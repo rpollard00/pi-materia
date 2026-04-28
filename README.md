@@ -24,7 +24,7 @@ pi-materia resolves its loadout/config in this order:
 1. `--materia-config /path/to/config.json`
 2. `MATERIA_CONFIG=/path/to/config.json`
 3. target project `.pi/pi-materia.json`
-4. built-in default loadout
+4. bundled default loadout at `config/default.json`
 
 Example:
 

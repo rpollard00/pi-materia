@@ -64,7 +64,7 @@ Implementation notes:
 - Each cast writes `config.resolved.json` into its artifact directory.
 - Added `README.md` development usage docs.
 
-### 2. Replace hardcoded agents with JSON pipeline config
+### 2. Replace hardcoded agents with JSON pipeline config — implemented
 
 Problem: planner/builder/evaluator/maintainer are hardcoded.
 
@@ -95,7 +95,7 @@ Tasks:
         },
         "maintainer": {
           "type": "agent",
-          "role": "maintainer",
+          "role": "jjMaintainer",
           "next": "planner"
         }
       }
@@ -111,6 +111,16 @@ Tasks:
 Acceptance:
 - Existing `/materia run <task>` behavior works as the only run command.
 - Pipeline can be modified by editing JSON only.
+
+Implementation notes:
+- Added `pipeline.entry` and `pipeline.nodes` to the default loadout.
+- Slots now reference roles by name instead of the runtime directly calling hardcoded role keys.
+- Removed `commitCommand` from the config schema; VCS behavior now belongs in maintainer role prompts.
+- Added separate `jjMaintainer` and `gitMaintainer` roles.
+- The bundled default currently uses `jjMaintainer` for faster local iteration.
+- Added pipeline validation with friendly errors for missing slots, missing roles, and unsupported links.
+- Current runtime supports the default sequential grid shape: planner -> builder -> evaluator, with evaluator `passed` linking to maintainer or `end`, and `failed` linking back to builder.
+- Added `config/default.json` as the bundled default loadout that is used when no explicit or project config exists.
 
 ## Phase 2: Observability, Token Budgeting, and Visual Feedback
 

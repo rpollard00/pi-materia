@@ -11,18 +11,44 @@ import {
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 interface PiMateriaConfig {
   maxBuilderAttempts: number;
   autoCommit: boolean;
-  commitCommand: string;
   artifactDir?: string;
+  pipeline: MateriaPipelineConfig;
   roles: Record<string, MateriaRoleConfig>;
 }
 
 interface LoadedConfig {
   config: PiMateriaConfig;
   source: string;
+}
+
+interface MateriaPipelineConfig {
+  entry: string;
+  nodes: Record<string, MateriaPipelineNodeConfig>;
+}
+
+interface MateriaPipelineNodeConfig {
+  type: "agent";
+  role: string;
+  next?: string;
+  edges?: Record<string, string>;
+}
+
+interface ResolvedMateriaPipeline {
+  planner: ResolvedMateriaNode;
+  builder: ResolvedMateriaNode;
+  evaluator: ResolvedMateriaNode;
+  maintainer?: ResolvedMateriaNode;
+}
+
+interface ResolvedMateriaNode {
+  id: string;
+  node: MateriaPipelineNodeConfig;
+  role: MateriaRoleConfig;
 }
 
 interface MateriaRoleConfig {
@@ -50,7 +76,34 @@ interface EvaluationResult {
 const defaultConfig: PiMateriaConfig = {
   maxBuilderAttempts: 3,
   autoCommit: false,
-  commitCommand: "git add -A && git commit -m",
+  artifactDir: ".pi/pi-materia",
+  pipeline: {
+    entry: "planner",
+    nodes: {
+      planner: {
+        type: "agent",
+        role: "planner",
+        next: "builder",
+      },
+      builder: {
+        type: "agent",
+        role: "builder",
+        next: "evaluator",
+      },
+      evaluator: {
+        type: "agent",
+        role: "evaluator",
+        edges: {
+          passed: "maintainer",
+          failed: "builder",
+        },
+      },
+      maintainer: {
+        type: "agent",
+        role: "jjMaintainer",
+      },
+    },
+  },
   roles: {
     planner: {
       tools: "readOnly",
@@ -67,10 +120,15 @@ const defaultConfig: PiMateriaConfig = {
       systemPrompt:
         "You are the pi-materia evaluator. Verify whether the builder satisfied the task and acceptance criteria. Be strict. Return only valid JSON when asked.",
     },
-    maintainer: {
+    jjMaintainer: {
       tools: "coding",
       systemPrompt:
-        "You are the pi-materia maintainer. Prepare a clean final state, inspect git status/diff, and create a concise commit when instructed.",
+        "You are the pi-materia jj maintainer. Prepare a clean final state using jj. Inspect changes with jj status and jj diff. If the work is satisfactory and should be checkpointed, describe the current change with jj describe -m \"message\". Do not use git commands.",
+    },
+    gitMaintainer: {
+      tools: "coding",
+      systemPrompt:
+        "You are the pi-materia git maintainer. Prepare a clean final state using git. Inspect changes with git status and git diff. If the work is satisfactory and should be committed, stage changes with git add -A and commit with git commit -m \"message\". Do not use jj commands.",
     },
   },
 };
@@ -96,26 +154,33 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
-      const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
-      const config = loaded.config;
-      const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
-      const runDir = path.join(artifactRoot, safeTimestamp());
-      await mkdir(runDir, { recursive: true });
-      await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
-      pi.setSessionName(`materia: ${request.slice(0, 60)}`);
-      pi.appendEntry("pi-materia-cast-start", {
-        request,
-        configSource: loaded.source,
-        artifactRoot,
-        runDir,
-        startedAt: Date.now(),
-      });
-      ctx.ui.notify(`pi-materia config: ${loaded.source}`, "info");
-      ctx.ui.notify(`pi-materia artifacts: ${runDir}`, "info");
-      ctx.ui.setStatus("materia", "planning");
-
       try {
-        const planText = await runRole(ctx.cwd, config.roles.planner, ctx.model, [
+        const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
+        const config = loaded.config;
+        const pipeline = resolvePipeline(config);
+        const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
+        const runDir = path.join(artifactRoot, safeTimestamp());
+        await mkdir(runDir, { recursive: true });
+        await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
+        pi.setSessionName(`materia: ${request.slice(0, 60)}`);
+        pi.appendEntry("pi-materia-cast-start", {
+          request,
+          configSource: loaded.source,
+          artifactRoot,
+          runDir,
+          pipeline: config.pipeline,
+          startedAt: Date.now(),
+        });
+        ctx.ui.notify(`pi-materia config: ${loaded.source}`, "info");
+        ctx.ui.notify(`pi-materia artifacts: ${runDir}`, "info");
+        ctx.ui.notify(
+          `pi-materia grid: ${pipeline.planner.id} -> ${pipeline.builder.id} -> ${pipeline.evaluator.id}` +
+            (pipeline.maintainer ? ` -> ${pipeline.maintainer.id}` : ""),
+          "info",
+        );
+        ctx.ui.setStatus("materia", `planning:${pipeline.planner.id}`);
+
+        const planText = await runRole(ctx.cwd, pipeline.planner.role, ctx.model, [
           "Create an implementation plan for this request.",
           "Return only JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.",
           `Request: ${request}`,
@@ -126,7 +191,7 @@ export default function piMateria(pi: ExtensionAPI) {
         ctx.ui.notify(`pi-materia planned ${plan.tasks.length} task(s).`, "info");
 
         for (const task of plan.tasks) {
-          ctx.ui.setStatus("materia", `building ${task.id}`);
+          ctx.ui.setStatus("materia", `${pipeline.builder.id}:${task.id}`);
           let passed = false;
           let feedback = "";
 
@@ -139,12 +204,12 @@ export default function piMateria(pi: ExtensionAPI) {
               "Implement the task now. Run relevant checks and summarize what changed.",
             ].filter(Boolean).join("\n\n");
 
-            const buildSummary = await runRole(ctx.cwd, config.roles.builder, ctx.model, buildPrompt);
+            const buildSummary = await runRole(ctx.cwd, pipeline.builder.role, ctx.model, buildPrompt);
             await writeFile(path.join(runDir, `${task.id}-build-${attempt}.md`), buildSummary);
             pi.appendEntry("pi-materia-build", { task, attempt, buildSummary });
 
-            ctx.ui.setStatus("materia", `evaluating ${task.id}`);
-            const evalText = await runRole(ctx.cwd, config.roles.evaluator, ctx.model, [
+            ctx.ui.setStatus("materia", `${pipeline.evaluator.id}:${task.id}`);
+            const evalText = await runRole(ctx.cwd, pipeline.evaluator.role, ctx.model, [
               "Evaluate whether the task is complete.",
               "Inspect the repository as needed. Return only JSON with shape: { \"passed\": boolean, \"feedback\": string, \"missing\": string[] }.",
               `Task: ${JSON.stringify(task, null, 2)}`,
@@ -166,13 +231,13 @@ export default function piMateria(pi: ExtensionAPI) {
           if (!passed) throw new Error(`Task ${task.id} did not pass after ${config.maxBuilderAttempts} attempts.`);
         }
 
-        ctx.ui.setStatus("materia", "maintaining");
-        const shouldCommit = config.autoCommit || (ctx.hasUI && await ctx.ui.confirm("pi-materia", "All tasks passed. Let maintainer commit the work?"));
-        if (shouldCommit) {
-          const maintainSummary = await runRole(ctx.cwd, config.roles.maintainer, ctx.model, [
+        ctx.ui.setStatus("materia", pipeline.maintainer ? `maintaining:${pipeline.maintainer.id}` : "complete");
+        const shouldCommit = Boolean(pipeline.maintainer) && (config.autoCommit || (ctx.hasUI && await ctx.ui.confirm("pi-materia", "All tasks passed. Let maintainer commit the work?")));
+        if (shouldCommit && pipeline.maintainer) {
+          const maintainSummary = await runRole(ctx.cwd, pipeline.maintainer.role, ctx.model, [
             "All planned tasks passed evaluation.",
-            "Inspect git status and diff. Commit the work with a concise message.",
-            `Use this commit command pattern if you invoke git commit: ${config.commitCommand} "message"`,
+            "Inspect the repository state and create an appropriate checkpoint/commit only if you are satisfied with the final state.",
+            "Follow your maintainer role system prompt for the correct VCS commands.",
           ].join("\n\n"));
           await writeFile(path.join(runDir, "maintainer.md"), maintainSummary);
           pi.appendEntry("pi-materia-maintainer", { maintainSummary });
@@ -204,27 +269,70 @@ async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedC
   const projectPath = path.join(cwd, ".pi", "pi-materia.json");
   if (existsSync(projectPath)) return loadConfigFile(projectPath);
 
-  return {
-    config: cloneDefaultConfig(),
-    source: "<pi-materia default loadout>",
-  };
+  return loadConfigFile(getBundledDefaultConfigPath(), "<pi-materia bundled default loadout>");
 }
 
-async function loadConfigFile(file: string): Promise<LoadedConfig> {
+async function loadConfigFile(file: string, source = file): Promise<LoadedConfig> {
   if (!existsSync(file)) throw new Error(`pi-materia config file not found: ${file}`);
   const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<PiMateriaConfig>;
   return {
     config: mergeConfig(parsed),
-    source: file,
+    source,
   };
 }
 
+function getBundledDefaultConfigPath(): string {
+  const currentFile = fileURLToPath(import.meta.url);
+  return path.resolve(path.dirname(currentFile), "..", "config", "default.json");
+}
+
 function mergeConfig(parsed: Partial<PiMateriaConfig>): PiMateriaConfig {
+  const base = cloneDefaultConfig();
   return {
-    ...cloneDefaultConfig(),
+    ...base,
     ...parsed,
-    roles: { ...defaultConfig.roles, ...(parsed.roles ?? {}) },
+    pipeline: {
+      ...base.pipeline,
+      ...(parsed.pipeline ?? {}),
+      nodes: { ...base.pipeline.nodes, ...(parsed.pipeline?.nodes ?? {}) },
+    },
+    roles: { ...base.roles, ...(parsed.roles ?? {}) },
   };
+}
+
+function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipeline {
+  const planner = resolveNode(config, config.pipeline.entry, "pipeline.entry");
+  if (!planner.node.next) throw new Error(`Planner slot "${planner.id}" must define next`);
+
+  const builder = resolveNode(config, planner.node.next, `${planner.id}.next`);
+  if (!builder.node.next) throw new Error(`Builder slot "${builder.id}" must define next`);
+
+  const evaluator = resolveNode(config, builder.node.next, `${builder.id}.next`);
+  const passedTarget = evaluator.node.edges?.passed;
+  const failedTarget = evaluator.node.edges?.failed;
+  if (!passedTarget) throw new Error(`Evaluator slot "${evaluator.id}" must define edges.passed`);
+  if (!failedTarget) throw new Error(`Evaluator slot "${evaluator.id}" must define edges.failed`);
+  if (failedTarget !== builder.id) {
+    throw new Error(`Evaluator slot "${evaluator.id}" edges.failed must link back to builder slot "${builder.id}" for this runtime`);
+  }
+
+  return {
+    planner,
+    builder,
+    evaluator,
+    maintainer: passedTarget === "end" ? undefined : resolveNode(config, passedTarget, `${evaluator.id}.edges.passed`),
+  };
+}
+
+function resolveNode(config: PiMateriaConfig, id: string, source: string): ResolvedMateriaNode {
+  const node = config.pipeline.nodes[id];
+  if (!node) throw new Error(`Unknown pipeline slot "${id}" referenced by ${source}`);
+  if (node.type !== "agent") throw new Error(`Pipeline slot "${id}" has unsupported type "${node.type}"`);
+
+  const role = config.roles[node.role];
+  if (!role) throw new Error(`Pipeline slot "${id}" references unknown materia role "${node.role}"`);
+
+  return { id, node, role };
 }
 
 function cloneDefaultConfig(): PiMateriaConfig {
