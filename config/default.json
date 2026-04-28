@@ -2,6 +2,12 @@
   "maxBuilderAttempts": 3,
   "autoCommit": false,
   "artifactDir": ".pi/pi-materia",
+  "budget": {
+    "maxTokens": 200000,
+    "maxCostUsd": 5,
+    "warnAtPercent": 75,
+    "stopAtLimit": true
+  },
   "pipeline": {
     "entry": "planner",
     "nodes": {

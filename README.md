@@ -2,7 +2,7 @@
 
 pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent pipelines.
 
-The current default pipeline is:
+The current default Materia Grid is:
 
 ```text
 planner -> builder -> evaluator
@@ -15,6 +15,8 @@ The planner breaks a high-level request into tasks, the builder implements each 
 ## Current status
 
 pi-materia is early and intentionally small. The current runtime supports the default sequential grid shape above, with configurable roles and prompts. The bundled default loadout uses a `jj` maintainer role by default.
+
+Phase 2 observability is partially implemented: casts now write structured artifacts, stream a live status widget, track available token/cost usage from subagent events, and expose `/materia grid`.
 
 ## Install or run
 
@@ -33,13 +35,19 @@ pi -e /path/to/pi-materia/src/index.ts
 
 ## Usage
 
-Start a cast with:
+Inspect the loaded grid/config:
+
+```text
+/materia grid
+```
+
+Start a cast:
 
 ```text
 /materia run implement the next small feature
 ```
 
-pi-materia will report the config source, artifact directory, and resolved grid at the start of the run.
+pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available.
 
 ## Configuration
 
@@ -62,6 +70,34 @@ Runtime artifacts are written to `.pi/pi-materia/<timestamp>/` by default. Overr
 {
   "artifactDir": ".pi/my-materia-runs"
 }
+```
+
+Budget limits can be configured:
+
+```json
+{
+  "budget": {
+    "maxTokens": 200000,
+    "maxCostUsd": 5,
+    "warnAtPercent": 75,
+    "stopAtLimit": true
+  }
+}
+```
+
+## Artifacts
+
+Each cast writes enough information to debug the run after the fact:
+
+```text
+.pi/pi-materia/<cast-id>/
+  config.resolved.json
+  events.jsonl
+  usage.json
+  plan.json
+  tasks/<task-id>/build-<attempt>.md
+  tasks/<task-id>/eval-<attempt>.json
+  maintenance/final.md
 ```
 
 ## Default loadout

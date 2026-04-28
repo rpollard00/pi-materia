@@ -1,0 +1,123 @@
+export interface PiMateriaConfig {
+  maxBuilderAttempts: number;
+  autoCommit: boolean;
+  artifactDir?: string;
+  budget?: MateriaBudgetConfig;
+  pipeline: MateriaPipelineConfig;
+  roles: Record<string, MateriaRoleConfig>;
+}
+
+export interface LoadedConfig {
+  config: PiMateriaConfig;
+  source: string;
+}
+
+export interface MateriaBudgetConfig {
+  maxTokens?: number;
+  maxCostUsd?: number;
+  warnAtPercent?: number;
+  stopAtLimit?: boolean;
+}
+
+export interface UsageTokens {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export interface UsageCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export interface UsageTotals {
+  tokens: UsageTokens;
+  cost: UsageCost;
+}
+
+export interface UsageReport extends UsageTotals {
+  model?: string;
+  provider?: string;
+  api?: string;
+  thinkingLevel?: string;
+  byRole: Record<string, UsageTotals>;
+  byNode: Record<string, UsageTotals>;
+  byTask: Record<string, UsageTotals>;
+  byAttempt: Record<string, UsageTotals>;
+}
+
+export interface MateriaRunState {
+  runId: string;
+  startedAt: number;
+  runDir: string;
+  eventsFile: string;
+  usageFile: string;
+  currentNode?: string;
+  currentRole?: string;
+  currentTask?: string;
+  attempt?: number;
+  lastMessage?: string;
+  usage: UsageReport;
+  budgetWarned: boolean;
+}
+
+export interface RoleRunContext {
+  nodeId: string;
+  roleName: string;
+  taskId?: string;
+  attempt?: number;
+  runState: MateriaRunState;
+  update: () => void;
+}
+
+export interface MateriaPipelineConfig {
+  entry: string;
+  nodes: Record<string, MateriaPipelineNodeConfig>;
+}
+
+export interface MateriaPipelineNodeConfig {
+  type: "agent";
+  role: string;
+  next?: string;
+  edges?: Record<string, string>;
+}
+
+export interface ResolvedMateriaPipeline {
+  planner: ResolvedMateriaNode;
+  builder: ResolvedMateriaNode;
+  evaluator: ResolvedMateriaNode;
+  maintainer?: ResolvedMateriaNode;
+}
+
+export interface ResolvedMateriaNode {
+  id: string;
+  node: MateriaPipelineNodeConfig;
+  role: MateriaRoleConfig;
+}
+
+export interface MateriaRoleConfig {
+  tools: "none" | "readOnly" | "coding";
+  systemPrompt: string;
+}
+
+export interface PlannedTask {
+  id: string;
+  title: string;
+  description: string;
+  acceptance: string[];
+}
+
+export interface PlanResult {
+  tasks: PlannedTask[];
+}
+
+export interface EvaluationResult {
+  passed: boolean;
+  feedback: string;
+  missing?: string[];
+}
