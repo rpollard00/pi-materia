@@ -1,16 +1,16 @@
-# Materia Works Next Features Plan
+# pi-materia Next Features Plan
 
-This plan turns the first test feedback into a staged roadmap for Materia Works, a Pi extension for configurable agent pipelines.
+This plan turns the first test feedback into a staged roadmap for pi-materia, a Pi extension for configurable agent pipelines.
 
 ## Goals
 
-Materia Works should become a configurable, observable Pi pipeline runtime where each pipeline node can run an agent role, report progress/cost, expose its work, and hand off to maintainer checkpoints safely.
+pi-materia should become a configurable, observable Pi pipeline runtime where each pipeline node can run an agent role, report progress/cost, expose its work, and hand off to maintainer checkpoints safely.
 
 ## Naming and Metaphor Architecture
 
-Materia Works uses a materia-inspired metaphor for pluggable agent pipelines:
+pi-materia uses a materia-inspired metaphor for pluggable agent pipelines:
 
-- **Materia Works**: the overall Pi extension/framework.
+- **pi-materia**: the overall Pi extension/framework and npm package.
 - **Materia Grid**: the configured pipeline graph visualization.
 - **Slot**: a graph position/node where an agent can be plugged in.
 - **Materia**: a reusable role/capability package that can be slotted into the grid.
@@ -45,16 +45,16 @@ Tasks:
 - Support a `--materia-config` extension flag or `MATERIA_CONFIG` env var.
 - Resolve config in this order:
   1. explicit flag/env path
-  2. target cwd `.pi/materia-works.json`
+  2. target cwd `.pi/pi-materia.json`
   3. extension package default config
 - Store cast artifacts in the target project by default, but support `artifactDir` in config.
 - Document running Pi with the extension from another path:
   ```bash
-  pi -e /path/to/materia-works/.pi/extensions/materia-works/index.ts
+  pi -e /path/to/pi-materia/.pi/extensions/pi-materia/index.ts
   ```
 
 Acceptance:
-- Can run Materia Works against any repo without writing runtime files into the extension repo.
+- Can run pi-materia against any repo without writing runtime files into the extension repo.
 - Config path and artifact directory are shown at run start.
 
 ### 2. Replace hardcoded agents with JSON pipeline config
@@ -102,14 +102,14 @@ Tasks:
 - Keep current hardcoded loop as the default config.
 
 Acceptance:
-- Existing `/materia run <task>` behavior works without any `/ralph` alias.
+- Existing `/materia run <task>` behavior works as the only run command.
 - Pipeline can be modified by editing JSON only.
 
 ## Phase 2: Observability, Token Budgeting, and Visual Feedback
 
 ### 3. Token and cost reporting for safe testing
 
-Problem: Materia Works runs multiple subagents, so token usage can climb quickly during test loops.
+Problem: pi-materia runs multiple subagents, so token usage can climb quickly during test loops.
 
 Tasks:
 - Capture usage from subagent events/messages where Pi exposes it.
@@ -118,7 +118,7 @@ Tasks:
   - node/role
   - task
   - attempt
-- Show live totals in the Materia Works widget.
+- Show live totals in the pi-materia widget.
 - Write incremental totals to `usage.json` after every subagent turn.
 - Include model/provider/thinking level in usage report.
 - Add configurable safety limits:
@@ -158,7 +158,7 @@ Tasks:
 - Update widget at each lifecycle event.
 
 Acceptance:
-- User can tell what Materia Works is doing without opening logs.
+- User can tell what pi-materia is doing without opening logs.
 
 ### 5. Visualize loaded pipeline/config
 
@@ -174,7 +174,7 @@ Tasks:
 - Show roles, tools, max attempts, artifact dir, maintain policy.
 
 Acceptance:
-- Before running, user can inspect exactly what Materia Works will execute.
+- Before running, user can inspect exactly what pi-materia will execute.
 
 ### 6. Better artifact/log structure
 
@@ -189,7 +189,7 @@ Tasks:
 - Append every state transition to `events.jsonl`.
 
 Acceptance:
-- A Materia Works cast can be debugged after the fact from artifacts alone.
+- A pi-materia cast can be debugged after the fact from artifacts alone.
 
 ## Phase 3: Subagent Inspection
 
@@ -201,7 +201,7 @@ Possible approaches:
 
 A. Streaming mirror in main session:
 - Subscribe to subagent `message_update` events.
-- Mirror current subagent text into the Materia Works widget or a custom message renderer.
+- Mirror current subagent text into the pi-materia widget or a custom message renderer.
 - Add config option `streamSubagents: true | false`.
 
 B. Persist each subagent as its own Pi session:
@@ -279,8 +279,8 @@ Tasks:
   - `git commit -m <message>`
 
 Acceptance:
-- In jj repos, Materia Works never runs git commit.
-- In git repos, Materia Works uses git.
+- In jj repos, pi-materia never runs git commit.
+- In git repos, pi-materia uses git.
 
 ## Phase 5: Safer Graph Execution
 
@@ -338,4 +338,4 @@ Acceptance:
 - Should subagents use the same active model by default, or should roles define defaults?
 - Should maintainer commit extension code/config changes by default, or only target-project changes?
 - Should failed maintenance send control back to builder, evaluator, or stop?
-- Should Materia Works support parallel branches later, or stay sequential initially?
+- Should pi-materia support parallel branches later, or stay sequential initially?

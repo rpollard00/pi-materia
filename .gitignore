@@ -2,7 +2,7 @@
 node_modules/
 
 # Pi runtime artifacts
-.pi/materia-works/
+.pi/pi-materia/
 
 # Build outputs
 _build/
