@@ -232,14 +232,18 @@ Feedback from a real `/materia run` test building a Rust/Bevy Snake clone expose
 Problem: the `last:` widget line is too small and does not give useful visibility into planner/builder/evaluator work.
 
 Actions:
-- [ ] Investigate Pi extension APIs for appending/displaying custom entries in the main transcript during a cast.
-- [ ] Mirror planner output into the main pane as planning progress.
-- [ ] Mirror builder summaries/tool activity/code-change summaries into the main pane.
-- [ ] Mirror evaluator results into the main pane.
-- [ ] Keep the widget as compact status only; use the main pane for readable narrative/progress.
+- [x] Investigate Pi extension APIs for appending/displaying custom entries in the main transcript during a cast.
+  - Initial implementation used `pi.sendMessage(..., { deliverAs: "nextTurn" })`, but that did not surface during real casts.
+  - Changed mirror messages to plain displayed `pi.sendMessage(...)` calls and also persist `pi-materia-mirror` entries for debugging.
+- [x] Mirror planner output into the main pane as planning progress.
+- [x] Mirror builder summaries/tool activity/code-change summaries into the main pane.
+- [x] Mirror evaluator results into the main pane.
+- [x] Keep the widget as compact status only; use the main pane for readable narrative/progress.
+- [ ] Verify whether mirrored custom messages should be excluded from future LLM context or rendered via a custom renderer/entry type.
 
 Acceptance:
-- During long-running builds/tool calls, the user can see useful progress in the main Pi window without opening artifacts.
+- [x] During long-running builds/tool calls, the user can see useful progress in the main Pi window without opening artifacts.
+- [ ] Real-run test confirms the transcript volume is useful and not too noisy.
 
 ### B. Fix token/cost tracking
 

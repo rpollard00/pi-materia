@@ -66,13 +66,22 @@ export interface MateriaRunState {
   budgetWarned: boolean;
 }
 
+export type MateriaMirrorEvent =
+  | { type: "role_start" }
+  | { type: "text_chunk"; text: string }
+  | { type: "tool_start"; toolName: string; args: unknown }
+  | { type: "tool_end"; toolName: string; isError: boolean; result: unknown }
+  | { type: "role_end"; output: string };
+
 export interface RoleRunContext {
   nodeId: string;
   roleName: string;
   taskId?: string;
+  taskTitle?: string;
   attempt?: number;
   runState: MateriaRunState;
   update: () => void;
+  mirror?: (event: MateriaMirrorEvent) => void;
 }
 
 export interface MateriaPipelineConfig {

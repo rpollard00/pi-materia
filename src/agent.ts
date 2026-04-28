@@ -34,6 +34,7 @@ export async function runRole(cwd: string, role: MateriaRoleConfig, model: unkno
     context.runState.attempt = context.attempt;
     context.runState.lastMessage = "starting";
     context.update();
+    context.mirror?.({ type: "role_start" });
     await appendEvent(context.runState, "role_start", {
       node: context.nodeId,
       role: context.roleName,
@@ -53,11 +54,17 @@ export async function runRole(cwd: string, role: MateriaRoleConfig, model: unkno
     tools,
   });
 
+  let mirroredText = "";
   const unsubscribe = session.subscribe((event) => {
     if (context) logAgentEvent(context, event);
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       output += event.assistantMessageEvent.delta;
       if (context) {
+        mirroredText += event.assistantMessageEvent.delta;
+        if (mirroredText.length >= 1200 || /\n\s*[-*]\s|\n#{1,3}\s|\n```/.test(mirroredText)) {
+          context.mirror?.({ type: "text_chunk", text: mirroredText });
+          mirroredText = "";
+        }
         context.runState.lastMessage = summarizeText(output);
         context.update();
       }
@@ -82,6 +89,8 @@ export async function runRole(cwd: string, role: MateriaRoleConfig, model: unkno
   try {
     await session.prompt(prompt, { source: "extension" });
     if (context) {
+      if (mirroredText.trim()) context.mirror?.({ type: "text_chunk", text: mirroredText });
+      context.mirror?.({ type: "role_end", output: output.trim() });
       await appendEvent(context.runState, "role_end", {
         node: context.nodeId,
         role: context.roleName,
@@ -118,12 +127,18 @@ function logAgentEvent(context: RoleRunContext, event: { type: string; [key: str
       void appendEvent(context.runState, "agent_message_end", { ...base, message: summarizeMessage(event.message) });
       break;
     case "tool_execution_start":
+      context.runState.lastMessage = `tool: ${String(event.toolName)}`;
+      context.update();
+      context.mirror?.({ type: "tool_start", toolName: String(event.toolName), args: event.args });
       void appendEvent(context.runState, "agent_tool_start", { ...base, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
       break;
     case "tool_execution_update":
       void appendEvent(context.runState, "agent_tool_update", { ...base, toolCallId: event.toolCallId, toolName: event.toolName, partialResult: summarizeUnknown(event.partialResult) });
       break;
     case "tool_execution_end":
+      context.runState.lastMessage = `tool done: ${String(event.toolName)}`;
+      context.update();
+      context.mirror?.({ type: "tool_end", toolName: String(event.toolName), isError: Boolean(event.isError), result: summarizeUnknown(event.result) });
       void appendEvent(context.runState, "agent_tool_end", { ...base, toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError, result: summarizeUnknown(event.result) });
       break;
     case "agent_end":
