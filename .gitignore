@@ -2,7 +2,7 @@
 node_modules/
 
 # Pi runtime artifacts
-.pi/ralph-loop/
+.pi/materia-works/
 
 # Build outputs
 _build/

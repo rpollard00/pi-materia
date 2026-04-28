@@ -35,8 +35,6 @@ Initial command naming should prefer `/materia` as the main namespace:
 /materia tail
 ```
 
-Legacy `/ralph` commands can remain temporarily as aliases during migration, but user-facing docs and config should use Materia Works terminology.
-
 ## Phase 1: Configuration and Runtime Separation
 
 ### 1. Load extension/config from outside the target project
@@ -104,7 +102,7 @@ Tasks:
 - Keep current hardcoded loop as the default config.
 
 Acceptance:
-- Existing `/materia run <task>` behavior works, with `/ralph <task>` temporarily available as a migration alias.
+- Existing `/materia run <task>` behavior works without any `/ralph` alias.
 - Pipeline can be modified by editing JSON only.
 
 ## Phase 2: Observability, Token Budgeting, and Visual Feedback
