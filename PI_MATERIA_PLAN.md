@@ -323,9 +323,160 @@ Actions:
 Acceptance:
 - Materia feels like a first-class Pi workflow, not a black-box extension.
 
-## Phase 3: Subagent Inspection
+## Phase 3: Native Pi Session Orchestration
 
-### 7. Ability to jump into/watch a subagent
+Strategic direction: Materia should become a Pi-native workflow/state-machine orchestrator, not a hidden subagent framework. The active Pi session should do the planner/builder/evaluator/maintainer work so rendering, scrolling, tool output, token accounting, and resumability come from Pi itself.
+
+### 7. Redesign lifecycle around the active Pi session
+
+Problem: current implementation runs roles via hidden `createAgentSession()` calls, then mirrors output back into the main pane. This loses native rendering, native tool display, accurate token/cost accounting, and resumability.
+
+Target architecture:
+
+```text
+/materia run <request>
+  -> create Materia cast state
+  -> send planner prompt into active Pi session
+
+Pi agent turn ends
+  -> Materia reads assistant output
+  -> parse/record plan
+  -> send builder prompt into active Pi session
+
+Builder turn ends
+  -> Materia records summary/artifacts
+  -> send evaluator prompt into active Pi session
+
+Evaluator turn ends
+  -> Materia parses evaluation JSON
+  -> if failed and attempts remain: send builder repair prompt
+  -> if passed: continue next task or maintainer
+
+Maintainer turn ends
+  -> Materia records checkpoint outcome
+  -> cast complete
+```
+
+Core principle:
+- Materia drives **what prompt comes next**.
+- Pi remains responsible for **rendering, tool execution, sessions, token accounting, scrolling, and persistence**.
+
+Implementation tasks:
+
+#### 7.1 Add persisted cast state
+
+- [ ] Define a `MateriaCastState` persisted via `pi.appendEntry()` and restored from session entries on resume.
+- [ ] Track:
+  - cast id
+  - request
+  - config source/hash
+  - artifact dir/run dir
+  - current node
+  - current phase: `planning | building | evaluating | maintaining | complete | failed`
+  - current task id/title
+  - task list
+  - current attempt
+  - last processed assistant entry/message id
+  - pending next action
+- [ ] Add helpers:
+  - `loadActiveCastState(ctx.sessionManager)`
+  - `saveCastState(pi, state)`
+  - `clearCastState(pi, state)`
+
+Acceptance:
+- A cast can survive Pi restart/session reload and know where it left off.
+
+#### 7.2 Replace `runRole()` subagent calls with active-session prompt injection
+
+- [ ] Stop using hidden `createAgentSession()` for the main runtime path.
+- [ ] Keep old subagent runner temporarily behind an internal fallback flag if needed.
+- [ ] Introduce prompt builders:
+  - `buildPlannerPrompt(request, config)`
+  - `buildBuilderPrompt(task, attempt, feedback, config)`
+  - `buildEvaluatorPrompt(task, buildSummary, config)`
+  - `buildMaintainerPrompt(config)`
+- [ ] Use `pi.sendUserMessage()` or `pi.sendMessage(..., { triggerTurn: true })` to start the next active Pi turn.
+- [ ] Ensure prompts include the active role/system-like instructions since per-turn system prompt swapping may not be available.
+
+Acceptance:
+- Planner/builder/evaluator/maintainer output appears as normal Pi assistant/tool output, not mirrored custom messages.
+
+#### 7.3 Drive transitions from Pi lifecycle events
+
+- [ ] Register `pi.on("agent_end", ...)` handler.
+- [ ] When a Materia cast is active, inspect the final assistant output for the current phase.
+- [ ] Transition state:
+  - planning -> parse `PlanResult`, write `plan.json`, start first builder turn
+  - building -> record build summary, start evaluator turn
+  - evaluating -> parse `EvaluationResult`, branch passed/failed
+  - maintaining -> record maintainer result, complete cast
+- [ ] Guard against double-processing by tracking last processed entry/message id.
+- [ ] Persist state before sending each next prompt.
+
+Acceptance:
+- Materia advances automatically after each active Pi turn.
+
+#### 7.4 Manage tools/role behavior per phase
+
+Problem: roles currently configure tool access and system prompts independently. Active-session orchestration needs equivalent behavior.
+
+Options to investigate:
+- [ ] Use `pi.setActiveTools()` before each phase to approximate role tool scopes.
+- [ ] Include role `systemPrompt` as explicit instructions in each injected prompt.
+- [ ] Investigate whether Pi supports temporary system prompt/context injection through extension lifecycle hooks.
+- [ ] If needed, add a `roleMode` config field documenting that active-session roles are prompt-scoped, not isolated system prompts.
+
+Acceptance:
+- Planner/evaluator can be constrained to read-only tools; builder/maintainer get coding tools.
+
+#### 7.5 Use Pi-native token/cost/session accounting
+
+- [ ] Remove custom subagent token accounting from the main active-session path.
+- [ ] Read totals from Pi session stats/context if needed for Materia widgets/artifacts.
+- [ ] Continue writing `usage.json`, but source it from Pi-native session data.
+- [ ] Keep budget enforcement, but check it after each turn using Pi's actual usage totals.
+
+Acceptance:
+- Materia token/cost numbers match Pi footer/session info.
+
+#### 7.6 Artifact model for active-session orchestration
+
+- [ ] Continue writing:
+  - `config.resolved.json`
+  - `events.jsonl`
+  - `usage.json`
+  - `plan.json`
+  - `tasks/<task-id>/build-<attempt>.md`
+  - `tasks/<task-id>/eval-<attempt>.json`
+  - `maintenance/final.md`
+- [ ] Store references to Pi session entries/message ids for each artifact.
+- [ ] Add a `manifest.json` mapping Materia phases/tasks to Pi entries.
+
+Acceptance:
+- Artifacts can be correlated directly with native Pi transcript entries.
+
+#### 7.7 User controls for active casts
+
+- [ ] Add `/materia status` to show active cast state.
+- [ ] Add `/materia abort` to stop/clear active cast state.
+- [ ] Add `/materia continue` to resume from persisted state and send the next prompt if needed.
+- [ ] Add `/materia runs` later for artifact discovery.
+
+Acceptance:
+- User can inspect, stop, and resume Materia's state machine explicitly.
+
+#### 7.8 Migration/deprecation of mirrored subagent path
+
+- [ ] Keep current mirrored subagent implementation only until active-session orchestration is working.
+- [ ] Once active-session runtime is stable, remove or demote subagent mode to an advanced optional mode.
+- [ ] Update README to describe Materia as a Pi-native workflow orchestrator.
+
+Acceptance:
+- Default Materia runtime no longer creates hidden subagent sessions.
+
+## Phase 4: Subagent Inspection / Advanced Multi-Session Mode
+
+### 8. Ability to jump into/watch a subagent
 
 Problem: subagents run invisibly.
 
@@ -349,9 +500,9 @@ Acceptance:
 - User can see what the active subagent is saying/doing in near real time.
 - User can find the subagent session/artifacts for deeper inspection.
 
-## Phase 4: Maintenance and VCS Policy
+## Phase 5: Maintenance and VCS Policy
 
-### 8. Maintain more frequently
+### 9. Maintain more frequently
 
 Problem: maintainer only runs at the end.
 
@@ -375,7 +526,7 @@ Tasks:
 Acceptance:
 - Maintainer runs after each task passes evaluation.
 
-### 9. Maintainer commits automatically when satisfied
+### 10. Maintainer commits automatically when satisfied
 
 Problem: maintainer asks user instead of deciding.
 
@@ -392,7 +543,7 @@ Acceptance:
 - No confirmation prompt is required by default.
 - User can opt into confirmation with `confirmBeforeCommit: true`.
 
-### 10. Detect jj and use jj instead of git
+### 11. Detect jj and use jj instead of git
 
 Tasks:
 - Detect VCS:
@@ -414,7 +565,7 @@ Acceptance:
 - In jj repos, pi-materia never runs git commit.
 - In git repos, pi-materia uses git.
 
-## Phase 5: Safer Graph Execution
+## Phase 6: Safer Graph Execution
 
 ### 11. Configurable edge conditions and loop limits
 

@@ -6,6 +6,7 @@ import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { loadConfig, resolveArtifactRoot } from "./config.js";
 import { parseJson } from "./json.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
+import { registerMateriaRenderer } from "./renderer.js";
 import type {
   EvaluationResult,
   MateriaMirrorEvent,
@@ -16,6 +17,8 @@ import { showUsageSummary, updateWidget } from "./ui.js";
 import { assertBudget, createRunState, writeUsage } from "./usage.js";
 
 export default function piMateria(pi: ExtensionAPI) {
+  registerMateriaRenderer(pi);
+
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
     type: "string",
@@ -375,6 +378,7 @@ function createMirror(
       content,
       display: true,
       details: {
+        prefix,
         nodeId,
         roleName,
         taskId,
@@ -395,20 +399,23 @@ function renderMirrorEvent(
 ): string | undefined {
   switch (event.type) {
     case "role_start":
-      return `## Materia: ${prefix}\n\nStarting **${roleName}**.`;
+      return `Starting **${roleName}**.`;
     case "text_chunk":
-      return event.text.trim()
-        ? `### Materia output: ${prefix}\n\n${event.text.trim()}`
-        : undefined;
+      return event.text.trim() || undefined;
     case "tool_start":
-      return `### Materia tool: ${prefix}\n\nRunning \`${event.toolName}\`\n\n${formatMirrorValue(event.args)}`;
+      return `Running \`${event.toolName}\`${formatToolArgs(event.args)}`;
     case "tool_end":
-      return `### Materia tool ${event.isError ? "failed" : "finished"}: ${prefix}\n\n\`${event.toolName}\`\n\n${formatMirrorValue(event.result)}`;
+      return `${event.isError ? "Failed" : "Finished"} \`${event.toolName}\`${event.isError ? `\n\n${formatMirrorValue(event.result)}` : ""}`;
     case "role_end":
-      return eventCount <= 2 && event.output
-        ? `### Materia completed: ${prefix}\n\n${event.output}`
-        : `### Materia completed: ${prefix}`;
+      return eventCount <= 2 && event.output ? `Completed.\n\n${event.output}` : "Completed.";
   }
+}
+
+function formatToolArgs(value: unknown): string {
+  const args = value as { command?: unknown; path?: unknown } | undefined;
+  if (typeof args?.command === "string") return `: ${truncate(args.command, 600)}`;
+  if (typeof args?.path === "string") return `: ${args.path}`;
+  return "";
 }
 
 function formatMirrorValue(value: unknown): string {

@@ -24,10 +24,12 @@
     "prepublishOnly": "npm run typecheck && npm run pack:dry-run"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "latest",
+    "@mariozechner/pi-tui": "latest",
     "@types/node": "latest",
     "typescript": "latest"
   },

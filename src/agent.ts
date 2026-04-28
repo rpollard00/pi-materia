@@ -61,7 +61,7 @@ export async function runRole(cwd: string, role: MateriaRoleConfig, model: unkno
       output += event.assistantMessageEvent.delta;
       if (context) {
         mirroredText += event.assistantMessageEvent.delta;
-        if (mirroredText.length >= 1200 || /\n\s*[-*]\s|\n#{1,3}\s|\n```/.test(mirroredText)) {
+        if (mirroredText.length >= 3000) {
           context.mirror?.({ type: "text_chunk", text: mirroredText });
           mirroredText = "";
         }
