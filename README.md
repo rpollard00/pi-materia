@@ -1,21 +1,45 @@
 # pi-materia
 
-A Pi extension for configurable, materia-themed agent pipelines.
+pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent pipelines.
 
-## Running from another project
+The current default pipeline is:
 
-During development, run this extension against a target repository without copying it into that repository:
+```text
+planner -> builder -> evaluator
+                      | passed -> maintainer
+                      | failed  -> builder
+```
+
+The planner breaks a high-level request into tasks, the builder implements each task, the evaluator checks the result, and the maintainer can create a VCS checkpoint when the work is accepted.
+
+## Current status
+
+pi-materia is early and intentionally small. The current runtime supports the default sequential grid shape above, with configurable roles and prompts. The bundled default loadout uses a `jj` maintainer role by default.
+
+## Install or run
+
+Install from npm once published:
+
+```bash
+pi install npm:@rpollard00/pi-materia
+```
+
+For local development, run the extension directly from this repo while working in a target project:
 
 ```bash
 cd /path/to/target-project
 pi -e /path/to/pi-materia/src/index.ts
 ```
 
-Then start a cast:
+## Usage
+
+Start a cast with:
 
 ```text
 /materia run implement the next small feature
 ```
+
+pi-materia will report the config source, artifact directory, and resolved grid at the start of the run.
 
 ## Configuration
 
@@ -40,43 +64,14 @@ Runtime artifacts are written to `.pi/pi-materia/<timestamp>/` by default. Overr
 }
 ```
 
-## Publishing to npm
+## Default loadout
 
-One-time setup:
+The bundled default loadout lives at `config/default.json`. It includes:
 
-```bash
-npm adduser
-```
+- `planner`
+- `builder`
+- `evaluator`
+- `jjMaintainer`
+- `gitMaintainer`
 
-Before publishing:
-
-```bash
-npm run typecheck
-npm run pack:dry-run
-```
-
-Publish the package:
-
-```bash
-npm publish --access public
-```
-
-After publishing, users can install it in Pi with:
-
-```bash
-pi install npm:@rpollard00/pi-materia
-```
-
-Or test without installing permanently:
-
-```bash
-pi -e npm:@rpollard00/pi-materia
-```
-
-For future releases, bump the version first:
-
-```bash
-npm version patch
-npm publish --access public
-```
-
+The default pipeline currently uses `jjMaintainer`. To use Git instead, copy `config/default.json` to your target project as `.pi/pi-materia.json` and change the maintainer slot role from `jjMaintainer` to `gitMaintainer`.
