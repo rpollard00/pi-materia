@@ -223,6 +223,102 @@ Acceptance:
 - [x] A pi-materia cast can be debugged after the fact from artifacts alone for the current pipeline.
 - [ ] Confirm artifact completeness with a real failed cast and a real successful cast.
 
+## Phase 2.5: Real-Run Feedback Fixes
+
+Feedback from a real `/materia run` test building a Rust/Bevy Snake clone exposed several integration gaps. These should be addressed before deeper Phase 3 work.
+
+### A. Surface subagent output in the main Pi conversation pane
+
+Problem: the `last:` widget line is too small and does not give useful visibility into planner/builder/evaluator work.
+
+Actions:
+- [ ] Investigate Pi extension APIs for appending/displaying custom entries in the main transcript during a cast.
+- [ ] Mirror planner output into the main pane as planning progress.
+- [ ] Mirror builder summaries/tool activity/code-change summaries into the main pane.
+- [ ] Mirror evaluator results into the main pane.
+- [ ] Keep the widget as compact status only; use the main pane for readable narrative/progress.
+
+Acceptance:
+- During long-running builds/tool calls, the user can see useful progress in the main Pi window without opening artifacts.
+
+### B. Fix token/cost tracking
+
+Problem: real run showed tokens/cost stuck at zero.
+
+Actions:
+- [ ] Inspect actual subagent event payloads from a real run and identify where Pi exposes usage for subagent sessions.
+- [ ] If usage is only available from session stats or persisted session entries, read it from there instead of relying only on streaming `done`/`error` events.
+- [ ] Add diagnostic logging for usage extraction during development.
+- [ ] Update widget and `usage.json` from the confirmed source of truth.
+
+Acceptance:
+- Widget token/cost numbers update during or immediately after each subagent turn.
+- Final `usage.json` matches Pi's own session/sub-session totals.
+
+### C. Make role work resumable/inspectable as Pi sessions
+
+Problem: Materia subagent work currently uses in-memory sessions, so runs are not resumable through Pi.
+
+Actions:
+- [ ] Replace or augment `SessionManager.inMemory()` with persisted per-role/per-task sessions under the cast artifact directory or Pi session store.
+- [ ] Record each sub-session id/path in `events.jsonl` and a run manifest.
+- [ ] Add a command to inspect sessions, e.g. `/materia inspect <cast-id> <slot/task/attempt>`.
+- [ ] Decide whether a Materia cast itself should be represented as a parent Pi session with child sessions.
+
+Acceptance:
+- The user can resume or inspect planner/builder/evaluator/maintainer work using Pi-native session tooling.
+
+### D. Bootstrap/checkpoint target projects for jj and artifacts
+
+Problem: default maintainer is `jjMaintainer`, but new target repos may not be initialized for jj. Materia artifacts were captured by VCS.
+
+Actions:
+- [ ] Add a bootstrap step at cast start.
+- [ ] If the default/configured maintainer is jj-based and no jj repo exists, initialize or ask to initialize jj.
+- [ ] Ensure target `.gitignore` or VCS ignore rules exclude `.pi/pi-materia/` artifacts.
+- [ ] Consider adding a `/materia bootstrap` command for explicit setup.
+
+Acceptance:
+- New target projects do not accidentally commit Materia runtime artifacts.
+- jj maintainer can checkpoint work even when the prompt did not mention jj.
+
+### E. Improve task labels and descriptions in UI/artifacts
+
+Problem: widget showed `task: 2`; task ids alone are not meaningful.
+
+Actions:
+- [ ] Track current task title/description in `MateriaRunState`.
+- [ ] Show task title in widget/status, e.g. `task: 2 - Add movement/input`.
+- [ ] Include task title in artifact filenames or task metadata files.
+
+Acceptance:
+- User can tell which planned task is active without opening `plan.json`.
+
+### F. Realtime elapsed/progress updates during long tool calls
+
+Problem: elapsed time only updates between lifecycle events, and status stayed on `starting` during long installs/compiles.
+
+Actions:
+- [ ] Add a timer while a cast is active to refresh the widget elapsed time every second or few seconds.
+- [ ] Capture and display tool execution start/update/end events in the widget.
+- [ ] Show active tool name/command summary, especially long `bash` commands.
+- [ ] Surface long-running tool output summaries in the main pane if possible.
+
+Acceptance:
+- During a long compile/install, elapsed time continues ticking and the active command/tool is visible.
+
+### G. Integrate Materia more tightly with Pi's harness model
+
+Problem: Materia feels like invisible subagents instead of a coordinated pipeline integrated with Pi.
+
+Actions:
+- [ ] Investigate whether a Materia role can run as the active Pi session/agent instead of hidden subagent sessions.
+- [ ] Explore a coordinator mode where Materia injects prompts/steering into Pi-native sessions and records transitions.
+- [ ] Decide on architecture: hidden subagents + mirrored transcript vs Pi-native session orchestration.
+
+Acceptance:
+- Materia feels like a first-class Pi workflow, not a black-box extension.
+
 ## Phase 3: Subagent Inspection
 
 ### 7. Ability to jump into/watch a subagent
