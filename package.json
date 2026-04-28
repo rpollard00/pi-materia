@@ -1,0 +1,22 @@
+{
+  "name": "ralph-loop-pi-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "latest",
+    "typebox": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "@types/node": "latest"
+  },
+  "pi": {
+    "extensions": [
+      ".pi/extensions/ralph-loop/index.ts"
+    ]
+  }
+}

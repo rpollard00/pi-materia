@@ -1,0 +1,53 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Inspect Elixir project structure",
+      "description": "Check whether the repository already contains a Mix project and identify the appropriate application/module entry point for a CLI.",
+      "acceptance": [
+        "Project structure is understood and documented for implementation.",
+        "If no Mix project exists, the need to create one is identified."
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Create or configure CLI entry point",
+      "description": "Add a Mix escript configuration and define a main module/function that can be executed from the command line.",
+      "acceptance": [
+        "mix.exs includes an escript configuration with a valid main_module.",
+        "The main module exposes a main/1 function.",
+        "Running the built escript invokes the CLI entry point."
+      ]
+    },
+    {
+      "id": "3",
+      "title": "Implement rainbow Hello World output",
+      "description": "Print the text \"Hello World\" using ANSI color escape codes so each character or segment appears in rainbow colors.",
+      "acceptance": [
+        "CLI output includes the exact text \"Hello World\".",
+        "Output uses multiple ANSI colors in rainbow order.",
+        "ANSI formatting is reset after the message."
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Add usage documentation",
+      "description": "Document how to build and run the CLI locally.",
+      "acceptance": [
+        "README or equivalent documentation includes build instructions.",
+        "Documentation includes an example command to run the CLI.",
+        "Documentation mentions that output requires a terminal with ANSI color support."
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Verify CLI behavior",
+      "description": "Run the CLI and confirm it prints the expected rainbow-colored greeting without errors.",
+      "acceptance": [
+        "The CLI builds successfully with Mix.",
+        "Executing the CLI exits with status 0.",
+        "The terminal displays \"Hello World\" in rainbow ASCII colors."
+      ]
+    }
+  ]
+}
