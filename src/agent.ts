@@ -54,6 +54,7 @@ export async function runRole(cwd: string, role: MateriaRoleConfig, model: unkno
   });
 
   const unsubscribe = session.subscribe((event) => {
+    if (context) logAgentEvent(context, event);
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       output += event.assistantMessageEvent.delta;
       if (context) {
@@ -93,6 +94,72 @@ export async function runRole(cwd: string, role: MateriaRoleConfig, model: unkno
     unsubscribe();
     session.dispose();
   }
+}
+
+function logAgentEvent(context: RoleRunContext, event: { type: string; [key: string]: unknown }): void {
+  const base = {
+    node: context.nodeId,
+    role: context.roleName,
+    taskId: context.taskId,
+    attempt: context.attempt,
+  };
+
+  switch (event.type) {
+    case "turn_start":
+      void appendEvent(context.runState, "agent_turn_start", { ...base, turnIndex: event.turnIndex });
+      break;
+    case "turn_end":
+      void appendEvent(context.runState, "agent_turn_end", { ...base, turnIndex: event.turnIndex, toolResults: summarizeToolResults(event.toolResults) });
+      break;
+    case "message_start":
+      void appendEvent(context.runState, "agent_message_start", { ...base, message: summarizeMessage(event.message) });
+      break;
+    case "message_end":
+      void appendEvent(context.runState, "agent_message_end", { ...base, message: summarizeMessage(event.message) });
+      break;
+    case "tool_execution_start":
+      void appendEvent(context.runState, "agent_tool_start", { ...base, toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
+      break;
+    case "tool_execution_update":
+      void appendEvent(context.runState, "agent_tool_update", { ...base, toolCallId: event.toolCallId, toolName: event.toolName, partialResult: summarizeUnknown(event.partialResult) });
+      break;
+    case "tool_execution_end":
+      void appendEvent(context.runState, "agent_tool_end", { ...base, toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError, result: summarizeUnknown(event.result) });
+      break;
+    case "agent_end":
+      void appendEvent(context.runState, "agent_end", { ...base });
+      break;
+  }
+}
+
+function summarizeToolResults(value: unknown): unknown {
+  if (!Array.isArray(value)) return undefined;
+  return value.map(summarizeMessage);
+}
+
+function summarizeMessage(value: unknown): unknown {
+  const message = value as { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown; usage?: { totalTokens?: unknown; cost?: { total?: unknown } } } | undefined;
+  if (!message) return undefined;
+  return {
+    role: message.role,
+    stopReason: message.stopReason,
+    errorMessage: message.errorMessage,
+    text: summarizeUnknown(message.content),
+    usage: message.usage ? { totalTokens: message.usage.totalTokens, cost: message.usage.cost?.total } : undefined,
+  };
+}
+
+function summarizeUnknown(value: unknown): unknown {
+  if (typeof value === "string") return summarizeText(value);
+  if (Array.isArray(value)) return value.map((item) => summarizeUnknown(item));
+  if (value && typeof value === "object") {
+    try {
+      return summarizeText(JSON.stringify(value));
+    } catch {
+      return "[unserializable object]";
+    }
+  }
+  return value;
 }
 
 function selectTools(kind: MateriaRoleConfig["tools"]): string[] {

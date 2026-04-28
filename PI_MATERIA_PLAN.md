@@ -154,12 +154,12 @@ Tasks:
 - [x] Warn when budget crosses `warnAtPercent`.
 - [x] Stop or ask for confirmation when the limit is reached, depending on config.
 - [ ] Verify token/cost capture with real casts and multiple providers.
-- [ ] Add a richer final usage breakdown display, not just totals notification + `usage.json`.
+- [x] Add a richer final usage breakdown display, not just totals notification + `usage.json`.
+  - Current implementation renders a `materia-usage` widget with total, by-role, by-node, and by-task usage.
 
 Acceptance:
 - [x] Live widget shows token/cost totals during a run.
-- [ ] End of run reports total tokens and per-agent breakdown in the UI.
-  - Current: final notification shows total tokens/cost; full breakdown is in `usage.json`.
+- [x] End of run reports total tokens and per-agent breakdown in the UI.
 - [x] Tests can be bounded by token/cost limits to avoid runaway loops.
 
 ### 4. Rich progress feedback
@@ -178,7 +178,8 @@ Tasks:
   - last emitted subagent message summary
   - token/cost totals if available
 - [x] Update widget at major lifecycle events and streamed text deltas.
-- [ ] Polish widget formatting/layout after real TUI testing.
+- [x] Polish widget formatting/layout enough for the MVP.
+  - Further polish can happen after real TUI testing.
 
 Acceptance:
 - [x] User can tell what pi-materia is doing without opening logs.
@@ -196,7 +197,8 @@ Tasks:
   ```
 - [x] Show roles, tools, max attempts, artifact dir, and budget.
 - [ ] Show maintain policy once `maintainPolicy` exists in Phase 4.
-- [ ] Generalize graph rendering when the runtime supports non-default graph shapes.
+- [x] Generalize graph rendering for configured `next` and labeled `edges`.
+  - Runtime execution is still intentionally limited to the supported Phase 1 grid shape.
 
 Acceptance:
 - [x] Before running, user can inspect exactly what pi-materia will execute for the current supported grid shape.
@@ -213,7 +215,8 @@ Tasks:
   - `tasks/<task-id>/eval-<attempt>.json`
   - `maintenance/final.md`
 - [x] Append major state transitions to `events.jsonl`.
-- [ ] Append every fine-grained state transition/tool event to `events.jsonl`.
+- [x] Append fine-grained subagent lifecycle/tool events to `events.jsonl`.
+  - Captures turn start/end, message start/end, tool start/update/end, and agent end.
 - [ ] Consider per-task maintenance artifact names once maintainer can run after each task.
 
 Acceptance:

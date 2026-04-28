@@ -45,6 +45,10 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     `autoCommit: ${config.autoCommit}`,
     `budget: ${formatBudget(config.budget)}`,
     "",
+    "Graph:",
+    ...renderGraph(config),
+    "",
+    "Supported runtime path:",
     `${pipeline.planner.id} -> ${pipeline.builder.id} -> ${pipeline.evaluator.id}`,
     `                         | passed -> ${pipeline.maintainer?.id ?? "end"}`,
     `                         | failed  -> ${pipeline.builder.id}`,
@@ -57,6 +61,18 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     lines.push(`- ${id}: role=${node.role}, tools=${role?.tools ?? "unknown"}`);
   }
   return lines;
+}
+
+function renderGraph(config: PiMateriaConfig): string[] {
+  const lines: string[] = [];
+  for (const [id, node] of Object.entries(config.pipeline.nodes)) {
+    if (node.next) lines.push(`${id} -> ${node.next}`);
+    for (const [label, target] of Object.entries(node.edges ?? {})) {
+      lines.push(`${id} --${label}--> ${target}`);
+    }
+    if (!node.next && !node.edges) lines.push(`${id}`);
+  }
+  return lines.length > 0 ? lines : ["<empty>"];
 }
 
 function formatBudget(budget?: MateriaBudgetConfig): string {

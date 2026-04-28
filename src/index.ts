@@ -7,7 +7,7 @@ import { loadConfig, resolveArtifactRoot } from "./config.js";
 import { parseJson } from "./json.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import type { EvaluationResult, MateriaRunState, PlanResult } from "./types.js";
-import { updateWidget } from "./ui.js";
+import { showUsageSummary, updateWidget } from "./ui.js";
 import { assertBudget, createRunState, writeUsage } from "./usage.js";
 
 export default function piMateria(pi: ExtensionAPI) {
@@ -185,6 +185,7 @@ export default function piMateria(pi: ExtensionAPI) {
         pi.appendEntry("pi-materia-cast-end", { ok: true, usage: runState.usage, endedAt: Date.now() });
         ctx.ui.setStatus("materia", "done");
         updateWidget(ctx, runState);
+        showUsageSummary(ctx, runState);
         ctx.ui.notify(`pi-materia cast complete. Tokens: ${runState.usage.tokens.total}, cost: $${runState.usage.cost.total.toFixed(4)}`, "info");
       } catch (error) {
         if (runState) {
