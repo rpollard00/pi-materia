@@ -1,6 +1,6 @@
 {
   "name": "@rpollard00/pi-materia",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A Pi extension for configurable, materia-themed agent pipelines.",
   "type": "module",
   "license": "MIT",
