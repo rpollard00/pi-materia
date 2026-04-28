@@ -129,16 +129,18 @@ Implementation notes:
 Problem: pi-materia runs multiple subagents, so token usage can climb quickly during test loops.
 
 Tasks:
-- Capture usage from subagent events/messages where Pi exposes it.
-- Aggregate per:
+- [x] Capture usage from subagent events/messages where Pi exposes it.
+  - Current implementation reads usage from assistant `done`/`error` message update events when available.
+  - Needs real-run verification against provider/event shapes.
+- [x] Aggregate per:
   - run
   - node/role
   - task
   - attempt
-- Show live totals in the pi-materia widget.
-- Write incremental totals to `usage.json` after every subagent turn.
-- Include model/provider/thinking level in usage report.
-- Add configurable safety limits:
+- [x] Show live totals in the pi-materia widget.
+- [x] Write incremental totals to `usage.json` after every observed subagent usage event.
+- [x] Include model/provider/api/thinking level in usage report when available from Pi/model metadata.
+- [x] Add configurable safety limits:
   ```json
   {
     "budget": {
@@ -149,21 +151,24 @@ Tasks:
     }
   }
   ```
-- Warn when budget crosses `warnAtPercent`.
-- Stop or ask for confirmation when the limit is reached, depending on config.
+- [x] Warn when budget crosses `warnAtPercent`.
+- [x] Stop or ask for confirmation when the limit is reached, depending on config.
+- [ ] Verify token/cost capture with real casts and multiple providers.
+- [ ] Add a richer final usage breakdown display, not just totals notification + `usage.json`.
 
 Acceptance:
-- Live widget shows token/cost totals during a run.
-- End of run reports total tokens and per-agent breakdown.
-- Tests can be bounded by token/cost limits to avoid runaway loops.
+- [x] Live widget shows token/cost totals during a run.
+- [ ] End of run reports total tokens and per-agent breakdown in the UI.
+  - Current: final notification shows total tokens/cost; full breakdown is in `usage.json`.
+- [x] Tests can be bounded by token/cost limits to avoid runaway loops.
 
 ### 4. Rich progress feedback
 
 Problem: current UI only shows messages like `building 1`, `building 2`.
 
 Tasks:
-- Add a live status widget using `ctx.ui.setWidget()`.
-- Display:
+- [x] Add a live status widget using `ctx.ui.setWidget()`.
+- [x] Display:
   - run id
   - current node
   - current role
@@ -172,41 +177,48 @@ Tasks:
   - elapsed time
   - last emitted subagent message summary
   - token/cost totals if available
-- Update widget at each lifecycle event.
+- [x] Update widget at major lifecycle events and streamed text deltas.
+- [ ] Polish widget formatting/layout after real TUI testing.
 
 Acceptance:
-- User can tell what pi-materia is doing without opening logs.
+- [x] User can tell what pi-materia is doing without opening logs.
+  - Current widget is functional but intentionally minimal.
 
 ### 5. Visualize loaded pipeline/config
 
 Tasks:
-- Add `/materia grid` command.
-- Render configured graph as text/ASCII:
+- [x] Add `/materia grid` command.
+- [x] Render configured graph as text/ASCII:
   ```text
   planner -> builder -> evaluator
                          | passed -> maintainer
                          | failed  -> builder
-  maintainer -> planner
   ```
-- Show roles, tools, max attempts, artifact dir, maintain policy.
+- [x] Show roles, tools, max attempts, artifact dir, and budget.
+- [ ] Show maintain policy once `maintainPolicy` exists in Phase 4.
+- [ ] Generalize graph rendering when the runtime supports non-default graph shapes.
 
 Acceptance:
-- Before running, user can inspect exactly what pi-materia will execute.
+- [x] Before running, user can inspect exactly what pi-materia will execute for the current supported grid shape.
 
 ### 6. Better artifact/log structure
 
 Tasks:
-- Store structured event log:
+- [x] Store structured event log/artifacts:
   - `events.jsonl`
+  - `usage.json`
   - `config.resolved.json`
   - `plan.json`
   - `tasks/<task-id>/build-<attempt>.md`
   - `tasks/<task-id>/eval-<attempt>.json`
-  - `maintenance/<task-id>.md`
-- Append every state transition to `events.jsonl`.
+  - `maintenance/final.md`
+- [x] Append major state transitions to `events.jsonl`.
+- [ ] Append every fine-grained state transition/tool event to `events.jsonl`.
+- [ ] Consider per-task maintenance artifact names once maintainer can run after each task.
 
 Acceptance:
-- A pi-materia cast can be debugged after the fact from artifacts alone.
+- [x] A pi-materia cast can be debugged after the fact from artifacts alone for the current pipeline.
+- [ ] Confirm artifact completeness with a real failed cast and a real successful cast.
 
 ## Phase 3: Subagent Inspection
 
