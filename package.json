@@ -1,22 +1,39 @@
 {
-  "name": "pi-materia",
+  "name": "@rpollard00/pi-materia",
   "version": "0.1.0",
-  "private": true,
+  "description": "A Pi extension for configurable, materia-themed agent pipelines.",
   "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "agent",
+    "pipeline",
+    "workflow"
+  ],
+  "files": [
+    "src",
+    "examples",
+    "README.md",
+    "PI_MATERIA_PLAN.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pack:dry-run": "npm pack --dry-run",
+    "prepublishOnly": "npm run typecheck && npm run pack:dry-run"
   },
-  "dependencies": {
-    "@mariozechner/pi-coding-agent": "latest",
-    "typebox": "latest"
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
   },
   "devDependencies": {
-    "typescript": "latest",
-    "@types/node": "latest"
+    "@mariozechner/pi-coding-agent": "latest",
+    "@types/node": "latest",
+    "typescript": "latest"
   },
   "pi": {
     "extensions": [
-      ".pi/extensions/pi-materia/index.ts"
+      "./src/index.ts"
     ]
   }
 }

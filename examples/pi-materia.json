@@ -2,6 +2,7 @@
   "maxBuilderAttempts": 3,
   "autoCommit": false,
   "commitCommand": "git add -A && git commit -m",
+  "artifactDir": ".pi/pi-materia",
   "roles": {
     "planner": {
       "tools": "readOnly",

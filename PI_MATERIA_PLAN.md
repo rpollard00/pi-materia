@@ -37,7 +37,7 @@ Initial command naming should prefer `/materia` as the main namespace:
 
 ## Phase 1: Configuration and Runtime Separation
 
-### 1. Load extension/config from outside the target project
+### 1. Load extension/config from outside the target project — implemented
 
 Problem: testing the loop from the plugin repo pollutes the plugin working directory.
 
@@ -50,12 +50,19 @@ Tasks:
 - Store cast artifacts in the target project by default, but support `artifactDir` in config.
 - Document running Pi with the extension from another path:
   ```bash
-  pi -e /path/to/pi-materia/.pi/extensions/pi-materia/index.ts
+  pi -e /path/to/pi-materia/src/index.ts
   ```
 
 Acceptance:
 - Can run pi-materia against any repo without writing runtime files into the extension repo.
 - Config path and artifact directory are shown at run start.
+
+Implementation notes:
+- Added `--materia-config` and `MATERIA_CONFIG` support.
+- Config resolution now falls back to target `.pi/pi-materia.json`, then built-in defaults.
+- Added `artifactDir` config support.
+- Each cast writes `config.resolved.json` into its artifact directory.
+- Added `README.md` development usage docs.
 
 ### 2. Replace hardcoded agents with JSON pipeline config
 

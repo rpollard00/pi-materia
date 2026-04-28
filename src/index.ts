@@ -16,7 +16,13 @@ interface PiMateriaConfig {
   maxBuilderAttempts: number;
   autoCommit: boolean;
   commitCommand: string;
+  artifactDir?: string;
   roles: Record<string, MateriaRoleConfig>;
+}
+
+interface LoadedConfig {
+  config: PiMateriaConfig;
+  source: string;
 }
 
 interface MateriaRoleConfig {
@@ -70,6 +76,11 @@ const defaultConfig: PiMateriaConfig = {
 };
 
 export default function piMateria(pi: ExtensionAPI) {
+  pi.registerFlag("materia-config", {
+    description: "Path to a pi-materia loadout/config JSON file",
+    type: "string",
+  });
+
   pi.registerCommand("materia", {
     description: "Run pi-materia commands: run, grid, loadout, runs, inspect, tail.",
     handler: async (args, ctx) => {
@@ -85,11 +96,22 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
-      const config = await loadConfig(ctx.cwd);
-      const runDir = path.join(ctx.cwd, ".pi", "pi-materia", safeTimestamp());
+      const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
+      const config = loaded.config;
+      const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
+      const runDir = path.join(artifactRoot, safeTimestamp());
       await mkdir(runDir, { recursive: true });
+      await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
       pi.setSessionName(`materia: ${request.slice(0, 60)}`);
-      pi.appendEntry("pi-materia-cast-start", { request, runDir, startedAt: Date.now() });
+      pi.appendEntry("pi-materia-cast-start", {
+        request,
+        configSource: loaded.source,
+        artifactRoot,
+        runDir,
+        startedAt: Date.now(),
+      });
+      ctx.ui.notify(`pi-materia config: ${loaded.source}`, "info");
+      ctx.ui.notify(`pi-materia artifacts: ${runDir}`, "info");
       ctx.ui.setStatus("materia", "planning");
 
       try {
@@ -168,15 +190,53 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 }
 
-async function loadConfig(cwd: string): Promise<PiMateriaConfig> {
-  const file = path.join(cwd, ".pi", "pi-materia.json");
-  if (!existsSync(file)) return defaultConfig;
+function getConfiguredConfigPath(pi: ExtensionAPI): string | undefined {
+  const flagValue = pi.getFlag("materia-config");
+  if (typeof flagValue === "string" && flagValue.trim()) return flagValue.trim();
+  if (process.env.MATERIA_CONFIG?.trim()) return process.env.MATERIA_CONFIG.trim();
+  return undefined;
+}
+
+async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
+  const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
+  if (explicitPath) return loadConfigFile(explicitPath);
+
+  const projectPath = path.join(cwd, ".pi", "pi-materia.json");
+  if (existsSync(projectPath)) return loadConfigFile(projectPath);
+
+  return {
+    config: cloneDefaultConfig(),
+    source: "<pi-materia default loadout>",
+  };
+}
+
+async function loadConfigFile(file: string): Promise<LoadedConfig> {
+  if (!existsSync(file)) throw new Error(`pi-materia config file not found: ${file}`);
   const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<PiMateriaConfig>;
   return {
-    ...defaultConfig,
+    config: mergeConfig(parsed),
+    source: file,
+  };
+}
+
+function mergeConfig(parsed: Partial<PiMateriaConfig>): PiMateriaConfig {
+  return {
+    ...cloneDefaultConfig(),
     ...parsed,
     roles: { ...defaultConfig.roles, ...(parsed.roles ?? {}) },
   };
+}
+
+function cloneDefaultConfig(): PiMateriaConfig {
+  return JSON.parse(JSON.stringify(defaultConfig)) as PiMateriaConfig;
+}
+
+function resolveArtifactRoot(cwd: string, artifactDir?: string): string {
+  return artifactDir ? resolveFromCwd(cwd, artifactDir) : path.join(cwd, ".pi", "pi-materia");
+}
+
+function resolveFromCwd(cwd: string, inputPath: string): string {
+  return path.isAbsolute(inputPath) ? inputPath : path.resolve(cwd, inputPath);
 }
 
 async function runRole(cwd: string, role: MateriaRoleConfig, model: unknown, prompt: string): Promise<string> {
