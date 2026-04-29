@@ -1,7 +1,7 @@
-import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { MateriaRunState, UsageReport, UsageTotals } from "./types.js";
 
-export function updateWidget(ctx: ExtensionCommandContext, state: MateriaRunState): void {
+export function updateWidget(ctx: ExtensionContext, state: MateriaRunState): void {
   const elapsed = Math.max(0, Math.round((Date.now() - state.startedAt) / 1000));
   ctx.ui.setWidget("materia", [
     `Materia Cast ${state.runId}`,
@@ -16,7 +16,7 @@ export function updateWidget(ctx: ExtensionCommandContext, state: MateriaRunStat
   ], { placement: "belowEditor" });
 }
 
-export function showUsageSummary(ctx: ExtensionCommandContext, state: MateriaRunState): void {
+export function showUsageSummary(ctx: ExtensionContext, state: MateriaRunState): void {
   ctx.ui.setWidget("materia-usage", renderUsageSummary(state.usage), { placement: "belowEditor" });
 }
 

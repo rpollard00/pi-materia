@@ -1,4 +1,4 @@
-import type { ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent } from "./artifacts.js";
@@ -28,7 +28,7 @@ export async function writeUsage(state: MateriaRunState): Promise<void> {
   await writeFile(state.usageFile, JSON.stringify(state.usage, null, 2));
 }
 
-export async function assertBudget(config: PiMateriaConfig, state: MateriaRunState, ctx: ExtensionCommandContext): Promise<void> {
+export async function assertBudget(config: PiMateriaConfig, state: MateriaRunState, ctx: ExtensionContext): Promise<void> {
   const budget = config.budget;
   if (!budget) return;
 
@@ -50,8 +50,7 @@ export async function assertBudget(config: PiMateriaConfig, state: MateriaRunSta
   await appendEvent(state, "budget_limit", { overToken, overCost, usage: state.usage });
   if (budget.stopAtLimit !== false) throw new Error("pi-materia budget limit reached");
   if (ctx.hasUI) {
-    const keepGoing = await ctx.ui.confirm("pi-materia budget", "Budget limit reached. Continue this cast?");
-    if (!keepGoing) throw new Error("pi-materia stopped at budget limit");
+    ctx.ui.notify("pi-materia budget limit reached.", "error");
   }
 }
 

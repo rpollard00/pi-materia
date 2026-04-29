@@ -51,6 +51,57 @@ export interface UsageReport extends UsageTotals {
   byAttempt: Record<string, UsageTotals>;
 }
 
+export type MateriaCastPhase = "planning" | "building" | "evaluating" | "maintaining" | "complete" | "failed";
+
+export interface MateriaCastState {
+  version: 1;
+  active: boolean;
+  castId: string;
+  request: string;
+  configSource: string;
+  configHash: string;
+  cwd: string;
+  runDir: string;
+  artifactRoot: string;
+  phase: MateriaCastPhase;
+  currentNode?: string;
+  currentRole?: string;
+  currentTaskId?: string;
+  currentTaskTitle?: string;
+  currentTaskIndex: number;
+  tasks: PlannedTask[];
+  attempt: number;
+  awaitingResponse: boolean;
+  lastProcessedEntryId?: string;
+  lastAssistantText?: string;
+  lastBuildSummary?: string;
+  lastFeedback?: string;
+  failedReason?: string;
+  startedAt: number;
+  updatedAt: number;
+  runState: MateriaRunState;
+  pipeline: ResolvedMateriaPipeline;
+}
+
+export interface MateriaManifestEntry {
+  phase: MateriaCastPhase;
+  node?: string;
+  role?: string;
+  taskId?: string;
+  attempt?: number;
+  entryId?: string;
+  artifact?: string;
+  timestamp: number;
+}
+
+export interface MateriaManifest {
+  castId: string;
+  request: string;
+  configSource: string;
+  sessionFile?: string;
+  entries: MateriaManifestEntry[];
+}
+
 export interface MateriaRunState {
   runId: string;
   startedAt: number;

@@ -10,13 +10,13 @@ planner -> builder -> evaluator
                       | failed  -> builder
 ```
 
-The planner breaks a high-level request into tasks, the builder implements each task, the evaluator checks the result, and the maintainer can create a VCS checkpoint when the work is accepted.
+The planner breaks a high-level request into tasks, the builder implements each task, the evaluator checks the result, and the maintainer can create a VCS checkpoint when the work is accepted. Materia now drives the normal Pi session as a state machine, so role turns render with Pi's native assistant/tool UI instead of hidden subagents.
 
 ## Current status
 
 pi-materia is early and intentionally small. The current runtime supports the default sequential grid shape above, with configurable roles and prompts. The bundled default loadout uses a `jj` maintainer role by default.
 
-Phase 2 observability is partially implemented: casts now write structured artifacts, stream a live status widget, track available token/cost usage from subagent events, and expose `/materia grid`.
+Phase 3 native orchestration is the default runtime: casts persist state in the active Pi session, advance automatically after each Pi agent turn, write structured artifacts, stream a live status widget, track Pi-native usage where available, and expose `/materia grid`.
 
 ## Install or run
 
@@ -45,6 +45,14 @@ Start a cast:
 
 ```text
 /materia run implement the next small feature
+```
+
+Inspect or control an active cast:
+
+```text
+/materia status
+/materia continue
+/materia abort
 ```
 
 pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available.
@@ -98,6 +106,7 @@ Each cast writes enough information to debug the run after the fact:
   tasks/<task-id>/build-<attempt>.md
   tasks/<task-id>/eval-<attempt>.json
   maintenance/final.md
+  manifest.json
 ```
 
 ## Default loadout
