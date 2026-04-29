@@ -102,11 +102,15 @@ Each cast writes enough information to debug the run after the fact:
   config.resolved.json
   events.jsonl
   usage.json
+  manifest.json
   plan.json
   tasks/<task-id>/build-<attempt>.md
   tasks/<task-id>/eval-<attempt>.json
   maintenance/final.md
-  manifest.json
+  contexts/planner.md
+  contexts/builder-<task-id>-attempt-<n>.md
+  contexts/evaluator-<task-id>-attempt-<n>.md
+  contexts/maintainer.md
 ```
 
 ## Default loadout

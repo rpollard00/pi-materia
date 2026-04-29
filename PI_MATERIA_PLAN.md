@@ -452,7 +452,8 @@ Phase 3 implementation notes:
 - `before_agent_start` augments the active system prompt with the current Materia role instructions.
 - `context` replaces the model-visible conversation for active Materia turns with an isolated per-role context plus the current role turn/tool-loop messages.
 - Role tool scopes are approximated with `pi.setActiveTools()`.
-- Artifacts now include `manifest.json` linking phases/tasks to native Pi session entry ids.
+- Artifacts now include `manifest.json` linking phases/tasks to native Pi session entry ids and context artifacts.
+- Each role turn writes the exact isolated model-visible context/prompt under `contexts/` before triggering the turn.
 
 ## Phase 4: Maintenance and VCS Policy
 
@@ -558,7 +559,7 @@ Acceptance:
 6. Maintainer after each passed task.
 7. VCS adapter with jj/git detection.
 8. Automatic maintainer commit decision.
-9. Context artifact capture for isolated role turns.
+9. Context artifact capture for isolated role turns. — implemented
 10. Per-role model/thinking/tool settings.
 11. Advanced graph edge conditions.
 

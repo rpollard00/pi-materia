@@ -18,6 +18,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   const runDir = path.join(artifactRoot, castId);
   await mkdir(path.join(runDir, "tasks"), { recursive: true });
   await mkdir(path.join(runDir, "maintenance"), { recursive: true });
+  await mkdir(path.join(runDir, "contexts"), { recursive: true });
   await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
 
   const runState = createRunState(castId, runDir, ctx.model);
@@ -57,7 +58,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `planning:${pipeline.planner.id}`);
   ctx.ui.notify(`pi-materia native cast started. Artifacts: ${runDir}`, "info");
-  sendMateriaTurn(pi, state, buildPlannerPrompt(request, pipeline.planner.role));
+  await sendMateriaTurn(pi, state, buildPlannerPrompt(request, pipeline.planner.role));
 }
 
 export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
@@ -68,7 +69,7 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   state.updatedAt = Date.now();
   saveCastState(pi, state);
   updateToolScope(pi, currentRole(state));
-  sendMateriaTurn(pi, state, prompt);
+  await sendMateriaTurn(pi, state, prompt);
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
@@ -189,7 +190,7 @@ async function startBuild(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   updateToolScope(pi, state.pipeline.builder.role);
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `${state.pipeline.builder.id}:${task.id}`);
-  sendMateriaTurn(pi, state, buildBuilderPrompt(task, state.attempt, state.lastFeedback, state.pipeline.builder.role));
+  await sendMateriaTurn(pi, state, buildBuilderPrompt(task, state.attempt, state.lastFeedback, state.pipeline.builder.role));
 }
 
 async function startEvaluation(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
@@ -209,7 +210,7 @@ async function startEvaluation(pi: ExtensionAPI, ctx: ExtensionContext, state: M
   updateToolScope(pi, state.pipeline.evaluator.role);
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `${state.pipeline.evaluator.id}:${task.id}`);
-  sendMateriaTurn(pi, state, buildEvaluatorPrompt(task, state.lastBuildSummary ?? "", state.pipeline.evaluator.role));
+  await sendMateriaTurn(pi, state, buildEvaluatorPrompt(task, state.lastBuildSummary ?? "", state.pipeline.evaluator.role));
 }
 
 async function maybeStartMaintenance(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, config: PiMateriaConfig, entryId: string): Promise<void> {
@@ -234,7 +235,7 @@ async function maybeStartMaintenance(pi: ExtensionAPI, ctx: ExtensionContext, st
   updateToolScope(pi, state.pipeline.maintainer.role);
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `maintaining:${state.pipeline.maintainer.id}`);
-  sendMateriaTurn(pi, state, buildMaintainerPrompt(state.pipeline.maintainer.role));
+  await sendMateriaTurn(pi, state, buildMaintainerPrompt(state.pipeline.maintainer.role));
 }
 
 async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, entryId: string, message: string): Promise<void> {
@@ -253,7 +254,17 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   ctx.ui.notify(`pi-materia cast complete. Tokens: ${state.runState.usage.tokens.total}, cost: $${state.runState.usage.cost.total.toFixed(4)}`, "info");
 }
 
-function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): void {
+async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<void> {
+  const contextArtifact = await writeContextArtifact(pi, state, prompt);
+  await appendManifest(state, {
+    phase: state.phase,
+    node: state.currentNode,
+    role: state.currentRole,
+    taskId: state.currentTaskId,
+    attempt: state.attempt || undefined,
+    artifact: contextArtifact,
+  });
+
   const label = state.currentTaskId
     ? `${state.phase}: ${state.currentTaskId}${state.currentTaskTitle ? ` - ${state.currentTaskTitle}` : ""}${state.attempt ? ` (attempt ${state.attempt})` : ""}`
     : state.phase;
@@ -273,6 +284,15 @@ function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: stri
     },
   });
 
+  pi.appendEntry("pi-materia-context", {
+    phase: state.phase,
+    nodeId: state.currentNode,
+    roleName: state.currentRole,
+    taskId: state.currentTaskId,
+    attempt: state.attempt || undefined,
+    artifact: contextArtifact,
+  });
+
   pi.sendMessage({
     customType: "pi-materia-prompt",
     content: prompt,
@@ -286,6 +306,46 @@ function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: stri
       attempt: state.attempt || undefined,
     },
   }, { triggerTurn: true });
+}
+
+async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<string> {
+  const relativePath = contextArtifactPath(state);
+  const fullPath = path.join(state.runDir, relativePath);
+  await mkdir(path.dirname(fullPath), { recursive: true });
+  const syntheticContext = buildSyntheticCastContext(state);
+  const activeTools = pi.getActiveTools();
+  const model = [state.runState.usage.provider, state.runState.usage.model].filter(Boolean).join("/") || state.runState.usage.model || "active Pi model";
+  const content = [
+    "# Materia Isolated Role Context",
+    "",
+    `cast: ${state.castId}`,
+    `phase: ${state.phase}`,
+    `node: ${state.currentNode ?? "-"}`,
+    `role: ${state.currentRole ?? "-"}`,
+    `task: ${state.currentTaskId ? `${state.currentTaskId} - ${state.currentTaskTitle ?? ""}` : "-"}`,
+    `attempt: ${state.attempt || "-"}`,
+    `model: ${model}`,
+    `active tools: ${activeTools.length ? activeTools.join(", ") : "none"}`,
+    `timestamp: ${new Date().toISOString()}`,
+    "",
+    "## Synthetic cast context",
+    "",
+    syntheticContext,
+    "",
+    "## Hidden role prompt",
+    "",
+    prompt,
+  ].join("\n");
+  await writeFile(fullPath, content);
+  return relativePath;
+}
+
+function contextArtifactPath(state: MateriaCastState): string {
+  if (state.phase === "planning") return path.join("contexts", "planner.md");
+  if (state.phase === "building") return path.join("contexts", `builder-${safePathSegment(state.currentTaskId ?? "task")}-attempt-${state.attempt || 1}.md`);
+  if (state.phase === "evaluating") return path.join("contexts", `evaluator-${safePathSegment(state.currentTaskId ?? "task")}-attempt-${state.attempt || 1}.md`);
+  if (state.phase === "maintaining") return path.join("contexts", "maintainer.md");
+  return path.join("contexts", `${safePathSegment(state.phase)}.md`);
 }
 
 function nextPromptForState(state: MateriaCastState): string {
