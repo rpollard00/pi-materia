@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { clearCastState, continueNativeCast, handleAgentEnd, loadActiveCastState, startNativeCast } from "./native.js";
+import { buildIsolatedMateriaContext, clearCastState, continueNativeCast, handleAgentEnd, loadActiveCastState, startNativeCast } from "./native.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -10,6 +10,14 @@ export default function piMateria(pi: ExtensionAPI) {
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
     type: "string",
+  });
+
+  pi.on("context", (event, ctx) => {
+    const state = loadActiveCastState(ctx);
+    if (!state?.active || !state.awaitingResponse) return;
+    return {
+      messages: buildIsolatedMateriaContext(event.messages, state) as typeof event.messages,
+    };
   });
 
   pi.on("before_agent_start", (event, ctx) => {

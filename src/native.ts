@@ -25,7 +25,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   runState.currentRole = pipeline.planner.node.role;
   runState.lastMessage = "planning";
   await writeUsage(runState);
-  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: config.pipeline, nativeSession: true });
+  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: config.pipeline, nativeSession: true, isolatedRoleContext: true });
   await writeManifest(runDir, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
 
   const state: MateriaCastState = {
@@ -298,6 +298,65 @@ export function buildMaintainerPrompt(role: MateriaRoleConfig): string {
     "Inspect the repository state and create an appropriate checkpoint/commit only if you are satisfied with the final state.",
     "Follow your maintainer role instructions for the correct VCS commands.",
   ]);
+}
+
+export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaCastState): unknown[] {
+  if (!state.active || !state.awaitingResponse) return messages;
+  const roleStart = findActiveMateriaPromptIndex(messages);
+  if (roleStart < 0) return messages;
+
+  const activeRoleTurn = messages.slice(roleStart);
+  return [createUserMessage(buildSyntheticCastContext(state)), ...activeRoleTurn];
+}
+
+function buildSyntheticCastContext(state: MateriaCastState): string {
+  const task = state.tasks[state.currentTaskIndex];
+  const lines = [
+    "Materia isolated context.",
+    "Use only this cast context, the current role prompt, and any tool results from this role turn. Do not rely on unrelated earlier visible transcript messages.",
+    "",
+    `Cast id: ${state.castId}`,
+    `Original request: ${state.request}`,
+    `Current phase: ${state.phase}`,
+    `Current node: ${state.currentNode ?? "-"}`,
+    `Current role: ${state.currentRole ?? "-"}`,
+    `Artifact directory: ${state.runDir}`,
+    "",
+    state.tasks.length ? `Plan tasks:\n${state.tasks.map((t, index) => `${index + 1}. ${t.id}: ${t.title}\n   ${t.description}\n   Acceptance: ${t.acceptance.join("; ")}`).join("\n")}` : "Plan tasks: not created yet.",
+  ];
+
+  if (task) {
+    lines.push("", `Current task: ${task.id} - ${task.title}`, task.description, `Acceptance: ${task.acceptance.join("; ")}`);
+  }
+  if (state.attempt) lines.push(`Attempt: ${state.attempt}`);
+  if (state.lastFeedback) lines.push("", `Previous evaluator feedback:\n${state.lastFeedback}`);
+  if (state.lastBuildSummary && state.phase === "evaluating") lines.push("", `Latest builder summary:\n${state.lastBuildSummary}`);
+  if (state.phase === "maintaining") lines.push("", "All planned tasks have passed evaluation. Use the artifact directory and repository state as needed for checkpointing.");
+
+  return lines.filter(Boolean).join("\n");
+}
+
+function findActiveMateriaPromptIndex(messages: unknown[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as { role?: unknown; content?: unknown };
+    if (message.role !== "user") continue;
+    const text = messageContentText(message.content);
+    if (text.includes("<materia-role-instructions>") && text.includes("Pi-native Materia cast")) return i;
+  }
+  return -1;
+}
+
+function createUserMessage(content: string): unknown {
+  return { role: "user", content, timestamp: Date.now() };
+}
+
+function messageContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => {
+    const value = part as { type?: unknown; text?: unknown };
+    return value.type === "text" && typeof value.text === "string" ? value.text : "";
+  }).join("\n");
 }
 
 function rolePrompt(role: MateriaRoleConfig, sections: (string | undefined)[]): string {

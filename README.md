@@ -16,7 +16,7 @@ The planner breaks a high-level request into tasks, the builder implements each 
 
 pi-materia is early and intentionally small. The current runtime supports the default sequential grid shape above, with configurable roles and prompts. The bundled default loadout uses a `jj` maintainer role by default.
 
-Phase 3 native orchestration is the default runtime: casts persist state in the active Pi session, advance automatically after each Pi agent turn, write structured artifacts, stream a live status widget, track Pi-native usage where available, and expose `/materia grid`.
+Phase 3 native orchestration is the default runtime: casts persist state in the active Pi session, advance automatically after each Pi agent turn, isolate model context per Materia role, write structured artifacts, stream a live status widget, track Pi-native usage where available, and expose `/materia grid`.
 
 ## Install or run
 
@@ -55,7 +55,7 @@ Inspect or control an active cast:
 /materia abort
 ```
 
-pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available.
+pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but each role turn receives a curated Materia context instead of the full previous conversation.
 
 ## Configuration
 

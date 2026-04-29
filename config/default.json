@@ -3,8 +3,8 @@
   "autoCommit": false,
   "artifactDir": ".pi/pi-materia",
   "budget": {
-    "maxTokens": 200000,
-    "maxCostUsd": 5,
+    "maxTokens": 1000000,
+    "maxCostUsd": 20,
     "warnAtPercent": 75,
     "stopAtLimit": true
   },

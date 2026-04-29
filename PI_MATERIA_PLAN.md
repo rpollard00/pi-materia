@@ -479,6 +479,7 @@ Phase 3 implementation notes:
 - `/materia run` now initializes a persisted cast state and sends the planner prompt into the active Pi session.
 - `agent_end` transitions the state machine and sends builder/evaluator/maintainer prompts as normal user messages.
 - `before_agent_start` augments the active system prompt with the current Materia role instructions.
+- `context` replaces the model-visible conversation for active Materia turns with an isolated per-role context plus the current role turn/tool-loop messages.
 - Role tool scopes are approximated with `pi.setActiveTools()`.
 - Artifacts now include `manifest.json` linking phases/tasks to native Pi session entry ids.
 - Legacy hidden subagent code remains in `src/agent.ts` but is no longer used by the default runtime.
