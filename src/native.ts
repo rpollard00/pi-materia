@@ -57,7 +57,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `planning:${pipeline.planner.id}`);
   ctx.ui.notify(`pi-materia native cast started. Artifacts: ${runDir}`, "info");
-  pi.sendUserMessage(buildPlannerPrompt(request, pipeline.planner.role));
+  sendMateriaTurn(pi, state, buildPlannerPrompt(request, pipeline.planner.role));
 }
 
 export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
@@ -68,7 +68,7 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   state.updatedAt = Date.now();
   saveCastState(pi, state);
   updateToolScope(pi, currentRole(state));
-  pi.sendUserMessage(prompt);
+  sendMateriaTurn(pi, state, prompt);
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
@@ -189,7 +189,7 @@ async function startBuild(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   updateToolScope(pi, state.pipeline.builder.role);
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `${state.pipeline.builder.id}:${task.id}`);
-  pi.sendUserMessage(buildBuilderPrompt(task, state.attempt, state.lastFeedback, state.pipeline.builder.role));
+  sendMateriaTurn(pi, state, buildBuilderPrompt(task, state.attempt, state.lastFeedback, state.pipeline.builder.role));
 }
 
 async function startEvaluation(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
@@ -209,7 +209,7 @@ async function startEvaluation(pi: ExtensionAPI, ctx: ExtensionContext, state: M
   updateToolScope(pi, state.pipeline.evaluator.role);
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `${state.pipeline.evaluator.id}:${task.id}`);
-  pi.sendUserMessage(buildEvaluatorPrompt(task, state.lastBuildSummary ?? "", state.pipeline.evaluator.role));
+  sendMateriaTurn(pi, state, buildEvaluatorPrompt(task, state.lastBuildSummary ?? "", state.pipeline.evaluator.role));
 }
 
 async function maybeStartMaintenance(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, config: PiMateriaConfig, entryId: string): Promise<void> {
@@ -234,7 +234,7 @@ async function maybeStartMaintenance(pi: ExtensionAPI, ctx: ExtensionContext, st
   updateToolScope(pi, state.pipeline.maintainer.role);
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", `maintaining:${state.pipeline.maintainer.id}`);
-  pi.sendUserMessage(buildMaintainerPrompt(state.pipeline.maintainer.role));
+  sendMateriaTurn(pi, state, buildMaintainerPrompt(state.pipeline.maintainer.role));
 }
 
 async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, entryId: string, message: string): Promise<void> {
@@ -251,6 +251,41 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   updateWidget(ctx, state.runState);
   showUsageSummary(ctx, state.runState);
   ctx.ui.notify(`pi-materia cast complete. Tokens: ${state.runState.usage.tokens.total}, cost: $${state.runState.usage.cost.total.toFixed(4)}`, "info");
+}
+
+function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): void {
+  const label = state.currentTaskId
+    ? `${state.phase}: ${state.currentTaskId}${state.currentTaskTitle ? ` - ${state.currentTaskTitle}` : ""}${state.attempt ? ` (attempt ${state.attempt})` : ""}`
+    : state.phase;
+
+  pi.sendMessage({
+    customType: "pi-materia",
+    content: `Casting **${state.currentRole ?? "materia"}**\n\n${label}`,
+    display: true,
+    details: {
+      prefix: label,
+      nodeId: state.currentNode,
+      roleName: state.currentRole,
+      taskId: state.currentTaskId,
+      taskTitle: state.currentTaskTitle,
+      attempt: state.attempt || undefined,
+      eventType: "role_prompt",
+    },
+  });
+
+  pi.sendMessage({
+    customType: "pi-materia-prompt",
+    content: prompt,
+    display: false,
+    details: {
+      phase: state.phase,
+      nodeId: state.currentNode,
+      roleName: state.currentRole,
+      taskId: state.currentTaskId,
+      taskTitle: state.currentTaskTitle,
+      attempt: state.attempt || undefined,
+    },
+  }, { triggerTurn: true });
 }
 
 function nextPromptForState(state: MateriaCastState): string {
@@ -338,8 +373,7 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
 
 function findActiveMateriaPromptIndex(messages: unknown[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i] as { role?: unknown; content?: unknown };
-    if (message.role !== "user") continue;
+    const message = messages[i] as { content?: unknown };
     const text = messageContentText(message.content);
     if (text.includes("<materia-role-instructions>") && text.includes("Pi-native Materia cast")) return i;
   }

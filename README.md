@@ -55,7 +55,7 @@ Inspect or control an active cast:
 /materia abort
 ```
 
-pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but each role turn receives a curated Materia context instead of the full previous conversation.
+pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full role prompts are hidden behind compact Materia cast messages, and each role turn receives a curated Materia context instead of the full previous conversation.
 
 ## Configuration
 
