@@ -1,28 +1,14 @@
 import { resolveArtifactRoot } from "./config.js";
-import type { MateriaBudgetConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { MateriaBudgetConfig, MateriaEdgeConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipeline {
-  const planner = resolveNode(config, config.pipeline.entry, "pipeline.entry");
-  if (!planner.node.next) throw new Error(`Planner slot "${planner.id}" must define next`);
-
-  const builder = resolveNode(config, planner.node.next, `${planner.id}.next`);
-  if (!builder.node.next) throw new Error(`Builder slot "${builder.id}" must define next`);
-
-  const evaluator = resolveNode(config, builder.node.next, `${builder.id}.next`);
-  const passedTarget = evaluator.node.edges?.passed;
-  const failedTarget = evaluator.node.edges?.failed;
-  if (!passedTarget) throw new Error(`Evaluator slot "${evaluator.id}" must define edges.passed`);
-  if (!failedTarget) throw new Error(`Evaluator slot "${evaluator.id}" must define edges.failed`);
-  if (failedTarget !== builder.id) {
-    throw new Error(`Evaluator slot "${evaluator.id}" edges.failed must link back to builder slot "${builder.id}" for this runtime`);
-  }
-
-  return {
-    planner,
-    builder,
-    evaluator,
-    maintainer: passedTarget === "end" ? undefined : resolveNode(config, passedTarget, `${evaluator.id}.edges.passed`),
-  };
+  const nodes = Object.fromEntries(
+    Object.keys(config.pipeline.nodes).map((id) => [id, resolveNode(config, id, `pipeline.nodes.${id}`)]),
+  );
+  const entry = nodes[config.pipeline.entry];
+  if (!entry) throw new Error(`Unknown pipeline entry slot "${config.pipeline.entry}"`);
+  validateTargets(config);
+  return { entry, nodes };
 }
 
 function resolveNode(config: PiMateriaConfig, id: string, source: string): ResolvedMateriaNode {
@@ -36,29 +22,40 @@ function resolveNode(config: PiMateriaConfig, id: string, source: string): Resol
   return { id, node, role };
 }
 
+function validateTargets(config: PiMateriaConfig): void {
+  for (const [id, node] of Object.entries(config.pipeline.nodes)) {
+    validateTarget(config, node.next, `${id}.next`);
+    validateTarget(config, node.foreach?.done, `${id}.foreach.done`);
+    validateTarget(config, node.advance?.done, `${id}.advance.done`);
+    for (const edge of node.edges ?? []) validateTarget(config, edge.to, `${id}.edges[].to`);
+  }
+}
+
+function validateTarget(config: PiMateriaConfig, target: string | undefined, source: string): void {
+  if (!target || target === "end") return;
+  if (!config.pipeline.nodes[target]) throw new Error(`Unknown pipeline slot "${target}" referenced by ${source}`);
+}
+
 export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPipeline, source: string, cwd: string): string[] {
   const lines = [
     "pi-materia Materia Grid",
     `source: ${source}`,
     `artifactDir: ${resolveArtifactRoot(cwd, config.artifactDir)}`,
-    `maxBuilderAttempts: ${config.maxBuilderAttempts}`,
-    `autoCommit: ${config.autoCommit}`,
+    `limits: ${formatLimits(config)}`,
     `budget: ${formatBudget(config.budget)}`,
     "",
     "Graph:",
     ...renderGraph(config),
     "",
-    "Supported runtime path:",
-    `${pipeline.planner.id} -> ${pipeline.builder.id} -> ${pipeline.evaluator.id}`,
-    `                         | passed -> ${pipeline.maintainer?.id ?? "end"}`,
-    `                         | failed  -> ${pipeline.builder.id}`,
+    "Resolved entry:",
+    pipeline.entry.id,
     "",
     "Slots:",
   ];
 
   for (const [id, node] of Object.entries(config.pipeline.nodes)) {
     const role = config.roles[node.role];
-    lines.push(`- ${id}: role=${node.role}, tools=${role?.tools ?? "unknown"}`);
+    lines.push(`- ${id}: role=${node.role}, parse=${node.parse ?? "text"}, tools=${role?.tools ?? "unknown"}`);
   }
   return lines;
 }
@@ -67,12 +64,21 @@ function renderGraph(config: PiMateriaConfig): string[] {
   const lines: string[] = [];
   for (const [id, node] of Object.entries(config.pipeline.nodes)) {
     if (node.next) lines.push(`${id} -> ${node.next}`);
-    for (const [label, target] of Object.entries(node.edges ?? {})) {
-      lines.push(`${id} --${label}--> ${target}`);
-    }
-    if (!node.next && !node.edges) lines.push(`${id}`);
+    for (const edge of node.edges ?? []) lines.push(`${id} --${edgeLabel(edge)}--> ${edge.to}`);
+    if (!node.next && !node.edges?.length) lines.push(`${id}`);
   }
   return lines.length > 0 ? lines : ["<empty>"];
+}
+
+function edgeLabel(edge: MateriaEdgeConfig): string {
+  return edge.when ?? "always";
+}
+
+function formatLimits(config: PiMateriaConfig): string {
+  return [
+    `node visits ${config.limits?.maxNodeVisits ?? 25}`,
+    `edge traversals ${config.limits?.maxEdgeTraversals ?? 25}`,
+  ].join(", ");
 }
 
 function formatBudget(budget?: MateriaBudgetConfig): string {

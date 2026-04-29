@@ -118,7 +118,7 @@ Implementation notes:
 - Added separate `jjMaintainer` and `gitMaintainer` roles.
 - The bundled default currently uses `jjMaintainer` for faster local iteration.
 - Added pipeline validation with friendly errors for missing slots, missing roles, and unsupported links.
-- Current runtime supports the default sequential grid shape: planner -> builder -> evaluator, with evaluator `passed` linking to maintainer or `end`, and `failed` linking back to builder.
+- Runtime traverses configured Materia Grid links. Built-in node kinds (`planner`, `builder`, `evaluator`, `maintainer`) provide structured behavior, and `generic` nodes can be inserted for custom handoffs.
 - Added `config/default.json` as the bundled default loadout that is used when no explicit or project config exists.
 
 ## Phase 2: Observability, Token Budgeting, and Visual Feedback
@@ -448,7 +448,7 @@ Acceptance:
 Phase 3 implementation notes:
 - Added `src/native.ts` as the Pi-native orchestration runtime.
 - `/materia cast` now initializes a persisted cast state and sends the planner prompt into the active Pi session.
-- `agent_end` transitions the state machine and sends builder/evaluator/maintainer prompts as normal user messages.
+- `agent_end` transitions the state machine by following configured Materia Grid links and sends the next node prompt through a shared node-start path.
 - `before_agent_start` augments the active system prompt with the current Materia role instructions.
 - `context` replaces the model-visible conversation for active Materia turns with an isolated per-role context plus the current role turn/tool-loop messages.
 - Role tool scopes are approximated with `pi.setActiveTools()`.
@@ -578,3 +578,391 @@ Acceptance:
 - Should maintainer commit extension code/config changes by default, or only target-project changes?
 - Should failed maintenance send control back to builder, evaluator, or stop?
 - Should pi-materia support parallel branches later, or stay sequential initially?
+## Phase 6: Fully Data-Driven Materia Engine
+
+Strategic correction: the Materia engine must not know about planner/builder/evaluator/maintainer semantics. Those are default loadout concepts only. The framework source should contain no references to `plan`, `build`, `evaluate`, `maintain`, or node kinds as runtime behavior. The engine should only traverse configured nodes, render configured prompts, parse configured outputs, assign configured state, evaluate configured edges, and enforce generic safety limits.
+
+Status: implemented. `src/native.ts` now uses one generic node start path and one generic node completion path. Runtime semantics are configured through `prompt`, `parse`, `assign`, `edges`, `foreach`, `advance`, and limits. The bundled software-development loadout is data in `config/default.json`; `src/` no longer contains runtime branches for planner/builder/evaluator/maintainer, plan/build/evaluation/maintain modes, or node kinds.
+
+### 13. Remove semantic node behavior from framework source — Done
+
+Problem: current code still has framework-level concepts like node output modes (`plan`, `evaluation`) and phase-specific branches. That prevents users from defining arbitrary Materia Grids such as a single node that says `HELLO WORLD` and exits.
+
+Target principle:
+
+```text
+Config owns workflow meaning.
+Engine owns traversal mechanics.
+LLM + role prompt own task behavior.
+```
+
+The engine may know generic concepts:
+- nodes
+- roles
+- prompts
+- tools
+- output parsing
+- state assignment
+- edges
+- cursors/iteration
+- counters/limits
+- artifacts
+
+The engine must not know domain concepts:
+- planner
+- builder
+- evaluator
+- maintainer
+- plan
+- build
+- evaluation
+- checkpoint/commit
+
+Acceptance:
+- A config with one node that prompts `Say exactly: HELLO WORLD` and `next: "end"` works without framework code changes.
+- Searching `src/` for planner/builder/evaluator/maintainer/plan/build/evaluation/maintain should find only docs/examples/default config compatibility comments if any, not runtime branches.
+
+### 14. Replace semantic node schema with generic node schema — Done
+
+Remove or stop using runtime-semantic fields:
+
+```ts
+MateriaNodeKind
+MateriaNodeOutputMode
+output: "plan" | "evaluation"
+taskScoped
+attemptScoped
+advanceTaskOnSuccess
+```
+
+Introduce generic node fields:
+
+```ts
+interface MateriaPipelineNodeConfig {
+  type: "agent";
+  role: string;
+  prompt?: string;
+  parse?: "text" | "json";
+  assign?: Record<string, string>;
+  next?: string;
+  edges?: MateriaEdgeConfig[];
+  foreach?: {
+    items: string;
+    as: string;
+    cursor?: string;
+  };
+  advance?: {
+    cursor: string;
+    items: string;
+  };
+  limits?: {
+    maxVisits?: number;
+  };
+}
+
+interface MateriaEdgeConfig {
+  when?: string;
+  to: string;
+  maxTraversals?: number;
+}
+```
+
+Examples:
+
+```json
+{
+  "hello": {
+    "type": "agent",
+    "role": "echoer",
+    "prompt": "Say exactly: HELLO WORLD",
+    "next": "end"
+  }
+}
+```
+
+```json
+{
+  "check": {
+    "type": "agent",
+    "role": "checker",
+    "parse": "json",
+    "assign": {
+      "lastCheck": "$"
+    },
+    "edges": [
+      { "when": "$.passed == true", "to": "checkpoint" },
+      { "when": "$.passed == false", "to": "repair", "maxTraversals": 3 }
+    ]
+  }
+}
+```
+
+Acceptance:
+- Node schema describes mechanics only.
+- Default planner/builder/evaluator/maintainer behavior is represented entirely as config using these generic fields.
+
+### 15. Replace semantic cast state with generic state — Done
+
+Remove semantic state fields:
+
+```ts
+tasks
+currentTaskIndex
+lastBuildSummary
+lastFeedback
+maintenanceMode
+```
+
+Replace with generic state:
+
+```ts
+interface MateriaCastState {
+  data: Record<string, unknown>;
+  cursors: Record<string, number>;
+  visits: Record<string, number>;
+  edgeTraversals: Record<string, number>;
+  lastOutput?: string;
+  lastJson?: unknown;
+}
+```
+
+Common default workflow state should live under generic keys assigned by config, e.g.:
+
+```json
+"assign": {
+  "tasks": "$.tasks"
+}
+```
+
+and referenced via templates:
+
+```text
+{{state.currentTask.title}}
+{{state.lastFeedback}}
+{{lastOutput}}
+```
+
+Acceptance:
+- Engine state is workflow-agnostic.
+- Task iteration is a generic cursor over a configured collection, not a hardcoded task loop.
+
+### 16. Implement generic node start path — Done
+
+Replace all start functions/branches with one path:
+
+```ts
+startNode(nodeId)
+```
+
+Responsibilities:
+- resolve node by id
+- increment/check node visit counter
+- resolve role
+- set active tools from role
+- render prompt template from generic state
+- write context artifact
+- send hidden prompt into active Pi session
+- persist cast state
+
+Prompt rendering should support generic variables:
+
+```text
+{{request}}
+{{state.foo}}
+{{item.id}}
+{{item.title}}
+{{lastOutput}}
+{{lastJson.feedback}}
+{{cursor.taskIndex}}
+```
+
+Acceptance:
+- Every node, including entry node, starts through the same function.
+- There are no node-id/name/kind-specific start functions.
+
+### 17. Implement generic node completion path — Done
+
+Replace phase branches with one path:
+
+```ts
+completeNode(outputText)
+```
+
+Responsibilities:
+- write raw output artifact under `nodes/<node-id>/...`
+- set `state.lastOutput`
+- parse JSON only when `node.parse === "json"`
+- set `state.lastJson` when parsed
+- apply `assign` mappings
+- apply cursor advancement when configured
+- evaluate edges/next
+- call `startNode(next)` or complete cast
+
+Generic assignment examples:
+
+```json
+"assign": {
+  "tasks": "$.tasks",
+  "lastFeedback": "$.feedback",
+  "lastPassed": "$.passed"
+}
+```
+
+Acceptance:
+- No `if planning`, `if building`, `if evaluating`, `if maintaining` runtime branches.
+- JSON parsing is opt-in and configured per node.
+- Raw output is always artifacted regardless of parse mode.
+
+### 18. Implement small JSONPath/template/expression helpers — Done
+
+Do not add a large dependency initially. Implement a minimal helper set.
+
+JSON path support:
+
+```text
+$              whole parsed node output
+$.field        parsed output field
+$.a.b          nested parsed output field
+state.foo      generic cast data
+item.foo       current foreach item
+lastJson.foo   previous parsed output
+```
+
+Template support:
+
+```text
+{{request}}
+{{state.tasks}}
+{{item.title}}
+{{lastOutput}}
+{{lastJson.feedback}}
+```
+
+Condition support for edges:
+
+```text
+$.passed == true
+$.passed == false
+$.status == "ok"
+exists($.missing)
+!exists($.missing)
+```
+
+Acceptance:
+- Default workflow can route pass/fail through config only.
+- Simple custom workflows can route on JSON fields without TypeScript changes.
+
+### 19. Implement generic edge traversal and cycle safety — Done
+
+Generic next resolution order:
+
+1. first matching configured edge
+2. `next`
+3. `end`
+
+Track:
+
+```ts
+visits[nodeId]
+edgeTraversals[`${from}->${to}`]
+```
+
+Support limits:
+
+```json
+"limits": { "maxVisits": 10 }
+```
+
+and edge limits:
+
+```json
+{ "when": "$.passed == false", "to": "repair", "maxTraversals": 3 }
+```
+
+Acceptance:
+- Infinite loops fail with clear diagnostics.
+- Retry behavior is data-driven through edge traversal limits, not builder-specific attempt logic.
+
+### 20. Make iteration data-driven — Done
+
+Support generic foreach/cursor behavior:
+
+```json
+"foreach": {
+  "items": "state.tasks",
+  "as": "task",
+  "cursor": "taskIndex"
+}
+```
+
+and cursor advancement:
+
+```json
+"advance": {
+  "cursor": "taskIndex",
+  "items": "state.tasks"
+}
+```
+
+Engine behavior:
+- template exposes current item as `{{task.title}}` or `{{item.title}}`
+- advancing past the collection routes to `end` or configured `done` target later
+
+Acceptance:
+- Default multi-task workflow is implemented via generic cursor configuration.
+- Other workflows can iterate over arbitrary arrays, not just `tasks`.
+
+### 21. Move current default workflow semantics into `config/default.json` — Done
+
+The bundled default config should define the familiar Materia Grid entirely as data:
+
+- planning node creates JSON `{ tasks: [...] }`
+- implementation node works on current task item
+- checking node returns JSON `{ passed, feedback, missing }`
+- checkpoint node records jj/git description/commit
+- pass/fail routing is configured via JSON conditions
+- task advancement is configured on checkpoint success
+
+The framework source should not contain those names or behaviors.
+
+Acceptance:
+- Editing only `config/default.json` can substantially change the workflow.
+- A user can replace the whole grid with unrelated nodes and the engine still works.
+
+### 22. Update docs around generic Materia Grids — Done
+
+README should show:
+
+Minimal hello-world grid:
+
+```json
+{
+  "pipeline": {
+    "entry": "hello",
+    "nodes": {
+      "hello": {
+        "type": "agent",
+        "role": "echoer",
+        "prompt": "Say exactly: HELLO WORLD",
+        "next": "end"
+      }
+    }
+  },
+  "roles": {
+    "echoer": {
+      "tools": "none",
+      "systemPrompt": "Follow the prompt exactly."
+    }
+  }
+}
+```
+
+And explain:
+- prompts are templates
+- outputs can be text or parsed JSON
+- edges are condition-driven
+- state assignment is explicit
+- loops need limits
+
+Acceptance:
+- Users understand pi-materia as a generic graph runtime, not a hardcoded software-development loop.

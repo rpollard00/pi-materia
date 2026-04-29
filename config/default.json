@@ -1,7 +1,9 @@
 {
-  "maxBuilderAttempts": 3,
-  "autoCommit": false,
   "artifactDir": ".pi/pi-materia",
+  "limits": {
+    "maxNodeVisits": 50,
+    "maxEdgeTraversals": 25
+  },
   "budget": {
     "maxTokens": 1000000,
     "maxCostUsd": 20,
@@ -14,47 +16,93 @@
       "planner": {
         "type": "agent",
         "role": "planner",
-        "next": "builder"
+        "parse": "json",
+        "assign": {
+          "tasks": "$.tasks"
+        },
+        "prompt": "Create an implementation plan for this request. Be directive about repository bootstrap. If the repository appears empty, uninitialized, or missing common project hygiene, make the first task a bootstrap task. Bootstrap tasks should instruct the implementer to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for .pi/pi-materia/ and language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Return only JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.\n\nRequest: {{request}}",
+        "next": "implement"
       },
-      "builder": {
+      "implement": {
         "type": "agent",
-        "role": "builder",
-        "next": "evaluator"
+        "role": "implementer",
+        "parse": "text",
+        "foreach": {
+          "items": "state.tasks",
+          "as": "task",
+          "cursor": "taskIndex",
+          "done": "end"
+        },
+        "prompt": "Task {{item.id}}: {{item.title}}\n\n{{item.description}}\n\nAcceptance criteria:\n{{item.acceptance}}\n\nPrevious feedback, if any:\n{{state.lastFeedback}}\n\nImplement the task now using normal Pi tools. Run relevant checks and summarize what changed.",
+        "next": "check"
       },
-      "evaluator": {
+      "check": {
         "type": "agent",
-        "role": "evaluator",
-        "edges": {
-          "passed": "maintainer",
-          "failed": "builder"
-        }
+        "role": "checker",
+        "parse": "json",
+        "foreach": {
+          "items": "state.tasks",
+          "as": "task",
+          "cursor": "taskIndex",
+          "done": "end"
+        },
+        "assign": {
+          "lastFeedback": "$.feedback",
+          "lastCheck": "$"
+        },
+        "prompt": "Evaluate whether the current task is complete. Inspect the repository as needed. Return only JSON with shape: { \"passed\": boolean, \"feedback\": string, \"missing\": string[] }.\n\nTask: {{itemJson}}\n\nImplementation summary: {{lastOutput}}",
+        "edges": [
+          {
+            "when": "$.passed == true",
+            "to": "checkpoint"
+          },
+          {
+            "when": "$.passed == false",
+            "to": "implement",
+            "maxTraversals": 3
+          }
+        ]
       },
-      "maintainer": {
+      "checkpoint": {
         "type": "agent",
-        "role": "jjMaintainer"
+        "role": "jjCheckpoint",
+        "parse": "text",
+        "foreach": {
+          "items": "state.tasks",
+          "as": "task",
+          "cursor": "taskIndex",
+          "done": "end"
+        },
+        "advance": {
+          "cursor": "taskIndex",
+          "items": "state.tasks",
+          "done": "end"
+        },
+        "prompt": "The current task passed verification. Create a checkpoint for this task before the next task begins.\n\nTask: {{item.id}} - {{item.title}}\n{{item.description}}\n\nLatest implementation summary:\n{{lastOutput}}\n\nInspect the repository state, summarize the changes for this task, and autonomously create an appropriate VCS checkpoint/description/commit message. Do not ask the user for permission.",
+        "next": "implement"
       }
     }
   },
   "roles": {
     "planner": {
       "tools": "readOnly",
-      "systemPrompt": "You are the pi-materia planner. Break high-level software requests into small, ordered implementation tasks with objective acceptance criteria. Return only valid JSON when asked."
+      "systemPrompt": "You are the pi-materia planning role. Break high-level software requests into small, ordered implementation tasks with objective acceptance criteria. Return only valid JSON when asked."
     },
-    "builder": {
+    "implementer": {
       "tools": "coding",
-      "systemPrompt": "You are the pi-materia builder. Implement exactly the assigned task. Prefer small, safe edits. Run relevant checks. Stop when the task is complete or blocked."
+      "systemPrompt": "You are the pi-materia implementation role. Implement exactly the assigned work item. Prefer small, safe edits. For bootstrap work, inspect the cwd, initialize the requested project appropriately, set up VCS hygiene, and add ignore rules for .pi/pi-materia/ plus language/build artifacts. If asked to initialize VCS, prefer jj when command -v jj succeeds and no .jj/.git exists; otherwise use git when appropriate. Run relevant checks. Stop when the item is complete or blocked."
     },
-    "evaluator": {
+    "checker": {
       "tools": "readOnly",
-      "systemPrompt": "You are the pi-materia evaluator. Verify whether the builder satisfied the task and acceptance criteria. Be strict. Return only valid JSON when asked."
+      "systemPrompt": "You are the pi-materia checking role. Verify whether the work satisfies the item and acceptance criteria. Be strict. Return only valid JSON when asked."
     },
-    "jjMaintainer": {
+    "jjCheckpoint": {
       "tools": "coding",
-      "systemPrompt": "You are the pi-materia jj maintainer. Prepare a clean final state using jj. Inspect changes with jj status and jj diff. If the work is satisfactory and should be checkpointed, describe the current change with jj describe -m \"message\". Do not use git commands."
+      "systemPrompt": "You are the pi-materia checkpoint role. Autonomously checkpoint each accepted work item; do not ask the user for permission. Prefer jj when command -v jj succeeds. If inside a jj repo, inspect with jj status and jj diff, then describe the current change with jj describe -m \"message\" using a concise item-specific message. If jj is unavailable but git is available, inspect with git status and git diff, then stage and commit with git add -A && git commit -m \"message\". If no VCS exists, initialize jj when available, otherwise git, then checkpoint. Never commit .pi/pi-materia artifacts."
     },
-    "gitMaintainer": {
+    "gitCheckpoint": {
       "tools": "coding",
-      "systemPrompt": "You are the pi-materia git maintainer. Prepare a clean final state using git. Inspect changes with git status and git diff. If the work is satisfactory and should be committed, stage changes with git add -A and commit with git commit -m \"message\". Do not use jj commands."
+      "systemPrompt": "You are the pi-materia git checkpoint role. Autonomously checkpoint each accepted work item; do not ask the user for permission. Inspect changes with git status and git diff. Stage and commit with git add -A && git commit -m \"message\" using a concise item-specific message. If no git repo exists, initialize git first. Never commit .pi/pi-materia artifacts. Do not use jj commands."
     }
   }
 }

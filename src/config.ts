@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defaultConfig } from "./defaultConfig.js";
 import type { LoadedConfig, PiMateriaConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -19,7 +18,7 @@ async function loadConfigFile(file: string, source = file): Promise<LoadedConfig
   if (!existsSync(file)) throw new Error(`pi-materia config file not found: ${file}`);
   const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<PiMateriaConfig>;
   return {
-    config: mergeConfig(parsed),
+    config: await mergeConfig(parsed),
     source,
   };
 }
@@ -29,23 +28,25 @@ function getBundledDefaultConfigPath(): string {
   return path.resolve(path.dirname(currentFile), "..", "config", "default.json");
 }
 
-function mergeConfig(parsed: Partial<PiMateriaConfig>): PiMateriaConfig {
-  const base = cloneDefaultConfig();
+async function mergeConfig(parsed: Partial<PiMateriaConfig>): Promise<PiMateriaConfig> {
+  const base = await loadDefaultConfig();
   return {
     ...base,
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
-    pipeline: {
-      ...base.pipeline,
-      ...(parsed.pipeline ?? {}),
-      nodes: { ...base.pipeline.nodes, ...(parsed.pipeline?.nodes ?? {}) },
-    },
+    pipeline: parsed.pipeline
+      ? {
+        ...base.pipeline,
+        ...parsed.pipeline,
+        nodes: parsed.pipeline.nodes ?? base.pipeline.nodes,
+      }
+      : base.pipeline,
     roles: { ...base.roles, ...(parsed.roles ?? {}) },
   };
 }
 
-function cloneDefaultConfig(): PiMateriaConfig {
-  return JSON.parse(JSON.stringify(defaultConfig)) as PiMateriaConfig;
+async function loadDefaultConfig(): Promise<PiMateriaConfig> {
+  return JSON.parse(await readFile(getBundledDefaultConfigPath(), "utf8")) as PiMateriaConfig;
 }
 
 export function resolveArtifactRoot(cwd: string, artifactDir?: string): string {

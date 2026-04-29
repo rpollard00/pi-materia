@@ -4,7 +4,7 @@ import path from "node:path";
 import { loadConfig, resolveArtifactRoot } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { buildIsolatedMateriaContext, clearCastState, continueNativeCast, handleAgentEnd, loadActiveCastState, startNativeCast } from "./native.js";
+import { buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, loadActiveCastState, startNativeCast } from "./native.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -25,18 +25,10 @@ export default function piMateria(pi: ExtensionAPI) {
   pi.on("before_agent_start", (event, ctx) => {
     const state = loadActiveCastState(ctx);
     if (!state?.active || !state.awaitingResponse) return;
-    const role = state.phase === "planning"
-      ? state.pipeline.planner.role
-      : state.phase === "building"
-        ? state.pipeline.builder.role
-        : state.phase === "evaluating"
-          ? state.pipeline.evaluator.role
-          : state.phase === "maintaining"
-            ? state.pipeline.maintainer?.role
-            : undefined;
+    const role = currentRole(state);
     if (!role) return;
     return {
-      systemPrompt: `${event.systemPrompt}\n\nMateria active role (${state.phase}):\n${role.systemPrompt}`,
+      systemPrompt: `${event.systemPrompt}\n\nMateria active role (${state.currentNode ?? state.phase}):\n${role.systemPrompt}`,
     };
   });
 
@@ -97,8 +89,8 @@ export default function piMateria(pi: ExtensionAPI) {
           `awaiting response: ${state.awaitingResponse}`,
           `node: ${state.currentNode ?? "-"}`,
           `role: ${state.currentRole ?? "-"}`,
-          `task: ${state.currentTaskId ? `${state.currentTaskId} - ${state.currentTaskTitle ?? ""}` : "-"}`,
-          `attempt: ${state.attempt || "-"}`,
+          `item: ${state.currentItemKey ? `${state.currentItemKey} - ${state.currentItemLabel ?? ""}` : "-"}`,
+          `visits: ${JSON.stringify(state.visits)}`,
           `artifacts: ${state.runDir}`,
           state.failedReason ? `failed: ${state.failedReason}` : undefined,
         ].filter((line): line is string => Boolean(line));
@@ -151,7 +143,7 @@ export default function piMateria(pi: ExtensionAPI) {
         const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
         const pipeline = resolvePipeline(loaded.config);
         ctx.ui.notify(`pi-materia config: ${loaded.source}`, "info");
-        ctx.ui.notify(`pi-materia grid: ${pipeline.planner.id} -> ${pipeline.builder.id} -> ${pipeline.evaluator.id}${pipeline.maintainer ? ` -> ${pipeline.maintainer.id}` : ""}`, "info");
+        ctx.ui.notify(`pi-materia grid entry: ${pipeline.entry.id}`, "info");
         await startNativeCast(pi, ctx, loaded, pipeline, request);
       } catch (error) {
         ctx.ui.setStatus("materia", "failed");

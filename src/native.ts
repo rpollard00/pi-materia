@@ -4,27 +4,28 @@ import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveArtifactRoot } from "./config.js";
 import { parseJson } from "./json.js";
-import type { EvaluationResult, LoadedConfig, MateriaCastPhase, MateriaCastState, MateriaManifest, MateriaManifestEntry, MateriaRoleConfig, PiMateriaConfig, PlannedTask, PlanResult, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
-import { updateWidget, showUsageSummary } from "./ui.js";
+import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import { showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractUsage, writeUsage } from "./usage.js";
 
 const STATE_ENTRY = "pi-materia-cast-state";
 const MANIFEST_FILE = "manifest.json";
+const DEFAULT_MAX_NODE_VISITS = 25;
+const DEFAULT_MAX_EDGE_TRAVERSALS = 25;
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
   const config = loaded.config;
   const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
   const castId = safeTimestamp();
   const runDir = path.join(artifactRoot, castId);
-  await mkdir(path.join(runDir, "tasks"), { recursive: true });
-  await mkdir(path.join(runDir, "maintenance"), { recursive: true });
+  await mkdir(path.join(runDir, "nodes"), { recursive: true });
   await mkdir(path.join(runDir, "contexts"), { recursive: true });
   await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
 
   const runState = createRunState(castId, runDir, ctx.model);
-  runState.currentNode = pipeline.planner.id;
-  runState.currentRole = pipeline.planner.node.role;
-  runState.lastMessage = "planning";
+  runState.currentNode = pipeline.entry.id;
+  runState.currentRole = pipeline.entry.node.role;
+  runState.lastMessage = pipeline.entry.id;
   await writeUsage(runState);
   await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: config.pipeline, nativeSession: true, isolatedRoleContext: true });
   await writeManifest(runDir, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
@@ -39,37 +40,31 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     cwd: ctx.cwd,
     runDir,
     artifactRoot,
-    phase: "planning",
-    currentNode: pipeline.planner.id,
-    currentRole: pipeline.planner.node.role,
-    currentTaskIndex: 0,
-    tasks: [],
-    attempt: 0,
+    phase: pipeline.entry.id,
+    currentNode: pipeline.entry.id,
+    currentRole: pipeline.entry.node.role,
     awaitingResponse: true,
     startedAt: Date.now(),
     updatedAt: Date.now(),
+    data: {},
+    cursors: {},
+    visits: {},
+    edgeTraversals: {},
     runState,
     pipeline,
   };
 
   pi.setSessionName(`materia: ${request.slice(0, 60)}`);
   saveCastState(pi, state);
-  updateToolScope(pi, pipeline.planner.role);
   updateWidget(ctx, state.runState);
-  ctx.ui.setStatus("materia", `planning:${pipeline.planner.id}`);
-  ctx.ui.notify(`pi-materia native cast started. Artifacts: ${runDir}`, "info");
-  await sendMateriaTurn(pi, state, buildPlannerPrompt(request, pipeline.planner.role));
+  ctx.ui.notify(`pi-materia cast started. Artifacts: ${runDir}`, "info");
+  await startNode(pi, ctx, state, pipeline.entry);
 }
 
 export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   if (!state.active) throw new Error("No active pi-materia cast to continue.");
   if (state.awaitingResponse) throw new Error("Materia is already awaiting a Pi agent response.");
-  const prompt = nextPromptForState(state);
-  state.awaitingResponse = true;
-  state.updatedAt = Date.now();
-  saveCastState(pi, state);
-  updateToolScope(pi, currentRole(state));
-  await sendMateriaTurn(pi, state, prompt);
+  await startNode(pi, ctx, state, currentNodeOrThrow(state));
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
@@ -77,8 +72,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   if (!state?.active || !state.awaitingResponse) return;
 
   const latest = findLatestAssistantEntry(ctx.sessionManager.getEntries(), state.lastProcessedEntryId);
-  if (!latest) return;
-  if (latest.entry.id === state.lastProcessedEntryId) return;
+  if (!latest || latest.entry.id === state.lastProcessedEntryId) return;
 
   const text = assistantText(latest.message);
   state.lastProcessedEntryId = latest.entry.id;
@@ -88,7 +82,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   captureUsage(state, latest.message);
 
   try {
-    await transitionFromAssistant(pi, ctx, state, text, latest.entry.id);
+    await completeNode(pi, ctx, state, text, latest.entry.id);
   } catch (error) {
     state.active = false;
     state.phase = "failed";
@@ -104,138 +98,138 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   }
 }
 
-async function transitionFromAssistant(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string): Promise<void> {
-  const pipeline = state.pipeline;
+async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string): Promise<void> {
   const config = await loadConfigFromState(state);
+  const node = currentNodeOrThrow(state);
+  const artifact = await recordNodeOutput(state, node, text, entryId);
+  state.lastOutput = text;
 
-  if (state.phase === "planning") {
-    const plan = parseJson<PlanResult>(text);
-    state.tasks = plan.tasks;
-    state.currentTaskIndex = 0;
-    await writeFile(path.join(state.runDir, "plan.json"), JSON.stringify(plan, null, 2));
-    await appendEvent(state.runState, "plan", plan);
-    await appendManifest(state, { phase: "planning", node: pipeline.planner.id, role: pipeline.planner.node.role, entryId, artifact: "plan.json" });
-    pi.appendEntry("pi-materia-plan", plan);
-    ctx.ui.notify(`pi-materia planned ${plan.tasks.length} task(s).`, "info");
-
-    if (plan.tasks.length === 0) return await finishCast(pi, ctx, state, entryId, "No tasks planned.");
-    await startBuild(pi, ctx, state, config);
-    return;
+  let parsed: unknown = text;
+  if (node.node.parse === "json") {
+    parsed = parseJson<unknown>(text);
+    state.lastJson = parsed;
+    await writeFile(path.join(state.runDir, "nodes", safePathSegment(node.id), `${nodeVisit(state, node.id)}.json`), JSON.stringify(parsed, null, 2));
   }
 
-  if (state.phase === "building") {
-    const task = currentTaskOrThrow(state);
-    await ensureTaskDir(state, task);
-    const artifact = path.join("tasks", safePathSegment(task.id), `build-${state.attempt}.md`);
-    await writeFile(path.join(state.runDir, artifact), text);
-    state.lastBuildSummary = text;
-    await appendEvent(state.runState, "build", { taskId: task.id, attempt: state.attempt, node: pipeline.builder.id, entryId });
-    await appendManifest(state, { phase: "building", node: pipeline.builder.id, role: pipeline.builder.node.role, taskId: task.id, attempt: state.attempt, entryId, artifact });
-    await assertBudget(config, state.runState, ctx);
-    await startEvaluation(pi, ctx, state);
-    return;
+  applyAssignments(state, node, parsed);
+  const advanceTarget = applyAdvance(state, node);
+  await appendEvent(state.runState, "node_complete", { node: node.id, role: node.node.role, artifact, parsed: node.node.parse === "json", entryId });
+  await assertBudget(config, state.runState, ctx);
+
+  const nextTarget = advanceTarget ?? selectNextTarget(state, node, parsed, config);
+  await advanceToNode(pi, ctx, state, nextTarget, entryId);
+}
+
+async function recordNodeOutput(state: MateriaCastState, node: ResolvedMateriaNode, text: string, entryId: string): Promise<string> {
+  const visit = nodeVisit(state, node.id);
+  const dir = path.join("nodes", safePathSegment(node.id));
+  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
+  const artifact = path.join(dir, `${visit}${item}.md`);
+  await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
+  await writeFile(path.join(state.runDir, artifact), text);
+  await appendManifest(state, { phase: state.phase, node: node.id, role: node.node.role, itemKey: state.currentItemKey, visit, entryId, artifact });
+  return artifact;
+}
+
+function applyAssignments(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): void {
+  for (const [target, source] of Object.entries(node.node.assign ?? {})) {
+    setPath(state.data, target, resolveValue(source, state, parsed));
   }
+}
 
-  if (state.phase === "evaluating") {
-    const task = currentTaskOrThrow(state);
-    const evaluation = parseJson<EvaluationResult>(text);
-    const artifact = path.join("tasks", safePathSegment(task.id), `eval-${state.attempt}.json`);
-    await writeFile(path.join(state.runDir, artifact), JSON.stringify(evaluation, null, 2));
-    await appendEvent(state.runState, "evaluation", { taskId: task.id, attempt: state.attempt, node: pipeline.evaluator.id, evaluation, entryId });
-    await appendManifest(state, { phase: "evaluating", node: pipeline.evaluator.id, role: pipeline.evaluator.node.role, taskId: task.id, attempt: state.attempt, entryId, artifact });
-    await assertBudget(config, state.runState, ctx);
+function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
+  const advance = node.node.advance;
+  if (!advance) return undefined;
+  const items = asArray(resolveValue(advance.items, state));
+  const next = (state.cursors[advance.cursor] ?? 0) + 1;
+  state.cursors[advance.cursor] = next;
+  state.currentItemKey = undefined;
+  state.currentItemLabel = undefined;
+  return next >= items.length ? advance.done : undefined;
+}
 
-    if (evaluation.passed) {
-      ctx.ui.notify(`pi-materia task ${task.id} passed.`, "info");
-      state.currentTaskIndex += 1;
-      state.lastFeedback = undefined;
-      if (state.currentTaskIndex < state.tasks.length) return await startBuild(pi, ctx, state, config);
-      return await maybeStartMaintenance(pi, ctx, state, config, entryId);
+function selectNextTarget(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown, config: PiMateriaConfig): string {
+  for (const edge of node.node.edges ?? []) {
+    if (!edge.when || evaluateCondition(edge.when, state, parsed)) {
+      enforceEdgeLimit(state, node.id, edge, config);
+      return edge.to;
     }
-
-    state.lastFeedback = evaluation.feedback || evaluation.missing?.join("\n") || "Evaluator found unresolved issues.";
-    if (state.attempt >= config.maxBuilderAttempts) throw new Error(`Task ${task.id} did not pass after ${config.maxBuilderAttempts} attempts.`);
-    ctx.ui.notify(`pi-materia task ${task.id} failed attempt ${state.attempt}; linking back to builder.`, "warning");
-    await startBuild(pi, ctx, state, config);
-    return;
   }
+  return node.node.next ?? "end";
+}
 
-  if (state.phase === "maintaining") {
-    const artifact = path.join("maintenance", "final.md");
-    await writeFile(path.join(state.runDir, artifact), text);
-    await appendEvent(state.runState, "maintenance", { node: pipeline.maintainer?.id, entryId });
-    await appendManifest(state, { phase: "maintaining", node: pipeline.maintainer?.id, role: pipeline.maintainer?.node.role, entryId, artifact });
-    await finishCast(pi, ctx, state, entryId, "Cast complete.");
+function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEdgeConfig, config: PiMateriaConfig): void {
+  const key = `${from}->${edge.to}`;
+  const count = (state.edgeTraversals[key] ?? 0) + 1;
+  state.edgeTraversals[key] = count;
+  const limit = edge.maxTraversals ?? config.limits?.maxEdgeTraversals ?? DEFAULT_MAX_EDGE_TRAVERSALS;
+  if (count > limit) throw new Error(`Materia edge traversal limit exceeded for ${key} (${count}/${limit}).`);
+}
+
+async function advanceToNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string): Promise<void> {
+  const target = targetId ?? "end";
+  if (target === "end") return await finishCast(pi, ctx, state, entryId, "Cast complete.");
+  const node = state.pipeline.nodes[target];
+  if (!node) throw new Error(`Unknown graph target "${target}"`);
+  await startNode(pi, ctx, state, node);
+}
+
+async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, node: ResolvedMateriaNode): Promise<void> {
+  const config = await loadConfigFromState(state);
+  const hasItem = setCurrentItem(state, node);
+  if (node.node.foreach && !hasItem) return await advanceToNode(pi, ctx, state, node.node.foreach.done ?? "end", "foreach-empty");
+  enforceNodeLimit(state, node, config);
+
+  state.phase = node.id;
+  state.currentNode = node.id;
+  state.currentRole = node.node.role;
+  state.awaitingResponse = true;
+  state.updatedAt = Date.now();
+  state.runState.currentNode = node.id;
+  state.runState.currentRole = node.node.role;
+  state.runState.currentTask = state.currentItemLabel;
+  state.runState.attempt = nodeVisit(state, node.id);
+  state.runState.lastMessage = node.id;
+  await writeUsage(state.runState);
+  await appendEvent(state.runState, "node_start", { node: node.id, role: node.node.role, itemKey: state.currentItemKey, visit: nodeVisit(state, node.id) });
+  saveCastState(pi, state);
+  updateToolScope(pi, node.role);
+  updateWidget(ctx, state.runState);
+  ctx.ui.setStatus("materia", state.currentItemLabel ? `${node.id}:${state.currentItemLabel}` : node.id);
+  await sendMateriaTurn(pi, state, buildNodePrompt(state, node));
+}
+
+function enforceNodeLimit(state: MateriaCastState, node: ResolvedMateriaNode, config: PiMateriaConfig): void {
+  const count = (state.visits[node.id] ?? 0) + 1;
+  const limit = node.node.limits?.maxVisits ?? config.limits?.maxNodeVisits ?? DEFAULT_MAX_NODE_VISITS;
+  if (count > limit) throw new Error(`Materia node visit limit exceeded for ${node.id} (${count}/${limit}).`);
+  state.visits[node.id] = count;
+}
+
+function setCurrentItem(state: MateriaCastState, node: ResolvedMateriaNode): boolean {
+  const loop = node.node.foreach;
+  if (!loop) {
+    state.currentItemKey = undefined;
+    state.currentItemLabel = undefined;
+    return true;
   }
-}
-
-async function startBuild(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, _config: PiMateriaConfig): Promise<void> {
-  const task = currentTaskOrThrow(state);
-  state.phase = "building";
-  state.currentNode = state.pipeline.builder.id;
-  state.currentRole = state.pipeline.builder.node.role;
-  state.currentTaskId = task.id;
-  state.currentTaskTitle = task.title;
-  state.attempt = state.lastFeedback ? state.attempt + 1 : 1;
-  state.awaitingResponse = true;
-  state.updatedAt = Date.now();
-  state.runState.currentNode = state.currentNode;
-  state.runState.currentRole = state.currentRole;
-  state.runState.currentTask = `${task.id}: ${task.title}`;
-  state.runState.attempt = state.attempt;
-  state.runState.lastMessage = "building";
-  await appendEvent(state.runState, "task_start", { task, attempt: state.attempt });
-  await writeUsage(state.runState);
-  saveCastState(pi, state);
-  updateToolScope(pi, state.pipeline.builder.role);
-  updateWidget(ctx, state.runState);
-  ctx.ui.setStatus("materia", `${state.pipeline.builder.id}:${task.id}`);
-  await sendMateriaTurn(pi, state, buildBuilderPrompt(task, state.attempt, state.lastFeedback, state.pipeline.builder.role));
-}
-
-async function startEvaluation(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
-  const task = currentTaskOrThrow(state);
-  state.phase = "evaluating";
-  state.currentNode = state.pipeline.evaluator.id;
-  state.currentRole = state.pipeline.evaluator.node.role;
-  state.awaitingResponse = true;
-  state.updatedAt = Date.now();
-  state.runState.currentNode = state.currentNode;
-  state.runState.currentRole = state.currentRole;
-  state.runState.currentTask = `${task.id}: ${task.title}`;
-  state.runState.attempt = state.attempt;
-  state.runState.lastMessage = "evaluating";
-  await writeUsage(state.runState);
-  saveCastState(pi, state);
-  updateToolScope(pi, state.pipeline.evaluator.role);
-  updateWidget(ctx, state.runState);
-  ctx.ui.setStatus("materia", `${state.pipeline.evaluator.id}:${task.id}`);
-  await sendMateriaTurn(pi, state, buildEvaluatorPrompt(task, state.lastBuildSummary ?? "", state.pipeline.evaluator.role));
-}
-
-async function maybeStartMaintenance(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, config: PiMateriaConfig, entryId: string): Promise<void> {
-  if (!state.pipeline.maintainer) return await finishCast(pi, ctx, state, entryId, "All tasks passed.");
-  const shouldMaintain = config.autoCommit || (ctx.hasUI && await ctx.ui.confirm("pi-materia", "All tasks passed. Let maintainer checkpoint the work?"));
-  if (!shouldMaintain) return await finishCast(pi, ctx, state, entryId, "All tasks passed; maintainer skipped.");
-  state.phase = "maintaining";
-  state.currentNode = state.pipeline.maintainer.id;
-  state.currentRole = state.pipeline.maintainer.node.role;
-  state.currentTaskId = undefined;
-  state.currentTaskTitle = undefined;
-  state.attempt = 0;
-  state.awaitingResponse = true;
-  state.updatedAt = Date.now();
-  state.runState.currentNode = state.currentNode;
-  state.runState.currentRole = state.currentRole;
-  state.runState.currentTask = undefined;
-  state.runState.attempt = undefined;
-  state.runState.lastMessage = "maintaining";
-  await writeUsage(state.runState);
-  saveCastState(pi, state);
-  updateToolScope(pi, state.pipeline.maintainer.role);
-  updateWidget(ctx, state.runState);
-  ctx.ui.setStatus("materia", `maintaining:${state.pipeline.maintainer.id}`);
-  await sendMateriaTurn(pi, state, buildMaintainerPrompt(state.pipeline.maintainer.role));
+  const cursor = loop.cursor ?? `${node.id}Index`;
+  const index = state.cursors[cursor] ?? 0;
+  state.cursors[cursor] = index;
+  const item = asArray(resolveValue(loop.items, state))[index];
+  if (item === undefined) {
+    state.currentItemKey = undefined;
+    state.currentItemLabel = undefined;
+    return false;
+  }
+  const alias = loop.as ?? "item";
+  setPath(state.data, "item", item);
+  setPath(state.data, alias, item);
+  const key = readObjectField(item, "id") ?? readObjectField(item, "key") ?? index;
+  const label = readObjectField(item, "title") ?? readObjectField(item, "name") ?? key;
+  state.currentItemKey = String(key);
+  state.currentItemLabel = String(label);
+  return true;
 }
 
 async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, entryId: string, message: string): Promise<void> {
@@ -256,55 +250,22 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
 
 async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<void> {
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
-  await appendManifest(state, {
-    phase: state.phase,
-    node: state.currentNode,
-    role: state.currentRole,
-    taskId: state.currentTaskId,
-    attempt: state.attempt || undefined,
-    artifact: contextArtifact,
-  });
+  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact });
 
-  const label = state.currentTaskId
-    ? `${state.phase}: ${state.currentTaskId}${state.currentTaskTitle ? ` - ${state.currentTaskTitle}` : ""}${state.attempt ? ` (attempt ${state.attempt})` : ""}`
-    : state.phase;
-
+  const label = state.currentItemLabel ? `${state.phase}: ${state.currentItemLabel}` : state.phase;
   pi.sendMessage({
     customType: "pi-materia",
     content: `Casting **${state.currentRole ?? "materia"}**\n\n${label}`,
     display: true,
-    details: {
-      prefix: label,
-      nodeId: state.currentNode,
-      roleName: state.currentRole,
-      taskId: state.currentTaskId,
-      taskTitle: state.currentTaskTitle,
-      attempt: state.attempt || undefined,
-      eventType: "role_prompt",
-    },
+    details: { prefix: label, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "role_prompt" },
   });
 
-  pi.appendEntry("pi-materia-context", {
-    phase: state.phase,
-    nodeId: state.currentNode,
-    roleName: state.currentRole,
-    taskId: state.currentTaskId,
-    attempt: state.attempt || undefined,
-    artifact: contextArtifact,
-  });
-
+  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, artifact: contextArtifact });
   pi.sendMessage({
     customType: "pi-materia-prompt",
     content: prompt,
     display: false,
-    details: {
-      phase: state.phase,
-      nodeId: state.currentNode,
-      roleName: state.currentRole,
-      taskId: state.currentTaskId,
-      taskTitle: state.currentTaskTitle,
-      attempt: state.attempt || undefined,
-    },
+    details: { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel },
   }, { triggerTurn: true });
 }
 
@@ -312,25 +273,23 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
   const relativePath = contextArtifactPath(state);
   const fullPath = path.join(state.runDir, relativePath);
   await mkdir(path.dirname(fullPath), { recursive: true });
-  const syntheticContext = buildSyntheticCastContext(state);
   const activeTools = pi.getActiveTools();
   const model = [state.runState.usage.provider, state.runState.usage.model].filter(Boolean).join("/") || state.runState.usage.model || "active Pi model";
   const content = [
     "# Materia Isolated Role Context",
     "",
     `cast: ${state.castId}`,
-    `phase: ${state.phase}`,
     `node: ${state.currentNode ?? "-"}`,
     `role: ${state.currentRole ?? "-"}`,
-    `task: ${state.currentTaskId ? `${state.currentTaskId} - ${state.currentTaskTitle ?? ""}` : "-"}`,
-    `attempt: ${state.attempt || "-"}`,
+    `item: ${state.currentItemLabel ?? "-"}`,
+    `visit: ${state.currentNode ? nodeVisit(state, state.currentNode) : "-"}`,
     `model: ${model}`,
     `active tools: ${activeTools.length ? activeTools.join(", ") : "none"}`,
     `timestamp: ${new Date().toISOString()}`,
     "",
     "## Synthetic cast context",
     "",
-    syntheticContext,
+    buildSyntheticCastContext(state),
     "",
     "## Hidden role prompt",
     "",
@@ -341,101 +300,69 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
 }
 
 function contextArtifactPath(state: MateriaCastState): string {
-  if (state.phase === "planning") return path.join("contexts", "planner.md");
-  if (state.phase === "building") return path.join("contexts", `builder-${safePathSegment(state.currentTaskId ?? "task")}-attempt-${state.attempt || 1}.md`);
-  if (state.phase === "evaluating") return path.join("contexts", `evaluator-${safePathSegment(state.currentTaskId ?? "task")}-attempt-${state.attempt || 1}.md`);
-  if (state.phase === "maintaining") return path.join("contexts", "maintainer.md");
-  return path.join("contexts", `${safePathSegment(state.phase)}.md`);
+  const node = safePathSegment(state.currentNode ?? state.phase);
+  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
+  const visit = state.currentNode ? nodeVisit(state, state.currentNode) : 1;
+  return path.join("contexts", `${node}${item}-${visit}.md`);
 }
 
-function nextPromptForState(state: MateriaCastState): string {
-  if (state.phase === "planning") return buildPlannerPrompt(state.request, state.pipeline.planner.role);
-  if (state.phase === "building") return buildBuilderPrompt(currentTaskOrThrow(state), state.attempt || 1, state.lastFeedback, state.pipeline.builder.role);
-  if (state.phase === "evaluating") return buildEvaluatorPrompt(currentTaskOrThrow(state), state.lastBuildSummary ?? "", state.pipeline.evaluator.role);
-  if (state.phase === "maintaining" && state.pipeline.maintainer) return buildMaintainerPrompt(state.pipeline.maintainer.role);
-  throw new Error(`Cannot continue cast in phase ${state.phase}`);
+function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
+  return rolePrompt(node.role, [renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state)]);
 }
 
-export function buildPlannerPrompt(request: string, role: MateriaRoleConfig): string {
-  return rolePrompt(role, [
-    "You are the Planner Materia in a Pi-native Materia cast.",
-    "Create an implementation plan for this request.",
-    'Return only JSON with shape: { "tasks": [{ "id": string, "title": string, "description": string, "acceptance": string[] }] }.',
-    `Request: ${request}`,
-  ]);
+function defaultNodePrompt(node: ResolvedMateriaNode): string {
+  return `You are Materia slot "${node.id}" in a Pi-native Materia cast.\n\nRequest: {{request}}\n\nState:\n{{stateJson}}\n\nCurrent item:\n{{itemJson}}\n\nPrevious output:\n{{lastOutput}}\n\nPerform this slot's configured role. Be concise and make your output useful to the next linked Materia slot.`;
 }
 
-export function buildBuilderPrompt(task: PlannedTask, attempt: number, feedback: string | undefined, role: MateriaRoleConfig): string {
-  return rolePrompt(role, [
-    "You are the Builder Materia in a Pi-native Materia cast.",
-    `Task ${task.id}: ${task.title}`,
-    task.description,
-    `Acceptance criteria:\n${task.acceptance.map((a) => `- ${a}`).join("\n")}`,
-    attempt > 1 && feedback ? `Previous evaluator feedback:\n${feedback}` : "",
-    "Implement the task now using normal Pi tools. Run relevant checks and summarize what changed.",
-  ]);
+function renderTemplate(template: string, state: MateriaCastState): string {
+  return template.replace(/{{\s*([^}]+?)\s*}}/g, (_match, key: string) => stringifyTemplateValue(resolveTemplateValue(key, state)));
 }
 
-export function buildEvaluatorPrompt(task: PlannedTask, buildSummary: string, role: MateriaRoleConfig): string {
-  return rolePrompt(role, [
-    "You are the Evaluator Materia in a Pi-native Materia cast.",
-    "Evaluate whether the task is complete. Inspect the repository as needed.",
-    'Return only JSON with shape: { "passed": boolean, "feedback": string, "missing": string[] }.',
-    `Task: ${JSON.stringify(task, null, 2)}`,
-    `Builder summary: ${buildSummary}`,
-  ]);
-}
-
-export function buildMaintainerPrompt(role: MateriaRoleConfig): string {
-  return rolePrompt(role, [
-    "You are the Maintainer Materia in a Pi-native Materia cast.",
-    "All planned tasks passed evaluation.",
-    "Inspect the repository state and create an appropriate checkpoint/commit only if you are satisfied with the final state.",
-    "Follow your maintainer role instructions for the correct VCS commands.",
-  ]);
+function resolveTemplateValue(key: string, state: MateriaCastState): unknown {
+  const trimmed = key.trim();
+  if (trimmed === "request") return state.request;
+  if (trimmed === "stateJson") return JSON.stringify(state.data, null, 2);
+  if (trimmed === "itemJson") return JSON.stringify(currentItem(state), null, 2);
+  if (trimmed === "lastOutput") return state.lastOutput ?? "";
+  if (trimmed === "lastJson") return state.lastJson ?? "";
+  if (trimmed.startsWith("state.")) return getPath(state.data, trimmed.slice("state.".length));
+  if (trimmed.startsWith("cursor.")) return state.cursors[trimmed.slice("cursor.".length)];
+  if (trimmed.startsWith("item.")) return getPath(currentItem(state), trimmed.slice("item.".length));
+  if (trimmed.startsWith("lastJson.")) return getPath(state.lastJson, trimmed.slice("lastJson.".length));
+  return getPath(state.data, trimmed);
 }
 
 export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaCastState): unknown[] {
   if (!state.active || !state.awaitingResponse) return messages;
   const roleStart = findActiveMateriaPromptIndex(messages);
   if (roleStart < 0) return messages;
-
-  const activeRoleTurn = messages.slice(roleStart);
-  return [createUserMessage(buildSyntheticCastContext(state)), ...activeRoleTurn];
+  return [createUserMessage(buildSyntheticCastContext(state)), ...messages.slice(roleStart)];
 }
 
 function buildSyntheticCastContext(state: MateriaCastState): string {
-  const task = state.tasks[state.currentTaskIndex];
-  const lines = [
+  return [
     "Materia isolated context.",
     "Use only this cast context, the current role prompt, and any tool results from this role turn. Do not rely on unrelated earlier visible transcript messages.",
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
-    `Current phase: ${state.phase}`,
     `Current node: ${state.currentNode ?? "-"}`,
     `Current role: ${state.currentRole ?? "-"}`,
+    `Current item: ${state.currentItemLabel ?? "-"}`,
     `Artifact directory: ${state.runDir}`,
     "",
-    state.tasks.length ? `Plan tasks:\n${state.tasks.map((t, index) => `${index + 1}. ${t.id}: ${t.title}\n   ${t.description}\n   Acceptance: ${t.acceptance.join("; ")}`).join("\n")}` : "Plan tasks: not created yet.",
-  ];
-
-  if (task) {
-    lines.push("", `Current task: ${task.id} - ${task.title}`, task.description, `Acceptance: ${task.acceptance.join("; ")}`);
-  }
-  if (state.attempt) lines.push(`Attempt: ${state.attempt}`);
-  if (state.lastFeedback) lines.push("", `Previous evaluator feedback:\n${state.lastFeedback}`);
-  if (state.lastBuildSummary && state.phase === "evaluating") lines.push("", `Latest builder summary:\n${state.lastBuildSummary}`);
-  if (state.phase === "maintaining") lines.push("", "All planned tasks have passed evaluation. Use the artifact directory and repository state as needed for checkpointing.");
-
-  return lines.filter(Boolean).join("\n");
+    "Generic cast data:",
+    JSON.stringify(state.data, null, 2),
+    "",
+    state.lastOutput ? `Previous output:\n${state.lastOutput}` : undefined,
+  ].filter(Boolean).join("\n");
 }
 
 function findActiveMateriaPromptIndex(messages: unknown[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i] as { content?: unknown };
     const text = messageContentText(message.content);
-    if (text.includes("<materia-role-instructions>") && text.includes("Pi-native Materia cast")) return i;
+    if (text.includes("<materia-role-instructions>")) return i;
   }
   return -1;
 }
@@ -454,21 +381,94 @@ function messageContentText(content: unknown): string {
 }
 
 function rolePrompt(role: MateriaRoleConfig, sections: (string | undefined)[]): string {
-  return [
-    "<materia-role-instructions>",
-    role.systemPrompt,
-    "</materia-role-instructions>",
-    ...sections.filter(Boolean),
-  ].join("\n\n");
+  return ["<materia-role-instructions>", role.systemPrompt, "</materia-role-instructions>", ...sections.filter(Boolean)].join("\n\n");
+}
+
+function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
+  const text = condition.trim();
+  const exists = text.match(/^!?exists\((.+)\)$/);
+  if (exists) {
+    const value = resolveValue(exists[1].trim(), state, parsed);
+    return text.startsWith("!") ? value === undefined : value !== undefined;
+  }
+  const match = text.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
+  if (!match) throw new Error(`Unsupported Materia edge condition: ${condition}`);
+  const left = resolveValue(match[1].trim(), state, parsed);
+  const right = parseLiteral(match[3].trim(), state, parsed);
+  return match[2] === "==" ? left === right : left !== right;
+}
+
+function parseLiteral(input: string, state: MateriaCastState, parsed: unknown): unknown {
+  if (input === "true") return true;
+  if (input === "false") return false;
+  if (input === "null") return null;
+  if (/^-?\d+(\.\d+)?$/.test(input)) return Number(input);
+  if ((input.startsWith('"') && input.endsWith('"')) || (input.startsWith("'") && input.endsWith("'"))) return input.slice(1, -1);
+  return resolveValue(input, state, parsed);
+}
+
+function resolveValue(source: string, state: MateriaCastState, parsed: unknown = state.lastJson): unknown {
+  if (source === "$") return parsed;
+  if (source.startsWith("$.")) return getPath(parsed, source.slice(2));
+  if (source === "state") return state.data;
+  if (source.startsWith("state.")) return getPath(state.data, source.slice("state.".length));
+  if (source === "item") return currentItem(state);
+  if (source.startsWith("item.")) return getPath(currentItem(state), source.slice("item.".length));
+  if (source === "lastJson") return state.lastJson;
+  if (source.startsWith("lastJson.")) return getPath(state.lastJson, source.slice("lastJson.".length));
+  if (source === "lastOutput") return state.lastOutput;
+  return getPath(state.data, source);
+}
+
+function currentItem(state: MateriaCastState): unknown {
+  return state.data.item;
+}
+
+function getPath(value: unknown, pathValue: string): unknown {
+  if (!pathValue) return value;
+  return pathValue.split(".").reduce<unknown>((current, part) => {
+    if (current === undefined || current === null) return undefined;
+    if (Array.isArray(current) && /^\d+$/.test(part)) return current[Number(part)];
+    if (typeof current === "object") return (current as Record<string, unknown>)[part];
+    return undefined;
+  }, value);
+}
+
+function setPath(target: Record<string, unknown>, pathValue: string, value: unknown): void {
+  const parts = pathValue.split(".").filter(Boolean);
+  if (!parts.length) throw new Error("Materia assignment target cannot be empty.");
+  let current: Record<string, unknown> = target;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (!next || typeof next !== "object" || Array.isArray(next)) current[part] = {};
+    current = current[part] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1]] = value;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function readObjectField(value: unknown, field: string): unknown {
+  return value && typeof value === "object" ? (value as Record<string, unknown>)[field] : undefined;
+}
+
+function stringifyTemplateValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function nodeVisit(state: MateriaCastState, nodeId: string): number {
+  return state.visits[nodeId] ?? 0;
 }
 
 export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | undefined {
   const entries = ctx.sessionManager.getBranch();
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
-    if (entry.type === "custom" && entry.customType === STATE_ENTRY && entry.data) {
-      return entry.data as MateriaCastState;
-    }
+    if (entry.type === "custom" && entry.customType === STATE_ENTRY && entry.data) return entry.data as MateriaCastState;
   }
   return undefined;
 }
@@ -508,7 +508,7 @@ function captureUsage(state: MateriaCastState, message: unknown): void {
   if (!usage) return;
   const node = state.currentNode ?? state.phase;
   const role = state.currentRole ?? state.phase;
-  addUsage(state.runState.usage, usage, { node, role, taskId: state.currentTaskId, attempt: state.attempt || undefined });
+  addUsage(state.runState.usage, usage, { node, role, taskId: state.currentItemKey, attempt: state.currentNode ? nodeVisit(state, state.currentNode) : undefined });
 }
 
 function updateToolScope(pi: ExtensionAPI, role: MateriaRoleConfig): void {
@@ -519,24 +519,14 @@ function updateToolScope(pi: ExtensionAPI, role: MateriaRoleConfig): void {
   else pi.setActiveTools(all);
 }
 
-function currentRole(state: MateriaCastState): MateriaRoleConfig {
-  if (state.phase === "planning") return state.pipeline.planner.role;
-  if (state.phase === "building") return state.pipeline.builder.role;
-  if (state.phase === "evaluating") return state.pipeline.evaluator.role;
-  if (state.phase === "maintaining" && state.pipeline.maintainer) return state.pipeline.maintainer.role;
-  return state.pipeline.planner.role;
+export function currentRole(state: MateriaCastState): MateriaRoleConfig {
+  return currentNodeOrThrow(state).role;
 }
 
-function currentTaskOrThrow(state: MateriaCastState): PlannedTask {
-  const task = state.tasks[state.currentTaskIndex];
-  if (!task) throw new Error("Materia cast has no current task.");
-  return task;
-}
-
-async function ensureTaskDir(state: MateriaCastState, task: PlannedTask): Promise<string> {
-  const taskDir = path.join(state.runDir, "tasks", safePathSegment(task.id));
-  await mkdir(taskDir, { recursive: true });
-  return taskDir;
+function currentNodeOrThrow(state: MateriaCastState): ResolvedMateriaNode {
+  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : state.pipeline.entry;
+  if (!node) throw new Error(`Current Materia node "${state.currentNode}" is not in the resolved grid.`);
+  return node;
 }
 
 async function writeManifest(runDir: string, manifest: MateriaManifest): Promise<void> {

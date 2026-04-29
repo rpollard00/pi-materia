@@ -1,22 +1,12 @@
 # pi-materia
 
-pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent pipelines.
+pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent workflows. A Materia Grid is a data-driven graph: each slot renders a prompt, exposes a configured tool scope, optionally parses output, assigns state, and follows configured links.
 
-The current default Materia Grid is:
-
-```text
-planner -> builder -> evaluator
-                      | passed -> maintainer
-                      | failed  -> builder
-```
-
-The planner breaks a high-level request into tasks, the builder implements each task, the evaluator checks the result, and the maintainer can create a VCS checkpoint when the work is accepted. Materia now drives the normal Pi session as a state machine, so role turns render with Pi's native assistant/tool UI instead of hidden subagents.
+The bundled default loadout is a software-development workflow, but the engine itself is generic. You can replace the grid with a single slot that says `HELLO WORLD`, or with any arbitrary sequence/loop of role turns.
 
 ## Current status
 
-pi-materia is early and intentionally small. The current runtime supports the default sequential grid shape above, with configurable roles and prompts. The bundled default loadout uses a `jj` maintainer role by default.
-
-Phase 3 native orchestration is the default runtime: casts persist state in the active Pi session, advance automatically after each Pi agent turn, isolate model context per Materia role, write structured artifacts, stream a live status widget, track Pi-native usage where available, and expose `/materia grid`.
+pi-materia is early and intentionally small. The native runtime drives the active Pi session, so role turns render with Pi's normal assistant/tool UI instead of hidden subagents. Casts persist state in the session, isolate model context per role, write structured artifacts, stream a live status widget, track Pi-native usage where available, and expose `/materia grid`.
 
 ## Install or run
 
@@ -35,27 +25,10 @@ pi -e /path/to/pi-materia/src/index.ts
 
 ## Usage
 
-Inspect the loaded grid/config:
-
 ```text
 /materia grid
-```
-
-Start a cast:
-
-```text
 /materia cast implement the next small feature
-```
-
-List recent casts:
-
-```text
 /materia casts
-```
-
-Inspect or control an active cast:
-
-```text
 /materia status
 /materia continue
 /materia abort
@@ -77,6 +50,42 @@ Example:
 ```bash
 pi -e /path/to/pi-materia/src/index.ts --materia-config ./my-loadout.json
 ```
+
+Minimal hello-world grid:
+
+```json
+{
+  "artifactDir": ".pi/pi-materia",
+  "pipeline": {
+    "entry": "hello",
+    "nodes": {
+      "hello": {
+        "type": "agent",
+        "role": "echoer",
+        "prompt": "Say exactly: HELLO WORLD",
+        "next": "end"
+      }
+    }
+  },
+  "roles": {
+    "echoer": {
+      "tools": "none",
+      "systemPrompt": "Follow the prompt exactly."
+    }
+  }
+}
+```
+
+Generic node mechanics:
+
+- `prompt`: template rendered for the role turn
+- `parse`: `"text"` or `"json"`
+- `assign`: copy parsed output/state values into generic cast state
+- `edges`: condition-driven links, e.g. `$.passed == true`
+- `next`: fallback link when no edge matches
+- `foreach`: iterate a node over an array in state
+- `advance`: advance a configured cursor
+- `limits`: node/edge cycle safety
 
 Runtime artifacts are written to `.pi/pi-materia/<timestamp>/` by default. Override with:
 
@@ -109,24 +118,11 @@ Each cast writes enough information to debug the run after the fact:
   events.jsonl
   usage.json
   manifest.json
-  plan.json
-  tasks/<task-id>/build-<attempt>.md
-  tasks/<task-id>/eval-<attempt>.json
-  maintenance/final.md
-  contexts/planner.md
-  contexts/builder-<task-id>-attempt-<n>.md
-  contexts/evaluator-<task-id>-attempt-<n>.md
-  contexts/maintainer.md
+  nodes/<node-id>/<visit>.md
+  nodes/<node-id>/<visit>.json
+  contexts/<node-id>-<visit>.md
 ```
 
 ## Default loadout
 
-The bundled default loadout lives at `config/default.json`. It includes:
-
-- `planner`
-- `builder`
-- `evaluator`
-- `jjMaintainer`
-- `gitMaintainer`
-
-The default pipeline currently uses `jjMaintainer`. To use Git instead, copy `config/default.json` to your target project as `.pi/pi-materia.json` and change the maintainer slot role from `jjMaintainer` to `gitMaintainer`.
+The bundled default loadout lives at `config/default.json`. It defines its software-development workflow entirely as config using generic prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and checkpoint roles.

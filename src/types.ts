@@ -1,8 +1,7 @@
 export interface PiMateriaConfig {
-  maxBuilderAttempts: number;
-  autoCommit: boolean;
   artifactDir?: string;
   budget?: MateriaBudgetConfig;
+  limits?: MateriaLimitsConfig;
   pipeline: MateriaPipelineConfig;
   roles: Record<string, MateriaRoleConfig>;
 }
@@ -17,6 +16,11 @@ export interface MateriaBudgetConfig {
   maxCostUsd?: number;
   warnAtPercent?: number;
   stopAtLimit?: boolean;
+}
+
+export interface MateriaLimitsConfig {
+  maxNodeVisits?: number;
+  maxEdgeTraversals?: number;
 }
 
 export interface UsageTokens {
@@ -51,7 +55,7 @@ export interface UsageReport extends UsageTotals {
   byAttempt: Record<string, UsageTotals>;
 }
 
-export type MateriaCastPhase = "planning" | "building" | "evaluating" | "maintaining" | "complete" | "failed";
+export type MateriaCastPhase = string;
 
 export interface MateriaCastState {
   version: 1;
@@ -66,19 +70,20 @@ export interface MateriaCastState {
   phase: MateriaCastPhase;
   currentNode?: string;
   currentRole?: string;
-  currentTaskId?: string;
-  currentTaskTitle?: string;
-  currentTaskIndex: number;
-  tasks: PlannedTask[];
-  attempt: number;
+  currentItemKey?: string;
+  currentItemLabel?: string;
   awaitingResponse: boolean;
   lastProcessedEntryId?: string;
   lastAssistantText?: string;
-  lastBuildSummary?: string;
-  lastFeedback?: string;
   failedReason?: string;
   startedAt: number;
   updatedAt: number;
+  data: Record<string, unknown>;
+  cursors: Record<string, number>;
+  visits: Record<string, number>;
+  edgeTraversals: Record<string, number>;
+  lastOutput?: string;
+  lastJson?: unknown;
   runState: MateriaRunState;
   pipeline: ResolvedMateriaPipeline;
 }
@@ -87,8 +92,8 @@ export interface MateriaManifestEntry {
   phase: MateriaCastPhase;
   node?: string;
   role?: string;
-  taskId?: string;
-  attempt?: number;
+  itemKey?: string;
+  visit?: number;
   entryId?: string;
   artifact?: string;
   timestamp: number;
@@ -127,9 +132,9 @@ export type MateriaMirrorEvent =
 export interface RoleRunContext {
   nodeId: string;
   roleName: string;
-  taskId?: string;
-  taskTitle?: string;
-  attempt?: number;
+  itemKey?: string;
+  itemLabel?: string;
+  visit?: number;
   runState: MateriaRunState;
   update: () => void;
   mirror?: (event: MateriaMirrorEvent) => void;
@@ -140,18 +145,47 @@ export interface MateriaPipelineConfig {
   nodes: Record<string, MateriaPipelineNodeConfig>;
 }
 
+export type MateriaParseMode = "text" | "json";
+
 export interface MateriaPipelineNodeConfig {
   type: "agent";
   role: string;
+  prompt?: string;
+  parse?: MateriaParseMode;
+  assign?: Record<string, string>;
   next?: string;
-  edges?: Record<string, string>;
+  edges?: MateriaEdgeConfig[];
+  foreach?: MateriaForeachConfig;
+  advance?: MateriaAdvanceConfig;
+  limits?: MateriaNodeLimitsConfig;
+}
+
+export interface MateriaEdgeConfig {
+  when?: string;
+  to: string;
+  maxTraversals?: number;
+}
+
+export interface MateriaForeachConfig {
+  items: string;
+  as?: string;
+  cursor?: string;
+  done?: string;
+}
+
+export interface MateriaAdvanceConfig {
+  cursor: string;
+  items: string;
+  done?: string;
+}
+
+export interface MateriaNodeLimitsConfig {
+  maxVisits?: number;
 }
 
 export interface ResolvedMateriaPipeline {
-  planner: ResolvedMateriaNode;
-  builder: ResolvedMateriaNode;
-  evaluator: ResolvedMateriaNode;
-  maintainer?: ResolvedMateriaNode;
+  entry: ResolvedMateriaNode;
+  nodes: Record<string, ResolvedMateriaNode>;
 }
 
 export interface ResolvedMateriaNode {
@@ -163,21 +197,4 @@ export interface ResolvedMateriaNode {
 export interface MateriaRoleConfig {
   tools: "none" | "readOnly" | "coding";
   systemPrompt: string;
-}
-
-export interface PlannedTask {
-  id: string;
-  title: string;
-  description: string;
-  acceptance: string[];
-}
-
-export interface PlanResult {
-  tasks: PlannedTask[];
-}
-
-export interface EvaluationResult {
-  passed: boolean;
-  feedback: string;
-  missing?: string[];
 }
