@@ -44,7 +44,13 @@ Inspect the loaded grid/config:
 Start a cast:
 
 ```text
-/materia run implement the next small feature
+/materia cast implement the next small feature
+```
+
+List recent casts:
+
+```text
+/materia casts
 ```
 
 Inspect or control an active cast:

@@ -26,10 +26,10 @@ pi-materia uses a materia-inspired metaphor for pluggable agent pipelines:
 Initial command naming should prefer `/materia` as the main namespace:
 
 ```text
-/materia run "build auth"
+/materia cast "build auth"
 /materia grid
 /materia loadout
-/materia runs
+/materia casts
 /materia inspect
 /materia tail
 ```
@@ -108,7 +108,7 @@ Tasks:
 - Keep current hardcoded loop as the default config.
 
 Acceptance:
-- Existing `/materia run <task>` behavior works as the only run command.
+- Existing `/materia cast <task>` behavior works as the primary cast command.
 - Pipeline can be modified by editing JSON only.
 
 Implementation notes:
@@ -224,7 +224,7 @@ Acceptance:
 
 ## Phase 2.5: Real-Run Feedback Fixes
 
-Feedback from real `/materia run` tests exposed several integration gaps. Follow-up work is now focused on the active Pi conversation/session as the primary runtime.
+Feedback from real `/materia cast` tests exposed several integration gaps. Follow-up work is now focused on the active Pi conversation/session as the primary runtime.
 
 ### A. Verify native transcript and prompt rendering
 
@@ -305,7 +305,7 @@ Problem addressed: the original implementation ran roles outside the active Pi c
 Target architecture:
 
 ```text
-/materia run <request>
+/materia cast <request>
   -> create Materia cast state
   -> send planner prompt into active Pi session
 
@@ -431,7 +431,7 @@ Acceptance:
 - [x] Add `/materia status` to show active cast state.
 - [x] Add `/materia abort` to stop/clear active cast state.
 - [x] Add `/materia continue` to resume from persisted state and send the next prompt if needed.
-- [ ] Add `/materia runs` later for artifact discovery.
+- [x] Add `/materia casts` for artifact discovery.
 
 Acceptance:
 - User can inspect, stop, and resume Materia's state machine explicitly.
@@ -447,7 +447,7 @@ Acceptance:
 
 Phase 3 implementation notes:
 - Added `src/native.ts` as the Pi-native orchestration runtime.
-- `/materia run` now initializes a persisted cast state and sends the planner prompt into the active Pi session.
+- `/materia cast` now initializes a persisted cast state and sends the planner prompt into the active Pi session.
 - `agent_end` transitions the state machine and sends builder/evaluator/maintainer prompts as normal user messages.
 - `before_agent_start` augments the active system prompt with the current Materia role instructions.
 - `context` replaces the model-visible conversation for active Materia turns with an isolated per-role context plus the current role turn/tool-loop messages.
@@ -565,10 +565,10 @@ Acceptance:
 
 ## Near-Term Commands to Add
 
-- `/materia run <task>`: run the configured pipeline.
+- `/materia cast <task>`: cast the configured pipeline.
 - `/materia grid`: show resolved config and graph.
 - `/materia loadout`: show resolved config details.
-- `/materia runs`: list recent cast artifact directories.
+- `/materia casts`: list recent cast artifact directories.
 - `/materia inspect <cast-id>`: show paths/details for a prior cast.
 - `/materia tail <cast-id>`: tail events from a prior cast.
 
