@@ -147,6 +147,55 @@ Generic node mechanics:
 - `foreach`: iterate a node over an array in state
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
+- `multiTurn`: set `true` on an agent node to pause for interactive refinement until `/materia continue`
+
+### Multi-turn planner nodes
+
+Agent nodes are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent node when you want a manual refinement loop. A multi-turn node records each assistant response as a refinement artifact, keeps the cast active at that node, and waits for more user turns or `/materia continue`. Finalization with `/materia continue` uses the latest assistant response for the node's normal `parse`, `assign`, `edges`, and `next` behavior, so invalid JSON is only an error when you finalize a JSON-parsed node.
+
+The bundled config includes an `interactivePlan` role but does not wire it into the default pipeline. To use it, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline like this excerpt:
+
+```json
+{
+  "artifactDir": ".pi/pi-materia",
+  "pipeline": {
+    "entry": "ensureArtifactsIgnored",
+    "nodes": {
+      "ensureArtifactsIgnored": {
+        "type": "utility",
+        "utility": "project.ensureIgnored",
+        "parse": "json",
+        "params": { "patterns": [".pi/pi-materia/"] },
+        "assign": { "artifactIgnore": "$" },
+        "next": "detectVcs"
+      },
+      "detectVcs": {
+        "type": "utility",
+        "utility": "vcs.detect",
+        "parse": "json",
+        "assign": { "vcs": "$" },
+        "next": "interactivePlan"
+      },
+      "interactivePlan": {
+        "type": "agent",
+        "role": "interactivePlan",
+        "multiTurn": true,
+        "parse": "json",
+        "assign": { "tasks": "$.tasks" },
+        "prompt": "Collaboratively refine an implementation plan for this request. When finalized, return only JSON with shape: { \\"tasks\\": [{ \\"id\\": string, \\"title\\": string, \\"description\\": string, \\"acceptance\\": string[] }] }. Request: {{request}}",
+        "next": "Build"
+      },
+      "Build": { "type": "agent", "role": "Build", "foreach": { "items": "state.tasks", "as": "task", "cursor": "taskIndex", "done": "end" }, "next": "Auto-Eval" }
+    }
+  },
+  "roles": {
+    "interactivePlan": { "tools": "readOnly", "systemPrompt": "Collaborate with the user, then finalize as valid JSON shaped { \\"tasks\\": [...] }." },
+    "Build": { "tools": "coding", "systemPrompt": "Implement exactly the assigned task." },
+    "Auto-Eval": { "tools": "readOnly", "systemPrompt": "Verify the task and return JSON." },
+    "Maintain": { "tools": "coding", "systemPrompt": "Checkpoint accepted work and return JSON." }
+  }
+}
+```
 
 For deterministic local steps that should run without an LLM turn, see [Utility Materia](docs/utility-materia.md).
 

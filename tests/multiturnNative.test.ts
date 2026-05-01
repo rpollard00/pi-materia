@@ -27,7 +27,40 @@ function multiTurnConfig(role: Record<string, unknown> = {}) {
   };
 }
 
+function singleTurnConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    pipeline: {
+      entry: "plan",
+      nodes: {
+        plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "build" },
+        build: { type: "agent", role: "Build", prompt: "Build {{state.tasks.0.title}}" },
+      },
+    },
+    roles: {
+      Plan: { tools: "readOnly", systemPrompt: "Plan once" },
+      Build: { tools: "coding", systemPrompt: "Build once" },
+    },
+  };
+}
+
 describe("native multi-turn runtime", () => {
+  test("single-turn agent nodes still parse, assign, and advance automatically", async () => {
+    const harness = await makeHarness(singleTurnConfig());
+
+    await harness.runCommand("materia", "cast make a plan");
+    harness.appendAssistantMessage('{"tasks":[{"id":"1","title":"Ship it"}]}');
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(state.active).toBe(true);
+    expect(state.currentNode).toBe("build");
+    expect(state.nodeState).toBe("awaiting_agent_response");
+    expect(state.awaitingResponse).toBe(true);
+    expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+  });
+
   test("multi-turn agent output pauses without parsing or advancing until continue", async () => {
     const harness = await makeHarness(multiTurnConfig());
 
