@@ -82,11 +82,13 @@ export default function piMateria(pi: ExtensionAPI) {
           ctx.ui.notify("No pi-materia cast state in this session.", "info");
           return;
         }
+        const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase === "complete" ? "complete" : state.phase === "failed" ? "failed" : "idle");
         const lines = [
           `Materia Cast ${state.castId}`,
           `active: ${state.active}`,
           `phase: ${state.phase}`,
-          `node state: ${state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase === "complete" ? "complete" : state.phase === "failed" ? "failed" : "idle")}`,
+          `node state: ${nodeState}`,
+          nodeState === "awaiting_user_refinement" ? "waiting: user refinement or /materia continue to finalize this multi-turn node" : undefined,
           `awaiting response: ${state.awaitingResponse}`,
           `node: ${state.currentNode ?? "-"}`,
           `role: ${state.currentRole ?? "-"}`,

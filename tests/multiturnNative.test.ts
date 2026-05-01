@@ -1,0 +1,82 @@
+import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import piMateria from "../src/index.js";
+import { FakePiHarness } from "./fakePi.js";
+
+async function makeHarness(config: unknown): Promise<FakePiHarness> {
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-multiturn-"));
+  await mkdir(path.join(cwd, ".pi"), { recursive: true });
+  await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(config, null, 2));
+  const harness = new FakePiHarness(cwd);
+  piMateria(harness.pi);
+  return harness;
+}
+
+function multiTurnConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    pipeline: {
+      entry: "plan",
+      nodes: {
+        plan: { type: "agent", role: "Plan", multiTurn: true, parse: "json", assign: { tasks: "$.tasks" } },
+      },
+    },
+    roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner" } },
+  };
+}
+
+describe("native multi-turn runtime", () => {
+  test("multi-turn agent output pauses without parsing or advancing until continue", async () => {
+    const harness = await makeHarness(multiTurnConfig());
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("not json yet");
+    await harness.emit("agent_end", { messages: [] });
+
+    const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(pausedState.active).toBe(true);
+    expect(pausedState.awaitingResponse).toBe(false);
+    expect(pausedState.nodeState).toBe("awaiting_user_refinement");
+    expect(pausedState.currentNode).toBe("plan");
+    expect(pausedState.lastJson).toBeUndefined();
+
+    await harness.runCommand("materia", "status");
+    expect(harness.widgets.get("materia-status")?.content).toContain("waiting: user refinement or /materia continue to finalize this multi-turn node");
+
+    await harness.runCommand("materia", "continue");
+    const failedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(failedState.active).toBe(false);
+    expect(failedState.nodeState).toBe("failed");
+    expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for node \"plan\"");
+  });
+
+  test("continue finalizes the latest multi-turn assistant output", async () => {
+    const harness = await makeHarness(multiTurnConfig());
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("not json yet");
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendUserMessage("make it final JSON");
+    harness.appendAssistantMessage('{"tasks":[{"id":"1","title":"Ship it"}]}');
+    await harness.emit("agent_end", { messages: [] });
+
+    const stillPausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(stillPausedState.active).toBe(true);
+    expect(stillPausedState.nodeState).toBe("awaiting_user_refinement");
+    expect(stillPausedState.lastAssistantText).toContain("Ship it");
+
+    await harness.runCommand("materia", "continue");
+    const completeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(completeState.active).toBe(false);
+    expect(completeState.nodeState).toBe("complete");
+    expect(completeState.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
+
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", completeState.castId);
+    const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
+    const artifacts = manifest.entries.map((entry: any) => entry.artifact).filter(Boolean);
+    expect(artifacts.some((artifact: string) => artifact.includes(".refinement-"))).toBe(true);
+    expect(artifacts).toContain(path.join("nodes", "plan", "1.md"));
+  });
+});

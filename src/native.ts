@@ -74,12 +74,30 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
 export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   if (!state.active) throw new Error("No active pi-materia cast to continue.");
   if (state.awaitingResponse) throw new Error("Materia is already awaiting a Pi agent response.");
+
+  if (state.nodeState === "awaiting_user_refinement") {
+    const text = state.lastAssistantText;
+    if (!text) throw new Error("Multi-turn node has no assistant output to finalize.");
+    const entryId = state.lastProcessedEntryId ?? `multiturn:${state.currentNode ?? state.phase}:latest`;
+    state.nodeState = "idle";
+    saveCastState(pi, state);
+    try {
+      await completeNode(pi, ctx, state, text, entryId);
+    } catch (error) {
+      await failCast(pi, ctx, state, error, entryId);
+    }
+    return;
+  }
+
   await startNode(pi, ctx, state, currentNodeOrThrow(state));
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
   const state = loadActiveCastState(ctx);
-  if (!state?.active || !state.awaitingResponse) return;
+  if (!state?.active) return;
+  const nodeAtEnd = currentNodeOrThrow(state);
+  const acceptingRefinement = !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isAgentResolvedNode(nodeAtEnd) && nodeAtEnd.node.multiTurn;
+  if (!state.awaitingResponse && !acceptingRefinement) return;
 
   const latest = findLatestAssistantEntry(ctx.sessionManager.getEntries(), state.lastProcessedEntryId);
   if (!latest || latest.entry.id === state.lastProcessedEntryId) return;
@@ -95,6 +113,19 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 
   try {
     if (agentError) throw new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
+    const node = currentNodeOrThrow(state);
+    if (isAgentResolvedNode(node) && node.node.multiTurn) {
+      const artifact = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
+      state.nodeState = "awaiting_user_refinement";
+      state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement or /materia continue.`;
+      await writeUsage(state.runState);
+      await appendEvent(state.runState, "node_refinement", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, entryId: latest.entry.id, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
+      saveCastState(pi, state);
+      ctx.ui.setStatus("materia", `${node.id}:refine`);
+      updateWidget(ctx, state.runState);
+      ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement or /materia continue.`, "info");
+      return;
+    }
     await completeNode(pi, ctx, state, text, latest.entry.id);
   } catch (error) {
     state.active = false;
@@ -144,6 +175,17 @@ async function recordNodeOutput(state: MateriaCastState, node: ResolvedMateriaNo
   const dir = path.join("nodes", safePathSegment(node.id));
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
   const artifact = path.join(dir, `${visit}${item}.md`);
+  await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
+  await writeFile(path.join(state.runDir, artifact), text);
+  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, roleModel: state.currentRoleModel });
+  return artifact;
+}
+
+async function recordMultiTurnRefinement(state: MateriaCastState, node: ResolvedMateriaNode, text: string, entryId: string): Promise<string> {
+  const visit = nodeVisit(state, node.id);
+  const dir = path.join("nodes", safePathSegment(node.id));
+  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
+  const artifact = path.join(dir, `${visit}${item}.refinement-${safePathSegment(entryId)}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
   await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, roleModel: state.currentRoleModel });
