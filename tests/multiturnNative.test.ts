@@ -14,7 +14,7 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
-function multiTurnConfig() {
+function multiTurnConfig(role: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
     pipeline: {
@@ -23,7 +23,7 @@ function multiTurnConfig() {
         plan: { type: "agent", role: "Plan", multiTurn: true, parse: "json", assign: { tasks: "$.tasks" } },
       },
     },
-    roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner" } },
+    roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner", ...role } },
   };
 }
 
@@ -50,6 +50,40 @@ describe("native multi-turn runtime", () => {
     expect(failedState.active).toBe(false);
     expect(failedState.nodeState).toBe("failed");
     expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for node \"plan\"");
+  });
+
+  test("paused refinement turns keep the active role prompt, tools, model, and isolated context", async () => {
+    const harness = await makeHarness(multiTurnConfig({ model: "test/refiner", thinking: "high" }));
+    harness.models = [{ provider: "test", id: "refiner", name: "Refiner", api: "fake" }];
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("draft response");
+    await harness.emit("agent_end", { messages: [] });
+
+    harness.activeTools = ["read", "grep", "find", "ls", "bash", "edit", "write"];
+    const beforeResults = await harness.emit("before_agent_start", { systemPrompt: "Base system" });
+    expect((beforeResults.at(-1) as any).systemPrompt).toContain("Materia active role (plan):\nCollaborative planner");
+    expect(harness.activeTools).toEqual(["read", "grep", "find", "ls"]);
+    expect(harness.setModelCalls.length).toBeGreaterThanOrEqual(2);
+    expect(harness.setThinkingLevelCalls.at(-1)).toBe("high");
+
+    const prompt = harness.sentMessages.find((sent) => (sent.message as any).customType === "pi-materia-prompt")?.message as any;
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "unrelated earlier transcript" }] },
+      { role: "user", content: [{ type: "text", text: prompt.content }] },
+      { role: "assistant", content: [{ type: "text", text: "draft response" }] },
+      { role: "user", content: [{ type: "text", text: "refine this plan" }] },
+    ];
+    const contextResults = await harness.emit("context", { messages });
+    const isolated = (contextResults.at(-1) as any).messages;
+    const synthetic = isolated[0].content as string;
+    expect(synthetic).toContain("Current node: plan");
+    expect(synthetic).toContain("Current role: Plan");
+    expect(synthetic).toContain("Artifact directory:");
+    expect(synthetic).toContain("Previous output:\ndraft response");
+    expect(synthetic).toContain("Mode: multi-turn refinement (awaiting_agent_response)");
+    expect(JSON.stringify(isolated)).not.toContain("unrelated earlier transcript");
+    expect(JSON.stringify(isolated)).toContain("refine this plan");
   });
 
   test("continue finalizes the latest multi-turn assistant output", async () => {

@@ -4,7 +4,7 @@ import path from "node:path";
 import { loadConfig, resolveArtifactRoot } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, loadActiveCastState, startNativeCast } from "./native.js";
+import { buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -16,15 +16,17 @@ export default function piMateria(pi: ExtensionAPI) {
 
   pi.on("context", (event, ctx) => {
     const state = loadActiveCastState(ctx);
-    if (!state?.active || !state.awaitingResponse) return;
+    if (!state?.active) return;
     return {
       messages: buildIsolatedMateriaContext(event.messages, state) as typeof event.messages,
     };
   });
 
-  pi.on("before_agent_start", (event, ctx) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     const state = loadActiveCastState(ctx);
-    if (!state?.active || !state.awaitingResponse) return;
+    if (!state?.active) return;
+    if (state.nodeState === "awaiting_user_refinement") await prepareMultiTurnRefinementTurn(pi, ctx, state);
+    if (!state.awaitingResponse) return;
     const role = currentRole(state);
     if (!role) return;
     return {

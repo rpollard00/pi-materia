@@ -627,14 +627,50 @@ function resolveTemplateValue(key: string, state: MateriaCastState): unknown {
   return getPath(state.data, trimmed);
 }
 
+export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
+  if (!isPausedMultiTurnRefinement(state)) return;
+  const node = currentNodeOrThrow(state);
+  if (!isAgentResolvedNode(node)) return;
+
+  const appliedModel = await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
+  const roleModel = roleModelSelection(appliedModel);
+  state.currentRole = nodeRoleName(node);
+  state.currentRoleModel = roleModel;
+  state.runState.currentRole = nodeRoleName(node);
+  state.runState.currentRoleModel = roleModel;
+  state.awaitingResponse = true;
+  state.nodeState = "awaiting_agent_response";
+  state.updatedAt = Date.now();
+  updateToolScope(pi, node.role);
+  saveCastState(pi, state);
+}
+
 export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaCastState): unknown[] {
-  if (!state.active || !state.awaitingResponse) return messages;
+  if (!shouldUseIsolatedRoleContext(state)) return messages;
   const roleStart = findActiveMateriaPromptIndex(messages);
   if (roleStart < 0) return messages;
   return [createUserMessage(buildSyntheticCastContext(state)), ...messages.slice(roleStart)];
 }
 
+function shouldUseIsolatedRoleContext(state: MateriaCastState): boolean {
+  return state.active && (state.awaitingResponse || isPausedMultiTurnRefinement(state));
+}
+
+function isPausedMultiTurnRefinement(state: MateriaCastState): boolean {
+  return !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isActiveMultiTurnNode(state);
+}
+
+function isActiveMultiTurnNode(state: MateriaCastState): boolean {
+  if (!state.active) return false;
+  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
+  return Boolean(node && isAgentResolvedNode(node) && node.node.multiTurn);
+}
+
 function buildSyntheticCastContext(state: MateriaCastState): string {
+  const latestOutput = state.lastAssistantText ?? state.lastOutput;
+  const mode = isActiveMultiTurnNode(state)
+    ? `multi-turn refinement (${state.nodeState === "awaiting_user_refinement" ? "awaiting user refinement or /materia continue" : state.nodeState ?? "active"})`
+    : state.nodeState ?? "active";
   return [
     "Materia isolated context.",
     "Use only this cast context, the current role prompt, and any tool results from this role turn. Do not rely on unrelated earlier visible transcript messages.",
@@ -644,6 +680,7 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
     `Current node: ${state.currentNode ?? "-"}`,
     `Current role: ${state.currentRole ?? "-"}`,
     `Current item: ${state.currentItemLabel ?? "-"}`,
+    `Mode: ${mode}`,
     `Effective model: ${state.currentRoleModel?.label ?? "active Pi model"}`,
     `Effective thinking: ${state.currentRoleModel?.thinking ?? "active Pi thinking"}`,
     `Artifact directory: ${state.runDir}`,
@@ -651,7 +688,7 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
     "Generic cast data:",
     JSON.stringify(state.data, null, 2),
     "",
-    state.lastOutput ? `Previous output:\n${state.lastOutput}` : undefined,
+    latestOutput ? `Previous output:\n${latestOutput}` : undefined,
   ].filter(Boolean).join("\n");
 }
 
