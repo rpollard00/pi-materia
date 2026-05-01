@@ -88,6 +88,49 @@ Minimal hello-world grid:
 }
 ```
 
+### Per-role model and thinking settings
+
+Role configs may optionally set `model` and `thinking` alongside `tools` and `systemPrompt`. If a role omits `model`, pi-materia does not switch models for that turn; it preserves Pi's currently active model as the default behavior. If a role omits `thinking`, pi-materia likewise preserves Pi's active thinking level.
+
+Use `provider/model-id` (or an unambiguous model id from Pi's model registry) for `model`. Supported `thinking` strings are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh` when the active Pi runtime/provider supports thinking controls.
+
+Example loadout excerpt where planner and evaluator roles use a cheaper model, while Build uses a stronger coding model:
+
+```json
+{
+  "roles": {
+    "planner": {
+      "tools": "readOnly",
+      "model": "openai/gpt-4o-mini",
+      "thinking": "low",
+      "systemPrompt": "Break requests into small implementation tasks."
+    },
+    "Build": {
+      "tools": "coding",
+      "model": "anthropic/claude-sonnet-4-5",
+      "thinking": "high",
+      "systemPrompt": "Implement exactly the assigned work item."
+    },
+    "Auto-Eval": {
+      "tools": "readOnly",
+      "model": "openai/gpt-4o-mini",
+      "thinking": "medium",
+      "systemPrompt": "Verify the task strictly and return JSON."
+    },
+    "Maintain": {
+      "tools": "coding",
+      "systemPrompt": "Checkpoint accepted work."
+    }
+  }
+}
+```
+
+In this example, `Maintain` intentionally has no `model` or `thinking`, so it falls back to whatever model and thinking level are active in Pi at that point. The bundled default loadout also leaves roles model-free, so installing pi-materia does not pin or override your active Pi model.
+
+Run `/materia grid` to verify the resolved role settings before casting. Agent slots show `model=<configured value>` and `thinking=<configured value>` for explicit settings, or labels such as `model=active Pi model` and `thinking=active Pi thinking` for fallback roles.
+
+Provider/runtime limitations: explicit model switching requires Pi's runtime to expose model switching and the requested model must exist in Pi's registry with usable credentials. Explicit thinking requires Pi's runtime to expose thinking-level controls, and individual providers/models may ignore or map levels differently. pi-materia raises a clear role-specific error when an explicit `model` or `thinking` setting is unsupported; fallback roles continue to use Pi's active settings without attempting a switch.
+
 Generic node mechanics:
 
 - `prompt`: template rendered for an agent role turn
