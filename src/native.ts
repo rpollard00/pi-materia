@@ -5,6 +5,7 @@ import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveArtifactRoot } from "./config.js";
 import { parseJson } from "./json.js";
+import { applyRoleModelSettings } from "./modelSettings.js";
 import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 import { showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractUsage, writeUsage } from "./usage.js";
@@ -226,6 +227,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
 
   state.awaitingResponse = true;
   saveCastState(pi, state);
+  await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
   updateToolScope(pi, node.role);
   await sendMateriaTurn(pi, state, buildNodePrompt(state, node));
 }

@@ -77,8 +77,14 @@ export class FakePiHarness {
   readonly notifications: FakeUiNotification[] = [];
   readonly statuses = new Map<string, string | undefined>();
   readonly registeredRenderers = new Map<string, unknown>();
+  readonly setModelCalls: unknown[] = [];
+  readonly setThinkingLevelCalls: string[] = [];
+  readonly operationLog: string[] = [];
   activeTools: string[] = ["read", "grep", "find", "ls", "bash", "edit", "write"];
   allTools: Array<{ name: string }> = this.activeTools.map((name) => ({ name }));
+  models: Array<{ provider: string; id: string; name?: string; api?: string }> = [];
+  activeModel: unknown;
+  thinkingLevel = "none";
   sessionName: string | undefined;
   idle = true;
 
@@ -101,6 +107,7 @@ export class FakePiHarness {
       getFlag: (name: string) => this.flags.get(name),
       registerMessageRenderer: (customType: string, renderer: unknown) => this.registeredRenderers.set(customType, renderer),
       sendMessage: (message: unknown, options?: unknown) => {
+        if ((options as { triggerTurn?: boolean } | undefined)?.triggerTurn) this.operationLog.push("triggerTurn");
         this.sentMessages.push({ message, options });
         const custom = message as { customType?: string; content?: string | unknown[]; display?: boolean; details?: unknown };
         if (custom.customType) this.sessionManager.appendCustomMessage({ customType: custom.customType, content: custom.content ?? "", display: Boolean(custom.display), details: custom.details });
@@ -116,13 +123,13 @@ export class FakePiHarness {
       exec: async () => ({ code: 0, stdout: "", stderr: "" }),
       getActiveTools: () => [...this.activeTools],
       getAllTools: () => [...this.allTools],
-      setActiveTools: (toolNames: string[]) => { this.activeTools = [...toolNames]; },
+      setActiveTools: (toolNames: string[]) => { this.operationLog.push("setActiveTools"); this.activeTools = [...toolNames]; },
       getCommands: () => [],
       registerTool: () => undefined,
       registerShortcut: () => undefined,
-      setModel: async () => true,
-      getThinkingLevel: () => "none",
-      setThinkingLevel: () => undefined,
+      setModel: async (model: unknown) => { this.operationLog.push("setModel"); this.setModelCalls.push(model); this.activeModel = model; if (this.ctx) (this.ctx as unknown as { model: unknown }).model = model; return true; },
+      getThinkingLevel: () => this.thinkingLevel,
+      setThinkingLevel: (level: string) => { this.operationLog.push("setThinkingLevel"); this.setThinkingLevelCalls.push(level); this.thinkingLevel = level; },
       registerProvider: () => undefined,
     } as unknown as ExtensionAPI;
   }
@@ -161,8 +168,11 @@ export class FakePiHarness {
       hasUI: true,
       cwd: this.cwd,
       sessionManager: this.sessionManager,
-      modelRegistry: {} as never,
-      model: undefined,
+      modelRegistry: {
+        find: (provider: string, id: string) => this.models.find((model) => model.provider === provider && model.id === id),
+        getAll: () => [...this.models],
+      } as never,
+      model: this.activeModel,
       isIdle: () => this.idle,
       signal: undefined,
       abort: () => undefined,
