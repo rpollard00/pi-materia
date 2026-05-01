@@ -77,20 +77,31 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   if (state.awaitingResponse) throw new Error("Materia is already awaiting a Pi agent response.");
 
   if (state.nodeState === "awaiting_user_refinement") {
-    const text = state.lastAssistantText;
-    if (!text) throw new Error("Multi-turn node has no assistant output to finalize.");
-    const entryId = state.lastProcessedEntryId ?? `multiturn:${state.currentNode ?? state.phase}:latest`;
-    state.nodeState = "idle";
-    saveCastState(pi, state);
-    try {
-      await completeNode(pi, ctx, state, text, entryId);
-    } catch (error) {
-      await failCast(pi, ctx, state, error, entryId);
-    }
+    await finalizePausedMultiTurnNode(pi, ctx, state);
     return;
   }
 
   await startNode(pi, ctx, state, currentNodeOrThrow(state));
+}
+
+export async function handleMultiTurnUserInput(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string): Promise<"finalized" | "continue"> {
+  if (!isPausedMultiTurnRefinement(state)) return "continue";
+  if (!isReadinessToContinueInstruction(text)) return "continue";
+  await finalizePausedMultiTurnNode(pi, ctx, state);
+  return "finalized";
+}
+
+async function finalizePausedMultiTurnNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
+  const text = state.lastAssistantText;
+  if (!text) throw new Error("Multi-turn node has no assistant output to finalize.");
+  const entryId = state.lastProcessedEntryId ?? `multiturn:${state.currentNode ?? state.phase}:latest`;
+  state.nodeState = "idle";
+  saveCastState(pi, state);
+  try {
+    await completeNode(pi, ctx, state, text, entryId);
+  } catch (error) {
+    await failCast(pi, ctx, state, error, entryId);
+  }
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
@@ -118,13 +129,13 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     if (isAgentResolvedNode(node) && node.node.multiTurn) {
       const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
       state.nodeState = "awaiting_user_refinement";
-      state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement or /materia continue.`;
+      state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement, or readiness to continue/finalize.`;
       await writeUsage(state.runState);
       await appendEvent(state.runState, "node_refinement", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
       saveCastState(pi, state);
       ctx.ui.setStatus("materia", `${node.id}:refine`);
       updateWidget(ctx, state.runState);
-      ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement or /materia continue.`, "info");
+      ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement, or readiness to continue/finalize.`, "info");
       return;
     }
     await completeNode(pi, ctx, state, text, latest.entry.id);
@@ -672,6 +683,25 @@ function isPausedMultiTurnRefinement(state: MateriaCastState): boolean {
   return !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isActiveMultiTurnNode(state);
 }
 
+export function isReadinessToContinueInstruction(input: string): boolean {
+  const normalized = input
+    .trim()
+    .toLowerCase()
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/^[\s.!?,;:()[\]{}"']+|[\s.!?,;:()[\]{}"']+$/g, "")
+    .replace(/\s+/g, " ");
+  if (!normalized) return false;
+
+  const conciseReadiness = /^(?:please\s+)?(?:(?:ready|continue|finali[sz]e|proceed|ship it|looks good|lgtm)|(?:we(?:'re| are)|i(?:'m| am)) ready)(?:\s+(?:please|now|to continue|and continue|to finali[sz]e|and finali[sz]e|it|this))?$/;
+  if (conciseReadiness.test(normalized)) return true;
+
+  const readinessPhrase = /\b(?:ready to continue|ready to finali[sz]e|(?:we(?:'re| are)|i(?:'m| am)) ready|looks good|lgtm)\b/;
+  const finalAction = /\b(?:continue|proceed|finali[sz]e|ship it)\b/;
+  const changeRequest = /\b(?:add|change|update|revise|refine|fix|include|remove|rewrite|adjust|edit|after|but|first|before|make it)\b/;
+  return (readinessPhrase.test(normalized) || finalAction.test(normalized)) && !changeRequest.test(normalized);
+}
+
 function isActiveMultiTurnNode(state: MateriaCastState): boolean {
   if (!state.active) return false;
   const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
@@ -681,7 +711,7 @@ function isActiveMultiTurnNode(state: MateriaCastState): boolean {
 function buildSyntheticCastContext(state: MateriaCastState): string {
   const latestOutput = state.lastAssistantText ?? state.lastOutput;
   const mode = isActiveMultiTurnNode(state)
-    ? `multi-turn refinement (${state.nodeState === "awaiting_user_refinement" ? "awaiting user refinement or /materia continue" : state.nodeState ?? "active"})`
+    ? `multi-turn refinement (${state.nodeState === "awaiting_user_refinement" ? "awaiting user refinement or readiness to continue/finalize" : state.nodeState ?? "active"})`
     : state.nodeState ?? "active";
   return [
     "Materia isolated context.",
