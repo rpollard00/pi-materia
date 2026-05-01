@@ -1,5 +1,52 @@
 import { describe, expect, test } from "bun:test";
-import { createRunState, extractUsage } from "../src/usage.js";
+import { addUsage, createRunState, extractUsage } from "../src/usage.js";
+import type { UsageReport, UsageTotals } from "../src/types.js";
+
+function usageTotals(tokens: number, cost: number): UsageTotals {
+  return {
+    tokens: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, total: tokens },
+    cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+  };
+}
+
+function sumCosts(values: UsageTotals[]): number {
+  return values.reduce((sum, value) => sum + value.cost.total, 0);
+}
+
+function values(record: Record<string, UsageTotals>): UsageTotals[] {
+  return Object.values(record);
+}
+
+describe("usage aggregation", () => {
+  test("aggregates total, role, node, and task costs from captured turn usage", () => {
+    const state = createRunState("run", "/tmp/run", { id: "gpt-test", provider: "openai" });
+    const turns = [
+      { node: "Plan", role: "Maintain", taskId: "task-1", usage: usageTotals(100000, 0.05) },
+      { node: "Plan", role: "Maintain", taskId: "task-1", usage: usageTotals(67153, 0.0787) },
+      { node: "Build", role: "Build", taskId: "task-4", usage: usageTotals(97629, 0.2148) },
+      { node: "Eval", role: "Auto-Eval", taskId: "task-4", usage: usageTotals(45545, 0.1537) },
+      { node: "Plan", role: "planner", taskId: "task-0", usage: usageTotals(2410, 0.0344) },
+    ];
+
+    for (const turn of turns) addUsage(state.usage, turn.usage, turn);
+
+    const report: UsageReport = state.usage;
+    expect(report.cost.total).toBeCloseTo(sumCosts(turns.map((turn) => turn.usage)), 10);
+    expect(sumCosts(values(report.byRole))).toBeCloseTo(report.cost.total, 10);
+    expect(sumCosts(values(report.byNode))).toBeCloseTo(report.cost.total, 10);
+    expect(sumCosts(values(report.byTask))).toBeCloseTo(report.cost.total, 10);
+    expect(sumCosts(report.turns ?? [])).toBeCloseTo(report.cost.total, 10);
+
+    expect(report.byRole["Maintain"].cost.total).toBeCloseTo(0.1287, 10);
+    expect(report.byRole["Build"].cost.total).toBeCloseTo(0.2148, 10);
+    expect(report.byRole["Auto-Eval"].cost.total).toBeCloseTo(0.1537, 10);
+    expect(report.byRole.planner.cost.total).toBeCloseTo(0.0344, 10);
+    expect(report.byNode.Plan.cost.total).toBeCloseTo(0.1631, 10);
+    expect(report.byNode.Build.cost.total).toBeCloseTo(0.2148, 10);
+    expect(report.byNode.Eval.cost.total).toBeCloseTo(0.1537, 10);
+    expect(report.byTask["task-4"].cost.total).toBeCloseTo(0.3685, 10);
+  });
+});
 
 describe("usage extraction", () => {
   test("marks OpenAI Codex model usage as subscription cost display", () => {
