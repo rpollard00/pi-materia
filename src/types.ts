@@ -137,6 +137,7 @@ export interface MateriaCastState {
   data: Record<string, unknown>;
   cursors: Record<string, number>;
   visits: Record<string, number>;
+  multiTurnRefinements?: Record<string, number>;
   taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
   lastOutput?: string;
@@ -155,6 +156,9 @@ export interface MateriaManifestEntry {
   visit?: number;
   entryId?: string;
   artifact?: string;
+  kind?: string;
+  refinementTurn?: number;
+  finalized?: boolean;
   roleModel?: RoleModelSelection;
   timestamp: number;
 }

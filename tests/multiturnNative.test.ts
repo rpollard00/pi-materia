@@ -86,6 +86,40 @@ describe("native multi-turn runtime", () => {
     expect(JSON.stringify(isolated)).toContain("refine this plan");
   });
 
+  test("records refinement artifacts, context prompts, events, finalization metadata, and usage", async () => {
+    const harness = await makeHarness(multiTurnConfig({ model: "test/refiner" }));
+    harness.models = [{ provider: "test", id: "refiner", name: "Refiner", api: "fake" }];
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("not json yet", { usage: { inputTokens: 3, outputTokens: 5 } });
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendUserMessage("make it final JSON");
+    await harness.emit("before_agent_start", { systemPrompt: "Base system" });
+    harness.appendAssistantMessage('{"tasks":[{"id":"1","title":"Ship it"}]}', { usage: { inputTokens: 7, outputTokens: 11 } });
+    await harness.emit("agent_end", { messages: [] });
+    await harness.runCommand("materia", "continue");
+
+    const completeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", completeState.castId);
+    const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
+    const refinements = manifest.entries.filter((entry: any) => entry.kind === "node_refinement");
+    expect(refinements.map((entry: any) => entry.refinementTurn)).toEqual([1, 2]);
+    expect(new Set(refinements.map((entry: any) => entry.artifact)).size).toBe(2);
+    expect(refinements.every((entry: any) => entry.artifact.includes(".refinement-"))).toBe(true);
+    expect(manifest.entries.some((entry: any) => entry.kind === "context_refinement" && entry.refinementTurn === 2)).toBe(true);
+    expect(manifest.entries.some((entry: any) => entry.kind === "node_output" && entry.finalized === true && entry.refinementTurn === 2)).toBe(true);
+
+    const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.filter((event: any) => event.type === "node_refinement").map((event: any) => event.data.refinementTurn)).toEqual([1, 2]);
+    expect(events.some((event: any) => event.type === "context_refinement" && event.data.refinementTurn === 2)).toBe(true);
+    expect(events.some((event: any) => event.type === "node_complete" && event.data.finalizedRefinement === true && event.data.refinementTurn === 2)).toBe(true);
+
+    const usage = JSON.parse(await readFile(path.join(castDir, "usage.json"), "utf8"));
+    expect(usage.tokens.total).toBe(26);
+    expect(usage.turns).toHaveLength(2);
+    expect(usage.modelSelections.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("continue finalizes the latest multi-turn assistant output", async () => {
     const harness = await makeHarness(multiTurnConfig());
 

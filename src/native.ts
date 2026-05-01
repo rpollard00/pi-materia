@@ -58,6 +58,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     data: {},
     cursors: {},
     visits: {},
+    multiTurnRefinements: {},
     taskAttempts: {},
     edgeTraversals: {},
     runState,
@@ -115,11 +116,11 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     if (agentError) throw new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
     const node = currentNodeOrThrow(state);
     if (isAgentResolvedNode(node) && node.node.multiTurn) {
-      const artifact = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
+      const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
       state.nodeState = "awaiting_user_refinement";
       state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement or /materia continue.`;
       await writeUsage(state.runState);
-      await appendEvent(state.runState, "node_refinement", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, entryId: latest.entry.id, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
+      await appendEvent(state.runState, "node_refinement", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
       saveCastState(pi, state);
       ctx.ui.setStatus("materia", `${node.id}:refine`);
       updateWidget(ctx, state.runState);
@@ -163,7 +164,8 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
 
   applyAssignments(state, node, parsed);
   const advanceTarget = applyAdvance(state, node, parsed);
-  await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
+  const finalizedRefinement = isAgentResolvedNode(node) && Boolean(node.node.multiTurn);
+  await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
   await assertBudget(config, state.runState, ctx);
 
   const nextTarget = advanceTarget ?? selectNextTarget(state, node, parsed, config);
@@ -177,19 +179,21 @@ async function recordNodeOutput(state: MateriaCastState, node: ResolvedMateriaNo
   const artifact = path.join(dir, `${visit}${item}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, roleModel: state.currentRoleModel });
+  const finalizedRefinement = isAgentResolvedNode(node) && Boolean(node.node.multiTurn);
+  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, roleModel: state.currentRoleModel });
   return artifact;
 }
 
-async function recordMultiTurnRefinement(state: MateriaCastState, node: ResolvedMateriaNode, text: string, entryId: string): Promise<string> {
+async function recordMultiTurnRefinement(state: MateriaCastState, node: ResolvedMateriaNode, text: string, entryId: string): Promise<{ artifact: string; turn: number }> {
   const visit = nodeVisit(state, node.id);
+  const turn = nextRefinementTurn(state, node.id);
   const dir = path.join("nodes", safePathSegment(node.id));
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
-  const artifact = path.join(dir, `${visit}${item}.refinement-${safePathSegment(entryId)}.md`);
+  const artifact = path.join(dir, `${visit}${item}.refinement-${turn}-${safePathSegment(entryId)}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, roleModel: state.currentRoleModel });
-  return artifact;
+  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, roleModel: state.currentRoleModel });
+  return { artifact, turn };
 }
 
 function applyAssignments(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): void {
@@ -518,7 +522,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
 
 async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<void> {
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
-  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, roleModel: state.currentRoleModel });
+  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, kind: "context", roleModel: state.currentRoleModel });
 
   const label = state.currentItemLabel ? `${state.phase}: ${state.currentItemLabel}` : state.phase;
   pi.sendMessage({
@@ -537,8 +541,8 @@ async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt
   }, { triggerTurn: true });
 }
 
-async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<string> {
-  const relativePath = contextArtifactPath(state);
+async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, prompt: string, suffix?: string): Promise<string> {
+  const relativePath = contextArtifactPath(state, suffix);
   const fullPath = path.join(state.runDir, relativePath);
   await mkdir(path.dirname(fullPath), { recursive: true });
   const activeTools = pi.getActiveTools();
@@ -593,11 +597,12 @@ function roleModelSelection(applied: AppliedRoleModelSettings): RoleModelSelecti
   };
 }
 
-function contextArtifactPath(state: MateriaCastState): string {
+function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
   const node = safePathSegment(state.currentNode ?? state.phase);
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
   const visit = state.currentNode ? nodeVisit(state, state.currentNode) : 1;
-  return path.join("contexts", `${node}${item}-${visit}.md`);
+  const extra = suffix ? `-${safePathSegment(suffix)}` : "";
+  return path.join("contexts", `${node}${item}-${visit}${extra}.md`);
 }
 
 function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
@@ -641,6 +646,13 @@ export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: Exte
   state.awaitingResponse = true;
   state.nodeState = "awaiting_agent_response";
   state.updatedAt = Date.now();
+  const refinementTurn = currentRefinementTurn(state, node.id) + 1;
+  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });
+  await writeUsage(state.runState);
+  await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel, refinementTurn });
+  const contextArtifact = await writeContextArtifact(pi, state, buildSyntheticCastContext(state), `refinement-${refinementTurn}-${safeTimestamp()}`);
+  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: nodeVisit(state, node.id), artifact: contextArtifact, kind: "context_refinement", refinementTurn, roleModel: state.currentRoleModel });
+  await appendEvent(state.runState, "context_refinement", { node: node.id, role: nodeRoleName(node), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel });
   updateToolScope(pi, node.role);
   saveCastState(pi, state);
 }
@@ -808,6 +820,22 @@ export const nativeTestInternals = {
 
 function nodeVisit(state: MateriaCastState, nodeId: string): number {
   return state.visits[nodeId] ?? 0;
+}
+
+function currentRefinementTurn(state: MateriaCastState, nodeId: string): number {
+  return state.multiTurnRefinements?.[refinementIdentityKey(state, nodeId)] ?? 0;
+}
+
+function nextRefinementTurn(state: MateriaCastState, nodeId: string): number {
+  state.multiTurnRefinements ??= {};
+  const key = refinementIdentityKey(state, nodeId);
+  const turn = (state.multiTurnRefinements[key] ?? 0) + 1;
+  state.multiTurnRefinements[key] = turn;
+  return turn;
+}
+
+function refinementIdentityKey(state: MateriaCastState, nodeId: string): string {
+  return JSON.stringify([nodeId, state.currentItemKey ?? "__singleton__", nodeVisit(state, nodeId)]);
 }
 
 function taskIdentityKey(state: MateriaCastState, nodeId: string): string {
