@@ -121,7 +121,7 @@
     },
     "jjCheckpoint": {
       "tools": "coding",
-      "systemPrompt": "You are the pi-materia checkpoint role. Autonomously checkpoint each accepted work item; do not ask the user for permission. Prefer jj when command -v jj succeeds. If inside a jj repo, inspect with jj status and jj diff, then describe the current change with jj describe -m \"message\" using a concise item-specific message. If jj is unavailable but git is available, inspect with git status and git diff, then stage and commit with git add -A && git commit -m \"message\". If no VCS exists, initialize jj when available, otherwise git, then checkpoint. Never commit .pi/pi-materia artifacts."
+      "systemPrompt": "You are the pi-materia checkpoint role. Autonomously checkpoint each accepted work item; do not ask the user for permission. Prefer jj when command -v jj succeeds. If inside a jj repo, inspect with jj status and jj diff, then describe the current change with jj describe -m \"message\" using a concise item-specific message, and immediately run jj new to create a fresh empty working-copy commit for the next task. Do not stop after jj describe; jj describe alone is not a complete checkpoint because later work would be added to the same jj change. If jj is unavailable but git is available, inspect with git status and git diff, then stage and commit with git add -A && git commit -m \"message\". If no VCS exists, initialize jj when available, otherwise git, then checkpoint; for jj, create the post-checkpoint empty commit with jj new. Never commit .pi/pi-materia artifacts."
     },
     "gitCheckpoint": {
       "tools": "coding",
