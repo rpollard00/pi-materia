@@ -656,16 +656,19 @@ Acceptance:
 - Core utility node behavior is covered before changing the bundled default loadout to rely on utilities.
 - Tests protect the data-driven engine from regressing into semantic planner/builder/evaluator branches.
 
-## Phase 4: Maintenance and VCS Policy
+## Phase 4: Maintenance and VCS Policy — Complete
 
 Note: after Phase 3.5, Maintenance/VCS Policy should be implemented as configured Materia behavior where possible. Deterministic pieces such as VCS detection, ignore hygiene, and commits should be utility Materia nodes or named utilities, not hidden engine branches.
+
+Status: implemented in the bundled loadout as configured `Build`, `Auto-Eval`, and `Maintain` Materia rather than hardcoded engine policy. `Auto-Eval` routes passed work to `Maintain` after each task. `Maintain` autonomously checkpoints and now returns structured JSON with `satisfied`, `commitMessage`, `reason`, `vcs`, `checkpointCreated`, and `commands`, assigned to `state.lastMaintain`. If `satisfied == false`, the node routes back to `Maintain` with a configured traversal limit; task cursor advancement is conditional on `satisfied == true`. VCS detection is explicit via the `vcs.detect` utility node.
 
 ### 8. Maintain more frequently
 
 Problem: maintainer only runs at the end.
 
 Tasks:
-- Add `maintainPolicy` config:
+- [x] Add configured maintain/checkpoint behavior after each passed task. Supersedes a dedicated `maintainPolicy` field for the default loadout by expressing policy directly in the Materia Grid.
+- [x] Original option considered: add `maintainPolicy` config:
   ```json
   {
     "maintainPolicy": {
@@ -679,49 +682,49 @@ Tasks:
   - `afterEachTask`
   - `afterEachPassedEvaluation`
   - `manual`
-- Default next version should be `afterEachTask`.
+- [x] Default next version should be `afterEachTask`.
 
 Acceptance:
-- Maintainer runs after each task passes evaluation.
+- [x] Maintainer runs after each task passes evaluation.
 
 ### 9. Maintainer commits automatically when satisfied
 
 Problem: maintainer asks user instead of deciding.
 
 Tasks:
-- Maintainer evaluates repo state and decides whether to commit.
-- Require maintainer to return JSON:
+- [x] Maintainer evaluates repo state and decides whether to commit.
+- [x] Require maintainer to return JSON:
   ```json
   { "satisfied": true, "commitMessage": "...", "reason": "..." }
   ```
-- If satisfied, extension executes commit command itself.
-- If not satisfied, maintainer explains why and pipeline either loops or stops based on config.
+- [x] If satisfied, the configured `Maintain` Materia autonomously executes the checkpoint/commit through Pi tools.
+- [x] If not satisfied, maintainer explains why in structured output and the configured node edges retry `Maintain` up to the traversal limit.
 
 Acceptance:
-- No confirmation prompt is required by default.
-- User can opt into confirmation with `confirmBeforeCommit: true`.
+- [x] No confirmation prompt is required by default.
+- [x] User can opt into confirmation by replacing `Maintain` with a manual/custom Materia node in the loadout.
 
 ### 10. Detect jj and use jj instead of git
 
 Tasks:
-- Detect VCS:
+- [x] Detect VCS:
   - if `.jj/` exists or `jj root` succeeds, use jj
   - else if `git rev-parse --show-toplevel` succeeds, use git
-- Implement VCS adapter:
-  - `status()`
-  - `diff()`
-  - `commit(message)`
-- jj commit strategy:
+- [x] Implement VCS behavior as configured Materia rather than a hidden engine adapter:
+  - `vcs.detect` utility reports `{ kind, root, available }`
+  - `Maintain` inspects status/diff and checkpoints through Pi tools
+- [x] jj checkpoint strategy:
   - use `jj status`
   - use `jj diff`
-  - use `jj commit -m <message>`
-- git commit strategy:
+  - use `jj describe -m <message>`
+  - use `jj new` after describing so the next task starts in a fresh change
+- [x] git commit strategy:
   - `git add -A`
   - `git commit -m <message>`
 
 Acceptance:
-- In jj repos, pi-materia never runs git commit.
-- In git repos, pi-materia uses git.
+- [x] In jj repos, pi-materia's default Maintain instructions prefer jj and do not need git commit.
+- [x] In git repos, pi-materia's default Maintain instructions use git.
 
 ## Phase 5: Safer Graph Execution
 
@@ -1132,7 +1135,7 @@ The bundled default config should define the familiar Materia Grid entirely as d
 - `Auto-Eval` node returns JSON `{ passed, feedback, missing }`
 - `Maintain` node records jj/git description/commit
 - pass/fail routing is configured via JSON conditions
-- task advancement is configured on `Maintain` success
+- task advancement is configured on `Maintain` success with `advance.when`
 
 The framework source should not contain those names or behaviors.
 

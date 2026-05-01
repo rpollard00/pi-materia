@@ -101,5 +101,13 @@ describe("utility pipeline nodes", () => {
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
+    expect(config.pipeline.nodes.Maintain).toMatchObject({
+      type: "agent",
+      role: "Maintain",
+      parse: "json",
+      assign: { lastMaintain: "$" },
+      advance: { cursor: "taskIndex", items: "state.tasks", when: "$.satisfied == true" },
+      edges: [{ when: "$.satisfied == false", to: "Maintain", maxTraversals: 3 }],
+    });
   });
 });

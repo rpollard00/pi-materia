@@ -192,6 +192,7 @@ export interface MateriaAdvanceConfig {
   cursor: string;
   items: string;
   done?: string;
+  when?: string;
 }
 
 export interface MateriaNodeLimitsConfig {

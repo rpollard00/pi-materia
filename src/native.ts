@@ -125,7 +125,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
   }
 
   applyAssignments(state, node, parsed);
-  const advanceTarget = applyAdvance(state, node);
+  const advanceTarget = applyAdvance(state, node, parsed);
   await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel) });
   await assertBudget(config, state.runState, ctx);
 
@@ -150,9 +150,10 @@ function applyAssignments(state: MateriaCastState, node: ResolvedMateriaNode, pa
   }
 }
 
-function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
+function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): string | undefined {
   const advance = node.node.advance;
   if (!advance) return undefined;
+  if (advance.when && !evaluateCondition(advance.when, state, parsed)) return undefined;
   const items = asArray(resolveValue(advance.items, state));
   const next = (state.cursors[advance.cursor] ?? 0) + 1;
   state.cursors[advance.cursor] = next;

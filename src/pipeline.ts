@@ -100,7 +100,7 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
   if (node.next) details.push(`next=${node.next}`);
   if (node.edges?.length) details.push(`edges=${node.edges.map((edge) => `${edgeLabel(edge)}->${edge.to}`).join(",")}`);
   if (node.foreach) details.push(`foreach=${node.foreach.items}${node.foreach.as ? ` as ${node.foreach.as}` : ""}${node.foreach.done ? ` done ${node.foreach.done}` : ""}`);
-  if (node.advance) details.push(`advance=${node.advance.cursor}:${node.advance.items}${node.advance.done ? ` done ${node.advance.done}` : ""}`);
+  if (node.advance) details.push(`advance=${node.advance.cursor}:${node.advance.items}${node.advance.when ? ` when ${node.advance.when}` : ""}${node.advance.done ? ` done ${node.advance.done}` : ""}`);
   if (node.limits) details.push(`limits=${formatNodeLimits(node.limits)}`);
   if (node.type === "utility" && node.timeoutMs !== undefined) details.push(`timeoutMs=${node.timeoutMs}`);
   return details.join(", ");

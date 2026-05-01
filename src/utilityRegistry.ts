@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -72,8 +73,12 @@ async function ensureIgnored(input: BuiltInUtilityInput): Promise<string> {
 
 async function detectVcs(input: BuiltInUtilityInput): Promise<string> {
   const [jj, git] = await Promise.all([isCommandAvailable("jj"), isCommandAvailable("git")]);
-  const jjRoot = findUp(input.cwd, ".jj");
-  const gitRoot = findUp(input.cwd, ".git");
+  const markerJjRoot = findUp(input.cwd, ".jj");
+  const markerGitRoot = findUp(input.cwd, ".git");
+  const commandJjRoot = jj ? await commandRoot("jj", ["root"], input.cwd) : null;
+  const commandGitRoot = git ? await commandRoot("git", ["rev-parse", "--show-toplevel"], input.cwd) : null;
+  const jjRoot = markerJjRoot ?? commandJjRoot;
+  const gitRoot = markerGitRoot ?? commandGitRoot;
   const kind = jjRoot ? "jj" : gitRoot ? "git" : "none";
   const root = jjRoot ?? gitRoot ?? null;
   return JSON.stringify({ kind, root, available: { jj, git } });
@@ -117,6 +122,24 @@ async function isCommandAvailable(command: string): Promise<boolean> {
     }
   }
   return false;
+}
+
+async function commandRoot(command: string, args: string[], cwd: string): Promise<string | null> {
+  try {
+    const stdout = await execFileText(command, args, cwd);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function execFileText(command: string, args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { cwd, timeout: 2000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) return reject(error);
+      resolve(stdout);
+    });
+  });
 }
 
 function resolveInsideCwd(cwd: string, inputPath: string): string {
