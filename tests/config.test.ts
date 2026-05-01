@@ -1,8 +1,8 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, saveActiveLoadout } from "../src/config.js";
 import { resolvePipeline } from "../src/pipeline.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {
@@ -36,6 +36,75 @@ describe("config loadouts", () => {
     expect(loaded.config.roles.planner.systemPrompt).toContain("planning role");
     expect(loaded.config.roles.interactivePlan.systemPrompt).toContain("interactive");
     expect(pipeline.entry.id).toBe("interactivePlan");
+  });
+});
+
+describe("active loadout persistence", () => {
+  test("updates only the active loadout in the active project config", async () => {
+    const { dir, file } = await writeConfig({
+      loadouts: {
+        "Full-Auto": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "planner" } },
+        },
+        "Planning-Consult": {
+          entry: "interactivePlan",
+          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
+        },
+      },
+    });
+
+    const written = await saveActiveLoadout(dir, "Planning-Consult", file);
+    const raw = JSON.parse(await readFile(file, "utf8"));
+    const reloaded = await loadConfig(dir, file);
+
+    expect(written).toBe(file);
+    expect(raw.activeLoadout).toBe("Planning-Consult");
+    expect(raw.roles).toBeUndefined();
+    expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
+    expect(resolvePipeline(reloaded.config).entry.id).toBe("interactivePlan");
+  });
+
+  test("creates a minimal project config override when using the default project config path", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-loadout-"));
+    const projectFile = path.join(dir, ".pi", "pi-materia.json");
+    await mkdir(path.dirname(projectFile), { recursive: true });
+    await writeFile(projectFile, JSON.stringify({
+      loadouts: {
+        "Full-Auto": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "planner" } },
+        },
+        "Planning-Consult": {
+          entry: "interactivePlan",
+          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
+        },
+      },
+    }), "utf8");
+
+    const written = await saveActiveLoadout(dir, "Full-Auto");
+    const raw = JSON.parse(await readFile(projectFile, "utf8"));
+
+    expect(written).toBe(projectFile);
+    expect(raw.activeLoadout).toBe("Full-Auto");
+    expect(raw.roles).toBeUndefined();
+  });
+
+  test("rejects unknown loadout names without changing the config file", async () => {
+    const { dir, file } = await writeConfig({
+      activeLoadout: "Full-Auto",
+      loadouts: {
+        "Full-Auto": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "planner" } },
+        },
+      },
+    });
+    const before = await readFile(file, "utf8");
+
+    await expect(saveActiveLoadout(dir, "Missing", file)).rejects.toThrow(/Unknown Materia loadout "Missing"/);
+
+    expect(await readFile(file, "utf8")).toBe(before);
   });
 });
 

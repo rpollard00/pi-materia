@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LoadedConfig, MateriaRoleConfig, PiMateriaConfig } from "./types.js";
@@ -8,10 +8,25 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
   if (explicitPath) return loadConfigFile(explicitPath);
 
-  const projectPath = path.join(cwd, ".pi", "pi-materia.json");
+  const projectPath = getProjectConfigPath(cwd);
   if (existsSync(projectPath)) return loadConfigFile(projectPath);
 
   return loadConfigFile(getBundledDefaultConfigPath(), "<pi-materia bundled default loadout>");
+}
+
+export async function saveActiveLoadout(cwd: string, loadoutName: string, configuredPath?: string): Promise<string> {
+  const loaded = await loadConfig(cwd, configuredPath);
+  const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
+  if (loadoutNames.length === 0) {
+    throw new Error(`Cannot change Materia loadout because this config does not define any loadouts.`);
+  }
+  if (!loaded.config.loadouts?.[loadoutName]) {
+    throw new Error(`Unknown Materia loadout "${loadoutName}". Available loadouts: ${loadoutNames.join(", ")}.`);
+  }
+
+  const targetPath = getWritableConfigPath(cwd, configuredPath);
+  await writeMinimalActiveLoadout(targetPath, loadoutName);
+  return targetPath;
 }
 
 async function loadConfigFile(file: string, source = file): Promise<LoadedConfig> {
@@ -26,6 +41,34 @@ async function loadConfigFile(file: string, source = file): Promise<LoadedConfig
 function getBundledDefaultConfigPath(): string {
   const currentFile = fileURLToPath(import.meta.url);
   return path.resolve(path.dirname(currentFile), "..", "config", "default.json");
+}
+
+function getProjectConfigPath(cwd: string): string {
+  return path.join(cwd, ".pi", "pi-materia.json");
+}
+
+function getWritableConfigPath(cwd: string, configuredPath?: string): string {
+  return configuredPath ? resolveFromCwd(cwd, configuredPath) : getProjectConfigPath(cwd);
+}
+
+async function writeMinimalActiveLoadout(file: string, loadoutName: string): Promise<void> {
+  let parsed: Partial<PiMateriaConfig> = {};
+  if (existsSync(file)) {
+    const text = await readFile(file, "utf8");
+    parsed = JSON.parse(text) as Partial<PiMateriaConfig>;
+    if (!isPlainObject(parsed)) throw new Error(`Materia config file ${file} is invalid. Expected a JSON object.`);
+  }
+
+  const next = { ...parsed, activeLoadout: loadoutName };
+  const dir = path.dirname(file);
+  const temp = path.join(dir, `.pi-materia.${process.pid}.${Date.now()}.tmp`);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    await rename(temp, file);
+  } catch (error) {
+    throw new Error(`Failed to persist active Materia loadout to ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function mergeConfig(parsed: Partial<PiMateriaConfig>): Promise<PiMateriaConfig> {
