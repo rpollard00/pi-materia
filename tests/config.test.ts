@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig, saveActiveLoadout } from "../src/config.js";
-import { resolvePipeline } from "../src/pipeline.js";
+import { getEffectivePipelineConfig, resolvePipeline } from "../src/pipeline.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-config-"));
@@ -13,6 +13,24 @@ async function writeConfig(config: unknown): Promise<{ dir: string; file: string
 }
 
 describe("config loadouts", () => {
+  test("legacy top-level pipeline configs still resolve through loadConfig", async () => {
+    const { dir, file } = await writeConfig({
+      pipeline: {
+        entry: "legacy",
+        nodes: { legacy: { type: "agent", role: "planner" } },
+      },
+    });
+
+    const loaded = await loadConfig(dir, file);
+    const effective = getEffectivePipelineConfig(loaded.config);
+    const pipeline = resolvePipeline(loaded.config);
+
+    expect(effective.loadoutName).toBeUndefined();
+    expect(loaded.config.loadouts).toBeUndefined();
+    expect(pipeline.entry.id).toBe("legacy");
+    expect(pipeline.entry.role.systemPrompt).toContain("planning role");
+  });
+
   test("project config can define loadouts and activeLoadout without duplicating roles", async () => {
     const { dir, file } = await writeConfig({
       activeLoadout: "Planning-Consult",
@@ -36,6 +54,23 @@ describe("config loadouts", () => {
     expect(loaded.config.roles.planner.systemPrompt).toContain("planning role");
     expect(loaded.config.roles.interactivePlan.systemPrompt).toContain("interactive");
     expect(pipeline.entry.id).toBe("interactivePlan");
+  });
+
+  test("bundled default loadouts select auto or interactive planner roles", async () => {
+    const loaded = await loadConfig(process.cwd());
+
+    expect(loaded.config.activeLoadout).toBe("Full-Auto");
+    expect(loaded.config.loadouts?.["Full-Auto"]?.nodes.planner).toMatchObject({ role: "planner" });
+    expect(loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner).toMatchObject({ role: "interactivePlan" });
+
+    const fullAuto = resolvePipeline(loaded.config);
+    expect(fullAuto.nodes.planner.node.type).toBe("agent");
+    expect(fullAuto.nodes.planner.role.systemPrompt).toContain("planning role");
+
+    loaded.config.activeLoadout = "Planning-Consult";
+    const planningConsult = resolvePipeline(loaded.config);
+    expect(planningConsult.nodes.planner.node.type).toBe("agent");
+    expect(planningConsult.nodes.planner.role.systemPrompt).toContain("interactive planning role");
   });
 });
 
@@ -65,29 +100,21 @@ describe("active loadout persistence", () => {
     expect(resolvePipeline(reloaded.config).entry.id).toBe("interactivePlan");
   });
 
-  test("creates a minimal project config override when using the default project config path", async () => {
+  test("creates a minimal project config override when using bundled defaults", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-loadout-"));
     const projectFile = path.join(dir, ".pi", "pi-materia.json");
-    await mkdir(path.dirname(projectFile), { recursive: true });
-    await writeFile(projectFile, JSON.stringify({
-      loadouts: {
-        "Full-Auto": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", role: "planner" } },
-        },
-        "Planning-Consult": {
-          entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
-        },
-      },
-    }), "utf8");
+    const defaultFile = path.resolve("config", "default.json");
+    const beforeDefault = await readFile(defaultFile, "utf8");
 
-    const written = await saveActiveLoadout(dir, "Full-Auto");
+    const written = await saveActiveLoadout(dir, "Planning-Consult");
     const raw = JSON.parse(await readFile(projectFile, "utf8"));
+    const reloaded = await loadConfig(dir);
 
     expect(written).toBe(projectFile);
-    expect(raw.activeLoadout).toBe("Full-Auto");
-    expect(raw.roles).toBeUndefined();
+    expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
+    expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
+    expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
+    expect(resolvePipeline(reloaded.config).nodes.planner.role.systemPrompt).toContain("interactive planning role");
   });
 
   test("rejects unknown loadout names without changing the config file", async () => {

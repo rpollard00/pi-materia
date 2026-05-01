@@ -65,6 +65,25 @@ describe("FakePiHarness", () => {
     expect(harness.userMessages).toHaveLength(0);
   });
 
+  test("switches bundled default loadout by writing only a project override", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-command-default-"));
+    const projectFile = path.join(dir, ".pi", "pi-materia.json");
+    const defaultFile = path.resolve("config", "default.json");
+    const beforeDefault = await readFile(defaultFile, "utf8");
+    const harness = new FakePiHarness(dir);
+    piMateria(harness.pi);
+
+    await harness.runCommand("materia", "loadout Planning-Consult");
+
+    const raw = JSON.parse(await readFile(projectFile, "utf8"));
+    const switched = harness.widgets.get("materia-loadouts")?.content ?? [];
+    expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
+    expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
+    expect(switched).toContain("- Planning-Consult (active)");
+    expect(switched).toContain("- Full-Auto");
+    expect(harness.operationLog).not.toContain("triggerTurn");
+  });
+
   test("reports valid options for an unknown /materia loadout", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-command-"));
     const configFile = path.join(dir, ".pi", "pi-materia.json");
