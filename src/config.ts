@@ -73,12 +73,14 @@ async function writeMinimalActiveLoadout(file: string, loadoutName: string): Pro
 
 async function mergeConfig(parsed: Partial<PiMateriaConfig>): Promise<PiMateriaConfig> {
   const base = await loadDefaultConfig();
+  const usesLegacyPipeline = Boolean(parsed.pipeline && !parsed.loadouts);
   const config = {
     ...base,
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
     pipeline: mergePipeline(base.pipeline, parsed.pipeline),
-    loadouts: mergeLoadouts(base.loadouts, parsed.loadouts),
+    loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, parsed.loadouts),
+    activeLoadout: usesLegacyPipeline ? undefined : (parsed.activeLoadout ?? base.activeLoadout),
     roles: mergeRoles(base.roles, parsed.roles),
   } as PiMateriaConfig;
   validateRoles(config.roles);
