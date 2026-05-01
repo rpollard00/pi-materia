@@ -44,6 +44,26 @@ function singleTurnConfig() {
   };
 }
 
+function multiTurnWithDownstreamConfig(parse: "json" | "text") {
+  const plan = parse === "json"
+    ? { type: "agent", role: "Plan", multiTurn: true, parse: "json", assign: { tasks: "$.tasks" }, next: "build" }
+    : { type: "agent", role: "Plan", multiTurn: true, parse: "text", assign: { summary: "$" }, next: "build" };
+  return {
+    artifactDir: ".pi/pi-materia",
+    pipeline: {
+      entry: "plan",
+      nodes: {
+        plan,
+        build: { type: "agent", role: "Build", prompt: "Tasks={{state.tasks}} Summary={{state.summary}} Last={{lastOutput}}" },
+      },
+    },
+    roles: {
+      Plan: { tools: "readOnly", systemPrompt: "Collaborative planner" },
+      Build: { tools: "coding", systemPrompt: "Build downstream" },
+    },
+  };
+}
+
 describe("native multi-turn runtime", () => {
   test("single-turn agent nodes still parse, assign, and advance automatically", async () => {
     const harness = await makeHarness(singleTurnConfig());
@@ -185,5 +205,76 @@ describe("native multi-turn runtime", () => {
     const artifacts = manifest.entries.map((entry: any) => entry.artifact).filter(Boolean);
     expect(artifacts.some((artifact: string) => artifact.includes(".refinement-"))).toBe(true);
     expect(artifacts).toContain(path.join("nodes", "plan", "1.md"));
+  });
+
+  test("finalized multi-turn JSON artifacts and downstream state match single-turn shape", async () => {
+    const harness = await makeHarness(multiTurnWithDownstreamConfig("json"));
+    const finalJson = '{"tasks":[{"id":"1","title":"Ship it"}]}';
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("draft");
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendUserMessage("make it final JSON");
+    harness.appendAssistantMessage(finalJson);
+    await harness.emit("agent_end", { messages: [] });
+    await harness.emit("input", { text: "ready to continue", source: "interactive" });
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(state.active).toBe(true);
+    expect(state.currentNode).toBe("build");
+    expect(state.nodeState).toBe("awaiting_agent_response");
+    expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
+    expect(state.lastJson).toEqual({ tasks: [{ id: "1", title: "Ship it" }] });
+
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", state.castId);
+    expect(await readFile(path.join(castDir, "nodes", "plan", "1.md"), "utf8")).toBe(finalJson);
+    expect(JSON.parse(await readFile(path.join(castDir, "nodes", "plan", "1.json"), "utf8"))).toEqual({ tasks: [{ id: "1", title: "Ship it" }] });
+
+    const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
+    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "node_output" && entry.node === "plan");
+    expect(nodeOutput.artifact).toBe(path.join("nodes", "plan", "1.md"));
+    expect(nodeOutput.finalized).toBe(true);
+    expect(nodeOutput.refinementTurn).toBe(2);
+
+    const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    const completeEvent = events.find((event: any) => event.type === "node_complete" && event.data.node === "plan");
+    expect(completeEvent.data.artifact).toBe(path.join("nodes", "plan", "1.md"));
+    expect(completeEvent.data.parsed).toBe(true);
+    expect(completeEvent.data.finalizedRefinement).toBe(true);
+
+    const buildPrompt = harness.sentMessages.at(-1)?.message as any;
+    expect(buildPrompt.customType).toBe("pi-materia-prompt");
+    expect(buildPrompt.content).toContain("Tasks=[\n  {\n    \"id\": \"1\",\n    \"title\": \"Ship it\"\n  }\n]");
+    expect(buildPrompt.content).toContain(`Last=${finalJson}`);
+  });
+
+  test("finalized multi-turn text artifacts and downstream state match single-turn shape", async () => {
+    const harness = await makeHarness(multiTurnWithDownstreamConfig("text"));
+    const finalText = "Final text plan";
+
+    await harness.runCommand("materia", "cast refine text");
+    harness.appendAssistantMessage("draft text");
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendAssistantMessage(finalText);
+    await harness.emit("agent_end", { messages: [] });
+    await harness.emit("input", { text: "continue", source: "interactive" });
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(state.active).toBe(true);
+    expect(state.currentNode).toBe("build");
+    expect(state.data.summary).toBe(finalText);
+    expect(state.lastJson).toBeUndefined();
+
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", state.castId);
+    expect(await readFile(path.join(castDir, "nodes", "plan", "1.md"), "utf8")).toBe(finalText);
+    const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
+    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "node_output" && entry.node === "plan");
+    expect(nodeOutput.artifact).toBe(path.join("nodes", "plan", "1.md"));
+    expect(nodeOutput.finalized).toBe(true);
+    expect(nodeOutput.kind).toBe("node_output");
+
+    const buildPrompt = harness.sentMessages.at(-1)?.message as any;
+    expect(buildPrompt.content).toContain("Summary=Final text plan");
+    expect(buildPrompt.content).toContain("Last=Final text plan");
   });
 });
