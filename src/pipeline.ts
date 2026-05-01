@@ -1,18 +1,43 @@
 import { resolveArtifactRoot } from "./config.js";
 import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineNodeConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
+export interface EffectiveMateriaPipelineConfig {
+  pipeline: NonNullable<PiMateriaConfig["pipeline"]>;
+  loadoutName?: string;
+}
+
+export function getEffectivePipelineConfig(config: PiMateriaConfig): EffectiveMateriaPipelineConfig {
+  const loadouts = config.loadouts ?? {};
+  const loadoutNames = Object.keys(loadouts);
+  if (loadoutNames.length > 0) {
+    const activeLoadout = config.activeLoadout;
+    if (!activeLoadout) {
+      throw new Error(`No active Materia loadout configured. Set "activeLoadout" to one of: ${loadoutNames.join(", ")}.`);
+    }
+    const pipeline = loadouts[activeLoadout];
+    if (!pipeline) {
+      throw new Error(`Unknown active Materia loadout "${activeLoadout}". Available loadouts: ${loadoutNames.join(", ")}.`);
+    }
+    return { pipeline, loadoutName: activeLoadout };
+  }
+
+  if (!config.pipeline) throw new Error(`Materia config must define either a legacy "pipeline" or one or more "loadouts".`);
+  return { pipeline: config.pipeline };
+}
+
 export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipeline {
+  const effective = getEffectivePipelineConfig(config);
   const nodes = Object.fromEntries(
-    Object.keys(config.pipeline.nodes).map((id) => [id, resolveNode(config, id, `pipeline.nodes.${id}`)]),
+    Object.keys(effective.pipeline.nodes).map((id) => [id, resolveNode(config, effective, id, `${pipelineSource(effective)}.nodes.${id}`)]),
   );
-  const entry = nodes[config.pipeline.entry];
-  if (!entry) throw new Error(`Unknown pipeline entry slot "${config.pipeline.entry}"`);
-  validateTargets(config);
+  const entry = nodes[effective.pipeline.entry];
+  if (!entry) throw new Error(`Unknown pipeline entry slot "${effective.pipeline.entry}"`);
+  validateTargets(effective);
   return { entry, nodes };
 }
 
-function resolveNode(config: PiMateriaConfig, id: string, source: string): ResolvedMateriaNode {
-  const node = config.pipeline.nodes[id];
+function resolveNode(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig, id: string, source: string): ResolvedMateriaNode {
+  const node = effective.pipeline.nodes[id];
   if (!node) throw new Error(`Unknown pipeline slot "${id}" referenced by ${source}`);
   validateNode(id, node);
 
@@ -57,30 +82,36 @@ function validateCommand(id: string, command: unknown): void {
   }
 }
 
-function validateTargets(config: PiMateriaConfig): void {
-  for (const [id, node] of Object.entries(config.pipeline.nodes)) {
-    validateTarget(config, node.next, `${id}.next`);
-    validateTarget(config, node.foreach?.done, `${id}.foreach.done`);
-    validateTarget(config, node.advance?.done, `${id}.advance.done`);
-    for (const edge of node.edges ?? []) validateTarget(config, edge.to, `${id}.edges[].to`);
+function validateTargets(effective: EffectiveMateriaPipelineConfig): void {
+  for (const [id, node] of Object.entries(effective.pipeline.nodes)) {
+    validateTarget(effective, node.next, `${id}.next`);
+    validateTarget(effective, node.foreach?.done, `${id}.foreach.done`);
+    validateTarget(effective, node.advance?.done, `${id}.advance.done`);
+    for (const edge of node.edges ?? []) validateTarget(effective, edge.to, `${id}.edges[].to`);
   }
 }
 
-function validateTarget(config: PiMateriaConfig, target: string | undefined, source: string): void {
+function validateTarget(effective: EffectiveMateriaPipelineConfig, target: string | undefined, source: string): void {
   if (!target || target === "end") return;
-  if (!config.pipeline.nodes[target]) throw new Error(`Unknown pipeline slot "${target}" referenced by ${source}`);
+  if (!effective.pipeline.nodes[target]) throw new Error(`Unknown pipeline slot "${target}" referenced by ${source}`);
+}
+
+function pipelineSource(effective: EffectiveMateriaPipelineConfig): string {
+  return effective.loadoutName ? `loadouts.${effective.loadoutName}` : "pipeline";
 }
 
 export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPipeline, source: string, cwd: string): string[] {
+  const effective = getEffectivePipelineConfig(config);
   const lines = [
     "pi-materia Materia Grid",
     `source: ${source}`,
     `artifactDir: ${resolveArtifactRoot(cwd, config.artifactDir)}`,
     `limits: ${formatLimits(config)}`,
     `budget: ${formatBudget(config.budget)}`,
+    `loadout: ${effective.loadoutName ?? "legacy pipeline"}`,
     "",
     "Graph:",
-    ...renderGraph(config),
+    ...renderGraph(effective.pipeline),
     "",
     "Resolved entry:",
     pipeline.entry.id,
@@ -91,7 +122,7 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     "Slots:",
   ];
 
-  for (const [id, node] of Object.entries(config.pipeline.nodes)) {
+  for (const [id, node] of Object.entries(effective.pipeline.nodes)) {
     lines.push(`- ${id}: ${formatNodeSlot(config, node)}`);
   }
   return lines;
@@ -142,9 +173,9 @@ function formatNodeLimits(limits: NonNullable<MateriaPipelineNodeConfig["limits"
   ].filter(Boolean).join("/") || "default";
 }
 
-function renderGraph(config: PiMateriaConfig): string[] {
+function renderGraph(pipeline: NonNullable<PiMateriaConfig["pipeline"]>): string[] {
   const lines: string[] = [];
-  for (const [id, node] of Object.entries(config.pipeline.nodes)) {
+  for (const [id, node] of Object.entries(pipeline.nodes)) {
     if (node.next) lines.push(`${id} -> ${node.next}`);
     for (const edge of node.edges ?? []) lines.push(`${id} --${edgeLabel(edge)}--> ${edge.to}`);
     if (!node.next && !node.edges?.length) lines.push(`${id}`);

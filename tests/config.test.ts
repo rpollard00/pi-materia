@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "../src/config.js";
+import { resolvePipeline } from "../src/pipeline.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-config-"));
@@ -10,6 +11,33 @@ async function writeConfig(config: unknown): Promise<{ dir: string; file: string
   await writeFile(file, JSON.stringify(config), "utf8");
   return { dir, file };
 }
+
+describe("config loadouts", () => {
+  test("project config can define loadouts and activeLoadout without duplicating roles", async () => {
+    const { dir, file } = await writeConfig({
+      activeLoadout: "Planning-Consult",
+      loadouts: {
+        "Full-Auto": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "planner" } },
+        },
+        "Planning-Consult": {
+          entry: "interactivePlan",
+          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
+        },
+      },
+    });
+
+    const loaded = await loadConfig(dir, file);
+    const pipeline = resolvePipeline(loaded.config);
+
+    expect(loaded.config.activeLoadout).toBe("Planning-Consult");
+    expect(Object.keys(loaded.config.loadouts ?? {})).toContain("Full-Auto");
+    expect(loaded.config.roles.planner.systemPrompt).toContain("planning role");
+    expect(loaded.config.roles.interactivePlan.systemPrompt).toContain("interactive");
+    expect(pipeline.entry.id).toBe("interactivePlan");
+  });
+});
 
 describe("config role model settings", () => {
   test("bundled default roles remain model-free", async () => {

@@ -2,7 +2,12 @@ export interface PiMateriaConfig {
   artifactDir?: string;
   budget?: MateriaBudgetConfig;
   limits?: MateriaLimitsConfig;
-  pipeline: MateriaPipelineConfig;
+  /** Legacy single graph config. Used when no loadouts are configured. */
+  pipeline?: MateriaPipelineConfig;
+  /** Named graph configs that share the top-level roles, limits, budget, and artifactDir. */
+  loadouts?: Record<string, MateriaPipelineConfig>;
+  /** Name of the loadout to use when loadouts are configured. */
+  activeLoadout?: string;
   roles: Record<string, MateriaRoleConfig>;
 }
 

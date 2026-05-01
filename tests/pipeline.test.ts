@@ -28,6 +28,57 @@ const baseConfig: PiMateriaConfig = {
   roles: {},
 };
 
+describe("loadout-aware pipeline resolution", () => {
+  test("legacy top-level pipeline configs still resolve", () => {
+    const pipeline = resolvePipeline(baseConfig);
+
+    expect(pipeline.entry.id).toBe("hello");
+    expect(pipeline.entry.node.type).toBe("utility");
+  });
+
+  test("activeLoadout selects a named graph while sharing roles", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Planning-Consult",
+      loadouts: {
+        "Full-Auto": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "planner" } },
+        },
+        "Planning-Consult": {
+          entry: "interactivePlan",
+          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
+        },
+      },
+      roles: {
+        planner: { tools: "readOnly", systemPrompt: "Plan automatically." },
+        interactivePlan: { tools: "readOnly", systemPrompt: "Plan interactively." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+    const lines = renderGrid(config, pipeline, "test", "/tmp/project");
+
+    expect(pipeline.entry.id).toBe("interactivePlan");
+    expect(pipeline.entry.node.type).toBe("agent");
+    expect(pipeline.entry.role.systemPrompt).toBe("Plan interactively.");
+    expect(lines).toContain("loadout: Planning-Consult");
+  });
+
+  test("unknown activeLoadout names include valid options", () => {
+    const config: PiMateriaConfig = {
+      activeLoadout: "Missing",
+      loadouts: {
+        "Full-Auto": baseConfig.pipeline!,
+        "Planning-Consult": baseConfig.pipeline!,
+      },
+      roles: {},
+    };
+
+    expect(() => resolvePipeline(config)).toThrow(/Unknown active Materia loadout "Missing"\. Available loadouts: Full-Auto, Planning-Consult/);
+  });
+});
+
 describe("utility pipeline nodes", () => {
   test("resolvePipeline accepts command and named utility nodes", () => {
     const pipeline = resolvePipeline(baseConfig);

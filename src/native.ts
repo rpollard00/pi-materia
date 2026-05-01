@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveArtifactRoot } from "./config.js";
+import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { applyRoleModelSettings } from "./modelSettings.js";
 import type { AppliedRoleModelSettings } from "./modelSettings.js";
@@ -35,7 +36,8 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   runState.currentRole = nodeRoleName(pipeline.entry);
   runState.lastMessage = pipeline.entry.id;
   await writeUsage(runState);
-  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: config.pipeline, nativeSession: true, isolatedRoleContext: true });
+  const effectivePipeline = getEffectivePipelineConfig(config);
+  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedRoleContext: true });
   await writeManifest(runDir, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
 
   const state: MateriaCastState = {

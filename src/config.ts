@@ -34,17 +34,36 @@ async function mergeConfig(parsed: Partial<PiMateriaConfig>): Promise<PiMateriaC
     ...base,
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
-    pipeline: parsed.pipeline
-      ? {
-        ...base.pipeline,
-        ...parsed.pipeline,
-        nodes: parsed.pipeline.nodes ?? base.pipeline.nodes,
-      }
-      : base.pipeline,
+    pipeline: mergePipeline(base.pipeline, parsed.pipeline),
+    loadouts: mergeLoadouts(base.loadouts, parsed.loadouts),
     roles: mergeRoles(base.roles, parsed.roles),
   } as PiMateriaConfig;
   validateRoles(config.roles);
   return config;
+}
+
+function mergePipeline(basePipeline: PiMateriaConfig["pipeline"], parsedPipeline: Partial<PiMateriaConfig>["pipeline"]): PiMateriaConfig["pipeline"] {
+  if (!parsedPipeline) return basePipeline;
+  return {
+    ...(basePipeline ?? {}),
+    ...parsedPipeline,
+    nodes: parsedPipeline.nodes ?? basePipeline?.nodes ?? {},
+  } as PiMateriaConfig["pipeline"];
+}
+
+function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts: Partial<PiMateriaConfig>["loadouts"]): PiMateriaConfig["loadouts"] {
+  if (!parsedLoadouts) return baseLoadouts;
+  const merged: Record<string, NonNullable<PiMateriaConfig["pipeline"]>> = { ...(baseLoadouts ?? {}) };
+  for (const [name, loadout] of Object.entries(parsedLoadouts)) {
+    if (!isPlainObject(loadout)) throw new Error(`Materia loadout "${name}" is invalid. Expected a pipeline object.`);
+    const baseLoadout = baseLoadouts?.[name];
+    merged[name] = {
+      ...(baseLoadout ?? {}),
+      ...loadout,
+      nodes: loadout.nodes ?? baseLoadout?.nodes ?? {},
+    } as NonNullable<PiMateriaConfig["pipeline"]>;
+  }
+  return merged;
 }
 
 function mergeRoles(baseRoles: Record<string, MateriaRoleConfig>, parsedRoles: Partial<PiMateriaConfig>["roles"]): Record<string, MateriaRoleConfig> {
