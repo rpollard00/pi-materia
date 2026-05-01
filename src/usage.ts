@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent } from "./artifacts.js";
-import type { MateriaRunState, PiMateriaConfig, UsageReport, UsageTotals } from "./types.js";
+import type { MateriaRunState, PiMateriaConfig, RoleModelSelection, UsageReport, UsageTotals } from "./types.js";
 
 export function createRunState(runId: string, runDir: string, model: unknown): MateriaRunState {
   const modelInfo = getModelInfo(model);
@@ -19,6 +19,8 @@ export function createRunState(runId: string, runDir: string, model: unknown): M
       byNode: {},
       byTask: {},
       byAttempt: {},
+      turns: [],
+      modelSelections: [],
     },
     budgetWarned: false,
   };
@@ -87,18 +89,70 @@ export function extractUsage(message: unknown): UsageTotals | undefined {
   };
 }
 
-export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: string; role: string; taskId?: string; attempt?: number }): void {
+export function recordUsageModelSelection(report: UsageReport, key: { node: string; role: string; taskId?: string; attempt?: number; roleModel: RoleModelSelection }): void {
+  if (key.roleModel.model) report.model = key.roleModel.model;
+  if (key.roleModel.provider) report.provider = key.roleModel.provider;
+  if (key.roleModel.api) report.api = key.roleModel.api;
+  if (key.roleModel.thinking) report.thinkingLevel = key.roleModel.thinking;
+  report.modelSelections ??= [];
+  report.modelSelections.push({ ...key.roleModel, node: key.node, role: key.role, taskId: key.taskId, attempt: key.attempt });
+}
+
+export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: string; role: string; taskId?: string; attempt?: number; roleModel?: RoleModelSelection; messageModel?: Partial<RoleModelSelection> }): void {
   addUsageTotals(report, usage);
   addUsageTotals(report.byNode[key.node] ??= emptyUsageTotals(), usage);
   addUsageTotals(report.byRole[key.role] ??= emptyUsageTotals(), usage);
   if (key.taskId) addUsageTotals(report.byTask[key.taskId] ??= emptyUsageTotals(), usage);
   if (key.taskId && key.attempt !== undefined) addUsageTotals(report.byAttempt[`${key.taskId}:${key.attempt}`] ??= emptyUsageTotals(), usage);
+
+  const metadata = { ...key.roleModel, ...key.messageModel };
+  if (metadata.model) report.model = metadata.model;
+  if (metadata.provider) report.provider = metadata.provider;
+  if (metadata.api) report.api = metadata.api;
+  if (metadata.thinking) report.thinkingLevel = metadata.thinking;
+  report.turns ??= [];
+  report.turns.push({
+    ...cloneUsageTotals(usage),
+    node: key.node,
+    role: key.role,
+    taskId: key.taskId,
+    attempt: key.attempt,
+    model: metadata.model,
+    provider: metadata.provider,
+    api: metadata.api,
+    thinking: metadata.thinking,
+    requestedModel: metadata.requestedModel,
+    requestedThinking: metadata.requestedThinking,
+    modelExplicit: metadata.modelExplicit,
+    thinkingExplicit: metadata.thinkingExplicit,
+    source: metadata.source,
+  });
+}
+
+export function extractMessageModelInfo(message: unknown): Partial<RoleModelSelection> {
+  const value = (message && typeof message === "object" ? message : {}) as Record<string, unknown>;
+  const modelValue = value.model;
+  const nestedModel = modelValue && typeof modelValue === "object" ? modelValue as Record<string, unknown> : undefined;
+  const model = stringField(value.modelId) ?? stringField(value.modelName) ?? (typeof modelValue === "string" ? modelValue : undefined) ?? stringField(nestedModel?.id) ?? stringField(nestedModel?.name);
+  return compactModelInfo({
+    model,
+    provider: stringField(value.provider) ?? stringField(nestedModel?.provider),
+    api: stringField(value.api) ?? stringField(nestedModel?.api),
+    thinking: stringField(value.thinkingLevel) ?? stringField(value.thinking),
+  });
 }
 
 function emptyUsageTotals(): UsageTotals {
   return {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
+
+function cloneUsageTotals(usage: UsageTotals): UsageTotals {
+  return {
+    tokens: { ...usage.tokens },
+    cost: { ...usage.cost },
   };
 }
 
@@ -123,6 +177,14 @@ function getModelInfo(model: unknown): Pick<UsageReport, "model" | "provider" | 
     api: typeof value.api === "string" ? value.api : typeof value.model?.api === "string" ? value.model.api : undefined,
     thinkingLevel: typeof value.thinkingLevel === "string" ? value.thinkingLevel : undefined,
   };
+}
+
+function compactModelInfo(info: Partial<RoleModelSelection>): Partial<RoleModelSelection> {
+  return Object.fromEntries(Object.entries(info).filter(([, value]) => value !== undefined)) as Partial<RoleModelSelection>;
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function numberOrZero(value: unknown): number {

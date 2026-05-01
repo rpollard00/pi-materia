@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
@@ -47,6 +47,46 @@ describe("native per-role model settings", () => {
     expect(harness.operationLog.indexOf("setModel")).toBeLessThan(harness.operationLog.indexOf("setActiveTools"));
     expect(harness.operationLog.indexOf("setThinkingLevel")).toBeLessThan(harness.operationLog.indexOf("setActiveTools"));
     expect(harness.operationLog.indexOf("setActiveTools")).toBeLessThan(harness.operationLog.indexOf("triggerTurn"));
+  });
+
+  test("records effective role model settings in context, manifest, events, and usage", async () => {
+    const harness = await makeHarness(agentConfig({ model: "anthropic/claude-test", thinking: "high" }));
+
+    await harness.runCommand("materia", "cast record model metadata");
+    harness.appendAssistantMessage("done", {
+      usage: { input: 3, output: 4, totalTokens: 7, cost: { total: 0.01 } },
+      model: { provider: "anthropic", id: "claude-test", api: "anthropic" },
+      thinkingLevel: "high",
+    });
+    await harness.emit("agent_end", { messages: [] });
+
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", (await readdir(path.join(harness.cwd, ".pi", "pi-materia")))[0]);
+    const context = await readFile(path.join(castDir, "contexts", "agent-1.md"), "utf8");
+    expect(context).toContain("model: anthropic/claude-test");
+    expect(context).toContain("thinking: high");
+    const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
+    expect(manifest.entries.some((entry: any) => entry.roleModel?.model === "claude-test" && entry.roleModel?.thinking === "high")).toBe(true);
+    const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.some((event) => event.type === "role_model_settings" && event.data.roleModel.model === "claude-test")).toBe(true);
+    const usage = JSON.parse(await readFile(path.join(castDir, "usage.json"), "utf8"));
+    expect(usage.tokens.total).toBe(7);
+    expect(usage.modelSelections[0]).toMatchObject({ node: "agent", role: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+    expect(usage.turns[0]).toMatchObject({ node: "agent", role: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+  });
+
+  test("fallback model metadata is labeled as the active Pi model", async () => {
+    const harness = await makeHarness(agentConfig());
+    harness.activeModel = { provider: "openai", id: "gpt-test", name: "GPT Test", api: "openai" };
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    await harness.runCommand("materia", "cast fallback model metadata");
+
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", (await readdir(path.join(harness.cwd, ".pi", "pi-materia")))[0]);
+    const context = await readFile(path.join(castDir, "contexts", "agent-1.md"), "utf8");
+    expect(context).toContain("model: openai/gpt-test");
+    expect(context).toContain("model source: active Pi model fallback");
+    const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.some((event) => event.type === "role_model_settings" && event.data.roleModel.source === "active" && event.data.roleModel.label === "openai/gpt-test")).toBe(true);
   });
 
   test("utility nodes do not apply role model settings", async () => {

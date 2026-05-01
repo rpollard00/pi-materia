@@ -44,6 +44,42 @@ export interface UsageTotals {
   cost: UsageCost;
 }
 
+export interface RoleModelSelection {
+  model?: string;
+  provider?: string;
+  api?: string;
+  thinking?: string;
+  requestedModel?: string;
+  requestedThinking?: string;
+  modelExplicit: boolean;
+  thinkingExplicit: boolean;
+  source: "configured" | "active";
+  label: string;
+}
+
+export interface UsageModelSelection extends RoleModelSelection {
+  node: string;
+  role: string;
+  taskId?: string;
+  attempt?: number;
+}
+
+export interface UsageTurn extends UsageTotals {
+  node: string;
+  role: string;
+  taskId?: string;
+  attempt?: number;
+  model?: string;
+  provider?: string;
+  api?: string;
+  thinking?: string;
+  requestedModel?: string;
+  requestedThinking?: string;
+  modelExplicit?: boolean;
+  thinkingExplicit?: boolean;
+  source?: "configured" | "active";
+}
+
 export interface UsageReport extends UsageTotals {
   model?: string;
   provider?: string;
@@ -53,6 +89,8 @@ export interface UsageReport extends UsageTotals {
   byNode: Record<string, UsageTotals>;
   byTask: Record<string, UsageTotals>;
   byAttempt: Record<string, UsageTotals>;
+  turns?: UsageTurn[];
+  modelSelections?: UsageModelSelection[];
 }
 
 export type MateriaCastPhase = string;
@@ -72,6 +110,7 @@ export interface MateriaCastState {
   currentRole?: string;
   currentItemKey?: string;
   currentItemLabel?: string;
+  currentRoleModel?: RoleModelSelection;
   awaitingResponse: boolean;
   lastProcessedEntryId?: string;
   lastAssistantText?: string;
@@ -98,6 +137,7 @@ export interface MateriaManifestEntry {
   visit?: number;
   entryId?: string;
   artifact?: string;
+  roleModel?: RoleModelSelection;
   timestamp: number;
 }
 
@@ -119,6 +159,7 @@ export interface MateriaRunState {
   currentRole?: string;
   currentTask?: string;
   attempt?: number;
+  currentRoleModel?: RoleModelSelection;
   lastMessage?: string;
   usage: UsageReport;
   budgetWarned: boolean;

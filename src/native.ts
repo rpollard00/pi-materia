@@ -6,9 +6,10 @@ import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveArtifactRoot } from "./config.js";
 import { parseJson } from "./json.js";
 import { applyRoleModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { AppliedRoleModelSettings } from "./modelSettings.js";
+import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline, RoleModelSelection } from "./types.js";
 import { showUsageSummary, updateWidget } from "./ui.js";
-import { addUsage, assertBudget, createRunState, extractUsage, writeUsage } from "./usage.js";
+import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
 
 const STATE_ENTRY = "pi-materia-cast-state";
@@ -127,7 +128,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
 
   applyAssignments(state, node, parsed);
   const advanceTarget = applyAdvance(state, node, parsed);
-  await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel) });
+  await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
   await assertBudget(config, state.runState, ctx);
 
   const nextTarget = advanceTarget ?? selectNextTarget(state, node, parsed, config);
@@ -141,7 +142,7 @@ async function recordNodeOutput(state: MateriaCastState, node: ResolvedMateriaNo
   const artifact = path.join(dir, `${visit}${item}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact });
+  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, roleModel: state.currentRoleModel });
   return artifact;
 }
 
@@ -198,10 +199,12 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   state.phase = node.id;
   state.currentNode = node.id;
   state.currentRole = nodeRoleName(node);
+  state.currentRoleModel = undefined;
   state.awaitingResponse = true;
   state.updatedAt = Date.now();
   state.runState.currentNode = node.id;
   state.runState.currentRole = nodeRoleName(node);
+  state.runState.currentRoleModel = undefined;
   state.runState.currentTask = state.currentItemLabel;
   state.runState.attempt = nodeVisit(state, node.id);
   state.runState.lastMessage = node.id;
@@ -214,7 +217,9 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   if (!isAgentResolvedNode(node)) {
     state.awaitingResponse = false;
     state.currentRole = undefined;
+    state.currentRoleModel = undefined;
     state.runState.currentRole = undefined;
+    state.runState.currentRoleModel = undefined;
     saveCastState(pi, state);
     try {
       const result = await executeUtilityNode(state, node);
@@ -227,7 +232,14 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
 
   state.awaitingResponse = true;
   saveCastState(pi, state);
-  await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
+  const appliedModel = await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
+  const roleModel = roleModelSelection(appliedModel);
+  state.currentRoleModel = roleModel;
+  state.runState.currentRoleModel = roleModel;
+  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: nodeVisit(state, node.id), roleModel });
+  await writeUsage(state.runState);
+  await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel });
+  saveCastState(pi, state);
   updateToolScope(pi, node.role);
   await sendMateriaTurn(pi, state, buildNodePrompt(state, node));
 }
@@ -454,22 +466,22 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
 
 async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<void> {
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
-  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact });
+  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, roleModel: state.currentRoleModel });
 
   const label = state.currentItemLabel ? `${state.phase}: ${state.currentItemLabel}` : state.phase;
   pi.sendMessage({
     customType: "pi-materia",
     content: `Casting **${state.currentRole ?? "materia"}**\n\n${label}`,
     display: true,
-    details: { prefix: label, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "role_prompt" },
+    details: { prefix: label, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "role_prompt", roleModel: state.currentRoleModel },
   });
 
-  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact });
+  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact, roleModel: state.currentRoleModel });
   pi.sendMessage({
     customType: "pi-materia-prompt",
     content: prompt,
     display: false,
-    details: { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel },
+    details: { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, roleModel: state.currentRoleModel },
   }, { triggerTurn: true });
 }
 
@@ -478,7 +490,10 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
   const fullPath = path.join(state.runDir, relativePath);
   await mkdir(path.dirname(fullPath), { recursive: true });
   const activeTools = pi.getActiveTools();
-  const model = [state.runState.usage.provider, state.runState.usage.model].filter(Boolean).join("/") || state.runState.usage.model || "active Pi model";
+  const roleModel = state.currentRoleModel;
+  const model = roleModel?.label ?? "active Pi model";
+  const thinking = roleModel?.thinking ?? (roleModel?.thinkingExplicit ? roleModel.requestedThinking : undefined) ?? "active Pi thinking";
+  const modelSource = roleModel?.modelExplicit ? "configured role setting" : "active Pi model fallback";
   const content = [
     "# Materia Isolated Role Context",
     "",
@@ -488,6 +503,9 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
     `item: ${state.currentItemLabel ?? "-"}`,
     `visit: ${state.currentNode ? nodeVisit(state, state.currentNode) : "-"}`,
     `model: ${model}`,
+    `model source: ${modelSource}`,
+    `thinking: ${thinking}`,
+    `thinking source: ${roleModel?.thinkingExplicit ? "configured role setting" : "active Pi thinking fallback"}`,
     `active tools: ${activeTools.length ? activeTools.join(", ") : "none"}`,
     `timestamp: ${new Date().toISOString()}`,
     "",
@@ -501,6 +519,26 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
   ].join("\n");
   await writeFile(fullPath, content);
   return relativePath;
+}
+
+function roleModelSelection(applied: AppliedRoleModelSettings): RoleModelSelection {
+  const model = applied.modelId ?? applied.modelName;
+  const provider = applied.provider;
+  const label = [provider, model].filter(Boolean).join("/") || model || "active Pi model";
+  const thinking = applied.thinking ? String(applied.thinking) : undefined;
+  const source = applied.modelExplicit || applied.thinkingExplicit ? "configured" : "active";
+  return {
+    model,
+    provider,
+    api: applied.api,
+    thinking,
+    requestedModel: applied.requestedModel,
+    requestedThinking: applied.requestedThinking,
+    modelExplicit: applied.modelExplicit,
+    thinkingExplicit: applied.thinkingExplicit,
+    source,
+    label,
+  };
 }
 
 function contextArtifactPath(state: MateriaCastState): string {
@@ -554,6 +592,8 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
     `Current node: ${state.currentNode ?? "-"}`,
     `Current role: ${state.currentRole ?? "-"}`,
     `Current item: ${state.currentItemLabel ?? "-"}`,
+    `Effective model: ${state.currentRoleModel?.label ?? "active Pi model"}`,
+    `Effective thinking: ${state.currentRoleModel?.thinking ?? "active Pi thinking"}`,
     `Artifact directory: ${state.runDir}`,
     "",
     "Generic cast data:",
@@ -731,7 +771,7 @@ function captureUsage(state: MateriaCastState, message: unknown): void {
   if (!usage) return;
   const node = state.currentNode ?? state.phase;
   const role = state.currentRole ?? state.phase;
-  addUsage(state.runState.usage, usage, { node, role, taskId: state.currentItemKey, attempt: state.currentNode ? nodeVisit(state, state.currentNode) : undefined });
+  addUsage(state.runState.usage, usage, { node, role, taskId: state.currentItemKey, attempt: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, roleModel: state.currentRoleModel, messageModel: extractMessageModelInfo(message) });
 }
 
 function updateToolScope(pi: ExtensionAPI, role: MateriaRoleConfig): void {
