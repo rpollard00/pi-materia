@@ -120,6 +120,7 @@ export interface MateriaCastState {
   data: Record<string, unknown>;
   cursors: Record<string, number>;
   visits: Record<string, number>;
+  taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
   lastOutput?: string;
   lastJson?: unknown;

@@ -57,6 +57,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     data: {},
     cursors: {},
     visits: {},
+    taskAttempts: {},
     edgeTraversals: {},
     runState,
     pipeline,
@@ -195,6 +196,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   const hasItem = setCurrentItem(state, node);
   if (node.node.foreach && !hasItem) return await advanceToNode(pi, ctx, state, node.node.foreach.done ?? "end", "foreach-empty");
   enforceNodeLimit(state, node, config);
+  const attempt = startTaskAttempt(state, node.id);
 
   state.phase = node.id;
   state.currentNode = node.id;
@@ -206,7 +208,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   state.runState.currentRole = nodeRoleName(node);
   state.runState.currentRoleModel = undefined;
   state.runState.currentTask = state.currentItemLabel;
-  state.runState.attempt = nodeVisit(state, node.id);
+  state.runState.attempt = attempt;
   state.runState.lastMessage = node.id;
   await writeUsage(state.runState);
   await appendEvent(state.runState, "node_start", { node: node.id, role: nodeRoleName(node), type: node.node.type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
@@ -236,7 +238,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   const roleModel = roleModelSelection(appliedModel);
   state.currentRoleModel = roleModel;
   state.runState.currentRoleModel = roleModel;
-  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: nodeVisit(state, node.id), roleModel });
+  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });
   await writeUsage(state.runState);
   await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel });
   saveCastState(pi, state);
@@ -721,6 +723,23 @@ function nodeVisit(state: MateriaCastState, nodeId: string): number {
   return state.visits[nodeId] ?? 0;
 }
 
+function taskIdentityKey(state: MateriaCastState, nodeId: string): string {
+  return JSON.stringify([nodeId, state.currentItemKey ?? "__singleton__"]);
+}
+
+function startTaskAttempt(state: MateriaCastState, nodeId: string): number {
+  state.taskAttempts ??= {};
+  const key = taskIdentityKey(state, nodeId);
+  const attempt = (state.taskAttempts[key] ?? 0) + 1;
+  state.taskAttempts[key] = attempt;
+  return attempt;
+}
+
+function currentTaskAttempt(state: MateriaCastState): number | undefined {
+  if (!state.currentNode) return undefined;
+  return state.runState.attempt ?? state.taskAttempts?.[taskIdentityKey(state, state.currentNode)];
+}
+
 export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | undefined {
   const entries = ctx.sessionManager.getBranch();
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -771,7 +790,7 @@ function captureUsage(state: MateriaCastState, message: unknown): void {
   if (!usage) return;
   const node = state.currentNode ?? state.phase;
   const role = state.currentRole ?? state.phase;
-  addUsage(state.runState.usage, usage, { node, role, taskId: state.currentItemKey, attempt: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, roleModel: state.currentRoleModel, messageModel: extractMessageModelInfo(message) });
+  addUsage(state.runState.usage, usage, { node, role, taskId: state.currentItemKey, attempt: currentTaskAttempt(state), roleModel: state.currentRoleModel, messageModel: extractMessageModelInfo(message) });
 }
 
 function updateToolScope(pi: ExtensionAPI, role: MateriaRoleConfig): void {
