@@ -14,6 +14,7 @@
   "files": [
     "src",
     "config",
+    "docs",
     "README.md",
     "PI_MATERIA_PLAN.md",
     "LICENSE"

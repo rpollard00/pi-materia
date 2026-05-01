@@ -12,6 +12,7 @@ const STATE_ENTRY = "pi-materia-cast-state";
 const MANIFEST_FILE = "manifest.json";
 const DEFAULT_MAX_NODE_VISITS = 25;
 const DEFAULT_MAX_EDGE_TRAVERSALS = 25;
+const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
   const config = loaded.config;
@@ -113,7 +114,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
 
   applyAssignments(state, node, parsed);
   const advanceTarget = applyAdvance(state, node);
-  await appendEvent(state.runState, "node_complete", { node: node.id, role: node.node.role, artifact, parsed: node.node.parse === "json", entryId });
+  await appendEvent(state.runState, "node_complete", { node: node.id, role: node.node.role, artifact, parsed: node.node.parse === "json", entryId, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel) });
   await assertBudget(config, state.runState, ctx);
 
   const nextTarget = advanceTarget ?? selectNextTarget(state, node, parsed, config);
@@ -191,7 +192,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   state.runState.attempt = nodeVisit(state, node.id);
   state.runState.lastMessage = node.id;
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "node_start", { node: node.id, role: node.node.role, itemKey: state.currentItemKey, visit: nodeVisit(state, node.id) });
+  await appendEvent(state.runState, "node_start", { node: node.id, role: node.node.role, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
   saveCastState(pi, state);
   updateToolScope(pi, node.role);
   updateWidget(ctx, state.runState);
@@ -260,7 +261,7 @@ async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt
     details: { prefix: label, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "role_prompt" },
   });
 
-  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, artifact: contextArtifact });
+  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact });
   pi.sendMessage({
     customType: "pi-materia-prompt",
     content: prompt,
@@ -541,8 +542,22 @@ async function appendManifest(state: MateriaCastState, entry: Omit<MateriaManife
   } catch {
     manifest = { castId: state.castId, request: state.request, configSource: state.configSource, entries: [] };
   }
-  manifest.entries.push({ ...entry, timestamp: Date.now() });
+  const itemLabel = entry.itemLabel ?? (entry.itemKey && entry.itemKey === state.currentItemKey ? state.currentItemLabel : undefined);
+  manifest.entries.push({
+    ...entry,
+    itemLabel,
+    itemLabelShort: entry.itemLabelShort ?? shortMetadataLabel(itemLabel),
+    timestamp: Date.now(),
+  });
   await writeManifest(state.runDir, manifest);
+}
+
+function shortMetadataLabel(label: unknown): string | undefined {
+  if (typeof label !== "string") return undefined;
+  const normalized = label.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= MAX_METADATA_ITEM_LABEL_LENGTH) return normalized;
+  return `${normalized.slice(0, MAX_METADATA_ITEM_LABEL_LENGTH - 1)}…`;
 }
 
 async function loadConfigFromState(state: MateriaCastState): Promise<PiMateriaConfig> {

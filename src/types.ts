@@ -93,6 +93,8 @@ export interface MateriaManifestEntry {
   node?: string;
   role?: string;
   itemKey?: string;
+  itemLabel?: string;
+  itemLabelShort?: string;
   visit?: number;
   entryId?: string;
   artifact?: string;

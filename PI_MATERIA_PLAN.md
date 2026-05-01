@@ -274,9 +274,9 @@ Acceptance:
 Problem: widget showed `task: 2`; task ids alone are not meaningful.
 
 Actions:
-- [ ] Track current task title/description in `MateriaRunState`.
-- [ ] Show task title in widget/status, e.g. `task: 2 - Add movement/input`.
-- [ ] Include task title in artifact filenames or task metadata files.
+- [x] Track current task title/description in `MateriaRunState`.
+- [x] Show task title in widget/status, e.g. `task: 2 - Add movement/input`.
+- [x] Include task title in artifact metadata files.
 
 Acceptance:
 - User can tell which planned task is active without opening `plan.json`.
@@ -455,7 +455,210 @@ Phase 3 implementation notes:
 - Artifacts now include `manifest.json` linking phases/tasks to native Pi session entry ids and context artifacts.
 - Each role turn writes the exact isolated model-visible context/prompt under `contexts/` before triggering the turn.
 
+## Phase 3.5: Utility Materia Nodes and Test Foundation — Next
+
+Strategic correction from follow-up design discussion: deterministic project setup, artifact ignore hygiene, VCS detection, and future checkpoint mechanics should not be hardcoded into the Materia engine. They should be represented as configured Materia nodes just like agent slots, but executed by deterministic utilities instead of LLM turns.
+
+Core principle:
+
+```text
+Config owns workflow meaning.
+Agent nodes ask Pi/LLMs to reason or edit.
+Utility nodes run deterministic configured programs.
+The engine only traverses nodes and records outputs.
+```
+
+This phase should happen before deeper Maintenance/VCS Policy work so that VCS and bootstrap behavior can be implemented as data-driven utility Materia rather than framework-specific branches.
+
+### 7.9 Add generic utility node support
+
+Tasks:
+- Extend pipeline node schema to support non-agent utility nodes:
+  ```ts
+  interface MateriaUtilityNodeConfig {
+    type: "utility";
+    utility?: string;
+    command?: string[];
+    params?: Record<string, unknown>;
+    parse?: "json" | "text";
+    assign?: Record<string, string>;
+    next?: string;
+    edges?: MateriaEdgeConfig[];
+    foreach?: MateriaForeachConfig;
+    advance?: MateriaAdvanceConfig;
+    limits?: MateriaNodeLimitsConfig;
+    timeoutMs?: number;
+  }
+  ```
+- Keep `agent` and `utility` nodes on the same generic completion path:
+  - write raw output artifact
+  - optionally parse JSON
+  - apply `assign`
+  - evaluate configured `edges`/`next`
+  - enforce visit/traversal limits
+  - write manifest and event metadata
+- Update `/materia grid` rendering and validation to show utility nodes and validate `command`/`utility` fields.
+- Ensure utility nodes can participate in `foreach` just like agent nodes.
+
+Acceptance:
+- A single-node utility grid can run and complete without starting a Pi agent turn.
+- Utility output can be assigned into generic cast state and routed with edge conditions.
+- No utility implementation contains planner/builder/evaluator/maintainer assumptions.
+
+### 7.10 Make utility nodes language-agnostic with a JSON process protocol
+
+Primary primitive: run an explicitly configured command and exchange JSON over stdin/stdout. This allows users to write utility Materia in Python, Bash, Go, Rust, Node, Bun, or any other language.
+
+Example config:
+
+```json
+{
+  "pipeline": {
+    "entry": "bootstrap",
+    "nodes": {
+      "bootstrap": {
+        "type": "utility",
+        "command": ["python3", ".pi/materia/ensure_ignored.py"],
+        "params": {
+          "patterns": [".pi/pi-materia/"]
+        },
+        "assign": {
+          "bootstrap": "$"
+        },
+        "next": "planner"
+      }
+    }
+  }
+}
+```
+
+Input sent to the utility on stdin:
+
+```json
+{
+  "cwd": "/path/to/project",
+  "runDir": "/path/to/project/.pi/pi-materia/20260430-120000",
+  "request": "build auth",
+  "castId": "20260430-120000",
+  "nodeId": "bootstrap",
+  "params": {
+    "patterns": [".pi/pi-materia/"]
+  },
+  "state": {},
+  "item": null,
+  "itemKey": null,
+  "itemLabel": null
+}
+```
+
+Expected stdout for JSON parse mode:
+
+```json
+{
+  "ok": true,
+  "changed": true,
+  "added": [".pi/pi-materia/"]
+}
+```
+
+Protocol rules:
+- `stdout` is the utility result.
+- `stderr` is diagnostic log output and should be artifacted.
+- Exit code `0` means success.
+- Non-zero exit code fails the node/cast with a clear diagnostic unless later config adds recoverable errors.
+- JSON parse failures fail the node when `parse: "json"`.
+- Utility commands are explicit config only; never auto-load arbitrary project files.
+- Add timeouts and maximum captured output sizes to avoid hung or noisy utilities.
+
+Acceptance:
+- Utility examples work in at least one non-TypeScript language using only stdin/stdout JSON.
+- The engine treats process utility output exactly like agent output for assignment and routing.
+
+### 7.11 Add optional named/built-in utility aliases without making them engine semantics
+
+Tasks:
+- Add a small utility registry for optional named utilities such as:
+  - `project.ensureIgnored`
+  - `vcs.detect`
+  - future `vcs.checkpoint`
+- Treat named utilities as plugins/commands behind the same generic utility-node interface.
+- Keep command-based utilities as the lowest-level, language-agnostic primitive.
+- Do not implicitly insert bootstrap/VCS behavior into casts. If the default loadout uses these utilities, it should do so explicitly in `config/default.json`.
+
+Initial candidate utility behavior:
+- `project.ensureIgnored` with params `{ "patterns": [".pi/pi-materia/"] }`.
+- `vcs.detect` returning `{ "kind": "jj" | "git" | "none", "root": string | null, "available": { "jj": boolean, "git": boolean } }`.
+
+Acceptance:
+- Built-in utilities can be used from config, but removing them from the grid removes the behavior.
+- The engine remains a generic node executor rather than a VCS/bootstrap policy engine.
+
+### 7.12 Document Utility Materia
+
+Tasks:
+- Add a simple markdown guide at `docs/utility-materia.md` covering:
+  - when to use utility nodes vs agent nodes
+  - utility node schema
+  - JSON stdin/stdout protocol
+  - Python example for `.gitignore`/artifact ignore hygiene
+  - edge routing from utility JSON output
+  - security/trust model for configured commands
+  - testing utilities locally outside Pi
+- Link the guide from `README.md` once the feature lands.
+- Include at least one minimal complete loadout example that says/runs `HELLO WORLD` without an LLM turn.
+
+Acceptance:
+- A user can write a utility node in an arbitrary language by following the docs.
+- Docs make clear that utility commands execute local code and must be explicitly trusted/configured.
+
+### 7.13 Establish a test framework, likely with Bun
+
+Problem: there is currently no test script or test harness. `npm run typecheck` exists, but runtime behavior is only manually smoke-tested.
+
+Tasks:
+- Evaluate adopting Bun for local development/test speed while preserving npm package compatibility for Pi users.
+- Add `bun test` based test scripts, for example:
+  ```json
+  {
+    "scripts": {
+      "test": "bun test",
+      "test:watch": "bun test --watch",
+      "typecheck": "tsc --noEmit"
+    }
+  }
+  ```
+- Decide whether to switch package management fully to Bun (`bun.lock`) or keep `package-lock.json` until publishing compatibility is confirmed.
+- Add a lightweight fake Pi extension context/session harness for native runtime tests.
+- Keep tests runnable in a normal repo checkout without requiring real provider API calls.
+
+Acceptance:
+- `bun test` runs locally and in future CI without contacting an LLM provider.
+- Existing `npm run typecheck` remains available.
+- Test setup is documented in README or contributor notes.
+
+### 7.14 Add test coverage for generic engine and utility nodes
+
+Initial test targets:
+- Template rendering and minimal path/expression helpers.
+- Pipeline validation for `agent` and `utility` nodes.
+- Utility command runner success with JSON output.
+- Utility command runner text mode.
+- Non-zero utility exit code failure diagnostics.
+- Invalid JSON failure diagnostics.
+- Timeout behavior.
+- `foreach` utility execution and current item metadata.
+- `assign` from utility output into generic state.
+- Edge routing from utility JSON output.
+- Manifest/events/artifacts for utility nodes, including short item labels.
+- Fake-session smoke test for an all-utility `HELLO WORLD` grid.
+
+Acceptance:
+- Core utility node behavior is covered before changing the bundled default loadout to rely on utilities.
+- Tests protect the data-driven engine from regressing into semantic planner/builder/evaluator branches.
+
 ## Phase 4: Maintenance and VCS Policy
+
+Note: after Phase 3.5, Maintenance/VCS Policy should be implemented as configured Materia behavior where possible. Deterministic pieces such as VCS detection, ignore hygiene, and commits should be utility Materia nodes or named utilities, not hidden engine branches.
 
 ### 8. Maintain more frequently
 
@@ -551,17 +754,21 @@ Acceptance:
 
 ## Proposed Implementation Order
 
-1. Config loading from external path and artifact directory separation.
-2. Token/cost aggregation with live widget display and budget limits.
-3. Structured pipeline config replacing hardcoded roles.
-4. Status widget and event log.
-5. `/materia grid` pipeline visualization.
-6. Maintainer after each passed task.
-7. VCS adapter with jj/git detection.
-8. Automatic maintainer commit decision.
-9. Context artifact capture for isolated role turns. — implemented
-10. Per-role model/thinking/tool settings.
-11. Advanced graph edge conditions.
+1. Config loading from external path and artifact directory separation. — implemented
+2. Token/cost aggregation with live widget display and budget limits. — implemented, pending broader provider verification
+3. Structured pipeline config replacing hardcoded roles. — implemented
+4. Status widget and event log. — implemented
+5. `/materia grid` pipeline visualization. — implemented
+6. Active-session orchestration and isolated role context artifacts. — implemented
+7. Fully data-driven generic engine. — implemented
+8. Bun-based test foundation and fake Pi runtime harness.
+9. Language-agnostic utility node schema and command runner.
+10. Utility Materia documentation and examples.
+11. Optional named utility registry, starting with artifact ignore/VCS detection utilities.
+12. Update bundled default loadout to use utility nodes explicitly for deterministic bootstrap hygiene.
+13. Maintainer/checkpoint policy as configured nodes/utilities, not engine branches.
+14. Per-role model/thinking/tool settings.
+15. Advanced graph edge conditions/parallelism if needed.
 
 ## Near-Term Commands to Add
 
@@ -578,6 +785,10 @@ Acceptance:
 - Should maintainer commit extension code/config changes by default, or only target-project changes?
 - Should failed maintenance send control back to builder, evaluator, or stop?
 - Should pi-materia support parallel branches later, or stay sequential initially?
+- Should built-in utility aliases live in pi-materia core, separate packages, or both?
+- What command sandbox/confirmation model is appropriate for utility nodes that execute arbitrary local programs?
+- Should Bun become the primary package manager, or should Bun only provide the test runner while npm remains the publishing baseline?
+
 ## Phase 6: Fully Data-Driven Materia Engine
 
 Strategic correction: the Materia engine must not know about planner/builder/evaluator/maintainer semantics. Those are default loadout concepts only. The framework source should contain no references to `plan`, `build`, `evaluate`, `maintain`, or node kinds as runtime behavior. The engine should only traverse configured nodes, render configured prompts, parse configured outputs, assign configured state, evaluate configured edges, and enforce generic safety limits.
