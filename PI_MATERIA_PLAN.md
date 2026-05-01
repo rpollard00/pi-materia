@@ -455,7 +455,7 @@ Phase 3 implementation notes:
 - Artifacts now include `manifest.json` linking phases/tasks to native Pi session entry ids and context artifacts.
 - Each role turn writes the exact isolated model-visible context/prompt under `contexts/` before triggering the turn.
 
-## Phase 3.5: Utility Materia Nodes and Test Foundation — Next
+## Phase 3.5: Utility Materia Nodes and Test Foundation — Complete
 
 Strategic correction from follow-up design discussion: deterministic project setup, artifact ignore hygiene, VCS detection, and future checkpoint mechanics should not be hardcoded into the Materia engine. They should be represented as configured Materia nodes just like agent slots, but executed by deterministic utilities instead of LLM turns.
 
