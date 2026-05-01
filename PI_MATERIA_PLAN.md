@@ -786,13 +786,13 @@ Acceptance:
 
 - Should roles use the same active model by default, or should roles define defaults?
 - Should maintainer commit extension code/config changes by default, or only target-project changes?
-- Should failed maintenance send control back to builder, evaluator, or stop?
-- Should pi-materia support parallel branches later, or stay sequential initially?
-- Should built-in utility aliases live in pi-materia core, separate packages, or both?
-- What command sandbox/confirmation model is appropriate for utility nodes that execute arbitrary local programs?
-- Should Bun become the primary package manager, or should Bun only provide the test runner while npm remains the publishing baseline?
+- Should failed maintenance send control back to builder, evaluator, or stop? Back to maintenance. This is already solved.
+- Should pi-materia support parallel branches later, or stay sequential initially? Stay sequential for now, we may add support for "Multi-" materia, but its a secondary concern.
+- Should built-in utility aliases live in pi-materia core, separate packages, or both? Both - we can provide some core utils but it should be extensible.
+- What command sandbox/confirmation model is appropriate for utility nodes that execute arbitrary local programs? YOLO, our utils will be safe. Disclaimer when adding external.
+- Should Bun become the primary package manager, or should Bun only provide the test runner while npm remains the publishing baseline? Primary package manager.
 
-## Phase 6: Fully Data-Driven Materia Engine
+## Phase 6: Fully Data-Driven Materia Engine [Complete]
 
 Strategic correction: the Materia engine must not know about planner/builder/evaluator/maintainer semantics. Those are default loadout concepts only. The framework source should contain no references to `plan`, `build`, `evaluate`, `maintain`, or node kinds as runtime behavior. The engine should only traverse configured nodes, render configured prompts, parse configured outputs, assign configured state, evaluate configured edges, and enforce generic safety limits.
 
