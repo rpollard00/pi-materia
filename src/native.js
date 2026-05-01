@@ -69,12 +69,15 @@ export async function handleAgentEnd(pi, event, ctx) {
     if (!latest || latest.entry.id === state.lastProcessedEntryId)
         return;
     const text = assistantText(latest.message);
+    const agentError = assistantErrorMessage(latest.message);
     state.lastProcessedEntryId = latest.entry.id;
     state.lastAssistantText = text;
     state.awaitingResponse = false;
     state.updatedAt = Date.now();
     captureUsage(state, latest.message);
     try {
+        if (agentError)
+            throw new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
         await completeNode(pi, ctx, state, text, latest.entry.id);
     }
     catch (error) {
@@ -345,11 +348,16 @@ function buildSyntheticCastContext(state) {
 function findActiveMateriaPromptIndex(messages) {
     for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i];
+        if (isToolOrAssistantMessage(message))
+            continue;
         const text = messageContentText(message.content);
-        if (text.includes("<materia-role-instructions>"))
+        if (text.includes("<materia-role-instructions>") && text.includes("</materia-role-instructions>"))
             return i;
     }
     return -1;
+}
+function isToolOrAssistantMessage(message) {
+    return message.role === "assistant" || message.role === "tool" || message.role === "toolResult";
 }
 function createUserMessage(content) {
     return { role: "user", content, timestamp: Date.now() };
@@ -496,6 +504,12 @@ function assistantText(message) {
     if (!Array.isArray(content))
         return "";
     return content.map((part) => part?.type === "text" ? part.text : "").filter(Boolean).join("\n").trim();
+}
+function assistantErrorMessage(message) {
+    const value = message;
+    if (value.stopReason !== "error")
+        return undefined;
+    return typeof value.errorMessage === "string" && value.errorMessage.trim() ? value.errorMessage : "unknown agent error";
 }
 function captureUsage(state, message) {
     const usage = extractUsage(message);
