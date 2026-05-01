@@ -10,6 +10,11 @@ _build/
 dist/
 coverage/
 
+# TypeScript compiler output accidentally emitted beside sources
+/src/**/*.js
+/src/**/*.js.map
+/src/**/*.d.ts
+
 # Logs
 *.log
 npm-debug.log*
