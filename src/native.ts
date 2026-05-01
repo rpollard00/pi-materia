@@ -52,6 +52,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     currentNode: pipeline.entry.id,
     currentRole: nodeRoleName(pipeline.entry),
     awaitingResponse: true,
+    nodeState: "awaiting_agent_response",
     startedAt: Date.now(),
     updatedAt: Date.now(),
     data: {},
@@ -88,6 +89,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   state.lastProcessedEntryId = latest.entry.id;
   state.lastAssistantText = text;
   state.awaitingResponse = false;
+  state.nodeState = "idle";
   state.updatedAt = Date.now();
   captureUsage(state, latest.message);
 
@@ -97,6 +99,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   } catch (error) {
     state.active = false;
     state.phase = "failed";
+    state.nodeState = "failed";
     state.failedReason = error instanceof Error ? error.message : String(error);
     state.runState.lastMessage = state.failedReason;
     await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason });
@@ -203,6 +206,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   state.currentRole = nodeRoleName(node);
   state.currentRoleModel = undefined;
   state.awaitingResponse = true;
+  state.nodeState = isAgentResolvedNode(node) ? "awaiting_agent_response" : "running_utility";
   state.updatedAt = Date.now();
   state.runState.currentNode = node.id;
   state.runState.currentRole = nodeRoleName(node);
@@ -218,6 +222,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
 
   if (!isAgentResolvedNode(node)) {
     state.awaitingResponse = false;
+    state.nodeState = "running_utility";
     state.currentRole = undefined;
     state.currentRoleModel = undefined;
     state.runState.currentRole = undefined;
@@ -233,6 +238,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   }
 
   state.awaitingResponse = true;
+  state.nodeState = "awaiting_agent_response";
   saveCastState(pi, state);
   const appliedModel = await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
   const roleModel = roleModelSelection(appliedModel);
@@ -405,6 +411,7 @@ async function recordUtilityInput(state: MateriaCastState, node: ResolvedMateria
 async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string): Promise<void> {
   state.active = false;
   state.awaitingResponse = false;
+  state.nodeState = "failed";
   state.phase = "failed";
   state.failedReason = error instanceof Error ? error.message : String(error);
   state.runState.lastMessage = state.failedReason;
@@ -454,6 +461,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.active = false;
   state.phase = "complete";
   state.awaitingResponse = false;
+  state.nodeState = "complete";
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
   await writeUsage(state.runState);
@@ -757,6 +765,7 @@ export function saveCastState(pi: ExtensionAPI, state: MateriaCastState): void {
 export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason = "aborted"): MateriaCastState {
   state.active = false;
   state.awaitingResponse = false;
+  state.nodeState = "failed";
   state.phase = reason === "aborted" ? "failed" : state.phase;
   state.failedReason = reason;
   state.updatedAt = Date.now();

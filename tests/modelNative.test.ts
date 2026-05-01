@@ -54,6 +54,24 @@ describe("native per-role model settings", () => {
     expect(harness.sentMessages.some(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toBe(true);
   });
 
+  test("cast state distinguishes awaiting agent response and completed states", async () => {
+    const harness = await makeHarness(agentConfig());
+
+    await harness.runCommand("materia", "cast state model");
+    const activeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as { active?: boolean; awaitingResponse?: boolean; nodeState?: string; phase?: string };
+    expect(activeState.active).toBe(true);
+    expect(activeState.awaitingResponse).toBe(true);
+    expect(activeState.nodeState).toBe("awaiting_agent_response");
+
+    harness.appendAssistantMessage("done");
+    await harness.emit("agent_end", { messages: [] });
+    const completeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as { active?: boolean; awaitingResponse?: boolean; nodeState?: string; phase?: string };
+    expect(completeState.active).toBe(false);
+    expect(completeState.awaitingResponse).toBe(false);
+    expect(completeState.nodeState).toBe("complete");
+    expect(completeState.phase).toBe("complete");
+  });
+
   test("explicit role model and thinking are applied before tools and agent turn", async () => {
     const harness = await makeHarness(agentConfig({ model: "anthropic/claude-test", thinking: "high" }));
 

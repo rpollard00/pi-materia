@@ -32,6 +32,12 @@ function validateNode(id: string, node: MateriaPipelineNodeConfig): void {
   if (node.parse !== undefined && node.parse !== "text" && node.parse !== "json") {
     throw new Error(`Pipeline slot "${id}" has unsupported parse mode "${String(node.parse)}". Expected "text" or "json".`);
   }
+  if ("multiTurn" in node && node.type !== "agent") {
+    throw new Error(`Pipeline slot "${id}" configures multiTurn, but multi-turn is only supported for agent nodes.`);
+  }
+  if (node.type === "agent" && node.multiTurn !== undefined && typeof node.multiTurn !== "boolean") {
+    throw new Error(`Agent pipeline slot "${id}" has invalid multiTurn. Expected a boolean.`);
+  }
   if (node.type === "utility") {
     if (!node.utility && !node.command) throw new Error(`Utility pipeline slot "${id}" must configure either "utility" or "command".`);
     if (node.command !== undefined) validateCommand(id, node.command);
@@ -102,6 +108,7 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
   if (node.type === "agent") {
     const role = config.roles[node.role];
     details.push(`role=${node.role}`, `tools=${role?.tools ?? "unknown"}`);
+    if (node.multiTurn) details.push("multiTurn=true");
     if (role) details.push(formatRoleModelSettings(role));
   } else {
     details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);

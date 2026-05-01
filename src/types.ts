@@ -98,6 +98,14 @@ export interface UsageReport extends UsageTotals {
 
 export type MateriaCastPhase = string;
 
+export type MateriaCastNodeState =
+  | "awaiting_agent_response"
+  | "awaiting_user_refinement"
+  | "running_utility"
+  | "idle"
+  | "complete"
+  | "failed";
+
 export interface MateriaCastState {
   version: 1;
   active: boolean;
@@ -114,7 +122,13 @@ export interface MateriaCastState {
   currentItemKey?: string;
   currentItemLabel?: string;
   currentRoleModel?: RoleModelSelection;
+  /**
+   * Backward-compatible boolean used by existing runtime checks.
+   * New code should prefer nodeState when it needs to distinguish active
+   * multi-turn refinement pauses from turns awaiting an agent response.
+   */
   awaitingResponse: boolean;
+  nodeState?: MateriaCastNodeState;
   lastProcessedEntryId?: string;
   lastAssistantText?: string;
   failedReason?: string;
@@ -210,6 +224,8 @@ export interface MateriaAgentNodeConfig extends MateriaPipelineNodeCommonConfig 
   type: "agent";
   role: string;
   prompt?: string;
+  /** Keep this agent node active for interactive refinement until finalized. */
+  multiTurn?: boolean;
 }
 
 export interface MateriaUtilityNodeConfig extends MateriaPipelineNodeCommonConfig {

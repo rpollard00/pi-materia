@@ -86,6 +86,7 @@ export default function piMateria(pi: ExtensionAPI) {
           `Materia Cast ${state.castId}`,
           `active: ${state.active}`,
           `phase: ${state.phase}`,
+          `node state: ${state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase === "complete" ? "complete" : state.phase === "failed" ? "failed" : "idle")}`,
           `awaiting response: ${state.awaitingResponse}`,
           `node: ${state.currentNode ?? "-"}`,
           `role: ${state.currentRole ?? "-"}`,
