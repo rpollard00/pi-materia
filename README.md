@@ -139,4 +139,4 @@ Each cast writes enough information to debug the run after the fact:
 
 ## Default loadout
 
-The bundled default loadout lives at `config/default.json`. It defines its software-development workflow entirely as config using generic prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and checkpoint roles.
+The bundled default loadout lives at `config/default.json`. It defines its software-development workflow entirely as config using generic prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia roles: `Build`, `Auto-Eval`, and `Maintain`. The `Auto-` prefix marks autonomous LLM-driven Materia, leaving room for manual variants in custom loadouts.

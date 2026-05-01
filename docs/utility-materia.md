@@ -190,8 +190,8 @@ Utility JSON output can choose the next node with edges:
   "parse": "json",
   "assign": { "vcs": "$" },
   "edges": [
-    { "when": "$.kind == \"jj\"", "to": "jjCheckpoint" },
-    { "when": "$.kind == \"git\"", "to": "gitCheckpoint" },
+    { "when": "$.kind == \"jj\"", "to": "Maintain" },
+    { "when": "$.kind == \"git\"", "to": "GitMaintain" },
     { "when": "$.kind == \"none\"", "to": "initVcs" }
   ],
   "next": "planner"

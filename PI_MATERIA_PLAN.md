@@ -893,16 +893,16 @@ Examples:
 
 ```json
 {
-  "check": {
+  "Auto-Eval": {
     "type": "agent",
-    "role": "checker",
+    "role": "Auto-Eval",
     "parse": "json",
     "assign": {
       "lastCheck": "$"
     },
     "edges": [
-      { "when": "$.passed == true", "to": "checkpoint" },
-      { "when": "$.passed == false", "to": "repair", "maxTraversals": 3 }
+      { "when": "$.passed == true", "to": "Maintain" },
+      { "when": "$.passed == false", "to": "Build", "maxTraversals": 3 }
     ]
   }
 }
@@ -1127,12 +1127,12 @@ Acceptance:
 
 The bundled default config should define the familiar Materia Grid entirely as data:
 
-- planning node creates JSON `{ tasks: [...] }`
-- implementation node works on current task item
-- checking node returns JSON `{ passed, feedback, missing }`
-- checkpoint node records jj/git description/commit
+- planner node creates JSON `{ tasks: [...] }`
+- `Build` node works on current task item
+- `Auto-Eval` node returns JSON `{ passed, feedback, missing }`
+- `Maintain` node records jj/git description/commit
 - pass/fail routing is configured via JSON conditions
-- task advancement is configured on checkpoint success
+- task advancement is configured on `Maintain` success
 
 The framework source should not contain those names or behaviors.
 
