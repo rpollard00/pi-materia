@@ -39,13 +39,17 @@ Tests use a fake Pi harness and do not require provider/API access or a real Pi 
 
 ```text
 /materia grid
+/materia loadout
+/materia loadout Planning-Consult
 /materia cast implement the next small feature
 /materia casts
 /materia status
 /materia abort
 ```
 
-pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full role prompts are hidden behind compact Materia cast messages, and each role turn receives a curated Materia context instead of the full previous conversation.
+pi-materia reports the config source, artifact directory, active loadout, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full role prompts are hidden behind compact Materia cast messages, and each role turn receives a curated Materia context instead of the full previous conversation.
+
+Use `/materia loadout` to list configured graph loadouts and mark the active one. Use `/materia loadout <name>` to switch the active graph for future casts, for example `/materia loadout Planning-Consult`. Loadout names may contain hyphens.
 
 ### Metrics semantics
 
@@ -55,12 +59,12 @@ Attempt counts are per exact Materia task identity: the node id plus the current
 
 ## Configuration
 
-pi-materia resolves its loadout/config in this order:
+pi-materia resolves its config in this order:
 
 1. `--materia-config /path/to/config.json`
 2. `MATERIA_CONFIG=/path/to/config.json`
 3. target project `.pi/pi-materia.json`
-4. bundled default loadout at `config/default.json`
+4. bundled default config at `config/default.json`
 
 Example:
 
@@ -68,7 +72,7 @@ Example:
 pi -e /path/to/pi-materia/src/index.ts --materia-config ./my-loadout.json
 ```
 
-Minimal hello-world grid:
+Minimal hello-world legacy grid:
 
 ```json
 {
@@ -92,6 +96,38 @@ Minimal hello-world grid:
   }
 }
 ```
+
+Configs can also define named `loadouts` that share the top-level `roles`, `limits`, `budget`, and `artifactDir`. Set `activeLoadout` to choose which graph `/materia cast` runs:
+
+```json
+{
+  "artifactDir": ".pi/pi-materia",
+  "activeLoadout": "Full-Auto",
+  "loadouts": {
+    "Full-Auto": {
+      "entry": "planner",
+      "nodes": {
+        "planner": { "type": "agent", "role": "planner", "next": "Build" },
+        "Build": { "type": "agent", "role": "Build", "next": "end" }
+      }
+    },
+    "Planning-Consult": {
+      "entry": "planner",
+      "nodes": {
+        "planner": { "type": "agent", "role": "interactivePlan", "multiTurn": true, "next": "Build" },
+        "Build": { "type": "agent", "role": "Build", "next": "end" }
+      }
+    }
+  },
+  "roles": {
+    "planner": { "tools": "readOnly", "systemPrompt": "Plan automatically." },
+    "interactivePlan": { "tools": "readOnly", "systemPrompt": "Collaborate, then finalize a plan." },
+    "Build": { "tools": "coding", "systemPrompt": "Implement exactly the assigned task." }
+  }
+}
+```
+
+When switching with `/materia loadout <name>`, pi-materia persists only the `activeLoadout` override to the active writable config path: the explicit `--materia-config`/`MATERIA_CONFIG` file when one is used, otherwise the target project's `.pi/pi-materia.json`. If you are using the bundled defaults, switching creates or updates `.pi/pi-materia.json`; it does not modify `config/default.json`.
 
 ### Per-role model and thinking settings
 
@@ -130,7 +166,7 @@ Example loadout excerpt where planner and evaluator roles use a cheaper model, w
 }
 ```
 
-In this example, `Maintain` intentionally has no `model` or `thinking`, so it falls back to whatever model and thinking level are active in Pi at that point. The bundled default loadout also leaves roles model-free, so installing pi-materia does not pin or override your active Pi model.
+In this example, `Maintain` intentionally has no `model` or `thinking`, so it falls back to whatever model and thinking level are active in Pi at that point. The bundled default loadouts leave roles model-free, so installing pi-materia does not pin or override your active Pi model.
 
 Run `/materia grid` to verify the resolved role settings before casting. Agent slots show `model=<configured value>` and `thinking=<configured value>` for explicit settings, or labels such as `model=active Pi model` and `thinking=active Pi thinking` for fallback roles.
 
@@ -152,7 +188,7 @@ Generic node mechanics:
 
 Agent nodes are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent node when you want a manual refinement loop. A multi-turn node records each assistant response as a refinement artifact, keeps the cast active at that node, and treats ordinary user replies as refinement instructions. When the latest draft is ready, say so in natural language (for example, "ready to continue", "continue", "finalize", or "we're ready") and pi-materia finalizes the latest assistant response using the node's normal `parse`, `assign`, `edges`, and `next` behavior. Invalid JSON is only an error when you finalize a JSON-parsed node.
 
-The bundled config includes an `interactivePlan` role but does not wire it into the default pipeline. To use it, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline like this excerpt:
+The bundled config wires the `interactivePlan` role into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline/loadout like this excerpt:
 
 ```json
 {
@@ -234,6 +270,11 @@ Each cast writes enough information to debug the run after the fact:
   contexts/<node-id>-<visit>.md
 ```
 
-## Default loadout
+## Default loadouts
 
-The bundled default loadout lives at `config/default.json`. It defines its software-development workflow entirely as config using generic prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia roles: `Build`, `Auto-Eval`, and `Maintain`. The `Auto-` prefix marks autonomous LLM-driven Materia, leaving room for manual variants in custom loadouts.
+The bundled defaults live at `config/default.json` and set `activeLoadout` to `Full-Auto`.
+
+- `Full-Auto`: the autonomous software-development workflow. The `planner` role creates the task list, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
+- `Planning-Consult`: the same graph except the planner node uses the `interactivePlan` role with `multiTurn: true`, letting you collaboratively refine the plan before continuing to the automated build/evaluate/maintain loop.
+
+Both loadouts are defined entirely as config using generic prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia roles. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
