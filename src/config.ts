@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { LoadedConfig, PiMateriaConfig } from "./types.js";
+import type { LoadedConfig, MateriaRoleConfig, PiMateriaConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
@@ -30,7 +30,7 @@ function getBundledDefaultConfigPath(): string {
 
 async function mergeConfig(parsed: Partial<PiMateriaConfig>): Promise<PiMateriaConfig> {
   const base = await loadDefaultConfig();
-  return {
+  const config = {
     ...base,
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
@@ -41,8 +41,42 @@ async function mergeConfig(parsed: Partial<PiMateriaConfig>): Promise<PiMateriaC
         nodes: parsed.pipeline.nodes ?? base.pipeline.nodes,
       }
       : base.pipeline,
-    roles: { ...base.roles, ...(parsed.roles ?? {}) },
-  };
+    roles: mergeRoles(base.roles, parsed.roles),
+  } as PiMateriaConfig;
+  validateRoles(config.roles);
+  return config;
+}
+
+function mergeRoles(baseRoles: Record<string, MateriaRoleConfig>, parsedRoles: Partial<PiMateriaConfig>["roles"]): Record<string, MateriaRoleConfig> {
+  if (!parsedRoles) return baseRoles;
+  const merged: Record<string, MateriaRoleConfig> = { ...baseRoles };
+  for (const [name, role] of Object.entries(parsedRoles as Record<string, unknown>)) {
+    if (!isPlainObject(role)) throw new Error(`Materia role "${name}" is invalid. Expected a role object.`);
+    merged[name] = { ...(baseRoles[name] ?? {}), ...role } as MateriaRoleConfig;
+  }
+  return merged;
+}
+
+function validateRoles(roles: Record<string, MateriaRoleConfig>): void {
+  for (const [name, role] of Object.entries(roles as Record<string, unknown>)) {
+    if (!isPlainObject(role)) throw new Error(`Materia role "${name}" is invalid. Expected a role object.`);
+    if (role.systemPrompt === undefined || typeof role.systemPrompt !== "string") {
+      throw new Error(`Materia role "${name}" has invalid systemPrompt. Expected a string.`);
+    }
+    if (role.tools === undefined || !["none", "readOnly", "coding"].includes(String(role.tools))) {
+      throw new Error(`Materia role "${name}" has invalid tools. Expected "none", "readOnly", or "coding".`);
+    }
+    if (role.model !== undefined && typeof role.model !== "string") {
+      throw new Error(`Materia role "${name}" has invalid model. Expected a string when configured.`);
+    }
+    if (role.thinking !== undefined && typeof role.thinking !== "string") {
+      throw new Error(`Materia role "${name}" has invalid thinking. Expected a string when configured.`);
+    }
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function loadDefaultConfig(): Promise<PiMateriaConfig> {

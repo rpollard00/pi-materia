@@ -222,4 +222,6 @@ export interface ResolvedMateriaUtilityNode {
 export interface MateriaRoleConfig {
   tools: "none" | "readOnly" | "coding";
   systemPrompt: string;
+  model?: string;
+  thinking?: string;
 }
