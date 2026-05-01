@@ -63,21 +63,26 @@ export function extractUsage(message: unknown): UsageTotals | undefined {
 
   const input = numberOrZero(firstNumber(usage, ["input", "inputTokens", "input_tokens", "promptTokens", "prompt_tokens"]));
   const output = numberOrZero(firstNumber(usage, ["output", "outputTokens", "output_tokens", "completionTokens", "completion_tokens"]));
-  const cacheRead = numberOrZero(firstNumber(usage, ["cacheRead", "cacheReadTokens", "cache_read", "cache_read_tokens", "cache_read_input_tokens", "cachedInputTokens", "cached_input_tokens"]));
+  const cacheRead = numberOrZero(firstNumber(usage, ["cacheRead", "cacheReadTokens", "cache_read", "cache_read_tokens", "cache_read_input_tokens", "cachedInputTokens", "cached_input_tokens", "cachedTokens", "cached_tokens"]));
   const cacheWrite = numberOrZero(firstNumber(usage, ["cacheWrite", "cacheWriteTokens", "cache_write", "cache_write_tokens", "cache_creation_input_tokens", "cacheCreationTokens", "cache_creation_tokens"]));
   const providedTotal = firstNumber(usage, ["totalTokens", "total", "tokens", "total_tokens"]);
   const total = providedTotal ?? input + output + cacheRead + cacheWrite;
 
   const costValue = usage.cost;
   const cost = costValue && typeof costValue === "object" ? costValue as Record<string, unknown> : undefined;
-  const costInput = numberOrZero(firstNumber(cost, ["input", "inputCost", "inputUsd", "prompt", "promptCost", "promptUsd"]) ?? firstNumber(usage, ["inputCost", "inputCostUsd", "inputUsd", "promptCost", "promptCostUsd", "promptUsd"]));
-  const costOutput = numberOrZero(firstNumber(cost, ["output", "outputCost", "outputUsd", "completion", "completionCost", "completionUsd"]) ?? firstNumber(usage, ["outputCost", "outputCostUsd", "outputUsd", "completionCost", "completionCostUsd", "completionUsd"]));
-  const costCacheRead = numberOrZero(firstNumber(cost, ["cacheRead", "cacheReadCost", "cacheReadUsd", "cachedInput", "cachedInputCost", "cachedInputUsd"]) ?? firstNumber(usage, ["cacheReadCost", "cacheReadCostUsd", "cacheReadUsd", "cachedInputCost", "cachedInputCostUsd", "cachedInputUsd"]));
-  const costCacheWrite = numberOrZero(firstNumber(cost, ["cacheWrite", "cacheWriteCost", "cacheWriteUsd", "cacheCreation", "cacheCreationCost", "cacheCreationUsd"]) ?? firstNumber(usage, ["cacheWriteCost", "cacheWriteCostUsd", "cacheWriteUsd", "cacheCreationCost", "cacheCreationCostUsd", "cacheCreationUsd"]));
-  const providedCostTotal = firstNumber(cost, ["total", "totalCost", "totalUsd", "costUsd", "usd"])
+  const costInput = numberOrZero(firstNumber(cost, ["input", "inputCost", "input_cost", "inputUsd", "input_usd", "inputCostUsd", "input_cost_usd", "prompt", "promptCost", "prompt_cost", "promptUsd", "prompt_usd", "promptCostUsd", "prompt_cost_usd"])
+    ?? firstNumber(usage, ["inputCost", "input_cost", "inputCostUsd", "input_cost_usd", "inputUsd", "input_usd", "promptCost", "prompt_cost", "promptCostUsd", "prompt_cost_usd", "promptUsd", "prompt_usd"]));
+  const costOutput = numberOrZero(firstNumber(cost, ["output", "outputCost", "output_cost", "outputUsd", "output_usd", "outputCostUsd", "output_cost_usd", "completion", "completionCost", "completion_cost", "completionUsd", "completion_usd", "completionCostUsd", "completion_cost_usd"])
+    ?? firstNumber(usage, ["outputCost", "output_cost", "outputCostUsd", "output_cost_usd", "outputUsd", "output_usd", "completionCost", "completion_cost", "completionCostUsd", "completion_cost_usd", "completionUsd", "completion_usd"]));
+  const costCacheRead = numberOrZero(firstNumber(cost, ["cacheRead", "cache_read", "cacheReadCost", "cache_read_cost", "cacheReadUsd", "cache_read_usd", "cacheReadCostUsd", "cache_read_cost_usd", "cachedInput", "cached_input", "cachedInputCost", "cached_input_cost", "cachedInputUsd", "cached_input_usd", "cachedInputCostUsd", "cached_input_cost_usd"])
+    ?? firstNumber(usage, ["cacheReadCost", "cache_read_cost", "cacheReadCostUsd", "cache_read_cost_usd", "cacheReadUsd", "cache_read_usd", "cachedInputCost", "cached_input_cost", "cachedInputCostUsd", "cached_input_cost_usd", "cachedInputUsd", "cached_input_usd"]));
+  const costCacheWrite = numberOrZero(firstNumber(cost, ["cacheWrite", "cache_write", "cacheWriteCost", "cache_write_cost", "cacheWriteUsd", "cache_write_usd", "cacheWriteCostUsd", "cache_write_cost_usd", "cacheCreation", "cache_creation", "cacheCreationCost", "cache_creation_cost", "cacheCreationUsd", "cache_creation_usd", "cacheCreationCostUsd", "cache_creation_cost_usd"])
+    ?? firstNumber(usage, ["cacheWriteCost", "cache_write_cost", "cacheWriteCostUsd", "cache_write_cost_usd", "cacheWriteUsd", "cache_write_usd", "cacheCreationCost", "cache_creation_cost", "cacheCreationCostUsd", "cache_creation_cost_usd", "cacheCreationUsd", "cache_creation_usd"]));
+  const providedCostTotal = firstNumber(cost, ["total", "totalCost", "total_cost", "totalUsd", "total_usd", "totalCostUsd", "total_cost_usd", "costUsd", "cost_usd", "usd"])
     ?? numberOrUndefined(costValue)
-    ?? firstNumber(usage, ["totalCost", "totalCostUsd", "totalUsd", "costUsd", "usd"]);
-  const costTotal = providedCostTotal ?? costInput + costOutput + costCacheRead + costCacheWrite;
+    ?? firstNumber(usage, ["totalCost", "total_cost", "totalCostUsd", "total_cost_usd", "totalUsd", "total_usd", "costUsd", "cost_usd", "usd"]);
+  const componentCostTotal = costInput + costOutput + costCacheRead + costCacheWrite;
+  const costTotal = providedCostTotal === undefined ? componentCostTotal : Math.max(providedCostTotal, componentCostTotal);
   return {
     tokens: { input, output, cacheRead, cacheWrite, total },
     cost: {

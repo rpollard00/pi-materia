@@ -21,6 +21,28 @@ describe("usage extraction", () => {
     expect(extractUsage({ usage: { input: 1, output: 2, costUsd: 0.456 } })?.cost.total).toBe(0.456);
   });
 
+  test("extracts OpenAI/Codex snake_case token and USD cost aliases", () => {
+    expect(extractUsage({
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+        cached_tokens: 30,
+        cache_creation_input_tokens: 40,
+        total_tokens: 100,
+        cost: {
+          input_cost_usd: 0.001,
+          output_cost_usd: 0.002,
+          cached_input_cost_usd: 0.0003,
+          cache_creation_cost_usd: 0.0004,
+          total_cost_usd: 0.0037,
+        },
+      },
+    })).toEqual({
+      tokens: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, total: 100 },
+      cost: { input: 0.001, output: 0.002, cacheRead: 0.0003, cacheWrite: 0.0004, total: 0.0037 },
+    });
+  });
+
   test("does not allow a provided total cost to underreport normalized component costs", () => {
     const usage = extractUsage({
       usage: {
