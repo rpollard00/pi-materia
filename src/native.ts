@@ -76,6 +76,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   if (!latest || latest.entry.id === state.lastProcessedEntryId) return;
 
   const text = assistantText(latest.message);
+  const agentError = assistantErrorMessage(latest.message);
   state.lastProcessedEntryId = latest.entry.id;
   state.lastAssistantText = text;
   state.awaitingResponse = false;
@@ -83,6 +84,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   captureUsage(state, latest.message);
 
   try {
+    if (agentError) throw new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
     await completeNode(pi, ctx, state, text, latest.entry.id);
   } catch (error) {
     state.active = false;
@@ -361,11 +363,16 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
 
 function findActiveMateriaPromptIndex(messages: unknown[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i] as { content?: unknown };
+    const message = messages[i] as { content?: unknown; role?: unknown };
+    if (isToolOrAssistantMessage(message)) continue;
     const text = messageContentText(message.content);
-    if (text.includes("<materia-role-instructions>")) return i;
+    if (text.includes("<materia-role-instructions>") && text.includes("</materia-role-instructions>")) return i;
   }
   return -1;
+}
+
+function isToolOrAssistantMessage(message: { role?: unknown }): boolean {
+  return message.role === "assistant" || message.role === "tool" || message.role === "toolResult";
 }
 
 function createUserMessage(content: string): unknown {
@@ -502,6 +509,12 @@ function assistantText(message: unknown): string {
   const content = (message as any)?.content;
   if (!Array.isArray(content)) return "";
   return content.map((part) => part?.type === "text" ? part.text : "").filter(Boolean).join("\n").trim();
+}
+
+function assistantErrorMessage(message: unknown): string | undefined {
+  const value = message as { stopReason?: unknown; errorMessage?: unknown };
+  if (value.stopReason !== "error") return undefined;
+  return typeof value.errorMessage === "string" && value.errorMessage.trim() ? value.errorMessage : "unknown agent error";
 }
 
 function captureUsage(state: MateriaCastState, message: unknown): void {
