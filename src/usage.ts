@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent } from "./artifacts.js";
-import type { MateriaRunState, PiMateriaConfig, RoleModelSelection, UsageReport, UsageTotals } from "./types.js";
+import type { MateriaRunState, PiMateriaConfig, RoleModelSelection, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
 
 export function createRunState(runId: string, runDir: string, model: unknown): MateriaRunState {
   const modelInfo = getModelInfo(model);
@@ -15,6 +15,7 @@ export function createRunState(runId: string, runDir: string, model: unknown): M
     usage: {
       ...emptyUsageTotals(),
       ...modelInfo,
+      costKind: inferUsageCostKind(modelInfo),
       byRole: {},
       byNode: {},
       byTask: {},
@@ -100,6 +101,7 @@ export function recordUsageModelSelection(report: UsageReport, key: { node: stri
   if (key.roleModel.provider) report.provider = key.roleModel.provider;
   if (key.roleModel.api) report.api = key.roleModel.api;
   if (key.roleModel.thinking) report.thinkingLevel = key.roleModel.thinking;
+  updateUsageCostKind(report, key.roleModel);
   report.modelSelections ??= [];
   report.modelSelections.push({ ...key.roleModel, node: key.node, role: key.role, taskId: key.taskId, attempt: key.attempt });
 }
@@ -116,6 +118,7 @@ export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: s
   if (metadata.provider) report.provider = metadata.provider;
   if (metadata.api) report.api = metadata.api;
   if (metadata.thinking) report.thinkingLevel = metadata.thinking;
+  updateUsageCostKind(report, metadata);
   report.turns ??= [];
   report.turns.push({
     ...cloneUsageTotals(usage),
@@ -187,6 +190,21 @@ function getModelInfo(model: unknown): Pick<UsageReport, "model" | "provider" | 
 
 function compactModelInfo(info: Partial<RoleModelSelection>): Partial<RoleModelSelection> {
   return Object.fromEntries(Object.entries(info).filter(([, value]) => value !== undefined)) as Partial<RoleModelSelection>;
+}
+
+function updateUsageCostKind(report: UsageReport, info: Partial<RoleModelSelection>): void {
+  const kind = inferUsageCostKind(info);
+  if (kind === "subscription" || !report.costKind) report.costKind = kind;
+}
+
+function inferUsageCostKind(info: Partial<RoleModelSelection>): UsageCostKind {
+  return isCodexSubscriptionModel(info) ? "subscription" : "actual";
+}
+
+function isCodexSubscriptionModel(info: Partial<RoleModelSelection>): boolean {
+  return [info.provider, info.api, info.model, info.requestedModel]
+    .filter((value): value is string => typeof value === "string")
+    .some((value) => value.toLowerCase().includes("openai-codex") || value.toLowerCase().startsWith("codex/"));
 }
 
 function stringField(value: unknown): string | undefined {

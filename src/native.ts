@@ -8,7 +8,7 @@ import { parseJson } from "./json.js";
 import { applyRoleModelSettings } from "./modelSettings.js";
 import type { AppliedRoleModelSettings } from "./modelSettings.js";
 import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline, RoleModelSelection } from "./types.js";
-import { showUsageSummary, updateWidget } from "./ui.js";
+import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
 
@@ -463,7 +463,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   ctx.ui.setStatus("materia", "done");
   updateWidget(ctx, state.runState);
   showUsageSummary(ctx, state.runState);
-  ctx.ui.notify(`pi-materia cast complete. Tokens: ${state.runState.usage.tokens.total}, cost: $${state.runState.usage.cost.total.toFixed(4)}`, "info");
+  ctx.ui.notify(`pi-materia cast complete. ${formatUsage(state.runState.usage, state.runState.usage.costKind)}`, "info");
 }
 
 async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<void> {

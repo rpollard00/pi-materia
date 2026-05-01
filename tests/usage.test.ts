@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { extractUsage } from "../src/usage.js";
+import { createRunState, extractUsage } from "../src/usage.js";
 
 describe("usage extraction", () => {
+  test("marks OpenAI Codex model usage as subscription cost display", () => {
+    const state = createRunState("run", "/tmp/run", { id: "openai-codex/gpt-5.5", provider: "openai-codex" });
+
+    expect(state.usage.costKind).toBe("subscription");
+  });
+
   test("preserves existing nested usage cost totals", () => {
     expect(extractUsage({ usage: { input: 3, output: 4, totalTokens: 7, cost: { input: 0.01, output: 0.02, total: 0.03 } } })).toEqual({
       tokens: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0, total: 7 },

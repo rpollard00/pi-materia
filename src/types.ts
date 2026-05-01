@@ -39,6 +39,8 @@ export interface UsageCost {
   total: number;
 }
 
+export type UsageCostKind = "actual" | "estimated" | "subscription";
+
 export interface UsageTotals {
   tokens: UsageTokens;
   cost: UsageCost;
@@ -85,6 +87,7 @@ export interface UsageReport extends UsageTotals {
   provider?: string;
   api?: string;
   thinkingLevel?: string;
+  costKind?: UsageCostKind;
   byRole: Record<string, UsageTotals>;
   byNode: Record<string, UsageTotals>;
   byTask: Record<string, UsageTotals>;
