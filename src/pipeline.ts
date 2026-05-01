@@ -79,6 +79,9 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     "Resolved entry:",
     pipeline.entry.id,
     "",
+    "Roles:",
+    ...renderRoles(config),
+    "",
     "Slots:",
   ];
 
@@ -88,11 +91,18 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
   return lines;
 }
 
+function renderRoles(config: PiMateriaConfig): string[] {
+  const entries = Object.entries(config.roles);
+  if (entries.length === 0) return ["- none configured"];
+  return entries.map(([name, role]) => `- ${name}: tools=${role.tools}, ${formatRoleModelSettings(role)}`);
+}
+
 function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig): string {
   const details: string[] = [`type=${node.type}`];
   if (node.type === "agent") {
     const role = config.roles[node.role];
     details.push(`role=${node.role}`, `tools=${role?.tools ?? "unknown"}`);
+    if (role) details.push(formatRoleModelSettings(role));
   } else {
     details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);
   }
@@ -108,6 +118,13 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
 
 function formatCommand(command: string[] | undefined): string {
   return command?.length ? command.map((part) => JSON.stringify(part)).join(" ") : "<missing>";
+}
+
+function formatRoleModelSettings(role: { model?: string; thinking?: string }): string {
+  return [
+    `model=${role.model ?? "active Pi model"}`,
+    `thinking=${role.thinking ?? "active Pi thinking"}`,
+  ].join(", ");
 }
 
 function formatNodeLimits(limits: NonNullable<MateriaPipelineNodeConfig["limits"]>): string {

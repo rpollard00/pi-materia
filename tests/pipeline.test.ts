@@ -40,6 +40,8 @@ describe("utility pipeline nodes", () => {
     const pipeline = resolvePipeline(baseConfig);
     const lines = renderGrid(baseConfig, pipeline, "test", "/tmp/project");
 
+    expect(lines).toContain("- none configured");
+
     const hello = lines.find((line) => line.startsWith("- hello:"));
     expect(hello).toContain("type=utility");
     expect(hello).toContain('command="node" "hello.js"');
@@ -51,6 +53,47 @@ describe("utility pipeline nodes", () => {
 
     const ignored = lines.find((line) => line.startsWith("- ignored:"));
     expect(ignored).toContain("utility=project.ensureIgnored");
+  });
+
+  test("renderGrid shows mixed explicit and active Pi model role settings", () => {
+    const config: PiMateriaConfig = {
+      ...baseConfig,
+      pipeline: {
+        entry: "planner",
+        nodes: {
+          planner: { type: "agent", role: "planner", next: "Build" },
+          Build: { type: "agent", role: "Build" },
+        },
+      },
+      roles: {
+        planner: {
+          tools: "readOnly",
+          systemPrompt: "Plan.",
+          model: "anthropic/claude-haiku",
+          thinking: "low",
+        },
+        Build: {
+          tools: "coding",
+          systemPrompt: "Build.",
+        },
+      },
+    };
+    const pipeline = resolvePipeline(config);
+    const lines = renderGrid(config, pipeline, "test", "/tmp/project");
+
+    expect(lines).toContain("- planner: tools=readOnly, model=anthropic/claude-haiku, thinking=low");
+    expect(lines).toContain("- Build: tools=coding, model=active Pi model, thinking=active Pi thinking");
+
+    const planner = lines.find((line) => line.startsWith("- planner: type=agent"));
+    expect(planner).toContain("role=planner");
+    expect(planner).toContain("tools=readOnly");
+    expect(planner).toContain("model=anthropic/claude-haiku");
+    expect(planner).toContain("thinking=low");
+
+    const build = lines.find((line) => line.startsWith("- Build: type=agent"));
+    expect(build).toContain("tools=coding");
+    expect(build).toContain("model=active Pi model");
+    expect(build).toContain("thinking=active Pi thinking");
   });
 
   test("rejects utility nodes without command or utility", () => {
@@ -93,9 +136,10 @@ describe("utility pipeline nodes", () => {
       next: "planner",
     });
 
-    const ensureLineIndex = lines.findIndex((line) => line.startsWith("- ensureArtifactsIgnored:"));
-    const detectLineIndex = lines.findIndex((line) => line.startsWith("- detectVcs:"));
-    const plannerLineIndex = lines.findIndex((line) => line.startsWith("- planner:"));
+    const slotsIndex = lines.indexOf("Slots:");
+    const ensureLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- ensureArtifactsIgnored:"));
+    const detectLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- detectVcs:"));
+    const plannerLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- planner:"));
     expect(ensureLineIndex).toBeGreaterThanOrEqual(0);
     expect(detectLineIndex).toBeGreaterThan(ensureLineIndex);
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
