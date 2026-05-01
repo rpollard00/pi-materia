@@ -1,7 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { PiMateriaConfig } from "./types.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { loadConfig, resolveArtifactRoot } from "./config.js";
+import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, handleMultiTurnUserInput, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
@@ -54,7 +55,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, casts, grid, status, abort.",
+    description: "Run pi-materia commands: cast, casts, grid, loadout, status, abort.",
     handler: async (args, ctx) => {
       await ctx.waitForIdle();
       const [subcommand, ...rest] = args.trim().split(/\s+/).filter(Boolean);
@@ -69,6 +70,23 @@ export default function piMateria(pi: ExtensionAPI) {
           pi.appendEntry("pi-materia-grid", { source: loaded.source, lines });
         } catch (error) {
           ctx.ui.notify(`pi-materia grid failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
+
+      if (subcommand === "loadout") {
+        const requestedLoadout = rest.join(" ").trim();
+        try {
+          if (requestedLoadout) {
+            const written = await saveActiveLoadout(ctx.cwd, requestedLoadout, getConfiguredConfigPath(pi));
+            ctx.ui.notify(`pi-materia active loadout set to ${requestedLoadout} (${written})`, "info");
+          }
+          const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
+          const lines = renderLoadoutList(loaded.config, loaded.source);
+          ctx.ui.setWidget("materia-loadouts", lines, { placement: "belowEditor" });
+          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", roleName: "orchestrator", eventType: "loadout" } });
+        } catch (error) {
+          ctx.ui.notify(`pi-materia loadout failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
         return;
       }
@@ -136,7 +154,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia casts, /materia grid, /materia status, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia casts, /materia grid, /materia loadout [name], /materia status, or /materia abort", "error");
         return;
       }
 
@@ -164,6 +182,22 @@ export default function piMateria(pi: ExtensionAPI) {
       }
     },
   });
+}
+
+function renderLoadoutList(config: PiMateriaConfig, source: string): string[] {
+  const loadoutNames = Object.keys(config.loadouts ?? {});
+  if (loadoutNames.length === 0) {
+    return ["Materia Loadouts", `source: ${source}`, "", "No loadouts configured. This config uses a legacy top-level pipeline."];
+  }
+
+  const active = config.activeLoadout;
+  return [
+    "Materia Loadouts",
+    `source: ${source}`,
+    `active: ${active ?? "-"}`,
+    "",
+    ...loadoutNames.map((name) => `- ${name}${name === active ? " (active)" : ""}`),
+  ];
 }
 
 async function renderCastList(artifactRoot: string): Promise<string[]> {

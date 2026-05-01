@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
 import { FakePiHarness } from "./fakePi.js";
@@ -26,6 +29,69 @@ describe("FakePiHarness", () => {
     expect(harness.statuses.get("fake")).toBe("started");
     expect(harness.widgets.get("fake-widget")?.content).toEqual(["hello"]);
     expect(harness.notifications[0]).toEqual({ message: "started", type: "info" });
+  });
+
+  test("lists and switches /materia loadout without triggering a turn", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-command-"));
+    const configFile = path.join(dir, ".pi", "pi-materia.json");
+    await mkdir(path.dirname(configFile), { recursive: true });
+    await writeFile(configFile, JSON.stringify({
+      activeLoadout: "Full-Auto",
+      loadouts: {
+        "Full-Auto": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "planner" } },
+        },
+        "Planning-Consult": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "interactivePlan", multiTurn: true } },
+        },
+      },
+    }), "utf8");
+    const harness = new FakePiHarness(dir);
+    piMateria(harness.pi);
+
+    await harness.runCommand("materia", "loadout");
+    const listed = harness.widgets.get("materia-loadouts")?.content ?? [];
+    expect(listed).toContain("- Full-Auto (active)");
+    expect(listed).toContain("- Planning-Consult");
+
+    await harness.runCommand("materia", "loadout Planning-Consult");
+    const switched = harness.widgets.get("materia-loadouts")?.content ?? [];
+    const raw = JSON.parse(await readFile(configFile, "utf8"));
+    expect(raw.activeLoadout).toBe("Planning-Consult");
+    expect(switched).toContain("- Planning-Consult (active)");
+    expect(harness.operationLog).not.toContain("triggerTurn");
+    expect(harness.userMessages).toHaveLength(0);
+  });
+
+  test("reports valid options for an unknown /materia loadout", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-command-"));
+    const configFile = path.join(dir, ".pi", "pi-materia.json");
+    await mkdir(path.dirname(configFile), { recursive: true });
+    await writeFile(configFile, JSON.stringify({
+      activeLoadout: "Full-Auto",
+      loadouts: {
+        "Full-Auto": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "planner" } },
+        },
+        "Planning-Consult": {
+          entry: "planner",
+          nodes: { planner: { type: "agent", role: "interactivePlan", multiTurn: true } },
+        },
+      },
+    }), "utf8");
+    const before = await readFile(configFile, "utf8");
+    const harness = new FakePiHarness(dir);
+    piMateria(harness.pi);
+
+    await harness.runCommand("materia", "loadout Missing");
+
+    expect(harness.notifications.at(-1)?.type).toBe("error");
+    expect(harness.notifications.at(-1)?.message).toContain('Unknown Materia loadout "Missing". Available loadouts: Full-Auto, Planning-Consult');
+    expect(await readFile(configFile, "utf8")).toBe(before);
+    expect(harness.operationLog).not.toContain("triggerTurn");
   });
 
   test("loads pi-materia and runs /materia grid locally", async () => {
