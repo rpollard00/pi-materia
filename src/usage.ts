@@ -57,26 +57,27 @@ export async function assertBudget(config: PiMateriaConfig, state: MateriaRunSta
 }
 
 export function extractUsage(message: unknown): UsageTotals | undefined {
-  const usage = (message as { usage?: unknown } | undefined)?.usage as {
-    input?: unknown;
-    output?: unknown;
-    cacheRead?: unknown;
-    cacheWrite?: unknown;
-    totalTokens?: unknown;
-    cost?: { input?: unknown; output?: unknown; cacheRead?: unknown; cacheWrite?: unknown; total?: unknown };
-  } | undefined;
+  const value = message && typeof message === "object" ? message as Record<string, unknown> : undefined;
+  const usage = value?.usage && typeof value.usage === "object" ? value.usage as Record<string, unknown> : undefined;
   if (!usage) return undefined;
 
-  const input = numberOrZero(usage.input);
-  const output = numberOrZero(usage.output);
-  const cacheRead = numberOrZero(usage.cacheRead);
-  const cacheWrite = numberOrZero(usage.cacheWrite);
-  const total = numberOrZero(usage.totalTokens) || input + output + cacheRead + cacheWrite;
-  const costInput = numberOrZero(usage.cost?.input);
-  const costOutput = numberOrZero(usage.cost?.output);
-  const costCacheRead = numberOrZero(usage.cost?.cacheRead);
-  const costCacheWrite = numberOrZero(usage.cost?.cacheWrite);
-  const costTotal = numberOrZero(usage.cost?.total) || costInput + costOutput + costCacheRead + costCacheWrite;
+  const input = numberOrZero(firstNumber(usage, ["input", "inputTokens", "input_tokens", "promptTokens", "prompt_tokens"]));
+  const output = numberOrZero(firstNumber(usage, ["output", "outputTokens", "output_tokens", "completionTokens", "completion_tokens"]));
+  const cacheRead = numberOrZero(firstNumber(usage, ["cacheRead", "cacheReadTokens", "cache_read", "cache_read_tokens", "cache_read_input_tokens", "cachedInputTokens", "cached_input_tokens"]));
+  const cacheWrite = numberOrZero(firstNumber(usage, ["cacheWrite", "cacheWriteTokens", "cache_write", "cache_write_tokens", "cache_creation_input_tokens", "cacheCreationTokens", "cache_creation_tokens"]));
+  const providedTotal = firstNumber(usage, ["totalTokens", "total", "tokens", "total_tokens"]);
+  const total = providedTotal ?? input + output + cacheRead + cacheWrite;
+
+  const costValue = usage.cost;
+  const cost = costValue && typeof costValue === "object" ? costValue as Record<string, unknown> : undefined;
+  const costInput = numberOrZero(firstNumber(cost, ["input", "inputCost", "inputUsd", "prompt", "promptCost", "promptUsd"]) ?? firstNumber(usage, ["inputCost", "inputCostUsd", "inputUsd", "promptCost", "promptCostUsd", "promptUsd"]));
+  const costOutput = numberOrZero(firstNumber(cost, ["output", "outputCost", "outputUsd", "completion", "completionCost", "completionUsd"]) ?? firstNumber(usage, ["outputCost", "outputCostUsd", "outputUsd", "completionCost", "completionCostUsd", "completionUsd"]));
+  const costCacheRead = numberOrZero(firstNumber(cost, ["cacheRead", "cacheReadCost", "cacheReadUsd", "cachedInput", "cachedInputCost", "cachedInputUsd"]) ?? firstNumber(usage, ["cacheReadCost", "cacheReadCostUsd", "cacheReadUsd", "cachedInputCost", "cachedInputCostUsd", "cachedInputUsd"]));
+  const costCacheWrite = numberOrZero(firstNumber(cost, ["cacheWrite", "cacheWriteCost", "cacheWriteUsd", "cacheCreation", "cacheCreationCost", "cacheCreationUsd"]) ?? firstNumber(usage, ["cacheWriteCost", "cacheWriteCostUsd", "cacheWriteUsd", "cacheCreationCost", "cacheCreationCostUsd", "cacheCreationUsd"]));
+  const providedCostTotal = firstNumber(cost, ["total", "totalCost", "totalUsd", "costUsd", "usd"])
+    ?? numberOrUndefined(costValue)
+    ?? firstNumber(usage, ["totalCost", "totalCostUsd", "totalUsd", "costUsd", "usd"]);
+  const costTotal = providedCostTotal ?? costInput + costOutput + costCacheRead + costCacheWrite;
   return {
     tokens: { input, output, cacheRead, cacheWrite, total },
     cost: {
@@ -187,6 +188,19 @@ function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function firstNumber(record: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const value = numberOrUndefined(record[key]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function numberOrZero(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return numberOrUndefined(value) ?? 0;
 }
