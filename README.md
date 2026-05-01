@@ -23,6 +23,18 @@ cd /path/to/target-project
 pi -e /path/to/pi-materia/src/index.ts
 ```
 
+## Development
+
+This package keeps npm compatibility (`package-lock.json` is retained). Install dependencies with npm, and install [Bun](https://bun.sh) to run the local test suite:
+
+```bash
+npm run typecheck
+npm test        # equivalent to: bun test
+bun test --watch
+```
+
+Tests use a fake Pi harness and do not require provider/API access or a real Pi session.
+
 ## Usage
 
 ```text
@@ -78,7 +90,7 @@ Minimal hello-world grid:
 
 Generic node mechanics:
 
-- `prompt`: template rendered for the role turn
+- `prompt`: template rendered for an agent role turn
 - `parse`: `"text"` or `"json"`
 - `assign`: copy parsed output/state values into generic cast state
 - `edges`: condition-driven links, e.g. `$.passed == true`
@@ -86,6 +98,8 @@ Generic node mechanics:
 - `foreach`: iterate a node over an array in state
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
+
+For deterministic local steps that should run without an LLM turn, see [Utility Materia](docs/utility-materia.md).
 
 Runtime artifacts are written to `.pi/pi-materia/<timestamp>/` by default. Override with:
 

@@ -20,6 +20,8 @@
     "LICENSE"
   ],
   "scripts": {
+    "test": "bun test",
+    "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
     "pack:dry-run": "npm pack --dry-run",
     "prepublishOnly": "npm run typecheck && npm run pack:dry-run"

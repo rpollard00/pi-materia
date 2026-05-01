@@ -149,10 +149,9 @@ export interface MateriaPipelineConfig {
 
 export type MateriaParseMode = "text" | "json";
 
-export interface MateriaPipelineNodeConfig {
-  type: "agent";
-  role: string;
-  prompt?: string;
+export type MateriaPipelineNodeConfig = MateriaAgentNodeConfig | MateriaUtilityNodeConfig;
+
+export interface MateriaPipelineNodeCommonConfig {
   parse?: MateriaParseMode;
   assign?: Record<string, string>;
   next?: string;
@@ -160,6 +159,20 @@ export interface MateriaPipelineNodeConfig {
   foreach?: MateriaForeachConfig;
   advance?: MateriaAdvanceConfig;
   limits?: MateriaNodeLimitsConfig;
+}
+
+export interface MateriaAgentNodeConfig extends MateriaPipelineNodeCommonConfig {
+  type: "agent";
+  role: string;
+  prompt?: string;
+}
+
+export interface MateriaUtilityNodeConfig extends MateriaPipelineNodeCommonConfig {
+  type: "utility";
+  utility?: string;
+  command?: string[];
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
 }
 
 export interface MateriaEdgeConfig {
@@ -183,6 +196,8 @@ export interface MateriaAdvanceConfig {
 
 export interface MateriaNodeLimitsConfig {
   maxVisits?: number;
+  maxEdgeTraversals?: number;
+  maxOutputBytes?: number;
 }
 
 export interface ResolvedMateriaPipeline {
@@ -190,10 +205,17 @@ export interface ResolvedMateriaPipeline {
   nodes: Record<string, ResolvedMateriaNode>;
 }
 
-export interface ResolvedMateriaNode {
+export type ResolvedMateriaNode = ResolvedMateriaAgentNode | ResolvedMateriaUtilityNode;
+
+export interface ResolvedMateriaAgentNode {
   id: string;
-  node: MateriaPipelineNodeConfig;
+  node: MateriaAgentNodeConfig;
   role: MateriaRoleConfig;
+}
+
+export interface ResolvedMateriaUtilityNode {
+  id: string;
+  node: MateriaUtilityNodeConfig;
 }
 
 export interface MateriaRoleConfig {

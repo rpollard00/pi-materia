@@ -116,7 +116,7 @@ function addUsageTotals(target: UsageTotals, usage: UsageTotals): void {
 }
 
 function getModelInfo(model: unknown): Pick<UsageReport, "model" | "provider" | "api" | "thinkingLevel"> {
-  const value = model as { id?: unknown; provider?: unknown; api?: unknown; thinkingLevel?: unknown; model?: { id?: unknown; provider?: unknown; api?: unknown } };
+  const value = (model && typeof model === "object" ? model : {}) as { id?: unknown; provider?: unknown; api?: unknown; thinkingLevel?: unknown; model?: { id?: unknown; provider?: unknown; api?: unknown } };
   return {
     model: typeof value.id === "string" ? value.id : typeof value.model?.id === "string" ? value.model.id : undefined,
     provider: typeof value.provider === "string" ? value.provider : typeof value.model?.provider === "string" ? value.model.provider : undefined,

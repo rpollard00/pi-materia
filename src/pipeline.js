@@ -11,12 +11,42 @@ function resolveNode(config, id, source) {
     const node = config.pipeline.nodes[id];
     if (!node)
         throw new Error(`Unknown pipeline slot "${id}" referenced by ${source}`);
-    if (node.type !== "agent")
-        throw new Error(`Pipeline slot "${id}" has unsupported type "${node.type}"`);
-    const role = config.roles[node.role];
-    if (!role)
-        throw new Error(`Pipeline slot "${id}" references unknown materia role "${node.role}"`);
-    return { id, node, role };
+    validateNode(id, node);
+    if (node.type === "agent") {
+        const role = config.roles[node.role];
+        if (!role)
+            throw new Error(`Pipeline slot "${id}" references unknown materia role "${node.role}"`);
+        return { id, node, role };
+    }
+    return { id, node };
+}
+function validateNode(id, node) {
+    if (node.type !== "agent" && node.type !== "utility") {
+        throw new Error(`Pipeline slot "${id}" has unsupported type "${String(node.type)}"`);
+    }
+    if (node.parse !== undefined && node.parse !== "text" && node.parse !== "json") {
+        throw new Error(`Pipeline slot "${id}" has unsupported parse mode "${String(node.parse)}". Expected "text" or "json".`);
+    }
+    if (node.type === "utility") {
+        if (!node.utility && !node.command)
+            throw new Error(`Utility pipeline slot "${id}" must configure either "utility" or "command".`);
+        if (node.command !== undefined)
+            validateCommand(id, node.command);
+        if (node.timeoutMs !== undefined && (!Number.isFinite(node.timeoutMs) || node.timeoutMs <= 0)) {
+            throw new Error(`Utility pipeline slot "${id}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
+        }
+    }
+}
+function validateCommand(id, command) {
+    if (!Array.isArray(command))
+        throw new Error(`Utility pipeline slot "${id}" has malformed command. Expected a non-empty string array.`);
+    if (command.length === 0)
+        throw new Error(`Utility pipeline slot "${id}" has malformed command. Expected at least one command element.`);
+    for (const [index, part] of command.entries()) {
+        if (typeof part !== "string" || part.length === 0) {
+            throw new Error(`Utility pipeline slot "${id}" has malformed command element at index ${index}. Expected a non-empty string.`);
+        }
+    }
 }
 function validateTargets(config) {
     for (const [id, node] of Object.entries(config.pipeline.nodes)) {
@@ -50,10 +80,43 @@ export function renderGrid(config, pipeline, source, cwd) {
         "Slots:",
     ];
     for (const [id, node] of Object.entries(config.pipeline.nodes)) {
-        const role = config.roles[node.role];
-        lines.push(`- ${id}: role=${node.role}, parse=${node.parse ?? "text"}, tools=${role?.tools ?? "unknown"}`);
+        lines.push(`- ${id}: ${formatNodeSlot(config, node)}`);
     }
     return lines;
+}
+function formatNodeSlot(config, node) {
+    const details = [`type=${node.type}`];
+    if (node.type === "agent") {
+        const role = config.roles[node.role];
+        details.push(`role=${node.role}`, `tools=${role?.tools ?? "unknown"}`);
+    }
+    else {
+        details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);
+    }
+    details.push(`parse=${node.parse ?? "text"}`);
+    if (node.next)
+        details.push(`next=${node.next}`);
+    if (node.edges?.length)
+        details.push(`edges=${node.edges.map((edge) => `${edgeLabel(edge)}->${edge.to}`).join(",")}`);
+    if (node.foreach)
+        details.push(`foreach=${node.foreach.items}${node.foreach.as ? ` as ${node.foreach.as}` : ""}${node.foreach.done ? ` done ${node.foreach.done}` : ""}`);
+    if (node.advance)
+        details.push(`advance=${node.advance.cursor}:${node.advance.items}${node.advance.done ? ` done ${node.advance.done}` : ""}`);
+    if (node.limits)
+        details.push(`limits=${formatNodeLimits(node.limits)}`);
+    if (node.type === "utility" && node.timeoutMs !== undefined)
+        details.push(`timeoutMs=${node.timeoutMs}`);
+    return details.join(", ");
+}
+function formatCommand(command) {
+    return command?.length ? command.map((part) => JSON.stringify(part)).join(" ") : "<missing>";
+}
+function formatNodeLimits(limits) {
+    return [
+        limits.maxVisits === undefined ? undefined : `visits ${limits.maxVisits}`,
+        limits.maxEdgeTraversals === undefined ? undefined : `edges ${limits.maxEdgeTraversals}`,
+        limits.maxOutputBytes === undefined ? undefined : `output ${limits.maxOutputBytes}B`,
+    ].filter(Boolean).join("/") || "default";
 }
 function renderGraph(config) {
     const lines = [];

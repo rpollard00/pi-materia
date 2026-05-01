@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
@@ -5,10 +6,14 @@ import { resolveArtifactRoot } from "./config.js";
 import { parseJson } from "./json.js";
 import { showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractUsage, writeUsage } from "./usage.js";
+import { executeBuiltInUtility, hasBuiltInUtility } from "./utilityRegistry.js";
 const STATE_ENTRY = "pi-materia-cast-state";
 const MANIFEST_FILE = "manifest.json";
 const DEFAULT_MAX_NODE_VISITS = 25;
 const DEFAULT_MAX_EDGE_TRAVERSALS = 25;
+const DEFAULT_UTILITY_TIMEOUT_MS = 30_000;
+const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
+const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
 export async function startNativeCast(pi, ctx, loaded, pipeline, request) {
     const config = loaded.config;
@@ -20,7 +25,7 @@ export async function startNativeCast(pi, ctx, loaded, pipeline, request) {
     await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
     const runState = createRunState(castId, runDir, ctx.model);
     runState.currentNode = pipeline.entry.id;
-    runState.currentRole = pipeline.entry.node.role;
+    runState.currentRole = nodeRoleName(pipeline.entry);
     runState.lastMessage = pipeline.entry.id;
     await writeUsage(runState);
     await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: config.pipeline, nativeSession: true, isolatedRoleContext: true });
@@ -37,7 +42,7 @@ export async function startNativeCast(pi, ctx, loaded, pipeline, request) {
         artifactRoot,
         phase: pipeline.entry.id,
         currentNode: pipeline.entry.id,
-        currentRole: pipeline.entry.node.role,
+        currentRole: nodeRoleName(pipeline.entry),
         awaitingResponse: true,
         startedAt: Date.now(),
         updatedAt: Date.now(),
@@ -101,13 +106,19 @@ async function completeNode(pi, ctx, state, text, entryId) {
     state.lastOutput = text;
     let parsed = text;
     if (node.node.parse === "json") {
-        parsed = parseJson(text);
+        try {
+            parsed = parseJson(text);
+        }
+        catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new Error(`Invalid JSON output for node "${node.id}": ${detail}`);
+        }
         state.lastJson = parsed;
         await writeFile(path.join(state.runDir, "nodes", safePathSegment(node.id), `${nodeVisit(state, node.id)}.json`), JSON.stringify(parsed, null, 2));
     }
     applyAssignments(state, node, parsed);
     const advanceTarget = applyAdvance(state, node);
-    await appendEvent(state.runState, "node_complete", { node: node.id, role: node.node.role, artifact, parsed: node.node.parse === "json", entryId, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel) });
+    await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel) });
     await assertBudget(config, state.runState, ctx);
     const nextTarget = advanceTarget ?? selectNextTarget(state, node, parsed, config);
     await advanceToNode(pi, ctx, state, nextTarget, entryId);
@@ -119,7 +130,7 @@ async function recordNodeOutput(state, node, text, entryId) {
     const artifact = path.join(dir, `${visit}${item}.md`);
     await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
     await writeFile(path.join(state.runDir, artifact), text);
-    await appendManifest(state, { phase: state.phase, node: node.id, role: node.node.role, itemKey: state.currentItemKey, visit, entryId, artifact });
+    await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact });
     return artifact;
 }
 function applyAssignments(state, node, parsed) {
@@ -172,21 +183,196 @@ async function startNode(pi, ctx, state, node) {
     enforceNodeLimit(state, node, config);
     state.phase = node.id;
     state.currentNode = node.id;
-    state.currentRole = node.node.role;
+    state.currentRole = nodeRoleName(node);
     state.awaitingResponse = true;
     state.updatedAt = Date.now();
     state.runState.currentNode = node.id;
-    state.runState.currentRole = node.node.role;
+    state.runState.currentRole = nodeRoleName(node);
     state.runState.currentTask = state.currentItemLabel;
     state.runState.attempt = nodeVisit(state, node.id);
     state.runState.lastMessage = node.id;
     await writeUsage(state.runState);
-    await appendEvent(state.runState, "node_start", { node: node.id, role: node.node.role, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
+    await appendEvent(state.runState, "node_start", { node: node.id, role: nodeRoleName(node), type: node.node.type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
     saveCastState(pi, state);
-    updateToolScope(pi, node.role);
     updateWidget(ctx, state.runState);
     ctx.ui.setStatus("materia", state.currentItemLabel ? `${node.id}:${state.currentItemLabel}` : node.id);
+    if (!isAgentResolvedNode(node)) {
+        state.awaitingResponse = false;
+        state.currentRole = undefined;
+        state.runState.currentRole = undefined;
+        saveCastState(pi, state);
+        try {
+            const result = await executeUtilityNode(state, node);
+            await completeNode(pi, ctx, state, result.output, result.entryId);
+        }
+        catch (error) {
+            await failCast(pi, ctx, state, error, `utility:${node.id}:${nodeVisit(state, node.id)}`);
+        }
+        return;
+    }
+    state.awaitingResponse = true;
+    saveCastState(pi, state);
+    updateToolScope(pi, node.role);
     await sendMateriaTurn(pi, state, buildNodePrompt(state, node));
+}
+async function executeUtilityNode(state, node) {
+    const visit = nodeVisit(state, node.id);
+    const input = buildUtilityInput(state, node);
+    const inputArtifact = await recordUtilityInput(state, node, input);
+    await appendEvent(state.runState, "utility_input", { node: node.id, artifact: inputArtifact, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit });
+    const params = node.node.params ?? {};
+    let output;
+    if (node.node.command) {
+        output = await executeCommandUtility(state, node, input);
+    }
+    else if (Object.prototype.hasOwnProperty.call(params, "output")) {
+        const value = params.output;
+        output = typeof value === "string" ? value : JSON.stringify(value);
+    }
+    else if (hasBuiltInUtility(node.node.utility)) {
+        output = await executeBuiltInUtility(node.node.utility, input);
+    }
+    else {
+        throw new Error(`Unknown utility alias "${node.node.utility}" for node "${node.id}".`);
+    }
+    return { output, entryId: `utility:${node.id}:${visit}` };
+}
+async function executeCommandUtility(state, node, input) {
+    const command = node.node.command;
+    if (!command || command.length === 0)
+        throw new Error(`Utility node "${node.id}" has no explicit command configured.`);
+    const timeoutMs = node.node.timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;
+    const child = spawn(command[0], command.slice(1), { cwd: state.cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
+    const stdout = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
+    const stderr = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        setTimeout(() => child.kill("SIGKILL"), 1_000).unref();
+    }, timeoutMs);
+    timeout.unref();
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    const closed = new Promise((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", (code, signal) => resolve({ code, signal }));
+    });
+    child.stdin.end(`${JSON.stringify(input)}\n`);
+    let result;
+    try {
+        result = await closed;
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+    const stdoutText = stdout.text();
+    const stderrText = stderr.text();
+    const artifacts = await recordCommandArtifacts(state, node, stdoutText, stderrText, stdout.truncated, stderr.truncated);
+    await appendEvent(state.runState, "utility_command", { node: node.id, command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
+    if (timedOut) {
+        throw new Error(`Utility command timed out for node "${node.id}" after ${timeoutMs}ms: ${formatCommandForError(command)}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
+    }
+    if (result.code !== 0) {
+        const summary = summarizeStderr(stderrText, stderr.truncated);
+        throw new Error(`Utility command failed for node "${node.id}": ${formatCommandForError(command)} exited with code ${result.code ?? `signal ${result.signal ?? "unknown"}`}. stderr: ${summary}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
+    }
+    return stdoutText;
+}
+function createBoundedCapture(maxBytes) {
+    const chunks = [];
+    let bytes = 0;
+    let truncated = false;
+    return {
+        push(chunk) {
+            if (bytes >= maxBytes) {
+                truncated = true;
+                return;
+            }
+            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            const remaining = maxBytes - bytes;
+            if (buffer.byteLength > remaining) {
+                chunks.push(buffer.subarray(0, remaining));
+                bytes += remaining;
+                truncated = true;
+            }
+            else {
+                chunks.push(buffer);
+                bytes += buffer.byteLength;
+            }
+        },
+        text() {
+            return Buffer.concat(chunks).toString("utf8");
+        },
+        get truncated() {
+            return truncated;
+        },
+    };
+}
+async function recordCommandArtifacts(state, node, stdout, stderr, stdoutTruncated, stderrTruncated) {
+    const visit = nodeVisit(state, node.id);
+    const dir = path.join("nodes", safePathSegment(node.id));
+    const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
+    const stdoutArtifact = path.join(dir, `${visit}${item}.command.stdout.txt`);
+    const stderrArtifact = path.join(dir, `${visit}${item}.command.stderr.txt`);
+    const metaArtifact = path.join(dir, `${visit}${item}.command.json`);
+    await mkdir(path.dirname(path.join(state.runDir, stdoutArtifact)), { recursive: true });
+    await writeFile(path.join(state.runDir, stdoutArtifact), stdout);
+    await writeFile(path.join(state.runDir, stderrArtifact), stderr);
+    await writeFile(path.join(state.runDir, metaArtifact), JSON.stringify({ stdoutArtifact, stderrArtifact, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES }, null, 2));
+    await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stdout`, artifact: stdoutArtifact });
+    await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stderr`, artifact: stderrArtifact });
+    await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:meta`, artifact: metaArtifact });
+    return { stdoutArtifact, stderrArtifact, metaArtifact };
+}
+function summarizeStderr(stderr, truncated) {
+    const summary = stderr.trim().replace(/\s+/g, " ").slice(0, MAX_UTILITY_ERROR_SUMMARY_LENGTH);
+    return `${summary || "<empty>"}${truncated ? " (truncated)" : ""}`;
+}
+function formatCommandForError(command) {
+    return command.map((part) => JSON.stringify(part)).join(" ");
+}
+function buildUtilityInput(state, node) {
+    const loop = node.node.foreach;
+    const cursorName = loop?.cursor ?? (loop ? `${node.id}Index` : undefined);
+    return {
+        cwd: state.cwd,
+        runDir: state.runDir,
+        request: state.request,
+        castId: state.castId,
+        nodeId: node.id,
+        params: node.node.params ?? {},
+        state: state.data,
+        item: currentItem(state) ?? null,
+        itemKey: state.currentItemKey ?? null,
+        itemLabel: state.currentItemLabel ?? null,
+        cursor: cursorName ? { name: cursorName, index: state.cursors[cursorName] ?? 0 } : null,
+        cursors: state.cursors,
+    };
+}
+async function recordUtilityInput(state, node, input) {
+    const visit = nodeVisit(state, node.id);
+    const dir = path.join("nodes", safePathSegment(node.id));
+    const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
+    const artifact = path.join(dir, `${visit}${item}.input.json`);
+    await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
+    await writeFile(path.join(state.runDir, artifact), JSON.stringify(input, null, 2));
+    await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:input`, artifact });
+    return artifact;
+}
+async function failCast(pi, ctx, state, error, entryId) {
+    state.active = false;
+    state.awaitingResponse = false;
+    state.phase = "failed";
+    state.failedReason = error instanceof Error ? error.message : String(error);
+    state.runState.lastMessage = state.failedReason;
+    await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, node: state.currentNode });
+    await writeUsage(state.runState);
+    await appendManifest(state, { phase: "failed", node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, entryId });
+    saveCastState(pi, state);
+    ctx.ui.setStatus("materia", "failed");
+    updateWidget(ctx, state.runState);
+    ctx.ui.notify(`pi-materia cast failed: ${state.failedReason}`, "error");
 }
 function enforceNodeLimit(state, node, config) {
     const count = (state.visits[node.id] ?? 0) + 1;
@@ -289,6 +475,8 @@ function contextArtifactPath(state) {
     return path.join("contexts", `${node}${item}-${visit}.md`);
 }
 function buildNodePrompt(state, node) {
+    if (!isAgentResolvedNode(node))
+        throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
     return rolePrompt(node.role, [renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state)]);
 }
 function defaultNodePrompt(node) {
@@ -465,6 +653,12 @@ function stringifyTemplateValue(value) {
         return value;
     return JSON.stringify(value, null, 2);
 }
+export const nativeTestInternals = {
+    evaluateCondition,
+    renderTemplate,
+    resolveValue,
+    setPath,
+};
 function nodeVisit(state, nodeId) {
     return state.visits[nodeId] ?? 0;
 }
@@ -530,7 +724,16 @@ function updateToolScope(pi, role) {
         pi.setActiveTools(all);
 }
 export function currentRole(state) {
-    return currentNodeOrThrow(state).role;
+    const node = currentNodeOrThrow(state);
+    if (!isAgentResolvedNode(node))
+        throw new Error(`Current Materia node "${node.id}" is a utility node and has no role.`);
+    return node.role;
+}
+function nodeRoleName(node) {
+    return isAgentResolvedNode(node) ? node.node.role : undefined;
+}
+function isAgentResolvedNode(node) {
+    return node.node.type === "agent";
 }
 function currentNodeOrThrow(state) {
     const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : state.pipeline.entry;

@@ -100,7 +100,7 @@ function addUsageTotals(target, usage) {
     target.cost.total += usage.cost.total;
 }
 function getModelInfo(model) {
-    const value = model;
+    const value = (model && typeof model === "object" ? model : {});
     return {
         model: typeof value.id === "string" ? value.id : typeof value.model?.id === "string" ? value.model.id : undefined,
         provider: typeof value.provider === "string" ? value.provider : typeof value.model?.provider === "string" ? value.model.provider : undefined,

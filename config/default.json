@@ -11,8 +11,31 @@
     "stopAtLimit": true
   },
   "pipeline": {
-    "entry": "planner",
+    "entry": "ensureArtifactsIgnored",
     "nodes": {
+      "ensureArtifactsIgnored": {
+        "type": "utility",
+        "utility": "project.ensureIgnored",
+        "parse": "json",
+        "params": {
+          "patterns": [
+            ".pi/pi-materia/"
+          ]
+        },
+        "assign": {
+          "artifactIgnore": "$"
+        },
+        "next": "detectVcs"
+      },
+      "detectVcs": {
+        "type": "utility",
+        "utility": "vcs.detect",
+        "parse": "json",
+        "assign": {
+          "vcs": "$"
+        },
+        "next": "planner"
+      },
       "planner": {
         "type": "agent",
         "role": "planner",
@@ -20,7 +43,7 @@
         "assign": {
           "tasks": "$.tasks"
         },
-        "prompt": "Create an implementation plan for this request. Be directive about repository bootstrap. If the repository appears empty, uninitialized, or missing common project hygiene, make the first task a bootstrap task. Bootstrap tasks should instruct the implementer to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for .pi/pi-materia/ and language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Return only JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.\n\nRequest: {{request}}",
+        "prompt": "Create an implementation plan for this request. Be directive about repository bootstrap. If the repository appears empty, uninitialized, or missing common project hygiene, make the first task a bootstrap task. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Bootstrap tasks should instruct the implementer to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Return only JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.\n\nRequest: {{request}}",
         "next": "implement"
       },
       "implement": {
