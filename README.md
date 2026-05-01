@@ -42,7 +42,6 @@ Tests use a fake Pi harness and do not require provider/API access or a real Pi 
 /materia cast implement the next small feature
 /materia casts
 /materia status
-/materia continue
 /materia abort
 ```
 
@@ -147,11 +146,11 @@ Generic node mechanics:
 - `foreach`: iterate a node over an array in state
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
-- `multiTurn`: set `true` on an agent node to pause for interactive refinement until `/materia continue`
+- `multiTurn`: set `true` on an agent node to pause for interactive refinement until the user says they are ready to continue/finalize
 
 ### Multi-turn planner nodes
 
-Agent nodes are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent node when you want a manual refinement loop. A multi-turn node records each assistant response as a refinement artifact, keeps the cast active at that node, and waits for more user turns or `/materia continue`. Finalization with `/materia continue` uses the latest assistant response for the node's normal `parse`, `assign`, `edges`, and `next` behavior, so invalid JSON is only an error when you finalize a JSON-parsed node.
+Agent nodes are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent node when you want a manual refinement loop. A multi-turn node records each assistant response as a refinement artifact, keeps the cast active at that node, and treats ordinary user replies as refinement instructions. When the latest draft is ready, say so in natural language (for example, "ready to continue", "continue", "finalize", or "we're ready") and pi-materia finalizes the latest assistant response using the node's normal `parse`, `assign`, `edges`, and `next` behavior. Invalid JSON is only an error when you finalize a JSON-parsed node.
 
 The bundled config includes an `interactivePlan` role but does not wire it into the default pipeline. To use it, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline like this excerpt:
 

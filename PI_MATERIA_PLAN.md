@@ -432,11 +432,11 @@ Acceptance:
 
 - [x] Add `/materia status` to show active cast state.
 - [x] Add `/materia abort` to stop/clear active cast state.
-- [x] Add `/materia continue` to resume from persisted state and send the next prompt if needed.
+- [x] Support natural-language multi-turn continuation/finalization from paused refinement nodes.
 - [x] Add `/materia casts` for artifact discovery.
 
 Acceptance:
-- User can inspect, stop, and resume Materia's state machine explicitly.
+- User can inspect, stop, and advance Materia's state machine explicitly or via natural-language readiness for multi-turn nodes.
 
 #### 7.8 Native runtime cleanup
 
