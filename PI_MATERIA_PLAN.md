@@ -130,12 +130,13 @@ Problem: pi-materia runs multiple role turns, so token usage can climb quickly d
 Tasks:
 - [x] Capture usage from Pi assistant messages where Pi exposes it.
   - Current native runtime reads usage from assistant messages after role turns.
+  - Cost totals are normalized as USD from Pi usage metadata, preserving provided totals or summing available input/output/cache components.
   - Needs real-run verification against provider/message shapes.
 - [x] Aggregate per:
   - run
   - node/role
   - task
-  - attempt
+  - attempt (per exact node plus foreach item key, not raw node visit count)
 - [x] Show live totals in the pi-materia widget.
 - [x] Write incremental totals to `usage.json` after every observed role-turn usage event.
 - [x] Include model/provider/api/thinking level in usage report when available from Pi/model metadata.
@@ -405,10 +406,10 @@ Acceptance:
 - [x] Remove custom external-runner token accounting from the main active-session path.
 - [x] Read totals from Pi assistant message usage for Materia widgets/artifacts.
 - [x] Continue writing `usage.json`, but source it from Pi-native session data.
-- [x] Keep budget enforcement, but check it after each turn using Pi's actual usage totals.
+- [x] Keep budget enforcement, but check it after each turn using Pi's actual usage totals, with cost limits evaluated against normalized USD totals.
 
 Acceptance:
-- Materia token/cost numbers match Pi footer/session info.
+- Materia token/cost numbers match Pi footer/session info and Pi usage metadata totals.
 
 #### 7.6 Artifact model for active-session orchestration
 
@@ -420,6 +421,7 @@ Acceptance:
   - `tasks/<task-id>/build-<attempt>.md`
   - `tasks/<task-id>/eval-<attempt>.json`
   - `maintenance/final.md`
+  - Attempt numbers are user-facing task attempts for the same exact node/item retry; node visit counts remain separate for generic node artifact paths and limits.
 - [x] Store references to Pi session entries/message ids for each artifact.
 - [x] Add a `manifest.json` mapping Materia phases/tasks to Pi entries.
 

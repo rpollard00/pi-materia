@@ -48,6 +48,12 @@ Tests use a fake Pi harness and do not require provider/API access or a real Pi 
 
 pi-materia reports the config source, artifact directory, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full role prompts are hidden behind compact Materia cast messages, and each role turn receives a curated Materia context instead of the full previous conversation.
 
+### Metrics semantics
+
+Usage costs are reported in USD from Pi assistant-message usage metadata. When Pi provides a total cost, Materia preserves that total; otherwise it sums the available input/output/cache cost components.
+
+Attempt counts are per exact Materia task identity: the node id plus the current `foreach` item key, or a singleton key for non-`foreach` nodes. A retry/self-loop of the same node/item increments the attempt; moving to a different `foreach` item or another node starts at attempt 1. Node visit counts are still used for visit limits and artifact file names.
+
 ## Configuration
 
 pi-materia resolves its loadout/config in this order:
@@ -173,7 +179,7 @@ Each cast writes enough information to debug the run after the fact:
 .pi/pi-materia/<cast-id>/
   config.resolved.json
   events.jsonl
-  usage.json
+  usage.json       # token totals and USD cost totals/breakdowns from Pi usage metadata
   manifest.json
   nodes/<node-id>/<visit>.md
   nodes/<node-id>/<visit>.json
