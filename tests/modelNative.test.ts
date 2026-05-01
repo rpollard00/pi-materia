@@ -26,6 +26,23 @@ function agentConfig(role: Record<string, unknown> = {}, node: Record<string, un
   };
 }
 
+function twoAgentConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    pipeline: {
+      entry: "build",
+      nodes: {
+        build: { type: "agent", role: "Build", next: "review" },
+        review: { type: "agent", role: "Review" },
+      },
+    },
+    roles: {
+      Build: { tools: "coding", systemPrompt: "Build role", model: "anthropic/claude-test", thinking: "high" },
+      Review: { tools: "readOnly", systemPrompt: "Review role", model: "openai/gpt-test", thinking: "low" },
+    },
+  };
+}
+
 describe("native per-role model settings", () => {
   test("omitted model and thinking preserve the active Pi model without switching", async () => {
     const harness = await makeHarness(agentConfig());
@@ -47,6 +64,46 @@ describe("native per-role model settings", () => {
     expect(harness.operationLog.indexOf("setModel")).toBeLessThan(harness.operationLog.indexOf("setActiveTools"));
     expect(harness.operationLog.indexOf("setThinkingLevel")).toBeLessThan(harness.operationLog.indexOf("setActiveTools"));
     expect(harness.operationLog.indexOf("setActiveTools")).toBeLessThan(harness.operationLog.indexOf("triggerTurn"));
+  });
+
+  test("different roles apply different model settings across one cast", async () => {
+    const harness = await makeHarness(twoAgentConfig());
+
+    await harness.runCommand("materia", "cast mixed role models");
+    harness.appendAssistantMessage("build complete");
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.setModelCalls).toEqual([
+      { provider: "anthropic", id: "claude-test", name: "Claude Test", api: "anthropic" },
+      { provider: "openai", id: "gpt-test", name: "GPT Test", api: "openai" },
+    ]);
+    expect(harness.setThinkingLevelCalls).toEqual(["high", "low"]);
+    expect(harness.operationLog).toEqual([
+      "setModel",
+      "setThinkingLevel",
+      "setActiveTools",
+      "triggerTurn",
+      "setModel",
+      "setThinkingLevel",
+      "setActiveTools",
+      "triggerTurn",
+    ]);
+    const rolePromptMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(rolePromptMessages).toHaveLength(2);
+  });
+
+  test("unsupported model switching APIs fail with a role-specific diagnostic", async () => {
+    const harness = await makeHarness(agentConfig({ model: "anthropic/claude-test" }));
+    delete (harness.pi as unknown as { setModel?: unknown }).setModel;
+
+    await harness.runCommand("materia", "cast unsupported model api");
+
+    expect(harness.setModelCalls).toHaveLength(0);
+    expect(harness.sentMessages.some(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toBe(false);
+    expect(harness.notifications.at(-1)).toEqual({
+      message: 'pi-materia cast failed to start: Role "Build" model setting is unsupported: this Pi runtime does not expose pi.setModel(model)',
+      type: "error",
+    });
   });
 
   test("records effective role model settings in context, manifest, events, and usage", async () => {
