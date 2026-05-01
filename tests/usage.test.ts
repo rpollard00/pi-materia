@@ -20,4 +20,25 @@ describe("usage extraction", () => {
     expect(extractUsage({ usage: { input: 1, output: 2, inputCost: 0.001, outputCost: 0.002, totalCost: 0.123 } })?.cost.total).toBe(0.123);
     expect(extractUsage({ usage: { input: 1, output: 2, costUsd: 0.456 } })?.cost.total).toBe(0.456);
   });
+
+  test("does not allow a provided total cost to underreport normalized component costs", () => {
+    const usage = extractUsage({
+      usage: {
+        input: 1000,
+        output: 1000,
+        cacheRead: 1000,
+        cost: {
+          input: 0.005,
+          output: 0.03,
+          cacheRead: 0.0005,
+          // Some provider/Pi payloads can include a total alias that is missing
+          // cached or output components. The extracted total must not be lower
+          // than the normalized component sum.
+          total: 0.005,
+        },
+      },
+    });
+
+    expect(usage?.cost.total).toBeCloseTo(0.0355, 10);
+  });
 });
