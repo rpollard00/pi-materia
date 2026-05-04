@@ -1,17 +1,64 @@
 @import "tailwindcss";
 
+.fantasy-panel {
+  border-radius: 1.5rem;
+  border: 1px solid rgb(207 250 254 / 0.16);
+  background:
+    linear-gradient(135deg, rgb(15 23 42 / 0.92), rgb(2 6 23 / 0.88)),
+    radial-gradient(circle at 20% 0%, rgb(34 211 238 / 0.14), transparent 35%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 24px 60px rgb(0 0 0 / 0.34), 0 0 34px rgb(34 211 238 / 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.loadout-card {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 1rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(15 23 42 / 0.72);
+  padding: 0.875rem;
+  text-align: left;
+  color: rgb(226 232 240);
+  transition: 160ms ease;
+}
+
+.loadout-card small {
+  color: rgb(125 211 252 / 0.78);
+}
+
+.loadout-card:hover,
+.loadout-card-active {
+  border-color: rgb(103 232 249 / 0.55);
+  background: linear-gradient(135deg, rgb(8 47 73 / 0.82), rgb(15 23 42 / 0.88));
+  box-shadow: 0 0 22px rgb(34 211 238 / 0.16);
+}
+
 .materia-socket {
   position: relative;
   display: flex;
-  min-height: 12rem;
+  min-height: 13.5rem;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   border-radius: 9999px;
-  border: 1px solid rgb(207 250 254 / 0.2);
-  background: radial-gradient(circle at 50% 42%, rgb(14 116 144 / 0.34), rgb(15 23 42 / 0.96) 62%, rgb(2 6 23));
+  border: 1px solid rgb(207 250 254 / 0.22);
+  background:
+    radial-gradient(circle at 50% 42%, rgb(14 116 144 / 0.28), rgb(15 23 42 / 0.96) 62%, rgb(2 6 23)),
+    conic-gradient(from 0deg, rgb(103 232 249 / 0.13), transparent, rgb(216 180 254 / 0.12), transparent, rgb(103 232 249 / 0.13));
   padding: 1.5rem;
-  box-shadow: inset 0 0 28px rgb(8 47 73 / 0.9), 0 0 24px rgb(34 211 238 / 0.12);
+  box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), inset 0 0 4px rgb(255 255 255 / 0.16), 0 0 26px rgb(34 211 238 / 0.12);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.materia-socket:hover,
+.materia-socket-selectable {
+  transform: translateY(-2px);
+  border-color: rgb(34 211 238 / 0.58);
+  box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 34px rgb(34 211 238 / 0.22);
 }
 
 .materia-socket::before {
@@ -19,14 +66,146 @@
   position: absolute;
   inset: 1rem;
   border-radius: 9999px;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  box-shadow: inset 0 0 30px rgb(0 0 0 / 0.8);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: inset 0 0 34px rgb(0 0 0 / 0.82), inset 0 0 10px rgb(34 211 238 / 0.13);
+}
+
+.materia-socket::after {
+  content: '';
+  position: absolute;
+  inset: 2.2rem;
+  border-radius: 9999px;
+  border: 1px dashed rgb(165 243 252 / 0.18);
+}
+
+.materia-orb,
+.materia-orb-small {
+  position: relative;
+  z-index: 10;
+  border-radius: 9999px;
+  box-shadow:
+    0 0 26px rgb(125 211 252 / 0.65),
+    0 0 60px rgb(192 132 252 / 0.22),
+    inset -12px -16px 24px rgb(0 0 0 / 0.38),
+    inset 10px 10px 18px rgb(255 255 255 / 0.45);
 }
 
 .materia-orb {
-  z-index: 10;
-  height: 5rem;
-  width: 5rem;
+  height: 5.25rem;
+  width: 5.25rem;
+}
+
+.materia-orb-small {
+  height: 2.5rem;
+  width: 2.5rem;
+  flex: none;
+}
+
+.materia-orb-empty {
+  background: radial-gradient(circle at 50% 42%, rgb(8 47 73 / 0.12), rgb(2 6 23 / 0.78) 70%);
+  border: 1px dashed rgb(165 243 252 / 0.36);
+  box-shadow: inset 0 0 28px rgb(0 0 0 / 0.82), 0 0 18px rgb(34 211 238 / 0.08);
+}
+
+.materia-orb::before,
+.materia-orb-small::before {
+  content: '';
+  position: absolute;
+  left: 20%;
+  top: 15%;
+  height: 24%;
+  width: 30%;
   border-radius: 9999px;
-  box-shadow: 0 0 26px rgb(125 211 252 / 0.65), inset -12px -16px 24px rgb(0 0 0 / 0.35), inset 10px 10px 18px rgb(255 255 255 / 0.42);
+  background: rgb(255 255 255 / 0.75);
+  filter: blur(1px);
+}
+
+.materia-orb-empty::before {
+  opacity: 0.18;
+}
+
+.entry-rune {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  z-index: 10;
+  border-radius: 9999px;
+  border: 1px solid rgb(253 224 71 / 0.45);
+  background: rgb(113 63 18 / 0.45);
+  padding: 0.2rem 0.55rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgb(254 240 138);
+}
+
+.palette-orb {
+  display: flex;
+  min-height: 5.25rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  border-radius: 1rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(15 23 42 / 0.74);
+  padding: 0.75rem;
+  color: rgb(226 232 240);
+  font-size: 0.78rem;
+  transition: 160ms ease;
+}
+
+.palette-orb:hover,
+.palette-orb-selected {
+  border-color: rgb(103 232 249 / 0.62);
+  background: rgb(8 47 73 / 0.72);
+  box-shadow: 0 0 24px rgb(34 211 238 / 0.16);
+}
+
+.materia-button,
+.materia-button-secondary {
+  border-radius: 9999px;
+  border: 1px solid rgb(103 232 249 / 0.36);
+  padding: 0.55rem 0.95rem;
+  font-weight: 700;
+  color: rgb(224 242 254);
+  transition: 160ms ease;
+}
+
+.materia-button {
+  background: linear-gradient(135deg, rgb(14 116 144 / 0.95), rgb(88 28 135 / 0.9));
+  box-shadow: 0 0 20px rgb(34 211 238 / 0.14);
+}
+
+.materia-button-secondary {
+  background: rgb(15 23 42 / 0.9);
+}
+
+.materia-button:hover:not(:disabled),
+.materia-button-secondary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(165 243 252 / 0.7);
+}
+
+.materia-button:disabled,
+.materia-button-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.trash-socket {
+  margin-top: 1rem;
+  border-radius: 1.25rem;
+  border: 1px dashed rgb(248 113 113 / 0.42);
+  background: rgb(69 10 10 / 0.26);
+  padding: 1rem;
+  text-align: center;
+  color: rgb(254 202 202);
+  transition: 160ms ease;
+}
+
+.trash-socket-hot {
+  border-color: rgb(252 165 165 / 0.95);
+  background: rgb(127 29 29 / 0.55);
+  box-shadow: 0 0 24px rgb(248 113 113 / 0.2);
 }
