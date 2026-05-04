@@ -356,6 +356,88 @@ describe('Materia loadout grid editor', () => {
     expect(body.config.materiaDefinitions.RunTests).toMatchObject({ type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000 });
   });
 
+  it('populates the edit selector from reusable definitions instead of active loadout sockets', async () => {
+    const selectorConfig = {
+      activeLoadout: 'Full-Auto',
+      roles: {
+        Build: { tools: 'coding', systemPrompt: 'Build the work' },
+        RoleOnly: { tools: 'none', systemPrompt: 'Reusable role not placed in a socket' },
+      },
+      materiaDefinitions: {
+        RunTests: { type: 'utility', utility: 'shell', command: ['npm', 'test'] },
+        PromptDef: { type: 'agent', role: 'RoleOnly', prompt: 'Prompt definition' },
+      },
+      loadouts: {
+        'Full-Auto': {
+          entry: 'SocketOnly',
+          nodes: {
+            SocketOnly: { type: 'agent', role: 'SocketOnly' },
+            Build: { type: 'agent', role: 'Build' },
+          },
+        },
+        Alternate: {
+          entry: 'OtherSocket',
+          nodes: {
+            OtherSocket: { type: 'utility', utility: 'other' },
+          },
+        },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: selectorConfig }))));
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const select = await screen.findByTestId('edit-materia-select') as HTMLSelectElement;
+    const initialOptions = Array.from(select.options).map((option) => option.value);
+    expect(initialOptions).toEqual(['', 'Build', 'PromptDef', 'RoleOnly', 'RunTests']);
+    expect(initialOptions).not.toContain('SocketOnly');
+    expect(initialOptions).not.toContain('OtherSocket');
+
+    await openTab('Loadout');
+    fireEvent.click(await screen.findByRole('button', { name: /Alternate/ }));
+    await openTab('Materia Editor');
+    const afterLoadoutSwitch = Array.from((await screen.findByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value);
+    expect(afterLoadoutSwitch).toEqual(initialOptions);
+  });
+
+  it('loads existing tool definition data without selecting or mutating loadout sockets', async () => {
+    const selectorConfig = {
+      activeLoadout: 'Full-Auto',
+      roles: {
+        Build: { tools: 'coding', systemPrompt: 'Build the work' },
+      },
+      materiaDefinitions: {
+        RunTests: { type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000, parse: 'json' },
+      },
+      loadouts: testConfig.loadouts,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: selectorConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'RunTests' } });
+    expect(screen.getByTestId('materia-name')).toHaveProperty('value', 'RunTests');
+    expect(screen.getByTestId('materia-behavior')).toHaveProperty('value', 'tool');
+    expect(screen.getByTestId('materia-utility')).toHaveProperty('value', 'shell');
+    expect(screen.getByTestId('materia-command')).toHaveProperty('value', 'npm test');
+    expect(screen.getByTestId('materia-timeout')).toHaveProperty('value', '90000');
+    fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '91000' } });
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+
+    await openTab('Loadout');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.config.loadouts).toEqual(selectorConfig.loadouts);
+  });
+
   it('edits existing prompt materia role settings where supported', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
