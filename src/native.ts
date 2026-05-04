@@ -705,13 +705,17 @@ export function isReadinessToContinueInstruction(input: string): boolean {
     .replace(/\s+/g, " ");
   if (!normalized) return false;
 
-  const conciseReadiness = /^(?:please\s+)?(?:(?:ready|continue|finali[sz]e|proceed|ship it|looks good|lgtm)|(?:we(?:'re| are)|i(?:'m| am)) ready)(?:\s+(?:please|now|to continue|and continue|to finali[sz]e|and finali[sz]e|it|this))?$/;
-  if (conciseReadiness.test(normalized)) return true;
+  const explicitReadiness = /^(?:please\s+)?(?:(?:ready|done)(?:\s+(?:please|now|to continue|to proceed|to finali[sz]e|and continue|and proceed|and finali[sz]e))?|(?:continue|proceed|finali[sz]e)(?:\s+(?:please|now|it|this))?|ship it|(?:we(?:'re| are)|i(?:'m| am))\s+(?:ready|done)(?:\s+(?:to continue|to proceed|to finali[sz]e|now))?)$/;
+  if (explicitReadiness.test(normalized)) return true;
 
-  const readinessPhrase = /\b(?:ready to continue|ready to finali[sz]e|(?:we(?:'re| are)|i(?:'m| am)) ready|looks good|lgtm)\b/;
+  const consensusThenAction = /^(?:that\s+)?(?:looks good|lgtm)(?:\s*(?:,|;|and)?\s*(?:please\s+)?(?:continue|proceed|finali[sz]e|ship it)(?:\s+(?:it|this|please|now))?)$/;
+  if (consensusThenAction.test(normalized)) return true;
+
+  const readinessPhrase = /\b(?:ready to (?:continue|proceed|finali[sz]e)|(?:we(?:'re| are)|i(?:'m| am))\s+(?:ready|done))\b/;
+  const consensus = /\b(?:looks good|lgtm)\b/;
   const finalAction = /\b(?:continue|proceed|finali[sz]e|ship it)\b/;
-  const changeRequest = /\b(?:add|change|update|revise|refine|fix|include|remove|rewrite|adjust|edit|after|but|first|before|make it)\b/;
-  return (readinessPhrase.test(normalized) || finalAction.test(normalized)) && !changeRequest.test(normalized);
+  const changeRequest = /\b(?:add|change|update|revise|refine|fix|include|remove|rewrite|adjust|edit|after|but|first|before|make it|should we|how should|what about)\b/;
+  return (readinessPhrase.test(normalized) || (consensus.test(normalized) && finalAction.test(normalized))) && !changeRequest.test(normalized);
 }
 
 function isActiveMultiTurnNode(state: MateriaCastState): boolean {

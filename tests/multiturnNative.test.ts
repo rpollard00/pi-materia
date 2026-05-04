@@ -281,6 +281,47 @@ describe("native multi-turn runtime", () => {
     expect(failedAfterReadinessState.failedReason).toContain("Invalid JSON output for node \"plan\"");
   });
 
+  test("multi-turn input finalizes only on explicit readiness intent", async () => {
+    const nonReadinessInputs = [
+      "Lets do a full CRT inspired shader, we should give it some phosphor glow, and some fading to make it look like a worn out tube.",
+      "continue with the full CRT shader details",
+      "How should we proceed with scoring?",
+      "looks good",
+    ];
+    const readinessInputs = ["ready to continue", "finalize", "looks good, proceed", "done"];
+
+    const refinementHarness = await makeHarness(multiTurnConfig());
+    await refinementHarness.runCommand("materia", "cast refine a plan");
+    refinementHarness.appendAssistantMessage("plain text draft, not final JSON");
+    await refinementHarness.emit("agent_end", { messages: [] });
+
+    const errorsBeforeInput = refinementHarness.notifications.filter((notification) => notification.type === "error").length;
+    for (const text of nonReadinessInputs) {
+      const inputResults = await refinementHarness.emit("input", { text, source: "interactive" });
+      expect(inputResults.at(-1)).toEqual({ action: "continue" });
+      const state = refinementHarness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+      expect(state.active).toBe(true);
+      expect(state.nodeState).toBe("awaiting_user_refinement");
+      expect(state.data.tasks).toBeUndefined();
+      expect(state.lastJson).toBeUndefined();
+    }
+    expect(refinementHarness.notifications.filter((notification) => notification.type === "error")).toHaveLength(errorsBeforeInput);
+
+    for (const text of readinessInputs) {
+      const harness = await makeHarness(multiTurnConfig());
+      await harness.runCommand("materia", "cast refine a plan");
+      harness.appendAssistantMessage('{"tasks":[{"id":"1","title":"Ship it"}]}');
+      await harness.emit("agent_end", { messages: [] });
+
+      const inputResults = await harness.emit("input", { text, source: "interactive" });
+      expect(inputResults.at(-1)).toEqual({ action: "handled" });
+      const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+      expect(state.active).toBe(false);
+      expect(state.nodeState).toBe("complete");
+      expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
+    }
+  });
+
   test("paused refinement turns keep the active role prompt, tools, model, and isolated context", async () => {
     const harness = await makeHarness(multiTurnConfig({ model: "test/refiner", thinking: "high" }));
     harness.models = [{ provider: "test", id: "refiner", name: "Refiner", api: "fake" }];
