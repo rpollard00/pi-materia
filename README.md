@@ -121,7 +121,7 @@ Configs can also define named `loadouts` that share the top-level `roles`, `limi
   },
   "roles": {
     "planner": { "tools": "readOnly", "systemPrompt": "Plan automatically." },
-    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "systemPrompt": "Collaborate, then finalize a plan." },
+    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "systemPrompt": "Collaborate, then finalize only after /materia continue." },
     "Build": { "tools": "coding", "systemPrompt": "Implement exactly the assigned task." }
   }
 }
@@ -183,7 +183,7 @@ Generic node mechanics:
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
 
-Role configs also define agent capabilities such as `tools`, `model`, `thinking`, `systemPrompt`, and `multiTurn`. Set `"multiTurn": true` on a role to let any agent node using that role pause for interactive refinement until the user says they are ready to continue/finalize.
+Role configs also define agent capabilities such as `tools`, `model`, `thinking`, `systemPrompt`, and `multiTurn`. Set `"multiTurn": true` on a role to let any agent node using that role pause for interactive refinement until the user runs `/materia continue`.
 
 ### Multi-turn planner roles
 
@@ -196,14 +196,9 @@ Examples of refinement replies that do **not** finalize or advance the node:
 - `Can you split the bootstrap work into its own task?`
 - `Continue refining the risk section.`
 
-When the latest draft is ready, say so with explicit readiness language. Examples that **do** finalize the node:
+Natural-language replies never finalize or advance the node, even when they say things like `ready to continue`, `looks good, proceed`, or `finalize`. When the latest draft is ready, run `/materia continue`; this command is the only supported way to finalize a paused multi-turn node.
 
-- `ready to continue`
-- `looks good, proceed`
-- `finalize`
-- `we're ready`
-
-Only after explicit readiness does pi-materia finalize the latest assistant response using the node's normal `parse`, `assign`, `edges`, and `next` behavior. For JSON-parsed multi-turn nodes, refinement turns should stay conversational: the agent should not emit final structured JSON, and pi-materia should not parse final JSON, until the readiness-triggered finalization turn.
+Only after `/materia continue` does pi-materia request the final assistant output and process it using the node's normal `parse`, `assign`, `edges`, and `next` behavior. For JSON-parsed multi-turn nodes, refinement turns should stay conversational: the agent should not emit final structured JSON, and pi-materia should not parse final JSON, until the command-triggered finalization turn.
 
 The bundled config wires the `interactivePlan` role, which has `multiTurn: true`, into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline/loadout like this excerpt:
 
@@ -233,14 +228,14 @@ The bundled config wires the `interactivePlan` role, which has `multiTurn: true`
         "role": "interactivePlan",
         "parse": "json",
         "assign": { "tasks": "$.tasks" },
-        "prompt": "Collaboratively refine an implementation plan for this request. When finalized, return only JSON with shape: { \\"tasks\\": [{ \\"id\\": string, \\"title\\": string, \\"description\\": string, \\"acceptance\\": string[] }] }. Request: {{request}}",
+        "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return JSON with shape: { \\"tasks\\": [{ \\"id\\": string, \\"title\\": string, \\"description\\": string, \\"acceptance\\": string[] }] }. Request: {{request}}",
         "next": "Build"
       },
       "Build": { "type": "agent", "role": "Build", "foreach": { "items": "state.tasks", "as": "task", "cursor": "taskIndex", "done": "end" }, "next": "Auto-Eval" }
     }
   },
   "roles": {
-    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "systemPrompt": "Collaborate with the user, then finalize as valid JSON shaped { \\"tasks\\": [...] }." },
+    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "systemPrompt": "Collaborate with the user. Do not emit final JSON until /materia continue is run; then finalize as valid JSON shaped { \\"tasks\\": [...] }." },
     "Build": { "tools": "coding", "systemPrompt": "Implement exactly the assigned task." },
     "Auto-Eval": { "tools": "readOnly", "systemPrompt": "Verify the task and return JSON." },
     "Maintain": { "tools": "coding", "systemPrompt": "Checkpoint accepted work and return JSON." }
@@ -293,6 +288,6 @@ The bundled defaults live at `config/default.json` and set `activeLoadout` to `F
 - `Full-Auto`: the autonomous software-development workflow. The `planner` role immediately produces structured task artifacts from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
 - `Planning-Consult`: the conversational planning workflow. The planner node uses the `interactivePlan` role with `multiTurn: true`, so it starts with normal discussion instead of immediate task JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
 
-When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate task"; these refinement messages do not finalize. Once the plan looks right, say something explicit like "ready to continue", "looks good, proceed", or "finalize". pi-materia then asks for the final JSON plan, parses it into the configured `{ "tasks": [...] }` artifacts, and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that readiness step.
+When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate task"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured `{ "tasks": [...] }` artifacts, and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 
 Both loadouts are defined entirely as config using generic prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia roles. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.

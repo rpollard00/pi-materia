@@ -1,50 +1,39 @@
 # Multi-turn continuation semantics
 
-Implementation notes for agent nodes whose resolved roles have `multiTurn: true`, pause for natural-language refinement, and finalize when the user says the work is ready to continue.
+Implementation notes for agent nodes whose resolved roles have `multiTurn: true`, pause for conversational refinement, and finalize only when the user runs `/materia continue`.
 
 ## Current lifecycle
 
 1. `startNativeCast()` creates an active `MateriaCastState`, sets `awaitingResponse = true` and `nodeState = "awaiting_agent_response"`, then calls `startNode()` for the pipeline entry.
 2. `startNode()` increments the node visit, records `node_start`, applies role model/tool scope for agent nodes, and sends the hidden role prompt with `sendMateriaTurn(..., { triggerTurn: true })`.
 3. `handleAgentEnd()` processes the newest assistant entry. For normal single-turn nodes it immediately calls `completeNode()`.
-4. For `agent` nodes whose resolved role has `multiTurn: true`, `handleAgentEnd()` records the assistant output as a `node_refinement` artifact, sets `nodeState = "awaiting_user_refinement"`, clears `awaitingResponse`, saves state, updates status/widgets, and notifies the user to either refine the draft or say they are ready to continue/finalize. The node pauses after each assistant turn until explicit readiness is detected.
-5. While paused, the `input` hook in `src/index.ts` calls `handleMultiTurnUserInput()` for normal user messages before Pi starts another agent turn.
-6. If the message is a readiness instruction, the runtime finalizes the latest assistant output and advances the cast. If it is not a readiness instruction, the normal Pi turn continues; the `before_agent_start` hook calls `prepareMultiTurnRefinementTurn()` to restore the active role/model/tools, set `awaitingResponse = true` and `nodeState = "awaiting_agent_response"`, record `context_refinement`, and let the user's message drive another isolated refinement turn.
-7. The next `agent_end` records another `node_refinement` and pauses again.
+4. For `agent` nodes whose resolved role has `multiTurn: true`, `handleAgentEnd()` records the assistant output as a `node_refinement` artifact, sets `nodeState = "awaiting_user_refinement"`, clears `awaitingResponse`, saves state, updates status/widgets, and notifies the user to refine the draft or run `/materia continue` to finalize. The node pauses after each assistant turn until that command is run.
+5. While paused, ordinary user messages are treated as refinement instructions. The normal Pi turn continues; the `before_agent_start` hook calls `prepareMultiTurnRefinementTurn()` to restore the active role/model/tools, set `awaitingResponse = true` and `nodeState = "awaiting_agent_response"`, record `context_refinement`, and let the user's message drive another isolated refinement turn.
+6. The next `agent_end` records another `node_refinement` and pauses again.
+7. When the user runs `/materia continue`, the command handler calls `startMultiTurnFinalizationTurn()` for the paused node, sets `multiTurnFinalizing = true`, requests the node's final output format, and advances through the normal completion path after the assistant replies.
 
-The `/materia continue` subcommand is retained only as a backward-compatible alias. User-facing status/help/documentation should describe natural-language readiness instead of requiring that command.
+`/materia continue` is the only supported finalization trigger for paused multi-turn nodes. Natural-language messages such as `continue`, `ready to continue`, `looks good, proceed`, or `finalize` are normal refinement input and must not finalize or advance the node.
 
-## Readiness detection
+## Refinement input
 
-Paused multi-turn user messages are classified by a deterministic helper, `isReadinessToContinueInstruction()`. Free-form refinement is the default: ordinary answers, constraints, corrections, and requested changes keep the node paused and start another conversational refinement turn instead of parsing or advancing.
+Free-form refinement is the default while a multi-turn node is paused. Ordinary answers, constraints, corrections, and requested changes keep the node at the current node and start another conversational refinement turn instead of parsing or advancing.
 
-Refinement messages that do **not** finalize include:
+Refinement messages include:
 
 - `Let's do a full CRT-inspired shader with phosphor glow.`
 - `Add rollback steps before we continue.`
 - `Can you split the bootstrap work into its own task?`
 - `Continue refining the risk section.`
 - `We are ready after you add rollback steps.`
-
-Readiness messages that **do** finalize include:
-
-- `continue`
 - `ready to continue`
 - `looks good, proceed`
 - `finalize`
-- `we're ready`
 
-Classifier rules:
-
-- Normalize the latest user text: trim whitespace, lowercase, collapse repeated whitespace, and strip surrounding punctuation that does not affect intent.
-- Treat concise readiness commands as finalization, for example `continue`, `ready to continue`, `finalize`, `finalise`, `we're ready`, `we are ready`, `ready`, `looks good, continue`, and `that looks good, finalize it`.
-- Require an explicit readiness/finalization verb or phrase. Messages with substantive requested changes remain refinement turns, for example `continue refining the risk section`, `finalize the API design but add tests first`, `we're ready after you add rollback steps`, and `make it final JSON`.
-
-If `awaitingResponse` is already true, no readiness or refinement processing runs; the runtime keeps preventing double-processing while waiting for the active agent response.
+If `awaitingResponse` is already true, no refinement preparation runs; the runtime keeps preventing double-processing while waiting for the active agent response.
 
 ## Finalization semantics
 
-Natural-language readiness reuses the same finalization path that single-turn nodes use. Until readiness is accepted, the assistant output is only a refinement draft: JSON-parsed nodes must not request or emit final structured JSON, and the runtime must not call `completeNode()` or attempt `parseJson()` for that plaintext refinement output. After readiness, the paused multi-turn branch asks the agent for the node's final format and then calls `completeNode(pi, ctx, state, finalAssistantText, entryId)` so behavior remains identical to normal orchestration:
+Command-triggered finalization reuses the same completion path that single-turn nodes use. Until `/materia continue` is run, the assistant output is only a refinement draft: JSON-parsed nodes must not request or emit final structured JSON, and the runtime must not call `completeNode()` or attempt `parseJson()` for that plaintext refinement output. After `/materia continue`, the paused multi-turn branch asks the agent for the node's final format and then calls `completeNode(pi, ctx, state, finalAssistantText, entryId)` so behavior remains identical to normal orchestration:
 
 - Text nodes write the normal `node_output` artifact via `recordNodeOutput()`.
 - JSON nodes parse with `parseJson()`, write the parsed JSON sidecar, and set `state.lastJson`.
@@ -53,4 +42,4 @@ Natural-language readiness reuses the same finalization path that single-turn no
 - `node_complete` events and manifest entries are appended as today, preserving multi-turn metadata such as `finalized: true` / `finalizedRefinement` and `refinementTurn` without changing the artifact content shape consumed downstream.
 - Budget checks, `advanceToNode()`, `startNode()`, `finishCast()`, and failure handling remain the same as single-turn nodes.
 
-The final multi-turn artifact is the role's latest assistant output in the normal node artifact path, e.g. `nodes/<node>/<visit>.md`, not a transcript or wrapper. Refinement drafts continue to be recorded separately as `.refinement-<turn>-...md` artifacts for traceability.
+The final multi-turn artifact is the role's command-triggered final assistant output in the normal node artifact path, e.g. `nodes/<node>/<visit>.md`, not a transcript or wrapper. Refinement drafts continue to be recorded separately as `.refinement-<turn>-...md` artifacts for traceability.

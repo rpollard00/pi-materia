@@ -80,7 +80,8 @@ describe("config loadouts", () => {
     expect(planningConsultPrompt).toContain("Ask concise clarifying questions");
     expect(planningConsultPrompt).toContain("propose and refine task breakdowns and acceptance criteria conversationally");
     expect(planningConsultPrompt).toContain("Do not emit the structured task JSON during refinement");
-    expect(planningConsultPrompt).toContain("Only after the user explicitly indicates consensus, readiness to continue, or asks to finalize");
+    expect(planningConsultPrompt).toContain("Only after the user runs /materia continue");
+    expect(planningConsultPrompt).toContain("Treat all normal user messages as refinement input");
     expect(planningConsultPrompt).toContain('{ "tasks": [{ "id": string, "title": string, "description": string, "acceptance": string[] }] }');
     expect(planningConsultPrompt).not.toContain("Return only JSON");
 
