@@ -220,6 +220,67 @@ describe("native multi-turn runtime", () => {
     expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for node \"plan\"");
   });
 
+  test("non-readiness CRT refinement text does not finalize or parse paused JSON multi-turn output", async () => {
+    const harness = await makeHarness(multiTurnConfig());
+    const crtRefinement = "Lets do a full CRT inspired shader, we should give it some phosphor glow, and some fading to make it look like a worn out tube.";
+    const plaintextAssistantRefinement = [
+      "Sounds good — we’ll make the visual treatment a first-class feature rather than just a simple tint.",
+      "Updated plan detail for the retro visuals:",
+      "- Full-screen CRT-inspired shader/post-process effect.",
+      "- Include scanlines, phosphor glow, and faded/worn tube styling.",
+    ].join("\n");
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("One clarification before finalizing: full-screen CRT effect, or simpler material effect?");
+    await harness.emit("agent_end", { messages: [] });
+
+    const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(pausedState.active).toBe(true);
+    expect(pausedState.nodeState).toBe("awaiting_user_refinement");
+    expect(pausedState.awaitingResponse).toBe(false);
+    expect(pausedState.data.tasks).toBeUndefined();
+    expect(pausedState.lastJson).toBeUndefined();
+    const errorNotificationsBeforeInput = harness.notifications.filter((notification) => notification.type === "error").length;
+
+    const inputResults = await harness.emit("input", { text: crtRefinement, source: "interactive" });
+    expect(inputResults.at(-1)).toEqual({ action: "continue" });
+
+    const afterInputState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(afterInputState.active).toBe(true);
+    expect(afterInputState.nodeState).toBe("awaiting_user_refinement");
+    expect(afterInputState.awaitingResponse).toBe(false);
+    expect(afterInputState.data.tasks).toBeUndefined();
+    expect(afterInputState.lastJson).toBeUndefined();
+    expect(afterInputState.failedReason).toBeUndefined();
+    expect(harness.notifications.filter((notification) => notification.type === "error")).toHaveLength(errorNotificationsBeforeInput);
+
+    harness.appendUserMessage(crtRefinement);
+    await harness.emit("before_agent_start", { systemPrompt: "Base system" });
+    harness.appendAssistantMessage(plaintextAssistantRefinement);
+    await harness.emit("agent_end", { messages: [] });
+
+    const refinedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(refinedState.active).toBe(true);
+    expect(refinedState.nodeState).toBe("awaiting_user_refinement");
+    expect(refinedState.awaitingResponse).toBe(false);
+    expect(refinedState.data.tasks).toBeUndefined();
+    expect(refinedState.lastJson).toBeUndefined();
+    expect(refinedState.failedReason).toBeUndefined();
+    expect(refinedState.lastAssistantText).toBe(plaintextAssistantRefinement);
+    expect(harness.notifications.filter((notification) => notification.type === "error")).toHaveLength(errorNotificationsBeforeInput);
+
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", refinedState.castId);
+    const manifestBeforeReadiness = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
+    expect(manifestBeforeReadiness.entries.some((entry: any) => entry.kind === "node_output" && entry.node === "plan")).toBe(false);
+
+    const readinessResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
+    expect(readinessResults.at(-1)).toEqual({ action: "handled" });
+    const failedAfterReadinessState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(failedAfterReadinessState.active).toBe(false);
+    expect(failedAfterReadinessState.nodeState).toBe("failed");
+    expect(failedAfterReadinessState.failedReason).toContain("Invalid JSON output for node \"plan\"");
+  });
+
   test("paused refinement turns keep the active role prompt, tools, model, and isolated context", async () => {
     const harness = await makeHarness(multiTurnConfig({ model: "test/refiner", thinking: "high" }));
     harness.models = [{ provider: "test", id: "refiner", name: "Refiner", api: "fake" }];
