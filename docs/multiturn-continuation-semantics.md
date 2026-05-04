@@ -1,13 +1,13 @@
 # Multi-turn continuation semantics
 
-Implementation notes for multi-turn agent nodes that pause for natural-language refinement and finalize when the user says the work is ready to continue.
+Implementation notes for agent nodes whose resolved roles have `multiTurn: true`, pause for natural-language refinement, and finalize when the user says the work is ready to continue.
 
 ## Current lifecycle
 
 1. `startNativeCast()` creates an active `MateriaCastState`, sets `awaitingResponse = true` and `nodeState = "awaiting_agent_response"`, then calls `startNode()` for the pipeline entry.
 2. `startNode()` increments the node visit, records `node_start`, applies role model/tool scope for agent nodes, and sends the hidden role prompt with `sendMateriaTurn(..., { triggerTurn: true })`.
 3. `handleAgentEnd()` processes the newest assistant entry. For normal single-turn nodes it immediately calls `completeNode()`.
-4. For `agent` nodes with `multiTurn: true`, `handleAgentEnd()` records the assistant output as a `node_refinement` artifact, sets `nodeState = "awaiting_user_refinement"`, clears `awaitingResponse`, saves state, updates status/widgets, and notifies the user to either refine the draft or say they are ready to continue/finalize.
+4. For `agent` nodes whose resolved role has `multiTurn: true`, `handleAgentEnd()` records the assistant output as a `node_refinement` artifact, sets `nodeState = "awaiting_user_refinement"`, clears `awaitingResponse`, saves state, updates status/widgets, and notifies the user to either refine the draft or say they are ready to continue/finalize.
 5. While paused, the `input` hook in `src/index.ts` calls `handleMultiTurnUserInput()` for normal user messages before Pi starts another agent turn.
 6. If the message is a readiness instruction, the runtime finalizes the latest assistant output and advances the cast. If it is not a readiness instruction, the normal Pi turn continues; the `before_agent_start` hook calls `prepareMultiTurnRefinementTurn()` to restore the active role/model/tools, set `awaitingResponse = true` and `nodeState = "awaiting_agent_response"`, record `context_refinement`, and let the user's message drive another isolated refinement turn.
 7. The next `agent_end` records another `node_refinement` and pauses again.

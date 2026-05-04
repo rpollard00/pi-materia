@@ -114,14 +114,14 @@ Configs can also define named `loadouts` that share the top-level `roles`, `limi
     "Planning-Consult": {
       "entry": "planner",
       "nodes": {
-        "planner": { "type": "agent", "role": "interactivePlan", "multiTurn": true, "next": "Build" },
+        "planner": { "type": "agent", "role": "interactivePlan", "next": "Build" },
         "Build": { "type": "agent", "role": "Build", "next": "end" }
       }
     }
   },
   "roles": {
     "planner": { "tools": "readOnly", "systemPrompt": "Plan automatically." },
-    "interactivePlan": { "tools": "readOnly", "systemPrompt": "Collaborate, then finalize a plan." },
+    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "systemPrompt": "Collaborate, then finalize a plan." },
     "Build": { "tools": "coding", "systemPrompt": "Implement exactly the assigned task." }
   }
 }
@@ -182,13 +182,14 @@ Generic node mechanics:
 - `foreach`: iterate a node over an array in state
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
-- `multiTurn`: set `true` on an agent node to pause for interactive refinement until the user says they are ready to continue/finalize
 
-### Multi-turn planner nodes
+Role configs also define agent capabilities such as `tools`, `model`, `thinking`, `systemPrompt`, and `multiTurn`. Set `"multiTurn": true` on a role to let any agent node using that role pause for interactive refinement until the user says they are ready to continue/finalize.
 
-Agent nodes are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent node when you want a manual refinement loop. A multi-turn node records each assistant response as a refinement artifact, keeps the cast active at that node, and treats ordinary user replies as refinement instructions. When the latest draft is ready, say so in natural language (for example, "ready to continue", "continue", "finalize", or "we're ready") and pi-materia finalizes the latest assistant response using the node's normal `parse`, `assign`, `edges`, and `next` behavior. Invalid JSON is only an error when you finalize a JSON-parsed node.
+### Multi-turn planner roles
 
-The bundled config wires the `interactivePlan` role into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline/loadout like this excerpt:
+Agent nodes are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent role when you want nodes using that role to run a manual refinement loop. A multi-turn role records each assistant response as a refinement artifact, keeps the cast active at the current node, and treats ordinary user replies as refinement instructions. When the latest draft is ready, say so in natural language (for example, "ready to continue", "continue", "finalize", or "we're ready") and pi-materia finalizes the latest assistant response using the node's normal `parse`, `assign`, `edges`, and `next` behavior. Invalid JSON is only an error when you finalize a JSON-parsed node.
+
+The bundled config wires the `interactivePlan` role, which has `multiTurn: true`, into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline/loadout like this excerpt:
 
 ```json
 {
@@ -214,7 +215,6 @@ The bundled config wires the `interactivePlan` role into the `Planning-Consult` 
       "interactivePlan": {
         "type": "agent",
         "role": "interactivePlan",
-        "multiTurn": true,
         "parse": "json",
         "assign": { "tasks": "$.tasks" },
         "prompt": "Collaboratively refine an implementation plan for this request. When finalized, return only JSON with shape: { \\"tasks\\": [{ \\"id\\": string, \\"title\\": string, \\"description\\": string, \\"acceptance\\": string[] }] }. Request: {{request}}",
@@ -224,7 +224,7 @@ The bundled config wires the `interactivePlan` role into the `Planning-Consult` 
     }
   },
   "roles": {
-    "interactivePlan": { "tools": "readOnly", "systemPrompt": "Collaborate with the user, then finalize as valid JSON shaped { \\"tasks\\": [...] }." },
+    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "systemPrompt": "Collaborate with the user, then finalize as valid JSON shaped { \\"tasks\\": [...] }." },
     "Build": { "tools": "coding", "systemPrompt": "Implement exactly the assigned task." },
     "Auto-Eval": { "tools": "readOnly", "systemPrompt": "Verify the task and return JSON." },
     "Maintain": { "tools": "coding", "systemPrompt": "Checkpoint accepted work and return JSON." }
