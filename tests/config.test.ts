@@ -60,14 +60,29 @@ describe("config loadouts", () => {
     const loaded = await loadConfig(process.cwd());
 
     expect(loaded.config.activeLoadout).toBe("Full-Auto");
-    expect(loaded.config.loadouts?.["Full-Auto"]?.nodes.planner).toMatchObject({ role: "planner" });
-    expect(loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner).toMatchObject({
+    const fullAutoPlanner = loaded.config.loadouts?.["Full-Auto"]?.nodes.planner;
+    const planningConsultPlanner = loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner;
+    expect(fullAutoPlanner).toMatchObject({ role: "planner" });
+    expect(planningConsultPlanner).toMatchObject({
       type: "agent",
       role: "interactivePlan",
       parse: "json",
     });
-    expect("multiTurn" in (loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner ?? {})).toBe(false);
+    expect("multiTurn" in (planningConsultPlanner ?? {})).toBe(false);
     expect(loaded.config.roles.interactivePlan.multiTurn).toBe(true);
+
+    const fullAutoPrompt = String(fullAutoPlanner?.prompt ?? "");
+    const planningConsultPrompt = String(planningConsultPlanner?.prompt ?? "");
+    expect(fullAutoPrompt).toContain("Return only JSON with shape");
+    expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
+    expect(planningConsultPrompt).toContain("Collaboratively refine an implementation plan");
+    expect(planningConsultPrompt).toContain("normal conversation");
+    expect(planningConsultPrompt).toContain("Ask concise clarifying questions");
+    expect(planningConsultPrompt).toContain("propose and refine task breakdowns and acceptance criteria conversationally");
+    expect(planningConsultPrompt).toContain("Do not emit the structured task JSON during refinement");
+    expect(planningConsultPrompt).toContain("Only after the user explicitly indicates consensus, readiness to continue, or asks to finalize");
+    expect(planningConsultPrompt).toContain('{ "tasks": [{ "id": string, "title": string, "description": string, "acceptance": string[] }] }');
+    expect(planningConsultPrompt).not.toContain("Return only JSON");
 
     const fullAuto = resolvePipeline(loaded.config);
     expect(fullAuto.nodes.planner.node.type).toBe("agent");

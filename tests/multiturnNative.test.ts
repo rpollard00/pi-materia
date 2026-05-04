@@ -122,8 +122,14 @@ describe("native multi-turn runtime", () => {
     expect(plannerStartedState.currentRole).toBe("interactivePlan");
     expect(plannerStartedState.nodeState).toBe("awaiting_agent_response");
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
+    const firstPrompt = harness.sentMessages.find((sent) => (sent.message as any).customType === "pi-materia-prompt")?.message as any;
+    expect(firstPrompt.content).toContain("Collaboratively refine an implementation plan");
+    expect(firstPrompt.content).toContain("normal conversation");
+    expect(firstPrompt.content).toContain("Do not emit the structured task JSON during refinement");
+    expect(firstPrompt.content).toContain("Only after the user explicitly indicates consensus, readiness to continue, or asks to finalize");
+    expect(firstPrompt.content).not.toContain("Return only JSON");
 
-    harness.appendAssistantMessage(finalPlan);
+    harness.appendAssistantMessage("I understand the feature. A good first cut is to update the prompt and cover it with tests. Should docs be included too?");
     await harness.emit("agent_end", { messages: [] });
 
     const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
@@ -133,8 +139,20 @@ describe("native multi-turn runtime", () => {
     expect(pausedState.nodeState).toBe("awaiting_user_refinement");
     expect(pausedState.awaitingResponse).toBe(false);
     expect(pausedState.data.tasks).toBeUndefined();
+    expect(pausedState.lastAssistantText).toContain("Should docs be included too?");
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
     expect(harness.sentMessages.map(({ message }) => (message as any).content).join("\n")).not.toContain("Task 1: Ship it");
+
+    harness.appendUserMessage("Yes, include docs and finalize the task artifacts.");
+    harness.appendAssistantMessage(finalPlan);
+    await harness.emit("agent_end", { messages: [] });
+
+    const finalizedButPausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(finalizedButPausedState.active).toBe(true);
+    expect(finalizedButPausedState.currentNode).toBe("planner");
+    expect(finalizedButPausedState.nodeState).toBe("awaiting_user_refinement");
+    expect(finalizedButPausedState.data.tasks).toBeUndefined();
+    expect(finalizedButPausedState.lastAssistantText).toBe(finalPlan);
 
     const inputResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
     expect(inputResults.at(-1)).toEqual({ action: "handled" });
