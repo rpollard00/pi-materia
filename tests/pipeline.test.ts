@@ -161,7 +161,7 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/unsupported parse mode "yaml"/);
   });
 
-  test("accepts multi-turn roles and renders agent slots with role-derived capability", () => {
+  test("accepts multi-turn roles and renders roles plus agent slots with role-derived capability", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
       pipeline: {
@@ -180,7 +180,8 @@ describe("utility pipeline nodes", () => {
 
     expect(pipeline.entry.node.type).toBe("agent");
     expect(pipeline.entry.role.multiTurn).toBe(true);
-    expect(lines.find((line) => line.startsWith("- interactivePlan:"))).toContain("multiTurn=true");
+    expect(lines).toContain("- planner: tools=readOnly, multiTurn=true, model=active Pi model, thinking=active Pi thinking");
+    expect(lines.find((line) => line.startsWith("- interactivePlan:"))).toContain("role.multiTurn=true");
   });
 
   test("rejects obsolete node-level multiTurn", () => {

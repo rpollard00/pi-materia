@@ -135,7 +135,7 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
 function renderRoles(config: PiMateriaConfig): string[] {
   const entries = Object.entries(config.roles);
   if (entries.length === 0) return ["- none configured"];
-  return entries.map(([name, role]) => `- ${name}: tools=${role.tools}, ${formatRoleModelSettings(role)}`);
+  return entries.map(([name, role]) => `- ${name}: ${formatRoleDetails(role)}`);
 }
 
 function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig): string {
@@ -143,7 +143,7 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
   if (node.type === "agent") {
     const role = config.roles[node.role];
     details.push(`role=${node.role}`, `tools=${role?.tools ?? "unknown"}`);
-    if (role?.multiTurn) details.push("multiTurn=true");
+    if (role?.multiTurn) details.push("role.multiTurn=true");
     if (role) details.push(formatRoleModelSettings(role));
   } else {
     details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);
@@ -160,6 +160,14 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
 
 function formatCommand(command: string[] | undefined): string {
   return command?.length ? command.map((part) => JSON.stringify(part)).join(" ") : "<missing>";
+}
+
+function formatRoleDetails(role: { tools?: string; model?: string; thinking?: string; multiTurn?: boolean }): string {
+  return [
+    `tools=${role.tools}`,
+    role.multiTurn ? "multiTurn=true" : undefined,
+    formatRoleModelSettings(role),
+  ].filter(Boolean).join(", ");
 }
 
 function formatRoleModelSettings(role: { model?: string; thinking?: string }): string {
