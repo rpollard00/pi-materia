@@ -294,7 +294,8 @@
 }
 
 .graph-field input,
-.graph-field select {
+.graph-field select,
+.graph-field textarea {
   min-width: 0;
   border-radius: 0.75rem;
   border: 1px solid rgb(207 250 254 / 0.16);
@@ -308,7 +309,8 @@
 }
 
 .graph-field input:focus,
-.graph-field select:focus {
+.graph-field select:focus,
+.graph-field textarea:focus {
   border-color: rgb(103 232 249 / 0.72);
   box-shadow: 0 0 0 3px rgb(34 211 238 / 0.12);
 }

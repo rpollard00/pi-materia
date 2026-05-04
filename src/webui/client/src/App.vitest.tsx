@@ -4,6 +4,10 @@ import { App } from './App.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
+  roles: {
+    planner: { tools: 'none', systemPrompt: 'Plan the work' },
+    Build: { tools: 'coding', systemPrompt: 'Build the work', model: 'openai/gpt-test' },
+  },
   loadouts: {
     'Full-Auto': {
       entry: 'planner',
@@ -212,6 +216,77 @@ describe('Materia loadout grid editor', () => {
     expect(saved.Build.insertedBy).toBe('node-shift');
     expect(saved['Build-insert']).toMatchObject({ next: 'Auto-Eval', inserted: { between: ['Build', 'Auto-Eval'], via: 'webui-graph-editor' } });
     expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
+  });
+
+  it('creates prompt materia with model, output format, and multiturn defaults to user persistence', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
+    fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
+    fireEvent.change(screen.getByTestId('materia-model'), { target: { value: 'openai/gpt-review' } });
+    fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
+    fireEvent.click(screen.getByTestId('materia-multiturn'));
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.target).toBe('user');
+    expect(body.config.loadouts['Full-Auto'].nodes.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'json' });
+    expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.', model: 'openai/gpt-review', multiTurn: true });
+  });
+
+  it('creates tool invocation materia and only uses project persistence when explicitly selected', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'project' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'RunTests' } });
+    fireEvent.change(screen.getByTestId('materia-behavior'), { target: { value: 'tool' } });
+    fireEvent.change(screen.getByTestId('materia-persist-scope'), { target: { value: 'project' } });
+    fireEvent.change(screen.getByTestId('materia-utility'), { target: { value: 'shell' } });
+    fireEvent.change(screen.getByTestId('materia-command'), { target: { value: 'npm test' } });
+    fireEvent.change(screen.getByTestId('materia-params'), { target: { value: '{"ci":true}' } });
+    fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '90000' } });
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.target).toBe('project');
+    expect(body.config.loadouts['Full-Auto'].nodes.RunTests).toMatchObject({ type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000 });
+  });
+
+  it('edits existing prompt materia role settings where supported', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Build with extra care.' } });
+    fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'readOnly' } });
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.target).toBe('user');
+    expect(body.config.loadouts['Full-Auto'].nodes.Build).toMatchObject({ type: 'agent', role: 'Build', prompt: 'Build with extra care.', next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
+    expect(body.config.roles.Build).toMatchObject({ tools: 'readOnly', systemPrompt: 'Build with extra care.', model: 'openai/gpt-test' });
   });
 
   it('stages branch, layout, and retry limit edits without deleting graph semantics', async () => {

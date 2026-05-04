@@ -24,11 +24,38 @@ interface PipelineConfig {
   [key: string]: unknown;
 }
 
+interface MateriaRoleConfig {
+  tools?: 'none' | 'readOnly' | 'coding';
+  systemPrompt?: string;
+  model?: string;
+  thinking?: string;
+  multiTurn?: boolean;
+  [key: string]: unknown;
+}
+
 interface MateriaConfig {
   activeLoadout?: string;
   loadouts?: Record<string, PipelineConfig>;
   pipeline?: PipelineConfig;
+  roles?: Record<string, MateriaRoleConfig>;
   [key: string]: unknown;
+}
+
+interface MateriaFormState {
+  editingNodeId: string;
+  name: string;
+  behavior: 'prompt' | 'tool';
+  prompt: string;
+  toolAccess: 'none' | 'readOnly' | 'coding';
+  model: string;
+  thinking: string;
+  outputFormat: 'text' | 'json';
+  multiTurn: boolean;
+  utility: string;
+  command: string;
+  params: string;
+  timeoutMs: string;
+  persistScope: SaveTarget;
 }
 
 interface ConfigResponse {
@@ -43,6 +70,23 @@ interface DragPayload {
   fromLoadout?: string;
   fromSocket?: string;
 }
+
+const emptyMateriaForm = (): MateriaFormState => ({
+  editingNodeId: '',
+  name: '',
+  behavior: 'prompt',
+  prompt: '',
+  toolAccess: 'none',
+  model: '',
+  thinking: '',
+  outputFormat: 'text',
+  multiTurn: false,
+  utility: '',
+  command: '',
+  params: '{}',
+  timeoutMs: '',
+  persistScope: 'user',
+});
 
 const paletteColors = [
   'from-sky-200 via-cyan-300 to-blue-600',
@@ -156,6 +200,18 @@ function clearSocketMateria(socket?: PipelineNode): PipelineNode {
   return { ...socketStructure(socket), empty: true };
 }
 
+function parseJsonObject(raw: string): Record<string, unknown> | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Tool params must be a JSON object.');
+  return parsed as Record<string, unknown>;
+}
+
+function commandParts(raw: string): string[] | undefined {
+  return raw.split(/\s+/).map((part) => part.trim()).filter(Boolean);
+}
+
 function Orb({ color, label, small = false, empty = false }: { color: string; label: string; small?: boolean; empty?: boolean }) {
   return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : `bg-gradient-to-br ${color}`}`} title={label} />;
 }
@@ -171,6 +227,7 @@ export function App() {
   const [newGraphNodeId, setNewGraphNodeId] = useState('Review');
   const [insertFrom, setInsertFrom] = useState('');
   const [insertTo, setInsertTo] = useState('');
+  const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
   useEffect(() => {
     let cancelled = false;
@@ -216,6 +273,7 @@ export function App() {
   const activeNodes = activeLoadout?.nodes ?? {};
   const activeNodeIds = Object.keys(activeNodes);
   const activeGraphEdges = useMemo(() => graphEdges(activeNodes), [activeNodes]);
+  const roles = draftConfig?.roles ?? {};
   const palette = useMemo(() => {
     const allNodes = Object.values(loadouts).flatMap((loadout) => Object.entries(loadout.nodes ?? {}));
     const byId = new Map<string, PipelineNode>();
@@ -397,6 +455,71 @@ export function App() {
     setStatus(`Entry node staged: ${id}.`);
   }
 
+  function editMateria(id: string) {
+    const node = activeNodes[id];
+    if (!node) return;
+    const role = node.role ? roles[node.role] : undefined;
+    setMateriaForm({
+      editingNodeId: id,
+      name: id,
+      behavior: node.type === 'utility' ? 'tool' : 'prompt',
+      prompt: String(role?.systemPrompt ?? node.prompt ?? ''),
+      toolAccess: role?.tools ?? 'none',
+      model: String(role?.model ?? node.model ?? ''),
+      thinking: String(role?.thinking ?? ''),
+      outputFormat: (node.parse === 'json' || node.outputFormat === 'json') ? 'json' : 'text',
+      multiTurn: Boolean(role?.multiTurn ?? node.multiturn),
+      utility: String(node.utility ?? ''),
+      command: Array.isArray(node.command) ? node.command.join(' ') : '',
+      params: node.params ? JSON.stringify(node.params, null, 2) : '{}',
+      timeoutMs: node.timeoutMs ? String(node.timeoutMs) : '',
+      persistScope: 'user',
+    });
+    setStatus(`Editing materia ${id}. Save the staged form to update this loadout.`);
+  }
+
+  function saveMateriaForm() {
+    if (!activeLoadoutName) return;
+    try {
+      const name = materiaForm.name.trim();
+      if (!name) throw new Error('Materia name is required.');
+      const timeoutMs = Number(materiaForm.timeoutMs);
+      const parsedParams = materiaForm.behavior === 'tool' ? parseJsonObject(materiaForm.params) : undefined;
+      mutateActiveGraph((loadout, nodes) => {
+        const existingId = materiaForm.editingNodeId && nodes[materiaForm.editingNodeId] ? materiaForm.editingNodeId : '';
+        const id = existingId || makeUniqueNodeId(nodes, name);
+        const prior = existingId ? nodes[existingId] : undefined;
+        const base = socketStructure(prior);
+        if (materiaForm.behavior === 'prompt') {
+          const roleName = name;
+          nodes[id] = { ...base, type: 'agent', role: roleName, prompt: materiaForm.prompt || undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text', empty: false };
+          loadout.entry ||= id;
+        } else {
+          const command = commandParts(materiaForm.command);
+          nodes[id] = { ...base, type: 'utility', utility: materiaForm.utility || name, command: command?.length ? command : undefined, params: parsedParams, timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text', empty: false };
+          loadout.entry ||= id;
+        }
+      });
+      updateDraft((config) => {
+        config.roles ??= {};
+        if (materiaForm.behavior === 'prompt') {
+          config.roles[materiaForm.name.trim()] = {
+            tools: materiaForm.toolAccess,
+            systemPrompt: materiaForm.prompt,
+            model: materiaForm.model.trim() || undefined,
+            thinking: materiaForm.thinking.trim() || undefined,
+            multiTurn: materiaForm.multiTurn || undefined,
+          };
+        }
+      });
+      setSaveTarget(materiaForm.persistScope);
+      setMateriaForm(emptyMateriaForm());
+      setStatus(`Staged ${materiaForm.behavior} materia. Save target is ${materiaForm.persistScope}; user profile remains the default unless project is explicitly selected.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   function handleDrop(socketId: string, event: DragEvent) {
     event.preventDefault();
     const raw = event.dataTransfer.getData('application/json');
@@ -537,6 +660,88 @@ export function App() {
             </section>
           </aside>
         </div>
+
+        <section className="fantasy-panel p-6" aria-label="Materia creation editor">
+          <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">materia forge</p>
+              <h2 className="mt-2 text-3xl font-black text-white">Create / edit materia</h2>
+              <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge prompt materia or tool-invocation materia as staged loadout edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
+            </div>
+            <label className="graph-field w-full max-w-xs">Edit existing
+              <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : setMateriaForm(emptyMateriaForm())}>
+                <option value="">new materia…</option>
+                {activeNodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+            <label className="graph-field">Name
+              <input data-testid="materia-name" value={materiaForm.name} onChange={(event) => setMateriaForm({ ...materiaForm, name: event.target.value })} placeholder="Critique" />
+            </label>
+            <label className="graph-field">Behavior
+              <select data-testid="materia-behavior" value={materiaForm.behavior} onChange={(event) => setMateriaForm({ ...materiaForm, behavior: event.target.value as MateriaFormState['behavior'] })}>
+                <option value="prompt">Prompt / agent</option>
+                <option value="tool">Tool invocation</option>
+              </select>
+            </label>
+            <label className="graph-field">Output format
+              <select data-testid="materia-output-format" value={materiaForm.outputFormat} onChange={(event) => setMateriaForm({ ...materiaForm, outputFormat: event.target.value as MateriaFormState['outputFormat'] })}>
+                <option value="text">Text</option>
+                <option value="json">JSON</option>
+              </select>
+            </label>
+            <label className="graph-field">Save scope
+              <select data-testid="materia-persist-scope" value={materiaForm.persistScope} onChange={(event) => setMateriaForm({ ...materiaForm, persistScope: event.target.value as SaveTarget })}>
+                <option value="user">User profile (~/.config/pi/pi-materia)</option>
+                <option value="project">Project (.pi/pi-materia.json)</option>
+                <option value="explicit">Explicit config</option>
+              </select>
+            </label>
+          </div>
+
+          {materiaForm.behavior === 'prompt' ? (
+            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_14rem_14rem_10rem]">
+              <label className="graph-field">Prompt / system prompt
+                <textarea data-testid="materia-prompt" className="min-h-32" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
+              </label>
+              <label className="graph-field">Model
+                <input data-testid="materia-model" value={materiaForm.model} onChange={(event) => setMateriaForm({ ...materiaForm, model: event.target.value })} placeholder="provider/model" />
+              </label>
+              <label className="graph-field">Tools
+                <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
+                  <option value="none">none</option>
+                  <option value="readOnly">read only</option>
+                  <option value="coding">coding</option>
+                </select>
+              </label>
+              <label className="graph-field">Multiturn
+                <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
+              </label>
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-4 lg:grid-cols-[14rem_1fr_1fr_10rem]">
+              <label className="graph-field">Utility
+                <input data-testid="materia-utility" value={materiaForm.utility} onChange={(event) => setMateriaForm({ ...materiaForm, utility: event.target.value })} placeholder="shell" />
+              </label>
+              <label className="graph-field">Command
+                <input data-testid="materia-command" value={materiaForm.command} onChange={(event) => setMateriaForm({ ...materiaForm, command: event.target.value })} placeholder="npm test" />
+              </label>
+              <label className="graph-field">Params JSON
+                <textarea data-testid="materia-params" value={materiaForm.params} onChange={(event) => setMateriaForm({ ...materiaForm, params: event.target.value })} />
+              </label>
+              <label className="graph-field">Timeout ms
+                <input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" />
+              </label>
+            </div>
+          )}
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button className="materia-button" data-testid="save-materia-form" onClick={saveMateriaForm}>{materiaForm.editingNodeId ? 'Update materia' : 'Create materia'}</button>
+            <button className="materia-button-secondary" onClick={() => setMateriaForm(emptyMateriaForm())}>Clear form</button>
+          </div>
+        </section>
 
         <section className="fantasy-panel p-6" aria-label="Pipeline graph editor">
           <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
