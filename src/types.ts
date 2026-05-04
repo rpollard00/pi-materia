@@ -136,6 +136,7 @@ export interface MateriaCastState {
   nodeState?: MateriaCastNodeState;
   lastProcessedEntryId?: string;
   lastAssistantText?: string;
+  multiTurnFinalizing?: boolean;
   failedReason?: string;
   startedAt: number;
   updatedAt: number;

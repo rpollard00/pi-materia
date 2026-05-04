@@ -82,7 +82,7 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
     if (!isPausedMultiTurnRefinement(state)) {
       throw new Error("Materia is awaiting user refinement, but the current node's resolved role is not multi-turn.");
     }
-    await finalizePausedMultiTurnNode(pi, ctx, state);
+    await startMultiTurnFinalizationTurn(pi, ctx, state);
     return;
   }
 
@@ -92,25 +92,32 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
 export async function handleMultiTurnUserInput(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string): Promise<"finalized" | "continue"> {
   if (!isPausedMultiTurnRefinement(state)) return "continue";
   if (!isReadinessToContinueInstruction(text)) return "continue";
-  await finalizePausedMultiTurnNode(pi, ctx, state);
+  await startMultiTurnFinalizationTurn(pi, ctx, state);
   return "finalized";
 }
 
-async function finalizePausedMultiTurnNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
+async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   const node = currentNodeOrThrow(state);
   if (!isMultiTurnResolvedAgentNode(node)) {
     throw new Error(`Cannot finalize refinement for node "${node.id}" because its resolved role is not multi-turn.`);
   }
-  const text = state.lastAssistantText;
-  if (!text) throw new Error("Multi-turn node has no assistant output to finalize.");
-  const entryId = state.lastProcessedEntryId ?? `multiturn:${state.currentNode ?? state.phase}:latest`;
-  state.nodeState = "idle";
+  const appliedModel = await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
+  const roleModel = roleModelSelection(appliedModel);
+  state.currentRole = nodeRoleName(node);
+  state.currentRoleModel = roleModel;
+  state.runState.currentRole = nodeRoleName(node);
+  state.runState.currentRoleModel = roleModel;
+  state.awaitingResponse = true;
+  state.nodeState = "awaiting_agent_response";
+  state.multiTurnFinalizing = true;
+  state.updatedAt = Date.now();
+  const refinementTurn = currentRefinementTurn(state, node.id) + 1;
+  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });
+  await writeUsage(state.runState);
+  await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel, refinementTurn, finalization: true });
+  updateToolScope(pi, node.role);
   saveCastState(pi, state);
-  try {
-    await completeNode(pi, ctx, state, text, entryId);
-  } catch (error) {
-    await failCast(pi, ctx, state, error, entryId);
-  }
+  await sendMateriaTurn(pi, state, buildMultiTurnFinalizationPrompt(state, node));
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
@@ -139,6 +146,13 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     // multiTurn, even an interactive planning node completes and advances.
     // Keep this generic runtime gate role-name agnostic.
     if (isMultiTurnResolvedAgentNode(node)) {
+      if (state.multiTurnFinalizing) {
+        state.multiTurnFinalizing = false;
+        state.nodeState = "idle";
+        saveCastState(pi, state);
+        await completeNode(pi, ctx, state, text, latest.entry.id);
+        return;
+      }
       const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
       state.nodeState = "awaiting_user_refinement";
       state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement, or readiness to continue/finalize.`;
@@ -630,7 +644,38 @@ function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
 
 function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
-  return rolePrompt(node.role, [renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state)]);
+  return rolePrompt(node.role, [renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state), multiTurnTurnInstruction(state, node)]);
+}
+
+function buildMultiTurnFinalizationPrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
+  if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
+  return rolePrompt(node.role, [
+    buildSyntheticCastContext(state),
+    "The user has explicitly indicated readiness to continue/finalize this multi-turn node. This is the finalization turn.",
+    renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state),
+    finalFormatInstruction(node),
+  ]);
+}
+
+function multiTurnTurnInstruction(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
+  if (!isMultiTurnResolvedAgentNode(node)) return undefined;
+  return state.multiTurnFinalizing
+    ? finalFormatInstruction(node)
+    : "Current multi-turn mode: refinement conversation. The user has not explicitly indicated readiness to continue/finalize in this turn. Respond in normal conversation, incorporate any refinement feedback, and do not emit final structured JSON or other final machine-parseable output yet. Wait for an explicit readiness/finalization instruction before producing the final node output.";
+}
+
+function finalFormatInstruction(node: ResolvedMateriaNode): string {
+  if (!isAgentResolvedNode(node)) return "";
+  if (node.node.parse === "json") {
+    return "Final output format: Return only JSON for this node, with no markdown fences, prose, or extra commentary. Follow the schema/shape requested by the node prompt exactly.";
+  }
+  return "Final output format: return the final plain-text output for this node, with no extra refinement questions.";
+}
+
+export function activeRoleSystemPrompt(state: MateriaCastState, role: MateriaRoleConfig): string {
+  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
+  const suffix = node && isAgentResolvedNode(node) ? multiTurnTurnInstruction(state, node) : undefined;
+  return [role.systemPrompt, suffix].filter(Boolean).join("\n\n");
 }
 
 function defaultNodePrompt(node: ResolvedMateriaNode): string {

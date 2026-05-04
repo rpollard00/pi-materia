@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, handleMultiTurnUserInput, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
+import { activeRoleSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, handleMultiTurnUserInput, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -39,7 +39,7 @@ export default function piMateria(pi: ExtensionAPI) {
     const role = currentRole(state);
     if (!role) return;
     return {
-      systemPrompt: `${event.systemPrompt}\n\nMateria active role (${state.currentNode ?? state.phase}):\n${role.systemPrompt}`,
+      systemPrompt: `${event.systemPrompt}\n\nMateria active role (${state.currentNode ?? state.phase}):\n${activeRoleSystemPrompt(state, role)}`,
     };
   });
 
