@@ -89,13 +89,6 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   await startNode(pi, ctx, state, currentNodeOrThrow(state));
 }
 
-export async function handleMultiTurnUserInput(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string): Promise<"finalized" | "continue"> {
-  if (!isPausedMultiTurnRefinement(state)) return "continue";
-  if (!isReadinessToContinueInstruction(text)) return "continue";
-  await startMultiTurnFinalizationTurn(pi, ctx, state);
-  return "finalized";
-}
-
 async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   const node = currentNodeOrThrow(state);
   if (!isMultiTurnResolvedAgentNode(node)) {
@@ -744,29 +737,6 @@ function shouldUseIsolatedRoleContext(state: MateriaCastState): boolean {
 
 function isPausedMultiTurnRefinement(state: MateriaCastState): boolean {
   return !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isActiveMultiTurnNode(state);
-}
-
-export function isReadinessToContinueInstruction(input: string): boolean {
-  const normalized = input
-    .trim()
-    .toLowerCase()
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/^[\s.!?,;:()[\]{}"']+|[\s.!?,;:()[\]{}"']+$/g, "")
-    .replace(/\s+/g, " ");
-  if (!normalized) return false;
-
-  const explicitReadiness = /^(?:please\s+)?(?:(?:ready|done)(?:\s+(?:please|now|to continue|to proceed|to finali[sz]e|and continue|and proceed|and finali[sz]e))?|(?:continue|proceed|finali[sz]e)(?:\s+(?:please|now|it|this))?|ship it|(?:we(?:'re| are)|i(?:'m| am))\s+(?:ready|done)(?:\s+(?:to continue|to proceed|to finali[sz]e|now))?)$/;
-  if (explicitReadiness.test(normalized)) return true;
-
-  const consensusThenAction = /^(?:that\s+)?(?:looks good|lgtm)(?:\s*(?:,|;|and)?\s*(?:please\s+)?(?:continue|proceed|finali[sz]e|ship it)(?:\s+(?:it|this|please|now))?)$/;
-  if (consensusThenAction.test(normalized)) return true;
-
-  const readinessPhrase = /\b(?:ready to (?:continue|proceed|finali[sz]e)|(?:we(?:'re| are)|i(?:'m| am))\s+(?:ready|done))\b/;
-  const consensus = /\b(?:looks good|lgtm)\b/;
-  const finalAction = /\b(?:continue|proceed|finali[sz]e|ship it)\b/;
-  const changeRequest = /\b(?:add|change|update|revise|refine|fix|include|remove|rewrite|adjust|edit|after|but|first|before|make it|should we|how should|what about)\b/;
-  return (readinessPhrase.test(normalized) || (consensus.test(normalized) && finalAction.test(normalized))) && !changeRequest.test(normalized);
 }
 
 function isActiveMultiTurnNode(state: MateriaCastState): boolean {

@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { activeRoleSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, handleMultiTurnUserInput, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
+import { activeRoleSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -13,14 +13,6 @@ export default function piMateria(pi: ExtensionAPI) {
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
     type: "string",
-  });
-
-  pi.on("input", async (event, ctx) => {
-    const state = loadActiveCastState(ctx);
-    if (!state?.active) return { action: "continue" };
-    if (event.source === "extension") return { action: "continue" };
-    const result = await handleMultiTurnUserInput(pi, ctx, state, event.text ?? "");
-    return result === "finalized" ? { action: "handled" } : { action: "continue" };
   });
 
   pi.on("context", (event, ctx) => {
