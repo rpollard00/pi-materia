@@ -58,7 +58,7 @@ export default function piMateria(pi: ExtensionAPI) {
 
       if (subcommand === "ui") {
         try {
-          const result = await launchMateriaWebUi(ctx);
+          const result = await launchMateriaWebUi(ctx, getConfiguredConfigPath(pi));
           const lines = [
             "Materia WebUI",
             result.reused ? "reused existing session-scoped server" : "started session-scoped server in background",

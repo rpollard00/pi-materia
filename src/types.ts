@@ -14,6 +14,28 @@ export interface PiMateriaConfig {
 export interface LoadedConfig {
   config: PiMateriaConfig;
   source: string;
+  layers?: MateriaConfigLayer[];
+}
+
+export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
+
+export interface MateriaConfigLayer {
+  scope: MateriaConfigLayerScope;
+  path: string;
+  loaded: boolean;
+}
+
+export type MateriaSaveTarget = "user" | "project" | "explicit";
+
+export interface MateriaProfileConfig {
+  webui?: {
+    autoOpenBrowser?: boolean;
+    openBrowser?: boolean;
+    preferredPort?: number;
+    port?: number;
+    host?: string;
+  };
+  defaultSaveTarget?: "user" | "project";
 }
 
 export interface MateriaBudgetConfig {

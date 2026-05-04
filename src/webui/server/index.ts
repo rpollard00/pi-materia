@@ -3,6 +3,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+type MateriaSaveTarget = 'user' | 'project' | 'explicit';
+type MateriaConfigPatch = Record<string, unknown>;
+
 export interface MateriaWebUiSessionSnapshot {
   ok: true;
   scope: 'session';
@@ -39,6 +42,8 @@ export interface MateriaWebUiServerOptions {
     sessionId: string;
     startedAt: number;
     getSnapshot: () => MateriaWebUiSessionSnapshot;
+    getConfig?: () => Promise<unknown>;
+    saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
   };
 }
 
@@ -62,6 +67,32 @@ function safeStaticPath(staticDir: string, urlPath = '/') {
   const candidate = normalize(decoded === '/' ? '/index.html' : decoded);
   const resolved = resolve(join(staticDir, candidate));
   return resolved.startsWith(staticDir) ? resolved : undefined;
+}
+
+function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolveBody, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 2_000_000) {
+        req.destroy();
+        reject(new Error('Request body too large'));
+      }
+    });
+    req.on('end', () => {
+      try {
+        resolveBody(body ? JSON.parse(body) : {});
+      } catch {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function serveStatic(req: IncomingMessage, res: ServerResponse, staticDir: string) {
@@ -88,7 +119,7 @@ export function createMateriaWebUiServer(options: MateriaWebUiServerOptions = {}
   const port = options.port ?? 0;
   const staticDir = resolve(options.staticDir ?? defaultStaticDir);
 
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     if (req.url?.startsWith('/api/health')) {
       sendJson(res, 200, { ok: true, scope: 'session', service: 'pi-materia-webui', sessionKey: options.session?.key });
       return;
@@ -96,6 +127,38 @@ export function createMateriaWebUiServer(options: MateriaWebUiServerOptions = {}
 
     if (req.url?.startsWith('/api/session')) {
       sendJson(res, 200, options.session?.getSnapshot() ?? { ok: true, scope: 'session', service: 'pi-materia-webui' });
+      return;
+    }
+
+    if (req.url?.startsWith('/api/config') && req.method === 'GET') {
+      if (!options.session?.getConfig) {
+        sendJson(res, 503, { ok: false, error: 'Config API is unavailable for this server.' });
+        return;
+      }
+      try {
+        const loaded = await options.session.getConfig();
+        sendJson(res, 200, isPlainObject(loaded) ? { ok: true, ...loaded } : { ok: true, config: loaded });
+      } catch (error) {
+        sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (req.url?.startsWith('/api/config') && req.method === 'POST') {
+      if (!options.session?.saveConfig) {
+        sendJson(res, 503, { ok: false, error: 'Config save API is unavailable for this server.' });
+        return;
+      }
+      try {
+        const body = await readJsonBody(req);
+        if (!isPlainObject(body) || !isPlainObject(body.config)) throw new Error('Expected JSON body with object field "config".');
+        const target = typeof body.target === 'string' ? body.target : 'user';
+        if (!['user', 'project', 'explicit'].includes(target)) throw new Error('Invalid save target. Expected user, project, or explicit.');
+        const written = await options.session.saveConfig(body.config, target as MateriaSaveTarget);
+        sendJson(res, 200, { ok: true, target, written });
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
 

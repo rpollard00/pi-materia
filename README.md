@@ -81,12 +81,15 @@ Attempt counts are per exact Materia task identity: the node id plus the current
 
 ## Configuration
 
-pi-materia resolves its config in this order:
+pi-materia layers config from lowest to highest precedence:
 
-1. `--materia-config /path/to/config.json`
-2. `MATERIA_CONFIG=/path/to/config.json`
+1. bundled default config at `config/default.json`
+2. user assets at `~/.config/pi/pi-materia/materia.json`
 3. target project `.pi/pi-materia.json`
-4. bundled default config at `config/default.json`
+4. `MATERIA_CONFIG=/path/to/config.json`
+5. `--materia-config /path/to/config.json`
+
+The user profile directory and `~/.config/pi/pi-materia/config.json` are created on demand for WebUI/profile preferences such as `webui.autoOpenBrowser`, `webui.preferredPort`, and `defaultSaveTarget`.
 
 Example:
 
@@ -149,7 +152,7 @@ Configs can also define named `loadouts` that share the top-level `roles`, `limi
 }
 ```
 
-When switching with `/materia loadout <name>`, pi-materia persists only the `activeLoadout` override to the active writable config path: the explicit `--materia-config`/`MATERIA_CONFIG` file when one is used, otherwise the target project's `.pi/pi-materia.json`. If you are using the bundled defaults, switching creates or updates `.pi/pi-materia.json`; it does not modify `config/default.json`.
+When switching with `/materia loadout <name>`, pi-materia persists only the `activeLoadout` override to the active writable config path: the explicit `--materia-config`/`MATERIA_CONFIG` file when one is used, otherwise the target project's `.pi/pi-materia.json`. If you are using the bundled defaults, switching creates or updates `.pi/pi-materia.json`; it does not modify `config/default.json`. WebUI saves default to the user asset store at `~/.config/pi/pi-materia/materia.json` and only write `.pi/pi-materia.json` when the UI explicitly requests project scope.
 
 ### Per-role model and thinking settings
 

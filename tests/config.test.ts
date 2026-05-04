@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { loadConfig, saveActiveLoadout } from "../src/config.js";
+import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config.js";
 import { getEffectivePipelineConfig, resolvePipeline } from "../src/pipeline.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {
@@ -11,6 +11,93 @@ async function writeConfig(config: unknown): Promise<{ dir: string; file: string
   await writeFile(file, JSON.stringify(config), "utf8");
   return { dir, file };
 }
+
+describe("layered config loading and persistence", () => {
+  test("creates and reads the user profile config safely", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    try {
+      const profile = await loadProfileConfig();
+      const raw = JSON.parse(await readFile(getUserProfileConfigPath(), "utf8"));
+
+      expect(profile.defaultSaveTarget).toBe("user");
+      expect(raw.webui.autoOpenBrowser).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("loads user, project, and explicit config with explicit taking precedence", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-layered-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const explicit = path.join(cwd, "explicit.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await writeFile(getUserMateriaAssetPath(), JSON.stringify({
+        activeLoadout: "UserLoadout",
+        roles: { Build: { model: "user/model" } },
+        loadouts: { UserLoadout: { entry: "planner", nodes: { planner: { type: "agent", role: "planner" } } } },
+      }), "utf8");
+      await mkdir(path.join(cwd, ".pi"), { recursive: true });
+      await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
+        activeLoadout: "ProjectLoadout",
+        roles: { Build: { model: "project/model" } },
+        loadouts: { ProjectLoadout: { entry: "builder", nodes: { builder: { type: "agent", role: "Build" } } } },
+      }), "utf8");
+      await writeFile(explicit, JSON.stringify({
+        activeLoadout: "ExplicitLoadout",
+        roles: { Build: { model: "explicit/model" } },
+        loadouts: { ExplicitLoadout: { entry: "checker", nodes: { checker: { type: "agent", role: "Check" } } } },
+      }), "utf8");
+
+      const loaded = await loadConfig(cwd, explicit);
+
+      expect(loaded.config.activeLoadout).toBe("ExplicitLoadout");
+      expect(loaded.config.roles.Build.model).toBe("explicit/model");
+      expect(loaded.config.loadouts?.UserLoadout).toBeDefined();
+      expect(loaded.config.loadouts?.ProjectLoadout).toBeDefined();
+      expect(loaded.config.loadouts?.ExplicitLoadout).toBeDefined();
+      expect(loaded.layers?.map((layer) => layer.scope)).toEqual(["default", "user", "project", "explicit"]);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("WebUI-style saves default to user profile and only touch project when explicitly targeted", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const projectFile = path.join(cwd, ".pi", "pi-materia.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(projectFile, JSON.stringify({ activeLoadout: "Full-Auto" }), "utf8");
+      const beforeProject = await readFile(projectFile, "utf8");
+
+      const userWritten = await saveMateriaConfigPatch(cwd, {
+        roles: { Custom: { tools: "none", systemPrompt: "custom user materia" } },
+        loadouts: { UserCreated: { entry: "custom", nodes: { custom: { type: "agent", role: "Custom" } } } },
+      });
+      expect(userWritten).toBe(getUserMateriaAssetPath());
+      expect(await readFile(projectFile, "utf8")).toBe(beforeProject);
+
+      const reloaded = await loadConfig(cwd);
+      expect(reloaded.config.roles.Custom.systemPrompt).toBe("custom user materia");
+      expect(reloaded.config.loadouts?.UserCreated?.entry).toBe("custom");
+
+      const projectWritten = await saveMateriaConfigPatch(cwd, { activeLoadout: "Planning-Consult" }, { target: "project" });
+      expect(projectWritten).toBe(projectFile);
+      expect(JSON.parse(await readFile(projectFile, "utf8")).activeLoadout).toBe("Planning-Consult");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+});
 
 describe("config loadouts", () => {
   test("legacy top-level pipeline configs still resolve through loadConfig", async () => {
@@ -57,7 +144,17 @@ describe("config loadouts", () => {
   });
 
   test("bundled Planning-Consult resolves an interactive multi-turn JSON planner", async () => {
-    const loaded = await loadConfig(process.cwd());
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    let loaded;
+    try {
+      loaded = await loadConfig(cwd);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
 
     expect(loaded.config.activeLoadout).toBe("Full-Auto");
     const fullAutoPlanner = loaded.config.loadouts?.["Full-Auto"]?.nodes.planner;
@@ -166,7 +263,17 @@ describe("active loadout persistence", () => {
 
 describe("config role model settings", () => {
   test("bundled default roles remain model-free", async () => {
-    const loaded = await loadConfig(process.cwd());
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    let loaded;
+    try {
+      loaded = await loadConfig(cwd);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
 
     for (const role of Object.values(loaded.config.roles)) {
       expect(role.model).toBeUndefined();

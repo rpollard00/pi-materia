@@ -1,17 +1,71 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { LoadedConfig, MateriaRoleConfig, PiMateriaConfig } from "./types.js";
+import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaRoleConfig, MateriaSaveTarget, PiMateriaConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
-  const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
-  if (explicitPath) return loadConfigFile(explicitPath);
-
+  await ensureUserProfileConfig();
+  const defaultPath = getBundledDefaultConfigPath();
+  const userPath = getUserMateriaAssetPath();
   const projectPath = getProjectConfigPath(cwd);
-  if (existsSync(projectPath)) return loadConfigFile(projectPath);
+  const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
+  const layers: MateriaConfigLayer[] = [{ scope: "default", path: defaultPath, loaded: true }];
+  const partials: Partial<PiMateriaConfig>[] = [await readConfigPartial(defaultPath)];
 
-  return loadConfigFile(getBundledDefaultConfigPath(), "<pi-materia bundled default loadout>");
+  if (existsSync(userPath)) {
+    layers.push({ scope: "user", path: userPath, loaded: true });
+    partials.push(await readConfigPartial(userPath));
+  } else {
+    layers.push({ scope: "user", path: userPath, loaded: false });
+  }
+
+  if (existsSync(projectPath)) {
+    layers.push({ scope: "project", path: projectPath, loaded: true });
+    partials.push(await readConfigPartial(projectPath));
+  } else {
+    layers.push({ scope: "project", path: projectPath, loaded: false });
+  }
+
+  if (explicitPath) {
+    if (!existsSync(explicitPath)) throw new Error(`pi-materia config file not found: ${explicitPath}`);
+    layers.push({ scope: "explicit", path: explicitPath, loaded: true });
+    partials.push(await readConfigPartial(explicitPath));
+  }
+
+  return {
+    config: await mergeConfigLayers(partials),
+    source: layers.filter((layer) => layer.loaded).map((layer) => layer.path).join(" < "),
+    layers,
+  };
+}
+
+export async function loadProfileConfig(): Promise<MateriaProfileConfig> {
+  await ensureUserProfileConfig();
+  try {
+    const parsed = JSON.parse(await readFile(getUserProfileConfigPath(), "utf8")) as MateriaProfileConfig;
+    return isPlainObject(parsed) ? parsed : defaultProfileConfig();
+  } catch {
+    return defaultProfileConfig();
+  }
+}
+
+export async function ensureUserProfileConfig(): Promise<string> {
+  const dir = getUserMateriaDir();
+  const file = getUserProfileConfigPath();
+  await mkdir(dir, { recursive: true });
+  if (!existsSync(file)) await writeJsonAtomic(file, defaultProfileConfig());
+  return file;
+}
+
+export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMateriaConfig>, options: { target?: MateriaSaveTarget; configuredPath?: string } = {}): Promise<string> {
+  const target = options.target ?? "user";
+  const file = getWritableConfigPath(cwd, options.configuredPath, target);
+  const existing = existsSync(file) ? await readConfigPartial(file) : {};
+  const next = mergeConfigPatch(existing, patch);
+  await writeJsonAtomic(file, next);
+  return file;
 }
 
 export async function saveActiveLoadout(cwd: string, loadoutName: string, configuredPath?: string): Promise<string> {
@@ -24,18 +78,15 @@ export async function saveActiveLoadout(cwd: string, loadoutName: string, config
     throw new Error(`Unknown Materia loadout "${loadoutName}". Available loadouts: ${loadoutNames.join(", ")}.`);
   }
 
-  const targetPath = getWritableConfigPath(cwd, configuredPath);
+  const targetPath = getWritableConfigPath(cwd, configuredPath, configuredPath ? "explicit" : "project");
   await writeMinimalActiveLoadout(targetPath, loadoutName);
   return targetPath;
 }
 
-async function loadConfigFile(file: string, source = file): Promise<LoadedConfig> {
-  if (!existsSync(file)) throw new Error(`pi-materia config file not found: ${file}`);
+async function readConfigPartial(file: string): Promise<Partial<PiMateriaConfig>> {
   const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<PiMateriaConfig>;
-  return {
-    config: await mergeConfig(parsed),
-    source,
-  };
+  if (!isPlainObject(parsed)) throw new Error(`Materia config file ${file} is invalid. Expected a JSON object.`);
+  return parsed;
 }
 
 function getBundledDefaultConfigPath(): string {
@@ -43,12 +94,40 @@ function getBundledDefaultConfigPath(): string {
   return path.resolve(path.dirname(currentFile), "..", "config", "default.json");
 }
 
-function getProjectConfigPath(cwd: string): string {
+export function getProjectConfigPath(cwd: string): string {
   return path.join(cwd, ".pi", "pi-materia.json");
 }
 
-function getWritableConfigPath(cwd: string, configuredPath?: string): string {
-  return configuredPath ? resolveFromCwd(cwd, configuredPath) : getProjectConfigPath(cwd);
+export function getUserMateriaDir(): string {
+  return process.env.PI_MATERIA_PROFILE_DIR?.trim() || path.join(homedir(), ".config", "pi", "pi-materia");
+}
+
+export function getUserProfileConfigPath(): string {
+  return path.join(getUserMateriaDir(), "config.json");
+}
+
+export function getUserMateriaAssetPath(): string {
+  return path.join(getUserMateriaDir(), "materia.json");
+}
+
+function getWritableConfigPath(cwd: string, configuredPath?: string, target: MateriaSaveTarget = configuredPath ? "explicit" : "user"): string {
+  if (target === "explicit") {
+    if (!configuredPath) throw new Error("Cannot save to explicit Materia config because no explicit config path is active.");
+    return resolveFromCwd(cwd, configuredPath);
+  }
+  return target === "project" ? getProjectConfigPath(cwd) : getUserMateriaAssetPath();
+}
+
+function defaultProfileConfig(): MateriaProfileConfig {
+  return { webui: { autoOpenBrowser: false }, defaultSaveTarget: "user" };
+}
+
+async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+  const dir = path.dirname(file);
+  const temp = path.join(dir, `.pi-materia.${process.pid}.${Date.now()}.tmp`);
+  await mkdir(dir, { recursive: true });
+  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(temp, file);
 }
 
 async function writeMinimalActiveLoadout(file: string, loadoutName: string): Promise<void> {
@@ -60,31 +139,47 @@ async function writeMinimalActiveLoadout(file: string, loadoutName: string): Pro
   }
 
   const next = { ...parsed, activeLoadout: loadoutName };
-  const dir = path.dirname(file);
-  const temp = path.join(dir, `.pi-materia.${process.pid}.${Date.now()}.tmp`);
   try {
-    await mkdir(dir, { recursive: true });
-    await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-    await rename(temp, file);
+    await writeJsonAtomic(file, next);
   } catch (error) {
     throw new Error(`Failed to persist active Materia loadout to ${file}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-async function mergeConfig(parsed: Partial<PiMateriaConfig>): Promise<PiMateriaConfig> {
-  const base = await loadDefaultConfig();
+async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<PiMateriaConfig> {
+  const [base, ...overrides] = layers;
+  let config = { ...base } as PiMateriaConfig;
+  for (const parsed of overrides) config = mergeConfig(config, parsed);
+  validateRoles(config.roles);
+  return config;
+}
+
+function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMateriaConfig>): Partial<PiMateriaConfig> {
+  const usesLegacyPipeline = Boolean(patch.pipeline && !patch.loadouts);
+  return {
+    ...base,
+    ...patch,
+    budget: patch.budget ? { ...(base.budget ?? {}), ...patch.budget } : base.budget,
+    limits: patch.limits ? { ...(base.limits ?? {}), ...patch.limits } : base.limits,
+    pipeline: patch.pipeline ? mergePipeline(base.pipeline, patch.pipeline) : base.pipeline,
+    loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, patch.loadouts),
+    activeLoadout: usesLegacyPipeline ? undefined : (patch.activeLoadout ?? base.activeLoadout),
+    roles: patch.roles ? mergeRoles(base.roles ?? {}, patch.roles) : base.roles,
+  };
+}
+
+function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>): PiMateriaConfig {
   const usesLegacyPipeline = Boolean(parsed.pipeline && !parsed.loadouts);
-  const config = {
+  return {
     ...base,
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
+    limits: { ...base.limits, ...(parsed.limits ?? {}) },
     pipeline: mergePipeline(base.pipeline, parsed.pipeline),
     loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, parsed.loadouts),
     activeLoadout: usesLegacyPipeline ? undefined : (parsed.activeLoadout ?? base.activeLoadout),
     roles: mergeRoles(base.roles, parsed.roles),
   } as PiMateriaConfig;
-  validateRoles(config.roles);
-  return config;
 }
 
 function mergePipeline(basePipeline: PiMateriaConfig["pipeline"], parsedPipeline: Partial<PiMateriaConfig>["pipeline"]): PiMateriaConfig["pipeline"] {

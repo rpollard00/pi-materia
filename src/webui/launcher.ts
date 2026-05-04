@@ -1,21 +1,10 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
-import { homedir, platform } from "node:os";
-import path from "node:path";
+import { platform } from "node:os";
 import { createMateriaWebUiServer, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../native.js";
-
-export interface MateriaWebUiProfileConfig {
-  webui?: {
-    autoOpenBrowser?: boolean;
-    openBrowser?: boolean;
-    preferredPort?: number;
-    port?: number;
-    host?: string;
-  };
-}
+import { loadConfig, loadProfileConfig, saveMateriaConfigPatch } from "../config.js";
 
 export interface MateriaWebUiLaunchResult {
   url: string;
@@ -36,7 +25,7 @@ interface RunningWebUiServer {
 const servers = new Map<string, RunningWebUiServer>();
 const pending = new Map<string, Promise<MateriaWebUiLaunchResult>>();
 
-export async function launchMateriaWebUi(ctx: ExtensionContext): Promise<MateriaWebUiLaunchResult> {
+export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?: string): Promise<MateriaWebUiLaunchResult> {
   const sessionKey = webUiSessionKey(ctx);
   const existing = servers.get(sessionKey);
   if (existing?.server.listening) {
@@ -46,7 +35,7 @@ export async function launchMateriaWebUi(ctx: ExtensionContext): Promise<Materia
   const inFlight = pending.get(sessionKey);
   if (inFlight) return inFlight;
 
-  const launch = startServer(ctx, sessionKey).finally(() => pending.delete(sessionKey));
+  const launch = startServer(ctx, sessionKey, configuredPath).finally(() => pending.delete(sessionKey));
   pending.set(sessionKey, launch);
   return launch;
 }
@@ -64,8 +53,8 @@ export function webUiSessionKey(ctx: ExtensionContext): string {
   return createHash("sha256").update(raw).digest("hex").slice(0, 24);
 }
 
-async function startServer(ctx: ExtensionContext, sessionKey: string): Promise<MateriaWebUiLaunchResult> {
-  const profile = await loadMateriaWebUiProfileConfig();
+async function startServer(ctx: ExtensionContext, sessionKey: string, configuredPath?: string): Promise<MateriaWebUiLaunchResult> {
+  const profile = await loadProfileConfig();
   const host = profile.webui?.host?.trim() || "127.0.0.1";
   const port = profile.webui?.preferredPort ?? profile.webui?.port ?? 0;
   const autoOpenBrowser = profile.webui?.autoOpenBrowser ?? profile.webui?.openBrowser ?? false;
@@ -84,6 +73,8 @@ async function startServer(ctx: ExtensionContext, sessionKey: string): Promise<M
       sessionId,
       startedAt,
       getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt),
+      getConfig: () => loadConfig(cwd, configuredPath),
+      saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
     },
   });
 
@@ -139,19 +130,6 @@ function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiSta
   };
 }
 
-async function loadMateriaWebUiProfileConfig(): Promise<MateriaWebUiProfileConfig> {
-  const dir = path.join(homedir(), ".config", "pi", "pi-materia");
-  const file = path.join(dir, "config.json");
-  try {
-    await mkdir(dir, { recursive: true });
-    return JSON.parse(await readFile(file, "utf8")) as MateriaWebUiProfileConfig;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return {};
-    return {};
-  }
-}
-
 function openBrowser(url: string): void {
   const os = platform();
   const command = os === "darwin" ? "open" : os === "win32" ? "cmd" : process.env.TERMUX_VERSION ? "termux-open-url" : "xdg-open";
@@ -162,6 +140,6 @@ function openBrowser(url: string): void {
 }
 
 export const webUiLauncherTestInternals = {
-  loadMateriaWebUiProfileConfig,
+  loadMateriaWebUiProfileConfig: loadProfileConfig,
   webUiSessionKey,
 };
