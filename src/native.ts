@@ -649,7 +649,7 @@ function buildMultiTurnFinalizationPrompt(state: MateriaCastState, node: Resolve
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
   return rolePrompt(node.role, [
     buildSyntheticCastContext(state),
-    "The user has explicitly indicated readiness to continue/finalize this multi-turn node. This is the finalization turn.",
+    "Command-triggered finalization: the user ran /materia continue for this multi-turn node. This is the only finalization mechanism and this is the finalization turn.",
     renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state),
     finalFormatInstruction(node),
   ]);
@@ -657,9 +657,11 @@ function buildMultiTurnFinalizationPrompt(state: MateriaCastState, node: Resolve
 
 function multiTurnTurnInstruction(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
   if (!isMultiTurnResolvedAgentNode(node)) return undefined;
-  return state.multiTurnFinalizing
-    ? finalFormatInstruction(node)
-    : "Current multi-turn mode: refinement conversation. The user has not explicitly indicated readiness to continue/finalize in this turn. Respond in normal conversation, incorporate any refinement feedback, and do not emit final structured JSON or other final machine-parseable output yet. Wait for an explicit readiness/finalization instruction before producing the final node output.";
+  return state.multiTurnFinalizing ? finalFormatInstruction(node) : multiTurnRefinementGuidance();
+}
+
+function multiTurnRefinementGuidance(): string {
+  return "Current multi-turn mode: refinement conversation. /materia continue is the only way to finalize this multi-turn node. Until the user runs /materia continue, respond conversationally, incorporate refinement feedback, and do not emit final JSON, final structured output, or other final machine-parseable output. If the refinement appears complete or the conversation is stalling, prompt the user to run /materia continue when they are ready for the final output.";
 }
 
 function finalFormatInstruction(node: ResolvedMateriaNode): string {
@@ -747,12 +749,15 @@ function isActiveMultiTurnNode(state: MateriaCastState): boolean {
 
 function buildSyntheticCastContext(state: MateriaCastState): string {
   const latestOutput = state.lastAssistantText ?? state.lastOutput;
-  const mode = isActiveMultiTurnNode(state)
-    ? `multi-turn refinement (${state.nodeState === "awaiting_user_refinement" ? "awaiting user refinement or readiness to continue/finalize" : state.nodeState ?? "active"})`
+  const activeMultiTurn = isActiveMultiTurnNode(state);
+  const multiTurnRefining = activeMultiTurn && state.multiTurnFinalizing !== true;
+  const mode = activeMultiTurn
+    ? `multi-turn refinement (${state.multiTurnFinalizing === true ? "/materia continue finalization" : state.nodeState === "awaiting_user_refinement" ? "awaiting user refinement or /materia continue" : state.nodeState ?? "active"})`
     : state.nodeState ?? "active";
   return [
     "Materia isolated context.",
     "Use only this cast context, the current role prompt, and any tool results from this role turn. Do not rely on unrelated earlier visible transcript messages.",
+    multiTurnRefining ? multiTurnRefinementGuidance() : undefined,
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
