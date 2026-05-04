@@ -35,6 +35,8 @@ bun test --watch
 
 Tests use a fake Pi harness and do not require provider/API access or a real Pi session.
 
+WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md).
+
 ## Usage
 
 ```text
