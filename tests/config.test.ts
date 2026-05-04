@@ -56,20 +56,31 @@ describe("config loadouts", () => {
     expect(pipeline.entry.id).toBe("interactivePlan");
   });
 
-  test("bundled default loadouts select auto or interactive planner roles", async () => {
+  test("bundled Planning-Consult resolves an interactive multi-turn JSON planner", async () => {
     const loaded = await loadConfig(process.cwd());
 
     expect(loaded.config.activeLoadout).toBe("Full-Auto");
     expect(loaded.config.loadouts?.["Full-Auto"]?.nodes.planner).toMatchObject({ role: "planner" });
-    expect(loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner).toMatchObject({ role: "interactivePlan" });
+    expect(loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner).toMatchObject({
+      type: "agent",
+      role: "interactivePlan",
+      parse: "json",
+      multiTurn: true,
+    });
 
     const fullAuto = resolvePipeline(loaded.config);
     expect(fullAuto.nodes.planner.node.type).toBe("agent");
+    expect(fullAuto.nodes.planner.node.multiTurn).toBeUndefined();
     expect(fullAuto.nodes.planner.role.systemPrompt).toContain("planning role");
 
     loaded.config.activeLoadout = "Planning-Consult";
     const planningConsult = resolvePipeline(loaded.config);
-    expect(planningConsult.nodes.planner.node.type).toBe("agent");
+    expect(planningConsult.nodes.planner.node).toMatchObject({
+      type: "agent",
+      role: "interactivePlan",
+      parse: "json",
+      multiTurn: true,
+    });
     expect(planningConsult.nodes.planner.role.systemPrompt).toContain("interactive planning role");
   });
 });

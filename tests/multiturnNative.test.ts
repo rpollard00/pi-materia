@@ -14,6 +14,13 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
+async function makeBundledDefaultHarness(): Promise<FakePiHarness> {
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
+  const harness = new FakePiHarness(cwd);
+  piMateria(harness.pi);
+  return harness;
+}
+
 function multiTurnConfig(role: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
@@ -79,6 +86,46 @@ describe("native multi-turn runtime", () => {
     expect(state.awaitingResponse).toBe(true);
     expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+  });
+
+  test("bundled Planning-Consult pauses after planner output until readiness advances to Build", async () => {
+    const harness = await makeBundledDefaultHarness();
+    const finalPlan = '{"tasks":[{"id":"1","title":"Ship it","description":"Do the work","acceptance":["Done"]}]}';
+
+    await harness.runCommand("materia", "loadout Planning-Consult");
+    expect(JSON.parse(await readFile(path.join(harness.cwd, ".pi", "pi-materia.json"), "utf8"))).toEqual({ activeLoadout: "Planning-Consult" });
+
+    await harness.runCommand("materia", "cast build the feature");
+    const plannerStartedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(plannerStartedState.currentNode).toBe("planner");
+    expect(plannerStartedState.currentRole).toBe("interactivePlan");
+    expect(plannerStartedState.nodeState).toBe("awaiting_agent_response");
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
+
+    harness.appendAssistantMessage(finalPlan);
+    await harness.emit("agent_end", { messages: [] });
+
+    const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(pausedState.active).toBe(true);
+    expect(pausedState.currentNode).toBe("planner");
+    expect(pausedState.currentRole).toBe("interactivePlan");
+    expect(pausedState.nodeState).toBe("awaiting_user_refinement");
+    expect(pausedState.awaitingResponse).toBe(false);
+    expect(pausedState.data.tasks).toBeUndefined();
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
+    expect(harness.sentMessages.map(({ message }) => (message as any).content).join("\n")).not.toContain("Task 1: Ship it");
+
+    const inputResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
+    expect(inputResults.at(-1)).toEqual({ action: "handled" });
+
+    const buildState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(buildState.active).toBe(true);
+    expect(buildState.currentNode).toBe("Build");
+    expect(buildState.currentRole).toBe("Build");
+    expect(buildState.nodeState).toBe("awaiting_agent_response");
+    expect(buildState.data.tasks).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"] }]);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Task 1: Ship it");
   });
 
   test("multi-turn agent output pauses without parsing or advancing until readiness", async () => {
