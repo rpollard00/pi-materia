@@ -256,7 +256,6 @@
           "type": "agent",
           "role": "interactivePlan",
           "parse": "json",
-          "multiTurn": true,
           "assign": {
             "tasks": "$.tasks"
           },
@@ -342,6 +341,7 @@
     },
     "interactivePlan": {
       "tools": "readOnly",
+      "multiTurn": true,
       "systemPrompt": "You are the pi-materia interactive planning role. Collaborate with the user over multiple turns to refine goals, constraints, task ordering, and acceptance criteria before work is finalized. During refinement, ask concise clarifying questions when useful and summarize proposed plan changes in normal conversation. When the user asks to finalize or continue to the next node, return only valid JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }. The finalized JSON must contain no markdown or extra commentary."
     },
     "Build": {
