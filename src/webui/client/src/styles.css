@@ -209,3 +209,138 @@
   background: rgb(127 29 29 / 0.55);
   box-shadow: 0 0 24px rgb(248 113 113 / 0.2);
 }
+
+.graph-canvas {
+  position: relative;
+  min-height: 42rem;
+  overflow: auto;
+  border-radius: 1.5rem;
+  border: 1px solid rgb(103 232 249 / 0.18);
+  background:
+    radial-gradient(circle at 18% 18%, rgb(34 211 238 / 0.13), transparent 28%),
+    radial-gradient(circle at 78% 28%, rgb(168 85 247 / 0.14), transparent 30%),
+    linear-gradient(135deg, rgb(2 6 23 / 0.94), rgb(15 23 42 / 0.9));
+  box-shadow: inset 0 0 50px rgb(0 0 0 / 0.45);
+}
+
+.graph-svg {
+  position: absolute;
+  inset: 0;
+  height: 620px;
+  width: 980px;
+  pointer-events: none;
+}
+
+.graph-edge {
+  stroke: rgb(103 232 249 / 0.68);
+  stroke-width: 2.5;
+  stroke-dasharray: 0;
+  filter: drop-shadow(0 0 8px rgb(34 211 238 / 0.55));
+}
+
+.graph-edge-satisfied {
+  stroke: rgb(74 222 128 / 0.78);
+}
+
+.graph-edge-unsatisfied {
+  stroke: rgb(251 146 60 / 0.82);
+  stroke-dasharray: 8 6;
+}
+
+.graph-edge-label {
+  fill: rgb(224 242 254 / 0.82);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  paint-order: stroke;
+  stroke: rgb(2 6 23 / 0.95);
+  stroke-width: 4px;
+}
+
+.graph-node-card {
+  position: absolute;
+  z-index: 2;
+  width: 18rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgb(207 250 254 / 0.22);
+  background:
+    linear-gradient(135deg, rgb(15 23 42 / 0.94), rgb(8 47 73 / 0.84)),
+    radial-gradient(circle at 50% 0%, rgb(34 211 238 / 0.18), transparent 42%);
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 34px rgb(34 211 238 / 0.12), 0 20px 36px rgb(0 0 0 / 0.3);
+}
+
+.graph-node-card::before {
+  content: '';
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  height: 0.8rem;
+  width: 0.8rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 35% 30%, white, rgb(103 232 249) 35%, rgb(14 116 144));
+  box-shadow: 0 0 16px rgb(34 211 238 / 0.82);
+}
+
+.graph-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(165 243 252 / 0.82);
+}
+
+.graph-field input,
+.graph-field select {
+  min-width: 0;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(207 250 254 / 0.16);
+  background: rgb(2 6 23 / 0.82);
+  padding: 0.45rem 0.55rem;
+  color: rgb(224 242 254);
+  font-size: 0.78rem;
+  letter-spacing: normal;
+  text-transform: none;
+  outline: none;
+}
+
+.graph-field input:focus,
+.graph-field select:focus {
+  border-color: rgb(103 232 249 / 0.72);
+  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.12);
+}
+
+.graph-entry-button {
+  border-radius: 9999px;
+  border: 1px solid rgb(253 224 71 / 0.32);
+  background: rgb(113 63 18 / 0.36);
+  padding: 0.2rem 0.55rem;
+  color: rgb(254 240 138);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.graph-edge-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(103 232 249 / 0.18);
+  background: rgb(15 23 42 / 0.72);
+  padding: 0.55rem 0.8rem;
+  color: rgb(226 232 240);
+  font-size: 0.8rem;
+}
+
+.graph-edge-pill b {
+  color: rgb(125 211 252);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}

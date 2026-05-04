@@ -159,4 +159,85 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('socket-Auto-Eval')).toBeNull();
     expect(screen.getByText('staged edits')).toBeTruthy();
   });
+
+  it('renders the visual pipeline graph with current edges', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    expect(await screen.findByTestId('pipeline-graph')).toBeTruthy();
+    expect(screen.getByTestId('graph-node-planner')).toBeTruthy();
+    expect(screen.getByTestId('graph-node-Auto-Eval')).toBeTruthy();
+    expect(screen.getAllByText('satisfied').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('not_satisfied').length).toBeGreaterThan(0);
+  });
+
+  it('adds a graph node and persists it through staged save', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByTestId('new-node-id'), { target: { value: 'Verifier' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add node' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
+    expect(saved.Verifier).toMatchObject({ type: 'agent', role: 'Verifier', limits: { maxVisits: 3 } });
+    expect(saved.Build.insertedBy).toBe('node-shift');
+  });
+
+  it('inserts a node between existing nodes while preserving surrounding layout and inserted metadata', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByTestId('insert-from'), { target: { value: 'Build' } });
+    fireEvent.change(screen.getByTestId('insert-to'), { target: { value: 'Auto-Eval' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Insert' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
+    expect(saved.Build.next).toBe('Build-insert');
+    expect(saved.Build.layout).toEqual({ x: 1, y: 0 });
+    expect(saved.Build.insertedBy).toBe('node-shift');
+    expect(saved['Build-insert']).toMatchObject({ next: 'Auto-Eval', inserted: { between: ['Build', 'Auto-Eval'], via: 'webui-graph-editor' } });
+    expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
+  });
+
+  it('stages branch, layout, and retry limit edits without deleting graph semantics', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByTestId('graph-node-Build');
+    fireEvent.change(screen.getByLabelText('Build satisfied branch'), { target: { value: 'Maintain' } });
+    fireEvent.change(screen.getByLabelText('Build not satisfied branch'), { target: { value: 'planner' } });
+    fireEvent.change(screen.getByLabelText('Build layout x'), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Build satisfied max traversals'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Build max visits'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Build max edge traversals'), { target: { value: '9' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
+    expect(saved.Build.next).toBe('Auto-Eval');
+    expect(saved.Build.edges).toEqual([{ when: 'satisfied', to: 'Maintain', maxTraversals: 2 }, { when: 'not_satisfied', to: 'planner' }]);
+    expect(saved.Build.layout).toEqual({ x: 7, y: 0 });
+    expect(saved.Build.limits).toMatchObject({ maxVisits: 5, maxEdgeTraversals: 9 });
+    expect(saved.Build.insertedBy).toBe('node-shift');
+  });
 });
