@@ -79,6 +79,9 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   if (state.awaitingResponse) throw new Error("Materia is already awaiting a Pi agent response.");
 
   if (state.nodeState === "awaiting_user_refinement") {
+    if (!isPausedMultiTurnRefinement(state)) {
+      throw new Error("Materia is awaiting user refinement, but the current node's resolved role is not multi-turn.");
+    }
     await finalizePausedMultiTurnNode(pi, ctx, state);
     return;
   }
@@ -94,6 +97,10 @@ export async function handleMultiTurnUserInput(pi: ExtensionAPI, ctx: ExtensionC
 }
 
 async function finalizePausedMultiTurnNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
+  const node = currentNodeOrThrow(state);
+  if (!isMultiTurnResolvedAgentNode(node)) {
+    throw new Error(`Cannot finalize refinement for node "${node.id}" because its resolved role is not multi-turn.`);
+  }
   const text = state.lastAssistantText;
   if (!text) throw new Error("Multi-turn node has no assistant output to finalize.");
   const entryId = state.lastProcessedEntryId ?? `multiturn:${state.currentNode ?? state.phase}:latest`;
