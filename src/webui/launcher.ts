@@ -1,8 +1,9 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { platform } from "node:os";
-import { createMateriaWebUiServer, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../native.js";
 import { loadConfig, loadProfileConfig, saveMateriaConfigPatch } from "../config.js";
 
@@ -102,8 +103,9 @@ function listen(server: RunningWebUiServer["server"], host: string, port: number
   });
 }
 
-function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiStartedAt: number): MateriaWebUiSessionSnapshot {
+async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiStartedAt: number): Promise<MateriaWebUiSessionSnapshot> {
   const state = loadActiveCastState(ctx);
+  const artifactSummary = state?.runDir ? await readArtifactSummary(state.runDir) : undefined;
   return {
     ok: true,
     scope: "session",
@@ -114,6 +116,8 @@ function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiSta
     sessionId: ctx.sessionManager.getSessionId() ?? "",
     uiStartedAt,
     now: Date.now(),
+    emittedOutputs: readSessionEmittedOutputs(ctx, uiStartedAt),
+    artifactSummary,
     activeCast: state ? {
       castId: state.castId,
       active: state.active,
@@ -128,6 +132,94 @@ function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiSta
       updatedAt: state.updatedAt,
     } : undefined,
   };
+}
+
+function readSessionEmittedOutputs(ctx: ExtensionContext, since: number): Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }> {
+  return ctx.sessionManager.getBranch().slice(-80).flatMap((entry) => {
+    const rawTimestamp = (entry as { timestamp?: unknown }).timestamp;
+    const timestamp = typeof rawTimestamp === "number" ? rawTimestamp : typeof rawTimestamp === "string" ? Date.parse(rawTimestamp) : undefined;
+    if (timestamp && Number.isFinite(timestamp) && timestamp < since) return [];
+    if (entry.type === "custom" && typeof entry.customType === "string" && entry.customType.startsWith("pi-materia")) {
+      const data = (entry as { data?: Record<string, unknown> }).data ?? {};
+      return [{ id: entry.id, type: entry.customType, text: summarizeUnknown(data), timestamp, node: typeof data.nodeId === "string" ? data.nodeId : undefined }];
+    }
+    if (entry.type === "message") {
+      const message = (entry as { message?: unknown }).message as { role?: unknown; content?: unknown } | undefined;
+      const text = messageContentText(message?.content).trim();
+      if (message?.role === "assistant" && text) return [{ id: entry.id, type: "assistant", text: truncate(text, 1200), timestamp }];
+    }
+    return [];
+  });
+}
+
+async function readArtifactSummary(runDir: string): Promise<MateriaWebUiSessionSnapshot["artifactSummary"]> {
+  const [manifest, events] = await Promise.all([
+    readJsonFile<{ request?: string; entries?: MateriaMonitorArtifactEntry[] }>(`${runDir}/manifest.json`),
+    readEventsFile(`${runDir}/events.jsonl`),
+  ]);
+  const outputs = await Promise.all((manifest?.entries ?? [])
+    .filter((entry) => entry.artifact && (entry.kind === "node_output" || entry.kind === "node_refinement" || entry.kind === "context" || entry.kind === undefined))
+    .slice(-12)
+    .map(async (entry) => ({ ...entry, content: await readArtifactText(runDir, entry.artifact) })));
+  const completed = outputs.filter((entry) => entry.kind === "node_output").map((entry) => entry.node).filter(Boolean).join(" → ");
+  const lastEvent = events.at(-1);
+  return {
+    runDir,
+    request: manifest?.request,
+    events: events.slice(-40),
+    outputs,
+    summary: [
+      manifest?.request ? `Request: ${manifest.request}` : undefined,
+      completed ? `Completed nodes: ${completed}` : undefined,
+      lastEvent?.type ? `Latest event: ${lastEvent.type}` : undefined,
+      outputs.length ? `${outputs.length} recent artifact entries loaded.` : "No artifact outputs recorded yet.",
+    ].filter(Boolean).join("\n"),
+  };
+}
+
+async function readArtifactText(runDir: string, artifact?: string): Promise<string | undefined> {
+  if (!artifact || artifact.includes("..")) return undefined;
+  try {
+    return truncate(await readFile(`${runDir}/${artifact}`, "utf8"), 2000);
+  } catch {
+    return undefined;
+  }
+}
+
+async function readJsonFile<T>(file: string): Promise<T | undefined> {
+  try {
+    return JSON.parse(await readFile(file, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readEventsFile(file: string): Promise<MateriaMonitorEventEntry[]> {
+  try {
+    return (await readFile(file, "utf8")).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as MateriaMonitorEventEntry);
+  } catch {
+    return [];
+  }
+}
+
+function summarizeUnknown(value: unknown): string {
+  if (!value || typeof value !== "object") return truncate(String(value ?? ""), 1200);
+  const object = value as Record<string, unknown>;
+  const label = [object.phase, object.nodeId, object.roleName, object.eventType].filter((part) => typeof part === "string").join(" · ");
+  return label || truncate(JSON.stringify(object), 1200);
+}
+
+function messageContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => {
+    const value = part as { type?: unknown; text?: unknown };
+    return value.type === "text" && typeof value.text === "string" ? value.text : "";
+  }).join("\n");
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 function openBrowser(url: string): void {

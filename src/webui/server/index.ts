@@ -6,6 +6,22 @@ import { fileURLToPath } from 'node:url';
 type MateriaSaveTarget = 'user' | 'project' | 'explicit';
 type MateriaConfigPatch = Record<string, unknown>;
 
+export interface MateriaMonitorArtifactEntry {
+  node?: string;
+  role?: string;
+  phase?: string;
+  kind?: string;
+  artifact?: string;
+  timestamp?: number;
+  content?: string;
+}
+
+export interface MateriaMonitorEventEntry {
+  ts?: number;
+  type?: string;
+  data?: unknown;
+}
+
 export interface MateriaWebUiSessionSnapshot {
   ok: true;
   scope: 'session';
@@ -16,6 +32,14 @@ export interface MateriaWebUiSessionSnapshot {
   sessionId: string;
   uiStartedAt: number;
   now: number;
+  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }>;
+  artifactSummary?: {
+    runDir?: string;
+    request?: string;
+    events: MateriaMonitorEventEntry[];
+    outputs: MateriaMonitorArtifactEntry[];
+    summary: string;
+  };
   activeCast?: {
     castId: string;
     active: boolean;
@@ -41,7 +65,7 @@ export interface MateriaWebUiServerOptions {
     sessionFile: string;
     sessionId: string;
     startedAt: number;
-    getSnapshot: () => MateriaWebUiSessionSnapshot;
+    getSnapshot: () => MateriaWebUiSessionSnapshot | Promise<MateriaWebUiSessionSnapshot>;
     getConfig?: () => Promise<unknown>;
     saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
   };
@@ -125,8 +149,25 @@ export function createMateriaWebUiServer(options: MateriaWebUiServerOptions = {}
       return;
     }
 
-    if (req.url?.startsWith('/api/session')) {
-      sendJson(res, 200, options.session?.getSnapshot() ?? { ok: true, scope: 'session', service: 'pi-materia-webui' });
+    if (req.url?.startsWith('/api/monitor/events')) {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+      });
+      const writeSnapshot = async () => {
+        const snapshot = options.session?.getSnapshot ? await options.session.getSnapshot() : { ok: true, scope: 'session', service: 'pi-materia-webui' };
+        res.write(`event: monitor\ndata: ${JSON.stringify(snapshot)}\n\n`);
+      };
+      await writeSnapshot();
+      const interval = setInterval(() => { void writeSnapshot().catch(() => undefined); }, 1500);
+      req.on('close', () => clearInterval(interval));
+      return;
+    }
+
+    if (req.url?.startsWith('/api/session') || req.url?.startsWith('/api/monitor')) {
+      const snapshot = options.session?.getSnapshot ? await options.session.getSnapshot() : { ok: true, scope: 'session', service: 'pi-materia-webui' };
+      sendJson(res, 200, snapshot);
       return;
     }
 

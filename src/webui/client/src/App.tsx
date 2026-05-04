@@ -64,6 +64,34 @@ interface ConfigResponse {
   source?: string;
 }
 
+interface MonitorSnapshot {
+  ok?: boolean;
+  sessionKey?: string;
+  uiStartedAt?: number;
+  now?: number;
+  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }>;
+  artifactSummary?: {
+    runDir?: string;
+    request?: string;
+    summary?: string;
+    events?: Array<{ ts?: number; type?: string; data?: unknown }>;
+    outputs?: Array<{ node?: string; role?: string; phase?: string; kind?: string; artifact?: string; timestamp?: number; content?: string }>;
+  };
+  activeCast?: {
+    castId: string;
+    active: boolean;
+    phase: string;
+    currentNode?: string;
+    currentRole?: string;
+    nodeState?: string;
+    awaitingResponse: boolean;
+    runDir: string;
+    artifactRoot: string;
+    startedAt: number;
+    updatedAt: number;
+  };
+}
+
 interface DragPayload {
   kind: 'palette' | 'socket';
   materiaId: string;
@@ -216,6 +244,17 @@ function Orb({ color, label, small = false, empty = false }: { color: string; la
   return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : `bg-gradient-to-br ${color}`}`} title={label} />;
 }
 
+function formatElapsed(startedAt?: number, now = Date.now()) {
+  if (!startedAt) return '—';
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function formatTime(timestamp?: number) {
+  return timestamp ? new Date(timestamp).toLocaleTimeString() : 'live';
+}
+
 export function App() {
   const [baselineConfig, setBaselineConfig] = useState<MateriaConfig | undefined>();
   const [draftConfig, setDraftConfig] = useState<MateriaConfig | undefined>();
@@ -226,6 +265,7 @@ export function App() {
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [newGraphNodeId, setNewGraphNodeId] = useState('Review');
   const [insertFrom, setInsertFrom] = useState('');
+  const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [insertTo, setInsertTo] = useState('');
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
@@ -267,6 +307,22 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => fetch('/api/monitor').then((response) => response.json() as Promise<MonitorSnapshot>).then((body) => { if (!cancelled) setMonitor(body); }).catch(() => undefined);
+    const events = typeof EventSource !== 'undefined' ? new EventSource('/api/monitor/events') : undefined;
+    events?.addEventListener('monitor', (event) => {
+      if (!cancelled) setMonitor(JSON.parse((event as MessageEvent).data) as MonitorSnapshot);
+    });
+    events?.addEventListener('error', () => { void refresh(); });
+    const interval = events ? undefined : window.setInterval(refresh, 1500);
+    return () => {
+      cancelled = true;
+      events?.close();
+      if (interval) window.clearInterval(interval);
+    };
+  }, []);
+
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
@@ -283,6 +339,8 @@ export function App() {
     return [...byId.entries()];
   }, [loadouts]);
   const isDirty = JSON.stringify(baselineConfig) !== JSON.stringify(draftConfig);
+  const currentMonitorNode = monitor?.activeCast?.currentNode;
+  const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
 
   function updateDraft(updater: (config: MateriaConfig) => void) {
     setDraftConfig((current) => {
@@ -596,7 +654,7 @@ export function App() {
                 <button
                   key={id}
                   data-testid={`socket-${id}`}
-                  className={`materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''}`}
+                  className={`materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''}`}
                   onClick={() => selectedMateriaId && putMateria(id, selectedMateriaId)}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDrop(id, event)}
@@ -743,6 +801,51 @@ export function App() {
           </div>
         </section>
 
+        <section className="fantasy-panel p-6" aria-label="Live session monitor">
+          <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">session monitor</p>
+              <h2 className="mt-2 text-3xl font-black text-white">Live cast telemetry</h2>
+              <p className="mt-2 max-w-4xl text-sm text-slate-400">Scoped to the Pi session that launched <code>/materia ui</code>. Native materia session entries and run artifacts are streamed from this session only.</p>
+            </div>
+            <div className="monitor-stat-grid">
+              <div><span>node</span><b>{currentMonitorNode ?? 'idle'}</b></div>
+              <div><span>state</span><b>{monitor?.activeCast?.nodeState ?? 'no active cast'}</b></div>
+              <div><span>elapsed</span><b>{elapsed}</b></div>
+            </div>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-3">
+            <article className="monitor-card xl:col-span-1">
+              <h3>Emitted outputs</h3>
+              <div className="monitor-scroll">
+                {(monitor?.emittedOutputs ?? []).length === 0 ? <p className="text-sm text-slate-500">Waiting for session output…</p> : monitor?.emittedOutputs?.slice(-10).reverse().map((output) => (
+                  <div key={output.id} className="monitor-output">
+                    <div><b>{output.type}</b><span>{formatTime(output.timestamp)}</span></div>
+                    <p>{output.text}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+            <article className="monitor-card xl:col-span-1">
+              <h3>Artifact summary</h3>
+              <pre className="monitor-summary">{monitor?.artifactSummary?.summary ?? 'No pi-materia artifacts found for this launched session yet.'}</pre>
+              {monitor?.artifactSummary?.runDir && <p className="mt-3 break-all text-xs text-cyan-100/70">{monitor.artifactSummary.runDir}</p>}
+            </article>
+            <article className="monitor-card xl:col-span-1">
+              <h3>Recent artifacts</h3>
+              <div className="monitor-scroll">
+                {(monitor?.artifactSummary?.outputs ?? []).length === 0 ? <p className="text-sm text-slate-500">Artifacts will appear as nodes emit context and output files.</p> : monitor?.artifactSummary?.outputs?.slice(-8).reverse().map((entry, index) => (
+                  <details key={`${entry.artifact}-${index}`} className="monitor-artifact">
+                    <summary>{entry.node ?? entry.phase ?? 'cast'} · {entry.kind ?? 'artifact'}</summary>
+                    <p className="break-all text-xs text-cyan-100/70">{entry.artifact}</p>
+                    {entry.content && <pre>{entry.content}</pre>}
+                  </details>
+                ))}
+              </div>
+            </article>
+          </div>
+        </section>
+
         <section className="fantasy-panel p-6" aria-label="Pipeline graph editor">
           <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
@@ -796,7 +899,7 @@ export function App() {
             {Object.entries(activeNodes).map(([id, node], index) => {
               const point = graphPoint(id, index, node);
               return (
-                <article key={id} data-testid={`graph-node-${id}`} className="graph-node-card" style={{ left: point.x, top: point.y }}>
+                <article key={id} data-testid={`graph-node-${id}`} className={`graph-node-card ${id === currentMonitorNode ? 'graph-node-card-active' : ''}`} style={{ left: point.x, top: point.y }}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-bold text-white">{id}</h3>

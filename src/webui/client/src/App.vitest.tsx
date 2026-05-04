@@ -315,4 +315,31 @@ describe('Materia loadout grid editor', () => {
     expect(saved.Build.limits).toMatchObject({ maxVisits: 5, maxEdgeTraversals: 9 });
     expect(saved.Build.insertedBy).toBe('node-shift');
   });
+
+  it('renders live monitor updates and highlights the active graph node', async () => {
+    const listeners = new Map<string, (event: MessageEvent) => void>();
+    class MockEventSource {
+      url: string;
+      constructor(url: string) { this.url = url; }
+      addEventListener(type: string, listener: (event: MessageEvent) => void) { listeners.set(type, listener); }
+      close() {}
+    }
+    vi.stubGlobal('EventSource', MockEventSource);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+    await screen.findByTestId('graph-node-Build');
+    listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({
+      ok: true,
+      now: 61_000,
+      uiStartedAt: 1_000,
+      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentNode: 'Build', currentRole: 'Build', nodeState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
+      emittedOutputs: [{ id: 'entry-1', type: 'pi-materia', text: 'Build · role_prompt', timestamp: 61_000, node: 'Build' }],
+      artifactSummary: { runDir: '/tmp/run', summary: 'Completed nodes: planner', outputs: [{ node: 'Build', kind: 'node_output', artifact: 'nodes/Build/1.md', content: 'built' }] },
+    }) }));
+
+    expect(await screen.findByText('awaiting_agent_response')).toBeTruthy();
+    expect(screen.getByText('Completed nodes: planner')).toBeTruthy();
+    expect(screen.getByTestId('graph-node-Build').className).toContain('graph-node-card-active');
+  });
 });
