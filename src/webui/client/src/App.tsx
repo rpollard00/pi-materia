@@ -38,6 +38,7 @@ interface MateriaConfig {
   loadouts?: Record<string, PipelineConfig>;
   pipeline?: PipelineConfig;
   roles?: Record<string, MateriaRoleConfig>;
+  materiaDefinitions?: Record<string, PipelineNode>;
   [key: string]: unknown;
 }
 
@@ -97,6 +98,24 @@ interface DragPayload {
   materiaId: string;
   fromLoadout?: string;
   fromSocket?: string;
+}
+
+type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor' | 'pipeline-graph';
+
+const materiaTabs: Array<{ id: MateriaTabId; label: string; description: string }> = [
+  { id: 'loadout', label: 'Loadout', description: 'Loadout selector, visual grid, palette, and apply controls' },
+  { id: 'materia-editor', label: 'Materia Editor', description: 'Create and edit materia definitions' },
+  { id: 'monitor', label: 'Monitoring', description: 'Live cast telemetry and artifacts' },
+  { id: 'pipeline-graph', label: 'Pipeline Graph', description: 'Graph links, branches, layout, and retry limits' },
+];
+
+function parseTabId(value: string | null): MateriaTabId {
+  return materiaTabs.some((tab) => tab.id === value) ? value as MateriaTabId : 'loadout';
+}
+
+function tabFromLocation(): MateriaTabId {
+  if (typeof window === 'undefined') return 'loadout';
+  return parseTabId(new URLSearchParams(window.location.search).get('tab'));
 }
 
 const emptyMateriaForm = (): MateriaFormState => ({
@@ -256,6 +275,7 @@ function formatTime(timestamp?: number) {
 }
 
 export function App() {
+  const [selectedTab, setSelectedTab] = useState<MateriaTabId>(() => tabFromLocation());
   const [baselineConfig, setBaselineConfig] = useState<MateriaConfig | undefined>();
   const [draftConfig, setDraftConfig] = useState<MateriaConfig | undefined>();
   const [source, setSource] = useState<string>('loading');
@@ -268,6 +288,12 @@ export function App() {
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [insertTo, setInsertTo] = useState('');
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
+
+  useEffect(() => {
+    const handlePopState = () => setSelectedTab(tabFromLocation());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -330,6 +356,11 @@ export function App() {
   const activeNodeIds = Object.keys(activeNodes);
   const activeGraphEdges = useMemo(() => graphEdges(activeNodes), [activeNodes]);
   const roles = draftConfig?.roles ?? {};
+  const materiaDefinitions = draftConfig?.materiaDefinitions ?? {};
+  const editableDefinitionIds = useMemo(() => {
+    const ids = new Set<string>([...Object.keys(roles), ...Object.keys(materiaDefinitions)]);
+    return [...ids].sort((a, b) => a.localeCompare(b));
+  }, [roles, materiaDefinitions]);
   const palette = useMemo(() => {
     const allNodes = Object.values(loadouts).flatMap((loadout) => Object.entries(loadout.nodes ?? {}));
     const byId = new Map<string, PipelineNode>();
@@ -346,6 +377,14 @@ export function App() {
     setDraftConfig((current) => {
       const next = cloneConfig(current ?? {});
       if (!next.loadouts) next.loadouts = buildLoadouts(next);
+      updater(next);
+      return next;
+    });
+  }
+
+  function updateDefinitionDraft(updater: (config: MateriaConfig) => void) {
+    setDraftConfig((current) => {
+      const next = cloneConfig(current ?? {});
       updater(next);
       return next;
     });
@@ -514,65 +553,57 @@ export function App() {
   }
 
   function editMateria(id: string) {
-    const node = activeNodes[id];
-    if (!node) return;
-    const role = node.role ? roles[node.role] : undefined;
+    const definition = materiaDefinitions[id];
+    const roleName = definition?.role ?? id;
+    const role = roles[roleName] ?? roles[id];
+    if (!definition && !role) return;
     setMateriaForm({
       editingNodeId: id,
       name: id,
-      behavior: node.type === 'utility' ? 'tool' : 'prompt',
-      prompt: String(role?.systemPrompt ?? node.prompt ?? ''),
+      behavior: definition?.type === 'utility' ? 'tool' : 'prompt',
+      prompt: String(role?.systemPrompt ?? definition?.prompt ?? ''),
       toolAccess: role?.tools ?? 'none',
-      model: String(role?.model ?? node.model ?? ''),
+      model: String(role?.model ?? definition?.model ?? ''),
       thinking: String(role?.thinking ?? ''),
-      outputFormat: (node.parse === 'json' || node.outputFormat === 'json') ? 'json' : 'text',
-      multiTurn: Boolean(role?.multiTurn ?? node.multiturn),
-      utility: String(node.utility ?? ''),
-      command: Array.isArray(node.command) ? node.command.join(' ') : '',
-      params: node.params ? JSON.stringify(node.params, null, 2) : '{}',
-      timeoutMs: node.timeoutMs ? String(node.timeoutMs) : '',
+      outputFormat: (definition?.parse === 'json' || definition?.outputFormat === 'json') ? 'json' : 'text',
+      multiTurn: Boolean(role?.multiTurn ?? definition?.multiturn),
+      utility: String(definition?.utility ?? ''),
+      command: Array.isArray(definition?.command) ? definition.command.join(' ') : '',
+      params: definition?.params ? JSON.stringify(definition.params, null, 2) : '{}',
+      timeoutMs: definition?.timeoutMs ? String(definition.timeoutMs) : '',
       persistScope: 'user',
     });
-    setStatus(`Editing materia ${id}. Save the staged form to update this loadout.`);
+    setStatus(`Editing reusable materia definition ${id}. Save the staged form to update definitions only.`);
   }
 
   function saveMateriaForm() {
-    if (!activeLoadoutName) return;
     try {
       const name = materiaForm.name.trim();
       if (!name) throw new Error('Materia name is required.');
       const timeoutMs = Number(materiaForm.timeoutMs);
       const parsedParams = materiaForm.behavior === 'tool' ? parseJsonObject(materiaForm.params) : undefined;
-      mutateActiveGraph((loadout, nodes) => {
-        const existingId = materiaForm.editingNodeId && nodes[materiaForm.editingNodeId] ? materiaForm.editingNodeId : '';
-        const id = existingId || makeUniqueNodeId(nodes, name);
-        const prior = existingId ? nodes[existingId] : undefined;
-        const base = socketStructure(prior);
+      updateDefinitionDraft((config) => {
+        config.materiaDefinitions ??= {};
+        if (materiaForm.editingNodeId && materiaForm.editingNodeId !== name) delete config.materiaDefinitions[materiaForm.editingNodeId];
         if (materiaForm.behavior === 'prompt') {
-          const roleName = name;
-          nodes[id] = { ...base, type: 'agent', role: roleName, prompt: materiaForm.prompt || undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text', empty: false };
-          loadout.entry ||= id;
-        } else {
-          const command = commandParts(materiaForm.command);
-          nodes[id] = { ...base, type: 'utility', utility: materiaForm.utility || name, command: command?.length ? command : undefined, params: parsedParams, timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text', empty: false };
-          loadout.entry ||= id;
-        }
-      });
-      updateDraft((config) => {
-        config.roles ??= {};
-        if (materiaForm.behavior === 'prompt') {
-          config.roles[materiaForm.name.trim()] = {
+          config.roles ??= {};
+          if (materiaForm.editingNodeId && materiaForm.editingNodeId !== name) delete config.roles[materiaForm.editingNodeId];
+          config.roles[name] = {
             tools: materiaForm.toolAccess,
             systemPrompt: materiaForm.prompt,
             model: materiaForm.model.trim() || undefined,
             thinking: materiaForm.thinking.trim() || undefined,
             multiTurn: materiaForm.multiTurn || undefined,
           };
+          config.materiaDefinitions[name] = { type: 'agent', role: name, prompt: materiaForm.prompt || undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text' };
+        } else {
+          const command = commandParts(materiaForm.command);
+          config.materiaDefinitions[name] = { type: 'utility', utility: materiaForm.utility || name, command: command?.length ? command : undefined, params: parsedParams, timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text' };
         }
       });
       setSaveTarget(materiaForm.persistScope);
       setMateriaForm(emptyMateriaForm());
-      setStatus(`Staged ${materiaForm.behavior} materia. Save target is ${materiaForm.persistScope}; user profile remains the default unless project is explicitly selected.`);
+      setStatus(`Staged reusable ${materiaForm.behavior} materia definition. Save target is ${materiaForm.persistScope}; no loadout sockets or graph nodes were changed.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -589,6 +620,13 @@ export function App() {
   function dragMateria(payload: DragPayload, event: DragEvent) {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('application/json', JSON.stringify(payload));
+  }
+
+  function selectTab(tabId: MateriaTabId) {
+    setSelectedTab(tabId);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tabId);
+    window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
   async function saveDraft() {
@@ -622,6 +660,23 @@ export function App() {
           </div>
         </header>
 
+        <nav className="materia-tab-bar" aria-label="Materia WebUI sections">
+          {materiaTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`materia-tab ${selectedTab === tab.id ? 'materia-tab-active' : ''}`}
+              aria-current={selectedTab === tab.id ? 'page' : undefined}
+              aria-selected={selectedTab === tab.id}
+              title={tab.description}
+              onClick={() => selectTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        {selectedTab === 'loadout' && (
         <div className="grid gap-6 xl:grid-cols-[18rem_1fr_20rem]">
           <aside className="fantasy-panel p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -718,18 +773,20 @@ export function App() {
             </section>
           </aside>
         </div>
+        )}
 
+        {selectedTab === 'materia-editor' && (
         <section className="fantasy-panel p-6" aria-label="Materia creation editor">
           <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">materia forge</p>
               <h2 className="mt-2 text-3xl font-black text-white">Create / edit materia</h2>
-              <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge prompt materia or tool-invocation materia as staged loadout edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
+              <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge reusable prompt materia or tool-invocation materia as staged definition edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
             </div>
             <label className="graph-field w-full max-w-xs">Edit existing
               <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : setMateriaForm(emptyMateriaForm())}>
                 <option value="">new materia…</option>
-                {activeNodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+                {editableDefinitionIds.map((id) => <option key={id} value={id}>{id}</option>)}
               </select>
             </label>
           </div>
@@ -800,7 +857,9 @@ export function App() {
             <button className="materia-button-secondary" onClick={() => setMateriaForm(emptyMateriaForm())}>Clear form</button>
           </div>
         </section>
+        )}
 
+        {selectedTab === 'monitor' && (
         <section className="fantasy-panel p-6" aria-label="Live session monitor">
           <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -845,7 +904,9 @@ export function App() {
             </article>
           </div>
         </section>
+        )}
 
+        {selectedTab === 'pipeline-graph' && (
         <section className="fantasy-panel p-6" aria-label="Pipeline graph editor">
           <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
@@ -953,6 +1014,7 @@ export function App() {
             ))}
           </div>
         </section>
+        )}
       </section>
     </main>
   );

@@ -28,6 +28,20 @@ const testConfig = {
   },
 };
 
+const legacyPipelineConfig = {
+  roles: {
+    planner: { tools: 'none', systemPrompt: 'Plan the work' },
+  },
+  pipeline: {
+    entry: 'planner',
+    nodes: {
+      planner: { type: 'agent', role: 'planner', next: 'Build', layout: { x: 0, y: 0 } },
+      Build: { type: 'agent', role: 'Build', next: 'Done', edges: [{ when: 'not_satisfied', to: 'planner' }], layout: { x: 1, y: 0 } },
+      Done: { type: 'utility', utility: 'finish', command: ['echo', 'done'], layout: { x: 2, y: 0 } },
+    },
+  },
+};
+
 function createDataTransfer() {
   const store = new Map<string, string>();
   return {
@@ -39,8 +53,13 @@ function createDataTransfer() {
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState({}, '', '/');
   vi.restoreAllMocks();
 });
+
+async function openTab(name: RegExp | string) {
+  fireEvent.click(await screen.findByRole('button', { name }));
+}
 
 describe('Materia loadout grid editor', () => {
   it('renders active and available loadouts with staged save controls', async () => {
@@ -53,6 +72,41 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByRole('button', { name: /Planning-Consult/ })).toBeTruthy();
     expect(screen.getByTestId('socket-planner')).toBeTruthy();
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
+  });
+
+  it('opens a valid tab from the URL query parameter', async () => {
+    window.history.replaceState({}, '', '/?tab=monitor');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Live cast telemetry' })).toBeTruthy();
+    expect(screen.queryByText('Visual materia grid')).toBeNull();
+  });
+
+  it('falls back to Loadout for invalid tab values', async () => {
+    window.history.replaceState({}, '', '/?tab=unknown');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    expect(await screen.findByText('Visual materia grid')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Live cast telemetry' })).toBeNull();
+  });
+
+  it('switches tabs while preserving unrelated query params and responding to history navigation', async () => {
+    window.history.replaceState({}, '', '/?cast=abc');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    expect(await screen.findByRole('heading', { name: 'Create / edit materia' })).toBeTruthy();
+    expect(window.location.search).toContain('cast=abc');
+    expect(window.location.search).toContain('tab=materia-editor');
+
+    window.history.back();
+    await waitFor(() => expect(screen.getByText('Visual materia grid')).toBeTruthy());
   });
 
   it('supports click-to-swap staging before explicit persistence', async () => {
@@ -169,6 +223,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    await openTab('Pipeline Graph');
     expect(await screen.findByTestId('pipeline-graph')).toBeTruthy();
     expect(screen.getByTestId('graph-node-planner')).toBeTruthy();
     expect(screen.getByTestId('graph-node-Auto-Eval')).toBeTruthy();
@@ -185,8 +240,10 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    await openTab('Pipeline Graph');
     fireEvent.change(await screen.findByTestId('new-node-id'), { target: { value: 'Verifier' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add node' }));
+    await openTab('Loadout');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -204,9 +261,11 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    await openTab('Pipeline Graph');
     fireEvent.change(await screen.findByTestId('insert-from'), { target: { value: 'Build' } });
     fireEvent.change(screen.getByTestId('insert-to'), { target: { value: 'Auto-Eval' } });
     fireEvent.click(screen.getByRole('button', { name: 'Insert' }));
+    await openTab('Loadout');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -227,19 +286,46 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.change(screen.getByTestId('materia-model'), { target: { value: 'openai/gpt-review' } });
     fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
+    await openTab('Loadout');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
-    expect(body.config.loadouts['Full-Auto'].nodes.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'json' });
+    expect(body.config.loadouts['Full-Auto']).toEqual(testConfig.loadouts['Full-Auto']);
+    expect(body.config.materiaDefinitions.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'json' });
     expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.', model: 'openai/gpt-review', multiTurn: true });
+  });
+
+  it('creates prompt materia in legacy pipeline configs without materializing loadouts', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: legacyPipelineConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
+    fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+    await openTab('Loadout');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.config).not.toHaveProperty('loadouts');
+    expect(body.config.pipeline).toEqual(legacyPipelineConfig.pipeline);
+    expect(body.config.materiaDefinitions.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'text' });
+    expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.' });
   });
 
   it('creates tool invocation materia and only uses project persistence when explicitly selected', async () => {
@@ -251,6 +337,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'RunTests' } });
     fireEvent.change(screen.getByTestId('materia-behavior'), { target: { value: 'tool' } });
     fireEvent.change(screen.getByTestId('materia-persist-scope'), { target: { value: 'project' } });
@@ -259,12 +346,14 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-params'), { target: { value: '{"ci":true}' } });
     fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '90000' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
+    await openTab('Loadout');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('project');
-    expect(body.config.loadouts['Full-Auto'].nodes.RunTests).toMatchObject({ type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000 });
+    expect(body.config.loadouts['Full-Auto']).toEqual(testConfig.loadouts['Full-Auto']);
+    expect(body.config.materiaDefinitions.RunTests).toMatchObject({ type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000 });
   });
 
   it('edits existing prompt materia role settings where supported', async () => {
@@ -276,16 +365,19 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Build with extra care.' } });
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'readOnly' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
+    await openTab('Loadout');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
-    expect(body.config.loadouts['Full-Auto'].nodes.Build).toMatchObject({ type: 'agent', role: 'Build', prompt: 'Build with extra care.', next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
+    expect(body.config.loadouts['Full-Auto']).toEqual(testConfig.loadouts['Full-Auto']);
+    expect(body.config.materiaDefinitions.Build).toMatchObject({ type: 'agent', role: 'Build', prompt: 'Build with extra care.', parse: 'text' });
     expect(body.config.roles.Build).toMatchObject({ tools: 'readOnly', systemPrompt: 'Build with extra care.', model: 'openai/gpt-test' });
   });
 
@@ -298,6 +390,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    await openTab('Pipeline Graph');
     await screen.findByTestId('graph-node-Build');
     fireEvent.change(screen.getByLabelText('Build satisfied branch'), { target: { value: 'Maintain' } });
     fireEvent.change(screen.getByLabelText('Build not satisfied branch'), { target: { value: 'planner' } });
@@ -305,6 +398,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByLabelText('Build satisfied max traversals'), { target: { value: '2' } });
     fireEvent.change(screen.getByLabelText('Build max visits'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('Build max edge traversals'), { target: { value: '9' } });
+    await openTab('Loadout');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -328,6 +422,7 @@ describe('Materia loadout grid editor', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
     render(<App />);
+    await openTab('Pipeline Graph');
     await screen.findByTestId('graph-node-Build');
     listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({
       ok: true,
@@ -338,8 +433,9 @@ describe('Materia loadout grid editor', () => {
       artifactSummary: { runDir: '/tmp/run', summary: 'Completed nodes: planner', outputs: [{ node: 'Build', kind: 'node_output', artifact: 'nodes/Build/1.md', content: 'built' }] },
     }) }));
 
+    await waitFor(() => expect(screen.getByTestId('graph-node-Build').className).toContain('graph-node-card-active'));
+    await openTab('Monitoring');
     expect(await screen.findByText('awaiting_agent_response')).toBeTruthy();
     expect(screen.getByText('Completed nodes: planner')).toBeTruthy();
-    expect(screen.getByTestId('graph-node-Build').className).toContain('graph-node-card-active');
   });
 });

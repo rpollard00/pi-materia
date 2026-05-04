@@ -164,6 +164,7 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMater
     pipeline: patch.pipeline ? mergePipeline(base.pipeline, patch.pipeline) : base.pipeline,
     loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, patch.loadouts),
     activeLoadout: usesLegacyPipeline ? undefined : (patch.activeLoadout ?? base.activeLoadout),
+    materiaDefinitions: mergeMateriaDefinitions(base.materiaDefinitions, patch.materiaDefinitions),
     roles: patch.roles ? mergeRoles(base.roles ?? {}, patch.roles) : base.roles,
   };
 }
@@ -178,6 +179,7 @@ function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>): P
     pipeline: mergePipeline(base.pipeline, parsed.pipeline),
     loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, parsed.loadouts),
     activeLoadout: usesLegacyPipeline ? undefined : (parsed.activeLoadout ?? base.activeLoadout),
+    materiaDefinitions: mergeMateriaDefinitions(base.materiaDefinitions, parsed.materiaDefinitions),
     roles: mergeRoles(base.roles, parsed.roles),
   } as PiMateriaConfig;
 }
@@ -204,6 +206,11 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
     } as NonNullable<PiMateriaConfig["pipeline"]>;
   }
   return merged;
+}
+
+function mergeMateriaDefinitions(baseDefinitions: PiMateriaConfig["materiaDefinitions"], parsedDefinitions: Partial<PiMateriaConfig>["materiaDefinitions"]): PiMateriaConfig["materiaDefinitions"] {
+  if (!parsedDefinitions) return baseDefinitions;
+  return { ...(baseDefinitions ?? {}), ...parsedDefinitions };
 }
 
 function mergeRoles(baseRoles: Record<string, MateriaRoleConfig>, parsedRoles: Partial<PiMateriaConfig>["roles"]): Record<string, MateriaRoleConfig> {

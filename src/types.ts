@@ -8,6 +8,8 @@ export interface PiMateriaConfig {
   loadouts?: Record<string, MateriaPipelineConfig>;
   /** Name of the loadout to use when loadouts are configured. */
   activeLoadout?: string;
+  /** Reusable materia definitions edited outside active loadout graphs. */
+  materiaDefinitions?: Record<string, MateriaPipelineNodeConfig>;
   roles: Record<string, MateriaRoleConfig>;
 }
 
