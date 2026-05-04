@@ -35,6 +35,23 @@ bun test --watch
 
 Tests use a fake Pi harness and do not require provider/API access or a real Pi session.
 
+### WebUI development scaffold
+
+The `/materia ui` WebUI scaffold lives under `src/webui/`:
+
+- `src/webui/client/` is a Vite + React + Tailwind app.
+- `src/webui/server/` is a TypeScript Node HTTP server that serves the built client and exposes a health endpoint.
+
+Useful commands:
+
+```bash
+npm run dev:webui          # Vite client dev server
+npm run dev:webui:server   # Node server in watch mode
+npm run build:webui        # build client and server into dist/webui/
+npm run test:webui         # Vitest client smoke tests
+npm run typecheck          # extension, client, and server type checks
+```
+
 WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md).
 
 ## Usage

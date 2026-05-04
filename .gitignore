@@ -9,12 +9,18 @@ config/.pi/pi-materia/
 # Build outputs
 _build/
 dist/
+build/
 coverage/
 
 # TypeScript compiler output accidentally emitted beside sources
 /src/**/*.js
 /src/**/*.js.map
 /src/**/*.d.ts
+
+# Local environment
+.env
+.env.*
+!.env.example
 
 # Logs
 *.log

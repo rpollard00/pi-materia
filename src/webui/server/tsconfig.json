@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.webui-base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../../dist/webui/server",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

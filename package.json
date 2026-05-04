@@ -20,11 +20,21 @@
     "LICENSE"
   ],
   "scripts": {
+    "dev:webui": "vite --config src/webui/client/vite.config.ts",
+    "dev:webui:server": "tsx watch src/webui/server/index.ts",
+    "build:webui": "vite build --config src/webui/client/vite.config.ts && tsc -p src/webui/server/tsconfig.json --noEmit false",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "typecheck": "tsc --noEmit",
+    "test:webui": "vitest run --config src/webui/client/vitest.config.ts",
+    "typecheck": "tsc --noEmit && tsc -p src/webui/client/tsconfig.json --noEmit && tsc -p src/webui/server/tsconfig.json --noEmit",
     "pack:dry-run": "npm pack --dry-run",
     "prepublishOnly": "npm run typecheck && npm run pack:dry-run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
@@ -33,8 +43,18 @@
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "latest",
     "@mariozechner/pi-tui": "latest",
+    "@tailwindcss/postcss": "latest",
+    "@testing-library/react": "latest",
     "@types/node": "latest",
-    "typescript": "latest"
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "autoprefixer": "latest",
+    "jsdom": "latest",
+    "postcss": "latest",
+    "tailwindcss": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
   },
   "pi": {
     "extensions": [
