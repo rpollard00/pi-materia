@@ -274,7 +274,9 @@ Each cast writes enough information to debug the run after the fact:
 
 The bundled defaults live at `config/default.json` and set `activeLoadout` to `Full-Auto`.
 
-- `Full-Auto`: the autonomous software-development workflow. The `planner` role creates the task list, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
-- `Planning-Consult`: the same graph except the planner node uses the `interactivePlan` role with `multiTurn: true`, letting you collaboratively refine the plan before continuing to the automated build/evaluate/maintain loop.
+- `Full-Auto`: the autonomous software-development workflow. The `planner` role immediately produces structured task artifacts from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
+- `Planning-Consult`: the conversational planning workflow. The planner node uses the `interactivePlan` role with `multiTurn: true`, so it starts with normal discussion instead of immediate task JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
+
+When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes. Once the plan looks right, say something like "ready to continue", "continue", or "finalize". pi-materia then finalizes the latest plan into the configured `{ "tasks": [...] }` artifacts and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop.
 
 Both loadouts are defined entirely as config using generic prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia roles. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
