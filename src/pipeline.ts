@@ -1,5 +1,5 @@
 import { resolveArtifactRoot } from "./config.js";
-import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineNodeConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineNodeConfig, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
   pipeline: NonNullable<PiMateriaConfig["pipeline"]>;
@@ -44,6 +44,7 @@ function resolveNode(config: PiMateriaConfig, effective: EffectiveMateriaPipelin
   if (node.type === "agent") {
     const role = config.roles[node.role];
     if (!role) throw new Error(`Pipeline slot "${id}" references unknown materia role "${node.role}"`);
+    validateRole(node.role, role);
     return { id, node, role };
   }
 
@@ -57,11 +58,8 @@ function validateNode(id: string, node: MateriaPipelineNodeConfig): void {
   if (node.parse !== undefined && node.parse !== "text" && node.parse !== "json") {
     throw new Error(`Pipeline slot "${id}" has unsupported parse mode "${String(node.parse)}". Expected "text" or "json".`);
   }
-  if ("multiTurn" in node && node.type !== "agent") {
-    throw new Error(`Pipeline slot "${id}" configures multiTurn, but multi-turn is only supported for agent nodes.`);
-  }
-  if (node.type === "agent" && node.multiTurn !== undefined && typeof node.multiTurn !== "boolean") {
-    throw new Error(`Agent pipeline slot "${id}" has invalid multiTurn. Expected a boolean.`);
+  if ("multiTurn" in node) {
+    throw new Error(`Pipeline slot "${id}" configures obsolete multiTurn. Configure multiTurn on the referenced role instead.`);
   }
   if (node.type === "utility") {
     if (!node.utility && !node.command) throw new Error(`Utility pipeline slot "${id}" must configure either "utility" or "command".`);
@@ -69,6 +67,12 @@ function validateNode(id: string, node: MateriaPipelineNodeConfig): void {
     if (node.timeoutMs !== undefined && (!Number.isFinite(node.timeoutMs) || node.timeoutMs <= 0)) {
       throw new Error(`Utility pipeline slot "${id}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
     }
+  }
+}
+
+function validateRole(name: string, role: MateriaRoleConfig): void {
+  if (role.multiTurn !== undefined && typeof role.multiTurn !== "boolean") {
+    throw new Error(`Materia role "${name}" has invalid multiTurn. Expected a boolean when configured.`);
   }
 }
 
@@ -139,7 +143,7 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
   if (node.type === "agent") {
     const role = config.roles[node.role];
     details.push(`role=${node.role}`, `tools=${role?.tools ?? "unknown"}`);
-    if (node.multiTurn) details.push("multiTurn=true");
+    if (role?.multiTurn) details.push("multiTurn=true");
     if (role) details.push(formatRoleModelSettings(role));
   } else {
     details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);

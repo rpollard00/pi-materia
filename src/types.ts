@@ -233,8 +233,6 @@ export interface MateriaAgentNodeConfig extends MateriaPipelineNodeCommonConfig 
   type: "agent";
   role: string;
   prompt?: string;
-  /** Keep this agent node active for interactive refinement until finalized. */
-  multiTurn?: boolean;
 }
 
 export interface MateriaUtilityNodeConfig extends MateriaPipelineNodeCommonConfig {
@@ -294,4 +292,6 @@ export interface MateriaRoleConfig {
   systemPrompt: string;
   model?: string;
   thinking?: string;
+  /** Keep agent nodes using this role active for interactive refinement until finalized. */
+  multiTurn?: boolean;
 }

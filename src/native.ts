@@ -110,7 +110,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   const state = loadActiveCastState(ctx);
   if (!state?.active) return;
   const nodeAtEnd = currentNodeOrThrow(state);
-  const acceptingRefinement = !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isAgentResolvedNode(nodeAtEnd) && nodeAtEnd.node.multiTurn;
+  const acceptingRefinement = !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isMultiTurnResolvedAgentNode(nodeAtEnd);
   if (!state.awaitingResponse && !acceptingRefinement) return;
 
   const latest = findLatestAssistantEntry(ctx.sessionManager.getEntries(), state.lastProcessedEntryId);
@@ -128,10 +128,10 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   try {
     if (agentError) throw new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
     const node = currentNodeOrThrow(state);
-    // Multi-turn pausing is config-driven: if a resolved agent node omits
-    // multiTurn, even an interactive planning role completes and advances.
+    // Multi-turn pausing is role-driven: if the resolved agent role omits
+    // multiTurn, even an interactive planning node completes and advances.
     // Keep this generic runtime gate role-name agnostic.
-    if (isAgentResolvedNode(node) && node.node.multiTurn) {
+    if (isMultiTurnResolvedAgentNode(node)) {
       const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
       state.nodeState = "awaiting_user_refinement";
       state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement, or readiness to continue/finalize.`;
@@ -180,7 +180,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
 
   applyAssignments(state, node, parsed);
   const advanceTarget = applyAdvance(state, node, parsed);
-  const finalizedRefinement = isAgentResolvedNode(node) && Boolean(node.node.multiTurn);
+  const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
   await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
   await assertBudget(config, state.runState, ctx);
 
@@ -195,7 +195,7 @@ async function recordNodeOutput(state: MateriaCastState, node: ResolvedMateriaNo
   const artifact = path.join(dir, `${visit}${item}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
-  const finalizedRefinement = isAgentResolvedNode(node) && Boolean(node.node.multiTurn);
+  const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
   await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, roleModel: state.currentRoleModel });
   return artifact;
 }
@@ -710,7 +710,7 @@ export function isReadinessToContinueInstruction(input: string): boolean {
 function isActiveMultiTurnNode(state: MateriaCastState): boolean {
   if (!state.active) return false;
   const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
-  return Boolean(node && isAgentResolvedNode(node) && node.node.multiTurn);
+  return Boolean(node && isMultiTurnResolvedAgentNode(node));
 }
 
 function buildSyntheticCastContext(state: MateriaCastState): string {
@@ -964,6 +964,10 @@ function nodeRoleName(node: ResolvedMateriaNode): string | undefined {
 
 function isAgentResolvedNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { role: MateriaRoleConfig }> {
   return node.node.type === "agent";
+}
+
+function isMultiTurnResolvedAgentNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { role: MateriaRoleConfig }> {
+  return isAgentResolvedNode(node) && node.role.multiTurn === true;
 }
 
 function currentNodeOrThrow(state: MateriaCastState): ResolvedMateriaNode {

@@ -136,6 +136,9 @@ function validateRoles(roles: Record<string, MateriaRoleConfig>): void {
     if (role.thinking !== undefined && typeof role.thinking !== "string") {
       throw new Error(`Materia role "${name}" has invalid thinking. Expected a string when configured.`);
     }
+    if (role.multiTurn !== undefined && typeof role.multiTurn !== "boolean") {
+      throw new Error(`Materia role "${name}" has invalid multiTurn. Expected a boolean when configured.`);
+    }
   }
 }
 
