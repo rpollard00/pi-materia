@@ -6,6 +6,7 @@ import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js"
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { activeRoleSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
+import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -46,11 +47,36 @@ export default function piMateria(pi: ExtensionAPI) {
     ctx.ui.notify(`pi-materia cast ${state.castId} restored in ${state.phase}. Use /materia status for details.`, "info");
   });
 
+  pi.on("session_shutdown", (_event, ctx) => {
+    closeMateriaWebUiForSession(ctx);
+  });
+
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, casts, grid, loadout, status, continue, abort.",
+    description: "Run pi-materia commands: cast, casts, grid, loadout, ui, status, continue, abort.",
     handler: async (args, ctx) => {
-      await ctx.waitForIdle();
       const [subcommand, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+
+      if (subcommand === "ui") {
+        try {
+          const result = await launchMateriaWebUi(ctx);
+          const lines = [
+            "Materia WebUI",
+            result.reused ? "reused existing session-scoped server" : "started session-scoped server in background",
+            `url: ${result.url}`,
+            `browser auto-open: ${result.autoOpenBrowser ? "enabled" : "disabled"}`,
+            "scope: this Pi session only",
+          ];
+          ctx.ui.setWidget("materia-webui", lines, { placement: "belowEditor" });
+          ctx.ui.notify(`Materia WebUI ${result.reused ? "ready" : "started"}: ${result.url}`, "info");
+          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "ui", roleName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey } });
+          pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused: result.reused, startedAt: Date.now() });
+        } catch (error) {
+          ctx.ui.notify(`pi-materia ui failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
+
+      await ctx.waitForIdle();
 
       if (subcommand === "grid") {
         try {
@@ -82,6 +108,7 @@ export default function piMateria(pi: ExtensionAPI) {
         }
         return;
       }
+
 
       if (subcommand === "casts") {
         try {
@@ -146,7 +173,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia casts, /materia grid, /materia loadout [name], /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 

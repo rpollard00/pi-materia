@@ -113,6 +113,34 @@ describe("FakePiHarness", () => {
     expect(harness.operationLog).not.toContain("triggerTurn");
   });
 
+  test("starts and reuses /materia ui session-scoped background server", async () => {
+    const harness = new FakePiHarness(process.cwd());
+    piMateria(harness.pi);
+
+    harness.idle = false;
+    await harness.runCommand("materia", "ui");
+    const first = harness.sentMessages.at(-1)?.message as { content?: string; details?: { url?: string; sessionKey?: string } };
+    const firstUrl = first.details?.url;
+    expect(firstUrl).toStartWith("http://127.0.0.1:");
+    expect(first.content).toContain("scope: this Pi session only");
+    expect(harness.operationLog).not.toContain("triggerTurn");
+    expect(harness.operationLog).not.toContain("waitForIdle");
+    expect(harness.waitForIdleCalls).toBe(0);
+
+    const response = await fetch(`${firstUrl?.replace(/\/$/, "")?.replace(/\?.*$/, "")}/api/session`);
+    const session = await response.json() as { scope?: string; sessionKey?: string };
+    expect(session.scope).toBe("session");
+    expect(session.sessionKey).toBe(first.details?.sessionKey);
+
+    await harness.runCommand("materia", "ui");
+    const second = harness.sentMessages.at(-1)?.message as { content?: string; details?: { url?: string; sessionKey?: string } };
+    expect(second.details?.url).toBe(firstUrl);
+    expect(second.content).toContain("reused existing session-scoped server");
+    expect(harness.waitForIdleCalls).toBe(0);
+
+    await harness.emit("session_shutdown");
+  });
+
   test("loads pi-materia and runs /materia grid locally", async () => {
     const harness = new FakePiHarness(process.cwd());
     piMateria(harness.pi);

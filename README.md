@@ -60,6 +60,7 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 /materia grid
 /materia loadout
 /materia loadout Planning-Consult
+/materia ui
 /materia cast implement the next small feature
 /materia casts
 /materia status
@@ -67,6 +68,8 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 ```
 
 pi-materia reports the config source, artifact directory, active loadout, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full role prompts are hidden behind compact Materia cast messages, and each role turn receives a curated Materia context instead of the full previous conversation.
+
+Use `/materia ui` to start or reuse a background WebUI server scoped to the current Pi session. It prints a clickable local URL. Browser auto-open is disabled by default and can be enabled in `~/.config/pi/pi-materia/config.json` with `{ "webui": { "autoOpenBrowser": true } }`; `preferredPort` and `host` are also supported.
 
 Use `/materia loadout` to list configured graph loadouts and mark the active one. Use `/materia loadout <name>` to switch the active graph for future casts, for example `/materia loadout Planning-Consult`. Loadout names may contain hyphens.
 

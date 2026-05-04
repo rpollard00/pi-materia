@@ -3,10 +3,43 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+export interface MateriaWebUiSessionSnapshot {
+  ok: true;
+  scope: 'session';
+  service: 'pi-materia-webui';
+  sessionKey: string;
+  cwd: string;
+  sessionFile: string;
+  sessionId: string;
+  uiStartedAt: number;
+  now: number;
+  activeCast?: {
+    castId: string;
+    active: boolean;
+    phase: string;
+    currentNode?: string;
+    currentRole?: string;
+    nodeState?: string;
+    awaitingResponse: boolean;
+    runDir: string;
+    artifactRoot: string;
+    startedAt: number;
+    updatedAt: number;
+  };
+}
+
 export interface MateriaWebUiServerOptions {
   host?: string;
   port?: number;
   staticDir?: string;
+  session?: {
+    key: string;
+    cwd: string;
+    sessionFile: string;
+    sessionId: string;
+    startedAt: number;
+    getSnapshot: () => MateriaWebUiSessionSnapshot;
+  };
 }
 
 const defaultStaticDir = resolve(fileURLToPath(new URL('../../../dist/webui/client', import.meta.url)));
@@ -57,7 +90,12 @@ export function createMateriaWebUiServer(options: MateriaWebUiServerOptions = {}
 
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/api/health')) {
-      sendJson(res, 200, { ok: true, scope: 'session', service: 'pi-materia-webui' });
+      sendJson(res, 200, { ok: true, scope: 'session', service: 'pi-materia-webui', sessionKey: options.session?.key });
+      return;
+    }
+
+    if (req.url?.startsWith('/api/session')) {
+      sendJson(res, 200, options.session?.getSnapshot() ?? { ok: true, scope: 'session', service: 'pi-materia-webui' });
       return;
     }
 

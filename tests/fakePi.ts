@@ -80,6 +80,7 @@ export class FakePiHarness {
   readonly setModelCalls: unknown[] = [];
   readonly setThinkingLevelCalls: string[] = [];
   readonly operationLog: string[] = [];
+  waitForIdleCalls = 0;
   activeTools: string[] = ["read", "grep", "find", "ls", "bash", "edit", "write"];
   allTools: Array<{ name: string }> = this.activeTools.map((name) => ({ name }));
   models: Array<{ provider: string; id: string; name?: string; api?: string }> = [];
@@ -181,7 +182,9 @@ export class FakePiHarness {
       getContextUsage: () => undefined,
       compact: () => undefined,
       getSystemPrompt: () => "",
-      waitForIdle: async () => undefined,
+      waitForIdle: async () => {
+        this.waitForIdleCalls += 1;
+      },
       newSession: async () => ({ cancelled: false }),
       fork: async () => ({ cancelled: false }),
       navigateTree: async () => ({ cancelled: false }),
