@@ -132,6 +132,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 
   const text = assistantText(latest.message);
   const agentError = assistantErrorMessage(latest.message);
+  const wasAwaitingFinalization = state.awaitingResponse && state.nodeState === "awaiting_agent_response" && state.multiTurnFinalizing === true;
   state.lastProcessedEntryId = latest.entry.id;
   state.lastAssistantText = text;
   state.awaitingResponse = false;
@@ -146,13 +147,14 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     // multiTurn, even an interactive planning node completes and advances.
     // Keep this generic runtime gate role-name agnostic.
     if (isMultiTurnResolvedAgentNode(node)) {
-      if (state.multiTurnFinalizing) {
+      if (wasAwaitingFinalization) {
         state.multiTurnFinalizing = false;
         state.nodeState = "idle";
         saveCastState(pi, state);
-        await completeNode(pi, ctx, state, text, latest.entry.id);
+        await completeNode(pi, ctx, state, text, latest.entry.id, { finalizedMultiTurn: true });
         return;
       }
+      state.multiTurnFinalizing = false;
       const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
       state.nodeState = "awaiting_user_refinement";
       state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement, or readiness to continue/finalize.`;
@@ -181,9 +183,12 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   }
 }
 
-async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string): Promise<void> {
+async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean } = {}): Promise<void> {
   const config = await loadConfigFromState(state);
   const node = currentNodeOrThrow(state);
+  if (isMultiTurnResolvedAgentNode(node) && !options.finalizedMultiTurn) {
+    throw new Error(`Internal multi-turn state error for node "${node.id}": completion requires explicit readiness-triggered finalization.`);
+  }
   const artifact = await recordNodeOutput(state, node, text, entryId);
   state.lastOutput = text;
 
@@ -713,6 +718,7 @@ export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: Exte
   state.runState.currentRoleModel = roleModel;
   state.awaitingResponse = true;
   state.nodeState = "awaiting_agent_response";
+  state.multiTurnFinalizing = false;
   state.updatedAt = Date.now();
   const refinementTurn = currentRefinementTurn(state, node.id) + 1;
   recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });

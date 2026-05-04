@@ -293,6 +293,40 @@ describe("native multi-turn runtime", () => {
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only JSON");
   });
 
+  test("stale finalization flag cannot complete a paused refinement turn", async () => {
+    const harness = await makeHarness(multiTurnConfig());
+    const plaintextAssistantRefinement = "Plaintext refinement response, definitely not JSON.";
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("Initial plaintext planning question.");
+    await harness.emit("agent_end", { messages: [] });
+
+    const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(pausedState.active).toBe(true);
+    expect(pausedState.nodeState).toBe("awaiting_user_refinement");
+    expect(pausedState.awaitingResponse).toBe(false);
+
+    // Simulate a stale/racy flag left behind while the node is still paused.
+    harness.pi.appendEntry("pi-materia-cast-state", { ...pausedState, multiTurnFinalizing: true });
+    harness.appendAssistantMessage(plaintextAssistantRefinement);
+    await harness.emit("agent_end", { messages: [] });
+
+    const refinedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(refinedState.active).toBe(true);
+    expect(refinedState.nodeState).toBe("awaiting_user_refinement");
+    expect(refinedState.awaitingResponse).toBe(false);
+    expect(refinedState.multiTurnFinalizing).toBe(false);
+    expect(refinedState.data.tasks).toBeUndefined();
+    expect(refinedState.lastJson).toBeUndefined();
+    expect(refinedState.failedReason).toBeUndefined();
+    expect(harness.notifications.filter((notification) => notification.type === "error")).toHaveLength(0);
+
+    const castDir = path.join(harness.cwd, ".pi", "pi-materia", refinedState.castId);
+    const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
+    expect(manifest.entries.some((entry: any) => entry.kind === "node_refinement" && entry.artifact.includes(".refinement-2-"))).toBe(true);
+    expect(manifest.entries.some((entry: any) => entry.kind === "node_output" && entry.node === "plan")).toBe(false);
+  });
+
   test("multi-turn input finalizes only on explicit readiness intent", async () => {
     const nonReadinessInputs = [
       "Lets do a full CRT inspired shader, we should give it some phosphor glow, and some fading to make it look like a worn out tube.",
