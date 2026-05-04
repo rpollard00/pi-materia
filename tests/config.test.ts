@@ -41,7 +41,7 @@ describe("config loadouts", () => {
         },
         "Planning-Consult": {
           entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
+          nodes: { interactivePlan: { type: "agent", role: "interactivePlan" } },
         },
       },
     });
@@ -65,12 +65,13 @@ describe("config loadouts", () => {
       type: "agent",
       role: "interactivePlan",
       parse: "json",
-      multiTurn: true,
     });
+    expect("multiTurn" in (loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner ?? {})).toBe(false);
+    expect(loaded.config.roles.interactivePlan.multiTurn).toBe(true);
 
     const fullAuto = resolvePipeline(loaded.config);
     expect(fullAuto.nodes.planner.node.type).toBe("agent");
-    expect(fullAuto.nodes.planner.node.multiTurn).toBeUndefined();
+    expect(fullAuto.nodes.planner.role.multiTurn).toBeUndefined();
     expect(fullAuto.nodes.planner.role.systemPrompt).toContain("planning role");
 
     loaded.config.activeLoadout = "Planning-Consult";
@@ -79,8 +80,9 @@ describe("config loadouts", () => {
       type: "agent",
       role: "interactivePlan",
       parse: "json",
-      multiTurn: true,
     });
+    expect("multiTurn" in planningConsult.nodes.planner.node).toBe(false);
+    expect(planningConsult.nodes.planner.role.multiTurn).toBe(true);
     expect(planningConsult.nodes.planner.role.systemPrompt).toContain("interactive planning role");
   });
 });
@@ -95,7 +97,7 @@ describe("active loadout persistence", () => {
         },
         "Planning-Consult": {
           entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
+          nodes: { interactivePlan: { type: "agent", role: "interactivePlan" } },
         },
       },
     });
@@ -186,5 +188,11 @@ describe("config role model settings", () => {
     const { dir, file } = await writeConfig({ roles: { Build: { thinking: true } } });
 
     await expect(loadConfig(dir, file)).rejects.toThrow(/Materia role "Build" has invalid thinking\. Expected a string/);
+  });
+
+  test("rejects non-boolean role multiTurn with a friendly error", async () => {
+    const { dir, file } = await writeConfig({ roles: { interactivePlan: { multiTurn: "yes" } } });
+
+    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia role "interactivePlan" has invalid multiTurn\. Expected a boolean/);
   });
 });

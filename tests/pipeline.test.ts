@@ -47,12 +47,12 @@ describe("loadout-aware pipeline resolution", () => {
         },
         "Planning-Consult": {
           entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", role: "interactivePlan", multiTurn: true } },
+          nodes: { interactivePlan: { type: "agent", role: "interactivePlan" } },
         },
       },
       roles: {
         planner: { tools: "readOnly", systemPrompt: "Plan automatically." },
-        interactivePlan: { tools: "readOnly", systemPrompt: "Plan interactively." },
+        interactivePlan: { tools: "readOnly", systemPrompt: "Plan interactively.", multiTurn: true },
       },
     };
 
@@ -161,17 +161,17 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/unsupported parse mode "yaml"/);
   });
 
-  test("accepts multi-turn agent nodes and renders them", () => {
+  test("accepts multi-turn roles and renders agent slots with role-derived capability", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
       pipeline: {
         entry: "interactivePlan",
         nodes: {
-          interactivePlan: { type: "agent", role: "planner", multiTurn: true, parse: "json" },
+          interactivePlan: { type: "agent", role: "planner", parse: "json" },
         },
       },
       roles: {
-        planner: { tools: "readOnly", systemPrompt: "Plan interactively." },
+        planner: { tools: "readOnly", systemPrompt: "Plan interactively.", multiTurn: true },
       },
     };
 
@@ -179,32 +179,32 @@ describe("utility pipeline nodes", () => {
     const lines = renderGrid(config, pipeline, "test", "/tmp/project");
 
     expect(pipeline.entry.node.type).toBe("agent");
-    expect(pipeline.entry.node.multiTurn).toBe(true);
+    expect(pipeline.entry.role.multiTurn).toBe(true);
     expect(lines.find((line) => line.startsWith("- interactivePlan:"))).toContain("multiTurn=true");
   });
 
-  test("rejects multi-turn utility nodes", () => {
+  test("rejects obsolete node-level multiTurn", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
     config.pipeline.nodes.hello = { type: "utility", utility: "example", multiTurn: true } as never;
 
-    expect(() => resolvePipeline(config)).toThrow(/multi-turn is only supported for agent nodes/);
+    expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
 
-  test("rejects malformed multiTurn values on agent nodes", () => {
+  test("rejects malformed multiTurn values on roles", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
       pipeline: {
         entry: "planner",
         nodes: {
-          planner: { type: "agent", role: "planner", multiTurn: "yes" as never },
+          planner: { type: "agent", role: "planner" },
         },
       },
       roles: {
-        planner: { tools: "readOnly", systemPrompt: "Plan." },
+        planner: { tools: "readOnly", systemPrompt: "Plan.", multiTurn: "yes" as never },
       },
     };
 
-    expect(() => resolvePipeline(config)).toThrow(/invalid multiTurn/);
+    expect(() => resolvePipeline(config)).toThrow(/Materia role "planner" has invalid multiTurn/);
   });
 
   test("rejects malformed command arrays with a friendly error", () => {

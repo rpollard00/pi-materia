@@ -27,10 +27,10 @@ function multiTurnConfig(role: Record<string, unknown> = {}) {
     pipeline: {
       entry: "plan",
       nodes: {
-        plan: { type: "agent", role: "Plan", multiTurn: true, parse: "json", assign: { tasks: "$.tasks" } },
+        plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
       },
     },
-    roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner", ...role } },
+    roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner", multiTurn: true, ...role } },
   };
 }
 
@@ -53,8 +53,8 @@ function singleTurnConfig() {
 
 function multiTurnWithDownstreamConfig(parse: "json" | "text") {
   const plan = parse === "json"
-    ? { type: "agent", role: "Plan", multiTurn: true, parse: "json", assign: { tasks: "$.tasks" }, next: "build" }
-    : { type: "agent", role: "Plan", multiTurn: true, parse: "text", assign: { summary: "$" }, next: "build" };
+    ? { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "build" }
+    : { type: "agent", role: "Plan", parse: "text", assign: { summary: "$" }, next: "build" };
   return {
     artifactDir: ".pi/pi-materia",
     pipeline: {
@@ -65,8 +65,29 @@ function multiTurnWithDownstreamConfig(parse: "json" | "text") {
       },
     },
     roles: {
-      Plan: { tools: "readOnly", systemPrompt: "Collaborative planner" },
+      Plan: { tools: "readOnly", systemPrompt: "Collaborative planner", multiTurn: true },
       Build: { tools: "coding", systemPrompt: "Build downstream" },
+    },
+  };
+}
+
+function loadoutSwitchingConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Single",
+    loadouts: {
+      Single: {
+        entry: "plan",
+        nodes: { plan: { type: "agent", role: "PlanSingle", parse: "json", assign: { tasks: "$.tasks" } } },
+      },
+      Interactive: {
+        entry: "plan",
+        nodes: { plan: { type: "agent", role: "PlanInteractive", parse: "json", assign: { tasks: "$.tasks" } } },
+      },
+    },
+    roles: {
+      PlanSingle: { tools: "readOnly", systemPrompt: "Plan once" },
+      PlanInteractive: { tools: "readOnly", systemPrompt: "Plan with refinements", multiTurn: true },
     },
   };
 }
@@ -126,6 +147,34 @@ describe("native multi-turn runtime", () => {
     expect(buildState.data.tasks).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"] }]);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Task 1: Ship it");
+  });
+
+  test("loadout switching changes multi-turn behavior only by selecting a multi-turn role", async () => {
+    const harness = await makeHarness(loadoutSwitchingConfig());
+    const finalPlan = '{"tasks":[{"id":"1","title":"Ship it"}]}';
+
+    await harness.runCommand("materia", "cast plan once");
+    harness.appendAssistantMessage(finalPlan);
+    await harness.emit("agent_end", { messages: [] });
+
+    const singleState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(singleState.active).toBe(false);
+    expect(singleState.currentNode).toBe("plan");
+    expect(singleState.currentRole).toBe("PlanSingle");
+    expect(singleState.nodeState).toBe("complete");
+    expect(singleState.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
+
+    await harness.runCommand("materia", "loadout Interactive");
+    await harness.runCommand("materia", "cast refine the plan");
+    harness.appendAssistantMessage(finalPlan);
+    await harness.emit("agent_end", { messages: [] });
+
+    const interactiveState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(interactiveState.active).toBe(true);
+    expect(interactiveState.currentNode).toBe("plan");
+    expect(interactiveState.currentRole).toBe("PlanInteractive");
+    expect(interactiveState.nodeState).toBe("awaiting_user_refinement");
+    expect(interactiveState.data.tasks).toBeUndefined();
   });
 
   test("multi-turn agent output pauses without parsing or advancing until readiness", async () => {

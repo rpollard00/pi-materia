@@ -44,7 +44,7 @@ describe("FakePiHarness", () => {
         },
         "Planning-Consult": {
           entry: "planner",
-          nodes: { planner: { type: "agent", role: "interactivePlan", multiTurn: true } },
+          nodes: { planner: { type: "agent", role: "interactivePlan" } },
         },
       },
     }), "utf8");
@@ -97,7 +97,7 @@ describe("FakePiHarness", () => {
         },
         "Planning-Consult": {
           entry: "planner",
-          nodes: { planner: { type: "agent", role: "interactivePlan", multiTurn: true } },
+          nodes: { planner: { type: "agent", role: "interactivePlan" } },
         },
       },
     }), "utf8");
