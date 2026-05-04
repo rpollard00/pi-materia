@@ -47,7 +47,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, casts, grid, loadout, status, abort.",
+    description: "Run pi-materia commands: cast, casts, grid, loadout, status, continue, abort.",
     handler: async (args, ctx) => {
       await ctx.waitForIdle();
       const [subcommand, ...rest] = args.trim().split(/\s+/).filter(Boolean);
@@ -108,7 +108,7 @@ export default function piMateria(pi: ExtensionAPI) {
           `active: ${state.active}`,
           `phase: ${state.phase}`,
           `node state: ${nodeState}`,
-          nodeState === "awaiting_user_refinement" ? "waiting: user refinement, or say you are ready to continue/finalize this multi-turn node" : undefined,
+          nodeState === "awaiting_user_refinement" ? "waiting: user refinement; run /materia continue to finalize this multi-turn node" : undefined,
           `awaiting response: ${state.awaitingResponse}`,
           `node: ${state.currentNode ?? "-"}`,
           `role: ${state.currentRole ?? "-"}`,
@@ -146,7 +146,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia casts, /materia grid, /materia loadout [name], /materia status, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia casts, /materia grid, /materia loadout [name], /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 

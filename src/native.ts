@@ -150,13 +150,13 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       state.multiTurnFinalizing = false;
       const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
       state.nodeState = "awaiting_user_refinement";
-      state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement, or readiness to continue/finalize.`;
+      state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement; run /materia continue to finalize.`;
       await writeUsage(state.runState);
       await appendEvent(state.runState, "node_refinement", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
       saveCastState(pi, state);
       ctx.ui.setStatus("materia", `${node.id}:refine`);
       updateWidget(ctx, state.runState);
-      ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement, or readiness to continue/finalize.`, "info");
+      ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
       return;
     }
     await completeNode(pi, ctx, state, text, latest.entry.id);
@@ -180,7 +180,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
   const config = await loadConfigFromState(state);
   const node = currentNodeOrThrow(state);
   if (isMultiTurnResolvedAgentNode(node) && !options.finalizedMultiTurn) {
-    throw new Error(`Internal multi-turn state error for node "${node.id}": completion requires explicit readiness-triggered finalization.`);
+    throw new Error(`Internal multi-turn state error for node "${node.id}": completion requires explicit /materia continue finalization.`);
   }
   const artifact = await recordNodeOutput(state, node, text, entryId);
   state.lastOutput = text;

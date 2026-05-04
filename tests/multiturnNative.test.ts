@@ -215,7 +215,7 @@ describe("native multi-turn runtime", () => {
     expect(pausedState.lastJson).toBeUndefined();
 
     await harness.runCommand("materia", "status");
-    expect(harness.widgets.get("materia-status")?.content).toContain("waiting: user refinement, or say you are ready to continue/finalize this multi-turn node");
+    expect(harness.widgets.get("materia-status")?.content).toContain("waiting: user refinement; run /materia continue to finalize this multi-turn node");
 
     const inputResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
     expect(inputResults.at(-1)).toEqual({ action: "handled" });
@@ -419,10 +419,9 @@ describe("native multi-turn runtime", () => {
     expect(JSON.stringify(isolated)).toContain("refine this plan");
   });
 
-  test("status and command help do not instruct users to run /materia continue", async () => {
+  test("status and command help instruct users to run /materia continue", async () => {
     const harness = await makeHarness(multiTurnConfig());
-    expect(harness.commands.get("materia")?.description).not.toContain("/materia continue");
-    expect(harness.commands.get("materia")?.description).not.toContain("continue");
+    expect(harness.commands.get("materia")?.description).toContain("continue");
 
     await harness.runCommand("materia", "cast refine a plan");
     harness.appendAssistantMessage("draft response");
@@ -430,12 +429,12 @@ describe("native multi-turn runtime", () => {
 
     await harness.runCommand("materia", "status");
     const statusText = (harness.widgets.get("materia-status")?.content ?? []).join("\n");
-    expect(statusText).toContain("say you are ready to continue/finalize");
-    expect(statusText).not.toContain("/materia continue");
+    expect(statusText).toContain("/materia continue");
+    expect(statusText).not.toContain("say you are ready to continue/finalize");
 
     await harness.runCommand("materia", "unknown");
     expect(harness.notifications.at(-1)?.message).toContain("Usage:");
-    expect(harness.notifications.at(-1)?.message).not.toContain("/materia continue");
+    expect(harness.notifications.at(-1)?.message).toContain("/materia continue");
   });
 
   test("records refinement artifacts, context prompts, events, finalization metadata, and usage", async () => {
