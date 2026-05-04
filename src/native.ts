@@ -128,6 +128,9 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   try {
     if (agentError) throw new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
     const node = currentNodeOrThrow(state);
+    // Multi-turn pausing is config-driven: if a resolved agent node omits
+    // multiTurn, even an interactive planning role completes and advances.
+    // Keep this generic runtime gate role-name agnostic.
     if (isAgentResolvedNode(node) && node.node.multiTurn) {
       const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
       state.nodeState = "awaiting_user_refinement";
