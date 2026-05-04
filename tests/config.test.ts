@@ -92,6 +92,13 @@ describe("layered config loading and persistence", () => {
       const projectWritten = await saveMateriaConfigPatch(cwd, { activeLoadout: "Planning-Consult" }, { target: "project" });
       expect(projectWritten).toBe(projectFile);
       expect(JSON.parse(await readFile(projectFile, "utf8")).activeLoadout).toBe("Planning-Consult");
+
+      const explicitFile = path.join(cwd, "explicit-save.json");
+      await writeFile(explicitFile, JSON.stringify({ activeLoadout: "Full-Auto" }), "utf8");
+      const explicitWritten = await saveMateriaConfigPatch(cwd, { activeLoadout: "ExplicitOnly" }, { target: "explicit", configuredPath: explicitFile });
+      expect(explicitWritten).toBe(explicitFile);
+      expect(JSON.parse(await readFile(explicitFile, "utf8")).activeLoadout).toBe("ExplicitOnly");
+      expect(JSON.parse(await readFile(projectFile, "utf8")).activeLoadout).toBe("Planning-Consult");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

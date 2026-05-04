@@ -5,7 +5,7 @@
     "maxEdgeTraversals": 25
   },
   "budget": {
-    "maxTokens": 1000000,
+    "maxTokens": 4000000,
     "maxCostUsd": 20,
     "warnAtPercent": 75,
     "stopAtLimit": true

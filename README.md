@@ -52,7 +52,7 @@ npm run test:webui         # Vitest client smoke tests
 npm run typecheck          # extension, client, and server type checks
 ```
 
-WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md).
+WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md). Manual regression coverage for the shipped UI is documented in [docs/webui-smoke-tests.md](docs/webui-smoke-tests.md).
 
 ## Usage
 
