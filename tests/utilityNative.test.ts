@@ -17,7 +17,8 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
 function utilityConfig(node: Record<string, unknown>, extraNodes: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: { entry: "hello", nodes: { hello: { type: "utility", ...node }, ...extraNodes } },
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "hello", nodes: { hello: { type: "utility", ...node }, ...extraNodes } } },
     roles: {},
   };
 }

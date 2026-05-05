@@ -21,7 +21,8 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
 function agentConfig(role: Record<string, unknown> = {}, node: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: { entry: "agent", nodes: { agent: { type: "agent", role: "Build", ...node } } },
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "agent", nodes: { agent: { type: "agent", role: "Build", ...node } } } },
     roles: { Build: { tools: "coding", systemPrompt: "Build role", ...role } },
   };
 }
@@ -29,11 +30,14 @@ function agentConfig(role: Record<string, unknown> = {}, node: Record<string, un
 function twoAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: {
-      entry: "build",
-      nodes: {
-        build: { type: "agent", role: "Build", next: "review" },
-        review: { type: "agent", role: "Review" },
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "build",
+        nodes: {
+          build: { type: "agent", role: "Build", next: "review" },
+          review: { type: "agent", role: "Review" },
+        },
       },
     },
     roles: {
@@ -167,7 +171,8 @@ describe("native per-role model settings", () => {
   test("utility nodes do not apply role model settings", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
-      pipeline: { entry: "utility", nodes: { utility: { type: "utility", utility: "echo", params: { text: "done" } } } },
+      activeLoadout: "Test",
+      loadouts: { Test: { entry: "utility", nodes: { utility: { type: "utility", utility: "echo", params: { text: "done" } } } } },
       roles: { Build: { tools: "coding", systemPrompt: "Build role", model: "anthropic/claude-test", thinking: "high" } },
     });
 

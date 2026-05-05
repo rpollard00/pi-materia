@@ -36,8 +36,13 @@ function activeLoadout(config: PiMateriaConfig) {
 }
 
 describe("loadout-aware pipeline resolution", () => {
-  test("configs without named loadouts are rejected", () => {
+  test("configs without named loadouts or a valid activeLoadout are rejected clearly", () => {
     expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", roles: {} })).toThrow(/must define named "loadouts"/);
+    expect(() => resolvePipeline({
+      artifactDir: ".pi/pi-materia",
+      loadouts: { Test: { entry: "hello", nodes: { hello: { type: "utility", utility: "echo" } } } },
+      roles: {},
+    })).toThrow(/No active Materia loadout configured/);
   });
 
   test("activeLoadout selects a named graph while sharing roles", () => {

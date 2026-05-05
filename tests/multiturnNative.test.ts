@@ -24,10 +24,13 @@ async function makeBundledDefaultHarness(): Promise<FakePiHarness> {
 function multiTurnConfig(role: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: {
-      entry: "plan",
-      nodes: {
-        plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "plan",
+        nodes: {
+          plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
+        },
       },
     },
     roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner", multiTurn: true, ...role } },
@@ -37,11 +40,14 @@ function multiTurnConfig(role: Record<string, unknown> = {}) {
 function singleTurnConfig() {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: {
-      entry: "plan",
-      nodes: {
-        plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "build" },
-        build: { type: "agent", role: "Build", prompt: "Build {{state.tasks.0.title}}" },
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "plan",
+        nodes: {
+          plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "build" },
+          build: { type: "agent", role: "Build", prompt: "Build {{state.tasks.0.title}}" },
+        },
       },
     },
     roles: {
@@ -57,11 +63,14 @@ function multiTurnWithDownstreamConfig(parse: "json" | "text") {
     : { type: "agent", role: "Plan", parse: "text", assign: { summary: "$" }, next: "build" };
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: {
-      entry: "plan",
-      nodes: {
-        plan,
-        build: { type: "agent", role: "Build", prompt: "Tasks={{state.tasks}} Summary={{state.summary}} Last={{lastOutput}}" },
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "plan",
+        nodes: {
+          plan,
+          build: { type: "agent", role: "Build", prompt: "Tasks={{state.tasks}} Summary={{state.summary}} Last={{lastOutput}}" },
+        },
       },
     },
     roles: {

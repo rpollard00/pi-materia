@@ -88,7 +88,8 @@ describe("agent and utility validation", () => {
   test("accepts a valid agent node and rejects an agent node with an unknown role", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
-      pipeline: { entry: "planner", nodes: { planner: { type: "agent", role: "planner", parse: "text" } } },
+      activeLoadout: "Test",
+      loadouts: { Test: { entry: "planner", nodes: { planner: { type: "agent", role: "planner", parse: "text" } } } },
       roles: { planner: { tools: "readOnly", systemPrompt: "Plan." } },
     };
 
@@ -99,17 +100,20 @@ describe("agent and utility validation", () => {
   test("accepts utility command and alias nodes and rejects malformed utility configuration", () => {
     expect(resolvePipeline({
       artifactDir: ".pi/pi-materia",
-      pipeline: {
-        entry: "cmd",
-        nodes: {
-          cmd: { type: "utility", command: ["node", "script.js"], next: "alias" },
-          alias: { type: "utility", utility: "project.ensureIgnored", parse: "json" },
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "cmd",
+          nodes: {
+            cmd: { type: "utility", command: ["node", "script.js"], next: "alias" },
+            alias: { type: "utility", utility: "project.ensureIgnored", parse: "json" },
+          },
         },
       },
       roles: {},
     }).nodes.alias.node.type).toBe("utility");
 
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", pipeline: { entry: "bad", nodes: { bad: { type: "utility" } } }, roles: {} })).toThrow(/must configure either "utility" or "command"/);
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", pipeline: { entry: "bad", nodes: { bad: { type: "utility", command: [] } } }, roles: {} })).toThrow(/Expected at least one command element/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "bad", nodes: { bad: { type: "utility" } } } }, roles: {} })).toThrow(/must configure either "utility" or "command"/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "bad", nodes: { bad: { type: "utility", command: [] } } } }, roles: {} })).toThrow(/Expected at least one command element/);
   });
 });

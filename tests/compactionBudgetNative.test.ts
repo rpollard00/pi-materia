@@ -17,7 +17,8 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
 function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } },
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } } },
     roles: { Build: { tools: "coding", systemPrompt: "Build role prompt" } },
   };
 }

@@ -23,7 +23,8 @@ async function makeHarness(compaction?: unknown): Promise<FakePiHarness> {
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
     artifactDir: ".pi/pi-materia",
     ...(compaction === undefined ? {} : { compaction }),
-    pipeline: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } },
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } } },
     roles: { Build: { tools: "coding", systemPrompt: "Build role prompt" } },
   }, null, 2));
   const harness = new FakePiHarness(cwd);

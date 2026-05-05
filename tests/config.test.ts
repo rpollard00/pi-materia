@@ -107,21 +107,28 @@ describe("layered config loading and persistence", () => {
 });
 
 describe("config loadouts", () => {
-  test("top-level pipeline configs do not override named loadout resolution", async () => {
-    const { dir, file } = await writeConfig({
-      pipeline: {
-        entry: "ignored",
-        nodes: { ignored: { type: "agent", role: "planner" } },
-      },
-    });
+  test("bundled default config has no root pipeline and its active loadout resolves", async () => {
+    const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
+    expect(rawDefault.pipeline).toBeUndefined();
+    expect(rawDefault.activeLoadout).toBe("Full-Auto");
+    expect(rawDefault.loadouts?.[rawDefault.activeLoadout]).toBeDefined();
 
-    const loaded = await loadConfig(dir, file);
-    const effective = getEffectivePipelineConfig(loaded.config);
-    const pipeline = resolvePipeline(loaded.config);
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-default-loadout-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const loaded = await loadConfig(cwd);
+      const effective = getEffectivePipelineConfig(loaded.config);
+      const pipeline = resolvePipeline(loaded.config);
 
-    expect(effective.loadoutName).toBe("Full-Auto");
-    expect(loaded.config.loadouts?.["Full-Auto"]).toBeDefined();
-    expect(pipeline.entry.id).toBe("ensureArtifactsIgnored");
+      expect(effective.loadoutName).toBe("Full-Auto");
+      expect(loaded.config.loadouts?.["Full-Auto"]).toBeDefined();
+      expect(pipeline.entry.id).toBe("ensureArtifactsIgnored");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
   });
 
   test("project config can define loadouts and activeLoadout without duplicating roles", async () => {

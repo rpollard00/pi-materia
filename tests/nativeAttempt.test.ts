@@ -23,27 +23,30 @@ async function readUsage(harness: FakePiHarness): Promise<any> {
 function attemptConfig() {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: {
-      entry: "seed",
-      nodes: {
-        seed: {
-          type: "utility",
-          utility: "echo",
-          parse: "json",
-          params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
-          assign: { items: "$.items" },
-          next: "work",
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "seed",
+        nodes: {
+          seed: {
+            type: "utility",
+            utility: "echo",
+            parse: "json",
+            params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
+            assign: { items: "$.items" },
+            next: "work",
+          },
+          work: {
+            type: "agent",
+            role: "Build",
+            parse: "json",
+            foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "review" },
+            advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "review" },
+            next: "work",
+            limits: { maxVisits: 5 },
+          },
+          review: { type: "agent", role: "Build" },
         },
-        work: {
-          type: "agent",
-          role: "Build",
-          parse: "json",
-          foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "review" },
-          advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "review" },
-          next: "work",
-          limits: { maxVisits: 5 },
-        },
-        review: { type: "agent", role: "Build" },
       },
     },
     roles: { Build: { tools: "coding", systemPrompt: "Build role" } },

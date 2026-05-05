@@ -11,10 +11,13 @@ async function makeHarness(): Promise<FakePiHarness> {
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
     artifactDir: ".pi/pi-materia",
-    pipeline: {
-      entry: "work",
-      nodes: {
-        work: { type: "agent", role: "Build" },
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "work",
+        nodes: {
+          work: { type: "agent", role: "Build" },
+        },
       },
     },
     roles: { Build: { tools: "coding", systemPrompt: "Build role" } },

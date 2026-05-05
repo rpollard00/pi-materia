@@ -23,7 +23,8 @@ async function readEvents(harness: FakePiHarness): Promise<any[]> {
 function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } },
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } } },
     roles: { Build: { tools: "coding", systemPrompt: "Build role" } },
   };
 }
@@ -31,7 +32,8 @@ function singleAgentConfig() {
 function multiTurnConfig() {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: { entry: "plan", nodes: { plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } },
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "plan", nodes: { plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
     roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner", multiTurn: true } },
   };
 }
@@ -39,25 +41,28 @@ function multiTurnConfig() {
 function foreachConfig() {
   return {
     artifactDir: ".pi/pi-materia",
-    pipeline: {
-      entry: "seed",
-      nodes: {
-        seed: {
-          type: "utility",
-          utility: "echo",
-          parse: "json",
-          params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
-          assign: { items: "$.items" },
-          next: "work",
-        },
-        work: {
-          type: "agent",
-          role: "Build",
-          parse: "json",
-          foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "end" },
-          advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "end" },
-          next: "work",
-          limits: { maxVisits: 5 },
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "seed",
+        nodes: {
+          seed: {
+            type: "utility",
+            utility: "echo",
+            parse: "json",
+            params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
+            assign: { items: "$.items" },
+            next: "work",
+          },
+          work: {
+            type: "agent",
+            role: "Build",
+            parse: "json",
+            foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "end" },
+            advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "end" },
+            next: "work",
+            limits: { maxVisits: 5 },
+          },
         },
       },
     },
