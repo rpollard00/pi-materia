@@ -101,6 +101,53 @@ describe("native same-node recovery", () => {
     expect(events.some((event) => event.type === "same_node_recovery_action_failed" && event.data.action === "compact")).toBe(true);
   });
 
+  test("proactive compaction failures are warnings and later context-window recovery still retries", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
+    harness.compactError = new Error("proactive summarizer unavailable");
+
+    await harness.runCommand("materia", "cast proactive warning");
+
+    expect(harness.operationLog).toContain("compact");
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.currentNode).toBe("work");
+    expect(latestState.visits).toEqual({ work: 1 });
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Proactive compaction failed"))).toBe(true);
+
+    harness.contextUsage = undefined;
+    harness.compactError = undefined;
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(2);
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.visits).toEqual({ work: 1 });
+
+    const events = await readEvents(harness);
+    expect(events.some((event) => event.type === "proactive_compaction_start" && event.data.action === "compact" && event.data.reason === "context_pressure")).toBe(true);
+    expect(events.some((event) => event.type === "proactive_compaction_failed" && event.data.warning === true)).toBe(true);
+    expect(events.some((event) => event.type === "same_node_recovery_action_start" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
+    expect(events.some((event) => event.type === "same_node_recovery_action_complete" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
+  });
+
+  test("non-recoverable assistant errors fail with non-recoverable diagnostics", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast fail diagnostic");
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.failedReason).toContain("Non-recoverable turn failure");
+    expect(latestState.failedReason).toContain("provider auth failed");
+  });
+
   test("recovery attempts are bounded and exhaustion fails clearly", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast exhaust me");

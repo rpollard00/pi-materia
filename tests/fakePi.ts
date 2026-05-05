@@ -82,6 +82,7 @@ export class FakePiHarness {
   readonly operationLog: string[] = [];
   readonly compactCalls: unknown[] = [];
   compactError: Error | undefined;
+  contextUsage: { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
   waitForIdleCalls = 0;
   activeTools: string[] = ["read", "grep", "find", "ls", "bash", "edit", "write"];
   allTools: Array<{ name: string }> = this.activeTools.map((name) => ({ name }));
@@ -181,7 +182,7 @@ export class FakePiHarness {
       abort: () => undefined,
       hasPendingMessages: () => false,
       shutdown: () => undefined,
-      getContextUsage: () => undefined,
+      getContextUsage: () => this.contextUsage,
       compact: (options?: { onComplete?: (result: unknown) => void; onError?: (error: Error) => void }) => {
         this.operationLog.push("compact");
         this.compactCalls.push(options);

@@ -22,6 +22,7 @@ const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
 const DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS = 1;
+const DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_PERCENT = 85;
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
   const config = loaded.config;
@@ -111,7 +112,7 @@ async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionCo
   await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel, refinementTurn, finalization: true });
   updateToolScope(pi, node.role);
   saveCastState(pi, state);
-  await sendMateriaTurn(pi, state, buildMultiTurnFinalizationPrompt(state, node));
+  await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, node));
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
@@ -127,7 +128,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     if (!eventFailure) return;
     const error = new Error(`Pi agent turn failed before producing an assistant response for node "${state.currentNode ?? state.phase}": ${eventFailure}`);
     const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error);
-    if (!recovered) await failCast(pi, ctx, state, error);
+    if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error));
     return;
   }
 
@@ -141,7 +142,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   if (agentError) {
     const error = new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
     const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id });
-    if (!recovered) await failCast(pi, ctx, state, error, latest.entry.id);
+    if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error), latest.entry.id);
     return;
   }
 
@@ -345,7 +346,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel });
   saveCastState(pi, state);
   updateToolScope(pi, node.role);
-  await sendMateriaTurn(pi, state, buildNodePrompt(state, node));
+  await sendMateriaTurn(pi, ctx, state, buildNodePrompt(state, node));
 }
 
 async function executeUtilityNode(state: MateriaCastState, node: Extract<ResolvedMateriaNode, { node: { type: "utility" } }>): Promise<{ output: string; entryId: string }> {
@@ -535,7 +536,7 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
   try {
     if (reason === "context_window") await runSameNodeRecoveryAction(pi, ctx, state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
     updateToolScope(pi, currentRole(state));
-    await sendMateriaTurn(pi, state, buildSameNodeRecoveryPrompt(state));
+    await sendMateriaTurn(pi, ctx, state, buildSameNodeRecoveryPrompt(state), { skipProactiveCompaction: true });
     await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, maxAttempts, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     saveCastState(pi, state);
     updateWidget(ctx, state.runState);
@@ -563,13 +564,13 @@ async function runSameNodeRecoveryAction(pi: ExtensionAPI, ctx: ExtensionContext
 }
 
 function forceContextCompaction(ctx: ExtensionContext, state: MateriaCastState): Promise<unknown> {
+  return compactContext(ctx, `Pi Materia forced context-window recovery for ${recoveryDiagnosticLabel(state)}. Preserve the active cast state, task requirements, and any durable artifacts/events needed to continue the same turn.`);
+}
+
+function compactContext(ctx: ExtensionContext, customInstructions: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     try {
-      ctx.compact({
-        customInstructions: `Pi Materia forced context-window recovery for ${recoveryDiagnosticLabel(state)}. Preserve the active cast state, task requirements, and any durable artifacts/events needed to continue the same turn.`,
-        onComplete: resolve,
-        onError: reject,
-      });
+      ctx.compact({ customInstructions, onComplete: resolve, onError: reject });
     } catch (error) {
       reject(error);
     }
@@ -580,6 +581,41 @@ function summarizeCompactionResult(result: unknown): unknown {
   if (!result || typeof result !== "object") return result;
   const value = result as Record<string, unknown>;
   return Object.fromEntries(Object.entries(value).filter(([key]) => ["tokensBefore", "tokensAfter", "entriesRemoved", "summaryTokens", "firstKeptEntryId"].includes(key)));
+}
+
+async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
+  const usage = ctx.getContextUsage();
+  if (!usage || usage.percent == null || usage.percent < DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_PERCENT) return;
+
+  const eventBase = {
+    action: "compact" as const,
+    reason: "context_pressure" as const,
+    thresholdPercent: DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_PERCENT,
+    tokens: usage.tokens,
+    contextWindow: usage.contextWindow,
+    percent: usage.percent,
+    node: state.currentNode,
+    itemKey: state.currentItemKey,
+    itemLabel: state.currentItemLabel,
+    itemLabelShort: shortMetadataLabel(state.currentItemLabel),
+    visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined,
+    mode: recoveryTurnMode(state),
+  };
+  await appendEvent(state.runState, "proactive_compaction_start", eventBase);
+  saveCastState(pi, state);
+
+  try {
+    const result = await compactContext(ctx, `Pi Materia proactive context-pressure compaction before ${recoveryDiagnosticLabel(state)}. Preserve the active cast state, task requirements, and any durable artifacts/events needed to continue the same turn.`);
+    await appendEvent(state.runState, "proactive_compaction_complete", { ...eventBase, result: summarizeCompactionResult(result) });
+    saveCastState(pi, state);
+  } catch (error) {
+    const message = `Proactive compaction failed before ${recoveryDiagnosticLabel(state)}; continuing turn so same-node recovery can handle any later context-window failure: ${errorMessage(error)}`;
+    state.runState.lastMessage = message;
+    await appendEvent(state.runState, "proactive_compaction_failed", { ...eventBase, error: errorMessage(error), warning: true });
+    await writeUsage(state.runState);
+    saveCastState(pi, state);
+    ctx.ui.notify(`pi-materia warning: ${message}`, "warning");
+  }
 }
 
 function classifyRecoverableTurnFailure(error: unknown): "context_window" | undefined {
@@ -613,6 +649,10 @@ function recoveryDiagnosticLabel(state: MateriaCastState): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function nonRecoverableTurnError(state: MateriaCastState, error: unknown): Error {
+  return new Error(`Non-recoverable turn failure for ${recoveryDiagnosticLabel(state)} (same-node recovery not attempted): ${errorMessage(error)}`);
 }
 
 async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string): Promise<void> {
@@ -681,9 +721,10 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   ctx.ui.notify(`pi-materia cast complete. ${formatUsage(state.runState.usage, state.runState.usage.costKind)}`, "info");
 }
 
-async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<void> {
+async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, prompt: string, options: { skipProactiveCompaction?: boolean } = {}): Promise<void> {
   state.activeTurnPrompt = prompt;
   saveCastState(pi, state);
+  if (!options.skipProactiveCompaction) await maybeRunProactiveCompaction(pi, ctx, state);
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
   await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, kind: "context", roleModel: state.currentRoleModel });
 
