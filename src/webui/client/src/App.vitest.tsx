@@ -74,6 +74,32 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
   });
 
+  it('creates new loadouts with exactly one empty untyped entry socket', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByTestId('socket-planner');
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+
+    expect(await screen.findByTestId('socket-Entry')).toBeTruthy();
+    expect(screen.getByText('Empty socket')).toBeTruthy();
+    expect(screen.getByText('entry')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
+    const created = savedConfig.loadouts[savedConfig.activeLoadout];
+    expect(Object.keys(created.nodes)).toEqual(['Entry']);
+    expect(created.entry).toBe('Entry');
+    expect(created.nodes.Entry).toEqual({ empty: true });
+    expect(created.nodes.Entry.type).toBeUndefined();
+  });
+
   it('opens a valid tab from the URL query parameter', async () => {
     window.history.replaceState({}, '', '/?tab=monitor');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));

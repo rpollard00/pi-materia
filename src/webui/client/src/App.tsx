@@ -185,6 +185,11 @@ function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
   return name;
 }
 
+function makeEmptyEntryLoadout(): PipelineConfig {
+  const entry = 'Entry';
+  return { entry, nodes: { [entry]: { empty: true } } };
+}
+
 function makeUniqueNodeId(nodes: Record<string, PipelineNode>, base = 'NewNode') {
   const cleaned = base.trim().replace(/\s+/g, '-') || 'NewNode';
   if (!nodes[cleaned]) return cleaned;
@@ -500,11 +505,11 @@ export function App() {
     updateDraft((config) => {
       const draftLoadouts = buildLoadouts(config);
       const name = makeNewLoadoutName(draftLoadouts);
-      draftLoadouts[name] = activeLoadout ? cloneConfig(activeLoadout) as PipelineConfig : { entry: '', nodes: {} };
+      draftLoadouts[name] = makeEmptyEntryLoadout();
       config.loadouts = draftLoadouts;
       config.activeLoadout = name;
     });
-    setStatus('Created a cloned draft loadout. Rename and save when ready.');
+    setStatus('Created a new draft loadout with one empty entry socket. Rename and save when ready.');
   }
 
   function putMateria(socketId: string, materiaId: string, fromSocket?: string) {
