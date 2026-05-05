@@ -24,8 +24,8 @@ function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } } },
-    roles: { Build: { tools: "coding", systemPrompt: "Build role" } },
+    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", materia: "Build", next: "end" } } } },
+    materia: { Build: { tools: "coding", prompt: "Build role" } },
   };
 }
 
@@ -33,8 +33,8 @@ function multiTurnConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "plan", nodes: { plan: { type: "agent", role: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
-    roles: { Plan: { tools: "readOnly", systemPrompt: "Collaborative planner", multiTurn: true } },
+    loadouts: { Test: { entry: "plan", nodes: { plan: { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
+    materia: { Plan: { tools: "readOnly", prompt: "Collaborative planner", multiTurn: true } },
   };
 }
 
@@ -56,7 +56,7 @@ function foreachConfig() {
           },
           work: {
             type: "agent",
-            role: "Build",
+            materia: "Build",
             parse: "json",
             foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "end" },
             advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "end" },
@@ -66,7 +66,7 @@ function foreachConfig() {
         },
       },
     },
-    roles: { Build: { tools: "coding", systemPrompt: "Build role" } },
+    materia: { Build: { tools: "coding", prompt: "Build role" } },
   };
 }
 

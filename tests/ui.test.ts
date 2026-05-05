@@ -36,7 +36,7 @@ describe("usage UI formatting", () => {
       provider: "openai-codex",
       model: "openai-codex/gpt-5.5",
       costKind: "subscription",
-      byRole: { Build: totals(100, 0.4567) },
+      byMateria: { Build: totals(100, 0.4567) },
       byNode: {},
       byTask: {},
       byAttempt: {},
@@ -47,7 +47,7 @@ describe("usage UI formatting", () => {
       "Cost display: estimated token value only; subscription usage is not billed per token.",
       "total: 100 tokens, estimated token value: $0.4567 (subscription; no per-token billing implied)",
       "",
-      "By role:",
+      "By materia:",
       "- Build: 100 tokens, estimated token value: $0.4567 (subscription; no per-token billing implied)",
       "",
       "By node:",
@@ -63,7 +63,7 @@ describe("usage UI formatting", () => {
       tokens: { input: 312737, output: 0, cacheRead: 0, cacheWrite: 0, total: 312737 },
       cost: { input: 0.5316, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5316 },
       costKind: "actual",
-      byRole: {
+      byMateria: {
         Maintain: totals(167153, 0.1287),
         Build: totals(97629, 0.2148),
         "Auto-Eval": totals(45545, 0.1537),
@@ -92,7 +92,7 @@ describe("usage UI formatting", () => {
     expect(lines).toContain("- task-4: 143174 tokens, billed cost: $0.3685");
 
     const total = costFromLine(lines.find((line) => line.startsWith("total:")) ?? "");
-    const roleLines = lines.slice(lines.indexOf("By role:") + 1, lines.indexOf("By node:"));
+    const roleLines = lines.slice(lines.indexOf("By materia:") + 1, lines.indexOf("By node:"));
     const nodeLines = lines.slice(lines.indexOf("By node:") + 1, lines.indexOf("By task:"));
     const taskLines = lines.slice(lines.indexOf("By task:") + 1);
     expect(roleLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
@@ -100,11 +100,11 @@ describe("usage UI formatting", () => {
     expect(taskLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
   });
 
-  test("renders an empty by-node breakdown without hiding total or role costs", () => {
+  test("renders an empty by-node breakdown without hiding total or materia costs", () => {
     const usage: UsageReport = {
       ...totals(42, 0.1234),
       costKind: "actual",
-      byRole: { Build: totals(42, 0.1234) },
+      byMateria: { Build: totals(42, 0.1234) },
       byNode: {},
       byTask: { "task-4": totals(42, 0.1234) },
       byAttempt: {},
@@ -115,7 +115,7 @@ describe("usage UI formatting", () => {
       "Cost display: billed USD cost.",
       "total: 42 tokens, billed cost: $0.1234",
       "",
-      "By role:",
+      "By materia:",
       "- Build: 42 tokens, billed cost: $0.1234",
       "",
       "By node:",

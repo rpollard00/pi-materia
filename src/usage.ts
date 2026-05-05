@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent } from "./artifacts.js";
-import type { MateriaRunState, PiMateriaConfig, RoleModelSelection, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
+import type { MateriaRunState, PiMateriaConfig, MateriaModelSelection, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
 
 export function createRunState(runId: string, runDir: string, model: unknown): MateriaRunState {
   const modelInfo = getModelInfo(model);
@@ -16,7 +16,7 @@ export function createRunState(runId: string, runDir: string, model: unknown): M
       ...emptyUsageTotals(),
       ...modelInfo,
       costKind: inferUsageCostKind(modelInfo),
-      byRole: {},
+      byMateria: {},
       byNode: {},
       byTask: {},
       byAttempt: {},
@@ -96,24 +96,24 @@ export function extractUsage(message: unknown): UsageTotals | undefined {
   };
 }
 
-export function recordUsageModelSelection(report: UsageReport, key: { node: string; role: string; taskId?: string; attempt?: number; roleModel: RoleModelSelection }): void {
-  if (key.roleModel.model) report.model = key.roleModel.model;
-  if (key.roleModel.provider) report.provider = key.roleModel.provider;
-  if (key.roleModel.api) report.api = key.roleModel.api;
-  if (key.roleModel.thinking) report.thinkingLevel = key.roleModel.thinking;
-  updateUsageCostKind(report, key.roleModel);
+export function recordUsageModelSelection(report: UsageReport, key: { node: string; materia: string; taskId?: string; attempt?: number; materiaModel: MateriaModelSelection }): void {
+  if (key.materiaModel.model) report.model = key.materiaModel.model;
+  if (key.materiaModel.provider) report.provider = key.materiaModel.provider;
+  if (key.materiaModel.api) report.api = key.materiaModel.api;
+  if (key.materiaModel.thinking) report.thinkingLevel = key.materiaModel.thinking;
+  updateUsageCostKind(report, key.materiaModel);
   report.modelSelections ??= [];
-  report.modelSelections.push({ ...key.roleModel, node: key.node, role: key.role, taskId: key.taskId, attempt: key.attempt });
+  report.modelSelections.push({ ...key.materiaModel, node: key.node, materia: key.materia, taskId: key.taskId, attempt: key.attempt });
 }
 
-export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: string; role: string; taskId?: string; attempt?: number; roleModel?: RoleModelSelection; messageModel?: Partial<RoleModelSelection> }): void {
+export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: string; materia: string; taskId?: string; attempt?: number; materiaModel?: MateriaModelSelection; messageModel?: Partial<MateriaModelSelection> }): void {
   addUsageTotals(report, usage);
   addUsageTotals(report.byNode[key.node] ??= emptyUsageTotals(), usage);
-  addUsageTotals(report.byRole[key.role] ??= emptyUsageTotals(), usage);
+  addUsageTotals(report.byMateria[key.materia] ??= emptyUsageTotals(), usage);
   if (key.taskId) addUsageTotals(report.byTask[key.taskId] ??= emptyUsageTotals(), usage);
   if (key.taskId && key.attempt !== undefined) addUsageTotals(report.byAttempt[`${key.taskId}:${key.attempt}`] ??= emptyUsageTotals(), usage);
 
-  const metadata = { ...key.roleModel, ...key.messageModel };
+  const metadata = { ...key.materiaModel, ...key.messageModel };
   if (metadata.model) report.model = metadata.model;
   if (metadata.provider) report.provider = metadata.provider;
   if (metadata.api) report.api = metadata.api;
@@ -123,7 +123,7 @@ export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: s
   report.turns.push({
     ...cloneUsageTotals(usage),
     node: key.node,
-    role: key.role,
+    materia: key.materia,
     taskId: key.taskId,
     attempt: key.attempt,
     model: metadata.model,
@@ -138,7 +138,7 @@ export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: s
   });
 }
 
-export function extractMessageModelInfo(message: unknown): Partial<RoleModelSelection> {
+export function extractMessageModelInfo(message: unknown): Partial<MateriaModelSelection> {
   const value = (message && typeof message === "object" ? message : {}) as Record<string, unknown>;
   const modelValue = value.model;
   const nestedModel = modelValue && typeof modelValue === "object" ? modelValue as Record<string, unknown> : undefined;
@@ -188,20 +188,20 @@ function getModelInfo(model: unknown): Pick<UsageReport, "model" | "provider" | 
   };
 }
 
-function compactModelInfo(info: Partial<RoleModelSelection>): Partial<RoleModelSelection> {
-  return Object.fromEntries(Object.entries(info).filter(([, value]) => value !== undefined)) as Partial<RoleModelSelection>;
+function compactModelInfo(info: Partial<MateriaModelSelection>): Partial<MateriaModelSelection> {
+  return Object.fromEntries(Object.entries(info).filter(([, value]) => value !== undefined)) as Partial<MateriaModelSelection>;
 }
 
-function updateUsageCostKind(report: UsageReport, info: Partial<RoleModelSelection>): void {
+function updateUsageCostKind(report: UsageReport, info: Partial<MateriaModelSelection>): void {
   const kind = inferUsageCostKind(info);
   if (kind === "subscription" || !report.costKind) report.costKind = kind;
 }
 
-function inferUsageCostKind(info: Partial<RoleModelSelection>): UsageCostKind {
+function inferUsageCostKind(info: Partial<MateriaModelSelection>): UsageCostKind {
   return isCodexSubscriptionModel(info) ? "subscription" : "actual";
 }
 
-function isCodexSubscriptionModel(info: Partial<RoleModelSelection>): boolean {
+function isCodexSubscriptionModel(info: Partial<MateriaModelSelection>): boolean {
   return [info.provider, info.api, info.model, info.requestedModel]
     .filter((value): value is string => typeof value === "string")
     .some((value) => value.toLowerCase().includes("openai-codex") || value.toLowerCase().startsWith("codex/"));

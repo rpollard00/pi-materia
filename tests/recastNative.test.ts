@@ -16,11 +16,11 @@ async function makeHarness(): Promise<FakePiHarness> {
       Test: {
         entry: "work",
         nodes: {
-          work: { type: "agent", role: "Build" },
+          work: { type: "agent", materia: "Build" },
         },
       },
     },
-    roles: { Build: { tools: "coding", systemPrompt: "Build role" } },
+    materia: { Build: { tools: "coding", prompt: "Build role" } },
   }, null, 2));
   const harness = new FakePiHarness(cwd);
   piMateria(harness.pi);

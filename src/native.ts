@@ -7,9 +7,9 @@ import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
-import { applyRoleModelSettings } from "./modelSettings.js";
-import type { AppliedRoleModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline, RoleModelSelection } from "./types.js";
+import { applyMateriaModelSettings } from "./modelSettings.js";
+import type { AppliedMateriaModelSettings } from "./modelSettings.js";
+import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
@@ -37,11 +37,11 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
 
   const runState = createRunState(castId, runDir, ctx.model);
   runState.currentNode = pipeline.entry.id;
-  runState.currentRole = nodeRoleName(pipeline.entry);
+  runState.currentMateria = nodeMateriaName(pipeline.entry);
   runState.lastMessage = pipeline.entry.id;
   await writeUsage(runState);
   const effectivePipeline = getEffectivePipelineConfig(config);
-  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedRoleContext: true });
+  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedMateriaContext: true });
   await writeManifest(runDir, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
 
   const state: MateriaCastState = {
@@ -56,7 +56,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     artifactRoot,
     phase: pipeline.entry.id,
     currentNode: pipeline.entry.id,
-    currentRole: nodeRoleName(pipeline.entry),
+    currentMateria: nodeMateriaName(pipeline.entry),
     awaitingResponse: true,
     nodeState: "awaiting_agent_response",
     startedAt: Date.now(),
@@ -84,7 +84,7 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
 
   if (state.nodeState === "awaiting_user_refinement") {
     if (!isPausedMultiTurnRefinement(state)) {
-      throw new Error("Materia is awaiting user refinement, but the current node's resolved role is not multi-turn.");
+      throw new Error("Materia is awaiting user refinement, but the current node's resolved materia is not multi-turn.");
     }
     await startMultiTurnFinalizationTurn(pi, ctx, state);
     return;
@@ -135,21 +135,21 @@ export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   state.active = true;
   state.phase = node.id;
   state.currentNode = node.id;
-  state.currentRole = nodeRoleName(node);
+  state.currentMateria = nodeMateriaName(node);
   state.awaitingResponse = isAgentResolvedNode(node);
   state.nodeState = isAgentResolvedNode(node) ? "awaiting_agent_response" : "running_utility";
   state.failedReason = undefined;
   state.runState.currentNode = node.id;
-  state.runState.currentRole = nodeRoleName(node);
+  state.runState.currentMateria = nodeMateriaName(node);
   state.runState.lastMessage = `Recasting from node ${node.id}.`;
-  await appendEvent(state.runState, "cast_recast", { node: node.id, role: nodeRoleName(node), type: node.node.type, previousFailure, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id), reusedActivePrompt: isAgentResolvedNode(node) && Boolean(state.activeTurnPrompt) });
+  await appendEvent(state.runState, "cast_recast", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, previousFailure, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id), reusedActivePrompt: isAgentResolvedNode(node) && Boolean(state.activeTurnPrompt) });
   await writeUsage(state.runState);
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", state.currentItemLabel ? `${node.id}:${state.currentItemLabel}` : node.id);
   updateWidget(ctx, state.runState);
 
   if (isAgentResolvedNode(node) && state.activeTurnPrompt) {
-    updateToolScope(pi, node.role);
+    updateToolScope(pi, node.materia);
     await sendMateriaTurn(pi, ctx, state, state.activeTurnPrompt);
   } else {
     await startNode(pi, ctx, state, node);
@@ -161,23 +161,23 @@ export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
 async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   const node = currentNodeOrThrow(state);
   if (!isMultiTurnResolvedAgentNode(node)) {
-    throw new Error(`Cannot finalize refinement for node "${node.id}" because its resolved role is not multi-turn.`);
+    throw new Error(`Cannot finalize refinement for node "${node.id}" because its resolved materia is not multi-turn.`);
   }
-  const appliedModel = await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
-  const roleModel = roleModelSelection(appliedModel);
-  state.currentRole = nodeRoleName(node);
-  state.currentRoleModel = roleModel;
-  state.runState.currentRole = nodeRoleName(node);
-  state.runState.currentRoleModel = roleModel;
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: node.node.materia, model: node.materia.model, thinking: node.materia.thinking });
+  const materiaModel = materiaModelSelection(appliedModel);
+  state.currentMateria = nodeMateriaName(node);
+  state.currentMateriaModel = materiaModel;
+  state.runState.currentMateria = nodeMateriaName(node);
+  state.runState.currentMateriaModel = materiaModel;
   state.awaitingResponse = true;
   state.nodeState = "awaiting_agent_response";
   state.multiTurnFinalizing = true;
   state.updatedAt = Date.now();
   const refinementTurn = currentRefinementTurn(state, node.id) + 1;
-  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });
+  recordUsageModelSelection(state.runState.usage, { node: node.id, materia: node.node.materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel, refinementTurn, finalization: true });
-  updateToolScope(pi, node.role);
+  await appendEvent(state.runState, "materia_model_settings", { node: node.id, materia: node.node.materia, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn, finalization: true });
+  updateToolScope(pi, node.materia);
   saveCastState(pi, state);
   await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, node));
 }
@@ -219,9 +219,9 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 
   try {
     const node = currentNodeOrThrow(state);
-    // Multi-turn pausing is role-driven: if the resolved agent role omits
+    // Multi-turn pausing is materia-driven: if the resolved agent materia omits
     // multiTurn, even an interactive planning node completes and advances.
-    // Keep this generic runtime gate role-name agnostic.
+    // Keep this generic runtime gate materia-name agnostic.
     if (isMultiTurnResolvedAgentNode(node)) {
       if (wasAwaitingFinalization) {
         state.multiTurnFinalizing = false;
@@ -235,7 +235,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       state.nodeState = "awaiting_user_refinement";
       state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement; run /materia continue to finalize.`;
       await writeUsage(state.runState);
-      await appendEvent(state.runState, "node_refinement", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
+      await appendEvent(state.runState, "node_refinement", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
       saveCastState(pi, state);
       ctx.ui.setStatus("materia", `${node.id}:refine`);
       updateWidget(ctx, state.runState);
@@ -283,7 +283,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
   applyAssignments(state, node, parsed);
   const advanceTarget = applyAdvance(state, node, parsed);
   const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
-  await appendEvent(state.runState, "node_complete", { node: node.id, role: nodeRoleName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel: state.currentRoleModel });
+  await appendEvent(state.runState, "node_complete", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
   await assertBudget(config, state.runState, ctx);
 
   const nextTarget = advanceTarget ?? selectNextTarget(state, node, parsed, config);
@@ -298,7 +298,7 @@ async function recordNodeOutput(state: MateriaCastState, node: ResolvedMateriaNo
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
   const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, roleModel: state.currentRoleModel });
+  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, materiaModel: state.currentMateriaModel });
   return artifact;
 }
 
@@ -310,7 +310,7 @@ async function recordMultiTurnRefinement(state: MateriaCastState, node: Resolved
   const artifact = path.join(dir, `${visit}${item}.refinement-${turn}-${safePathSegment(entryId)}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, roleModel: state.currentRoleModel });
+  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
   return { artifact, turn };
 }
 
@@ -367,19 +367,19 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
 
   state.phase = node.id;
   state.currentNode = node.id;
-  state.currentRole = nodeRoleName(node);
-  state.currentRoleModel = undefined;
+  state.currentMateria = nodeMateriaName(node);
+  state.currentMateriaModel = undefined;
   state.awaitingResponse = true;
   state.nodeState = isAgentResolvedNode(node) ? "awaiting_agent_response" : "running_utility";
   state.updatedAt = Date.now();
   state.runState.currentNode = node.id;
-  state.runState.currentRole = nodeRoleName(node);
-  state.runState.currentRoleModel = undefined;
+  state.runState.currentMateria = nodeMateriaName(node);
+  state.runState.currentMateriaModel = undefined;
   state.runState.currentTask = state.currentItemLabel;
   state.runState.attempt = attempt;
   state.runState.lastMessage = node.id;
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "node_start", { node: node.id, role: nodeRoleName(node), type: node.node.type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
+  await appendEvent(state.runState, "node_start", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
   saveCastState(pi, state);
   updateWidget(ctx, state.runState);
   ctx.ui.setStatus("materia", state.currentItemLabel ? `${node.id}:${state.currentItemLabel}` : node.id);
@@ -387,10 +387,10 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   if (!isAgentResolvedNode(node)) {
     state.awaitingResponse = false;
     state.nodeState = "running_utility";
-    state.currentRole = undefined;
-    state.currentRoleModel = undefined;
-    state.runState.currentRole = undefined;
-    state.runState.currentRoleModel = undefined;
+    state.currentMateria = undefined;
+    state.currentMateriaModel = undefined;
+    state.runState.currentMateria = undefined;
+    state.runState.currentMateriaModel = undefined;
     saveCastState(pi, state);
     try {
       const result = await executeUtilityNode(state, node);
@@ -404,15 +404,15 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   state.awaitingResponse = true;
   state.nodeState = "awaiting_agent_response";
   saveCastState(pi, state);
-  const appliedModel = await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
-  const roleModel = roleModelSelection(appliedModel);
-  state.currentRoleModel = roleModel;
-  state.runState.currentRoleModel = roleModel;
-  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: node.node.materia, model: node.materia.model, thinking: node.materia.thinking });
+  const materiaModel = materiaModelSelection(appliedModel);
+  state.currentMateriaModel = materiaModel;
+  state.runState.currentMateriaModel = materiaModel;
+  recordUsageModelSelection(state.runState.usage, { node: node.id, materia: node.node.materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel });
+  await appendEvent(state.runState, "materia_model_settings", { node: node.id, materia: node.node.materia, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
   saveCastState(pi, state);
-  updateToolScope(pi, node.role);
+  updateToolScope(pi, node.materia);
   await sendMateriaTurn(pi, ctx, state, buildNodePrompt(state, node));
 }
 
@@ -527,9 +527,9 @@ async function recordCommandArtifacts(state: MateriaCastState, node: ResolvedMat
   await writeFile(path.join(state.runDir, stdoutArtifact), stdout);
   await writeFile(path.join(state.runDir, stderrArtifact), stderr);
   await writeFile(path.join(state.runDir, metaArtifact), JSON.stringify({ stdoutArtifact, stderrArtifact, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES }, null, 2));
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stdout`, artifact: stdoutArtifact });
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stderr`, artifact: stderrArtifact });
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:meta`, artifact: metaArtifact });
+  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stdout`, artifact: stdoutArtifact });
+  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stderr`, artifact: stderrArtifact });
+  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:meta`, artifact: metaArtifact });
   return { stdoutArtifact, stderrArtifact, metaArtifact };
 }
 
@@ -568,7 +568,7 @@ async function recordUtilityInput(state: MateriaCastState, node: ResolvedMateria
   const artifact = path.join(dir, `${visit}${item}.input.json`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), JSON.stringify(input, null, 2));
-  await appendManifest(state, { phase: state.phase, node: node.id, role: nodeRoleName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:input`, artifact });
+  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:input`, artifact });
   return artifact;
 }
 
@@ -601,7 +601,7 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
 
   try {
     if (reason === "context_window") await runSameNodeRecoveryAction(pi, ctx, state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
-    updateToolScope(pi, currentRole(state));
+    updateToolScope(pi, currentMateria(state));
     await sendMateriaTurn(pi, ctx, state, buildSameNodeRecoveryPrompt(state), { skipProactiveCompaction: true });
     await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, maxAttempts, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     saveCastState(pi, state);
@@ -750,7 +750,7 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   state.runState.lastMessage = state.failedReason;
   await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, node: state.currentNode });
   await writeUsage(state.runState);
-  await appendManifest(state, { phase: "failed", node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, entryId });
+  await appendManifest(state, { phase: "failed", node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", "failed");
   updateWidget(ctx, state.runState);
@@ -812,22 +812,22 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
   saveCastState(pi, state);
   if (!options.skipProactiveCompaction) await maybeRunProactiveCompaction(pi, ctx, state);
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
-  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, kind: "context", roleModel: state.currentRoleModel });
+  await appendManifest(state, { phase: state.phase, node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, kind: "context", materiaModel: state.currentMateriaModel });
 
   const label = state.currentItemLabel ? `${state.phase}: ${state.currentItemLabel}` : state.phase;
   pi.sendMessage({
     customType: "pi-materia",
-    content: `Casting **${state.currentRole ?? "materia"}**\n\n${label}`,
+    content: `Casting **${state.currentMateria ?? "materia"}**\n\n${label}`,
     display: true,
-    details: { prefix: label, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "role_prompt", roleModel: state.currentRoleModel },
+    details: { prefix: label, nodeId: state.currentNode, materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "materia_prompt", materiaModel: state.currentMateriaModel },
   });
 
-  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact, roleModel: state.currentRoleModel });
+  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact, materiaModel: state.currentMateriaModel });
   pi.sendMessage({
     customType: "pi-materia-prompt",
     content: prompt,
     display: false,
-    details: { phase: state.phase, nodeId: state.currentNode, roleName: state.currentRole, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, roleModel: state.currentRoleModel },
+    details: { phase: state.phase, nodeId: state.currentNode, materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, materiaModel: state.currentMateriaModel },
   }, { triggerTurn: true });
 }
 
@@ -836,22 +836,22 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
   const fullPath = path.join(state.runDir, relativePath);
   await mkdir(path.dirname(fullPath), { recursive: true });
   const activeTools = pi.getActiveTools();
-  const roleModel = state.currentRoleModel;
-  const model = roleModel?.label ?? "active Pi model";
-  const thinking = roleModel?.thinking ?? (roleModel?.thinkingExplicit ? roleModel.requestedThinking : undefined) ?? "active Pi thinking";
-  const modelSource = roleModel?.modelExplicit ? "configured role setting" : "active Pi model fallback";
+  const materiaModel = state.currentMateriaModel;
+  const model = materiaModel?.label ?? "active Pi model";
+  const thinking = materiaModel?.thinking ?? (materiaModel?.thinkingExplicit ? materiaModel.requestedThinking : undefined) ?? "active Pi thinking";
+  const modelSource = materiaModel?.modelExplicit ? "configured materia setting" : "active Pi model fallback";
   const content = [
-    "# Materia Isolated Role Context",
+    "# Materia Isolated Context",
     "",
     `cast: ${state.castId}`,
     `node: ${state.currentNode ?? "-"}`,
-    `role: ${state.currentRole ?? "-"}`,
+    `materia: ${state.currentMateria ?? "-"}`,
     `item: ${state.currentItemLabel ?? "-"}`,
     `visit: ${state.currentNode ? nodeVisit(state, state.currentNode) : "-"}`,
     `model: ${model}`,
     `model source: ${modelSource}`,
     `thinking: ${thinking}`,
-    `thinking source: ${roleModel?.thinkingExplicit ? "configured role setting" : "active Pi thinking fallback"}`,
+    `thinking source: ${materiaModel?.thinkingExplicit ? "configured materia setting" : "active Pi thinking fallback"}`,
     `active tools: ${activeTools.length ? activeTools.join(", ") : "none"}`,
     `timestamp: ${new Date().toISOString()}`,
     "",
@@ -859,7 +859,7 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
     "",
     buildSyntheticCastContext(state),
     "",
-    "## Hidden role prompt",
+    "## Hidden materia prompt",
     "",
     prompt,
   ].join("\n");
@@ -867,7 +867,7 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
   return relativePath;
 }
 
-function roleModelSelection(applied: AppliedRoleModelSettings): RoleModelSelection {
+function materiaModelSelection(applied: AppliedMateriaModelSettings): MateriaModelSelection {
   const model = applied.modelId ?? applied.modelName;
   const provider = applied.provider;
   const label = [provider, model].filter(Boolean).join("/") || model || "active Pi model";
@@ -897,15 +897,14 @@ function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
 
 function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
-  return rolePrompt(node.role, [renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state), multiTurnTurnInstruction(state, node)]);
+  return materiaPrompt(node.materia, state, [multiTurnTurnInstruction(state, node)]);
 }
 
 function buildMultiTurnFinalizationPrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
-  return rolePrompt(node.role, [
+  return materiaPrompt(node.materia, state, [
     buildSyntheticCastContext(state),
     "Command-triggered finalization: the user ran /materia continue for this multi-turn node. This is the only finalization mechanism and this is the finalization turn.",
-    renderTemplate(node.node.prompt ?? defaultNodePrompt(node), state),
     finalFormatInstruction(node),
   ]);
 }
@@ -927,14 +926,10 @@ function finalFormatInstruction(node: ResolvedMateriaNode): string {
   return "Final output format: return the final plain-text output for this node, with no extra refinement questions.";
 }
 
-export function activeRoleSystemPrompt(state: MateriaCastState, role: MateriaRoleConfig): string {
+export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaConfig): string {
   const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
   const suffix = node && isAgentResolvedNode(node) ? multiTurnTurnInstruction(state, node) : undefined;
-  return [role.systemPrompt, suffix].filter(Boolean).join("\n\n");
-}
-
-function defaultNodePrompt(node: ResolvedMateriaNode): string {
-  return `You are Materia slot "${node.id}" in a Pi-native Materia cast.\n\nRequest: {{request}}\n\nState:\n{{stateJson}}\n\nCurrent item:\n{{itemJson}}\n\nPrevious output:\n{{lastOutput}}\n\nPerform this slot's configured role. Be concise and make your output useful to the next linked Materia slot.`;
+  return [renderTemplate(materia.prompt, state), suffix].filter(Boolean).join("\n\n");
 }
 
 function renderTemplate(template: string, state: MateriaCastState): string {
@@ -960,36 +955,36 @@ export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: Exte
   const node = currentNodeOrThrow(state);
   if (!isAgentResolvedNode(node)) return;
 
-  const appliedModel = await applyRoleModelSettings(pi, ctx, { roleName: node.node.role, model: node.role.model, thinking: node.role.thinking });
-  const roleModel = roleModelSelection(appliedModel);
-  state.currentRole = nodeRoleName(node);
-  state.currentRoleModel = roleModel;
-  state.runState.currentRole = nodeRoleName(node);
-  state.runState.currentRoleModel = roleModel;
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: node.node.materia, model: node.materia.model, thinking: node.materia.thinking });
+  const materiaModel = materiaModelSelection(appliedModel);
+  state.currentMateria = nodeMateriaName(node);
+  state.currentMateriaModel = materiaModel;
+  state.runState.currentMateria = nodeMateriaName(node);
+  state.runState.currentMateriaModel = materiaModel;
   state.awaitingResponse = true;
   state.nodeState = "awaiting_agent_response";
   state.multiTurnFinalizing = false;
-  state.activeTurnPrompt = rolePrompt(node.role, [buildSyntheticCastContext(state), multiTurnRefinementGuidance()]);
+  state.activeTurnPrompt = materiaPrompt(node.materia, state, [buildSyntheticCastContext(state), multiTurnRefinementGuidance()]);
   state.updatedAt = Date.now();
   const refinementTurn = currentRefinementTurn(state, node.id) + 1;
-  recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });
+  recordUsageModelSelection(state.runState.usage, { node: node.id, materia: node.node.materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "role_model_settings", { node: node.id, role: node.node.role, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel, refinementTurn });
+  await appendEvent(state.runState, "materia_model_settings", { node: node.id, materia: node.node.materia, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn });
   const contextArtifact = await writeContextArtifact(pi, state, buildSyntheticCastContext(state), `refinement-${refinementTurn}-${safeTimestamp()}`);
-  await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: nodeVisit(state, node.id), artifact: contextArtifact, kind: "context_refinement", refinementTurn, roleModel: state.currentRoleModel });
-  await appendEvent(state.runState, "context_refinement", { node: node.id, role: nodeRoleName(node), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), roleModel });
-  updateToolScope(pi, node.role);
+  await appendManifest(state, { phase: state.phase, node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, visit: nodeVisit(state, node.id), artifact: contextArtifact, kind: "context_refinement", refinementTurn, materiaModel: state.currentMateriaModel });
+  await appendEvent(state.runState, "context_refinement", { node: node.id, materia: nodeMateriaName(node), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
+  updateToolScope(pi, node.materia);
   saveCastState(pi, state);
 }
 
 export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaCastState): unknown[] {
-  if (!shouldUseIsolatedRoleContext(state)) return messages;
-  const roleStart = findActiveMateriaPromptIndex(messages);
-  if (roleStart < 0) return messages;
-  return [createUserMessage(buildSyntheticCastContext(state)), ...messages.slice(roleStart)];
+  if (!shouldUseIsolatedMateriaContext(state)) return messages;
+  const materiaStart = findActiveMateriaPromptIndex(messages);
+  if (materiaStart < 0) return messages;
+  return [createUserMessage(buildSyntheticCastContext(state)), ...messages.slice(materiaStart)];
 }
 
-function shouldUseIsolatedRoleContext(state: MateriaCastState): boolean {
+function shouldUseIsolatedMateriaContext(state: MateriaCastState): boolean {
   return state.active && (state.awaitingResponse || isPausedMultiTurnRefinement(state));
 }
 
@@ -1012,17 +1007,17 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
     : state.nodeState ?? "active";
   return [
     "Materia isolated context.",
-    "Use only this cast context, the current role prompt, and any tool results from this role turn. Do not rely on unrelated earlier visible transcript messages.",
+    "Use only this cast context, the current materia prompt, and any tool results from this materia turn. Do not rely on unrelated earlier visible transcript messages.",
     multiTurnRefining ? multiTurnRefinementGuidance() : undefined,
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
     `Current node: ${state.currentNode ?? "-"}`,
-    `Current role: ${state.currentRole ?? "-"}`,
+    `Current materia: ${state.currentMateria ?? "-"}`,
     `Current item: ${state.currentItemLabel ?? "-"}`,
     `Mode: ${mode}`,
-    `Effective model: ${state.currentRoleModel?.label ?? "active Pi model"}`,
-    `Effective thinking: ${state.currentRoleModel?.thinking ?? "active Pi thinking"}`,
+    `Effective model: ${state.currentMateriaModel?.label ?? "active Pi model"}`,
+    `Effective thinking: ${state.currentMateriaModel?.thinking ?? "active Pi thinking"}`,
     `Artifact directory: ${state.runDir}`,
     "",
     "Generic cast data:",
@@ -1037,7 +1032,7 @@ function findActiveMateriaPromptIndex(messages: unknown[]): number {
     const message = messages[i] as { content?: unknown; role?: unknown };
     if (isToolOrAssistantMessage(message)) continue;
     const text = messageContentText(message.content);
-    if (text.includes("<materia-role-instructions>") && text.includes("</materia-role-instructions>")) return i;
+    if (text.includes("<materia-instructions>") && text.includes("</materia-instructions>")) return i;
   }
   return -1;
 }
@@ -1059,8 +1054,8 @@ function messageContentText(content: unknown): string {
   }).join("\n");
 }
 
-function rolePrompt(role: MateriaRoleConfig, sections: (string | undefined)[]): string {
-  return ["<materia-role-instructions>", role.systemPrompt, "</materia-role-instructions>", ...sections.filter(Boolean)].join("\n\n");
+function materiaPrompt(materia: MateriaConfig, state: MateriaCastState, sections: (string | undefined)[]): string {
+  return ["<materia-instructions>", renderTemplate(materia.prompt, state), "</materia-instructions>", ...sections.filter(Boolean)].join("\n\n");
 }
 
 function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
@@ -1247,34 +1242,34 @@ function captureUsage(state: MateriaCastState, message: unknown): void {
   const usage = extractUsage(message);
   if (!usage) return;
   const node = state.currentNode ?? state.phase;
-  const role = state.currentRole ?? state.phase;
-  addUsage(state.runState.usage, usage, { node, role, taskId: state.currentItemKey, attempt: currentTaskAttempt(state), roleModel: state.currentRoleModel, messageModel: extractMessageModelInfo(message) });
+  const materia = state.currentMateria ?? state.phase;
+  addUsage(state.runState.usage, usage, { node, materia, taskId: state.currentItemKey, attempt: currentTaskAttempt(state), materiaModel: state.currentMateriaModel, messageModel: extractMessageModelInfo(message) });
 }
 
-function updateToolScope(pi: ExtensionAPI, role: MateriaRoleConfig): void {
+function updateToolScope(pi: ExtensionAPI, materia: MateriaConfig): void {
   const all = pi.getAllTools().map((tool) => tool.name);
   const readOnly = all.filter((name) => ["read", "grep", "find", "ls"].includes(name));
-  if (role.tools === "none") pi.setActiveTools([]);
-  else if (role.tools === "readOnly") pi.setActiveTools(readOnly);
+  if (materia.tools === "none") pi.setActiveTools([]);
+  else if (materia.tools === "readOnly") pi.setActiveTools(readOnly);
   else pi.setActiveTools(all);
 }
 
-export function currentRole(state: MateriaCastState): MateriaRoleConfig {
+export function currentMateria(state: MateriaCastState): MateriaConfig {
   const node = currentNodeOrThrow(state);
-  if (!isAgentResolvedNode(node)) throw new Error(`Current Materia node "${node.id}" is a utility node and has no role.`);
-  return node.role;
+  if (!isAgentResolvedNode(node)) throw new Error(`Current Materia node "${node.id}" is a utility node and has no materia.`);
+  return node.materia;
 }
 
-function nodeRoleName(node: ResolvedMateriaNode): string | undefined {
-  return isAgentResolvedNode(node) ? node.node.role : undefined;
+function nodeMateriaName(node: ResolvedMateriaNode): string | undefined {
+  return isAgentResolvedNode(node) ? node.node.materia : undefined;
 }
 
-function isAgentResolvedNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { role: MateriaRoleConfig }> {
+function isAgentResolvedNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { materia: MateriaConfig }> {
   return node.node.type === "agent";
 }
 
-function isMultiTurnResolvedAgentNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { role: MateriaRoleConfig }> {
-  return isAgentResolvedNode(node) && node.role.multiTurn === true;
+function isMultiTurnResolvedAgentNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { materia: MateriaConfig }> {
+  return isAgentResolvedNode(node) && node.materia.multiTurn === true;
 }
 
 function currentNodeOrThrow(state: MateriaCastState): ResolvedMateriaNode {

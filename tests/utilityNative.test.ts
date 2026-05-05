@@ -19,7 +19,7 @@ function utilityConfig(node: Record<string, unknown>, extraNodes: Record<string,
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
     loadouts: { Test: { entry: "hello", nodes: { hello: { type: "utility", ...node }, ...extraNodes } } },
-    roles: {},
+    materia: {},
   };
 }
 

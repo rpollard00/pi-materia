@@ -38,18 +38,18 @@ function attemptConfig() {
           },
           work: {
             type: "agent",
-            role: "Build",
+            materia: "Build",
             parse: "json",
             foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "review" },
             advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "review" },
             next: "work",
             limits: { maxVisits: 5 },
           },
-          review: { type: "agent", role: "Build" },
+          review: { type: "agent", materia: "Build" },
         },
       },
     },
-    roles: { Build: { tools: "coding", systemPrompt: "Build role" } },
+    materia: { Build: { tools: "coding", prompt: "Build role" } },
   };
 }
 

@@ -3,13 +3,12 @@ export interface PiMateriaConfig {
   budget?: MateriaBudgetConfig;
   limits?: MateriaLimitsConfig;
   compaction?: MateriaCompactionConfig;
-  /** Named graph configs that share the top-level roles, limits, budget, and artifactDir. */
+  /** Named graph configs that share the top-level materia, limits, budget, and artifactDir. */
   loadouts?: Record<string, MateriaPipelineConfig>;
   /** Name of the loadout to use. */
   activeLoadout?: string;
-  /** Reusable materia definitions edited outside active loadout graphs. */
-  materiaDefinitions?: Record<string, MateriaPipelineNodeConfig>;
-  roles: Record<string, MateriaRoleConfig>;
+  /** Top-level materia behavior definitions. */
+  materia: Record<string, MateriaConfig>;
 }
 
 export interface LoadedConfig {
@@ -88,7 +87,7 @@ export interface UsageTotals {
   cost: UsageCost;
 }
 
-export interface RoleModelSelection {
+export interface MateriaModelSelection {
   model?: string;
   provider?: string;
   api?: string;
@@ -101,16 +100,16 @@ export interface RoleModelSelection {
   label: string;
 }
 
-export interface UsageModelSelection extends RoleModelSelection {
+export interface UsageModelSelection extends MateriaModelSelection {
   node: string;
-  role: string;
+  materia: string;
   taskId?: string;
   attempt?: number;
 }
 
 export interface UsageTurn extends UsageTotals {
   node: string;
-  role: string;
+  materia: string;
   taskId?: string;
   attempt?: number;
   model?: string;
@@ -130,7 +129,7 @@ export interface UsageReport extends UsageTotals {
   api?: string;
   thinkingLevel?: string;
   costKind?: UsageCostKind;
-  byRole: Record<string, UsageTotals>;
+  byMateria: Record<string, UsageTotals>;
   byNode: Record<string, UsageTotals>;
   byTask: Record<string, UsageTotals>;
   byAttempt: Record<string, UsageTotals>;
@@ -160,10 +159,10 @@ export interface MateriaCastState {
   artifactRoot: string;
   phase: MateriaCastPhase;
   currentNode?: string;
-  currentRole?: string;
+  currentMateria?: string;
   currentItemKey?: string;
   currentItemLabel?: string;
-  currentRoleModel?: RoleModelSelection;
+  currentMateriaModel?: MateriaModelSelection;
   /**
    * Backward-compatible boolean used by existing runtime checks.
    * New code should prefer nodeState when it needs to distinguish active
@@ -196,7 +195,7 @@ export interface MateriaCastState {
 export interface MateriaManifestEntry {
   phase: MateriaCastPhase;
   node?: string;
-  role?: string;
+  materia?: string;
   itemKey?: string;
   itemLabel?: string;
   itemLabelShort?: string;
@@ -206,7 +205,7 @@ export interface MateriaManifestEntry {
   kind?: string;
   refinementTurn?: number;
   finalized?: boolean;
-  roleModel?: RoleModelSelection;
+  materiaModel?: MateriaModelSelection;
   timestamp: number;
 }
 
@@ -225,25 +224,25 @@ export interface MateriaRunState {
   eventsFile: string;
   usageFile: string;
   currentNode?: string;
-  currentRole?: string;
+  currentMateria?: string;
   currentTask?: string;
   attempt?: number;
-  currentRoleModel?: RoleModelSelection;
+  currentMateriaModel?: MateriaModelSelection;
   lastMessage?: string;
   usage: UsageReport;
   budgetWarned: boolean;
 }
 
 export type MateriaMirrorEvent =
-  | { type: "role_start" }
+  | { type: "materia_start" }
   | { type: "text_chunk"; text: string }
   | { type: "tool_start"; toolName: string; args: unknown }
   | { type: "tool_end"; toolName: string; isError: boolean; result: unknown }
-  | { type: "role_end"; output: string };
+  | { type: "materia_end"; output: string };
 
-export interface RoleRunContext {
+export interface MateriaRunContext {
   nodeId: string;
-  roleName: string;
+  materiaName: string;
   itemKey?: string;
   itemLabel?: string;
   visit?: number;
@@ -273,8 +272,7 @@ export interface MateriaPipelineNodeCommonConfig {
 
 export interface MateriaAgentNodeConfig extends MateriaPipelineNodeCommonConfig {
   type: "agent";
-  role: string;
-  prompt?: string;
+  materia: string;
 }
 
 export interface MateriaUtilityNodeConfig extends MateriaPipelineNodeCommonConfig {
@@ -321,7 +319,7 @@ export type ResolvedMateriaNode = ResolvedMateriaAgentNode | ResolvedMateriaUtil
 export interface ResolvedMateriaAgentNode {
   id: string;
   node: MateriaAgentNodeConfig;
-  role: MateriaRoleConfig;
+  materia: MateriaConfig;
 }
 
 export interface ResolvedMateriaUtilityNode {
@@ -329,11 +327,11 @@ export interface ResolvedMateriaUtilityNode {
   node: MateriaUtilityNodeConfig;
 }
 
-export interface MateriaRoleConfig {
+export interface MateriaConfig {
   tools: "none" | "readOnly" | "coding";
-  systemPrompt: string;
+  prompt: string;
   model?: string;
   thinking?: string;
-  /** Keep agent nodes using this role active for interactive refinement until finalized. */
+  /** Keep agent nodes using this materia active for interactive refinement until finalized. */
   multiTurn?: boolean;
 }

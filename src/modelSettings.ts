@@ -11,23 +11,23 @@ export interface ActiveModelInfo {
   thinking?: ThinkingLevel;
 }
 
-export interface RoleModelSettings {
-  roleName: string;
+export interface MateriaModelSettings {
+  materiaName: string;
   model?: string;
   thinking?: string;
 }
 
-export interface AppliedRoleModelSettings extends ActiveModelInfo {
+export interface AppliedMateriaModelSettings extends ActiveModelInfo {
   requestedModel?: string;
   requestedThinking?: string;
   modelExplicit: boolean;
   thinkingExplicit: boolean;
 }
 
-export class RoleModelSettingsError extends Error {
-  constructor(roleName: string, field: "model" | "thinking", message: string) {
-    super(`Role "${roleName}" ${field} setting is unsupported: ${message}`);
-    this.name = "RoleModelSettingsError";
+export class MateriaModelSettingsError extends Error {
+  constructor(materiaName: string, field: "model" | "thinking", message: string) {
+    super(`Materia "${materiaName}" ${field} setting is unsupported: ${message}`);
+    this.name = "MateriaModelSettingsError";
   }
 }
 
@@ -35,7 +35,7 @@ const THINKING_LEVELS = new Set<string>(["off", "minimal", "low", "medium", "hig
 
 /**
  * Read the active Pi model/thinking state through the extension runtime.
- * Missing fields are tolerated so older Pi runtimes can still run model-free roles.
+ * Missing fields are tolerated so older Pi runtimes can still run model-free materia.
  */
 export function getActiveModelInfo(pi: ExtensionAPI, ctx: ExtensionContext): ActiveModelInfo {
   const model = ctx.model as Model<Api> | undefined;
@@ -51,10 +51,10 @@ export function getActiveModelInfo(pi: ExtensionAPI, ctx: ExtensionContext): Act
 }
 
 /**
- * Apply explicit per-role model settings, if present. Omitting both fields is a no-op
+ * Apply explicit per-materia model settings, if present. Omitting both fields is a no-op
  * that preserves the user's active Pi model and thinking level.
  */
-export async function applyRoleModelSettings(pi: ExtensionAPI, ctx: ExtensionContext, settings: RoleModelSettings): Promise<AppliedRoleModelSettings> {
+export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: ExtensionContext, settings: MateriaModelSettings): Promise<AppliedMateriaModelSettings> {
   const modelExplicit = settings.model !== undefined;
   const thinkingExplicit = settings.thinking !== undefined;
 
@@ -68,21 +68,21 @@ export async function applyRoleModelSettings(pi: ExtensionAPI, ctx: ExtensionCon
   if (modelExplicit) {
     const setModel = maybeSetModel(pi);
     if (typeof setModel !== "function") {
-      throw new RoleModelSettingsError(settings.roleName, "model", "this Pi runtime does not expose pi.setModel(model)");
+      throw new MateriaModelSettingsError(settings.materiaName, "model", "this Pi runtime does not expose pi.setModel(model)");
     }
-    appliedModel = resolveConfiguredModel(ctx, settings.roleName, settings.model);
+    appliedModel = resolveConfiguredModel(ctx, settings.materiaName, settings.model);
     const ok = await setModel.call(pi, appliedModel);
     if (!ok) {
-      throw new RoleModelSettingsError(settings.roleName, "model", `no configured API key or credentials for ${appliedModel.provider}/${appliedModel.id}`);
+      throw new MateriaModelSettingsError(settings.materiaName, "model", `no configured API key or credentials for ${appliedModel.provider}/${appliedModel.id}`);
     }
   }
 
   if (thinkingExplicit) {
     const setThinkingLevel = maybeSetThinkingLevel(pi);
     if (typeof setThinkingLevel !== "function") {
-      throw new RoleModelSettingsError(settings.roleName, "thinking", "this Pi runtime does not expose pi.setThinkingLevel(level)");
+      throw new MateriaModelSettingsError(settings.materiaName, "thinking", "this Pi runtime does not expose pi.setThinkingLevel(level)");
     }
-    appliedThinking = normalizeThinkingLevel(settings.roleName, settings.thinking);
+    appliedThinking = normalizeThinkingLevel(settings.materiaName, settings.thinking);
     setThinkingLevel.call(pi, appliedThinking);
   }
 
@@ -103,25 +103,25 @@ export async function applyRoleModelSettings(pi: ExtensionAPI, ctx: ExtensionCon
   };
 }
 
-function resolveConfiguredModel(ctx: ExtensionContext, roleName: string, requested: string | undefined): Model<Api> {
+function resolveConfiguredModel(ctx: ExtensionContext, materiaName: string, requested: string | undefined): Model<Api> {
   if (typeof requested !== "string" || !requested.trim()) {
-    throw new RoleModelSettingsError(roleName, "model", "expected a non-empty model string");
+    throw new MateriaModelSettingsError(materiaName, "model", "expected a non-empty model string");
   }
   const value = requested.trim();
   const registry = ctx.modelRegistry;
   const providerAndId = parseProviderAndModel(value);
   if (providerAndId) {
     const model = registry.find(providerAndId.provider, providerAndId.modelId) as Model<Api> | undefined;
-    if (!model) throw new RoleModelSettingsError(roleName, "model", `unknown model ${providerAndId.provider}/${providerAndId.modelId}`);
+    if (!model) throw new MateriaModelSettingsError(materiaName, "model", `unknown model ${providerAndId.provider}/${providerAndId.modelId}`);
     return model;
   }
 
   const matches = registry.getAll().filter((model) => model.id === value || `${model.provider}/${model.id}` === value);
   if (matches.length === 1) return matches[0] as Model<Api>;
   if (matches.length > 1) {
-    throw new RoleModelSettingsError(roleName, "model", `model id "${value}" is ambiguous; use provider/modelId`);
+    throw new MateriaModelSettingsError(materiaName, "model", `model id "${value}" is ambiguous; use provider/modelId`);
   }
-  throw new RoleModelSettingsError(roleName, "model", `unknown model "${value}"; use provider/modelId or a unique model id`);
+  throw new MateriaModelSettingsError(materiaName, "model", `unknown model "${value}"; use provider/modelId or a unique model id`);
 }
 
 function parseProviderAndModel(value: string): { provider: string; modelId: string } | undefined {
@@ -133,13 +133,13 @@ function parseProviderAndModel(value: string): { provider: string; modelId: stri
   return { provider, modelId };
 }
 
-function normalizeThinkingLevel(roleName: string, requested: string | undefined): ThinkingLevel {
+function normalizeThinkingLevel(materiaName: string, requested: string | undefined): ThinkingLevel {
   if (typeof requested !== "string" || !requested.trim()) {
-    throw new RoleModelSettingsError(roleName, "thinking", "expected a non-empty thinking string");
+    throw new MateriaModelSettingsError(materiaName, "thinking", "expected a non-empty thinking string");
   }
   const level = requested.trim().toLowerCase();
   if (!THINKING_LEVELS.has(level)) {
-    throw new RoleModelSettingsError(roleName, "thinking", `unknown thinking level "${requested}"; expected one of ${Array.from(THINKING_LEVELS).join(", ")}`);
+    throw new MateriaModelSettingsError(materiaName, "thinking", `unknown thinking level "${requested}"; expected one of ${Array.from(THINKING_LEVELS).join(", ")}`);
   }
   return level as ThinkingLevel;
 }

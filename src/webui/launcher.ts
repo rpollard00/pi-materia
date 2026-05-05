@@ -123,7 +123,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
       active: state.active,
       phase: state.phase,
       currentNode: state.currentNode,
-      currentRole: state.currentRole,
+      currentMateria: state.currentMateria,
       nodeState: state.nodeState,
       awaitingResponse: state.awaitingResponse,
       runDir: state.runDir,
@@ -205,7 +205,7 @@ async function readEventsFile(file: string): Promise<MateriaMonitorEventEntry[]>
 function summarizeUnknown(value: unknown): string {
   if (!value || typeof value !== "object") return truncate(String(value ?? ""), 1200);
   const object = value as Record<string, unknown>;
-  const label = [object.phase, object.nodeId, object.roleName, object.eventType].filter((part) => typeof part === "string").join(" · ");
+  const label = [object.phase, object.nodeId, object.materiaName, object.eventType].filter((part) => typeof part === "string").join(" · ");
   return label || truncate(JSON.stringify(object), 1200);
 }
 

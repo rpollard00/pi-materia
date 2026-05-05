@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { activeRoleSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
 
 export default function piMateria(pi: ExtensionAPI) {
@@ -32,10 +32,10 @@ export default function piMateria(pi: ExtensionAPI) {
     if (!state?.active) return;
     if (state.nodeState === "awaiting_user_refinement") await prepareMultiTurnRefinementTurn(pi, ctx, state);
     if (!state.awaitingResponse) return;
-    const role = currentRole(state);
-    if (!role) return;
+    const materia = currentMateria(state);
+    if (!materia) return;
     return {
-      systemPrompt: `${event.systemPrompt}\n\nMateria active role (${state.currentNode ?? state.phase}):\n${activeRoleSystemPrompt(state, role)}`,
+      systemPrompt: `${event.systemPrompt}\n\nMateria active materia (${state.currentNode ?? state.phase}):\n${activeMateriaSystemPrompt(state, materia)}`,
     };
   });
 
@@ -75,7 +75,7 @@ export default function piMateria(pi: ExtensionAPI) {
           ];
           ctx.ui.setWidget("materia-webui", lines, { placement: "belowEditor" });
           ctx.ui.notify(`Materia WebUI ${result.reused ? "ready" : "started"}: ${result.url}`, "info");
-          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "ui", roleName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey } });
+          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "ui", materiaName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey } });
           pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused: result.reused, startedAt: Date.now() });
         } catch (error) {
           ctx.ui.notify(`pi-materia ui failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -109,7 +109,7 @@ export default function piMateria(pi: ExtensionAPI) {
           const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
           const lines = renderLoadoutList(loaded.config, loaded.source);
           ctx.ui.setWidget("materia-loadouts", lines, { placement: "belowEditor" });
-          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", roleName: "orchestrator", eventType: "loadout" } });
+          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout" } });
         } catch (error) {
           ctx.ui.notify(`pi-materia loadout failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
@@ -123,7 +123,7 @@ export default function piMateria(pi: ExtensionAPI) {
           const artifactRoot = resolveArtifactRoot(ctx.cwd, loaded.config.artifactDir);
           const lines = await renderCastList(artifactRoot, listLatestCastStates(ctx));
           ctx.ui.setWidget("materia-casts", lines, { placement: "belowEditor" });
-          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "casts", roleName: "orchestrator", eventType: "casts" } });
+          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "casts", materiaName: "orchestrator", eventType: "casts" } });
         } catch (error) {
           ctx.ui.notify(`pi-materia casts failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
@@ -145,14 +145,14 @@ export default function piMateria(pi: ExtensionAPI) {
           nodeState === "awaiting_user_refinement" ? "waiting: user refinement; run /materia continue to finalize this multi-turn node" : undefined,
           `awaiting response: ${state.awaitingResponse}`,
           `node: ${state.currentNode ?? "-"}`,
-          `role: ${state.currentRole ?? "-"}`,
+          `materia: ${state.currentMateria ?? "-"}`,
           `item: ${state.currentItemKey ? `${state.currentItemKey} - ${state.currentItemLabel ?? ""}` : "-"}`,
           `visits: ${JSON.stringify(state.visits)}`,
           `artifacts: ${state.runDir}`,
           state.failedReason ? `failed: ${state.failedReason}` : undefined,
         ].filter((line): line is string => Boolean(line));
         ctx.ui.setWidget("materia-status", lines, { placement: "belowEditor" });
-        pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "status", roleName: "orchestrator", eventType: "status" } });
+        pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "status", materiaName: "orchestrator", eventType: "status" } });
         return;
       }
 
@@ -279,7 +279,7 @@ interface CastSummary {
   recastTarget: boolean;
   request?: string;
   currentNode?: string;
-  currentRole?: string;
+  currentMateria?: string;
   currentItemKey?: string;
   currentItemLabel?: string;
   visit?: number;
@@ -307,7 +307,7 @@ async function readCastSummary(id: string, dir: string, state?: MateriaCastState
     recastTarget: state ? isRecastTargetState(state) : status === "failed" || status === "aborted",
     request,
     currentNode: state?.currentNode ?? stringField(latestProgress, "node") ?? stringField(endData, "node"),
-    currentRole: state?.currentRole ?? stringField(latestProgress, "role"),
+    currentMateria: state?.currentMateria ?? stringField(latestProgress, "materia"),
     currentItemKey: state?.currentItemKey ?? stringField(latestProgress, "itemKey"),
     currentItemLabel: state?.currentItemLabel ?? stringField(latestProgress, "itemLabel"),
     visit: typeof latestProgress?.visit === "number" ? latestProgress.visit : undefined,
@@ -333,7 +333,7 @@ function renderCastSummaryLines(cast: CastSummary): string[] {
 function castProgressLine(cast: CastSummary): string | undefined {
   const parts = [
     cast.currentNode ? `node ${cast.currentNode}` : undefined,
-    cast.currentRole ? `role ${cast.currentRole}` : undefined,
+    cast.currentMateria ? `materia ${cast.currentMateria}` : undefined,
     cast.currentItemKey ? `item ${cast.currentItemKey}${cast.currentItemLabel ? ` - ${cast.currentItemLabel}` : ""}` : cast.currentItemLabel ? `item ${cast.currentItemLabel}` : undefined,
     typeof cast.visit === "number" ? `visit ${cast.visit}` : undefined,
   ].filter((part): part is string => Boolean(part));
@@ -366,7 +366,7 @@ function failureStatus(reason?: string): string {
 
 function latestProgressEvent(events: CastEvent[]): Record<string, unknown> | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].type !== "node_start" && events[i].type !== "node_complete" && events[i].type !== "role_model_settings") continue;
+    if (events[i].type !== "node_start" && events[i].type !== "node_complete" && events[i].type !== "materia_model_settings") continue;
     const data = objectData(events[i]);
     if (data) return data;
   }

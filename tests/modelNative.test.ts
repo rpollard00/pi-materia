@@ -18,12 +18,12 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
-function agentConfig(role: Record<string, unknown> = {}, node: Record<string, unknown> = {}) {
+function agentConfig(overrides: Record<string, unknown> = {}, node: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "agent", nodes: { agent: { type: "agent", role: "Build", ...node } } } },
-    roles: { Build: { tools: "coding", systemPrompt: "Build role", ...role } },
+    loadouts: { Test: { entry: "agent", nodes: { agent: { type: "agent", materia: "Build", ...node } } } },
+    materia: { Build: { tools: "coding", prompt: "Build role", ...overrides } },
   };
 }
 
@@ -35,19 +35,19 @@ function twoAgentConfig() {
       Test: {
         entry: "build",
         nodes: {
-          build: { type: "agent", role: "Build", next: "review" },
-          review: { type: "agent", role: "Review" },
+          build: { type: "agent", materia: "Build", next: "review" },
+          review: { type: "agent", materia: "Review" },
         },
       },
     },
-    roles: {
-      Build: { tools: "coding", systemPrompt: "Build role", model: "anthropic/claude-test", thinking: "high" },
-      Review: { tools: "readOnly", systemPrompt: "Review role", model: "openai/gpt-test", thinking: "low" },
+    materia: {
+      Build: { tools: "coding", prompt: "Build role", model: "anthropic/claude-test", thinking: "high" },
+      Review: { tools: "readOnly", prompt: "Review role", model: "openai/gpt-test", thinking: "low" },
     },
   };
 }
 
-describe("native per-role model settings", () => {
+describe("native per-materia model settings", () => {
   test("omitted model and thinking preserve the active Pi model without switching", async () => {
     const harness = await makeHarness(agentConfig());
 
@@ -76,7 +76,7 @@ describe("native per-role model settings", () => {
     expect(completeState.phase).toBe("complete");
   });
 
-  test("explicit role model and thinking are applied before tools and agent turn", async () => {
+  test("explicit materia model and thinking are applied before tools and agent turn", async () => {
     const harness = await makeHarness(agentConfig({ model: "anthropic/claude-test", thinking: "high" }));
 
     await harness.runCommand("materia", "cast explicit model");
@@ -88,10 +88,10 @@ describe("native per-role model settings", () => {
     expect(harness.operationLog.indexOf("setActiveTools")).toBeLessThan(harness.operationLog.indexOf("triggerTurn"));
   });
 
-  test("different roles apply different model settings across one cast", async () => {
+  test("different materia apply different model settings across one cast", async () => {
     const harness = await makeHarness(twoAgentConfig());
 
-    await harness.runCommand("materia", "cast mixed role models");
+    await harness.runCommand("materia", "cast mixed materia models");
     harness.appendAssistantMessage("build complete");
     await harness.emit("agent_end", { messages: [] });
 
@@ -114,7 +114,7 @@ describe("native per-role model settings", () => {
     expect(rolePromptMessages).toHaveLength(2);
   });
 
-  test("unsupported model switching APIs fail with a role-specific diagnostic", async () => {
+  test("unsupported model switching APIs fail with a materia-specific diagnostic", async () => {
     const harness = await makeHarness(agentConfig({ model: "anthropic/claude-test" }));
     delete (harness.pi as unknown as { setModel?: unknown }).setModel;
 
@@ -123,12 +123,12 @@ describe("native per-role model settings", () => {
     expect(harness.setModelCalls).toHaveLength(0);
     expect(harness.sentMessages.some(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toBe(false);
     expect(harness.notifications.at(-1)).toEqual({
-      message: 'pi-materia cast failed to start: Role "Build" model setting is unsupported: this Pi runtime does not expose pi.setModel(model)',
+      message: 'pi-materia cast failed to start: Materia "Build" model setting is unsupported: this Pi runtime does not expose pi.setModel(model)',
       type: "error",
     });
   });
 
-  test("records effective role model settings in context, manifest, events, and usage", async () => {
+  test("records effective materia model settings in context, manifest, events, and usage", async () => {
     const harness = await makeHarness(agentConfig({ model: "anthropic/claude-test", thinking: "high" }));
 
     await harness.runCommand("materia", "cast record model metadata");
@@ -144,13 +144,13 @@ describe("native per-role model settings", () => {
     expect(context).toContain("model: anthropic/claude-test");
     expect(context).toContain("thinking: high");
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
-    expect(manifest.entries.some((entry: any) => entry.roleModel?.model === "claude-test" && entry.roleModel?.thinking === "high")).toBe(true);
+    expect(manifest.entries.some((entry: any) => entry.materiaModel?.model === "claude-test" && entry.materiaModel?.thinking === "high")).toBe(true);
     const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(events.some((event) => event.type === "role_model_settings" && event.data.roleModel.model === "claude-test")).toBe(true);
+    expect(events.some((event) => event.type === "materia_model_settings" && event.data.materiaModel.model === "claude-test")).toBe(true);
     const usage = JSON.parse(await readFile(path.join(castDir, "usage.json"), "utf8"));
     expect(usage.tokens.total).toBe(7);
-    expect(usage.modelSelections[0]).toMatchObject({ node: "agent", role: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
-    expect(usage.turns[0]).toMatchObject({ node: "agent", role: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+    expect(usage.modelSelections[0]).toMatchObject({ node: "agent", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+    expect(usage.turns[0]).toMatchObject({ node: "agent", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
   });
 
   test("fallback model metadata is labeled as the active Pi model", async () => {
@@ -165,15 +165,15 @@ describe("native per-role model settings", () => {
     expect(context).toContain("model: openai/gpt-test");
     expect(context).toContain("model source: active Pi model fallback");
     const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(events.some((event) => event.type === "role_model_settings" && event.data.roleModel.source === "active" && event.data.roleModel.label === "openai/gpt-test")).toBe(true);
+    expect(events.some((event) => event.type === "materia_model_settings" && event.data.materiaModel.source === "active" && event.data.materiaModel.label === "openai/gpt-test")).toBe(true);
   });
 
-  test("utility nodes do not apply role model settings", async () => {
+  test("utility nodes do not apply materia model settings", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
       loadouts: { Test: { entry: "utility", nodes: { utility: { type: "utility", utility: "echo", params: { text: "done" } } } } },
-      roles: { Build: { tools: "coding", systemPrompt: "Build role", model: "anthropic/claude-test", thinking: "high" } },
+      materia: { Build: { tools: "coding", prompt: "Build role", model: "anthropic/claude-test", thinking: "high" } },
     });
 
     await harness.runCommand("materia", "cast utility only");

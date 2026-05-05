@@ -7,12 +7,11 @@ type NodeType = 'agent' | 'utility';
 
 interface PipelineNode {
   type?: NodeType;
-  role?: string;
+  materia?: string;
   utility?: string;
   command?: string[];
   next?: string;
   edges?: { to: string; when?: string; maxTraversals?: number }[];
-  prompt?: string;
   empty?: boolean;
   layout?: { x?: number; y?: number };
   limits?: { maxVisits?: number; maxEdgeTraversals?: number; maxOutputBytes?: number };
@@ -25,9 +24,9 @@ interface PipelineConfig {
   [key: string]: unknown;
 }
 
-interface MateriaRoleConfig {
+interface MateriaBehaviorConfig {
   tools?: 'none' | 'readOnly' | 'coding';
-  systemPrompt?: string;
+  prompt?: string;
   model?: string;
   thinking?: string;
   multiTurn?: boolean;
@@ -37,8 +36,7 @@ interface MateriaRoleConfig {
 interface MateriaConfig {
   activeLoadout?: string;
   loadouts?: Record<string, PipelineConfig>;
-  roles?: Record<string, MateriaRoleConfig>;
-  materiaDefinitions?: Record<string, PipelineNode>;
+  materia?: Record<string, MateriaBehaviorConfig>;
   [key: string]: unknown;
 }
 
@@ -94,14 +92,14 @@ interface MonitorSnapshot {
     request?: string;
     summary?: string;
     events?: Array<{ ts?: number; type?: string; data?: unknown }>;
-    outputs?: Array<{ node?: string; role?: string; phase?: string; kind?: string; artifact?: string; timestamp?: number; content?: string }>;
+    outputs?: Array<{ node?: string; materia?: string; phase?: string; kind?: string; artifact?: string; timestamp?: number; content?: string }>;
   };
   activeCast?: {
     castId: string;
     active: boolean;
     phase: string;
     currentNode?: string;
-    currentRole?: string;
+    currentMateria?: string;
     nodeState?: string;
     awaitingResponse: boolean;
     runDir: string;
@@ -207,9 +205,9 @@ function buildLoadouts(config: MateriaConfig): Record<string, PipelineConfig> {
 
 function getNodeLabel(id: string, node?: PipelineNode) {
   if (!node || node.empty) return 'Empty socket';
-  if (node.type === 'agent') return node.role ?? id;
+  if (node.type === 'agent') return node.materia ?? id;
   if (node.type === 'utility') return node.utility ?? node.command?.join(' ') ?? id;
-  return node.role ?? node.utility ?? id;
+  return node.materia ?? node.utility ?? id;
 }
 
 function nodeColor(id: string, index: number) {
@@ -314,12 +312,11 @@ function makeEmptyEntryLoadout(): PipelineConfig {
 
 const materiaBehaviorKeys = new Set([
   'type',
-  'role',
+  'materia',
   'utility',
   'command',
   'params',
   'timeoutMs',
-  'prompt',
   'model',
   'modelSettings',
   'outputFormat',
@@ -407,43 +404,25 @@ function parseOptionalFiniteNumber(label: string, raw: string, errors: string[])
   return value;
 }
 
-function rolePaletteNode(id: string, role: MateriaRoleConfig): PipelineNode {
-  return {
-    type: 'agent',
-    role: id,
-    prompt: role.systemPrompt,
-    model: role.model,
-    thinking: role.thinking,
-    multiturn: role.multiTurn,
-  };
+function materiaPaletteNode(id: string): PipelineNode {
+  return { type: 'agent', materia: id };
 }
 
 function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
   const name = form.name.trim();
   if (!name) throw new Error('Materia name is required.');
-  const timeoutMs = Number(form.timeoutMs);
-  const patch: MateriaConfig = { materiaDefinitions: {} };
-  if (form.behavior === 'prompt') {
-    patch.roles = {
+  if (form.behavior !== 'prompt') throw new Error('Reusable tool definitions are no longer saved outside loadout graphs.');
+  return {
+    materia: {
       [name]: {
         tools: form.toolAccess,
-        systemPrompt: form.prompt,
+        prompt: form.prompt,
         model: form.model.trim() || undefined,
         thinking: form.thinking.trim() || undefined,
         multiTurn: form.multiTurn || undefined,
       },
-    };
-    patch.materiaDefinitions = {
-      [name]: { type: 'agent', role: name, prompt: form.prompt || undefined, parse: form.outputFormat === 'json' ? 'json' : 'text' },
-    };
-  } else {
-    const parsedParams = parseJsonObject(form.params);
-    const command = commandParts(form.command);
-    patch.materiaDefinitions = {
-      [name]: { type: 'utility', utility: form.utility || name, command: command?.length ? command : undefined, params: parsedParams, timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined, parse: form.outputFormat === 'json' ? 'json' : 'text' },
-    };
-  }
-  return patch;
+    },
+  };
 }
 
 async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string }> {
@@ -456,8 +435,7 @@ function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reload
   if (!preserveLoadoutEdits || !current) return cloneConfig(reloaded);
   return {
     ...cloneConfig(current),
-    roles: reloaded.roles ? cloneConfig(reloaded.roles) : undefined,
-    materiaDefinitions: reloaded.materiaDefinitions ? cloneConfig(reloaded.materiaDefinitions) : undefined,
+    materia: reloaded.materia ? cloneConfig(reloaded.materia) : undefined,
   };
 }
 
@@ -518,10 +496,10 @@ export function App() {
           'Demo Loadout': {
             entry: 'planner',
             nodes: {
-              planner: { type: 'agent', role: 'planner', next: 'Build' },
-              Build: { type: 'agent', role: 'Build', next: 'Auto-Eval' },
-              'Auto-Eval': { type: 'agent', role: 'Auto-Eval', next: 'Maintain' },
-              Maintain: { type: 'agent', role: 'Maintain' },
+              planner: { type: 'agent', materia: 'planner', next: 'Build' },
+              Build: { type: 'agent', materia: 'Build', next: 'Auto-Eval' },
+              'Auto-Eval': { type: 'agent', materia: 'Auto-Eval', next: 'Maintain' },
+              Maintain: { type: 'agent', materia: 'Maintain' },
             },
           },
         },
@@ -556,26 +534,17 @@ export function App() {
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
   const loadoutGraph = useMemo(() => layoutSockets(activeLoadout), [activeLoadout]);
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
-  const roles = draftConfig?.roles ?? {};
-  const materiaDefinitions = draftConfig?.materiaDefinitions ?? {};
-  const editableDefinitionIds = useMemo(() => {
-    const ids = new Set<string>([...Object.keys(roles), ...Object.keys(materiaDefinitions)]);
-    return [...ids].sort((a, b) => a.localeCompare(b));
-  }, [roles, materiaDefinitions]);
+  const materia = draftConfig?.materia ?? {};
+  const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
   const palette = useMemo(() => {
     const byId = new Map<string, PipelineNode>();
-    for (const [id, node] of Object.entries(materiaDefinitions)) {
-      if (!node.empty) byId.set(id, cloneConfig(node));
-    }
-    for (const [id, role] of Object.entries(roles)) {
-      if (!byId.has(id)) byId.set(id, rolePaletteNode(id, role));
-    }
+    for (const id of Object.keys(materia)) byId.set(id, materiaPaletteNode(id));
     const allNodes = Object.values(loadouts).flatMap((loadout) => Object.entries(loadout.nodes ?? {}));
     for (const [id, node] of allNodes) {
       if (!node.empty && !byId.has(id)) byId.set(id, node);
     }
     return [...byId.entries()];
-  }, [loadouts, materiaDefinitions, roles]);
+  }, [loadouts, materia]);
   const isDirty = JSON.stringify(baselineConfig) !== JSON.stringify(draftConfig);
   const currentMonitorNode = monitor?.activeCast?.currentNode;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
@@ -988,24 +957,22 @@ export function App() {
   }
 
   function editMateria(id: string) {
-    const definition = materiaDefinitions[id];
-    const roleName = definition?.role ?? id;
-    const role = roles[roleName] ?? roles[id];
-    if (!definition && !role) return;
+    const definition = materia[id];
+    if (!definition) return;
     setMateriaForm({
       editingNodeId: id,
       name: id,
-      behavior: definition?.type === 'utility' ? 'tool' : 'prompt',
-      prompt: String(role?.systemPrompt ?? definition?.prompt ?? ''),
-      toolAccess: role?.tools ?? 'none',
-      model: String(role?.model ?? definition?.model ?? ''),
-      thinking: String(role?.thinking ?? ''),
-      outputFormat: (definition?.parse === 'json' || definition?.outputFormat === 'json') ? 'json' : 'text',
-      multiTurn: Boolean(role?.multiTurn ?? definition?.multiturn),
-      utility: String(definition?.utility ?? ''),
-      command: Array.isArray(definition?.command) ? definition.command.join(' ') : '',
-      params: definition?.params ? JSON.stringify(definition.params, null, 2) : '{}',
-      timeoutMs: definition?.timeoutMs ? String(definition.timeoutMs) : '',
+      behavior: 'prompt',
+      prompt: String(definition.prompt ?? ''),
+      toolAccess: definition.tools ?? 'none',
+      model: String(definition.model ?? ''),
+      thinking: String(definition.thinking ?? ''),
+      outputFormat: 'text',
+      multiTurn: Boolean(definition.multiTurn),
+      utility: '',
+      command: '',
+      params: '{}',
+      timeoutMs: '',
       persistScope: 'user',
     });
     setStatus(`Editing reusable materia definition ${id}. Save the staged form to update definitions only.`);
@@ -1414,7 +1381,7 @@ export function App() {
 
           {materiaForm.behavior === 'prompt' ? (
             <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_14rem_14rem_10rem]">
-              <label className="graph-field">Prompt / system prompt
+              <label className="graph-field">Prompt
                 <textarea data-testid="materia-prompt" className="min-h-32" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
               </label>
               <label className="graph-field">Model

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
-import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaRoleConfig, MateriaSaveTarget, PiMateriaConfig } from "./types.js";
+import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
@@ -61,10 +61,12 @@ export async function ensureUserProfileConfig(): Promise<string> {
 }
 
 export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMateriaConfig>, options: { target?: MateriaSaveTarget; configuredPath?: string } = {}): Promise<string> {
+  rejectObsoleteConfigFields(patch as Record<string, unknown>, "patch");
   const target = options.target ?? "user";
   const file = getWritableConfigPath(cwd, options.configuredPath, target);
   const existing = existsSync(file) ? await readConfigPartial(file) : {};
   const next = mergeConfigPatch(existing, patch);
+  if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
   await writeJsonAtomic(file, next);
   return file;
 }
@@ -87,6 +89,7 @@ export async function saveActiveLoadout(cwd: string, loadoutName: string, config
 async function readConfigPartial(file: string): Promise<Partial<PiMateriaConfig>> {
   const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<PiMateriaConfig>;
   if (!isPlainObject(parsed)) throw new Error(`Materia config file ${file} is invalid. Expected a JSON object.`);
+  rejectObsoleteConfigFields(parsed, file);
   return parsed;
 }
 
@@ -137,6 +140,7 @@ async function writeMinimalActiveLoadout(file: string, loadoutName: string): Pro
     const text = await readFile(file, "utf8");
     parsed = JSON.parse(text) as Partial<PiMateriaConfig>;
     if (!isPlainObject(parsed)) throw new Error(`Materia config file ${file} is invalid. Expected a JSON object.`);
+    rejectObsoleteConfigFields(parsed as Record<string, unknown>, file);
   }
 
   const next = { ...parsed, activeLoadout: loadoutName };
@@ -151,7 +155,8 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   const [base, ...overrides] = layers;
   let config = { ...base } as PiMateriaConfig;
   for (const parsed of overrides) config = mergeConfig(config, parsed);
-  validateRoles(config.roles);
+  if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
+  validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
   return config;
 }
@@ -165,8 +170,7 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMater
     compaction: patch.compaction ? { ...(base.compaction ?? {}), ...patch.compaction } : base.compaction,
     loadouts: mergeLoadouts(base.loadouts, patch.loadouts),
     activeLoadout: patch.activeLoadout ?? base.activeLoadout,
-    materiaDefinitions: mergeMateriaDefinitions(base.materiaDefinitions, patch.materiaDefinitions),
-    roles: patch.roles ? mergeRoles(base.roles ?? {}, patch.roles) : base.roles,
+    materia: patch.materia ? mergeMateria(base.materia ?? {}, patch.materia) : base.materia,
   };
 }
 
@@ -179,8 +183,7 @@ function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>): P
     compaction: { ...base.compaction, ...(parsed.compaction ?? {}) },
     loadouts: mergeLoadouts(base.loadouts, parsed.loadouts),
     activeLoadout: parsed.activeLoadout ?? base.activeLoadout,
-    materiaDefinitions: mergeMateriaDefinitions(base.materiaDefinitions, parsed.materiaDefinitions),
-    roles: mergeRoles(base.roles, parsed.roles),
+    materia: mergeMateria(base.materia, parsed.materia),
   } as PiMateriaConfig;
 }
 
@@ -199,38 +202,52 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
   return merged;
 }
 
-function mergeMateriaDefinitions(baseDefinitions: PiMateriaConfig["materiaDefinitions"], parsedDefinitions: Partial<PiMateriaConfig>["materiaDefinitions"]): PiMateriaConfig["materiaDefinitions"] {
-  if (!parsedDefinitions) return baseDefinitions;
-  return { ...(baseDefinitions ?? {}), ...parsedDefinitions };
-}
-
-function mergeRoles(baseRoles: Record<string, MateriaRoleConfig>, parsedRoles: Partial<PiMateriaConfig>["roles"]): Record<string, MateriaRoleConfig> {
-  if (!parsedRoles) return baseRoles;
-  const merged: Record<string, MateriaRoleConfig> = { ...baseRoles };
-  for (const [name, role] of Object.entries(parsedRoles as Record<string, unknown>)) {
-    if (!isPlainObject(role)) throw new Error(`Materia role "${name}" is invalid. Expected a role object.`);
-    merged[name] = { ...(baseRoles[name] ?? {}), ...role } as MateriaRoleConfig;
+function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria: Partial<PiMateriaConfig>["materia"]): Record<string, MateriaConfig> {
+  if (!parsedMateria) return baseMateria;
+  const merged: Record<string, MateriaConfig> = { ...baseMateria };
+  for (const [name, materia] of Object.entries(parsedMateria as Record<string, unknown>)) {
+    if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
+    merged[name] = { ...(baseMateria[name] ?? {}), ...materia } as MateriaConfig;
   }
   return merged;
 }
 
-function validateRoles(roles: Record<string, MateriaRoleConfig>): void {
-  for (const [name, role] of Object.entries(roles as Record<string, unknown>)) {
-    if (!isPlainObject(role)) throw new Error(`Materia role "${name}" is invalid. Expected a role object.`);
-    if (role.systemPrompt === undefined || typeof role.systemPrompt !== "string") {
-      throw new Error(`Materia role "${name}" has invalid systemPrompt. Expected a string.`);
+function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
+  for (const [name, materia] of Object.entries(materiaConfig as Record<string, unknown>)) {
+    if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
+    if ("systemPrompt" in materia) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
+    if (materia.prompt === undefined || typeof materia.prompt !== "string") {
+      throw new Error(`Materia "${name}" has invalid prompt. Expected a string.`);
     }
-    if (role.tools === undefined || !["none", "readOnly", "coding"].includes(String(role.tools))) {
-      throw new Error(`Materia role "${name}" has invalid tools. Expected "none", "readOnly", or "coding".`);
+    if (materia.tools === undefined || !["none", "readOnly", "coding"].includes(String(materia.tools))) {
+      throw new Error(`Materia "${name}" has invalid tools. Expected "none", "readOnly", or "coding".`);
     }
-    if (role.model !== undefined && typeof role.model !== "string") {
-      throw new Error(`Materia role "${name}" has invalid model. Expected a string when configured.`);
+    if (materia.model !== undefined && typeof materia.model !== "string") {
+      throw new Error(`Materia "${name}" has invalid model. Expected a string when configured.`);
     }
-    if (role.thinking !== undefined && typeof role.thinking !== "string") {
-      throw new Error(`Materia role "${name}" has invalid thinking. Expected a string when configured.`);
+    if (materia.thinking !== undefined && typeof materia.thinking !== "string") {
+      throw new Error(`Materia "${name}" has invalid thinking. Expected a string when configured.`);
     }
-    if (role.multiTurn !== undefined && typeof role.multiTurn !== "boolean") {
-      throw new Error(`Materia role "${name}" has invalid multiTurn. Expected a boolean when configured.`);
+    if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
+      throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
+    }
+  }
+}
+
+function rejectObsoleteConfigFields(config: Record<string, unknown>, file: string): void {
+  if ("roles" in config) throw new Error(`Materia config file ${file} configures obsolete roles. Use top-level materia instead.`);
+  if ("materiaDefinitions" in config) throw new Error(`Materia config file ${file} configures obsolete materiaDefinitions.`);
+  for (const [name, materia] of Object.entries((config.materia ?? {}) as Record<string, unknown>)) {
+    if (!isPlainObject(materia)) continue;
+    if ("systemPrompt" in materia) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
+  }
+  for (const [loadoutName, loadout] of Object.entries((config.loadouts ?? {}) as Record<string, unknown>)) {
+    if (!isPlainObject(loadout)) continue;
+    for (const [nodeName, node] of Object.entries((loadout.nodes ?? {}) as Record<string, unknown>)) {
+      if (!isPlainObject(node)) continue;
+      if ("role" in node) throw new Error(`Materia loadout "${loadoutName}" node "${nodeName}" configures obsolete role. Use materia instead.`);
+      if ("prompt" in node) throw new Error(`Materia loadout "${loadoutName}" node "${nodeName}" configures obsolete prompt. Define prompt on the referenced materia instead.`);
+      if ("systemPrompt" in node) throw new Error(`Materia loadout "${loadoutName}" node "${nodeName}" configures obsolete systemPrompt. Define prompt on the referenced materia instead.`);
     }
   }
 }

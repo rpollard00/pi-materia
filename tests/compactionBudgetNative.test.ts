@@ -18,8 +18,8 @@ function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } } },
-    roles: { Build: { tools: "coding", systemPrompt: "Build role prompt" } },
+    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", materia: "Build", next: "end" } } } },
+    materia: { Build: { tools: "coding", prompt: "Build role prompt\n\n{{request}}" } },
   };
 }
 
@@ -58,7 +58,7 @@ describe("native compaction request budgeting audit", () => {
 
     const beforeStartResult = (await harness.emit("before_agent_start", { systemPrompt: "Base system prompt" })) as any[];
     expect(beforeStartResult[0].systemPrompt).toContain("Base system prompt");
-    expect(beforeStartResult[0].systemPrompt).toContain("Materia active role (work)");
+    expect(beforeStartResult[0].systemPrompt).toContain("Materia active materia (work)");
 
     const castRoot = path.join(harness.cwd, ".pi", "pi-materia");
     expect(await readdir(castRoot)).toHaveLength(1);

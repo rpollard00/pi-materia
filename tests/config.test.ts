@@ -38,25 +38,25 @@ describe("layered config loading and persistence", () => {
     try {
       await writeFile(getUserMateriaAssetPath(), JSON.stringify({
         activeLoadout: "UserLoadout",
-        roles: { Build: { model: "user/model" } },
-        loadouts: { UserLoadout: { entry: "planner", nodes: { planner: { type: "agent", role: "planner" } } } },
+        materia: { Build: { model: "user/model" } },
+        loadouts: { UserLoadout: { entry: "planner", nodes: { planner: { type: "agent", materia: "planner" } } } },
       }), "utf8");
       await mkdir(path.join(cwd, ".pi"), { recursive: true });
       await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
         activeLoadout: "ProjectLoadout",
-        roles: { Build: { model: "project/model" } },
-        loadouts: { ProjectLoadout: { entry: "builder", nodes: { builder: { type: "agent", role: "Build" } } } },
+        materia: { Build: { model: "project/model" } },
+        loadouts: { ProjectLoadout: { entry: "builder", nodes: { builder: { type: "agent", materia: "Build" } } } },
       }), "utf8");
       await writeFile(explicit, JSON.stringify({
         activeLoadout: "ExplicitLoadout",
-        roles: { Build: { model: "explicit/model" } },
-        loadouts: { ExplicitLoadout: { entry: "checker", nodes: { checker: { type: "agent", role: "Check" } } } },
+        materia: { Build: { model: "explicit/model" } },
+        loadouts: { ExplicitLoadout: { entry: "checker", nodes: { checker: { type: "agent", materia: "Check" } } } },
       }), "utf8");
 
       const loaded = await loadConfig(cwd, explicit);
 
       expect(loaded.config.activeLoadout).toBe("ExplicitLoadout");
-      expect(loaded.config.roles.Build.model).toBe("explicit/model");
+      expect(loaded.config.materia.Build.model).toBe("explicit/model");
       expect(loaded.config.loadouts?.UserLoadout).toBeDefined();
       expect(loaded.config.loadouts?.ProjectLoadout).toBeDefined();
       expect(loaded.config.loadouts?.ExplicitLoadout).toBeDefined();
@@ -79,14 +79,14 @@ describe("layered config loading and persistence", () => {
       const beforeProject = await readFile(projectFile, "utf8");
 
       const userWritten = await saveMateriaConfigPatch(cwd, {
-        roles: { Custom: { tools: "none", systemPrompt: "custom user materia" } },
-        loadouts: { UserCreated: { entry: "custom", nodes: { custom: { type: "agent", role: "Custom" } } } },
+        materia: { Custom: { tools: "none", prompt: "custom user materia" } },
+        loadouts: { UserCreated: { entry: "custom", nodes: { custom: { type: "agent", materia: "Custom" } } } },
       });
       expect(userWritten).toBe(getUserMateriaAssetPath());
       expect(await readFile(projectFile, "utf8")).toBe(beforeProject);
 
       const reloaded = await loadConfig(cwd);
-      expect(reloaded.config.roles.Custom.systemPrompt).toBe("custom user materia");
+      expect(reloaded.config.materia.Custom.prompt).toBe("custom user materia");
       expect(reloaded.config.loadouts?.UserCreated?.entry).toBe("custom");
 
       const projectWritten = await saveMateriaConfigPatch(cwd, { activeLoadout: "Planning-Consult" }, { target: "project" });
@@ -131,17 +131,17 @@ describe("config loadouts", () => {
     }
   });
 
-  test("project config can define loadouts and activeLoadout without duplicating roles", async () => {
+  test("project config can define loadouts and activeLoadout without duplicating materia", async () => {
     const { dir, file } = await writeConfig({
       activeLoadout: "Planning-Consult",
       loadouts: {
         "Full-Auto": {
           entry: "planner",
-          nodes: { planner: { type: "agent", role: "planner" } },
+          nodes: { planner: { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", role: "interactivePlan" } },
+          nodes: { interactivePlan: { type: "agent", materia: "interactivePlan" } },
         },
       },
     });
@@ -151,8 +151,8 @@ describe("config loadouts", () => {
 
     expect(loaded.config.activeLoadout).toBe("Planning-Consult");
     expect(Object.keys(loaded.config.loadouts ?? {})).toContain("Full-Auto");
-    expect(loaded.config.roles.planner.systemPrompt).toContain("planning role");
-    expect(loaded.config.roles.interactivePlan.systemPrompt).toContain("interactive");
+    expect(loaded.config.materia.planner.prompt).toContain("planning materia");
+    expect(loaded.config.materia.interactivePlan.prompt).toContain("interactive");
     expect(pipeline.entry.id).toBe("interactivePlan");
   });
 
@@ -172,17 +172,17 @@ describe("config loadouts", () => {
     expect(loaded.config.activeLoadout).toBe("Full-Auto");
     const fullAutoPlanner = loaded.config.loadouts?.["Full-Auto"]?.nodes.planner;
     const planningConsultPlanner = loaded.config.loadouts?.["Planning-Consult"]?.nodes.planner;
-    expect(fullAutoPlanner).toMatchObject({ role: "planner" });
+    expect(fullAutoPlanner).toMatchObject({ materia: "planner" });
     expect(planningConsultPlanner).toMatchObject({
       type: "agent",
-      role: "interactivePlan",
+      materia: "interactivePlan",
       parse: "json",
     });
     expect("multiTurn" in (planningConsultPlanner ?? {})).toBe(false);
-    expect(loaded.config.roles.interactivePlan.multiTurn).toBe(true);
+    expect(loaded.config.materia.interactivePlan.multiTurn).toBe(true);
 
-    const fullAutoPrompt = String(fullAutoPlanner?.prompt ?? "");
-    const planningConsultPrompt = String(planningConsultPlanner?.prompt ?? "");
+    const fullAutoPrompt = loaded.config.materia.planner.prompt;
+    const planningConsultPrompt = loaded.config.materia.interactivePlan.prompt;
     expect(fullAutoPrompt).toContain("Return only JSON with shape");
     expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
     expect(planningConsultPrompt).toContain("Collaboratively refine an implementation plan");
@@ -197,19 +197,19 @@ describe("config loadouts", () => {
 
     const fullAuto = resolvePipeline(loaded.config);
     expect(fullAuto.nodes.planner.node.type).toBe("agent");
-    expect(fullAuto.nodes.planner.role.multiTurn).toBeUndefined();
-    expect(fullAuto.nodes.planner.role.systemPrompt).toContain("planning role");
+    expect(fullAuto.nodes.planner.materia.multiTurn).toBeUndefined();
+    expect(fullAuto.nodes.planner.materia.prompt).toContain("planning materia");
 
     loaded.config.activeLoadout = "Planning-Consult";
     const planningConsult = resolvePipeline(loaded.config);
     expect(planningConsult.nodes.planner.node).toMatchObject({
       type: "agent",
-      role: "interactivePlan",
+      materia: "interactivePlan",
       parse: "json",
     });
     expect("multiTurn" in planningConsult.nodes.planner.node).toBe(false);
-    expect(planningConsult.nodes.planner.role.multiTurn).toBe(true);
-    expect(planningConsult.nodes.planner.role.systemPrompt).toContain("interactive planning role");
+    expect(planningConsult.nodes.planner.materia.multiTurn).toBe(true);
+    expect(planningConsult.nodes.planner.materia.prompt).toContain("interactive planning materia");
   });
 });
 
@@ -219,11 +219,11 @@ describe("active loadout persistence", () => {
       loadouts: {
         "Full-Auto": {
           entry: "planner",
-          nodes: { planner: { type: "agent", role: "planner" } },
+          nodes: { planner: { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", role: "interactivePlan" } },
+          nodes: { interactivePlan: { type: "agent", materia: "interactivePlan" } },
         },
       },
     });
@@ -234,7 +234,7 @@ describe("active loadout persistence", () => {
 
     expect(written).toBe(file);
     expect(raw.activeLoadout).toBe("Planning-Consult");
-    expect(raw.roles).toBeUndefined();
+    expect(raw.materia).toBeUndefined();
     expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
     expect(resolvePipeline(reloaded.config).entry.id).toBe("interactivePlan");
   });
@@ -253,7 +253,7 @@ describe("active loadout persistence", () => {
     expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
     expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
-    expect(resolvePipeline(reloaded.config).nodes.planner.role.systemPrompt).toContain("interactive planning role");
+    expect(resolvePipeline(reloaded.config).nodes.planner.materia.prompt).toContain("interactive planning materia");
   });
 
   test("rejects unknown loadout names without changing the config file", async () => {
@@ -262,7 +262,7 @@ describe("active loadout persistence", () => {
       loadouts: {
         "Full-Auto": {
           entry: "planner",
-          nodes: { planner: { type: "agent", role: "planner" } },
+          nodes: { planner: { type: "agent", materia: "planner" } },
         },
       },
     });
@@ -274,8 +274,8 @@ describe("active loadout persistence", () => {
   });
 });
 
-describe("config role model settings", () => {
-  test("bundled default roles remain model-free", async () => {
+describe("config materia model settings", () => {
+  test("bundled default materia remain model-free", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
@@ -288,15 +288,15 @@ describe("config role model settings", () => {
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
     }
 
-    for (const role of Object.values(loaded.config.roles)) {
-      expect(role.model).toBeUndefined();
-      expect(role.thinking).toBeUndefined();
+    for (const materia of Object.values(loaded.config.materia)) {
+      expect(materia.model).toBeUndefined();
+      expect(materia.thinking).toBeUndefined();
     }
   });
 
-  test("project config can set model and thinking for one existing role only", async () => {
+  test("project config can set model and thinking for one existing materia only", async () => {
     const { dir, file } = await writeConfig({
-      roles: {
+      materia: {
         Build: {
           model: "anthropic/claude-3-7-sonnet-latest",
           thinking: "high",
@@ -306,29 +306,29 @@ describe("config role model settings", () => {
 
     const loaded = await loadConfig(dir, file);
 
-    expect(loaded.config.roles.Build.model).toBe("anthropic/claude-3-7-sonnet-latest");
-    expect(loaded.config.roles.Build.thinking).toBe("high");
-    expect(loaded.config.roles.Build.tools).toBe("coding");
-    expect(loaded.config.roles.Build.systemPrompt).toContain("pi-materia Build Materia role");
-    expect(loaded.config.roles.planner.model).toBeUndefined();
-    expect(loaded.config.roles.planner.thinking).toBeUndefined();
+    expect(loaded.config.materia.Build.model).toBe("anthropic/claude-3-7-sonnet-latest");
+    expect(loaded.config.materia.Build.thinking).toBe("high");
+    expect(loaded.config.materia.Build.tools).toBe("coding");
+    expect(loaded.config.materia.Build.prompt).toContain("pi-materia Build Materia materia");
+    expect(loaded.config.materia.planner.model).toBeUndefined();
+    expect(loaded.config.materia.planner.thinking).toBeUndefined();
   });
 
-  test("rejects non-string role model with a friendly error", async () => {
-    const { dir, file } = await writeConfig({ roles: { Build: { model: 123 } } });
+  test("rejects non-string materia model with a friendly error", async () => {
+    const { dir, file } = await writeConfig({ materia: { Build: { model: 123 } } });
 
-    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia role "Build" has invalid model\. Expected a string/);
+    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia "Build" has invalid model\. Expected a string/);
   });
 
-  test("rejects non-string role thinking with a friendly error", async () => {
-    const { dir, file } = await writeConfig({ roles: { Build: { thinking: true } } });
+  test("rejects non-string materia thinking with a friendly error", async () => {
+    const { dir, file } = await writeConfig({ materia: { Build: { thinking: true } } });
 
-    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia role "Build" has invalid thinking\. Expected a string/);
+    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia "Build" has invalid thinking\. Expected a string/);
   });
 
-  test("rejects non-boolean role multiTurn with a friendly error", async () => {
-    const { dir, file } = await writeConfig({ roles: { interactivePlan: { multiTurn: "yes" } } });
+  test("rejects non-boolean materia multiTurn with a friendly error", async () => {
+    const { dir, file } = await writeConfig({ materia: { interactivePlan: { multiTurn: "yes" } } });
 
-    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia role "interactivePlan" has invalid multiTurn\. Expected a boolean/);
+    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia "interactivePlan" has invalid multiTurn\. Expected a boolean/);
   });
 });

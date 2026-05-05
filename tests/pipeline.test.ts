@@ -28,7 +28,7 @@ const baseConfig: PiMateriaConfig = {
   artifactDir: ".pi/pi-materia",
   activeLoadout: "Test",
   loadouts: { Test: baseLoadout },
-  roles: {},
+  materia: {},
 };
 
 function activeLoadout(config: PiMateriaConfig) {
@@ -37,31 +37,31 @@ function activeLoadout(config: PiMateriaConfig) {
 
 describe("loadout-aware pipeline resolution", () => {
   test("configs without named loadouts or a valid activeLoadout are rejected clearly", () => {
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", roles: {} })).toThrow(/must define named "loadouts"/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", materia: {} })).toThrow(/must define named "loadouts"/);
     expect(() => resolvePipeline({
       artifactDir: ".pi/pi-materia",
       loadouts: { Test: { entry: "hello", nodes: { hello: { type: "utility", utility: "echo" } } } },
-      roles: {},
+      materia: {},
     })).toThrow(/No active Materia loadout configured/);
   });
 
-  test("activeLoadout selects a named graph while sharing roles", () => {
+  test("activeLoadout selects a named graph while sharing materia", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Planning-Consult",
       loadouts: {
         "Full-Auto": {
           entry: "planner",
-          nodes: { planner: { type: "agent", role: "planner" } },
+          nodes: { planner: { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", role: "interactivePlan" } },
+          nodes: { interactivePlan: { type: "agent", materia: "interactivePlan" } },
         },
       },
-      roles: {
-        planner: { tools: "readOnly", systemPrompt: "Plan automatically." },
-        interactivePlan: { tools: "readOnly", systemPrompt: "Plan interactively.", multiTurn: true },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan automatically." },
+        interactivePlan: { tools: "readOnly", prompt: "Plan interactively.", multiTurn: true },
       },
     };
 
@@ -70,7 +70,7 @@ describe("loadout-aware pipeline resolution", () => {
 
     expect(pipeline.entry.id).toBe("interactivePlan");
     expect(pipeline.entry.node.type).toBe("agent");
-    expect(pipeline.entry.role.systemPrompt).toBe("Plan interactively.");
+    expect(pipeline.entry.materia.prompt).toBe("Plan interactively.");
     expect(lines).toContain("loadout: Planning-Consult");
   });
 
@@ -81,7 +81,7 @@ describe("loadout-aware pipeline resolution", () => {
         "Full-Auto": baseLoadout,
         "Planning-Consult": baseLoadout,
       },
-      roles: {},
+      materia: {},
     };
 
     expect(() => resolvePipeline(config)).toThrow(/Unknown active Materia loadout "Missing"\. Available loadouts: Full-Auto, Planning-Consult/);
@@ -115,28 +115,28 @@ describe("utility pipeline nodes", () => {
     expect(ignored).toContain("utility=project.ensureIgnored");
   });
 
-  test("renderGrid shows mixed explicit and active Pi model role settings", () => {
+  test("renderGrid shows mixed explicit and active Pi model materia settings", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
       loadouts: {
         Test: {
           entry: "planner",
           nodes: {
-            planner: { type: "agent", role: "planner", next: "Build" },
-            Build: { type: "agent", role: "Build" },
+            planner: { type: "agent", materia: "planner", next: "Build" },
+            Build: { type: "agent", materia: "Build" },
           },
         },
       },
-      roles: {
+      materia: {
         planner: {
           tools: "readOnly",
-          systemPrompt: "Plan.",
+          prompt: "Plan.",
           model: "anthropic/claude-haiku",
           thinking: "low",
         },
         Build: {
           tools: "coding",
-          systemPrompt: "Build.",
+          prompt: "Build.",
         },
       },
     };
@@ -147,7 +147,7 @@ describe("utility pipeline nodes", () => {
     expect(lines).toContain("- Build: tools=coding, model=active Pi model, thinking=active Pi thinking");
 
     const planner = lines.find((line) => line.startsWith("- planner: type=agent"));
-    expect(planner).toContain("role=planner");
+    expect(planner).toContain("materia=planner");
     expect(planner).toContain("tools=readOnly");
     expect(planner).toContain("model=anthropic/claude-haiku");
     expect(planner).toContain("thinking=low");
@@ -172,19 +172,19 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/unsupported parse mode "yaml"/);
   });
 
-  test("accepts multi-turn roles and renders roles plus agent slots with role-derived capability", () => {
+  test("accepts multi-turn materia and renders materia plus agent slots with materia-derived capability", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
       loadouts: {
         Test: {
           entry: "interactivePlan",
           nodes: {
-            interactivePlan: { type: "agent", role: "planner", parse: "json" },
+            interactivePlan: { type: "agent", materia: "planner", parse: "json" },
           },
         },
       },
-      roles: {
-        planner: { tools: "readOnly", systemPrompt: "Plan interactively.", multiTurn: true },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan interactively.", multiTurn: true },
       },
     };
 
@@ -192,9 +192,9 @@ describe("utility pipeline nodes", () => {
     const lines = renderGrid(config, pipeline, "test", "/tmp/project");
 
     expect(pipeline.entry.node.type).toBe("agent");
-    expect(pipeline.entry.role.multiTurn).toBe(true);
+    expect(pipeline.entry.materia.multiTurn).toBe(true);
     expect(lines).toContain("- planner: tools=readOnly, multiTurn=true, model=active Pi model, thinking=active Pi thinking");
-    expect(lines.find((line) => line.startsWith("- interactivePlan:"))).toContain("role.multiTurn=true");
+    expect(lines.find((line) => line.startsWith("- interactivePlan:"))).toContain("materia.multiTurn=true");
   });
 
   test("rejects obsolete node-level multiTurn", () => {
@@ -204,23 +204,23 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
 
-  test("rejects malformed multiTurn values on roles", () => {
+  test("rejects malformed multiTurn values on materia", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
       loadouts: {
         Test: {
           entry: "planner",
           nodes: {
-            planner: { type: "agent", role: "planner" },
+            planner: { type: "agent", materia: "planner" },
           },
         },
       },
-      roles: {
-        planner: { tools: "readOnly", systemPrompt: "Plan.", multiTurn: "yes" as never },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", multiTurn: "yes" as never },
       },
     };
 
-    expect(() => resolvePipeline(config)).toThrow(/Materia role "planner" has invalid multiTurn/);
+    expect(() => resolvePipeline(config)).toThrow(/Materia "planner" has invalid multiTurn/);
   });
 
   test("rejects malformed command arrays with a friendly error", () => {
@@ -261,34 +261,24 @@ describe("utility pipeline nodes", () => {
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
     expect(loadout.nodes.Maintain).toMatchObject({
       type: "agent",
-      role: "Maintain",
+      materia: "Maintain",
       parse: "json",
       assign: { lastMaintain: "$" },
-      advance: { cursor: "taskIndex", items: "state.tasks", when: "$.satisfied == true" },
+      advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "$.satisfied == true" },
       edges: [{ when: "$.satisfied == false", to: "Maintain", maxTraversals: 3 }],
     });
 
-    const maintainPrompts = [
-      config.loadouts!["Full-Auto"]!.nodes.Maintain.prompt ?? "",
-      config.loadouts!["Planning-Consult"]!.nodes.Maintain.prompt ?? "",
-    ];
-    for (const prompt of maintainPrompts) {
-      expect(prompt).toContain("Inspect the repository state first");
-      expect(prompt).toContain("no meaningful repository changes");
-      expect(prompt).toContain("checkpointCreated=false");
-      expect(prompt).toContain("avoid an empty commit/checkpoint");
-    }
+    const maintainPrompt = config.materia.Maintain!.prompt;
+    expect(maintainPrompt).toContain("Always inspect repository state before checkpointing");
+    expect(maintainPrompt).toContain("Inspect the repository state first");
+    expect(maintainPrompt).toContain("checkpointCreated=false");
+    expect(maintainPrompt).toContain("No-op tasks must not create empty commits/checkpoints");
+    expect(maintainPrompt).toContain("do not run jj describe, jj new, git add, git commit");
 
-    const maintainRolePrompt = config.roles.Maintain!.systemPrompt;
-    expect(maintainRolePrompt).toContain("Always inspect repository state before checkpointing");
-    expect(maintainRolePrompt).toContain("checkpointCreated=false");
-    expect(maintainRolePrompt).toContain("No-op tasks must not create empty commits/checkpoints");
-    expect(maintainRolePrompt).toContain("do not run jj describe, jj new, git add, git commit");
-
-    const gitMaintainRolePrompt = config.roles.GitMaintain!.systemPrompt;
-    expect(gitMaintainRolePrompt).toContain("Inspect repository state before committing");
-    expect(gitMaintainRolePrompt).toContain("checkpointCreated=false");
-    expect(gitMaintainRolePrompt).toContain("No-op tasks must not create empty commits/checkpoints");
-    expect(gitMaintainRolePrompt).toContain("do not run git add, git commit");
+    const gitMaintainPrompt = config.materia.GitMaintain!.prompt;
+    expect(gitMaintainPrompt).toContain("Inspect repository state before committing");
+    expect(gitMaintainPrompt).toContain("checkpointCreated=false");
+    expect(gitMaintainPrompt).toContain("No-op tasks must not create empty commits/checkpoints");
+    expect(gitMaintainPrompt).toContain("do not run git add, git commit");
   });
 });

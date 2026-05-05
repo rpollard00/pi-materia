@@ -4,25 +4,28 @@ import { App } from './App.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
-  roles: {
-    planner: { tools: 'none', systemPrompt: 'Plan the work' },
-    Build: { tools: 'coding', systemPrompt: 'Build the work', model: 'openai/gpt-test' },
+  materia: {
+    planner: { tools: 'none', prompt: 'Plan the work' },
+    Build: { tools: 'coding', prompt: 'Build the work', model: 'openai/gpt-test' },
+    'Auto-Eval': { tools: 'readOnly', prompt: 'Evaluate the work' },
+    Maintain: { tools: 'coding', prompt: 'Maintain the work' },
+    interactivePlan: { tools: 'readOnly', prompt: 'Plan interactively', multiTurn: true },
   },
   loadouts: {
     'Full-Auto': {
       entry: 'planner',
       nodes: {
-        planner: { type: 'agent', role: 'planner', next: 'Build', layout: { x: 0, y: 0 } },
-        Build: { type: 'agent', role: 'Build', next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
-        'Auto-Eval': { type: 'agent', role: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }], layout: { x: 2, y: 0 } },
-        Maintain: { type: 'agent', role: 'Maintain', layout: { x: 3, y: 0 } },
+        planner: { type: 'agent', materia: 'planner', next: 'Build', layout: { x: 0, y: 0 } },
+        Build: { type: 'agent', materia: 'Build', next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
+        'Auto-Eval': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }], layout: { x: 2, y: 0 } },
+        Maintain: { type: 'agent', materia: 'Maintain', layout: { x: 3, y: 0 } },
       },
     },
     'Planning-Consult': {
       entry: 'planner',
       nodes: {
-        planner: { type: 'agent', role: 'interactivePlan', next: 'Build' },
-        Build: { type: 'agent', role: 'Build' },
+        planner: { type: 'agent', materia: 'interactivePlan', next: 'Build' },
+        Build: { type: 'agent', materia: 'Build' },
       },
     },
   },
@@ -34,23 +37,23 @@ const edgeEditorConfig = {
     Edges: {
       entry: 'Start',
       nodes: {
-        Start: { type: 'agent', role: 'Start', layout: { x: 0, y: 0 }, edges: [] as Array<{ to: string; when?: string }> },
-        Review: { type: 'agent', role: 'Review', layout: { x: 1, y: 0 } },
-        Ship: { type: 'agent', role: 'Ship', layout: { x: 2, y: 0 } },
+        Start: { type: 'agent', materia: 'Start', layout: { x: 0, y: 0 }, edges: [] as Array<{ to: string; when?: string }> },
+        Review: { type: 'agent', materia: 'Review', layout: { x: 1, y: 0 } },
+        Ship: { type: 'agent', materia: 'Ship', layout: { x: 2, y: 0 } },
       },
     },
   },
 };
 
 const legacyPipelineConfig = {
-  roles: {
-    planner: { tools: 'none', systemPrompt: 'Plan the work' },
+  materia: {
+    planner: { tools: 'none', prompt: 'Plan the work' },
   },
   pipeline: {
     entry: 'planner',
     nodes: {
-      planner: { type: 'agent', role: 'planner', next: 'Build', layout: { x: 0, y: 0 } },
-      Build: { type: 'agent', role: 'Build', next: 'Done', edges: [{ when: 'not_satisfied', to: 'planner' }], layout: { x: 1, y: 0 } },
+      planner: { type: 'agent', materia: 'planner', next: 'Build', layout: { x: 0, y: 0 } },
+      Build: { type: 'agent', materia: 'Build', next: 'Done', edges: [{ when: 'not_satisfied', to: 'planner' }], layout: { x: 1, y: 0 } },
       Done: { type: 'utility', utility: 'finish', command: ['echo', 'done'], layout: { x: 2, y: 0 } },
     },
   },
@@ -246,7 +249,7 @@ describe('Materia loadout grid editor', () => {
     expect(saveCall[0]).toBe('/api/config');
     expect(JSON.parse(String(saveCall[1]?.body)).target).toBe('user');
     const savedBuild = JSON.parse(String(saveCall[1]?.body)).config.loadouts['Full-Auto'].nodes.Build;
-    expect(savedBuild.role).toBe('Maintain');
+    expect(savedBuild.materia).toBe('Maintain');
     expect(savedBuild.next).toBe('Auto-Eval');
     expect(savedBuild.layout).toEqual({ x: 1, y: 0 });
     expect(savedBuild.insertedBy).toBe('node-shift');
@@ -269,11 +272,11 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
-    expect(saved.Build.role).toBe('Maintain');
+    expect(saved.Build.materia).toBe('Maintain');
     expect(saved.Build.next).toBe('Auto-Eval');
     expect(saved.Build.layout).toEqual({ x: 1, y: 0 });
     expect(saved.Build.insertedBy).toBe('node-shift');
-    expect(saved.Maintain.role).toBe('Build');
+    expect(saved.Maintain.materia).toBe('Build');
     expect(saved.Maintain.layout).toEqual({ x: 3, y: 0 });
     expect(saved.planner.next).toBe('Build');
     expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
@@ -324,7 +327,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedBuild = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes.Build;
     expect(savedBuild).toMatchObject({ empty: true, next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
-    expect(savedBuild.role).toBeUndefined();
+    expect(savedBuild.materia).toBeUndefined();
   });
 
   it('creates a connected empty socket through validated socket modal mutation', async () => {
@@ -368,7 +371,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
     expect(Object.keys(saved)).toContain('Build');
-    expect(saved.Build.role).toBe('Maintain');
+    expect(saved.Build.materia).toBe('Maintain');
     expect(saved.Build.next).toBe('Auto-Eval');
     expect(saved.Build.layout).toEqual({ x: 1, y: 0 });
     expect(saved.Build.insertedBy).toBe('node-shift');
@@ -418,7 +421,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
-    expect(saved.Build).toMatchObject({ role: 'Build', next: 'Auto-Eval', insertedBy: 'node-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 }, layout: { x: 4, y: 1.5 } });
+    expect(saved.Build).toMatchObject({ materia: 'Build', next: 'Auto-Eval', insertedBy: 'node-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 }, layout: { x: 4, y: 1.5 } });
     expect(saved.planner.layout).toEqual({ x: 0, y: 0 });
     expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
   });
@@ -462,7 +465,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedBuild = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes.Build;
-    expect(savedBuild.role).toBe('Maintain');
+    expect(savedBuild.materia).toBe('Maintain');
     expect(savedBuild.next).toBe('Auto-Eval');
     expect(savedBuild.layout).toEqual({ x: 1, y: 0 });
     expect(savedBuild.insertedBy).toBe('node-shift');
@@ -662,7 +665,7 @@ describe('Materia loadout grid editor', () => {
 
 
   it('creates prompt materia, emits a saved event, and reloads without clobbering loadout draft edits', async () => {
-    let serverConfig = structuredClone(testConfig) as typeof testConfig & { materiaDefinitions?: Record<string, unknown> };
+    let serverConfig = structuredClone(testConfig) as typeof testConfig & { materia?: Record<string, unknown> };
     const savedEvents: CustomEvent[] = [];
     window.addEventListener('materia:saved', (event) => savedEvents.push(event as CustomEvent), { once: true });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -670,8 +673,7 @@ describe('Materia loadout grid editor', () => {
         const body = JSON.parse(String(init.body));
         serverConfig = {
           ...serverConfig,
-          roles: { ...serverConfig.roles, ...(body.config.roles ?? {}) },
-          materiaDefinitions: { ...(serverConfig.materiaDefinitions ?? {}), ...(body.config.materiaDefinitions ?? {}) },
+          materia: { ...(serverConfig.materia ?? {}), ...(body.config.materia ?? {}) },
         };
         return new Response(JSON.stringify({ ok: true, target: 'user' }));
       }
@@ -694,8 +696,7 @@ describe('Materia loadout grid editor', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materiaDefinitions.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'json' });
-    expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.', model: 'openai/gpt-review', multiTurn: true });
+    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', multiTurn: true });
     expect(fetchMock.mock.calls[2][0]).toBe('/api/config');
     expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
@@ -723,11 +724,10 @@ describe('Materia loadout grid editor', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config).not.toHaveProperty('pipeline');
-    expect(body.config.materiaDefinitions.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'text' });
-    expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.' });
+    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.' });
   });
 
-  it('creates tool invocation materia and only uses project persistence when explicitly selected', async () => {
+  it('rejects reusable tool invocation materia outside loadout graphs', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'project' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
@@ -746,31 +746,25 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '90000' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(body.target).toBe('project');
-    expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config).not.toHaveProperty('roles');
-    expect(body.config.materiaDefinitions.RunTests).toMatchObject({ type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000 });
+    await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Reusable tool definitions are no longer saved outside loadout graphs.'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('populates the edit selector from reusable definitions instead of active loadout sockets', async () => {
     const selectorConfig = {
       activeLoadout: 'Full-Auto',
-      roles: {
-        Build: { tools: 'coding', systemPrompt: 'Build the work' },
-        RoleOnly: { tools: 'none', systemPrompt: 'Reusable role not placed in a socket' },
-      },
-      materiaDefinitions: {
+      materia: {
+        Build: { tools: 'coding', prompt: 'Build the work' },
+        RoleOnly: { tools: 'none', prompt: 'Reusable materia not placed in a socket' },
         RunTests: { type: 'utility', utility: 'shell', command: ['npm', 'test'] },
-        PromptDef: { type: 'agent', role: 'RoleOnly', prompt: 'Prompt definition' },
+        PromptDef: { tools: 'none', prompt: 'Prompt definition' },
       },
       loadouts: {
         'Full-Auto': {
           entry: 'SocketOnly',
           nodes: {
-            SocketOnly: { type: 'agent', role: 'SocketOnly' },
-            Build: { type: 'agent', role: 'Build' },
+            SocketOnly: { type: 'agent', materia: 'SocketOnly' },
+            Build: { type: 'agent', materia: 'Build' },
           },
         },
         Alternate: {
@@ -805,10 +799,8 @@ describe('Materia loadout grid editor', () => {
   it('loads existing tool definition data without selecting or mutating loadout sockets', async () => {
     const selectorConfig = {
       activeLoadout: 'Full-Auto',
-      roles: {
-        Build: { tools: 'coding', systemPrompt: 'Build the work' },
-      },
-      materiaDefinitions: {
+      materia: {
+        Build: { tools: 'coding', prompt: 'Build the work' },
         RunTests: { type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000, parse: 'json' },
       },
       loadouts: testConfig.loadouts,
@@ -824,20 +816,12 @@ describe('Materia loadout grid editor', () => {
     await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'RunTests' } });
     expect(screen.getByTestId('materia-name')).toHaveProperty('value', 'RunTests');
-    expect(screen.getByTestId('materia-behavior')).toHaveProperty('value', 'tool');
-    expect(screen.getByTestId('materia-utility')).toHaveProperty('value', 'shell');
-    expect(screen.getByTestId('materia-command')).toHaveProperty('value', 'npm test');
-    expect(screen.getByTestId('materia-timeout')).toHaveProperty('value', '90000');
-    fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '91000' } });
-    fireEvent.click(screen.getByTestId('save-materia-form'));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materiaDefinitions.RunTests).toMatchObject({ timeoutMs: 91000 });
+    expect(screen.getByTestId('materia-behavior')).toHaveProperty('value', 'prompt');
+    expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', '');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('edits existing prompt materia role settings where supported', async () => {
+  it('edits existing prompt materia materia settings where supported', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
@@ -856,8 +840,7 @@ describe('Materia loadout grid editor', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materiaDefinitions.Build).toMatchObject({ type: 'agent', role: 'Build', prompt: 'Build with extra care.', parse: 'text' });
-    expect(body.config.roles.Build).toMatchObject({ tools: 'readOnly', systemPrompt: 'Build with extra care.', model: 'openai/gpt-test' });
+    expect(body.config.materia.Build).toMatchObject({ tools: 'readOnly', prompt: 'Build with extra care.', model: 'openai/gpt-test' });
   });
 
 
@@ -878,8 +861,8 @@ describe('Materia loadout grid editor', () => {
       ok: true,
       now: 61_000,
       uiStartedAt: 1_000,
-      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentNode: 'Build', currentRole: 'Build', nodeState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
-      emittedOutputs: [{ id: 'entry-1', type: 'pi-materia', text: 'Build · role_prompt', timestamp: 61_000, node: 'Build' }],
+      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentNode: 'Build', currentMateria: 'Build', nodeState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
+      emittedOutputs: [{ id: 'entry-1', type: 'pi-materia', text: 'Build · materia_prompt', timestamp: 61_000, node: 'Build' }],
       artifactSummary: { runDir: '/tmp/run', summary: 'Completed nodes: planner', outputs: [{ node: 'Build', kind: 'node_output', artifact: 'nodes/Build/1.md', content: 'built' }] },
     }) }));
 

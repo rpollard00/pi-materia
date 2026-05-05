@@ -8,7 +8,7 @@ type MateriaConfigPatch = Record<string, unknown>;
 
 export interface MateriaMonitorArtifactEntry {
   node?: string;
-  role?: string;
+  materia?: string;
   phase?: string;
   kind?: string;
   artifact?: string;
@@ -45,7 +45,7 @@ export interface MateriaWebUiSessionSnapshot {
     active: boolean;
     phase: string;
     currentNode?: string;
-    currentRole?: string;
+    currentMateria?: string;
     nodeState?: string;
     awaitingResponse: boolean;
     runDir: string;

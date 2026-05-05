@@ -5,17 +5,17 @@ import type { MateriaPipelineConfig } from "../src/types.js";
 const validGraph = (): MateriaPipelineConfig => ({
   entry: "Plan",
   nodes: {
-    Plan: { type: "agent", role: "Plan", next: "Check" },
+    Plan: { type: "agent", materia: "Plan", next: "Check" },
     Check: {
       type: "agent",
-      role: "Check",
+      materia: "Check",
       edges: [
         { when: "$.passed == true", to: "Maintain" },
         { when: "$.passed == false", to: "Build" },
       ],
     },
-    Build: { type: "agent", role: "Build", next: "Maintain" },
-    Maintain: { type: "agent", role: "Maintain" },
+    Build: { type: "agent", materia: "Build", next: "Maintain" },
+    Maintain: { type: "agent", materia: "Maintain" },
   },
 });
 

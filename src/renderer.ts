@@ -4,7 +4,7 @@ import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
 
 interface MateriaMessageDetails {
   prefix?: string;
-  roleName?: string;
+  materiaName?: string;
   eventType?: string;
 }
 
@@ -12,9 +12,9 @@ export function registerMateriaRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer<MateriaMessageDetails>("pi-materia", (message, { expanded }, theme) => {
     const details = message.details as MateriaMessageDetails | undefined;
     const prefix = details?.prefix ?? "materia";
-    const role = details?.roleName ? ` ${details.roleName}` : "";
+    const materia = details?.materiaName ? ` ${details.materiaName}` : "";
     const event = details?.eventType ? ` ${details.eventType.replace(/_/g, " ")}` : "";
-    const label = theme.fg("customMessageLabel", `◆ Materia:${role}`);
+    const label = theme.fg("customMessageLabel", `◆ Materia:${materia}`);
     const sublabel = theme.fg("dim", ` ${prefix}${event}`);
 
     const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));

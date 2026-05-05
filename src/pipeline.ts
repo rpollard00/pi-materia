@@ -1,5 +1,5 @@
 import { resolveArtifactRoot } from "./config.js";
-import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
   pipeline: MateriaPipelineConfig;
@@ -25,6 +25,9 @@ export function getEffectivePipelineConfig(config: PiMateriaConfig): EffectiveMa
 }
 
 export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipeline {
+  const rawConfig = config as unknown as Record<string, unknown>;
+  if ("roles" in rawConfig) throw new Error(`Materia config configures obsolete roles. Use top-level materia instead.`);
+  if ("materiaDefinitions" in rawConfig) throw new Error(`Materia config configures obsolete materiaDefinitions.`);
   const effective = getEffectivePipelineConfig(config);
   const nodes = Object.fromEntries(
     Object.keys(effective.pipeline.nodes).map((id) => [id, resolveNode(config, effective, id, `${pipelineSource(effective)}.nodes.${id}`)]),
@@ -41,10 +44,10 @@ function resolveNode(config: PiMateriaConfig, effective: EffectiveMateriaPipelin
   validateNode(id, node);
 
   if (node.type === "agent") {
-    const role = config.roles[node.role];
-    if (!role) throw new Error(`Pipeline slot "${id}" references unknown materia role "${node.role}"`);
-    validateRole(node.role, role);
-    return { id, node, role };
+    const materia = config.materia[node.materia];
+    if (!materia) throw new Error(`Pipeline slot "${id}" references unknown materia "${node.materia}"`);
+    validateMateriaEntry(node.materia, materia);
+    return { id, node, materia };
   }
 
   return { id, node };
@@ -57,8 +60,14 @@ function validateNode(id: string, node: MateriaPipelineNodeConfig): void {
   if (node.parse !== undefined && node.parse !== "text" && node.parse !== "json") {
     throw new Error(`Pipeline slot "${id}" has unsupported parse mode "${String(node.parse)}". Expected "text" or "json".`);
   }
+  if ("role" in node) {
+    throw new Error(`Pipeline slot "${id}" configures obsolete role. Use materia instead.`);
+  }
+  if ("prompt" in node || "systemPrompt" in node) {
+    throw new Error(`Pipeline slot "${id}" configures obsolete prompt. Define prompt on the referenced materia instead.`);
+  }
   if ("multiTurn" in node) {
-    throw new Error(`Pipeline slot "${id}" configures obsolete multiTurn. Configure multiTurn on the referenced role instead.`);
+    throw new Error(`Pipeline slot "${id}" configures obsolete multiTurn. Configure multiTurn on the referenced materia instead.`);
   }
   if (node.type === "utility") {
     if (!node.utility && !node.command) throw new Error(`Utility pipeline slot "${id}" must configure either "utility" or "command".`);
@@ -69,9 +78,9 @@ function validateNode(id: string, node: MateriaPipelineNodeConfig): void {
   }
 }
 
-function validateRole(name: string, role: MateriaRoleConfig): void {
-  if (role.multiTurn !== undefined && typeof role.multiTurn !== "boolean") {
-    throw new Error(`Materia role "${name}" has invalid multiTurn. Expected a boolean when configured.`);
+function validateMateriaEntry(name: string, materia: MateriaConfig): void {
+  if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
   }
 }
 
@@ -119,8 +128,8 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     "Resolved entry:",
     pipeline.entry.id,
     "",
-    "Roles:",
-    ...renderRoles(config),
+    "Materia:",
+    ...renderMateria(config),
     "",
     "Slots:",
   ];
@@ -131,19 +140,19 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
   return lines;
 }
 
-function renderRoles(config: PiMateriaConfig): string[] {
-  const entries = Object.entries(config.roles);
+function renderMateria(config: PiMateriaConfig): string[] {
+  const entries = Object.entries(config.materia);
   if (entries.length === 0) return ["- none configured"];
-  return entries.map(([name, role]) => `- ${name}: ${formatRoleDetails(role)}`);
+  return entries.map(([name, materia]) => `- ${name}: ${formatMateriaDetails(materia)}`);
 }
 
 function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig): string {
   const details: string[] = [`type=${node.type}`];
   if (node.type === "agent") {
-    const role = config.roles[node.role];
-    details.push(`role=${node.role}`, `tools=${role?.tools ?? "unknown"}`);
-    if (role?.multiTurn) details.push("role.multiTurn=true");
-    if (role) details.push(formatRoleModelSettings(role));
+    const materia = config.materia[node.materia];
+    details.push(`materia=${node.materia}`, `tools=${materia?.tools ?? "unknown"}`);
+    if (materia?.multiTurn) details.push("materia.multiTurn=true");
+    if (materia) details.push(formatMateriaModelSettings(materia));
   } else {
     details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);
   }
@@ -161,18 +170,18 @@ function formatCommand(command: string[] | undefined): string {
   return command?.length ? command.map((part) => JSON.stringify(part)).join(" ") : "<missing>";
 }
 
-function formatRoleDetails(role: { tools?: string; model?: string; thinking?: string; multiTurn?: boolean }): string {
+function formatMateriaDetails(materia: { tools?: string; model?: string; thinking?: string; multiTurn?: boolean }): string {
   return [
-    `tools=${role.tools}`,
-    role.multiTurn ? "multiTurn=true" : undefined,
-    formatRoleModelSettings(role),
+    `tools=${materia.tools}`,
+    materia.multiTurn ? "multiTurn=true" : undefined,
+    formatMateriaModelSettings(materia),
   ].filter(Boolean).join(", ");
 }
 
-function formatRoleModelSettings(role: { model?: string; thinking?: string }): string {
+function formatMateriaModelSettings(materia: { model?: string; thinking?: string }): string {
   return [
-    `model=${role.model ?? "active Pi model"}`,
-    `thinking=${role.thinking ?? "active Pi thinking"}`,
+    `model=${materia.model ?? "active Pi model"}`,
+    `thinking=${materia.thinking ?? "active Pi thinking"}`,
   ].join(", ");
 }
 
