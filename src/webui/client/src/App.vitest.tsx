@@ -28,6 +28,20 @@ const testConfig = {
   },
 };
 
+const edgeEditorConfig = {
+  activeLoadout: 'Edges',
+  loadouts: {
+    Edges: {
+      entry: 'Start',
+      nodes: {
+        Start: { type: 'agent', role: 'Start', layout: { x: 0, y: 0 }, edges: [] as Array<{ to: string; when?: string }> },
+        Review: { type: 'agent', role: 'Review', layout: { x: 1, y: 0 } },
+        Ship: { type: 'agent', role: 'Ship', layout: { x: 2, y: 0 } },
+      },
+    },
+  },
+};
+
 const legacyPipelineConfig = {
   roles: {
     planner: { tools: 'none', systemPrompt: 'Plan the work' },
@@ -477,6 +491,81 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByText('Ignored drop: materia Missing-Materia is not available.')).toBeTruthy();
     expect(screen.queryByText('staged edits')).toBeNull();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a validated edge between existing sockets from the socket modal', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: edgeEditorConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Start'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Edge' }));
+    expect(await screen.findByTestId('edge-connector')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('edge-target'), { target: { value: 'Review' } });
+    fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'not_satisfied' } });
+    fireEvent.click(screen.getByTestId('create-edge'));
+
+    expect(await screen.findByText(/Staged edge Start → Review as not satisfied\./)).toBeTruthy();
+    expect(screen.getByTestId('edge-Start-Review-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes;
+    expect(saved.Start.edges).toEqual([{ to: 'Review', when: 'not_satisfied' }]);
+    expect(saved.Review).toBeTruthy();
+  });
+
+  it('removes a conditional edge without deleting either socket', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    config.loadouts.Edges.nodes.Start.edges = [{ to: 'Review', when: 'satisfied' }];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByTestId('edge-Start-Review-0')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('socket-Start'));
+    fireEvent.click(await screen.findByTestId('remove-edge-Start-0'));
+    expect(await screen.findByText(/Removed edge Start → Review; sockets were preserved\./)).toBeTruthy();
+    expect(screen.queryByTestId('edge-Start-Review-0')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes;
+    expect(saved.Start.edges).toBeUndefined();
+    expect(saved.Start).toBeTruthy();
+    expect(saved.Review).toBeTruthy();
+  });
+
+  it('surfaces invalid edge creation without mutating draft state', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    config.loadouts.Edges.nodes.Start.edges = [{ to: 'Review', when: 'satisfied' }];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Start'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Edge' }));
+    fireEvent.change(screen.getByTestId('edge-target'), { target: { value: 'Ship' } });
+    fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'satisfied' } });
+    fireEvent.click(screen.getByTestId('create-edge'));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Socket "Start" has more than one outgoing satisfied edge');
+    expect(screen.queryByTestId('edge-Start-Ship-1')).toBeNull();
+    expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

@@ -324,6 +324,30 @@
   font-size: 0.875rem;
 }
 
+.edge-removal-list {
+  border-top: 1px solid rgb(103 232 249 / 0.16);
+  padding-top: 1rem;
+}
+
+.edge-removal-row {
+  margin-top: 0.55rem;
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid rgb(248 113 113 / 0.28);
+  background: rgb(69 10 10 / 0.32);
+  padding: 0.7rem 0.85rem;
+  color: rgb(254 226 226);
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.edge-removal-row:hover,
+.edge-removal-row:focus {
+  border-color: rgb(252 165 165 / 0.72);
+  background: rgb(127 29 29 / 0.5);
+}
+
 .entry-rune {
   position: absolute;
   right: 1rem;

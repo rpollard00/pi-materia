@@ -473,9 +473,12 @@ export function App() {
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
-  const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace' | 'edit'>('actions');
+  const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace' | 'edit' | 'connect'>('actions');
   const [socketPropertyForm, setSocketPropertyForm] = useState<SocketPropertyFormState>(() => emptySocketPropertyForm());
   const [socketPropertyError, setSocketPropertyError] = useState('');
+  const [edgeTargetId, setEdgeTargetId] = useState('');
+  const [edgeCondition, setEdgeCondition] = useState('satisfied');
+  const [edgeMutationError, setEdgeMutationError] = useState('');
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
@@ -743,7 +746,81 @@ export function App() {
   function openSocketPropertyEditor(socketId: string) {
     setSocketPropertyForm(socketPropertyFormFromNode(activeLoadout?.nodes?.[socketId]));
     setSocketPropertyError('');
+    setEdgeMutationError('');
     setSocketActionMode('edit');
+  }
+
+  function openEdgeConnector(socketId: string) {
+    const firstOtherSocket = Object.keys(activeLoadout?.nodes ?? {}).find((id) => id !== socketId) ?? '';
+    setEdgeTargetId(firstOtherSocket);
+    setEdgeCondition('satisfied');
+    setEdgeMutationError('');
+    setSocketActionMode('connect');
+  }
+
+  function commitGraphMutation(description: string, mutator: (loadout: import('../../../types.js').MateriaPipelineConfig) => void, onSuccess: string, onError: (message: string) => string) {
+    if (!activeLoadoutName || !activeLoadout) return false;
+    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, mutator);
+    if (!result.ok) {
+      const message = formatGraphValidationErrors(result.errors);
+      setEdgeMutationError(message);
+      setStatus(onError(message));
+      return false;
+    }
+    updateDraft((config) => {
+      const draftLoadouts = buildLoadouts(config);
+      draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
+      config.loadouts = draftLoadouts;
+    });
+    setEdgeMutationError('');
+    setStatus(onSuccess || description);
+    return true;
+  }
+
+  function createEdge(from: string) {
+    const to = edgeTargetId;
+    if (!to) {
+      const message = 'Choose a target socket.';
+      setEdgeMutationError(message);
+      setStatus(`Cannot create edge from ${from}: ${message}`);
+      return;
+    }
+    const created = commitGraphMutation(
+      `Staged edge ${from} → ${to}.`,
+      (loadout) => {
+        const node = loadout.nodes?.[from] as PipelineNode | undefined;
+        if (!node || !loadout.nodes?.[to]) return;
+        const edges = [...(node.edges ?? [])];
+        edges.push({ to, when: edgeCondition || undefined });
+        node.edges = edges;
+      },
+      `Staged edge ${from} → ${to} as ${edgeConditionLabel(edgeCondition)}.`,
+      (message) => `Cannot create edge ${from} → ${to}: ${message}`,
+    );
+    if (created) {
+      setSocketActionId(undefined);
+      setSocketActionMode('actions');
+    }
+  }
+
+  function removeEdge(from: string, edgeIndex: number) {
+    const edge = activeLoadout?.nodes?.[from]?.edges?.[edgeIndex];
+    if (!edge) return;
+    const removed = commitGraphMutation(
+      `Removed edge ${from} → ${edge.to}.`,
+      (loadout) => {
+        const node = loadout.nodes?.[from] as PipelineNode | undefined;
+        if (!node?.edges) return;
+        node.edges = node.edges.filter((_, index) => index !== edgeIndex);
+        if (node.edges.length === 0) delete node.edges;
+      },
+      `Removed edge ${from} → ${edge.to}; sockets were preserved.`,
+      (message) => `Cannot remove edge ${from} → ${edge.to}: ${message}`,
+    );
+    if (removed) {
+      setSocketActionId(undefined);
+      setSocketActionMode('actions');
+    }
   }
 
   function saveSocketProperties(socketId: string) {
@@ -787,6 +864,7 @@ export function App() {
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setSocketPropertyError('');
+    setEdgeMutationError('');
   }
 
   function toggleEdgeCondition(edge: LoadoutEdge) {
@@ -1025,11 +1103,11 @@ export function App() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : 'socket actions'}</p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : socketActionMode === 'connect' ? 'connect edge' : 'socket actions'}</p>
                       <h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{socketActionId}</h3>
                       <p className="mt-1 text-sm text-slate-300">{getNodeLabel(socketActionId, activeLoadout.nodes[socketActionId])}</p>
                     </div>
-                    <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' ? 'Cancel' : 'Close'}</button>
+                    <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' || socketActionMode === 'connect' ? 'Cancel' : 'Close'}</button>
                   </div>
                   {socketActionMode === 'replace' ? (
                     <div className="mt-5">
@@ -1075,12 +1153,46 @@ export function App() {
                         <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button>
                       </div>
                     </div>
+                  ) : socketActionMode === 'connect' ? (
+                    <div className="mt-5 space-y-4" data-testid="edge-connector">
+                      <p className="text-sm text-slate-300">Create a validated conditional edge from this socket to an existing socket.</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="graph-field">Target socket
+                          <select data-testid="edge-target" value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}>
+                            <option value="">choose socket…</option>
+                            {Object.keys(activeLoadout.nodes ?? {}).filter((id) => id !== socketActionId).map((id) => <option key={id} value={id}>{id}</option>)}
+                          </select>
+                        </label>
+                        <label className="graph-field">Condition
+                          <select data-testid="edge-condition" value={edgeCondition} onChange={(event) => setEdgeCondition(event.target.value)}>
+                            <option value="satisfied">satisfied</option>
+                            <option value="not_satisfied">not satisfied</option>
+                          </select>
+                        </label>
+                      </div>
+                      {edgeMutationError && <p className="socket-property-error" role="alert">{edgeMutationError}</p>}
+                      <div className="flex flex-wrap gap-3">
+                        <button type="button" className="materia-button" data-testid="create-edge" onClick={() => createEdge(socketActionId)}>Create edge</button>
+                        <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button>
+                      </div>
+                    </div>
                   ) : (
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                      <button type="button" className="socket-action-button" onClick={() => removeMateria(socketActionId)}>Unsocket</button>
-                      <button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button>
-                      <button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button>
-                      <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
+                    <div className="mt-5 space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <button type="button" className="socket-action-button" onClick={() => removeMateria(socketActionId)}>Unsocket</button>
+                        <button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button>
+                        <button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button>
+                        <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
+                        <button type="button" className="socket-action-button" onClick={() => openEdgeConnector(socketActionId)}>Connect Edge</button>
+                      </div>
+                      <div className="edge-removal-list" data-testid="edge-removal-list">
+                        <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>
+                        {(activeLoadout.nodes[socketActionId].edges ?? []).length > 0 ? activeLoadout.nodes[socketActionId].edges?.map((edge, index) => (
+                          <button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>
+                            Remove {edgeConditionLabel(edge.when)} edge to {edge.to}
+                          </button>
+                        )) : <p className="mt-2 text-sm text-slate-400">No conditional edges from this socket.</p>}
+                      </div>
                     </div>
                   )}
                 </section>
