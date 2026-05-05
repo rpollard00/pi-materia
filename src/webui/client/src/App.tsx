@@ -110,13 +110,12 @@ interface DragPayload {
   fromSocket?: string;
 }
 
-type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor' | 'pipeline-graph';
+type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor';
 
 const materiaTabs: Array<{ id: MateriaTabId; label: string; description: string }> = [
   { id: 'loadout', label: 'Loadout', description: 'Loadout selector, visual grid, palette, and apply controls' },
   { id: 'materia-editor', label: 'Materia Editor', description: 'Create and edit materia definitions' },
   { id: 'monitor', label: 'Monitoring', description: 'Live cast telemetry and artifacts' },
-  { id: 'pipeline-graph', label: 'Pipeline Graph', description: 'Graph links, branches, layout, and retry limits' },
 ];
 
 function parseTabId(value: string | null): MateriaTabId {
@@ -188,38 +187,6 @@ function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
 function makeEmptyEntryLoadout(): PipelineConfig {
   const entry = 'Entry';
   return { entry, nodes: { [entry]: { empty: true } } };
-}
-
-function makeUniqueNodeId(nodes: Record<string, PipelineNode>, base = 'NewNode') {
-  const cleaned = base.trim().replace(/\s+/g, '-') || 'NewNode';
-  if (!nodes[cleaned]) return cleaned;
-  let index = 2;
-  while (nodes[`${cleaned}-${index}`]) index += 1;
-  return `${cleaned}-${index}`;
-}
-
-function getNodeLayout(id: string, index: number, node?: PipelineNode) {
-  const rawX = node?.layout?.x;
-  const rawY = node?.layout?.y;
-  return {
-    x: typeof rawX === 'number' ? rawX : 40 + (index % 4) * 210,
-    y: typeof rawY === 'number' ? rawY : 40 + Math.floor(index / 4) * 150,
-  };
-}
-
-function graphEdges(nodes: Record<string, PipelineNode>): { from: string; to: string; when: string; maxTraversals?: number }[] {
-  return Object.entries(nodes).flatMap(([from, node]) => [
-    ...(node.next ? [{ from, to: node.next, when: 'next' }] : []),
-    ...(node.edges ?? []).map((edge) => ({ from, to: edge.to, when: edge.when ?? 'always', maxTraversals: edge.maxTraversals })),
-  ]);
-}
-
-function graphPoint(id: string, index: number, node?: PipelineNode) {
-  const layout = getNodeLayout(id, index, node);
-  return {
-    x: Math.abs(layout.x) <= 10 ? 54 + layout.x * 220 : layout.x,
-    y: Math.abs(layout.y) <= 10 ? 46 + layout.y * 150 : layout.y,
-  };
 }
 
 const materiaBehaviorKeys = new Set([
@@ -356,10 +323,7 @@ export function App() {
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
   const [dragOverTrash, setDragOverTrash] = useState(false);
-  const [newGraphNodeId, setNewGraphNodeId] = useState('Review');
-  const [insertFrom, setInsertFrom] = useState('');
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
-  const [insertTo, setInsertTo] = useState('');
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
   useEffect(() => {
@@ -416,8 +380,6 @@ export function App() {
   const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
   const activeNodes = activeLoadout?.nodes ?? {};
-  const activeNodeIds = Object.keys(activeNodes);
-  const activeGraphEdges = useMemo(() => graphEdges(activeNodes), [activeNodes]);
   const roles = draftConfig?.roles ?? {};
   const materiaDefinitions = draftConfig?.materiaDefinitions ?? {};
   const editableDefinitionIds = useMemo(() => {
@@ -540,106 +502,6 @@ export function App() {
       loadout.nodes[socketId] = clearSocketMateria(loadout.nodes[socketId]);
     });
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
-  }
-
-  function mutateActiveGraph(mutator: (loadout: PipelineConfig, nodes: Record<string, PipelineNode>) => void) {
-    if (!activeLoadoutName) return;
-    updateDraft((config) => {
-      const loadout = buildLoadouts(config)[activeLoadoutName];
-      if (!loadout) return;
-      loadout.nodes ??= {};
-      mutator(loadout, loadout.nodes);
-    });
-  }
-
-  function addGraphNode() {
-    mutateActiveGraph((loadout, nodes) => {
-      const id = makeUniqueNodeId(nodes, newGraphNodeId);
-      nodes[id] = { type: 'agent', role: id, layout: { x: 40 + Object.keys(nodes).length * 35, y: 420 }, limits: { maxVisits: 3 } };
-      if (!loadout.entry) loadout.entry = id;
-      setNewGraphNodeId(id);
-      setStatus(`Added pipeline node ${id}. Save to persist.`);
-    });
-  }
-
-  function insertGraphNodeBetween() {
-    if (!insertFrom || !insertTo || insertFrom === insertTo) return;
-    mutateActiveGraph((_loadout, nodes) => {
-      const fromNode = nodes[insertFrom];
-      const toNode = nodes[insertTo];
-      if (!fromNode || !toNode) return;
-      const id = makeUniqueNodeId(nodes, `${insertFrom}-insert`);
-      const fromIndex = activeNodeIds.indexOf(insertFrom);
-      const toIndex = activeNodeIds.indexOf(insertTo);
-      const fromLayout = getNodeLayout(insertFrom, fromIndex < 0 ? 0 : fromIndex, fromNode);
-      const toLayout = getNodeLayout(insertTo, toIndex < 0 ? 1 : toIndex, toNode);
-      nodes[id] = { type: 'agent', role: id, next: insertTo, layout: { x: Math.round((fromLayout.x + toLayout.x) / 2), y: Math.round((fromLayout.y + toLayout.y) / 2) }, inserted: { between: [insertFrom, insertTo], via: 'webui-graph-editor' } };
-      if (fromNode.next === insertTo) fromNode.next = id;
-      fromNode.edges = fromNode.edges?.map((edge) => edge.to === insertTo ? { ...edge, to: id } : edge);
-      setStatus(`Inserted ${id} between ${insertFrom} and ${insertTo}; surrounding graph references were shifted safely.`);
-    });
-  }
-
-  function setNodeNext(id: string, next: string) {
-    mutateActiveGraph((_loadout, nodes) => {
-      if (!nodes[id]) return;
-      if (next) nodes[id].next = next;
-      else delete nodes[id].next;
-    });
-    setStatus(`Updated next edge for ${id}.`);
-  }
-
-  function setBranch(id: string, when: 'satisfied' | 'not_satisfied', to: string) {
-    mutateActiveGraph((_loadout, nodes) => {
-      const node = nodes[id];
-      if (!node) return;
-      const existing = node.edges?.find((edge) => edge.when === when);
-      const remaining = (node.edges ?? []).filter((edge) => edge.when !== when);
-      node.edges = to ? [...remaining, { ...existing, when, to }] : remaining;
-    });
-    setStatus(`Updated ${when.replace('_', ' ')} branch for ${id}.`);
-  }
-
-  function updateBranchMaxTraversals(id: string, when: 'satisfied' | 'not_satisfied', value: string) {
-    const parsed = Number(value);
-    mutateActiveGraph((_loadout, nodes) => {
-      const node = nodes[id];
-      const edge = node?.edges?.find((candidate) => candidate.when === when);
-      if (!edge) return;
-      if (!Number.isFinite(parsed) || parsed <= 0) delete edge.maxTraversals;
-      else edge.maxTraversals = parsed;
-    });
-    setStatus(`Tweaked ${when.replace('_', ' ')} branch retry traversal limit for ${id}.`);
-  }
-
-  function updateNodeLayout(id: string, axis: 'x' | 'y', value: string) {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return;
-    mutateActiveGraph((_loadout, nodes) => {
-      const node = nodes[id];
-      if (!node) return;
-      node.layout = { ...(node.layout ?? {}), [axis]: parsed };
-    });
-    setStatus(`Moved graph node ${id}. Layout change is staged.`);
-  }
-
-  function updateRetryLimit(id: string, key: 'maxVisits' | 'maxEdgeTraversals' | 'maxOutputBytes', value: string) {
-    const parsed = Number(value);
-    mutateActiveGraph((_loadout, nodes) => {
-      const node = nodes[id];
-      if (!node) return;
-      node.limits = { ...(node.limits ?? {}) };
-      if (!Number.isFinite(parsed) || parsed <= 0) delete node.limits[key];
-      else node.limits[key] = parsed;
-    });
-    setStatus(`Tweaked retry/limit setting ${key} for ${id}.`);
-  }
-
-  function setEntry(id: string) {
-    mutateActiveGraph((loadout) => {
-      loadout.entry = id;
-    });
-    setStatus(`Entry node staged: ${id}.`);
   }
 
   function editMateria(id: string) {
@@ -982,116 +844,6 @@ export function App() {
                 ))}
               </div>
             </article>
-          </div>
-        </section>
-        )}
-
-        {selectedTab === 'pipeline-graph' && (
-        <section className="fantasy-panel p-6" aria-label="Pipeline graph editor">
-          <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">pipeline graph</p>
-              <h2 className="mt-2 text-3xl font-black text-white">Graph editor</h2>
-              <p className="mt-2 max-w-4xl text-sm text-slate-400">Edit graph links, branches, layout, and retry limits as staged loadout changes. Insertions shift only the selected references and preserve existing inserted metadata, socket ids, and layout fields.</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-[12rem_8rem_8rem_auto]">
-              <label className="graph-field">New node id
-                <input data-testid="new-node-id" value={newGraphNodeId} onChange={(event) => setNewGraphNodeId(event.target.value)} />
-              </label>
-              <label className="graph-field">Insert from
-                <select data-testid="insert-from" value={insertFrom} onChange={(event) => setInsertFrom(event.target.value)}>
-                  <option value="">from…</option>
-                  {activeNodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
-                </select>
-              </label>
-              <label className="graph-field">Insert to
-                <select data-testid="insert-to" value={insertTo} onChange={(event) => setInsertTo(event.target.value)}>
-                  <option value="">to…</option>
-                  {activeNodeIds.map((id) => <option key={id} value={id}>{id}</option>)}
-                </select>
-              </label>
-              <div className="flex items-end gap-2">
-                <button className="materia-button" onClick={addGraphNode}>Add node</button>
-                <button className="materia-button-secondary" disabled={!insertFrom || !insertTo || insertFrom === insertTo} onClick={insertGraphNodeBetween}>Insert</button>
-              </div>
-            </div>
-          </div>
-
-          <div className="graph-canvas" data-testid="pipeline-graph">
-            <svg className="graph-svg" viewBox="0 0 980 620" role="img" aria-label="Pipeline graph edges">
-              <defs>
-                <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgb(103 232 249 / 0.82)" />
-                </marker>
-              </defs>
-              {activeGraphEdges.map((edge, index) => {
-                const fromIndex = activeNodeIds.indexOf(edge.from);
-                const toIndex = activeNodeIds.indexOf(edge.to);
-                const fromPoint = graphPoint(edge.from, fromIndex < 0 ? 0 : fromIndex, activeNodes[edge.from]);
-                const toPoint = graphPoint(edge.to, toIndex < 0 ? 0 : toIndex, activeNodes[edge.to]);
-                return (
-                  <g key={`${edge.from}-${edge.when}-${edge.to}-${index}`}>
-                    <line x1={fromPoint.x + 80} y1={fromPoint.y + 42} x2={toPoint.x + 8} y2={toPoint.y + 42} className={`graph-edge ${edge.when === 'satisfied' ? 'graph-edge-satisfied' : edge.when === 'not_satisfied' ? 'graph-edge-unsatisfied' : ''}`} markerEnd="url(#arrow)" />
-                    <text x={(fromPoint.x + toPoint.x) / 2 + 44} y={(fromPoint.y + toPoint.y) / 2 + 30} className="graph-edge-label">{edge.when}{edge.maxTraversals ? ` · ${edge.maxTraversals}x` : ''}</text>
-                  </g>
-                );
-              })}
-            </svg>
-            {Object.entries(activeNodes).map(([id, node], index) => {
-              const point = graphPoint(id, index, node);
-              return (
-                <article key={id} data-testid={`graph-node-${id}`} className={`graph-node-card ${id === currentMonitorNode ? 'graph-node-card-active' : ''}`} style={{ left: point.x, top: point.y }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-bold text-white">{id}</h3>
-                      <p className="text-xs text-cyan-100/80">{getNodeLabel(id, node)}</p>
-                    </div>
-                    <button className="graph-entry-button" onClick={() => setEntry(id)}>{id === activeLoadout?.entry ? 'entry' : 'make entry'}</button>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <label className="graph-field">x<input aria-label={`${id} layout x`} value={node.layout?.x ?? getNodeLayout(id, index, node).x} onChange={(event) => updateNodeLayout(id, 'x', event.target.value)} /></label>
-                    <label className="graph-field">y<input aria-label={`${id} layout y`} value={node.layout?.y ?? getNodeLayout(id, index, node).y} onChange={(event) => updateNodeLayout(id, 'y', event.target.value)} /></label>
-                  </div>
-                  <label className="graph-field mt-2">next
-                    <select aria-label={`${id} next`} value={node.next ?? ''} onChange={(event) => setNodeNext(id, event.target.value)}>
-                      <option value="">end</option>
-                      {activeNodeIds.filter((target) => target !== id).map((target) => <option key={target} value={target}>{target}</option>)}
-                    </select>
-                  </label>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <label className="graph-field">satisfied
-                      <select aria-label={`${id} satisfied branch`} value={node.edges?.find((edge) => edge.when === 'satisfied')?.to ?? ''} onChange={(event) => setBranch(id, 'satisfied', event.target.value)}>
-                        <option value="">none</option>
-                        {activeNodeIds.filter((target) => target !== id).map((target) => <option key={target} value={target}>{target}</option>)}
-                      </select>
-                    </label>
-                    <label className="graph-field">not satisfied
-                      <select aria-label={`${id} not satisfied branch`} value={node.edges?.find((edge) => edge.when === 'not_satisfied')?.to ?? ''} onChange={(event) => setBranch(id, 'not_satisfied', event.target.value)}>
-                        <option value="">none</option>
-                        {activeNodeIds.filter((target) => target !== id).map((target) => <option key={target} value={target}>{target}</option>)}
-                      </select>
-                    </label>
-                    <label className="graph-field">sat retry
-                      <input aria-label={`${id} satisfied max traversals`} value={node.edges?.find((edge) => edge.when === 'satisfied')?.maxTraversals ?? ''} placeholder="global" onChange={(event) => updateBranchMaxTraversals(id, 'satisfied', event.target.value)} />
-                    </label>
-                    <label className="graph-field">not sat retry
-                      <input aria-label={`${id} not satisfied max traversals`} value={node.edges?.find((edge) => edge.when === 'not_satisfied')?.maxTraversals ?? ''} placeholder="global" onChange={(event) => updateBranchMaxTraversals(id, 'not_satisfied', event.target.value)} />
-                    </label>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    <label className="graph-field">visits<input aria-label={`${id} max visits`} value={node.limits?.maxVisits ?? ''} placeholder="default" onChange={(event) => updateRetryLimit(id, 'maxVisits', event.target.value)} /></label>
-                    <label className="graph-field">edges<input aria-label={`${id} max edge traversals`} value={node.limits?.maxEdgeTraversals ?? ''} placeholder="default" onChange={(event) => updateRetryLimit(id, 'maxEdgeTraversals', event.target.value)} /></label>
-                    <label className="graph-field">bytes<input aria-label={`${id} max output bytes`} value={node.limits?.maxOutputBytes ?? ''} placeholder="default" onChange={(event) => updateRetryLimit(id, 'maxOutputBytes', event.target.value)} /></label>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="Graph edge list">
-            {activeGraphEdges.length === 0 ? <p className="text-sm text-slate-400">No edges yet. Add next or branch links on a node card.</p> : activeGraphEdges.map((edge, index) => (
-              <div key={`${edge.from}-${edge.when}-${edge.to}-list-${index}`} className="graph-edge-pill"><span>{edge.from}</span><b>{edge.when}</b><span>{edge.to}</span></div>
-            ))}
           </div>
         </section>
         )}
