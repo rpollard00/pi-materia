@@ -1,0 +1,100 @@
+import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import piMateria from "../src/index.js";
+import { FakePiHarness } from "./fakePi.js";
+
+async function makeHarness(config: unknown): Promise<FakePiHarness> {
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-recovery-"));
+  await mkdir(path.join(cwd, ".pi"), { recursive: true });
+  await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(config, null, 2));
+  const harness = new FakePiHarness(cwd);
+  piMateria(harness.pi);
+  return harness;
+}
+
+async function readEvents(harness: FakePiHarness): Promise<any[]> {
+  const castRoot = path.join(harness.cwd, ".pi", "pi-materia");
+  const castDir = path.join(castRoot, (await readdir(castRoot))[0]);
+  return (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line));
+}
+
+function singleAgentConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    pipeline: { entry: "work", nodes: { work: { type: "agent", role: "Build", next: "end" } } },
+    roles: { Build: { tools: "coding", systemPrompt: "Build role" } },
+  };
+}
+
+describe("native same-node recovery", () => {
+  test("context-window assistant errors retry the same active node without a new node start", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast recover me");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const triggerTurnsAfter = harness.operationLog.filter((op) => op === "triggerTurn").length;
+    expect(triggerTurnsAfter).toBe(triggerTurnsBefore + 1);
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.currentNode).toBe("work");
+    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.recoveryAttempts).toBeDefined();
+
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "node_start")).toHaveLength(1);
+    expect(events.some((event) => event.type === "same_node_recovery_start" && event.data.reason === "context_window" && event.data.mode === "normal")).toBe(true);
+    expect(events.some((event) => event.type === "same_node_recovery_retry")).toBe(true);
+  });
+
+  test("agent_end failures without assistant output retry the same active node", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast no assistant");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    await harness.emit("agent_end", { errorMessage: "maximum tokens exceeded before response" });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.visits).toEqual({ work: 1 });
+  });
+
+  test("non-recoverable assistant errors fail without retry", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast fail me");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.nodeState).toBe("failed");
+    expect(latestState.failedReason).toContain("provider auth failed");
+  });
+
+  test("recovery attempts are bounded and exhaustion fails clearly", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast exhaust me");
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded again" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.failedReason).toContain("Same-node recovery exhausted");
+    expect(latestState.visits).toEqual({ work: 1 });
+    const events = await readEvents(harness);
+    expect(events.some((event) => event.type === "same_node_recovery_exhausted")).toBe(true);
+  });
+});

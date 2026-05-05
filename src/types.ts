@@ -160,6 +160,8 @@ export interface MateriaCastState {
   nodeState?: MateriaCastNodeState;
   lastProcessedEntryId?: string;
   lastAssistantText?: string;
+  /** Hidden prompt for the active in-flight agent turn; used to retry without re-running node start. */
+  activeTurnPrompt?: string;
   multiTurnFinalizing?: boolean;
   failedReason?: string;
   startedAt: number;
@@ -168,6 +170,8 @@ export interface MateriaCastState {
   cursors: Record<string, number>;
   visits: Record<string, number>;
   multiTurnRefinements?: Record<string, number>;
+  /** Bounded retry counters for same-node recovery of incomplete agent turns. */
+  recoveryAttempts?: Record<string, number>;
   taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
   lastOutput?: string;

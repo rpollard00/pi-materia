@@ -21,6 +21,7 @@ const DEFAULT_UTILITY_TIMEOUT_MS = 30_000;
 const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
+const DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS = 1;
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
   const config = loaded.config;
@@ -121,20 +122,34 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   if (!state.awaitingResponse && !acceptingRefinement) return;
 
   const latest = findLatestAssistantEntry(ctx.sessionManager.getEntries(), state.lastProcessedEntryId);
-  if (!latest || latest.entry.id === state.lastProcessedEntryId) return;
+  if (!latest || latest.entry.id === state.lastProcessedEntryId) {
+    const eventFailure = agentEndFailureMessage(event);
+    if (!eventFailure) return;
+    const error = new Error(`Pi agent turn failed before producing an assistant response for node "${state.currentNode ?? state.phase}": ${eventFailure}`);
+    const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error);
+    if (!recovered) await failCast(pi, ctx, state, error);
+    return;
+  }
 
   const text = assistantText(latest.message);
   const agentError = assistantErrorMessage(latest.message);
   const wasAwaitingFinalization = state.awaitingResponse && state.nodeState === "awaiting_agent_response" && state.multiTurnFinalizing === true;
   state.lastProcessedEntryId = latest.entry.id;
   state.lastAssistantText = text;
+  captureUsage(state, latest.message);
+
+  if (agentError) {
+    const error = new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
+    const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id });
+    if (!recovered) await failCast(pi, ctx, state, error, latest.entry.id);
+    return;
+  }
+
   state.awaitingResponse = false;
   state.nodeState = "idle";
   state.updatedAt = Date.now();
-  captureUsage(state, latest.message);
 
   try {
-    if (agentError) throw new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
     const node = currentNodeOrThrow(state);
     // Multi-turn pausing is role-driven: if the resolved agent role omits
     // multiTurn, even an interactive planning node completes and advances.
@@ -489,6 +504,82 @@ async function recordUtilityInput(state: MateriaCastState, node: ResolvedMateria
   return artifact;
 }
 
+async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<boolean> {
+  const reason = classifyRecoverableTurnFailure(error);
+  if (!reason) {
+    await appendEvent(state.runState, "same_node_recovery_skip", { recoverable: false, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    return false;
+  }
+
+  const key = recoveryIdentityKey(state);
+  state.recoveryAttempts ??= {};
+  const previousAttempts = state.recoveryAttempts[key] ?? 0;
+  const maxAttempts = DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS;
+  if (previousAttempts >= maxAttempts) {
+    const exhausted = `Same-node recovery exhausted for ${recoveryDiagnosticLabel(state)} after ${previousAttempts}/${maxAttempts} attempt(s): ${errorMessage(error)}`;
+    await appendEvent(state.runState, "same_node_recovery_exhausted", { reason, key, attempts: previousAttempts, maxAttempts, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    await failCast(pi, ctx, state, new Error(exhausted), options.entryId);
+    return true;
+  }
+
+  const attempt = previousAttempts + 1;
+  state.recoveryAttempts[key] = attempt;
+  state.awaitingResponse = true;
+  state.nodeState = "awaiting_agent_response";
+  state.updatedAt = Date.now();
+  state.runState.lastMessage = `Retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`;
+  await appendEvent(state.runState, "same_node_recovery_start", { reason, key, attempt, maxAttempts, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, mode: recoveryTurnMode(state) });
+  await writeUsage(state.runState);
+  saveCastState(pi, state);
+
+  try {
+    updateToolScope(pi, currentRole(state));
+    await sendMateriaTurn(pi, state, buildSameNodeRecoveryPrompt(state));
+    await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, maxAttempts, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    saveCastState(pi, state);
+    updateWidget(ctx, state.runState);
+    ctx.ui.notify(`pi-materia retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`, "warning");
+    return true;
+  } catch (retryError) {
+    await appendEvent(state.runState, "same_node_recovery_retry_failed", { reason, key, attempt, maxAttempts, error: errorMessage(retryError), originalError: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    await failCast(pi, ctx, state, new Error(`Same-node recovery retry failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(retryError)}. Original failure: ${errorMessage(error)}`), options.entryId);
+    return true;
+  }
+}
+
+function classifyRecoverableTurnFailure(error: unknown): "context_window" | undefined {
+  const message = errorMessage(error).toLowerCase();
+  return /context (window|length|limit|overflow)|token limit|max(?:imum)? tokens|input too long|request too large|too many tokens/.test(message) ? "context_window" : undefined;
+}
+
+function buildSameNodeRecoveryPrompt(state: MateriaCastState): string {
+  if (state.activeTurnPrompt) return state.activeTurnPrompt;
+  const node = currentNodeOrThrow(state);
+  if (recoveryTurnMode(state) === "finalization") return buildMultiTurnFinalizationPrompt(state, node);
+  return buildNodePrompt(state, node);
+}
+
+function recoveryTurnMode(state: MateriaCastState): "normal" | "refinement" | "finalization" {
+  if (state.multiTurnFinalizing === true) return "finalization";
+  return isActiveMultiTurnNode(state) ? "refinement" : "normal";
+}
+
+function recoveryIdentityKey(state: MateriaCastState): string {
+  const nodeId = state.currentNode ?? state.phase;
+  const visit = state.currentNode ? nodeVisit(state, state.currentNode) : 0;
+  const refinementTurn = state.currentNode ? currentRefinementTurn(state, state.currentNode) : 0;
+  return JSON.stringify([recoveryTurnMode(state), nodeId, state.currentItemKey ?? "__singleton__", visit, refinementTurn]);
+}
+
+function recoveryDiagnosticLabel(state: MateriaCastState): string {
+  const item = state.currentItemKey ? ` item ${JSON.stringify(state.currentItemKey)}` : "";
+  return `${recoveryTurnMode(state)} turn for node "${state.currentNode ?? state.phase}"${item}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string): Promise<void> {
   state.active = false;
   state.awaitingResponse = false;
@@ -556,6 +647,8 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
 }
 
 async function sendMateriaTurn(pi: ExtensionAPI, state: MateriaCastState, prompt: string): Promise<void> {
+  state.activeTurnPrompt = prompt;
+  saveCastState(pi, state);
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
   await appendManifest(state, { phase: state.phase, node: state.currentNode, role: state.currentRole, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, kind: "context", roleModel: state.currentRoleModel });
 
@@ -714,6 +807,7 @@ export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: Exte
   state.awaitingResponse = true;
   state.nodeState = "awaiting_agent_response";
   state.multiTurnFinalizing = false;
+  state.activeTurnPrompt = rolePrompt(node.role, [buildSyntheticCastContext(state), multiTurnRefinementGuidance()]);
   state.updatedAt = Date.now();
   const refinementTurn = currentRefinementTurn(state, node.id) + 1;
   recordUsageModelSelection(state.runState.usage, { node: node.id, role: node.node.role, taskId: state.currentItemKey, attempt: state.runState.attempt, roleModel });
@@ -971,6 +1065,13 @@ function assistantErrorMessage(message: unknown): string | undefined {
   const value = message as { stopReason?: unknown; errorMessage?: unknown };
   if (value.stopReason !== "error") return undefined;
   return typeof value.errorMessage === "string" && value.errorMessage.trim() ? value.errorMessage : "unknown agent error";
+}
+
+function agentEndFailureMessage(event: unknown): string | undefined {
+  const value = event as { error?: unknown; errorMessage?: unknown; message?: unknown; reason?: unknown; stopReason?: unknown };
+  const candidates = [value.errorMessage, value.error, value.message, value.reason].filter((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0);
+  if (candidates.length > 0) return candidates.join(": ");
+  return value.stopReason === "error" ? "unknown agent error" : undefined;
 }
 
 function captureUsage(state: MateriaCastState, message: unknown): void {
