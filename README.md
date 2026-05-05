@@ -122,7 +122,7 @@ Minimal hello-world legacy grid:
 }
 ```
 
-Configs can also define named `loadouts` that share the top-level `roles`, `limits`, `budget`, and `artifactDir`. Set `activeLoadout` to choose which graph `/materia cast` runs:
+Configs can also define named `loadouts` that share the top-level `roles`, `limits`, `budget`, `compaction`, and `artifactDir`. Set `activeLoadout` to choose which graph `/materia cast` runs:
 
 ```json
 {
@@ -153,6 +153,28 @@ Configs can also define named `loadouts` that share the top-level `roles`, `limi
 ```
 
 When switching with `/materia loadout <name>`, pi-materia persists only the `activeLoadout` override to the active writable config path: the explicit `--materia-config`/`MATERIA_CONFIG` file when one is used, otherwise the target project's `.pi/pi-materia.json`. If you are using the bundled defaults, switching creates or updates `.pi/pi-materia.json`; it does not modify `config/default.json`. WebUI saves default to the user asset store at `~/.config/pi/pi-materia/materia.json` and only write `.pi/pi-materia.json` when the UI explicitly requests project scope.
+
+### Proactive compaction thresholds
+
+By default, pi-materia proactively compacts at 75% for context windows below 128k tokens, 65% for 128k through 199,999 tokens, and 55% for 200k tokens and above. Threshold resolution uses the active/effective Pi model context window; if model/context-window metadata is missing or invalid, pi-materia falls back to the conservative 55% threshold to compact earlier and reduce provider-side context-window failures. You can override this with a backward-compatible single percentage:
+
+```json
+{ "compaction": { "proactiveThresholdPercent": 60 } }
+```
+
+If `proactiveThresholdPercent` is present, it takes precedence even if tiered thresholds are also present (useful for layered config overrides). Or configure ordered min-inclusive/max-exclusive tiers. Tiers must start at `0`, have no gaps or overlaps, and the final tier must omit `maxContextWindow`:
+
+```json
+{
+  "compaction": {
+    "proactiveThresholdTiers": [
+      { "id": "small", "minContextWindow": 0, "maxContextWindow": 128000, "thresholdPercent": 70 },
+      { "id": "medium", "minContextWindow": 128000, "maxContextWindow": 200000, "thresholdPercent": 60 },
+      { "id": "large", "minContextWindow": 200000, "thresholdPercent": 50 }
+    ]
+  }
+}
+```
 
 ### Per-role model and thinking settings
 

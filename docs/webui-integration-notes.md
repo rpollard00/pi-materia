@@ -31,13 +31,13 @@ Current `src/config.ts` precedence is:
 3. project `.pi/pi-materia.json`;
 4. bundled `config/default.json`.
 
-`loadConfig()` merges parsed config over bundled defaults. Legacy top-level `pipeline` configs remain supported and suppress named `loadouts`. Named loadouts share top-level `roles`, `limits`, `budget`, and `artifactDir`. `saveActiveLoadout()` currently writes only `{ activeLoadout }` plus existing file fields to the explicit/project writable config path; it intentionally does not rewrite bundled defaults.
+`loadConfig()` merges parsed config over bundled defaults. Legacy top-level `pipeline` configs remain supported and suppress named `loadouts`. Named loadouts share top-level `roles`, `limits`, `budget`, `compaction`, and `artifactDir`. `saveActiveLoadout()` currently writes only `{ activeLoadout }` plus existing file fields to the explicit/project writable config path; it intentionally does not rewrite bundled defaults.
 
 ### Loadouts, roles, and materia slots
 
 Important TypeScript interfaces are in `src/types.ts`:
 
-- `PiMateriaConfig`: `artifactDir`, `budget`, `limits`, optional legacy `pipeline`, optional named `loadouts`, `activeLoadout`, and `roles`.
+- `PiMateriaConfig`: `artifactDir`, `budget`, `limits`, `compaction`, optional legacy `pipeline`, optional named `loadouts`, `activeLoadout`, and `roles`.
 - `MateriaPipelineConfig`: `{ entry, nodes }`.
 - `MateriaPipelineNodeConfig`: agent or utility node.
 - `MateriaAgentNodeConfig`: `type: "agent"`, `role`, optional `prompt`, plus common routing fields.

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
+import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
@@ -22,19 +23,8 @@ const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
 const DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS = 1;
-const SMALL_CONTEXT_WINDOW_LIMIT = 128_000;
-const LARGE_CONTEXT_WINDOW_LIMIT = 200_000;
-const FALLBACK_PROACTIVE_COMPACTION_THRESHOLD_PERCENT = 55;
 
-export function defaultProactiveCompactionThresholdPercent(contextWindow: number | null | undefined): number {
-  // If model/context-window metadata is unavailable, fall back to the most
-  // conservative default tier so Materia compacts early rather than risking a
-  // provider-side context_length_exceeded failure.
-  if (!Number.isFinite(contextWindow) || contextWindow == null || contextWindow <= 0) return FALLBACK_PROACTIVE_COMPACTION_THRESHOLD_PERCENT;
-  if (contextWindow < SMALL_CONTEXT_WINDOW_LIMIT) return 75;
-  if (contextWindow < LARGE_CONTEXT_WINDOW_LIMIT) return 65;
-  return 55;
-}
+export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
   const config = loaded.config;
@@ -609,8 +599,10 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
   // when changing this decision point.
   const usage = ctx.getContextUsage();
   if (!usage) return;
+  const config = await loadConfigFromState(state);
   const contextWindow = effectiveContextWindow(ctx, usage);
-  const thresholdPercent = defaultProactiveCompactionThresholdPercent(contextWindow);
+  const threshold = resolveProactiveCompactionThreshold(config.compaction, contextWindow);
+  const thresholdPercent = threshold.thresholdPercent;
   const percent = usage.tokens != null && contextWindow != null && contextWindow > 0 ? (usage.tokens / contextWindow) * 100 : usage.percent;
   if (percent == null || percent < thresholdPercent) return;
 
@@ -618,6 +610,8 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
     action: "compact" as const,
     reason: "context_pressure" as const,
     thresholdPercent,
+    thresholdMode: threshold.mode,
+    thresholdTier: threshold.tier,
     tokens: usage.tokens,
     contextWindow,
     percent,

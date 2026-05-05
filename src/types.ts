@@ -2,6 +2,7 @@ export interface PiMateriaConfig {
   artifactDir?: string;
   budget?: MateriaBudgetConfig;
   limits?: MateriaLimitsConfig;
+  compaction?: MateriaCompactionConfig;
   /** Legacy single graph config. Used when no loadouts are configured. */
   pipeline?: MateriaPipelineConfig;
   /** Named graph configs that share the top-level roles, limits, budget, and artifactDir. */
@@ -50,6 +51,20 @@ export interface MateriaBudgetConfig {
 export interface MateriaLimitsConfig {
   maxNodeVisits?: number;
   maxEdgeTraversals?: number;
+}
+
+export interface MateriaCompactionConfig {
+  /** Backward-compatible single proactive compaction threshold percentage. */
+  proactiveThresholdPercent?: number;
+  /** Ordered min-inclusive/max-exclusive context-window tiers. Tiers must cover 0..infinity without gaps. */
+  proactiveThresholdTiers?: MateriaCompactionThresholdTierConfig[];
+}
+
+export interface MateriaCompactionThresholdTierConfig {
+  id?: string;
+  minContextWindow?: number;
+  maxContextWindow?: number;
+  thresholdPercent: number;
 }
 
 export interface UsageTokens {

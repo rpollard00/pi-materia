@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateCompactionConfig } from "./compaction.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaRoleConfig, MateriaSaveTarget, PiMateriaConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -151,6 +152,7 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   let config = { ...base } as PiMateriaConfig;
   for (const parsed of overrides) config = mergeConfig(config, parsed);
   validateRoles(config.roles);
+  validateCompactionConfig(config.compaction);
   return config;
 }
 
@@ -161,6 +163,7 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMater
     ...patch,
     budget: patch.budget ? { ...(base.budget ?? {}), ...patch.budget } : base.budget,
     limits: patch.limits ? { ...(base.limits ?? {}), ...patch.limits } : base.limits,
+    compaction: patch.compaction ? { ...(base.compaction ?? {}), ...patch.compaction } : base.compaction,
     pipeline: patch.pipeline ? mergePipeline(base.pipeline, patch.pipeline) : base.pipeline,
     loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, patch.loadouts),
     activeLoadout: usesLegacyPipeline ? undefined : (patch.activeLoadout ?? base.activeLoadout),
@@ -176,6 +179,7 @@ function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>): P
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
     limits: { ...base.limits, ...(parsed.limits ?? {}) },
+    compaction: { ...base.compaction, ...(parsed.compaction ?? {}) },
     pipeline: mergePipeline(base.pipeline, parsed.pipeline),
     loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, parsed.loadouts),
     activeLoadout: usesLegacyPipeline ? undefined : (parsed.activeLoadout ?? base.activeLoadout),
