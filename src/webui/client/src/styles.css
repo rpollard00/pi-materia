@@ -246,6 +246,48 @@
   opacity: 0.18;
 }
 
+.socket-action-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(2 6 23 / 0.68);
+  padding: 1.5rem;
+  backdrop-filter: blur(8px);
+}
+
+.socket-action-modal {
+  width: min(34rem, 100%);
+  border-radius: 1.5rem;
+  border: 1px solid rgb(103 232 249 / 0.28);
+  background:
+    radial-gradient(circle at 20% 0%, rgb(34 211 238 / 0.18), transparent 38%),
+    linear-gradient(135deg, rgb(15 23 42 / 0.98), rgb(2 6 23 / 0.96));
+  padding: 1.5rem;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.52), 0 0 42px rgb(34 211 238 / 0.14);
+}
+
+.socket-action-button {
+  border-radius: 1rem;
+  border: 1px solid rgb(207 250 254 / 0.18);
+  background: rgb(15 23 42 / 0.78);
+  padding: 1rem;
+  color: rgb(224 242 254);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: 160ms ease;
+}
+
+.socket-action-button:hover,
+.socket-action-button:focus {
+  border-color: rgb(103 232 249 / 0.64);
+  background: linear-gradient(135deg, rgb(8 47 73 / 0.92), rgb(88 28 135 / 0.62));
+  box-shadow: 0 0 24px rgb(34 211 238 / 0.16);
+}
+
 .entry-rune {
   position: absolute;
   right: 1rem;

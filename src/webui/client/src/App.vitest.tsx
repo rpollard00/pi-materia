@@ -287,6 +287,54 @@ describe('Materia loadout grid editor', () => {
     expect(saved.Build.next).toBe('Auto-Eval');
   });
 
+  it('opens a socket action modal and unsockets materia while preserving graph metadata', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Build'));
+
+    expect(await screen.findByTestId('socket-action-modal')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Unsocket' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Replace' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New Socket' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unsocket' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const savedBuild = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes.Build;
+    expect(savedBuild).toMatchObject({ empty: true, next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
+    expect(savedBuild.role).toBeUndefined();
+  });
+
+  it('creates a connected empty socket through validated socket modal mutation', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Planning-Consult/ }));
+    fireEvent.click(await screen.findByTestId('socket-Build'));
+    fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
+    expect(await screen.findByTestId('socket-Build-Socket')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Planning-Consult'].nodes;
+    expect(saved.Build.next).toBe('Build-Socket');
+    expect(saved['Build-Socket']).toEqual({ empty: true });
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Planning-Consult');
+  });
+
   it('preserves socket graph structure when dragging a palette materia into a socket', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));

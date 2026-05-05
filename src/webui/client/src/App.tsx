@@ -424,6 +424,7 @@ export function App() {
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
   const [dragOverTrash, setDragOverTrash] = useState(false);
+  const [socketActionId, setSocketActionId] = useState<string | undefined>();
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
@@ -549,6 +550,7 @@ export function App() {
       config.activeLoadout = name;
     });
     setSelectedMateriaId(undefined);
+    setSocketActionId(undefined);
     setStatus(`Active loadout staged: ${name}`);
   }
 
@@ -626,7 +628,53 @@ export function App() {
       if (!loadout?.nodes || !loadout.nodes[socketId]) return;
       loadout.nodes[socketId] = clearSocketMateria(loadout.nodes[socketId]);
     });
+    setSocketActionId(undefined);
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
+  }
+
+  function makeNewSocketId(nodes: Record<string, PipelineNode>, afterSocketId: string) {
+    const base = `${afterSocketId}-Socket`;
+    if (!nodes[base]) return base;
+    let index = 2;
+    while (nodes[`${base}-${index}`]) index += 1;
+    return `${base}-${index}`;
+  }
+
+  function createConnectedSocket(afterSocketId: string) {
+    if (!activeLoadoutName || !activeLoadout) return;
+    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, (loadout) => {
+      if (!loadout.nodes?.[afterSocketId]) return;
+      const source = loadout.nodes[afterSocketId] as PipelineNode;
+      const newId = makeNewSocketId(loadout.nodes as Record<string, PipelineNode>, afterSocketId);
+      const priorNext = source.next;
+      const sourceLayout = source.layout;
+      loadout.nodes[newId] = {
+        empty: true,
+        next: priorNext,
+        layout: sourceLayout ? { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 } : undefined,
+      } as unknown as import('../../../types.js').MateriaPipelineNodeConfig;
+      if (!priorNext) delete (loadout.nodes[newId] as PipelineNode).next;
+      source.next = newId;
+    });
+    if (!result.ok) {
+      setStatus(`Cannot create socket after ${afterSocketId}: ${formatGraphValidationErrors(result.errors)}`);
+      return;
+    }
+    updateDraft((config) => {
+      const draftLoadouts = buildLoadouts(config);
+      draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
+      config.loadouts = draftLoadouts;
+    });
+    setSocketActionId(undefined);
+    setStatus(`Created a connected empty socket after ${afterSocketId}.`);
+  }
+
+  function handleSocketClick(socketId: string) {
+    if (selectedMateriaId) {
+      putMateria(socketId, selectedMateriaId);
+      return;
+    }
+    setSocketActionId(socketId);
   }
 
   function toggleEdgeCondition(edge: LoadoutEdge) {
@@ -839,7 +887,7 @@ export function App() {
                   data-testid={`socket-${id}`}
                   className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''}`}
                   style={{ left: `${x}px`, top: `${y}px` }}
-                  onClick={() => selectedMateriaId && putMateria(id, selectedMateriaId)}
+                  onClick={() => handleSocketClick(id)}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDrop(id, event)}
                 >
@@ -852,6 +900,34 @@ export function App() {
                 </button>
               ))}
             </div>
+
+            {socketActionId && activeLoadout?.nodes?.[socketActionId] && (
+              <div className="socket-action-backdrop" role="presentation" onMouseDown={() => setSocketActionId(undefined)}>
+                <section
+                  className="socket-action-modal"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="socket-action-title"
+                  data-testid="socket-action-modal"
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">socket actions</p>
+                      <h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{socketActionId}</h3>
+                      <p className="mt-1 text-sm text-slate-300">{getNodeLabel(socketActionId, activeLoadout.nodes[socketActionId])}</p>
+                    </div>
+                    <button type="button" className="materia-button-secondary" onClick={() => setSocketActionId(undefined)}>Close</button>
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <button type="button" className="socket-action-button" onClick={() => removeMateria(socketActionId)}>Unsocket</button>
+                    <button type="button" className="socket-action-button" onClick={() => setStatus('Replace selector is coming in the next implementation step.')}>Replace</button>
+                    <button type="button" className="socket-action-button" onClick={() => setStatus('Socket property editor is coming in the next implementation step.')}>Edit</button>
+                    <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
+                  </div>
+                </section>
+              </div>
+            )}
           </section>
 
           <aside className="flex flex-col gap-6">
