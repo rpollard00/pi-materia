@@ -96,14 +96,26 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
 export function loadCastStateById(ctx: ExtensionContext, castId: string): MateriaCastState | undefined {
   const requested = castId.trim();
   if (!requested) return undefined;
+  return listLatestCastStates(ctx).find((state) => state.castId === requested);
+}
+
+export function listLatestCastStates(ctx: ExtensionContext): MateriaCastState[] {
   const entries = ctx.sessionManager.getBranch();
+  const seenCastIds = new Set<string>();
+  const states: MateriaCastState[] = [];
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "custom" || entry.customType !== STATE_ENTRY || !entry.data) continue;
     const state = entry.data as MateriaCastState;
-    if (state.castId === requested) return state;
+    if (seenCastIds.has(state.castId)) continue;
+    seenCastIds.add(state.castId);
+    states.push(state);
   }
-  return undefined;
+  return states;
+}
+
+export function listResumableCastStates(ctx: ExtensionContext): MateriaCastState[] {
+  return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && state.nodeState !== "complete" && (state.phase === "failed" || state.nodeState === "failed"));
 }
 
 export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, castId: string): Promise<MateriaCastState> {

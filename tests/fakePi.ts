@@ -68,7 +68,7 @@ export class FakePiHarness {
   readonly pi: ExtensionAPI;
   readonly ctx: FakeCommandContext;
   readonly events = new Map<string, ExtensionHandler<any, any>[]>();
-  readonly commands = new Map<string, { description?: string; handler: (args: string, ctx: FakeCommandContext) => Promise<void> }>();
+  readonly commands = new Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string; description?: string }> | null; handler: (args: string, ctx: FakeCommandContext) => Promise<void> }>();
   readonly flags = new Map<string, boolean | string | undefined>();
   readonly sentMessages: Array<{ message: unknown; options?: unknown }> = [];
   readonly userMessages: Array<{ content: unknown; options?: unknown }> = [];
@@ -106,7 +106,7 @@ export class FakePiHarness {
         handlers.push(handler);
         this.events.set(event, handlers);
       },
-      registerCommand: (name: string, options: { description?: string; handler: (args: string, ctx: FakeCommandContext) => Promise<void> }) => this.commands.set(name, options),
+      registerCommand: (name: string, options: { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string; description?: string }> | null; handler: (args: string, ctx: FakeCommandContext) => Promise<void> }) => this.commands.set(name, options),
       registerFlag: (name: string, options: { default?: boolean | string }) => this.flags.set(name, options.default),
       getFlag: (name: string) => this.flags.get(name),
       registerMessageRenderer: (customType: string, renderer: unknown) => this.registeredRenderers.set(customType, renderer),
@@ -210,6 +210,12 @@ export class FakePiHarness {
     const command = this.commands.get(name);
     if (!command) throw new Error(`Fake Pi command not registered: ${name}`);
     await command.handler(args, this.ctx);
+  }
+
+  getCommandCompletions(name: string, prefix: string): Array<{ value: string; label: string; description?: string }> | null {
+    const command = this.commands.get(name);
+    if (!command) throw new Error(`Fake Pi command not registered: ${name}`);
+    return command.getArgumentCompletions?.(prefix) ?? null;
   }
 
   appendAssistantMessage(text: string, extra: Record<string, unknown> = {}): SessionEntry {

@@ -1,15 +1,16 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { PiMateriaConfig } from "./types.js";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { MateriaCastState, PiMateriaConfig } from "./types.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { activeRoleSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, loadActiveCastState, prepareMultiTurnRefinementTurn, startNativeCast } from "./native.js";
+import { activeRoleSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentRole, handleAgentEnd, listResumableCastStates, loadActiveCastState, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
+  let activeContext: ExtensionContext | undefined;
 
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
@@ -17,6 +18,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.on("context", (event, ctx) => {
+    activeContext = ctx;
     const state = loadActiveCastState(ctx);
     if (!state?.active) return;
     return {
@@ -25,6 +27,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    activeContext = ctx;
     const state = loadActiveCastState(ctx);
     if (!state?.active) return;
     if (state.nodeState === "awaiting_user_refinement") await prepareMultiTurnRefinementTurn(pi, ctx, state);
@@ -37,10 +40,12 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    activeContext = ctx;
     await handleAgentEnd(pi, event, ctx);
   });
 
   pi.on("session_start", (_event, ctx) => {
+    activeContext = ctx;
     const state = loadActiveCastState(ctx);
     if (!state?.active) return;
     ctx.ui.setStatus("materia", `${state.phase}${state.currentNode ? `:${state.currentNode}` : ""}`);
@@ -52,8 +57,10 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, casts, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: cast, recast, casts, grid, loadout, ui, status, continue, abort.",
+    getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext),
     handler: async (args, ctx) => {
+      activeContext = ctx;
       const [subcommand, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 
       if (subcommand === "ui") {
@@ -172,8 +179,23 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
+      if (subcommand === "recast") {
+        try {
+          const requestedCastId = rest.join(" ").trim();
+          const castId = requestedCastId || listResumableCastStates(ctx)[0]?.castId;
+          if (!castId) {
+            ctx.ui.notify("No failed or aborted pi-materia casts are available to recast.", "info");
+            return;
+          }
+          await resumeNativeCast(pi, ctx, castId);
+        } catch (error) {
+          ctx.ui.notify(`pi-materia recast failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
+
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia recast [cast-id], /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -292,6 +314,43 @@ async function readEvents(file: string): Promise<Array<{ type?: string; data?: u
   } catch {
     return [];
   }
+}
+
+function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | undefined): Array<{ value: string; label: string; description?: string }> | null {
+  const trimmedStart = prefix.trimStart();
+  const tokens = trimmedStart.split(/\s+/).filter(Boolean);
+  const endsWithWhitespace = /\s$/.test(prefix);
+
+  if (tokens.length === 0 && !endsWithWhitespace) {
+    const subcommands = ["cast", "recast", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
+    return subcommands.map((value) => ({ value, label: value }));
+  }
+
+  if (tokens.length === 1 && !endsWithWhitespace) {
+    const subcommands = ["cast", "recast", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
+    const matching = subcommands.filter((value) => value.startsWith(tokens[0]));
+    return matching.length ? matching.map((value) => ({ value, label: value })) : null;
+  }
+
+  if (tokens[0] !== "recast" || !ctx) return null;
+  const castIdPrefix = endsWithWhitespace ? "" : (tokens[1] ?? "");
+  const completions = listResumableCastStates(ctx)
+    .filter((state) => state.castId.startsWith(castIdPrefix))
+    .map((state) => ({
+      value: `recast ${state.castId}`,
+      label: `${state.castId}  ${recastStatusLabel(state)}  node:${state.currentNode ?? "-"}`,
+      description: truncateLine(state.request ?? state.failedReason ?? state.runState?.lastMessage ?? "", 72),
+    }));
+  return completions.length ? completions : null;
+}
+
+function recastStatusLabel(state: MateriaCastState): string {
+  return state.failedReason?.toLowerCase().includes("abort") ? "aborted" : "failed";
+}
+
+function truncateLine(value: string, max: number): string {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  return singleLine.length > max ? `${singleLine.slice(0, Math.max(0, max - 1))}…` : singleLine;
 }
 
 function getConfiguredConfigPath(pi: ExtensionAPI): string | undefined {
