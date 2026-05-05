@@ -74,6 +74,26 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
   });
 
+  it('renders the active loadout as a directional left-to-right graph', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    const { container } = render(<App />);
+
+    const planner = await screen.findByTestId('socket-planner');
+    const build = await screen.findByTestId('socket-Build');
+    const evaluate = await screen.findByTestId('socket-Auto-Eval');
+    const maintain = await screen.findByTestId('socket-Maintain');
+    expect(parseFloat(planner.style.left)).toBeLessThan(parseFloat(build.style.left));
+    expect(parseFloat(build.style.left)).toBeLessThan(parseFloat(evaluate.style.left));
+    expect(parseFloat(evaluate.style.left)).toBeLessThan(parseFloat(maintain.style.left));
+    expect(planner.style.left).toBe('32px');
+    expect(build.style.left).toBe('292px');
+    expect(screen.getAllByText('flow').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('satisfied')).toBeTruthy();
+    expect(screen.getByText('not satisfied')).toBeTruthy();
+    expect(container.querySelectorAll('.loadout-edge path[marker-end]').length).toBe(4);
+  });
+
   it('creates new loadouts with exactly one empty untyped entry socket', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));

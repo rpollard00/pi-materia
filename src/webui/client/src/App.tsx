@@ -110,6 +110,21 @@ interface DragPayload {
   fromSocket?: string;
 }
 
+interface LoadoutEdge {
+  id: string;
+  from: string;
+  to: string;
+  when?: string;
+}
+
+interface PositionedSocket {
+  id: string;
+  node: PipelineNode;
+  index: number;
+  x: number;
+  y: number;
+}
+
 type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor';
 
 const materiaTabs: Array<{ id: MateriaTabId; label: string; description: string }> = [
@@ -175,6 +190,67 @@ function nodeColor(id: string, index: number) {
   if (lowered.includes('check') || lowered.includes('eval')) return paletteColors[2];
   if (lowered.includes('maintain')) return paletteColors[3];
   return paletteColors[index % paletteColors.length];
+}
+
+function edgeConditionLabel(when?: string) {
+  if (!when) return 'flow';
+  return when.replace(/_/g, ' ');
+}
+
+function getLoadoutEdges(nodes: Record<string, PipelineNode>): LoadoutEdge[] {
+  const edges: LoadoutEdge[] = [];
+  for (const [from, node] of Object.entries(nodes)) {
+    if (typeof node.next === 'string' && nodes[node.next]) {
+      edges.push({ id: `${from}:next:${node.next}`, from, to: node.next });
+    }
+    for (const [index, edge] of (node.edges ?? []).entries()) {
+      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when ?? 'flow'}`, from, to: edge.to, when: edge.when });
+    }
+  }
+  return edges;
+}
+
+function layoutUnit(value: number, unit: number) {
+  return Math.abs(value) <= 20 ? value * unit : value;
+}
+
+function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[]; edges: LoadoutEdge[]; width: number; height: number } {
+  const nodes = loadout?.nodes ?? {};
+  const entries = Object.entries(nodes);
+  const edges = getLoadoutEdges(nodes);
+  const entryId = loadout?.entry && nodes[loadout.entry] ? loadout.entry : entries[0]?.[0];
+  const depth = new Map<string, number>();
+  if (entryId) depth.set(entryId, 0);
+  const queue = entryId ? [entryId] : [];
+  while (queue.length > 0) {
+    const from = queue.shift() as string;
+    const nextDepth = (depth.get(from) ?? 0) + 1;
+    for (const edge of edges.filter((candidate) => candidate.from === from)) {
+      if (!depth.has(edge.to) || nextDepth < (depth.get(edge.to) ?? Infinity)) {
+        depth.set(edge.to, nextDepth);
+        queue.push(edge.to);
+      }
+    }
+  }
+
+  const rowsByDepth = new Map<number, number>();
+  const sockets = entries.map(([id, node], index) => {
+    const automaticDepth = depth.get(id) ?? Math.max(0, ...depth.values(), 0) + 1;
+    const row = rowsByDepth.get(automaticDepth) ?? 0;
+    rowsByDepth.set(automaticDepth, row + 1);
+    const explicitX = typeof node.layout?.x === 'number' ? layoutUnit(node.layout.x, 260) : undefined;
+    const explicitY = typeof node.layout?.y === 'number' ? layoutUnit(node.layout.y, 210) : undefined;
+    return {
+      id,
+      node,
+      index,
+      x: 32 + (explicitX ?? automaticDepth * 260),
+      y: 28 + (explicitY ?? row * 220),
+    };
+  });
+  const width = Math.max(560, ...sockets.map((socket) => socket.x + 230));
+  const height = Math.max(320, ...sockets.map((socket) => socket.y + 190));
+  return { sockets, edges, width, height };
 }
 
 function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
@@ -379,7 +455,8 @@ export function App() {
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
-  const activeNodes = activeLoadout?.nodes ?? {};
+  const loadoutGraph = useMemo(() => layoutSockets(activeLoadout), [activeLoadout]);
+  const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
   const roles = draftConfig?.roles ?? {};
   const materiaDefinitions = draftConfig?.materiaDefinitions ?? {};
   const editableDefinitionIds = useMemo(() => {
@@ -645,12 +722,39 @@ export function App() {
               </label>
             </div>
 
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3" data-testid="socket-grid">
-              {Object.entries(activeNodes).map(([id, node], index) => (
+            <div className="loadout-graph-canvas" data-testid="socket-grid" style={{ minWidth: `${loadoutGraph.width}px`, minHeight: `${loadoutGraph.height}px` }}>
+              <svg className="loadout-edge-layer" width={loadoutGraph.width} height={loadoutGraph.height} aria-hidden="true">
+                <defs>
+                  <marker id="materia-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+                    <path d="M2,2 L10,6 L2,10 Z" className="loadout-edge-arrow" />
+                  </marker>
+                </defs>
+                {loadoutGraph.edges.map((edge) => {
+                  const from = socketPositions.get(edge.from);
+                  const to = socketPositions.get(edge.to);
+                  if (!from || !to) return null;
+                  const startX = from.x + 184;
+                  const startY = from.y + 92;
+                  const endX = to.x + 12;
+                  const endY = to.y + 92;
+                  const midX = (startX + endX) / 2;
+                  const midY = (startY + endY) / 2;
+                  const curve = Math.max(44, Math.abs(endX - startX) * 0.35);
+                  const path = `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
+                  return (
+                    <g key={edge.id} className={`loadout-edge loadout-edge-${edge.when === 'not_satisfied' ? 'unsatisfied' : edge.when === 'satisfied' ? 'satisfied' : 'default'}`}>
+                      <path d={path} markerEnd="url(#materia-edge-arrow)" />
+                      <text x={midX} y={midY - 10}>{edgeConditionLabel(edge.when)}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+              {loadoutGraph.sockets.map(({ id, node, index, x, y }) => (
                 <button
                   key={id}
                   data-testid={`socket-${id}`}
-                  className={`materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''}`}
+                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''}`}
+                  style={{ left: `${x}px`, top: `${y}px` }}
                   onClick={() => selectedMateriaId && putMateria(id, selectedMateriaId)}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDrop(id, event)}
