@@ -305,6 +305,17 @@ function clearSocketMateria(socket?: PipelineNode): PipelineNode {
   return { ...socketStructure(socket), empty: true };
 }
 
+function parseDragPayload(raw: string): DragPayload | undefined {
+  try {
+    const parsed = JSON.parse(raw) as Partial<DragPayload> | null;
+    if (!parsed || (parsed.kind !== 'palette' && parsed.kind !== 'socket') || typeof parsed.materiaId !== 'string' || !parsed.materiaId) return undefined;
+    if (parsed.kind === 'socket' && parsed.fromSocket !== undefined && typeof parsed.fromSocket !== 'string') return undefined;
+    return parsed as DragPayload;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseJsonObject(raw: string): Record<string, unknown> | undefined {
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
@@ -552,23 +563,46 @@ export function App() {
   }
 
   function putMateria(socketId: string, materiaId: string, fromSocket?: string) {
-    if (!activeLoadoutName || !draftConfig) return;
+    if (!activeLoadoutName || !draftConfig) return false;
+    const currentLoadout = loadouts[activeLoadoutName];
+    const currentTarget = currentLoadout?.nodes?.[socketId];
+    if (!currentLoadout?.nodes || !currentTarget) {
+      setStatus(`Ignored drop: socket ${socketId} is not available in the active loadout.`);
+      return false;
+    }
+
+    if (fromSocket && fromSocket !== socketId) {
+      const currentSource = currentLoadout.nodes[fromSocket];
+      if (!currentSource || currentSource.empty) {
+        setStatus('Ignored drop: dragged socket materia is no longer available.');
+        return false;
+      }
+    } else {
+      const currentSource = palette.find(([id]) => id === materiaId)?.[1] ?? currentLoadout.nodes[materiaId];
+      if (!currentSource || currentSource.empty) {
+        setStatus(`Ignored drop: materia ${materiaId} is not available.`);
+        return false;
+      }
+    }
+
     updateDraft((config) => {
       const loadout = buildLoadouts(config)[activeLoadoutName];
       if (!loadout?.nodes) return;
       if (fromSocket && fromSocket !== socketId) {
         const target = loadout.nodes[socketId];
         const source = loadout.nodes[fromSocket];
-        if (!source || !target) return;
+        if (!source || source.empty || !target) return;
         loadout.nodes[socketId] = placeMateriaInSocket(target, source);
         loadout.nodes[fromSocket] = placeMateriaInSocket(source, target);
       } else {
         const sourceNode = palette.find(([id]) => id === materiaId)?.[1] ?? loadout.nodes[materiaId];
-        if (sourceNode) loadout.nodes[socketId] = placeMateriaInSocket(loadout.nodes[socketId], sourceNode);
+        const target = loadout.nodes[socketId];
+        if (sourceNode && !sourceNode.empty && target) loadout.nodes[socketId] = placeMateriaInSocket(target, sourceNode);
       }
     });
     setSelectedMateriaId(undefined);
     setStatus(`Staged ${materiaId} in socket ${socketId}; socket graph links and layout were preserved.`);
+    return true;
   }
 
   function removeMateria(socketId: string) {
@@ -631,7 +665,11 @@ export function App() {
     event.preventDefault();
     const raw = event.dataTransfer.getData('application/json');
     if (!raw) return;
-    const payload = JSON.parse(raw) as DragPayload;
+    const payload = parseDragPayload(raw);
+    if (!payload) {
+      setStatus('Ignored drop: unsupported drag payload.');
+      return;
+    }
     putMateria(socketId, payload.materiaId, payload.kind === 'socket' ? payload.fromSocket : undefined);
   }
 
@@ -804,8 +842,12 @@ export function App() {
                   setDragOverTrash(false);
                   const raw = event.dataTransfer.getData('application/json');
                   if (!raw) return;
-                  const payload = JSON.parse(raw) as DragPayload;
-                  if (payload.fromSocket) removeMateria(payload.fromSocket);
+                  const payload = parseDragPayload(raw);
+                  if (!payload) {
+                    setStatus('Ignored drop: unsupported drag payload.');
+                    return;
+                  }
+                  if (payload.kind === 'socket' && payload.fromSocket) removeMateria(payload.fromSocket);
                 }}
               >
                 Drag socket here to remove non-entry materia

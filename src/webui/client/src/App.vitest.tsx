@@ -261,6 +261,34 @@ describe('Materia loadout grid editor', () => {
     expect(savedBuild.role).toBe('Maintain');
     expect(savedBuild.next).toBe('Auto-Eval');
     expect(savedBuild.layout).toEqual({ x: 1, y: 0 });
+    expect(savedBuild.insertedBy).toBe('node-shift');
+    expect(savedBuild.edges).toBeUndefined();
+  });
+
+  it('ignores invalid palette-to-socket drops without corrupting draft state', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByTestId('socket-Build');
+    const dataTransfer = createDataTransfer();
+    dataTransfer.setData('application/json', '{not-json');
+    fireEvent.drop(screen.getByTestId('socket-Build'), { dataTransfer });
+
+    expect(await screen.findByText('Ignored drop: unsupported drag payload.')).toBeTruthy();
+    expect(screen.queryByText('staged edits')).toBeNull();
+
+    dataTransfer.setData('application/json', JSON.stringify({ kind: 'palette', materiaId: 'Missing-Materia' }));
+    fireEvent.drop(screen.getByTestId('socket-Build'), { dataTransfer });
+    expect(await screen.findByText('Ignored drop: materia Missing-Materia is not available.')).toBeTruthy();
+    expect(screen.queryByText('staged edits')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('switches the active loadout as a staged client-side edit', async () => {
