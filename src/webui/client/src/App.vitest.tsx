@@ -570,6 +570,82 @@ describe('Materia loadout grid editor', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('removes a default flow without dropping conditional edges or sockets', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    const startNode = config.loadouts.Edges.nodes.Start as typeof config.loadouts.Edges.nodes.Start & { next?: string };
+    startNode.next = 'Review';
+    startNode.edges = [{ to: 'Ship', when: 'satisfied' }];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByTestId('edge-Start-Review-next')).toBeTruthy();
+    expect(screen.getByTestId('edge-Start-Ship-0')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('socket-Start'));
+    fireEvent.click(await screen.findByTestId('remove-next-edge-Start'));
+
+    expect(await screen.findByText(/Removed default flow Start → Review; conditional edges and sockets were preserved\./)).toBeTruthy();
+    expect(screen.queryByTestId('edge-Start-Review-next')).toBeNull();
+    expect(screen.getByTestId('edge-Start-Ship-0')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes;
+    expect(saved.Start.next).toBeUndefined();
+    expect(saved.Start.edges).toEqual([{ to: 'Ship', when: 'satisfied' }]);
+    expect(saved.Review).toBeTruthy();
+    expect(saved.Ship).toBeTruthy();
+  });
+
+  it('persists manually dragged socket layout using layout units near the graph origin', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: edgeEditorConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const startSocket = await screen.findByTestId('socket-Start');
+    startSocket.setPointerCapture = vi.fn();
+    startSocket.releasePointerCapture = vi.fn();
+    expect(startSocket.style.left).toBe('32px');
+    expect(startSocket.style.top).toBe('28px');
+
+    fireEvent.pointerDown(startSocket, { button: 0, pointerId: 7, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(startSocket, { pointerId: 7, clientX: 108, clientY: 107 });
+    fireEvent.pointerUp(startSocket, { pointerId: 7, clientX: 108, clientY: 107 });
+
+    expect(await screen.findByText(/Moved socket Start; explicit layout will be saved with the loadout\./)).toBeTruthy();
+    expect(screen.queryByTestId('socket-action-modal')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const savedStart = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes.Start;
+    expect(savedStart.layout.x).toBeCloseTo(8 / 260);
+    expect(savedStart.layout.y).toBeCloseTo(7 / 210);
+    expect(savedStart.edges).toEqual([]);
+  });
+
+  it('falls back to automatic graph layout when sockets have no explicit layout', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Planning-Consult/ }));
+    const planner = await screen.findByTestId('socket-planner');
+    const build = await screen.findByTestId('socket-Build');
+
+    expect(planner.style.left).toBe('32px');
+    expect(planner.style.top).toBe('28px');
+    expect(build.style.left).toBe('292px');
+    expect(build.style.top).toBe('28px');
+  });
+
   it('switches the active loadout as a staged client-side edit', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
