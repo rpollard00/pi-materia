@@ -508,7 +508,6 @@ async function recordUtilityInput(state: MateriaCastState, node: ResolvedMateria
 async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<boolean> {
   const reason = classifyRecoverableTurnFailure(error);
   if (!reason) {
-    await appendEvent(state.runState, "same_node_recovery_skip", { recoverable: false, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     return false;
   }
 
