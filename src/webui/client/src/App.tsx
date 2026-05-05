@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 
 type SaveTarget = 'user' | 'project' | 'explicit';
@@ -136,6 +136,18 @@ interface PositionedSocket {
   y: number;
 }
 
+interface SocketLayoutDragState {
+  socketId: string;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  originX: number;
+  originY: number;
+  currentX: number;
+  currentY: number;
+  moved: boolean;
+}
+
 type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor';
 
 const materiaTabs: Array<{ id: MateriaTabId; label: string; description: string }> = [
@@ -242,6 +254,13 @@ function getLoadoutEdges(nodes: Record<string, PipelineNode>): LoadoutEdge[] {
 
 function layoutUnit(value: number, unit: number) {
   return Math.abs(value) <= 20 ? value * unit : value;
+}
+
+function layoutValueForPosition(position: number, offset: number, unit: number) {
+  const raw = position - offset;
+  const asUnits = raw / unit;
+  const value = Math.abs(asUnits) <= 20 ? asUnits : raw;
+  return Math.round(value * 100) / 100;
 }
 
 function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[]; edges: LoadoutEdge[]; width: number; height: number } {
@@ -479,6 +498,8 @@ export function App() {
   const [edgeTargetId, setEdgeTargetId] = useState('');
   const [edgeCondition, setEdgeCondition] = useState('satisfied');
   const [edgeMutationError, setEdgeMutationError] = useState('');
+  const [socketLayoutDrag, setSocketLayoutDrag] = useState<SocketLayoutDragState | undefined>();
+  const suppressSocketClickRef = useRef(false);
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
@@ -727,6 +748,10 @@ export function App() {
   }
 
   function handleSocketClick(socketId: string) {
+    if (suppressSocketClickRef.current) {
+      suppressSocketClickRef.current = false;
+      return;
+    }
     if (selectedMateriaId) {
       putMateria(socketId, selectedMateriaId);
       return;
@@ -734,6 +759,66 @@ export function App() {
     setSocketActionId(socketId);
     setSocketActionMode('actions');
     setSocketPropertyError('');
+  }
+
+  function beginSocketLayoutDrag(socket: PositionedSocket, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || selectedMateriaId) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('[draggable="true"]')) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSocketLayoutDrag({
+      socketId: socket.id,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      originX: socket.x,
+      originY: socket.y,
+      currentX: socket.x,
+      currentY: socket.y,
+      moved: false,
+    });
+  }
+
+  function moveSocketLayoutDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    setSocketLayoutDrag((current) => {
+      if (!current || current.pointerId !== event.pointerId) return current;
+      const deltaX = event.clientX - current.startClientX;
+      const deltaY = event.clientY - current.startClientY;
+      const moved = current.moved || Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4;
+      return {
+        ...current,
+        currentX: Math.max(0, current.originX + deltaX),
+        currentY: Math.max(0, current.originY + deltaY),
+        moved,
+      };
+    });
+  }
+
+  function finishSocketLayoutDrag(socketId: string, event: ReactPointerEvent<HTMLButtonElement>) {
+    const current = socketLayoutDrag;
+    if (!current || current.pointerId !== event.pointerId || current.socketId !== socketId) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    setSocketLayoutDrag(undefined);
+    const deltaX = event.clientX - current.startClientX;
+    const deltaY = event.clientY - current.startClientY;
+    const moved = current.moved || Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4;
+    if (!moved || !activeLoadoutName) return;
+    suppressSocketClickRef.current = true;
+    const finalX = Math.max(0, current.originX + deltaX);
+    const finalY = Math.max(0, current.originY + deltaY);
+    const layoutX = layoutValueForPosition(finalX, 32, 260);
+    const layoutY = layoutValueForPosition(finalY, 28, 210);
+    updateDraft((config) => {
+      const node = buildLoadouts(config)[activeLoadoutName]?.nodes?.[socketId];
+      if (!node) return;
+      node.layout = { ...(node.layout ?? {}), x: layoutX, y: layoutY };
+    });
+    setStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);
+  }
+
+  function cancelSocketLayoutDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (socketLayoutDrag?.pointerId !== event.pointerId) return;
+    setSocketLayoutDrag(undefined);
   }
 
   function replaceMateriaFromModal(socketId: string, materiaId: string) {
@@ -816,6 +901,24 @@ export function App() {
       },
       `Removed edge ${from} → ${edge.to}; sockets were preserved.`,
       (message) => `Cannot remove edge ${from} → ${edge.to}: ${message}`,
+    );
+    if (removed) {
+      setSocketActionId(undefined);
+      setSocketActionMode('actions');
+    }
+  }
+
+  function removeNextEdge(from: string) {
+    const to = activeLoadout?.nodes?.[from]?.next;
+    if (!to) return;
+    const removed = commitGraphMutation(
+      `Removed default flow ${from} → ${to}.`,
+      (loadout) => {
+        const node = loadout.nodes?.[from] as PipelineNode | undefined;
+        if (node) delete node.next;
+      },
+      `Removed default flow ${from} → ${to}; conditional edges and sockets were preserved.`,
+      (message) => `Cannot remove default flow ${from} → ${to}: ${message}`,
     );
     if (removed) {
       setSocketActionId(undefined);
@@ -1024,7 +1127,7 @@ export function App() {
             <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Visual materia grid</h2>
-                <p className="text-sm text-slate-400">Drag orbs into sockets, drag sockets onto each other to swap, or click a palette orb then click a socket.</p>
+                <p className="text-sm text-slate-400">Drag orbs into sockets, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
               </div>
               <label className="text-sm text-slate-300">Edit name
                 <input className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" value={activeLoadoutName ?? ''} onChange={(event) => renameActiveLoadout(event.target.value)} />
@@ -1071,13 +1174,22 @@ export function App() {
                   );
                 })}
               </svg>
-              {loadoutGraph.sockets.map(({ id, node, index, x, y }) => (
+              {loadoutGraph.sockets.map((socket) => {
+                const { id, node, index, x, y } = socket;
+                const dragPreview = socketLayoutDrag?.socketId === id ? socketLayoutDrag : undefined;
+                const socketX = dragPreview?.currentX ?? x;
+                const socketY = dragPreview?.currentY ?? y;
+                return (
                 <button
                   key={id}
                   data-testid={`socket-${id}`}
-                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''}`}
-                  style={{ left: `${x}px`, top: `${y}px` }}
+                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''}`}
+                  style={{ left: `${socketX}px`, top: `${socketY}px` }}
                   onClick={() => handleSocketClick(id)}
+                  onPointerDown={(event) => beginSocketLayoutDrag(socket, event)}
+                  onPointerMove={moveSocketLayoutDrag}
+                  onPointerUp={(event) => finishSocketLayoutDrag(id, event)}
+                  onPointerCancel={cancelSocketLayoutDrag}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDrop(id, event)}
                 >
@@ -1088,7 +1200,8 @@ export function App() {
                   <span className="relative z-10 mt-1 text-xs text-cyan-100/80">{getNodeLabel(id, node)}</span>
                   {id === activeLoadout?.entry && <span className="entry-rune">entry</span>}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             {socketActionId && activeLoadout?.nodes?.[socketActionId] && (
@@ -1187,11 +1300,17 @@ export function App() {
                       </div>
                       <div className="edge-removal-list" data-testid="edge-removal-list">
                         <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>
-                        {(activeLoadout.nodes[socketActionId].edges ?? []).length > 0 ? activeLoadout.nodes[socketActionId].edges?.map((edge, index) => (
+                        {activeLoadout.nodes[socketActionId].next && (
+                          <button type="button" className="edge-removal-row" data-testid={`remove-next-edge-${socketActionId}`} onClick={() => removeNextEdge(socketActionId)}>
+                            Remove default flow to {activeLoadout.nodes[socketActionId].next}
+                          </button>
+                        )}
+                        {(activeLoadout.nodes[socketActionId].edges ?? []).map((edge, index) => (
                           <button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>
                             Remove {edgeConditionLabel(edge.when)} edge to {edge.to}
                           </button>
-                        )) : <p className="mt-2 text-sm text-slate-400">No conditional edges from this socket.</p>}
+                        ))}
+                        {!activeLoadout.nodes[socketActionId].next && (activeLoadout.nodes[socketActionId].edges ?? []).length === 0 && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}
                       </div>
                     </div>
                   )}
