@@ -262,5 +262,28 @@ describe("utility pipeline nodes", () => {
       advance: { cursor: "taskIndex", items: "state.tasks", when: "$.satisfied == true" },
       edges: [{ when: "$.satisfied == false", to: "Maintain", maxTraversals: 3 }],
     });
+
+    const maintainPrompts = [
+      config.loadouts!["Full-Auto"]!.nodes.Maintain.prompt ?? "",
+      config.loadouts!["Planning-Consult"]!.nodes.Maintain.prompt ?? "",
+    ];
+    for (const prompt of maintainPrompts) {
+      expect(prompt).toContain("Inspect the repository state first");
+      expect(prompt).toContain("no meaningful repository changes");
+      expect(prompt).toContain("checkpointCreated=false");
+      expect(prompt).toContain("avoid an empty commit/checkpoint");
+    }
+
+    const maintainRolePrompt = config.roles.Maintain!.systemPrompt;
+    expect(maintainRolePrompt).toContain("Always inspect repository state before checkpointing");
+    expect(maintainRolePrompt).toContain("checkpointCreated=false");
+    expect(maintainRolePrompt).toContain("No-op tasks must not create empty commits/checkpoints");
+    expect(maintainRolePrompt).toContain("do not run jj describe, jj new, git add, git commit");
+
+    const gitMaintainRolePrompt = config.roles.GitMaintain!.systemPrompt;
+    expect(gitMaintainRolePrompt).toContain("Inspect repository state before committing");
+    expect(gitMaintainRolePrompt).toContain("checkpointCreated=false");
+    expect(gitMaintainRolePrompt).toContain("No-op tasks must not create empty commits/checkpoints");
+    expect(gitMaintainRolePrompt).toContain("do not run git add, git commit");
   });
 });
