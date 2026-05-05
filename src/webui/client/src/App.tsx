@@ -65,6 +65,16 @@ interface ConfigResponse {
   source?: string;
 }
 
+interface MateriaSavedEventDetail {
+  id: string;
+  name: string;
+  behavior: MateriaFormState['behavior'];
+  requestedScope: SaveTarget;
+  scope: SaveTarget | string;
+}
+
+const materiaSavedEventName = 'materia:saved';
+
 interface MonitorSnapshot {
   ok?: boolean;
   sessionKey?: string;
@@ -287,12 +297,23 @@ function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
   return patch;
 }
 
-function applyMateriaPatch(config: MateriaConfig, patch: MateriaConfig): MateriaConfig {
+async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string }> {
+  const response = await fetch('/api/config');
+  const body = await response.json() as ConfigResponse;
+  return { config: body.config ?? (body as MateriaConfig), source: body.source ?? 'unknown' };
+}
+
+function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
+  if (!preserveLoadoutEdits || !current) return cloneConfig(reloaded);
   return {
-    ...config,
-    roles: patch.roles ? { ...(config.roles ?? {}), ...patch.roles } : config.roles,
-    materiaDefinitions: patch.materiaDefinitions ? { ...(config.materiaDefinitions ?? {}), ...patch.materiaDefinitions } : config.materiaDefinitions,
+    ...cloneConfig(current),
+    roles: reloaded.roles ? cloneConfig(reloaded.roles) : undefined,
+    materiaDefinitions: reloaded.materiaDefinitions ? cloneConfig(reloaded.materiaDefinitions) : undefined,
   };
+}
+
+function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
+  window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
 }
 
 function Orb({ color, label, small = false, empty = false }: { color: string; label: string; small?: boolean; empty?: boolean }) {
@@ -333,37 +354,27 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/config')
-      .then((response) => response.json() as Promise<ConfigResponse>)
-      .then((body) => {
-        if (cancelled) return;
-        const config = body.config ?? (body as MateriaConfig);
-        setBaselineConfig(cloneConfig(config));
-        setDraftConfig(cloneConfig(config));
-        setSource(body.source ?? 'unknown');
-        setStatus('Draft ready. Changes are staged until you save.');
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setStatus(`Using demo loadout data: ${error instanceof Error ? error.message : String(error)}`);
-        const fallback: MateriaConfig = {
-          activeLoadout: 'Demo Loadout',
-          loadouts: {
-            'Demo Loadout': {
-              entry: 'planner',
-              nodes: {
-                planner: { type: 'agent', role: 'planner', next: 'Build' },
-                Build: { type: 'agent', role: 'Build', next: 'Auto-Eval' },
-                'Auto-Eval': { type: 'agent', role: 'Auto-Eval', next: 'Maintain' },
-                Maintain: { type: 'agent', role: 'Maintain' },
-              },
+    reloadConfig({ cancelled: () => cancelled }).catch((error) => {
+      if (cancelled) return;
+      setStatus(`Using demo loadout data: ${error instanceof Error ? error.message : String(error)}`);
+      const fallback: MateriaConfig = {
+        activeLoadout: 'Demo Loadout',
+        loadouts: {
+          'Demo Loadout': {
+            entry: 'planner',
+            nodes: {
+              planner: { type: 'agent', role: 'planner', next: 'Build' },
+              Build: { type: 'agent', role: 'Build', next: 'Auto-Eval' },
+              'Auto-Eval': { type: 'agent', role: 'Auto-Eval', next: 'Maintain' },
+              Maintain: { type: 'agent', role: 'Maintain' },
             },
           },
-        };
-        setBaselineConfig(cloneConfig(fallback));
-        setDraftConfig(fallback);
-        setSource('demo');
-      });
+        },
+      };
+      setBaselineConfig(cloneConfig(fallback));
+      setDraftConfig(fallback);
+      setSource('demo');
+    });
     return () => {
       cancelled = true;
     };
@@ -418,9 +429,13 @@ export function App() {
     });
   }
 
-  function applySavedMateriaPatch(patch: MateriaConfig) {
-    setBaselineConfig((current) => applyMateriaPatch(cloneConfig(current ?? {}), patch));
-    setDraftConfig((current) => applyMateriaPatch(cloneConfig(current ?? {}), patch));
+  async function reloadConfig({ preserveLoadoutEdits = false, readyStatus = 'Draft ready. Changes are staged until you save.', cancelled = () => false }: { preserveLoadoutEdits?: boolean; readyStatus?: string; cancelled?: () => boolean } = {}) {
+    const loaded = await fetchMateriaConfig();
+    if (cancelled()) return;
+    setBaselineConfig(cloneConfig(loaded.config));
+    setDraftConfig((current) => mergeReloadedConfigIntoDraft(current, loaded.config, preserveLoadoutEdits));
+    setSource(loaded.source);
+    setStatus(readyStatus);
   }
 
   function switchLoadout(name: string) {
@@ -623,9 +638,13 @@ export function App() {
       });
       const body = await response.json();
       if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Materia save failed');
-      applySavedMateriaPatch(patch);
+      const scope = body.target ?? target;
+      dispatchMateriaSavedEvent({ id: savedName, name: savedName, behavior: savedBehavior, requestedScope: target, scope });
       setMateriaForm(emptyMateriaForm());
-      setStatus(`Saved reusable ${savedBehavior} materia ${savedName} to ${body.target ?? target} scope. Loadout draft edits were left unchanged.`);
+      await reloadConfig({
+        preserveLoadoutEdits: true,
+        readyStatus: `Saved reusable ${savedBehavior} materia ${savedName} to ${scope} scope. Loadout draft edits were left unchanged.`,
+      });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }

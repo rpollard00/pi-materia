@@ -277,10 +277,21 @@ describe('Materia loadout grid editor', () => {
     expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
   });
 
-  it('creates prompt materia with model, output format, and multiturn defaults to user persistence', async () => {
+  it('creates prompt materia, emits a saved event, and reloads without clobbering loadout draft edits', async () => {
+    let serverConfig = structuredClone(testConfig) as typeof testConfig & { materiaDefinitions?: Record<string, unknown> };
+    const savedEvents: CustomEvent[] = [];
+    window.addEventListener('materia:saved', (event) => savedEvents.push(event as CustomEvent), { once: true });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
-      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        serverConfig = {
+          ...serverConfig,
+          roles: { ...serverConfig.roles, ...(body.config.roles ?? {}) },
+          materiaDefinitions: { ...(serverConfig.materiaDefinitions ?? {}), ...(body.config.materiaDefinitions ?? {}) },
+        };
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: serverConfig }));
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -295,13 +306,16 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config.materiaDefinitions.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'json' });
     expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.', model: 'openai/gpt-review', multiTurn: true });
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/config');
+    expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
+    expect(Array.from((screen.getByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value)).toContain('Critique');
     await openTab('Loadout');
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
