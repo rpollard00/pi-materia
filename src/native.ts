@@ -22,7 +22,19 @@ const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
 const DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS = 1;
-const DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_PERCENT = 85;
+const SMALL_CONTEXT_WINDOW_LIMIT = 128_000;
+const LARGE_CONTEXT_WINDOW_LIMIT = 200_000;
+const FALLBACK_PROACTIVE_COMPACTION_THRESHOLD_PERCENT = 55;
+
+export function defaultProactiveCompactionThresholdPercent(contextWindow: number | null | undefined): number {
+  // If model/context-window metadata is unavailable, fall back to the most
+  // conservative default tier so Materia compacts early rather than risking a
+  // provider-side context_length_exceeded failure.
+  if (!Number.isFinite(contextWindow) || contextWindow == null || contextWindow <= 0) return FALLBACK_PROACTIVE_COMPACTION_THRESHOLD_PERCENT;
+  if (contextWindow < SMALL_CONTEXT_WINDOW_LIMIT) return 75;
+  if (contextWindow < LARGE_CONTEXT_WINDOW_LIMIT) return 65;
+  return 55;
+}
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
   const config = loaded.config;
@@ -582,6 +594,12 @@ function summarizeCompactionResult(result: unknown): unknown {
   return Object.fromEntries(Object.entries(value).filter(([key]) => ["tokensBefore", "tokensAfter", "entriesRemoved", "summaryTokens", "firstKeptEntryId"].includes(key)));
 }
 
+function effectiveContextWindow(ctx: ExtensionContext, usage: { contextWindow?: number }): number | undefined {
+  const modelContextWindow = ctx.model?.contextWindow;
+  if (Number.isFinite(modelContextWindow) && modelContextWindow != null && modelContextWindow > 0) return modelContextWindow;
+  return Number.isFinite(usage.contextWindow) && usage.contextWindow != null && usage.contextWindow > 0 ? usage.contextWindow : undefined;
+}
+
 async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   // This is a pre-turn transcript snapshot from Pi core. It does not include
   // request material added later in this turn: the hidden Materia prompt,
@@ -590,15 +608,19 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
   // tokenization overhead. Keep docs/materia-compaction-budgeting.md in sync
   // when changing this decision point.
   const usage = ctx.getContextUsage();
-  if (!usage || usage.percent == null || usage.percent < DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_PERCENT) return;
+  if (!usage) return;
+  const contextWindow = effectiveContextWindow(ctx, usage);
+  const thresholdPercent = defaultProactiveCompactionThresholdPercent(contextWindow);
+  const percent = usage.tokens != null && contextWindow != null && contextWindow > 0 ? (usage.tokens / contextWindow) * 100 : usage.percent;
+  if (percent == null || percent < thresholdPercent) return;
 
   const eventBase = {
     action: "compact" as const,
     reason: "context_pressure" as const,
-    thresholdPercent: DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_PERCENT,
+    thresholdPercent,
     tokens: usage.tokens,
-    contextWindow: usage.contextWindow,
-    percent: usage.percent,
+    contextWindow,
+    percent,
     node: state.currentNode,
     itemKey: state.currentItemKey,
     itemLabel: state.currentItemLabel,
