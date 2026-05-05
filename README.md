@@ -97,19 +97,22 @@ Example:
 pi -e /path/to/pi-materia/src/index.ts --materia-config ./my-loadout.json
 ```
 
-Minimal hello-world legacy grid:
+Minimal hello-world loadout:
 
 ```json
 {
   "artifactDir": ".pi/pi-materia",
-  "pipeline": {
-    "entry": "hello",
-    "nodes": {
-      "hello": {
-        "type": "agent",
-        "role": "echoer",
-        "prompt": "Say exactly: HELLO WORLD",
-        "next": "end"
+  "activeLoadout": "Hello",
+  "loadouts": {
+    "Hello": {
+      "entry": "hello",
+      "nodes": {
+        "hello": {
+          "type": "agent",
+          "role": "echoer",
+          "prompt": "Say exactly: HELLO WORLD",
+          "next": "end"
+        }
       }
     }
   },
@@ -247,14 +250,16 @@ Natural-language replies never finalize or advance the node, even when they say 
 
 Only after `/materia continue` does pi-materia request the final assistant output and process it using the node's normal `parse`, `assign`, `edges`, and `next` behavior. For JSON-parsed multi-turn nodes, refinement turns should stay conversational: the agent should not emit final structured JSON, and pi-materia should not parse final JSON, until the command-triggered finalization turn.
 
-The bundled config wires the `interactivePlan` role, which has `multiTurn: true`, into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with a pipeline/loadout like this excerpt:
+The bundled config wires the `interactivePlan` role, which has `multiTurn: true`, into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with named `loadouts` and `activeLoadout` like this excerpt:
 
 ```json
 {
   "artifactDir": ".pi/pi-materia",
-  "pipeline": {
-    "entry": "ensureArtifactsIgnored",
-    "nodes": {
+  "activeLoadout": "Custom",
+  "loadouts": {
+    "Custom": {
+      "entry": "ensureArtifactsIgnored",
+      "nodes": {
       "ensureArtifactsIgnored": {
         "type": "utility",
         "utility": "project.ensureIgnored",
@@ -279,6 +284,7 @@ The bundled config wires the `interactivePlan` role, which has `multiTurn: true`
         "next": "Build"
       },
       "Build": { "type": "agent", "role": "Build", "foreach": { "items": "state.tasks", "as": "task", "cursor": "taskIndex", "done": "end" }, "next": "Auto-Eval" }
+      }
     }
   },
   "roles": {

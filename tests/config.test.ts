@@ -107,11 +107,11 @@ describe("layered config loading and persistence", () => {
 });
 
 describe("config loadouts", () => {
-  test("legacy top-level pipeline configs still resolve through loadConfig", async () => {
+  test("top-level pipeline configs do not override named loadout resolution", async () => {
     const { dir, file } = await writeConfig({
       pipeline: {
-        entry: "legacy",
-        nodes: { legacy: { type: "agent", role: "planner" } },
+        entry: "ignored",
+        nodes: { ignored: { type: "agent", role: "planner" } },
       },
     });
 
@@ -119,10 +119,9 @@ describe("config loadouts", () => {
     const effective = getEffectivePipelineConfig(loaded.config);
     const pipeline = resolvePipeline(loaded.config);
 
-    expect(effective.loadoutName).toBeUndefined();
-    expect(loaded.config.loadouts).toBeUndefined();
-    expect(pipeline.entry.id).toBe("legacy");
-    expect(pipeline.entry.role.systemPrompt).toContain("planning role");
+    expect(effective.loadoutName).toBe("Full-Auto");
+    expect(loaded.config.loadouts?.["Full-Auto"]).toBeDefined();
+    expect(pipeline.entry.id).toBe("ensureArtifactsIgnored");
   });
 
   test("project config can define loadouts and activeLoadout without duplicating roles", async () => {

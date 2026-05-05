@@ -228,7 +228,7 @@ export default function piMateria(pi: ExtensionAPI) {
 function renderLoadoutList(config: PiMateriaConfig, source: string): string[] {
   const loadoutNames = Object.keys(config.loadouts ?? {});
   if (loadoutNames.length === 0) {
-    return ["Materia Loadouts", `source: ${source}`, "", "No loadouts configured. This config uses a legacy top-level pipeline."];
+    return ["Materia Loadouts", `source: ${source}`, "", "No loadouts configured. Define named loadouts and set activeLoadout."];
   }
 
   const active = config.activeLoadout;

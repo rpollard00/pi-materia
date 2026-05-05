@@ -37,7 +37,6 @@ interface MateriaRoleConfig {
 interface MateriaConfig {
   activeLoadout?: string;
   loadouts?: Record<string, PipelineConfig>;
-  pipeline?: PipelineConfig;
   roles?: Record<string, MateriaRoleConfig>;
   materiaDefinitions?: Record<string, PipelineNode>;
   [key: string]: unknown;
@@ -203,7 +202,6 @@ const cloneConfig = <T,>(config: T): T => JSON.parse(JSON.stringify(config)) as 
 
 function buildLoadouts(config: MateriaConfig): Record<string, PipelineConfig> {
   if (config.loadouts && Object.keys(config.loadouts).length > 0) return config.loadouts;
-  if (config.pipeline) return { Legacy: config.pipeline };
   return {};
 }
 

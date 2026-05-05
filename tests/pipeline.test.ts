@@ -3,37 +3,41 @@ import { describe, expect, test } from "bun:test";
 import { renderGrid, resolvePipeline } from "../src/pipeline.js";
 import type { PiMateriaConfig } from "../src/types.js";
 
-const baseConfig: PiMateriaConfig = {
-  artifactDir: ".pi/pi-materia",
-  pipeline: {
-    entry: "hello",
-    nodes: {
-      hello: {
-        type: "utility",
-        command: ["node", "hello.js"],
-        parse: "json",
-        params: { name: "world" },
-        next: "ignored",
-        foreach: { items: "state.items", as: "item", done: "end" },
-        limits: { maxVisits: 2, maxEdgeTraversals: 3, maxOutputBytes: 1024 },
-        timeoutMs: 5000,
-      },
-      ignored: {
-        type: "utility",
-        utility: "project.ensureIgnored",
-        parse: "text",
-      },
+const baseLoadout = {
+  entry: "hello",
+  nodes: {
+    hello: {
+      type: "utility" as const,
+      command: ["node", "hello.js"],
+      parse: "json" as const,
+      params: { name: "world" },
+      next: "ignored",
+      foreach: { items: "state.items", as: "item", done: "end" },
+      limits: { maxVisits: 2, maxEdgeTraversals: 3, maxOutputBytes: 1024 },
+      timeoutMs: 5000,
+    },
+    ignored: {
+      type: "utility" as const,
+      utility: "project.ensureIgnored",
+      parse: "text" as const,
     },
   },
+};
+
+const baseConfig: PiMateriaConfig = {
+  artifactDir: ".pi/pi-materia",
+  activeLoadout: "Test",
+  loadouts: { Test: baseLoadout },
   roles: {},
 };
 
-describe("loadout-aware pipeline resolution", () => {
-  test("legacy top-level pipeline configs still resolve", () => {
-    const pipeline = resolvePipeline(baseConfig);
+function activeLoadout(config: PiMateriaConfig) {
+  return config.loadouts![config.activeLoadout!]!;
+}
 
-    expect(pipeline.entry.id).toBe("hello");
-    expect(pipeline.entry.node.type).toBe("utility");
+describe("loadout-aware pipeline resolution", () => {
+  test("configs without named loadouts are rejected", () => {
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", roles: {} })).toThrow(/must define named "loadouts"/);
   });
 
   test("activeLoadout selects a named graph while sharing roles", () => {
@@ -69,8 +73,8 @@ describe("loadout-aware pipeline resolution", () => {
     const config: PiMateriaConfig = {
       activeLoadout: "Missing",
       loadouts: {
-        "Full-Auto": baseConfig.pipeline!,
-        "Planning-Consult": baseConfig.pipeline!,
+        "Full-Auto": baseLoadout,
+        "Planning-Consult": baseLoadout,
       },
       roles: {},
     };
@@ -109,11 +113,13 @@ describe("utility pipeline nodes", () => {
   test("renderGrid shows mixed explicit and active Pi model role settings", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
-      pipeline: {
-        entry: "planner",
-        nodes: {
-          planner: { type: "agent", role: "planner", next: "Build" },
-          Build: { type: "agent", role: "Build" },
+      loadouts: {
+        Test: {
+          entry: "planner",
+          nodes: {
+            planner: { type: "agent", role: "planner", next: "Build" },
+            Build: { type: "agent", role: "Build" },
+          },
         },
       },
       roles: {
@@ -149,14 +155,14 @@ describe("utility pipeline nodes", () => {
 
   test("rejects utility nodes without command or utility", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    config.pipeline.nodes.hello = { type: "utility" };
+    activeLoadout(config).nodes.hello = { type: "utility" };
 
     expect(() => resolvePipeline(config)).toThrow(/must configure either "utility" or "command"/);
   });
 
   test("rejects unsupported parse modes with a friendly error", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    config.pipeline.nodes.hello = { type: "utility", utility: "example", parse: "yaml" as never };
+    activeLoadout(config).nodes.hello = { type: "utility", utility: "example", parse: "yaml" as never };
 
     expect(() => resolvePipeline(config)).toThrow(/unsupported parse mode "yaml"/);
   });
@@ -164,10 +170,12 @@ describe("utility pipeline nodes", () => {
   test("accepts multi-turn roles and renders roles plus agent slots with role-derived capability", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
-      pipeline: {
-        entry: "interactivePlan",
-        nodes: {
-          interactivePlan: { type: "agent", role: "planner", parse: "json" },
+      loadouts: {
+        Test: {
+          entry: "interactivePlan",
+          nodes: {
+            interactivePlan: { type: "agent", role: "planner", parse: "json" },
+          },
         },
       },
       roles: {
@@ -186,7 +194,7 @@ describe("utility pipeline nodes", () => {
 
   test("rejects obsolete node-level multiTurn", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    config.pipeline.nodes.hello = { type: "utility", utility: "example", multiTurn: true } as never;
+    activeLoadout(config).nodes.hello = { type: "utility", utility: "example", multiTurn: true } as never;
 
     expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
@@ -194,10 +202,12 @@ describe("utility pipeline nodes", () => {
   test("rejects malformed multiTurn values on roles", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
-      pipeline: {
-        entry: "planner",
-        nodes: {
-          planner: { type: "agent", role: "planner" },
+      loadouts: {
+        Test: {
+          entry: "planner",
+          nodes: {
+            planner: { type: "agent", role: "planner" },
+          },
         },
       },
       roles: {
@@ -210,7 +220,7 @@ describe("utility pipeline nodes", () => {
 
   test("rejects malformed command arrays with a friendly error", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    config.pipeline.nodes.hello = { type: "utility", command: ["node", ""] };
+    activeLoadout(config).nodes.hello = { type: "utility", command: ["node", ""] };
 
     expect(() => resolvePipeline(config)).toThrow(/malformed command element at index 1/);
   });
@@ -220,14 +230,15 @@ describe("utility pipeline nodes", () => {
     const pipeline = resolvePipeline(config);
     const lines = renderGrid(config, pipeline, "default", "/tmp/project");
 
-    expect(config.pipeline.entry).toBe("ensureArtifactsIgnored");
+    const loadout = activeLoadout(config);
+    expect(loadout.entry).toBe("ensureArtifactsIgnored");
     expect(pipeline.entry.node.type).toBe("utility");
-    expect(config.pipeline.nodes.ensureArtifactsIgnored).toMatchObject({
+    expect(loadout.nodes.ensureArtifactsIgnored).toMatchObject({
       type: "utility",
       utility: "project.ensureIgnored",
       next: "detectVcs",
     });
-    expect(config.pipeline.nodes.detectVcs).toMatchObject({
+    expect(loadout.nodes.detectVcs).toMatchObject({
       type: "utility",
       utility: "vcs.detect",
       assign: { vcs: "$" },
@@ -243,7 +254,7 @@ describe("utility pipeline nodes", () => {
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
-    expect(config.pipeline.nodes.Maintain).toMatchObject({
+    expect(loadout.nodes.Maintain).toMatchObject({
       type: "agent",
       role: "Maintain",
       parse: "json",

@@ -157,49 +157,36 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
 }
 
 function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMateriaConfig>): Partial<PiMateriaConfig> {
-  const usesLegacyPipeline = Boolean(patch.pipeline && !patch.loadouts);
   return {
     ...base,
     ...patch,
     budget: patch.budget ? { ...(base.budget ?? {}), ...patch.budget } : base.budget,
     limits: patch.limits ? { ...(base.limits ?? {}), ...patch.limits } : base.limits,
     compaction: patch.compaction ? { ...(base.compaction ?? {}), ...patch.compaction } : base.compaction,
-    pipeline: patch.pipeline ? mergePipeline(base.pipeline, patch.pipeline) : base.pipeline,
-    loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, patch.loadouts),
-    activeLoadout: usesLegacyPipeline ? undefined : (patch.activeLoadout ?? base.activeLoadout),
+    loadouts: mergeLoadouts(base.loadouts, patch.loadouts),
+    activeLoadout: patch.activeLoadout ?? base.activeLoadout,
     materiaDefinitions: mergeMateriaDefinitions(base.materiaDefinitions, patch.materiaDefinitions),
     roles: patch.roles ? mergeRoles(base.roles ?? {}, patch.roles) : base.roles,
   };
 }
 
 function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>): PiMateriaConfig {
-  const usesLegacyPipeline = Boolean(parsed.pipeline && !parsed.loadouts);
   return {
     ...base,
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
     limits: { ...base.limits, ...(parsed.limits ?? {}) },
     compaction: { ...base.compaction, ...(parsed.compaction ?? {}) },
-    pipeline: mergePipeline(base.pipeline, parsed.pipeline),
-    loadouts: usesLegacyPipeline ? undefined : mergeLoadouts(base.loadouts, parsed.loadouts),
-    activeLoadout: usesLegacyPipeline ? undefined : (parsed.activeLoadout ?? base.activeLoadout),
+    loadouts: mergeLoadouts(base.loadouts, parsed.loadouts),
+    activeLoadout: parsed.activeLoadout ?? base.activeLoadout,
     materiaDefinitions: mergeMateriaDefinitions(base.materiaDefinitions, parsed.materiaDefinitions),
     roles: mergeRoles(base.roles, parsed.roles),
   } as PiMateriaConfig;
 }
 
-function mergePipeline(basePipeline: PiMateriaConfig["pipeline"], parsedPipeline: Partial<PiMateriaConfig>["pipeline"]): PiMateriaConfig["pipeline"] {
-  if (!parsedPipeline) return basePipeline;
-  return {
-    ...(basePipeline ?? {}),
-    ...parsedPipeline,
-    nodes: parsedPipeline.nodes ?? basePipeline?.nodes ?? {},
-  } as PiMateriaConfig["pipeline"];
-}
-
 function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts: Partial<PiMateriaConfig>["loadouts"]): PiMateriaConfig["loadouts"] {
   if (!parsedLoadouts) return baseLoadouts;
-  const merged: Record<string, NonNullable<PiMateriaConfig["pipeline"]>> = { ...(baseLoadouts ?? {}) };
+  const merged: NonNullable<PiMateriaConfig["loadouts"]> = { ...(baseLoadouts ?? {}) };
   for (const [name, loadout] of Object.entries(parsedLoadouts)) {
     if (!isPlainObject(loadout)) throw new Error(`Materia loadout "${name}" is invalid. Expected a pipeline object.`);
     const baseLoadout = baseLoadouts?.[name];
@@ -207,7 +194,7 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
       ...(baseLoadout ?? {}),
       ...loadout,
       nodes: loadout.nodes ?? baseLoadout?.nodes ?? {},
-    } as NonNullable<PiMateriaConfig["pipeline"]>;
+    };
   }
   return merged;
 }

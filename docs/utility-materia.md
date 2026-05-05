@@ -83,16 +83,19 @@ This loadout completes without an LLM turn by using an explicit command utility.
 ```json
 {
   "artifactDir": ".pi/pi-materia",
-  "pipeline": {
-    "entry": "hello",
-    "nodes": {
-      "hello": {
-        "type": "utility",
-        "command": ["python3", "-c", "import json,sys; ctx=json.load(sys.stdin); print(json.dumps({'ok': True, 'message': ctx['params']['message']}))"],
-        "params": { "message": "HELLO WORLD" },
-        "parse": "json",
-        "assign": { "hello": "$" },
-        "next": "end"
+  "activeLoadout": "Hello Utility",
+  "loadouts": {
+    "Hello Utility": {
+      "entry": "hello",
+      "nodes": {
+        "hello": {
+          "type": "utility",
+          "command": ["python3", "-c", "import json,sys; ctx=json.load(sys.stdin); print(json.dumps({'ok': True, 'message': ctx['params']['message']}))"],
+          "params": { "message": "HELLO WORLD" },
+          "parse": "json",
+          "assign": { "hello": "$" },
+          "next": "end"
+        }
       }
     }
   },
@@ -146,19 +149,22 @@ Complete loadout using the script:
 ```json
 {
   "artifactDir": ".pi/pi-materia",
-  "pipeline": {
-    "entry": "ignoreArtifacts",
-    "nodes": {
-      "ignoreArtifacts": {
-        "type": "utility",
-        "command": ["python3", "scripts/ensure_ignored.py"],
-        "params": {
-          "file": ".gitignore",
-          "patterns": [".pi/pi-materia/"]
-        },
-        "parse": "json",
-        "assign": { "artifactIgnore": "$" },
-        "next": "end"
+  "activeLoadout": "Ignore Artifacts",
+  "loadouts": {
+    "Ignore Artifacts": {
+      "entry": "ignoreArtifacts",
+      "nodes": {
+        "ignoreArtifacts": {
+          "type": "utility",
+          "command": ["python3", "scripts/ensure_ignored.py"],
+          "params": {
+            "file": ".gitignore",
+            "patterns": [".pi/pi-materia/"]
+          },
+          "parse": "json",
+          "assign": { "artifactIgnore": "$" },
+          "next": "end"
+        }
       }
     }
   },

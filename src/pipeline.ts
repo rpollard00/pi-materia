@@ -1,28 +1,27 @@
 import { resolveArtifactRoot } from "./config.js";
-import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineNodeConfig, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaRoleConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
-  pipeline: NonNullable<PiMateriaConfig["pipeline"]>;
-  loadoutName?: string;
+  pipeline: MateriaPipelineConfig;
+  loadoutName: string;
 }
 
 export function getEffectivePipelineConfig(config: PiMateriaConfig): EffectiveMateriaPipelineConfig {
   const loadouts = config.loadouts ?? {};
   const loadoutNames = Object.keys(loadouts);
-  if (loadoutNames.length > 0) {
-    const activeLoadout = config.activeLoadout;
-    if (!activeLoadout) {
-      throw new Error(`No active Materia loadout configured. Set "activeLoadout" to one of: ${loadoutNames.join(", ")}.`);
-    }
-    const pipeline = loadouts[activeLoadout];
-    if (!pipeline) {
-      throw new Error(`Unknown active Materia loadout "${activeLoadout}". Available loadouts: ${loadoutNames.join(", ")}.`);
-    }
-    return { pipeline, loadoutName: activeLoadout };
+  if (loadoutNames.length === 0) {
+    throw new Error(`Materia config must define named "loadouts" and set "activeLoadout" to one of them.`);
   }
 
-  if (!config.pipeline) throw new Error(`Materia config must define either a legacy "pipeline" or one or more "loadouts".`);
-  return { pipeline: config.pipeline };
+  const activeLoadout = config.activeLoadout;
+  if (!activeLoadout) {
+    throw new Error(`No active Materia loadout configured. Set "activeLoadout" to one of: ${loadoutNames.join(", ")}.`);
+  }
+  const pipeline = loadouts[activeLoadout];
+  if (!pipeline) {
+    throw new Error(`Unknown active Materia loadout "${activeLoadout}". Available loadouts: ${loadoutNames.join(", ")}.`);
+  }
+  return { pipeline, loadoutName: activeLoadout };
 }
 
 export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipeline {
@@ -101,7 +100,7 @@ function validateTarget(effective: EffectiveMateriaPipelineConfig, target: strin
 }
 
 function pipelineSource(effective: EffectiveMateriaPipelineConfig): string {
-  return effective.loadoutName ? `loadouts.${effective.loadoutName}` : "pipeline";
+  return `loadouts.${effective.loadoutName}`;
 }
 
 export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPipeline, source: string, cwd: string): string[] {
@@ -112,7 +111,7 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     `artifactDir: ${resolveArtifactRoot(cwd, config.artifactDir)}`,
     `limits: ${formatLimits(config)}`,
     `budget: ${formatBudget(config.budget)}`,
-    `loadout: ${effective.loadoutName ?? "legacy pipeline"}`,
+    `loadout: ${effective.loadoutName}`,
     "",
     "Graph:",
     ...renderGraph(effective.pipeline),
@@ -185,7 +184,7 @@ function formatNodeLimits(limits: NonNullable<MateriaPipelineNodeConfig["limits"
   ].filter(Boolean).join("/") || "default";
 }
 
-function renderGraph(pipeline: NonNullable<PiMateriaConfig["pipeline"]>): string[] {
+function renderGraph(pipeline: MateriaPipelineConfig): string[] {
   const lines: string[] = [];
   for (const [id, node] of Object.entries(pipeline.nodes)) {
     if (node.next) lines.push(`${id} -> ${node.next}`);
