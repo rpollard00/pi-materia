@@ -317,6 +317,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
     expect(Array.from((screen.getByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value)).toContain('Critique');
     await openTab('Loadout');
+    expect(await screen.findByTestId('palette-Critique')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -408,6 +409,9 @@ describe('Materia loadout grid editor', () => {
     expect(initialOptions).not.toContain('OtherSocket');
 
     await openTab('Loadout');
+    expect(await screen.findByTestId('palette-RunTests')).toBeTruthy();
+    expect(screen.getByTestId('palette-RoleOnly')).toBeTruthy();
+    expect(screen.getByTestId('palette-SocketOnly')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: /Alternate/ }));
     await openTab('Materia Editor');
     const afterLoadoutSwitch = Array.from((await screen.findByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value);

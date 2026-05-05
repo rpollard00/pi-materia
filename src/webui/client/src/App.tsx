@@ -269,6 +269,17 @@ function commandParts(raw: string): string[] | undefined {
   return raw.split(/\s+/).map((part) => part.trim()).filter(Boolean);
 }
 
+function rolePaletteNode(id: string, role: MateriaRoleConfig): PipelineNode {
+  return {
+    type: 'agent',
+    role: id,
+    prompt: role.systemPrompt,
+    model: role.model,
+    thinking: role.thinking,
+    multiturn: role.multiTurn,
+  };
+}
+
 function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
   const name = form.name.trim();
   if (!name) throw new Error('Materia name is required.');
@@ -409,13 +420,19 @@ export function App() {
     return [...ids].sort((a, b) => a.localeCompare(b));
   }, [roles, materiaDefinitions]);
   const palette = useMemo(() => {
-    const allNodes = Object.values(loadouts).flatMap((loadout) => Object.entries(loadout.nodes ?? {}));
     const byId = new Map<string, PipelineNode>();
+    for (const [id, node] of Object.entries(materiaDefinitions)) {
+      if (!node.empty) byId.set(id, cloneConfig(node));
+    }
+    for (const [id, role] of Object.entries(roles)) {
+      if (!byId.has(id)) byId.set(id, rolePaletteNode(id, role));
+    }
+    const allNodes = Object.values(loadouts).flatMap((loadout) => Object.entries(loadout.nodes ?? {}));
     for (const [id, node] of allNodes) {
-      if (!node.empty) byId.set(id, node);
+      if (!node.empty && !byId.has(id)) byId.set(id, node);
     }
     return [...byId.entries()];
-  }, [loadouts]);
+  }, [loadouts, materiaDefinitions, roles]);
   const isDirty = JSON.stringify(baselineConfig) !== JSON.stringify(draftConfig);
   const currentMonitorNode = monitor?.activeCast?.currentNode;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
@@ -437,6 +454,26 @@ export function App() {
     setSource(loaded.source);
     setStatus(readyStatus);
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    const handleMateriaSaved = (event: Event) => {
+      const detail = (event as CustomEvent<MateriaSavedEventDetail>).detail;
+      const name = detail?.name ?? detail?.id ?? 'materia';
+      const behavior = detail?.behavior ?? 'prompt';
+      const scope = detail?.scope ?? 'configured';
+      void reloadConfig({
+        preserveLoadoutEdits: true,
+        readyStatus: `Saved reusable ${behavior} materia ${name} to ${scope} scope. Loadout draft edits were left unchanged.`,
+        cancelled: () => cancelled,
+      });
+    };
+    window.addEventListener(materiaSavedEventName, handleMateriaSaved);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(materiaSavedEventName, handleMateriaSaved);
+    };
+  }, []);
 
   function switchLoadout(name: string) {
     updateDraft((config) => {
@@ -641,10 +678,6 @@ export function App() {
       const scope = body.target ?? target;
       dispatchMateriaSavedEvent({ id: savedName, name: savedName, behavior: savedBehavior, requestedScope: target, scope });
       setMateriaForm(emptyMateriaForm());
-      await reloadConfig({
-        preserveLoadoutEdits: true,
-        readyStatus: `Saved reusable ${savedBehavior} materia ${savedName} to ${scope} scope. Loadout draft edits were left unchanged.`,
-      });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
