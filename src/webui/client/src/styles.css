@@ -288,6 +288,33 @@
   box-shadow: 0 0 24px rgb(34 211 238 / 0.16);
 }
 
+.materia-replacement-list {
+  display: flex;
+  max-height: min(24rem, 55vh);
+  flex-direction: column;
+  gap: 0.65rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.materia-replacement-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgb(207 250 254 / 0.16);
+  background: rgb(15 23 42 / 0.72);
+  padding: 0.75rem;
+  transition: 160ms ease;
+}
+
+.materia-replacement-row:hover,
+.materia-replacement-row:focus {
+  border-color: rgb(103 232 249 / 0.62);
+  background: rgb(8 47 73 / 0.86);
+  box-shadow: 0 0 20px rgb(34 211 238 / 0.14);
+}
+
 .entry-rune {
   position: absolute;
   right: 1rem;

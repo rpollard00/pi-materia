@@ -425,6 +425,7 @@ export function App() {
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
+  const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace'>('actions');
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
@@ -551,6 +552,7 @@ export function App() {
     });
     setSelectedMateriaId(undefined);
     setSocketActionId(undefined);
+    setSocketActionMode('actions');
     setStatus(`Active loadout staged: ${name}`);
   }
 
@@ -629,6 +631,7 @@ export function App() {
       loadout.nodes[socketId] = clearSocketMateria(loadout.nodes[socketId]);
     });
     setSocketActionId(undefined);
+    setSocketActionMode('actions');
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
   }
 
@@ -666,6 +669,7 @@ export function App() {
       config.loadouts = draftLoadouts;
     });
     setSocketActionId(undefined);
+    setSocketActionMode('actions');
     setStatus(`Created a connected empty socket after ${afterSocketId}.`);
   }
 
@@ -675,6 +679,19 @@ export function App() {
       return;
     }
     setSocketActionId(socketId);
+    setSocketActionMode('actions');
+  }
+
+  function replaceMateriaFromModal(socketId: string, materiaId: string) {
+    if (putMateria(socketId, materiaId)) {
+      setSocketActionId(undefined);
+      setSocketActionMode('actions');
+    }
+  }
+
+  function closeSocketActionModal() {
+    setSocketActionId(undefined);
+    setSocketActionMode('actions');
   }
 
   function toggleEdgeCondition(edge: LoadoutEdge) {
@@ -902,7 +919,7 @@ export function App() {
             </div>
 
             {socketActionId && activeLoadout?.nodes?.[socketActionId] && (
-              <div className="socket-action-backdrop" role="presentation" onMouseDown={() => setSocketActionId(undefined)}>
+              <div className="socket-action-backdrop" role="presentation" onMouseDown={closeSocketActionModal}>
                 <section
                   className="socket-action-modal"
                   role="dialog"
@@ -913,18 +930,36 @@ export function App() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">socket actions</p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : 'socket actions'}</p>
                       <h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{socketActionId}</h3>
                       <p className="mt-1 text-sm text-slate-300">{getNodeLabel(socketActionId, activeLoadout.nodes[socketActionId])}</p>
                     </div>
-                    <button type="button" className="materia-button-secondary" onClick={() => setSocketActionId(undefined)}>Close</button>
+                    <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' ? 'Cancel' : 'Close'}</button>
                   </div>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <button type="button" className="socket-action-button" onClick={() => removeMateria(socketActionId)}>Unsocket</button>
-                    <button type="button" className="socket-action-button" onClick={() => setStatus('Replace selector is coming in the next implementation step.')}>Replace</button>
-                    <button type="button" className="socket-action-button" onClick={() => setStatus('Socket property editor is coming in the next implementation step.')}>Edit</button>
-                    <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
-                  </div>
+                  {socketActionMode === 'replace' ? (
+                    <div className="mt-5">
+                      <p className="text-sm text-slate-300">Choose reusable materia to assign to this socket. Socket id, edges, traversal settings, and layout metadata will be preserved.</p>
+                      <div className="materia-replacement-list mt-4" role="list" aria-label="Available replacement materia" data-testid="materia-replacement-list">
+                        {palette.map(([id, node], index) => (
+                          <button key={id} type="button" className="materia-replacement-row" data-testid={`replacement-materia-${id}`} onClick={() => replaceMateriaFromModal(socketActionId, id)}>
+                            <Orb small color={nodeColor(id, index)} label={id} />
+                            <span className="flex min-w-0 flex-col text-left">
+                              <span className="truncate font-black text-cyan-50">{id}</span>
+                              <span className="truncate text-xs text-slate-300">{getNodeLabel(id, node)}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      {palette.length === 0 && <p className="mt-4 text-sm text-amber-200">No available materia definitions found.</p>}
+                    </div>
+                  ) : (
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      <button type="button" className="socket-action-button" onClick={() => removeMateria(socketActionId)}>Unsocket</button>
+                      <button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button>
+                      <button type="button" className="socket-action-button" onClick={() => setStatus('Socket property editor is coming in the next implementation step.')}>Edit</button>
+                      <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
+                    </div>
+                  )}
                 </section>
               </div>
             )}

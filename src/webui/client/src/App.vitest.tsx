@@ -335,6 +335,52 @@ describe('Materia loadout grid editor', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Planning-Consult');
   });
 
+  it('replaces socket materia from the modal while preserving socket graph metadata', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Build'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace' }));
+
+    expect(await screen.findByTestId('materia-replacement-list')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('replacement-materia-Maintain'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
+    expect(Object.keys(saved)).toContain('Build');
+    expect(saved.Build.role).toBe('Maintain');
+    expect(saved.Build.next).toBe('Auto-Eval');
+    expect(saved.Build.layout).toEqual({ x: 1, y: 0 });
+    expect(saved.Build.insertedBy).toBe('node-shift');
+    expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
+  });
+
+  it('cancels modal materia replacement without mutating draft state', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Build'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace' }));
+    expect(await screen.findByTestId('materia-replacement-list')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByTestId('socket-action-modal')).toBeNull();
+    expect(screen.queryByText('staged edits')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves socket graph structure when dragging a palette materia into a socket', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
