@@ -39,6 +39,7 @@ describe("native same-node recovery", () => {
 
     const triggerTurnsAfter = harness.operationLog.filter((op) => op === "triggerTurn").length;
     expect(triggerTurnsAfter).toBe(triggerTurnsBefore + 1);
+    expect(harness.operationLog).toContain("compact");
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
@@ -60,6 +61,7 @@ describe("native same-node recovery", () => {
     await harness.emit("agent_end", { errorMessage: "maximum tokens exceeded before response" });
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    expect(harness.operationLog).toContain("compact");
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
@@ -79,6 +81,24 @@ describe("native same-node recovery", () => {
     expect(latestState.active).toBe(false);
     expect(latestState.nodeState).toBe("failed");
     expect(latestState.failedReason).toContain("provider auth failed");
+  });
+
+  test("forced compaction failure is recorded and fails clearly", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    harness.compactError = new Error("compaction provider unavailable");
+    await harness.runCommand("materia", "cast compact fail");
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog).toContain("compact");
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.failedReason).toContain("Same-node recovery action compact failed");
+    expect(latestState.failedReason).toContain("compaction provider unavailable");
+    const events = await readEvents(harness);
+    expect(events.some((event) => event.type === "same_node_recovery_action_failed" && event.data.action === "compact")).toBe(true);
   });
 
   test("recovery attempts are bounded and exhaustion fails clearly", async () => {

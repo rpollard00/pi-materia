@@ -533,6 +533,7 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
   saveCastState(pi, state);
 
   try {
+    if (reason === "context_window") await runSameNodeRecoveryAction(pi, ctx, state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
     updateToolScope(pi, currentRole(state));
     await sendMateriaTurn(pi, state, buildSameNodeRecoveryPrompt(state));
     await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, maxAttempts, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
@@ -545,6 +546,40 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
     await failCast(pi, ctx, state, new Error(`Same-node recovery retry failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(retryError)}. Original failure: ${errorMessage(error)}`), options.entryId);
     return true;
   }
+}
+
+async function runSameNodeRecoveryAction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, options: { action: "compact"; reason: "context_window"; key: string; attempt: number; maxAttempts: number; entryId?: string }): Promise<void> {
+  await appendEvent(state.runState, "same_node_recovery_action_start", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+  saveCastState(pi, state);
+
+  try {
+    const result = await forceContextCompaction(ctx, state);
+    await appendEvent(state.runState, "same_node_recovery_action_complete", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state), result: summarizeCompactionResult(result) });
+    saveCastState(pi, state);
+  } catch (actionError) {
+    await appendEvent(state.runState, "same_node_recovery_action_failed", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state), error: errorMessage(actionError) });
+    throw new Error(`Same-node recovery action compact failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(actionError)}`);
+  }
+}
+
+function forceContextCompaction(ctx: ExtensionContext, state: MateriaCastState): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    try {
+      ctx.compact({
+        customInstructions: `Pi Materia forced context-window recovery for ${recoveryDiagnosticLabel(state)}. Preserve the active cast state, task requirements, and any durable artifacts/events needed to continue the same turn.`,
+        onComplete: resolve,
+        onError: reject,
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function summarizeCompactionResult(result: unknown): unknown {
+  if (!result || typeof result !== "object") return result;
+  const value = result as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => ["tokensBefore", "tokensAfter", "entriesRemoved", "summaryTokens", "firstKeptEntryId"].includes(key)));
 }
 
 function classifyRecoverableTurnFailure(error: unknown): "context_window" | undefined {
