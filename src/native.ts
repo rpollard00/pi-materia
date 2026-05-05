@@ -583,6 +583,12 @@ function summarizeCompactionResult(result: unknown): unknown {
 }
 
 async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
+  // This is a pre-turn transcript snapshot from Pi core. It does not include
+  // request material added later in this turn: the hidden Materia prompt,
+  // synthetic isolated cast context, before_agent_start system-prompt suffix,
+  // active-turn tool results retained by context isolation, or provider-specific
+  // tokenization overhead. Keep docs/materia-compaction-budgeting.md in sync
+  // when changing this decision point.
   const usage = ctx.getContextUsage();
   if (!usage || usage.percent == null || usage.percent < DEFAULT_PROACTIVE_COMPACTION_THRESHOLD_PERCENT) return;
 
