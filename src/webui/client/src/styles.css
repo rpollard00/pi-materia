@@ -315,6 +315,15 @@
   box-shadow: 0 0 20px rgb(34 211 238 / 0.14);
 }
 
+.socket-property-error {
+  border-radius: 0.9rem;
+  border: 1px solid rgb(251 191 36 / 0.42);
+  background: rgb(120 53 15 / 0.28);
+  padding: 0.75rem;
+  color: rgb(254 240 138);
+  font-size: 0.875rem;
+}
+
 .entry-rune {
   position: absolute;
   right: 1rem;

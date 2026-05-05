@@ -381,6 +381,57 @@ describe('Materia loadout grid editor', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('edits socket properties while preserving materia and graph metadata', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Build'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(await screen.findByTestId('socket-property-editor')).toBeTruthy();
+    expect(screen.getByTestId('socket-layout-x')).toHaveProperty('value', '1');
+    fireEvent.change(screen.getByTestId('socket-max-visits'), { target: { value: '7' } });
+    fireEvent.change(screen.getByTestId('socket-max-edge-traversals'), { target: { value: '3' } });
+    fireEvent.change(screen.getByTestId('socket-max-output-bytes'), { target: { value: '2048' } });
+    fireEvent.change(screen.getByTestId('socket-layout-x'), { target: { value: '4' } });
+    fireEvent.change(screen.getByTestId('socket-layout-y'), { target: { value: '1.5' } });
+    fireEvent.click(screen.getByTestId('save-socket-properties'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
+    expect(saved.Build).toMatchObject({ role: 'Build', next: 'Auto-Eval', insertedBy: 'node-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 }, layout: { x: 4, y: 1.5 } });
+    expect(saved.planner.layout).toEqual({ x: 0, y: 0 });
+    expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
+  });
+
+  it('rejects invalid socket property input without mutating draft state', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Build'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(await screen.findByTestId('socket-max-visits'), { target: { value: '0' } });
+    fireEvent.change(screen.getByTestId('socket-layout-x'), { target: { value: 'NaN' } });
+    fireEvent.click(screen.getByTestId('save-socket-properties'));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Max visits must be a positive whole number.');
+    expect(screen.getByRole('alert').textContent).toContain('Layout X must be a finite number.');
+    expect(screen.getByTestId('socket-property-editor')).toBeTruthy();
+    expect(screen.queryByText('staged edits')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves socket graph structure when dragging a palette materia into a socket', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));

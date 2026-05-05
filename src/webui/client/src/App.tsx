@@ -60,6 +60,14 @@ interface MateriaFormState {
   persistScope: SaveTarget;
 }
 
+interface SocketPropertyFormState {
+  maxVisits: string;
+  maxEdgeTraversals: string;
+  maxOutputBytes: string;
+  layoutX: string;
+  layoutY: string;
+}
+
 interface ConfigResponse {
   ok?: boolean;
   config?: MateriaConfig;
@@ -160,6 +168,14 @@ const emptyMateriaForm = (): MateriaFormState => ({
   params: '{}',
   timeoutMs: '',
   persistScope: 'user',
+});
+
+const emptySocketPropertyForm = (): SocketPropertyFormState => ({
+  maxVisits: '',
+  maxEdgeTraversals: '',
+  maxOutputBytes: '',
+  layoutX: '',
+  layoutY: '',
 });
 
 const paletteColors = [
@@ -342,6 +358,38 @@ function commandParts(raw: string): string[] | undefined {
   return raw.split(/\s+/).map((part) => part.trim()).filter(Boolean);
 }
 
+function socketPropertyFormFromNode(node?: PipelineNode): SocketPropertyFormState {
+  return {
+    maxVisits: node?.limits?.maxVisits === undefined ? '' : String(node.limits.maxVisits),
+    maxEdgeTraversals: node?.limits?.maxEdgeTraversals === undefined ? '' : String(node.limits.maxEdgeTraversals),
+    maxOutputBytes: node?.limits?.maxOutputBytes === undefined ? '' : String(node.limits.maxOutputBytes),
+    layoutX: node?.layout?.x === undefined ? '' : String(node.layout.x),
+    layoutY: node?.layout?.y === undefined ? '' : String(node.layout.y),
+  };
+}
+
+function parseOptionalPositiveInteger(label: string, raw: string, errors: string[]): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < 1) {
+    errors.push(`${label} must be a positive whole number.`);
+    return undefined;
+  }
+  return value;
+}
+
+function parseOptionalFiniteNumber(label: string, raw: string, errors: string[]): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) {
+    errors.push(`${label} must be a finite number.`);
+    return undefined;
+  }
+  return value;
+}
+
 function rolePaletteNode(id: string, role: MateriaRoleConfig): PipelineNode {
   return {
     type: 'agent',
@@ -425,7 +473,9 @@ export function App() {
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
-  const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace'>('actions');
+  const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace' | 'edit'>('actions');
+  const [socketPropertyForm, setSocketPropertyForm] = useState<SocketPropertyFormState>(() => emptySocketPropertyForm());
+  const [socketPropertyError, setSocketPropertyError] = useState('');
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
 
@@ -680,6 +730,7 @@ export function App() {
     }
     setSocketActionId(socketId);
     setSocketActionMode('actions');
+    setSocketPropertyError('');
   }
 
   function replaceMateriaFromModal(socketId: string, materiaId: string) {
@@ -689,9 +740,53 @@ export function App() {
     }
   }
 
+  function openSocketPropertyEditor(socketId: string) {
+    setSocketPropertyForm(socketPropertyFormFromNode(activeLoadout?.nodes?.[socketId]));
+    setSocketPropertyError('');
+    setSocketActionMode('edit');
+  }
+
+  function saveSocketProperties(socketId: string) {
+    if (!activeLoadoutName || !activeLoadout?.nodes?.[socketId]) return;
+    const errors: string[] = [];
+    const maxVisits = parseOptionalPositiveInteger('Max visits', socketPropertyForm.maxVisits, errors);
+    const maxEdgeTraversals = parseOptionalPositiveInteger('Retry / edge traversal limit', socketPropertyForm.maxEdgeTraversals, errors);
+    const maxOutputBytes = parseOptionalPositiveInteger('Max output bytes', socketPropertyForm.maxOutputBytes, errors);
+    const layoutX = parseOptionalFiniteNumber('Layout X', socketPropertyForm.layoutX, errors);
+    const layoutY = parseOptionalFiniteNumber('Layout Y', socketPropertyForm.layoutY, errors);
+    if (errors.length > 0) {
+      const message = errors.join(' ');
+      setSocketPropertyError(message);
+      setStatus(`Cannot save socket ${socketId}: ${message}`);
+      return;
+    }
+
+    updateDraft((config) => {
+      const loadout = buildLoadouts(config)[activeLoadoutName];
+      const node = loadout?.nodes?.[socketId];
+      if (!node) return;
+      const limits: PipelineNode['limits'] = {};
+      if (maxVisits !== undefined) limits.maxVisits = maxVisits;
+      if (maxEdgeTraversals !== undefined) limits.maxEdgeTraversals = maxEdgeTraversals;
+      if (maxOutputBytes !== undefined) limits.maxOutputBytes = maxOutputBytes;
+      if (Object.keys(limits).length > 0) node.limits = limits;
+      else delete node.limits;
+      const layout: PipelineNode['layout'] = {};
+      if (layoutX !== undefined) layout.x = layoutX;
+      if (layoutY !== undefined) layout.y = layoutY;
+      if (Object.keys(layout).length > 0) node.layout = layout;
+      else delete node.layout;
+    });
+    setSocketActionId(undefined);
+    setSocketActionMode('actions');
+    setSocketPropertyError('');
+    setStatus(`Updated socket properties for ${socketId}.`);
+  }
+
   function closeSocketActionModal() {
     setSocketActionId(undefined);
     setSocketActionMode('actions');
+    setSocketPropertyError('');
   }
 
   function toggleEdgeCondition(edge: LoadoutEdge) {
@@ -930,11 +1025,11 @@ export function App() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : 'socket actions'}</p>
+                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : 'socket actions'}</p>
                       <h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{socketActionId}</h3>
                       <p className="mt-1 text-sm text-slate-300">{getNodeLabel(socketActionId, activeLoadout.nodes[socketActionId])}</p>
                     </div>
-                    <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' ? 'Cancel' : 'Close'}</button>
+                    <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' ? 'Cancel' : 'Close'}</button>
                   </div>
                   {socketActionMode === 'replace' ? (
                     <div className="mt-5">
@@ -952,11 +1047,39 @@ export function App() {
                       </div>
                       {palette.length === 0 && <p className="mt-4 text-sm text-amber-200">No available materia definitions found.</p>}
                     </div>
+                  ) : socketActionMode === 'edit' ? (
+                    <div className="mt-5 space-y-4" data-testid="socket-property-editor">
+                      <p className="text-sm text-slate-300">Edit socket-level traversal limits and explicit layout coordinates. Empty fields clear that socket property.</p>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <label className="graph-field">Max visits
+                          <input data-testid="socket-max-visits" inputMode="numeric" value={socketPropertyForm.maxVisits} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxVisits: event.target.value })} placeholder="default" />
+                        </label>
+                        <label className="graph-field">Retries / edge traversals
+                          <input data-testid="socket-max-edge-traversals" inputMode="numeric" value={socketPropertyForm.maxEdgeTraversals} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxEdgeTraversals: event.target.value })} placeholder="default" />
+                        </label>
+                        <label className="graph-field">Max output bytes
+                          <input data-testid="socket-max-output-bytes" inputMode="numeric" value={socketPropertyForm.maxOutputBytes} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxOutputBytes: event.target.value })} placeholder="default" />
+                        </label>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="graph-field">Layout X
+                          <input data-testid="socket-layout-x" value={socketPropertyForm.layoutX} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutX: event.target.value })} placeholder="auto" />
+                        </label>
+                        <label className="graph-field">Layout Y
+                          <input data-testid="socket-layout-y" value={socketPropertyForm.layoutY} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutY: event.target.value })} placeholder="auto" />
+                        </label>
+                      </div>
+                      {socketPropertyError && <p className="socket-property-error" role="alert">{socketPropertyError}</p>}
+                      <div className="flex flex-wrap gap-3">
+                        <button type="button" className="materia-button" data-testid="save-socket-properties" onClick={() => saveSocketProperties(socketActionId)}>Save socket properties</button>
+                        <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button>
+                      </div>
+                    </div>
                   ) : (
                     <div className="mt-5 grid gap-3 sm:grid-cols-2">
                       <button type="button" className="socket-action-button" onClick={() => removeMateria(socketActionId)}>Unsocket</button>
                       <button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button>
-                      <button type="button" className="socket-action-button" onClick={() => setStatus('Socket property editor is coming in the next implementation step.')}>Edit</button>
+                      <button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button>
                       <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
                     </div>
                   )}
