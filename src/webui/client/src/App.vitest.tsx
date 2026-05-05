@@ -286,6 +286,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: /Planning-Consult/ }));
     await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
@@ -293,15 +294,16 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await openTab('Loadout');
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
-    expect(body.config.loadouts['Full-Auto']).toEqual(testConfig.loadouts['Full-Auto']);
+    expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config.materiaDefinitions.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'json' });
     expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.', model: 'openai/gpt-review', multiTurn: true });
+    await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
+    await openTab('Loadout');
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('creates prompt materia in legacy pipeline configs without materializing loadouts', async () => {
@@ -317,13 +319,11 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await openTab('Loadout');
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.pipeline).toEqual(legacyPipelineConfig.pipeline);
+    expect(body.config).not.toHaveProperty('pipeline');
     expect(body.config.materiaDefinitions.Critique).toMatchObject({ type: 'agent', role: 'Critique', prompt: 'Review the output carefully.', parse: 'text' });
     expect(body.config.roles.Critique).toMatchObject({ tools: 'none', systemPrompt: 'Review the output carefully.' });
   });
@@ -346,13 +346,12 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-params'), { target: { value: '{"ci":true}' } });
     fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '90000' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await openTab('Loadout');
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('project');
-    expect(body.config.loadouts['Full-Auto']).toEqual(testConfig.loadouts['Full-Auto']);
+    expect(body.config).not.toHaveProperty('loadouts');
+    expect(body.config).not.toHaveProperty('roles');
     expect(body.config.materiaDefinitions.RunTests).toMatchObject({ type: 'utility', utility: 'shell', command: ['npm', 'test'], params: { ci: true }, timeoutMs: 90000 });
   });
 
@@ -430,12 +429,10 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '91000' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await openTab('Loadout');
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(body.config.loadouts).toEqual(selectorConfig.loadouts);
+    expect(body.config).not.toHaveProperty('loadouts');
+    expect(body.config.materiaDefinitions.RunTests).toMatchObject({ timeoutMs: 91000 });
   });
 
   it('edits existing prompt materia role settings where supported', async () => {
@@ -452,13 +449,11 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Build with extra care.' } });
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'readOnly' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await openTab('Loadout');
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
-    expect(body.config.loadouts['Full-Auto']).toEqual(testConfig.loadouts['Full-Auto']);
+    expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config.materiaDefinitions.Build).toMatchObject({ type: 'agent', role: 'Build', prompt: 'Build with extra care.', parse: 'text' });
     expect(body.config.roles.Build).toMatchObject({ tools: 'readOnly', systemPrompt: 'Build with extra care.', model: 'openai/gpt-test' });
   });

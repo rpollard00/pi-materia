@@ -259,6 +259,42 @@ function commandParts(raw: string): string[] | undefined {
   return raw.split(/\s+/).map((part) => part.trim()).filter(Boolean);
 }
 
+function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
+  const name = form.name.trim();
+  if (!name) throw new Error('Materia name is required.');
+  const timeoutMs = Number(form.timeoutMs);
+  const patch: MateriaConfig = { materiaDefinitions: {} };
+  if (form.behavior === 'prompt') {
+    patch.roles = {
+      [name]: {
+        tools: form.toolAccess,
+        systemPrompt: form.prompt,
+        model: form.model.trim() || undefined,
+        thinking: form.thinking.trim() || undefined,
+        multiTurn: form.multiTurn || undefined,
+      },
+    };
+    patch.materiaDefinitions = {
+      [name]: { type: 'agent', role: name, prompt: form.prompt || undefined, parse: form.outputFormat === 'json' ? 'json' : 'text' },
+    };
+  } else {
+    const parsedParams = parseJsonObject(form.params);
+    const command = commandParts(form.command);
+    patch.materiaDefinitions = {
+      [name]: { type: 'utility', utility: form.utility || name, command: command?.length ? command : undefined, params: parsedParams, timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined, parse: form.outputFormat === 'json' ? 'json' : 'text' },
+    };
+  }
+  return patch;
+}
+
+function applyMateriaPatch(config: MateriaConfig, patch: MateriaConfig): MateriaConfig {
+  return {
+    ...config,
+    roles: patch.roles ? { ...(config.roles ?? {}), ...patch.roles } : config.roles,
+    materiaDefinitions: patch.materiaDefinitions ? { ...(config.materiaDefinitions ?? {}), ...patch.materiaDefinitions } : config.materiaDefinitions,
+  };
+}
+
 function Orb({ color, label, small = false, empty = false }: { color: string; label: string; small?: boolean; empty?: boolean }) {
   return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : `bg-gradient-to-br ${color}`}`} title={label} />;
 }
@@ -382,12 +418,9 @@ export function App() {
     });
   }
 
-  function updateDefinitionDraft(updater: (config: MateriaConfig) => void) {
-    setDraftConfig((current) => {
-      const next = cloneConfig(current ?? {});
-      updater(next);
-      return next;
-    });
+  function applySavedMateriaPatch(patch: MateriaConfig) {
+    setBaselineConfig((current) => applyMateriaPatch(cloneConfig(current ?? {}), patch));
+    setDraftConfig((current) => applyMateriaPatch(cloneConfig(current ?? {}), patch));
   }
 
   function switchLoadout(name: string) {
@@ -576,34 +609,23 @@ export function App() {
     setStatus(`Editing reusable materia definition ${id}. Save the staged form to update definitions only.`);
   }
 
-  function saveMateriaForm() {
+  async function saveMateriaForm() {
     try {
-      const name = materiaForm.name.trim();
-      if (!name) throw new Error('Materia name is required.');
-      const timeoutMs = Number(materiaForm.timeoutMs);
-      const parsedParams = materiaForm.behavior === 'tool' ? parseJsonObject(materiaForm.params) : undefined;
-      updateDefinitionDraft((config) => {
-        config.materiaDefinitions ??= {};
-        if (materiaForm.editingNodeId && materiaForm.editingNodeId !== name) delete config.materiaDefinitions[materiaForm.editingNodeId];
-        if (materiaForm.behavior === 'prompt') {
-          config.roles ??= {};
-          if (materiaForm.editingNodeId && materiaForm.editingNodeId !== name) delete config.roles[materiaForm.editingNodeId];
-          config.roles[name] = {
-            tools: materiaForm.toolAccess,
-            systemPrompt: materiaForm.prompt,
-            model: materiaForm.model.trim() || undefined,
-            thinking: materiaForm.thinking.trim() || undefined,
-            multiTurn: materiaForm.multiTurn || undefined,
-          };
-          config.materiaDefinitions[name] = { type: 'agent', role: name, prompt: materiaForm.prompt || undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text' };
-        } else {
-          const command = commandParts(materiaForm.command);
-          config.materiaDefinitions[name] = { type: 'utility', utility: materiaForm.utility || name, command: command?.length ? command : undefined, params: parsedParams, timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined, parse: materiaForm.outputFormat === 'json' ? 'json' : 'text' };
-        }
+      const patch = buildMateriaPatch(materiaForm);
+      const savedName = materiaForm.name.trim();
+      const savedBehavior = materiaForm.behavior;
+      const target = materiaForm.persistScope;
+      setStatus(`Saving reusable ${savedBehavior} materia to ${target} scope…`);
+      const response = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ target, config: patch }),
       });
-      setSaveTarget(materiaForm.persistScope);
+      const body = await response.json();
+      if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Materia save failed');
+      applySavedMateriaPatch(patch);
       setMateriaForm(emptyMateriaForm());
-      setStatus(`Staged reusable ${materiaForm.behavior} materia definition. Save target is ${materiaForm.persistScope}; no loadout sockets or graph nodes were changed.`);
+      setStatus(`Saved reusable ${savedBehavior} materia ${savedName} to ${body.target ?? target} scope. Loadout draft edits were left unchanged.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -853,9 +875,10 @@ export function App() {
           )}
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <button className="materia-button" data-testid="save-materia-form" onClick={saveMateriaForm}>{materiaForm.editingNodeId ? 'Update materia' : 'Create materia'}</button>
+            <button className="materia-button" data-testid="save-materia-form" onClick={() => { void saveMateriaForm(); }}>{materiaForm.editingNodeId ? 'Update materia' : 'Create materia'}</button>
             <button className="materia-button-secondary" onClick={() => setMateriaForm(emptyMateriaForm())}>Clear form</button>
           </div>
+          <p className="mt-3 min-h-10 text-sm text-cyan-100" data-testid="materia-save-status">{status}</p>
         </section>
         )}
 
