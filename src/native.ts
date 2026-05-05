@@ -93,6 +93,59 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   await startNode(pi, ctx, state, currentNodeOrThrow(state));
 }
 
+export function loadCastStateById(ctx: ExtensionContext, castId: string): MateriaCastState | undefined {
+  const requested = castId.trim();
+  if (!requested) return undefined;
+  const entries = ctx.sessionManager.getBranch();
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry.type !== "custom" || entry.customType !== STATE_ENTRY || !entry.data) continue;
+    const state = entry.data as MateriaCastState;
+    if (state.castId === requested) return state;
+  }
+  return undefined;
+}
+
+export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, castId: string): Promise<MateriaCastState> {
+  const state = loadCastStateById(ctx, castId);
+  if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
+  const active = loadActiveCastState(ctx);
+  if (active?.active) {
+    if (active.castId === state.castId) throw new Error(`pi-materia cast ${state.castId} is already running.`);
+    throw new Error(`A pi-materia cast is already active (${active.castId}). Abort it before recasting ${state.castId}.`);
+  }
+  if (state.active) throw new Error(`pi-materia cast ${state.castId} is already running.`);
+  if (state.phase === "complete" || state.nodeState === "complete") throw new Error(`pi-materia cast ${state.castId} is complete and cannot be recast.`);
+  if (state.phase !== "failed" && state.nodeState !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed or aborted (phase: ${state.phase}, node state: ${state.nodeState ?? "unknown"}).`);
+  const node = currentNodeOrThrow(state);
+  const previousFailure = state.failedReason;
+
+  state.active = true;
+  state.phase = node.id;
+  state.currentNode = node.id;
+  state.currentRole = nodeRoleName(node);
+  state.awaitingResponse = isAgentResolvedNode(node);
+  state.nodeState = isAgentResolvedNode(node) ? "awaiting_agent_response" : "running_utility";
+  state.failedReason = undefined;
+  state.runState.currentNode = node.id;
+  state.runState.currentRole = nodeRoleName(node);
+  state.runState.lastMessage = `Recasting from node ${node.id}.`;
+  await appendEvent(state.runState, "cast_recast", { node: node.id, role: nodeRoleName(node), type: node.node.type, previousFailure, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id), reusedActivePrompt: isAgentResolvedNode(node) && Boolean(state.activeTurnPrompt) });
+  await writeUsage(state.runState);
+  saveCastState(pi, state);
+  ctx.ui.setStatus("materia", state.currentItemLabel ? `${node.id}:${state.currentItemLabel}` : node.id);
+  updateWidget(ctx, state.runState);
+
+  if (isAgentResolvedNode(node) && state.activeTurnPrompt) {
+    updateToolScope(pi, node.role);
+    await sendMateriaTurn(pi, ctx, state, state.activeTurnPrompt);
+  } else {
+    await startNode(pi, ctx, state, node);
+  }
+  ctx.ui.notify(`pi-materia cast ${state.castId} recast from node "${node.id}".`, "info");
+  return state;
+}
+
 async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   const node = currentNodeOrThrow(state);
   if (!isMultiTurnResolvedAgentNode(node)) {
@@ -1120,11 +1173,18 @@ function currentTaskAttempt(state: MateriaCastState): number | undefined {
 
 export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | undefined {
   const entries = ctx.sessionManager.getBranch();
+  const seenCastIds = new Set<string>();
+  let latest: MateriaCastState | undefined;
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
-    if (entry.type === "custom" && entry.customType === STATE_ENTRY && entry.data) return entry.data as MateriaCastState;
+    if (entry.type !== "custom" || entry.customType !== STATE_ENTRY || !entry.data) continue;
+    const state = entry.data as MateriaCastState;
+    if (!latest) latest = state;
+    if (seenCastIds.has(state.castId)) continue;
+    seenCastIds.add(state.castId);
+    if (state.active) return state;
   }
-  return undefined;
+  return latest;
 }
 
 export function saveCastState(pi: ExtensionAPI, state: MateriaCastState): void {
