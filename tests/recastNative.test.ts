@@ -77,6 +77,21 @@ describe("/materia recast", () => {
     expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${failed.castId} recast from node "work".`);
   });
 
+  test("explicit id resumes an aborted cast", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast aborted task");
+    await harness.runCommand("materia", "abort");
+    const aborted = latestState(harness);
+
+    await harness.runCommand("materia", `recast ${aborted.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(aborted.castId);
+    expect(resumed.active).toBe(true);
+    expect(resumed.runState.lastMessage).toBe("Recasting from node work.");
+  });
+
   test("reports clear errors for complete, running, missing, and non-resumable casts", async () => {
     const harness = await makeHarness();
 
@@ -103,11 +118,31 @@ describe("/materia recast", () => {
     expect(harness.notifications.at(-1)?.message).toContain("is not failed or aborted");
   });
 
-  test("completions include resumable casts newest first", async () => {
+  test("without an explicit id reports when no resumable casts exist", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast complete only");
+    harness.appendAssistantMessage("done");
+    await harness.emit("agent_end", { messages: [] });
+
+    await harness.runCommand("materia", "recast");
+
+    expect(harness.notifications.at(-1)).toEqual({
+      message: "No failed or aborted pi-materia casts are available to recast.",
+      type: "info",
+    });
+  });
+
+  test("completions include only matching resumable casts newest first", async () => {
     const harness = await makeHarness();
 
     await harness.runCommand("materia", "cast older failed request");
     const older = await failCurrentCast(harness, "older failure");
+
+    await harness.runCommand("materia", "cast complete request");
+    harness.appendAssistantMessage("done");
+    await harness.emit("agent_end", { messages: [] });
+    const complete = latestState(harness);
 
     await harness.runCommand("materia", "cast newer aborted request");
     await harness.runCommand("materia", "abort");
@@ -115,8 +150,12 @@ describe("/materia recast", () => {
 
     const completions = harness.getCommandCompletions("materia", "recast ") ?? [];
     expect(completions.map((item) => item.value)).toEqual([`recast ${newer.castId}`, `recast ${older.castId}`]);
+    expect(completions.map((item) => item.value)).not.toContain(`recast ${complete.castId}`);
     expect(completions[0].label).toContain("aborted");
     expect(completions[1].label).toContain("failed");
     expect(completions[0].description).toContain("newer aborted request");
+
+    const prefixCompletions = harness.getCommandCompletions("materia", `recast ${older.castId.slice(0, -1)}`) ?? [];
+    expect(prefixCompletions.map((item) => item.value)).toEqual([`recast ${older.castId}`]);
   });
 });

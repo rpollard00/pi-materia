@@ -26,6 +26,22 @@ describe("/materia casts listing", () => {
     expect(text).toContain("progress: node Auto-Eval; role Auto-Eval; item recast-003 - Implement /materia recast; visit 3");
   });
 
+  test("does not mark completed casts as recast targets", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-casts-"));
+    const id = "2026-05-05T19-30-00-000Z";
+    await writeCast(root, id, [
+      { type: "cast_start", data: { request: "completed request" } },
+      { type: "node_start", data: { node: "Build", role: "Build", itemKey: "done-001" } },
+      { type: "cast_end", data: { ok: true, node: "Build" } },
+    ]);
+
+    const lines = await renderCastList(root);
+    const text = lines.join("\n");
+    expect(text).toContain(`complete  ${id}`);
+    expect(text).not.toContain(`↻ RECAST TARGET  complete  ${id}`);
+    expect(text).not.toContain(`recast: /materia recast ${id}`);
+  });
+
   test("uses session state to identify aborted recast targets", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-materia-casts-"));
     const id = "2026-05-05T18-55-00-685Z";
