@@ -91,7 +91,52 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getAllByText('flow').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('satisfied')).toBeTruthy();
     expect(screen.getByText('not satisfied')).toBeTruthy();
+    expect(container.querySelector('.loadout-edge-satisfied')).toBeTruthy();
+    expect(container.querySelector('.loadout-edge-unsatisfied')).toBeTruthy();
     expect(container.querySelectorAll('.loadout-edge path[marker-end]').length).toBe(4);
+  });
+
+  it('toggles a clickable edge condition through validated staged state', async () => {
+    const singleEdgeConfig = structuredClone(testConfig);
+    singleEdgeConfig.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [{ when: 'satisfied', to: 'Maintain' }];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: singleEdgeConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const edge = await screen.findByTestId('edge-Auto-Eval-Maintain-0');
+    expect(edge.getAttribute('class')).toContain('loadout-edge-satisfied');
+    fireEvent.click(edge);
+
+    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as not satisfied\./)).toBeTruthy();
+    expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const savedEdge = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes['Auto-Eval'].edges[0];
+    expect(savedEdge).toEqual({ when: 'not_satisfied', to: 'Maintain' });
+  });
+
+  it('shows validation failures from edge condition toggles without mutating draft state', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const edge = await screen.findByTestId('edge-Auto-Eval-Maintain-0');
+    fireEvent.click(edge);
+
+    expect(await screen.findByText(/Cannot toggle edge Auto-Eval → Maintain: Socket "Auto-Eval" has more than one outgoing unsatisfied edge/)).toBeTruthy();
+    expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-satisfied');
+    expect(screen.queryByText('staged edits')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('creates new loadouts with exactly one empty untyped entry socket', async () => {

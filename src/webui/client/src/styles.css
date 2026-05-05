@@ -90,6 +90,22 @@
   pointer-events: none;
 }
 
+.loadout-edge-clickable {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.loadout-edge-clickable path,
+.loadout-edge-clickable text {
+  pointer-events: auto;
+}
+
+.loadout-edge-clickable:hover path,
+.loadout-edge-clickable:focus path {
+  stroke-width: 4;
+  filter: drop-shadow(0 0 12px rgb(255 255 255 / 0.36));
+}
+
 .loadout-edge path {
   fill: none;
   stroke: rgb(125 211 252 / 0.72);

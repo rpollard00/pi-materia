@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
+import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 
 type SaveTarget = 'user' | 'project' | 'explicit';
 type NodeType = 'agent' | 'utility';
@@ -115,6 +116,8 @@ interface LoadoutEdge {
   from: string;
   to: string;
   when?: string;
+  kind: 'next' | 'edge';
+  edgeIndex?: number;
 }
 
 interface PositionedSocket {
@@ -197,14 +200,25 @@ function edgeConditionLabel(when?: string) {
   return when.replace(/_/g, ' ');
 }
 
+function edgeConditionClass(when?: string) {
+  const state = edgeConditionState({ when });
+  if (state === 'unsatisfied') return 'unsatisfied';
+  if (state === 'satisfied' && when) return 'satisfied';
+  return 'default';
+}
+
+function toggledEdgeCondition(when?: string) {
+  return edgeConditionState({ when }) === 'unsatisfied' ? 'satisfied' : 'not_satisfied';
+}
+
 function getLoadoutEdges(nodes: Record<string, PipelineNode>): LoadoutEdge[] {
   const edges: LoadoutEdge[] = [];
   for (const [from, node] of Object.entries(nodes)) {
     if (typeof node.next === 'string' && nodes[node.next]) {
-      edges.push({ id: `${from}:next:${node.next}`, from, to: node.next });
+      edges.push({ id: `${from}:next:${node.next}`, from, to: node.next, kind: 'next' });
     }
     for (const [index, edge] of (node.edges ?? []).entries()) {
-      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when ?? 'flow'}`, from, to: edge.to, when: edge.when });
+      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when ?? 'flow'}`, from, to: edge.to, when: edge.when, kind: 'edge', edgeIndex: index });
     }
   }
   return edges;
@@ -615,6 +629,25 @@ export function App() {
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
   }
 
+  function toggleEdgeCondition(edge: LoadoutEdge) {
+    if (!activeLoadoutName || edge.kind !== 'edge' || edge.edgeIndex === undefined || !activeLoadout) return;
+    const edgeIndex = edge.edgeIndex;
+    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, (loadout) => {
+      const candidate = loadout.nodes?.[edge.from]?.edges?.[edgeIndex];
+      if (candidate) candidate.when = toggledEdgeCondition(candidate.when);
+    });
+    if (!result.ok) {
+      setStatus(`Cannot toggle edge ${edge.from} → ${edge.to}: ${formatGraphValidationErrors(result.errors)}`);
+      return;
+    }
+    updateDraft((config) => {
+      const draftLoadouts = buildLoadouts(config);
+      draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
+      config.loadouts = draftLoadouts;
+    });
+    setStatus(`Staged edge ${edge.from} → ${edge.to} as ${edgeConditionLabel(result.graph.nodes?.[edge.from]?.edges?.[edge.edgeIndex]?.when)}.`);
+  }
+
   function editMateria(id: string) {
     const definition = materiaDefinitions[id];
     const roleName = definition?.role ?? id;
@@ -761,7 +794,7 @@ export function App() {
             </div>
 
             <div className="loadout-graph-canvas" data-testid="socket-grid" style={{ minWidth: `${loadoutGraph.width}px`, minHeight: `${loadoutGraph.height}px` }}>
-              <svg className="loadout-edge-layer" width={loadoutGraph.width} height={loadoutGraph.height} aria-hidden="true">
+              <svg className="loadout-edge-layer" width={loadoutGraph.width} height={loadoutGraph.height} aria-label="Loadout edges">
                 <defs>
                   <marker id="materia-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
                     <path d="M2,2 L10,6 L2,10 Z" className="loadout-edge-arrow" />
@@ -780,7 +813,20 @@ export function App() {
                   const curve = Math.max(44, Math.abs(endX - startX) * 0.35);
                   const path = `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
                   return (
-                    <g key={edge.id} className={`loadout-edge loadout-edge-${edge.when === 'not_satisfied' ? 'unsatisfied' : edge.when === 'satisfied' ? 'satisfied' : 'default'}`}>
+                    <g
+                      key={edge.id}
+                      data-testid={`edge-${edge.from}-${edge.to}-${edge.edgeIndex ?? 'next'}`}
+                      role={edge.kind === 'edge' ? 'button' : undefined}
+                      tabIndex={edge.kind === 'edge' ? 0 : undefined}
+                      className={`loadout-edge loadout-edge-${edgeConditionClass(edge.when)} ${edge.kind === 'edge' ? 'loadout-edge-clickable' : ''}`}
+                      onClick={() => toggleEdgeCondition(edge)}
+                      onKeyDown={(event) => {
+                        if (edge.kind === 'edge' && (event.key === 'Enter' || event.key === ' ')) {
+                          event.preventDefault();
+                          toggleEdgeCondition(edge);
+                        }
+                      }}
+                    >
                       <path d={path} markerEnd="url(#materia-edge-arrow)" />
                       <text x={midX} y={midY - 10}>{edgeConditionLabel(edge.when)}</text>
                     </g>

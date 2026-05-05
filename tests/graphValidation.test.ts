@@ -87,8 +87,10 @@ describe("graph validation foundation", () => {
 
   test("classifies current satisfied and unsatisfied edge condition strings", () => {
     expect(edgeConditionState({})).toBe("satisfied");
+    expect(edgeConditionState({ when: "satisfied" })).toBe("satisfied");
     expect(edgeConditionState({ when: "$.satisfied == true" })).toBe("satisfied");
     expect(edgeConditionState({ when: "$.passed != false" })).toBe("satisfied");
+    expect(edgeConditionState({ when: "not_satisfied" })).toBe("unsatisfied");
     expect(edgeConditionState({ when: "$.satisfied == false" })).toBe("unsatisfied");
     expect(edgeConditionState({ when: "$.passed != true" })).toBe("unsatisfied");
     expect(edgeConditionState({ when: "$.score > 2" })).toBe("other");

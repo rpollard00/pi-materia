@@ -62,6 +62,8 @@ export function edgeConditionState(edge: Pick<MateriaEdgeConfig, "when">): Mater
   const condition = edge.when?.trim();
   if (!condition) return "satisfied";
   const normalized = condition.replace(/\s+/g, " ").toLowerCase();
+  if (normalized === "satisfied" || normalized === "not unsatisfied") return "satisfied";
+  if (normalized === "unsatisfied" || normalized === "not_satisfied" || normalized === "not satisfied") return "unsatisfied";
   if (/==\s*true$/.test(normalized) || /!=\s*false$/.test(normalized)) return "satisfied";
   if (/==\s*false$/.test(normalized) || /!=\s*true$/.test(normalized)) return "unsatisfied";
   return "other";
