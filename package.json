@@ -12,9 +12,13 @@
     "workflow"
   ],
   "files": [
-    "src",
-    "config",
-    "docs",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.css",
+    "src/**/*.html",
+    "src/**/tsconfig.json",
+    "config/default.json",
+    "docs/*.md",
     "README.md",
     "PI_MATERIA_PLAN.md",
     "LICENSE"
