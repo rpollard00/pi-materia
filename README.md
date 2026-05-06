@@ -232,6 +232,8 @@ Generic node mechanics:
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
 
+Materia graphs are workflow state machines, not DAGs. Loops such as `Build -> Auto-Eval -> Maintain -> Build` are valid and model repeated task sections/retry paths; runtime node-visit and edge-traversal limits bound execution instead of config validation rejecting cycles.
+
 Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, and optional `multiTurn`. Set `"multiTurn": true` on a materia to let any agent node using that materia pause for interactive refinement until the user runs `/materia continue`.
 
 ### Multi-turn planner materia

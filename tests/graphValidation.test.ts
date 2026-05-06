@@ -55,14 +55,22 @@ describe("graph validation foundation", () => {
     ]);
   });
 
-  test("rejects cycles before graph changes are accepted", () => {
+  test("accepts intentional iterative workflow loops bounded by runtime traversal limits", () => {
     const graph = validGraph();
+    graph.nodes.Build.next = "Auto-Eval";
+    graph.nodes["Auto-Eval"] = {
+      type: "agent",
+      materia: "Auto-Eval",
+      edges: [
+        { when: "satisfied", to: "Maintain" },
+        { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+      ],
+    };
     graph.nodes.Maintain.next = "Build";
 
     const result = validatePipelineGraph(graph);
 
-    expect(result.ok).toBe(false);
-    expect(result.errors).toContainEqual(expect.objectContaining({ code: "cycle" }));
+    expect(result).toEqual({ ok: true, errors: [] });
   });
 
   test("stages valid graph mutations and leaves the original graph unchanged on validation errors", () => {
@@ -76,11 +84,19 @@ describe("graph validation foundation", () => {
     expect(accepted.graph.nodes.Check.edges).toHaveLength(1);
     expect(graph.nodes.Check.edges).toHaveLength(2);
 
+    const acceptedLoop = stageValidatedPipelineGraphChange(graph, (draft) => {
+      draft.nodes.Maintain.next = "Build";
+    });
+
+    expect(acceptedLoop.ok).toBe(true);
+    expect(acceptedLoop.graph.nodes.Maintain.next).toBe("Build");
+
     const rejected = stageValidatedPipelineGraphChange(graph, (draft) => {
-      draft.nodes.Maintain.next = "Plan";
+      draft.nodes.Maintain.next = "MissingTarget";
     });
 
     expect(rejected.ok).toBe(false);
+    expect(rejected.errors).toContainEqual(expect.objectContaining({ code: "unknown-endpoint" }));
     expect(rejected.graph).toBe(graph);
     expect(graph.nodes.Maintain.next).toBeUndefined();
   });
