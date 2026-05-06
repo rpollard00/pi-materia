@@ -1,44 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
+import {
+  clearSocketMateria,
+  getNodeLabel,
+  isEmptySocket,
+  makeEmptyEntryLoadout,
+  makeEmptySocket,
+  materiaPaletteNode,
+  nodeColor,
+  placeMateriaInSocket,
+  type MateriaConfig,
+  type PipelineConfig,
+  type PipelineNode,
+} from './loadoutModel.js';
 
 type SaveTarget = 'user' | 'project' | 'explicit';
-type NodeType = 'agent' | 'utility';
-
-interface PipelineNode {
-  type?: NodeType;
-  materia?: string;
-  utility?: string;
-  command?: string[];
-  next?: string;
-  edges?: { to: string; when?: string; maxTraversals?: number }[];
-  empty?: boolean;
-  layout?: { x?: number; y?: number };
-  limits?: { maxVisits?: number; maxEdgeTraversals?: number; maxOutputBytes?: number };
-  [key: string]: unknown;
-}
-
-interface PipelineConfig {
-  entry?: string;
-  nodes?: Record<string, PipelineNode>;
-  [key: string]: unknown;
-}
-
-interface MateriaBehaviorConfig {
-  tools?: 'none' | 'readOnly' | 'coding';
-  prompt?: string;
-  model?: string;
-  thinking?: string;
-  multiTurn?: boolean;
-  [key: string]: unknown;
-}
-
-interface MateriaConfig {
-  activeLoadout?: string;
-  loadouts?: Record<string, PipelineConfig>;
-  materia?: Record<string, MateriaBehaviorConfig>;
-  [key: string]: unknown;
-}
 
 interface MateriaFormState {
   editingNodeId: string;
@@ -187,36 +164,11 @@ const emptySocketPropertyForm = (): SocketPropertyFormState => ({
   layoutY: '',
 });
 
-const paletteColors = [
-  'from-sky-200 via-cyan-300 to-blue-600',
-  'from-emerald-200 via-lime-300 to-green-700',
-  'from-amber-100 via-yellow-300 to-orange-600',
-  'from-fuchsia-200 via-pink-300 to-purple-700',
-  'from-rose-200 via-red-300 to-red-700',
-  'from-violet-200 via-indigo-300 to-slate-700',
-];
-
 const cloneConfig = <T,>(config: T): T => JSON.parse(JSON.stringify(config)) as T;
 
 function buildLoadouts(config: MateriaConfig): Record<string, PipelineConfig> {
   if (config.loadouts && Object.keys(config.loadouts).length > 0) return config.loadouts;
   return {};
-}
-
-function getNodeLabel(id: string, node?: PipelineNode) {
-  if (!node || node.empty) return 'Empty socket';
-  if (node.type === 'agent') return node.materia ?? id;
-  if (node.type === 'utility') return node.utility ?? node.command?.join(' ') ?? id;
-  return node.materia ?? node.utility ?? id;
-}
-
-function nodeColor(id: string, index: number) {
-  const lowered = id.toLowerCase();
-  if (lowered.includes('plan')) return paletteColors[0];
-  if (lowered.includes('build')) return paletteColors[1];
-  if (lowered.includes('check') || lowered.includes('eval')) return paletteColors[2];
-  if (lowered.includes('maintain')) return paletteColors[3];
-  return paletteColors[index % paletteColors.length];
 }
 
 function edgeConditionLabel(when?: string) {
@@ -305,50 +257,6 @@ function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
   return name;
 }
 
-function makeEmptyEntryLoadout(): PipelineConfig {
-  const entry = 'Entry';
-  return { entry, nodes: { [entry]: { empty: true } } };
-}
-
-const materiaBehaviorKeys = new Set([
-  'type',
-  'materia',
-  'utility',
-  'command',
-  'params',
-  'timeoutMs',
-  'model',
-  'modelSettings',
-  'outputFormat',
-  'multiturn',
-  'parse',
-]);
-
-function materiaBehavior(node?: PipelineNode): PipelineNode {
-  if (!node || node.empty) return { empty: true };
-  const behavior: PipelineNode = {};
-  for (const [key, value] of Object.entries(node)) {
-    if (materiaBehaviorKeys.has(key)) behavior[key] = cloneConfig(value);
-  }
-  return Object.keys(behavior).length > 0 ? behavior : { empty: true };
-}
-
-function socketStructure(node?: PipelineNode): PipelineNode {
-  const structure: PipelineNode = {};
-  for (const [key, value] of Object.entries(node ?? {})) {
-    if (!materiaBehaviorKeys.has(key) && key !== 'empty') structure[key] = cloneConfig(value);
-  }
-  return structure;
-}
-
-function placeMateriaInSocket(socket?: PipelineNode, materia?: PipelineNode): PipelineNode {
-  return { ...socketStructure(socket), ...materiaBehavior(materia), empty: false };
-}
-
-function clearSocketMateria(socket?: PipelineNode): PipelineNode {
-  return { ...socketStructure(socket), empty: true };
-}
-
 function parseDragPayload(raw: string): DragPayload | undefined {
   try {
     const parsed = JSON.parse(raw) as Partial<DragPayload> | null;
@@ -402,10 +310,6 @@ function parseOptionalFiniteNumber(label: string, raw: string, errors: string[])
     return undefined;
   }
   return value;
-}
-
-function materiaPaletteNode(id: string): PipelineNode {
-  return { type: 'agent', materia: id };
 }
 
 function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
@@ -541,7 +445,7 @@ export function App() {
     for (const id of Object.keys(materia)) byId.set(id, materiaPaletteNode(id));
     const allNodes = Object.values(loadouts).flatMap((loadout) => Object.entries(loadout.nodes ?? {}));
     for (const [id, node] of allNodes) {
-      if (!node.empty && !byId.has(id)) byId.set(id, node);
+      if (!isEmptySocket(node) && !byId.has(id)) byId.set(id, node);
     }
     return [...byId.entries()];
   }, [loadouts, materia]);
@@ -632,13 +536,13 @@ export function App() {
 
     if (fromSocket && fromSocket !== socketId) {
       const currentSource = currentLoadout.nodes[fromSocket];
-      if (!currentSource || currentSource.empty) {
+      if (isEmptySocket(currentSource)) {
         setStatus('Ignored drop: dragged socket materia is no longer available.');
         return false;
       }
     } else {
       const currentSource = palette.find(([id]) => id === materiaId)?.[1] ?? currentLoadout.nodes[materiaId];
-      if (!currentSource || currentSource.empty) {
+      if (isEmptySocket(currentSource)) {
         setStatus(`Ignored drop: materia ${materiaId} is not available.`);
         return false;
       }
@@ -650,13 +554,13 @@ export function App() {
       if (fromSocket && fromSocket !== socketId) {
         const target = loadout.nodes[socketId];
         const source = loadout.nodes[fromSocket];
-        if (!source || source.empty || !target) return;
+        if (isEmptySocket(source) || !target) return;
         loadout.nodes[socketId] = placeMateriaInSocket(target, source);
         loadout.nodes[fromSocket] = placeMateriaInSocket(source, target);
       } else {
         const sourceNode = palette.find(([id]) => id === materiaId)?.[1] ?? loadout.nodes[materiaId];
         const target = loadout.nodes[socketId];
-        if (sourceNode && !sourceNode.empty && target) loadout.nodes[socketId] = placeMateriaInSocket(target, sourceNode);
+        if (!isEmptySocket(sourceNode) && target) loadout.nodes[socketId] = placeMateriaInSocket(target, sourceNode);
       }
     });
     setSelectedMateriaId(undefined);
@@ -692,11 +596,10 @@ export function App() {
       const newId = makeNewSocketId(loadout.nodes as Record<string, PipelineNode>, afterSocketId);
       const priorNext = source.next;
       const sourceLayout = source.layout;
-      loadout.nodes[newId] = {
-        empty: true,
+      loadout.nodes[newId] = makeEmptySocket({
         next: priorNext,
         layout: sourceLayout ? { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 } : undefined,
-      } as unknown as import('../../../types.js').MateriaPipelineNodeConfig;
+      }) as unknown as import('../../../types.js').MateriaPipelineNodeConfig;
       if (!priorNext) delete (loadout.nodes[newId] as PipelineNode).next;
       source.next = newId;
     });
@@ -1158,8 +1061,8 @@ export function App() {
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDrop(id, event)}
                 >
-                  <div draggable={!node.empty} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
-                    <Orb color={nodeColor(id, index)} label={getNodeLabel(id, node)} empty={node.empty} />
+                  <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
+                    <Orb color={nodeColor(id, index, materia, node)} label={getNodeLabel(id, node)} empty={isEmptySocket(node)} />
                   </div>
                   <span className="relative z-10 mt-4 text-sm font-semibold uppercase tracking-widest text-slate-100">{id}</span>
                   <span className="relative z-10 mt-1 text-xs text-cyan-100/80">{getNodeLabel(id, node)}</span>
@@ -1193,7 +1096,7 @@ export function App() {
                       <div className="materia-replacement-list mt-4" role="list" aria-label="Available replacement materia" data-testid="materia-replacement-list">
                         {palette.map(([id, node], index) => (
                           <button key={id} type="button" className="materia-replacement-row" data-testid={`replacement-materia-${id}`} onClick={() => replaceMateriaFromModal(socketActionId, id)}>
-                            <Orb small color={nodeColor(id, index)} label={id} />
+                            <Orb small color={nodeColor(id, index, materia, node)} label={id} />
                             <span className="flex min-w-0 flex-col text-left">
                               <span className="truncate font-black text-cyan-50">{id}</span>
                               <span className="truncate text-xs text-slate-300">{getNodeLabel(id, node)}</span>
@@ -1291,7 +1194,7 @@ export function App() {
               <div className="mt-4 grid grid-cols-2 gap-3">
                 {palette.map(([id, node], index) => (
                   <button key={id} draggable data-testid={`palette-${id}`} onDragStart={(event) => dragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => setSelectedMateriaId(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''}`}>
-                    <Orb small color={nodeColor(id, index)} label={id} />
+                    <Orb small color={nodeColor(id, index, materia, node)} label={id} />
                     <span>{getNodeLabel(id, node)}</span>
                   </button>
                 ))}
