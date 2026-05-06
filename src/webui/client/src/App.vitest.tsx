@@ -78,6 +78,10 @@ async function openTab(name: RegExp | string) {
   fireEvent.click(await screen.findByRole('button', { name }));
 }
 
+function paletteIds() {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="palette-"]')).map((element) => element.dataset.testid?.replace('palette-', ''));
+}
+
 describe('Materia loadout grid editor', () => {
   it('renders active and available loadouts with staged save controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
@@ -207,6 +211,42 @@ describe('Materia loadout grid editor', () => {
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
     expect(created.nodes.Entry).toEqual({ empty: true, next: 'Entry-Socket' });
+    expect(created.nodes['Entry-Socket']).toEqual({ empty: true });
+  });
+
+  it('keeps palette definitions and save payload materia stable during new loadout grid edits', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByTestId('palette-Build');
+    const initialPaletteIds = paletteIds();
+    const initialMateria = structuredClone(testConfig.materia);
+
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('palette-Build'), { dataTransfer });
+    fireEvent.drop(await screen.findByTestId('socket-Entry'), { dataTransfer });
+
+    expect(paletteIds()).toEqual(initialPaletteIds);
+
+    fireEvent.click(screen.getByTestId('socket-Entry'));
+    fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
+
+    expect(await screen.findByTestId('socket-Entry-Socket')).toBeTruthy();
+    expect(paletteIds()).toEqual(initialPaletteIds);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
+    const created = savedConfig.loadouts[savedConfig.activeLoadout];
+    expect(savedConfig.materia).toEqual(initialMateria);
+    expect(created.nodes.Entry).toEqual({ type: 'agent', materia: 'Build', empty: false, next: 'Entry-Socket' });
     expect(created.nodes['Entry-Socket']).toEqual({ empty: true });
   });
 
