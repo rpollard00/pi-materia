@@ -706,7 +706,7 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
 
 function classifyRecoverableTurnFailure(error: unknown): "context_window" | undefined {
   const message = errorMessage(error).toLowerCase();
-  return /context (window|length|limit|overflow)|token limit|max(?:imum)? tokens|input too long|request too large|too many tokens/.test(message) ? "context_window" : undefined;
+  return /context[_-]?length[_-]?exceeded|context[_-]?window[_-]?exceeded|context (window|length|limit|overflow)|token limit|max(?:imum)? tokens|input too long|request too large|too many tokens/.test(message) ? "context_window" : undefined;
 }
 
 function buildSameNodeRecoveryPrompt(state: MateriaCastState): string {

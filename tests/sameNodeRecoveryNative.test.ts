@@ -99,6 +99,28 @@ describe("native same-node recovery", () => {
     expect(events.some((event) => event.type === "same_node_recovery_retry")).toBe(true);
   });
 
+  test("Codex context_length_exceeded websocket errors retry the same active node", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast codex websocket context length");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    const errorMessage = 'Error: WebSocket closed 1000 Error: Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","param":"input"},"sequence_number":2}';
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    expect(harness.operationLog).toContain("compact");
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.currentNode).toBe("work");
+    expect(latestState.visits).toEqual({ work: 1 });
+
+    const events = await readEvents(harness);
+    expect(events.some((event) => event.type === "same_node_recovery_start" && event.data.reason === "context_window" && event.data.error.includes(errorMessage))).toBe(true);
+    expect(events.some((event) => event.type === "same_node_recovery_retry")).toBe(true);
+  });
+
   test("agent_end failures without assistant output retry the same active node", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast no assistant");
