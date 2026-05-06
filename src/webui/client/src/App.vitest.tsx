@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { App } from './App.js';
+import { App, routeLoadoutEdges } from './App.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
@@ -127,6 +127,52 @@ describe('Materia loadout grid editor', () => {
     expect(container.querySelector('.loadout-edge-satisfied')).toBeTruthy();
     expect(container.querySelector('.loadout-edge-unsatisfied')).toBeTruthy();
     expect(container.querySelectorAll('.loadout-edge path[marker-end]').length).toBe(4);
+    const forwardPath = screen.getByTestId('edge-Build-Auto-Eval-next').querySelector('path')?.getAttribute('d');
+    const retryEdge = screen.getByTestId('edge-Auto-Eval-Build-1');
+    expect(retryEdge.getAttribute('class')).toContain('loadout-edge-route-backward');
+    expect(retryEdge.querySelector('path')?.getAttribute('d')).not.toBe(forwardPath);
+  });
+
+  it('routes parallel edges between the same sockets on separate visual lanes', async () => {
+    const parallelConfig = structuredClone(edgeEditorConfig);
+    parallelConfig.loadouts.Edges.nodes.Start.edges = [
+      { when: 'satisfied', to: 'Review' },
+      { when: 'not_satisfied', to: 'Review' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: parallelConfig }))));
+
+    render(<App />);
+
+    const satisfied = await screen.findByTestId('edge-Start-Review-0');
+    const unsatisfied = await screen.findByTestId('edge-Start-Review-1');
+    expect(satisfied.querySelector('path')?.getAttribute('d')).not.toBe(unsatisfied.querySelector('path')?.getAttribute('d'));
+    expect(satisfied.querySelector('text')?.getAttribute('y')).not.toBe(unsatisfied.querySelector('text')?.getAttribute('y'));
+  });
+
+  it('routes parallel backward, loop, nearby, and crossing edges on separate lanes', () => {
+    const positions = new Map<string, never>([
+      ['A', { id: 'A', node: { type: 'agent', materia: 'A' }, index: 0, x: 520, y: 0 } as never],
+      ['B', { id: 'B', node: { type: 'agent', materia: 'B' }, index: 1, x: 0, y: 20 } as never],
+      ['C', { id: 'C', node: { type: 'agent', materia: 'C' }, index: 2, x: 0, y: 120 } as never],
+      ['D', { id: 'D', node: { type: 'agent', materia: 'D' }, index: 3, x: 520, y: 140 } as never],
+    ]);
+    const edges = [
+      { id: 'A:edge:0:B:satisfied', from: 'A', to: 'B', kind: 'edge', edgeIndex: 0, when: 'satisfied' },
+      { id: 'A:edge:1:B:not_satisfied', from: 'A', to: 'B', kind: 'edge', edgeIndex: 1, when: 'not_satisfied' },
+      { id: 'A:edge:2:A:first', from: 'A', to: 'A', kind: 'edge', edgeIndex: 2, when: 'first' },
+      { id: 'A:edge:3:A:second', from: 'A', to: 'A', kind: 'edge', edgeIndex: 3, when: 'second' },
+      { id: 'C:edge:0:D:satisfied', from: 'C', to: 'D', kind: 'edge', edgeIndex: 0, when: 'satisfied' },
+      { id: 'B:edge:0:D:not_satisfied', from: 'B', to: 'D', kind: 'edge', edgeIndex: 0, when: 'not_satisfied' },
+    ] as never;
+
+    const routed = routeLoadoutEdges(edges, positions);
+    const byId = new Map(routed.map((route) => [route.edge.id, route]));
+    expect(byId.get('A:edge:0:B:satisfied')?.path).not.toBe(byId.get('A:edge:1:B:not_satisfied')?.path);
+    expect(byId.get('A:edge:0:B:satisfied')?.labelY).not.toBe(byId.get('A:edge:1:B:not_satisfied')?.labelY);
+    expect(byId.get('A:edge:2:A:first')?.path).not.toBe(byId.get('A:edge:3:A:second')?.path);
+    expect(byId.get('A:edge:2:A:first')?.labelY).not.toBe(byId.get('A:edge:3:A:second')?.labelY);
+    expect(byId.get('C:edge:0:D:satisfied')?.path).not.toBe(byId.get('B:edge:0:D:not_satisfied')?.path);
+    expect(byId.get('C:edge:0:D:satisfied')?.labelY).not.toBe(byId.get('B:edge:0:D:not_satisfied')?.labelY);
   });
 
   it('toggles a clickable edge condition through validated staged state', async () => {
@@ -159,7 +205,7 @@ describe('Materia loadout grid editor', () => {
       { when: 'satisfied', to: 'Maintain' },
       { when: 'not_satisfied', to: 'Build' },
     ];
-    iterativeConfig.loadouts['Full-Auto'].nodes.Maintain.next = 'Build';
+    (iterativeConfig.loadouts['Full-Auto'].nodes.Maintain as { next?: string }).next = 'Build';
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: iterativeConfig }));

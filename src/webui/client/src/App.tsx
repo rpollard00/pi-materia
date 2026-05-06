@@ -111,6 +111,19 @@ interface PositionedSocket {
   y: number;
 }
 
+interface RoutedLoadoutEdge {
+  edge: LoadoutEdge;
+  path: string;
+  labelX: number;
+  labelY: number;
+  labelRotate: number;
+  routeClass: 'forward' | 'backward' | 'loop';
+}
+
+const socketCardWidth = 196;
+const socketAnchorY = 92;
+const socketLoopHeight = 118;
+
 interface SocketLayoutDragState {
   socketId: string;
   pointerId: number;
@@ -256,6 +269,157 @@ function layoutValueForPosition(position: number, offset: number, unit: number) 
   const asUnits = raw / unit;
   const value = Math.abs(asUnits) <= 20 ? asUnits : raw;
   return Math.round(value * 100) / 100;
+}
+
+function rounded(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function edgeOrderKey(edge: LoadoutEdge) {
+  return `${edge.from}\u0000${edge.to}\u0000${edge.kind}\u0000${edge.edgeIndex ?? -1}\u0000${edge.when ?? ''}`;
+}
+
+function orderedLane(edges: LoadoutEdge[], edge: LoadoutEdge, spacing: number) {
+  const sorted = [...edges].sort((a, b) => edgeOrderKey(a).localeCompare(edgeOrderKey(b)));
+  const index = sorted.findIndex((candidate) => candidate.id === edge.id);
+  return (index - (sorted.length - 1) / 2) * spacing;
+}
+
+function lineIntersection(a: { startX: number; startY: number; endX: number; endY: number }, b: { startX: number; startY: number; endX: number; endY: number }) {
+  const denominator = (a.startX - a.endX) * (b.startY - b.endY) - (a.startY - a.endY) * (b.startX - b.endX);
+  if (Math.abs(denominator) < 0.001) return false;
+  const t = ((a.startX - b.startX) * (b.startY - b.endY) - (a.startY - b.startY) * (b.startX - b.endX)) / denominator;
+  const u = -((a.startX - a.endX) * (a.startY - b.startY) - (a.startY - a.endY) * (a.startX - b.startX)) / denominator;
+  return t > 0.08 && t < 0.92 && u > 0.08 && u < 0.92;
+}
+
+function routeLaneGroups(edges: LoadoutEdge[], positions: Map<string, PositionedSocket>) {
+  const routeable = edges.flatMap((edge) => {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to) return [];
+    return [{
+      edge,
+      startX: edge.from === edge.to ? from.x + socketCardWidth : (to.x + 36 < from.x ? from.x : from.x + socketCardWidth),
+      startY: from.y + socketAnchorY,
+      endX: edge.from === edge.to ? to.x + socketCardWidth : (to.x + 36 < from.x ? to.x + socketCardWidth : to.x),
+      endY: to.y + socketAnchorY,
+    }];
+  });
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    const current = parent.get(id) ?? id;
+    if (current === id) return id;
+    const root = find(current);
+    parent.set(id, root);
+    return root;
+  };
+  const union = (a: string, b: string) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent.set(rootB, rootA);
+  };
+  for (const route of routeable) parent.set(route.edge.id, route.edge.id);
+  for (let i = 0; i < routeable.length; i += 1) {
+    for (let j = i + 1; j < routeable.length; j += 1) {
+      const a = routeable[i];
+      const b = routeable[j];
+      const exactParallel = (a.edge.from === b.edge.from && a.edge.to === b.edge.to) || (a.edge.from === b.edge.to && a.edge.to === b.edge.from);
+      const nearbyParallel = Math.abs(a.startX - b.startX) < socketCardWidth * 0.7 && Math.abs(a.endX - b.endX) < socketCardWidth * 0.7 && Math.abs(a.startY - b.startY) < 90 && Math.abs(a.endY - b.endY) < 90;
+      if (exactParallel || nearbyParallel || lineIntersection(a, b)) union(a.edge.id, b.edge.id);
+    }
+  }
+  const groups = new Map<string, LoadoutEdge[]>();
+  for (const { edge } of routeable) groups.set(find(edge.id), [...(groups.get(find(edge.id)) ?? []), edge]);
+  const byEdge = new Map<string, LoadoutEdge[]>();
+  for (const group of groups.values()) for (const edge of group) byEdge.set(edge.id, group);
+  return byEdge;
+}
+
+function labelRotation(startX: number, startY: number, endX: number, endY: number) {
+  const degrees = Math.atan2(endY - startY, endX - startX) * 180 / Math.PI;
+  return degrees > 90 || degrees < -90 ? degrees + 180 : degrees;
+}
+
+export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, PositionedSocket>): RoutedLoadoutEdge[] {
+  // Keep routing deterministic and local instead of adding a physics/layout dependency:
+  // the WebUI preserves user-authored socket positions, so force solvers would move
+  // nodes unpredictably and make saved layouts harder to reason about. Edges are
+  // separated by stable lanes per unordered socket pair, with retry/backward routes
+  // leaving from the left side and arcing around cards so iterative loops are clear.
+  const laneGroups = routeLaneGroups(edges, positions);
+
+  return edges.map((edge) => {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to) return undefined;
+    const lane = orderedLane(laneGroups.get(edge.id) ?? [edge], edge, 30);
+
+    if (edge.from === edge.to) {
+      const startX = from.x + socketCardWidth - 8;
+      const startY = from.y + socketAnchorY - 22;
+      const endX = from.x + socketCardWidth - 8;
+      const endY = from.y + socketAnchorY + 22;
+      const right = from.x + socketCardWidth + 72 + Math.max(-50, lane * 0.7);
+      const top = from.y + socketAnchorY - socketLoopHeight - lane * 0.6;
+      return {
+        edge,
+        routeClass: 'loop' as const,
+        path: `M ${rounded(startX)} ${rounded(startY)} C ${rounded(right)} ${rounded(top)}, ${rounded(right)} ${rounded(endY + 24)}, ${rounded(endX)} ${rounded(endY)}`,
+        labelX: rounded(right + 8),
+        labelY: rounded((top + endY) / 2),
+        labelRotate: 0,
+      };
+    }
+
+    const backward = to.x + 36 < from.x;
+    if (backward) {
+      const startX = from.x + 12;
+      const startY = from.y + socketAnchorY;
+      const endX = to.x + socketCardWidth - 12;
+      const endY = to.y + socketAnchorY;
+      const span = Math.max(90, Math.abs(startX - endX));
+      const verticalDirection = startY <= endY ? -1 : 1;
+      const arch = verticalDirection * (72 + Math.min(120, span * 0.18)) + lane * 0.75;
+      const control1X = startX - Math.max(70, span * 0.32);
+      const control2X = endX + Math.max(70, span * 0.32);
+      const labelX = (startX + endX) / 2;
+      const labelY = (startY + endY) / 2 + arch;
+      return {
+        edge,
+        routeClass: 'backward' as const,
+        path: `M ${rounded(startX)} ${rounded(startY)} C ${rounded(control1X)} ${rounded(startY + arch)}, ${rounded(control2X)} ${rounded(endY + arch)}, ${rounded(endX)} ${rounded(endY)}`,
+        labelX: rounded(labelX),
+        labelY: rounded(labelY - Math.sign(arch || -1) * 8),
+        labelRotate: 0,
+      };
+    }
+
+    const startX = from.x + socketCardWidth - 12;
+    const startY = from.y + socketAnchorY;
+    const endX = to.x + 12;
+    const endY = to.y + socketAnchorY;
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const length = Math.max(1, Math.hypot(dx, dy));
+    const normalX = -dy / length;
+    const normalY = dx / length;
+    const offsetX = normalX * lane;
+    const offsetY = normalY * lane;
+    const curve = Math.max(54, Math.abs(dx) * 0.35, Math.abs(dy) * 0.22);
+    const control1X = startX + curve + offsetX;
+    const control1Y = startY + offsetY;
+    const control2X = endX - curve + offsetX;
+    const control2Y = endY + offsetY;
+    return {
+      edge,
+      routeClass: 'forward' as const,
+      path: `M ${rounded(startX)} ${rounded(startY)} C ${rounded(control1X)} ${rounded(control1Y)}, ${rounded(control2X)} ${rounded(control2Y)}, ${rounded(endX)} ${rounded(endY)}`,
+      labelX: rounded((startX + endX) / 2 + offsetX),
+      labelY: rounded((startY + endY) / 2 + offsetY - 10),
+      labelRotate: rounded(labelRotation(startX, startY, endX, endY)),
+    };
+  }).filter((route): route is RoutedLoadoutEdge => Boolean(route));
 }
 
 function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[]; edges: LoadoutEdge[]; width: number; height: number } {
@@ -486,6 +650,7 @@ export function App() {
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
   const loadoutGraph = useMemo(() => layoutSockets(activeLoadout), [activeLoadout]);
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
+  const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const materia = draftConfig?.materia ?? {};
   const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
@@ -1050,25 +1215,14 @@ export function App() {
                     <path d="M2,2 L10,6 L2,10 Z" className="loadout-edge-arrow" />
                   </marker>
                 </defs>
-                {loadoutGraph.edges.map((edge) => {
-                  const from = socketPositions.get(edge.from);
-                  const to = socketPositions.get(edge.to);
-                  if (!from || !to) return null;
-                  const startX = from.x + 184;
-                  const startY = from.y + 92;
-                  const endX = to.x + 12;
-                  const endY = to.y + 92;
-                  const midX = (startX + endX) / 2;
-                  const midY = (startY + endY) / 2;
-                  const curve = Math.max(44, Math.abs(endX - startX) * 0.35);
-                  const path = `M ${startX} ${startY} C ${startX + curve} ${startY}, ${endX - curve} ${endY}, ${endX} ${endY}`;
+                {routedEdges.map(({ edge, path, labelX, labelY, labelRotate, routeClass }) => {
                   return (
                     <g
                       key={edge.id}
                       data-testid={`edge-${edge.from}-${edge.to}-${edge.edgeIndex ?? 'next'}`}
                       role={edge.kind === 'edge' ? 'button' : undefined}
                       tabIndex={edge.kind === 'edge' ? 0 : undefined}
-                      className={`loadout-edge loadout-edge-${edgeConditionClass(edge.when)} ${edge.kind === 'edge' ? 'loadout-edge-clickable' : ''}`}
+                      className={`loadout-edge loadout-edge-${edgeConditionClass(edge.when)} loadout-edge-route-${routeClass} ${edge.kind === 'edge' ? 'loadout-edge-clickable' : ''}`}
                       onClick={() => toggleEdgeCondition(edge)}
                       onKeyDown={(event) => {
                         if (edge.kind === 'edge' && (event.key === 'Enter' || event.key === ' ')) {
@@ -1078,7 +1232,7 @@ export function App() {
                       }}
                     >
                       <path d={path} markerEnd="url(#materia-edge-arrow)" />
-                      <text x={midX} y={midY - 10}>{edgeConditionLabel(edge.when)}</text>
+                      <text x={labelX} y={labelY} transform={`rotate(${labelRotate} ${labelX} ${labelY})`}>{edgeConditionLabel(edge.when)}</text>
                     </g>
                   );
                 })}

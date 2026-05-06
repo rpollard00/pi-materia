@@ -134,6 +134,20 @@
   stroke-dasharray: 9 7;
 }
 
+.loadout-edge-route-backward path {
+  stroke-width: 3.5;
+  stroke-dasharray: 14 6 4 6;
+}
+
+.loadout-edge-route-loop path {
+  stroke-dasharray: 4 5;
+}
+
+.loadout-edge-route-backward text,
+.loadout-edge-route-loop text {
+  fill: rgb(254 243 199 / 0.92);
+}
+
 .loadout-edge-arrow {
   fill: rgb(125 211 252 / 0.9);
 }
