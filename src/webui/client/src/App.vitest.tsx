@@ -95,6 +95,18 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
   });
 
+  it('renders socket supplemental details as hover titles', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    const build = await screen.findByTestId('socket-Build');
+    expect(build.getAttribute('title')).toContain('Socket: Build');
+    expect(build.getAttribute('title')).toContain('Materia: Build');
+    expect(build.getAttribute('title')).toContain('Model: openai/gpt-test');
+    expect(build.getAttribute('title')).toContain('Next: Auto-Eval');
+  });
+
   it('renders the active loadout as a directional left-to-right graph', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
@@ -172,7 +184,9 @@ describe('Materia loadout grid editor', () => {
     await screen.findByTestId('socket-planner');
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
 
-    expect(await screen.findByTestId('socket-Entry')).toBeTruthy();
+    const entry = await screen.findByTestId('socket-Entry');
+    expect(entry).toBeTruthy();
+    expect(entry.getAttribute('title')).toBe('Socket: Entry\nEmpty socket');
     expect(screen.getByText('Empty')).toBeTruthy();
     expect(screen.queryByText('Empty socket')).toBeNull();
     expect(screen.queryByText('entry')).toBeNull();

@@ -189,6 +189,51 @@ function toggledEdgeCondition(when?: string) {
   return edgeConditionState({ when }) === 'unsatisfied' ? 'satisfied' : 'not_satisfied';
 }
 
+function summarizeHoverText(value?: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
+}
+
+function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: MateriaConfig['materia']): string {
+  const lines = [`Socket: ${id}`];
+  if (isEmptySocket(node)) return [...lines, 'Empty socket'].join('\n');
+
+  const label = getNodeLabel(id, node);
+  lines.push(`Label: ${label}`);
+  if (node?.type) lines.push(`Type: ${node.type}`);
+  if (node?.type === 'agent' && node.materia) {
+    lines.push(`Materia: ${node.materia}`);
+    const definition = definitions?.[node.materia];
+    if (definition?.model) lines.push(`Model: ${definition.model}`);
+    if (definition?.tools) lines.push(`Tools: ${definition.tools}`);
+    if (definition?.thinking) lines.push(`Thinking: ${definition.thinking}`);
+    if (definition?.multiTurn !== undefined) lines.push(`Multi-turn: ${definition.multiTurn ? 'yes' : 'no'}`);
+    const prompt = summarizeHoverText(definition?.prompt);
+    if (prompt) lines.push(`Prompt: ${prompt}`);
+  }
+  if (node?.type === 'utility') {
+    if (node.utility) lines.push(`Utility: ${node.utility}`);
+    if (node.command?.length) lines.push(`Command: ${node.command.join(' ')}`);
+  }
+  if (node?.next) lines.push(`Next: ${node.next}`);
+  if (node?.edges?.length) {
+    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when)} → ${edge.to}`).join(', ')}`);
+  }
+  if (node?.limits) {
+    const limits = [
+      node.limits.maxVisits !== undefined ? `max visits ${node.limits.maxVisits}` : undefined,
+      node.limits.maxEdgeTraversals !== undefined ? `max edge traversals ${node.limits.maxEdgeTraversals}` : undefined,
+      node.limits.maxOutputBytes !== undefined ? `max output bytes ${node.limits.maxOutputBytes}` : undefined,
+    ].filter(Boolean);
+    if (limits.length) lines.push(`Limits: ${limits.join(', ')}`);
+  }
+  if (node?.layout && (node.layout.x !== undefined || node.layout.y !== undefined)) {
+    lines.push(`Layout: ${node.layout.x ?? 0}, ${node.layout.y ?? 0}`);
+  }
+  return lines.join('\n');
+}
+
 function getLoadoutEdges(nodes: Record<string, PipelineNode>): LoadoutEdge[] {
   const edges: LoadoutEdge[] = [];
   for (const [from, node] of Object.entries(nodes)) {
@@ -1043,6 +1088,8 @@ export function App() {
                 const dragPreview = socketLayoutDrag?.socketId === id ? socketLayoutDrag : undefined;
                 const socketX = dragPreview?.currentX ?? x;
                 const socketY = dragPreview?.currentY ?? y;
+                const nodeLabel = getNodeLabel(id, node);
+                const socketHoverDetails = buildSocketHoverDetails(id, node, materia);
                 return (
                 <button
                   key={id}
@@ -1056,13 +1103,15 @@ export function App() {
                   onPointerCancel={cancelSocketLayoutDrag}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDrop(id, event)}
+                  title={socketHoverDetails}
+                  aria-label={`${nodeLabel} socket details`}
                 >
                   <div className="materia-socket-orb-stage">
                     <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
-                      <Orb color={nodeColor(id, index, materia, node)} label={getNodeLabel(id, node)} empty={isEmptySocket(node)} />
+                      <Orb color={nodeColor(id, index, materia, node)} label={socketHoverDetails} empty={isEmptySocket(node)} />
                     </div>
                   </div>
-                  <span className="materia-socket-label">{getNodeLabel(id, node)}</span>
+                  <span className="materia-socket-label">{nodeLabel}</span>
                 </button>
                 );
               })}
