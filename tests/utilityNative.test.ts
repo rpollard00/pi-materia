@@ -96,6 +96,53 @@ describe("native utility node execution", () => {
     await expect(readFile(path.join(state.runDir!, "nodes", "second", "1.md"), "utf8")).resolves.toBe("second");
   });
 
+  test("runtime traverses iterative Build/Eval/Maintain retry loops as ordered guarded transitions", async () => {
+    const evalScript = `
+      let input = "";
+      process.stdin.on("data", (chunk) => input += chunk);
+      process.stdin.on("end", () => {
+        const state = JSON.parse(input).state ?? {};
+        const cycle = Number(state.evalCycle ?? 0) + 1;
+        process.stdout.write(JSON.stringify({ cycle, done: cycle >= 3, satisfied: cycle === 2 }));
+      });
+    `;
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Build",
+          nodes: {
+            Build: { type: "utility", utility: "echo", params: { text: "build" }, next: "Auto-Eval", limits: { maxVisits: 5 } },
+            "Auto-Eval": {
+              type: "utility",
+              command: ["node", "-e", evalScript],
+              parse: "json",
+              assign: { evalCycle: "$.cycle" },
+              edges: [
+                { when: "$.done == true", to: "end" },
+                { when: "satisfied", to: "Maintain" },
+                { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+              ],
+              limits: { maxVisits: 5 },
+            },
+            Maintain: { type: "utility", utility: "echo", params: { text: "maintain" }, next: "Build", limits: { maxVisits: 3 } },
+          },
+        },
+      },
+      materia: {},
+    });
+
+    await harness.runCommand("materia", "cast iterative workflow");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; visits?: Record<string, number>; edgeTraversals?: Record<string, number>; runDir?: string };
+    expect(state.phase).toBe("complete");
+    expect(state.data?.evalCycle).toBe(3);
+    expect(state.visits).toMatchObject({ Build: 3, "Auto-Eval": 3, Maintain: 1 });
+    expect(state.edgeTraversals).toMatchObject({ "Auto-Eval->Build": 1, "Auto-Eval->Maintain": 1 });
+    await expect(readFile(path.join(state.runDir!, "nodes", "Maintain", "1.md"), "utf8")).resolves.toBe("maintain");
+  });
+
   test("foreach utility nodes expose item and cursor metadata in input artifacts", async () => {
     const harness = await makeHarness(utilityConfig({
       utility: "echo",

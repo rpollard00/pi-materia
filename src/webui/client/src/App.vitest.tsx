@@ -153,6 +153,39 @@ describe('Materia loadout grid editor', () => {
     expect(savedEdge).toEqual({ when: 'not_satisfied', to: 'Maintain' });
   });
 
+  it('stages iterative retry edge toggles without rejecting looped satisfied routes', async () => {
+    const iterativeConfig = structuredClone(testConfig);
+    iterativeConfig.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [
+      { when: 'satisfied', to: 'Maintain' },
+      { when: 'not_satisfied', to: 'Build' },
+    ];
+    iterativeConfig.loadouts['Full-Auto'].nodes.Maintain.next = 'Build';
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: iterativeConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const retryEdge = await screen.findByTestId('edge-Auto-Eval-Build-1');
+    expect(retryEdge.getAttribute('class')).toContain('loadout-edge-unsatisfied');
+    fireEvent.click(retryEdge);
+
+    expect(await screen.findByText(/Staged edge Auto-Eval → Build as satisfied\./)).toBeTruthy();
+    expect(screen.queryByText(/Cannot toggle edge Auto-Eval → Build/)).toBeNull();
+    expect(screen.getByTestId('edge-Auto-Eval-Build-1').getAttribute('class')).toContain('loadout-edge-satisfied');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const savedNodes = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
+    expect(savedNodes['Auto-Eval'].edges).toEqual([
+      { when: 'satisfied', to: 'Maintain' },
+      { when: 'satisfied', to: 'Build' },
+    ]);
+    expect(savedNodes.Maintain.next).toBe('Build');
+  });
+
   it('shows validation failures from unreachable edge toggles without mutating draft state', async () => {
     const config = structuredClone(testConfig);
     config.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [{ to: 'Maintain' }, { when: 'satisfied', to: 'Build' }] as never;
