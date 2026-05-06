@@ -243,6 +243,8 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
   }
   for (const [loadoutName, loadout] of Object.entries((config.loadouts ?? {}) as Record<string, unknown>)) {
     if (!isPlainObject(loadout)) continue;
+    if ("prompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete prompt. Define prompt on referenced materia instead.`);
+    if ("systemPrompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete systemPrompt. Define prompt on referenced materia instead.`);
     for (const [nodeName, node] of Object.entries((loadout.nodes ?? {}) as Record<string, unknown>)) {
       if (!isPlainObject(node)) continue;
       if ("role" in node) throw new Error(`Materia loadout "${loadoutName}" node "${nodeName}" configures obsolete role. Use materia instead.`);

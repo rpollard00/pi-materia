@@ -8,9 +8,9 @@ This audit traces the current Pi-native Materia execution paths in `src/native.t
 
 1. `/materia cast` resolves config/pipeline in `src/index.ts` and calls `startNativeCast()`.
 2. `startNativeCast()` initializes `MateriaCastState` as active, awaiting an agent response, writes run artifacts/state, then calls `startNode()` for the entry node.
-3. `startNode()` performs node-start mutations (see below), applies role model/tool scope, then calls `sendMateriaTurn()` with `buildNodePrompt()`.
+3. `startNode()` performs node-start mutations (see below), applies materia model/tool scope, then calls `sendMateriaTurn()` with `buildNodePrompt()`.
 4. `sendMateriaTurn()` writes a context artifact, appends a manifest entry, sends visible metadata, appends a `pi-materia-context` entry, and sends the hidden `pi-materia-prompt` with `{ triggerTurn: true }`.
-5. Pi fires `before_agent_start`; Materia injects the active role system prompt.
+5. Pi fires `before_agent_start`; Materia injects the active materia prompt.
 6. Pi fires `context`; Materia replaces visible history with isolated synthetic context plus the active Materia prompt slice.
 7. Pi fires `agent_end`; `handleAgentEnd()` finds the latest assistant entry, records text/error/usage, marks the state no longer awaiting, and either:
    - calls `completeNode()` for a normal agent node, or
@@ -23,13 +23,13 @@ This audit traces the current Pi-native Materia execution paths in `src/native.t
 2. On `agent_end`, `handleAgentEnd()` sees `isMultiTurnResolvedAgentNode(node)` and `multiTurnFinalizing !== true`.
 3. It calls `recordMultiTurnRefinement()`, which increments the refinement counter and writes the refinement artifact/manifest.
 4. State is changed to `nodeState = "awaiting_user_refinement"`, `awaitingResponse = false`; the graph does not advance.
-5. User follow-up causes Pi to start another turn. In `before_agent_start`, if state is `awaiting_user_refinement`, `prepareMultiTurnRefinementTurn()` applies role model settings, flips state back to `awaiting_agent_response`, writes a `context_refinement` artifact/event, saves state, and lets Pi run using the user's prompt plus Materia isolated context.
+5. User follow-up causes Pi to start another turn. In `before_agent_start`, if state is `awaiting_user_refinement`, `prepareMultiTurnRefinementTurn()` applies materia model settings, flips state back to `awaiting_agent_response`, writes a `context_refinement` artifact/event, saves state, and lets Pi run using the user's prompt plus Materia isolated context.
 6. The next `agent_end` repeats the refinement-recording path until the user runs `/materia continue`.
 
 ### Multi-turn finalization turn
 
 1. `/materia continue` loads state and calls `continueNativeCast()`.
-2. If `nodeState === "awaiting_user_refinement"`, `startMultiTurnFinalizationTurn()` applies role model settings, sets `awaitingResponse = true`, `nodeState = "awaiting_agent_response"`, and `multiTurnFinalizing = true`.
+2. If `nodeState === "awaiting_user_refinement"`, `startMultiTurnFinalizationTurn()` applies materia model settings, sets `awaitingResponse = true`, `nodeState = "awaiting_agent_response"`, and `multiTurnFinalizing = true`.
 3. It sends `buildMultiTurnFinalizationPrompt()` through `sendMateriaTurn()`.
 4. On `agent_end`, `handleAgentEnd()` captures `wasAwaitingFinalization`, clears `multiTurnFinalizing`, and calls `completeNode(..., { finalizedMultiTurn: true })`.
 5. `completeNode()` then records final output, parses/assigns/advances, and proceeds like a normal node completion.
@@ -57,11 +57,11 @@ A full `startNode()` call is not a safe retry primitive once a turn has been sen
 - `setCurrentItem()` mutates foreach state: initializes cursor, writes `state.data.item` and the loop alias, and sets `currentItemKey/currentItemLabel`; on empty loops it can advance to the foreach `done` target.
 - `enforceNodeLimit()` increments `state.visits[node.id]`; retrying would consume visits and change artifact paths/refinement identity keys.
 - `startTaskAttempt()` increments `taskAttempts` keyed by node/item and updates `runState.attempt`; retrying would create duplicate attempts for the same logical turn.
-- `startNode()` rewrites phase/current role/current task/node state and emits another `node_start` event.
+- `startNode()` rewrites phase/current materia/current task/node state and emits another `node_start` event.
 - Utility nodes execute side effects immediately; recovery should target incomplete agent turns only, not re-run utility commands.
 - `completeNode()` applies non-idempotent completion mutations: output artifacts, JSON artifacts, assignments into `state.data`, foreach cursor advancement via `applyAdvance()`, edge traversal increments in `selectNextTarget()`, and graph advancement through `advanceToNode()`.
 - `recordMultiTurnRefinement()` increments `multiTurnRefinements`; retrying after an incomplete refinement turn must happen before this path, not by replaying a partially recorded refinement.
-- `startMultiTurnFinalizationTurn()` and `prepareMultiTurnRefinementTurn()` also mutate awaiting/finalizing flags and role-model usage entries; retries should preserve the active mode rather than re-entering these setup functions blindly.
+- `startMultiTurnFinalizationTurn()` and `prepareMultiTurnRefinementTurn()` also mutate awaiting/finalizing flags and materia-model usage entries; retries should preserve the active mode rather than re-entering these setup functions blindly.
 
 ## Implementation notes for same-node recovery
 

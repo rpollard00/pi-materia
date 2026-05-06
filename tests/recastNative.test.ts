@@ -20,7 +20,7 @@ async function makeHarness(): Promise<FakePiHarness> {
         },
       },
     },
-    materia: { Build: { tools: "coding", prompt: "Build role" } },
+    materia: { Build: { tools: "coding", prompt: "Build materia" } },
   }, null, 2));
   const harness = new FakePiHarness(cwd);
   piMateria(harness.pi);

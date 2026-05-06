@@ -23,7 +23,7 @@ function agentConfig(overrides: Record<string, unknown> = {}, node: Record<strin
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
     loadouts: { Test: { entry: "agent", nodes: { agent: { type: "agent", materia: "Build", ...node } } } },
-    materia: { Build: { tools: "coding", prompt: "Build role", ...overrides } },
+    materia: { Build: { tools: "coding", prompt: "Build materia", ...overrides } },
   };
 }
 
@@ -41,8 +41,8 @@ function twoAgentConfig() {
       },
     },
     materia: {
-      Build: { tools: "coding", prompt: "Build role", model: "anthropic/claude-test", thinking: "high" },
-      Review: { tools: "readOnly", prompt: "Review role", model: "openai/gpt-test", thinking: "low" },
+      Build: { tools: "coding", prompt: "Build materia", model: "anthropic/claude-test", thinking: "high" },
+      Review: { tools: "readOnly", prompt: "Review materia", model: "openai/gpt-test", thinking: "low" },
     },
   };
 }
@@ -110,8 +110,8 @@ describe("native per-materia model settings", () => {
       "setActiveTools",
       "triggerTurn",
     ]);
-    const rolePromptMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
-    expect(rolePromptMessages).toHaveLength(2);
+    const materiaPromptMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(materiaPromptMessages).toHaveLength(2);
   });
 
   test("unsupported model switching APIs fail with a materia-specific diagnostic", async () => {
@@ -173,7 +173,7 @@ describe("native per-materia model settings", () => {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
       loadouts: { Test: { entry: "utility", nodes: { utility: { type: "utility", utility: "echo", params: { text: "done" } } } } },
-      materia: { Build: { tools: "coding", prompt: "Build role", model: "anthropic/claude-test", thinking: "high" } },
+      materia: { Build: { tools: "coding", prompt: "Build materia", model: "anthropic/claude-test", thinking: "high" } },
     });
 
     await harness.runCommand("materia", "cast utility only");

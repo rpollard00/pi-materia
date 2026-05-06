@@ -74,6 +74,42 @@ describe("loadout-aware pipeline resolution", () => {
     expect(lines).toContain("loadout: Planning-Consult");
   });
 
+  test("rejects direct pipeline configs with loadout-level prompt fields", () => {
+    const withPrompt = structuredClone(baseConfig) as PiMateriaConfig;
+    (activeLoadout(withPrompt) as unknown as Record<string, unknown>).prompt = "obsolete loadout behavior";
+    expect(() => resolvePipeline(withPrompt)).toThrow(/loadout "Test" configures obsolete prompt/);
+
+    const withSystemPrompt = structuredClone(baseConfig) as PiMateriaConfig;
+    (activeLoadout(withSystemPrompt) as unknown as Record<string, unknown>).systemPrompt = "obsolete loadout system behavior";
+    expect(() => resolvePipeline(withSystemPrompt)).toThrow(/loadout "Test" configures obsolete systemPrompt/);
+  });
+
+  test("rejects direct pipeline configs with obsolete or invalid materia prompt fields", () => {
+    const withSystemPrompt: PiMateriaConfig = {
+      ...baseConfig,
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", systemPrompt: "obsolete materia system behavior" } as never,
+      },
+    };
+    expect(() => resolvePipeline(withSystemPrompt)).toThrow(/Materia "planner" configures obsolete systemPrompt/);
+
+    const withoutPrompt: PiMateriaConfig = {
+      ...baseConfig,
+      materia: {
+        planner: { tools: "readOnly" } as never,
+      },
+    };
+    expect(() => resolvePipeline(withoutPrompt)).toThrow(/Materia "planner" has invalid prompt\. Expected a string/);
+
+    const withNonStringPrompt: PiMateriaConfig = {
+      ...baseConfig,
+      materia: {
+        planner: { tools: "readOnly", prompt: 42 } as never,
+      },
+    };
+    expect(() => resolvePipeline(withNonStringPrompt)).toThrow(/Materia "planner" has invalid prompt\. Expected a string/);
+  });
+
   test("unknown activeLoadout names include valid options", () => {
     const config: PiMateriaConfig = {
       activeLoadout: "Missing",

@@ -99,7 +99,7 @@ This loadout completes without an LLM turn by using an explicit command utility.
       }
     }
   },
-  "roles": {}
+  "materia": {}
 }
 ```
 
@@ -168,7 +168,7 @@ Complete loadout using the script:
       }
     }
   },
-  "roles": {}
+  "materia": {}
 }
 ```
 

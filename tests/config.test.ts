@@ -131,6 +131,51 @@ describe("config loadouts", () => {
     }
   });
 
+  test("rejects loadout-level prompt fields so materia.prompt stays the only behavior prompt source", async () => {
+    const withPrompt = await writeConfig({
+      loadouts: {
+        Custom: {
+          entry: "planner",
+          prompt: "obsolete loadout behavior",
+          nodes: { planner: { type: "agent", materia: "planner" } },
+        },
+      },
+    });
+    await expect(loadConfig(withPrompt.dir, withPrompt.file)).rejects.toThrow(/loadout "Custom" configures obsolete prompt/);
+
+    const withSystemPrompt = await writeConfig({
+      loadouts: {
+        Custom: {
+          entry: "planner",
+          systemPrompt: "obsolete loadout system behavior",
+          nodes: { planner: { type: "agent", materia: "planner" } },
+        },
+      },
+    });
+    await expect(loadConfig(withSystemPrompt.dir, withSystemPrompt.file)).rejects.toThrow(/loadout "Custom" configures obsolete systemPrompt/);
+  });
+
+  test("rejects saved patches that try to add loadout-level prompt fields", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-reject-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: {
+          Custom: {
+            entry: "planner",
+            prompt: "obsolete saved behavior",
+            nodes: { planner: { type: "agent", materia: "planner" } },
+          } as never,
+        },
+      })).rejects.toThrow(/loadout "Custom" configures obsolete prompt/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("project config can define loadouts and activeLoadout without duplicating materia", async () => {
     const { dir, file } = await writeConfig({
       activeLoadout: "Planning-Consult",

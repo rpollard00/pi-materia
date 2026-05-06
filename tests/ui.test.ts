@@ -92,10 +92,10 @@ describe("usage UI formatting", () => {
     expect(lines).toContain("- task-4: 143174 tokens, billed cost: $0.3685");
 
     const total = costFromLine(lines.find((line) => line.startsWith("total:")) ?? "");
-    const roleLines = lines.slice(lines.indexOf("By materia:") + 1, lines.indexOf("By node:"));
+    const materiaLines = lines.slice(lines.indexOf("By materia:") + 1, lines.indexOf("By node:"));
     const nodeLines = lines.slice(lines.indexOf("By node:") + 1, lines.indexOf("By task:"));
     const taskLines = lines.slice(lines.indexOf("By task:") + 1);
-    expect(roleLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
+    expect(materiaLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
     expect(nodeLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
     expect(taskLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
   });

@@ -1,5 +1,7 @@
 # pi-materia Next Features Plan
 
+> Historical implementation plan. Remaining `role`/`roles`/`systemPrompt` examples and terminology in this file document older designs or migration history; active configuration now uses top-level `materia` entries and agent-node `materia` assignments.
+
 This plan turns the first test feedback into a staged roadmap for pi-materia, a Pi extension for configurable agent pipelines.
 
 ## Goals

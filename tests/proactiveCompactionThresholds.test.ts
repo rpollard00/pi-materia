@@ -25,7 +25,7 @@ async function makeHarness(compaction?: unknown): Promise<FakePiHarness> {
     ...(compaction === undefined ? {} : { compaction }),
     activeLoadout: "Test",
     loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", materia: "Build", next: "end" } } } },
-    materia: { Build: { tools: "coding", prompt: "Build role prompt" } },
+    materia: { Build: { tools: "coding", prompt: "Build materia prompt" } },
   }, null, 2));
   const harness = new FakePiHarness(cwd);
   piMateria(harness.pi);

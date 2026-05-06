@@ -28,7 +28,9 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   const rawConfig = config as unknown as Record<string, unknown>;
   if ("roles" in rawConfig) throw new Error(`Materia config configures obsolete roles. Use top-level materia instead.`);
   if ("materiaDefinitions" in rawConfig) throw new Error(`Materia config configures obsolete materiaDefinitions.`);
+  validateMateriaEntries(config);
   const effective = getEffectivePipelineConfig(config);
+  validateLoadout(effective.loadoutName, effective.pipeline);
   const nodes = Object.fromEntries(
     Object.keys(effective.pipeline.nodes).map((id) => [id, resolveNode(config, effective, id, `${pipelineSource(effective)}.nodes.${id}`)]),
   );
@@ -51,6 +53,16 @@ function resolveNode(config: PiMateriaConfig, effective: EffectiveMateriaPipelin
   }
 
   return { id, node };
+}
+
+function validateLoadout(name: string, pipeline: MateriaPipelineConfig): void {
+  const rawLoadout = pipeline as unknown as Record<string, unknown>;
+  if ("prompt" in rawLoadout) {
+    throw new Error(`Materia loadout "${name}" configures obsolete prompt. Define prompt on referenced materia instead.`);
+  }
+  if ("systemPrompt" in rawLoadout) {
+    throw new Error(`Materia loadout "${name}" configures obsolete systemPrompt. Define prompt on referenced materia instead.`);
+  }
 }
 
 function validateNode(id: string, node: MateriaPipelineNodeConfig): void {
@@ -78,10 +90,29 @@ function validateNode(id: string, node: MateriaPipelineNodeConfig): void {
   }
 }
 
+function validateMateriaEntries(config: PiMateriaConfig): void {
+  const rawMateriaConfig = (config as unknown as Record<string, unknown>).materia;
+  if (rawMateriaConfig === undefined) return;
+  if (!isPlainObject(rawMateriaConfig)) throw new Error(`Materia config has invalid materia. Expected a materia object.`);
+  for (const [name, materia] of Object.entries(rawMateriaConfig)) {
+    validateMateriaEntry(name, materia as MateriaConfig);
+  }
+}
+
 function validateMateriaEntry(name: string, materia: MateriaConfig): void {
+  const rawMateria = materia as unknown as Record<string, unknown>;
+  if (!isPlainObject(rawMateria)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
+  if ("systemPrompt" in rawMateria) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
+  if (rawMateria.prompt === undefined || typeof rawMateria.prompt !== "string") {
+    throw new Error(`Materia "${name}" has invalid prompt. Expected a string.`);
+  }
   if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
     throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validateCommand(id: string, command: unknown): void {

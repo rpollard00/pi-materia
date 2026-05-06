@@ -85,7 +85,7 @@ describe("generic engine helper mechanics", () => {
 });
 
 describe("agent and utility validation", () => {
-  test("accepts a valid agent node and rejects an agent node with an unknown role", () => {
+  test("accepts a valid agent node and rejects an agent node with an unknown materia", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",

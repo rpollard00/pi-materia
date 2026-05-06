@@ -19,7 +19,7 @@ function singleAgentConfig() {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
     loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", materia: "Build", next: "end" } } } },
-    materia: { Build: { tools: "coding", prompt: "Build role prompt\n\n{{request}}" } },
+    materia: { Build: { tools: "coding", prompt: "Build materia prompt\n\n{{request}}" } },
   };
 }
 

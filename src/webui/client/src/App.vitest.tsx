@@ -755,7 +755,7 @@ describe('Materia loadout grid editor', () => {
       activeLoadout: 'Full-Auto',
       materia: {
         Build: { tools: 'coding', prompt: 'Build the work' },
-        RoleOnly: { tools: 'none', prompt: 'Reusable materia not placed in a socket' },
+        DetachedMateria: { tools: 'none', prompt: 'Reusable materia not placed in a socket' },
         RunTests: { type: 'utility', utility: 'shell', command: ['npm', 'test'] },
         PromptDef: { tools: 'none', prompt: 'Prompt definition' },
       },
@@ -782,13 +782,13 @@ describe('Materia loadout grid editor', () => {
     await openTab('Materia Editor');
     const select = await screen.findByTestId('edit-materia-select') as HTMLSelectElement;
     const initialOptions = Array.from(select.options).map((option) => option.value);
-    expect(initialOptions).toEqual(['', 'Build', 'PromptDef', 'RoleOnly', 'RunTests']);
+    expect(initialOptions).toEqual(['', 'Build', 'DetachedMateria', 'PromptDef', 'RunTests']);
     expect(initialOptions).not.toContain('SocketOnly');
     expect(initialOptions).not.toContain('OtherSocket');
 
     await openTab('Loadout');
     expect(await screen.findByTestId('palette-RunTests')).toBeTruthy();
-    expect(screen.getByTestId('palette-RoleOnly')).toBeTruthy();
+    expect(screen.getByTestId('palette-DetachedMateria')).toBeTruthy();
     expect(screen.getByTestId('palette-SocketOnly')).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: /Alternate/ }));
     await openTab('Materia Editor');

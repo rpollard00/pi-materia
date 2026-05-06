@@ -49,7 +49,7 @@ function attemptConfig() {
         },
       },
     },
-    materia: { Build: { tools: "coding", prompt: "Build role" } },
+    materia: { Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
 
