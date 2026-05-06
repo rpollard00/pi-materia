@@ -1,3 +1,5 @@
+import type { MateriaEdgeCondition } from '../../../types.js';
+
 type NodeType = 'agent' | 'utility';
 
 export interface PipelineNode {
@@ -6,7 +8,7 @@ export interface PipelineNode {
   utility?: string;
   command?: string[];
   next?: string;
-  edges?: { to: string; when?: string; maxTraversals?: number }[];
+  edges?: { to: string; when: MateriaEdgeCondition; maxTraversals?: number }[];
   empty?: boolean;
   layout?: { x?: number; y?: number };
   limits?: { maxVisits?: number; maxEdgeTraversals?: number; maxOutputBytes?: number };

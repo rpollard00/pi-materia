@@ -191,8 +191,8 @@ describe("config loadouts", () => {
                 type: "agent",
                 materia: "Check",
                 edges: [
-                  { to: "Done" },
-                  { when: "$.retry == true", to: "Check" },
+                  { when: "always", to: "Done" },
+                  { when: "satisfied", to: "Check" },
                 ],
               },
               Done: { type: "agent", materia: "Done" },
@@ -206,7 +206,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Check",
             nodes: {
-              Check: { type: "agent", materia: "Check", edges: [{ when: "$.retry == true", to: undefined as never }] },
+              Check: { type: "agent", materia: "Check", edges: [{ when: "satisfied", to: undefined as never }] },
             },
           },
         },
@@ -223,7 +223,7 @@ describe("config loadouts", () => {
                 materia: "Auto-Eval",
                 edges: [
                   { when: "satisfied", to: "Maintain" },
-                  { when: "$.score >= 0", to: "Build", maxTraversals: 3 },
+                  { when: "satisfied", to: "Build", maxTraversals: 3 },
                   { when: "not_satisfied", to: "Build", maxTraversals: 3 },
                 ],
               },

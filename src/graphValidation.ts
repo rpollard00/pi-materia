@@ -1,10 +1,11 @@
-import type { MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
+import type { MateriaEdgeCondition, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
 
-export type MateriaGraphEdgeCondition = "satisfied" | "unsatisfied" | "other";
+export const CANONICAL_EDGE_CONDITIONS = ["always", "satisfied", "not_satisfied"] as const satisfies readonly MateriaEdgeCondition[];
+export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
 export type MateriaGraphEdgeGuard = "unconditional" | "guarded";
 
 export interface MateriaGraphValidationError {
-  code: "missing-endpoint" | "unknown-endpoint" | "unreachable-edge";
+  code: "missing-endpoint" | "unknown-endpoint" | "invalid-edge-condition" | "unreachable-edge";
   message: string;
   source?: string;
   from?: string;
@@ -55,19 +56,16 @@ export function formatGraphValidationErrors(errors: MateriaGraphValidationError[
   return errors.map((error) => error.message).join("\n");
 }
 
-export function edgeConditionState(edge: Pick<MateriaEdgeConfig, "when">): MateriaGraphEdgeCondition {
-  const condition = edge.when?.trim();
-  if (!condition) return "satisfied";
-  const normalized = condition.replace(/\s+/g, " ").toLowerCase();
-  if (normalized === "satisfied" || normalized === "not unsatisfied") return "satisfied";
-  if (normalized === "unsatisfied" || normalized === "not_satisfied" || normalized === "not satisfied") return "unsatisfied";
-  if (/==\s*true$/.test(normalized) || /!=\s*false$/.test(normalized)) return "satisfied";
-  if (/==\s*false$/.test(normalized) || /!=\s*true$/.test(normalized)) return "unsatisfied";
-  return "other";
+export function isCanonicalEdgeCondition(value: unknown): value is MateriaEdgeCondition {
+  return typeof value === "string" && (CANONICAL_EDGE_CONDITIONS as readonly string[]).includes(value);
 }
 
-export function edgeGuard(edge: Pick<MateriaEdgeConfig, "when">): MateriaGraphEdgeGuard {
-  return edge.when?.trim() ? "guarded" : "unconditional";
+export function edgeConditionState(edge: { when?: unknown }): MateriaGraphEdgeCondition {
+  return isCanonicalEdgeCondition(edge.when) ? edge.when : "invalid";
+}
+
+export function edgeGuard(edge: { when?: unknown }): MateriaGraphEdgeGuard {
+  return edgeConditionState(edge) === "always" ? "unconditional" : "guarded";
 }
 
 function validateNodeLinks(id: string, node: MateriaPipelineNodeConfig, errors: MateriaGraphValidationError[], nodeIds: Set<string>): void {
@@ -81,12 +79,21 @@ function validateNodeLinks(id: string, node: MateriaPipelineNodeConfig, errors: 
 
 function validateOutgoingEdgeConditions(id: string, edges: MateriaEdgeConfig[], errors: MateriaGraphValidationError[]): void {
   // Runtime treats outgoing edges as an ordered guard list: the first edge with
-  // no `when`, or whose `when` evaluates truthy, wins. Guarded edges are not
-  // mutually exclusive at validation time, so repeated satisfied/unsatisfied or
-  // custom predicates are valid. Only edges after an unconditional edge are
+  // `when: "always"`, or whose canonical condition evaluates truthy, wins.
+  // Only the closed canonical set is valid, and edges after an `always` edge are
   // structurally unreachable and rejected.
   let firstUnconditional: number | undefined;
   for (const [index, edge] of edges.entries()) {
+    const validCondition = isCanonicalEdgeCondition(edge.when);
+    if (!validCondition) {
+      errors.push({
+        code: "invalid-edge-condition",
+        source: `${id}.edges[${index}].when`,
+        from: id,
+        to: edge.to,
+        message: `Socket "${id}" has invalid edge condition at ${id}.edges[${index}].when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.`,
+      });
+    }
     if (firstUnconditional !== undefined) {
       errors.push({
         code: "unreachable-edge",
@@ -96,7 +103,7 @@ function validateOutgoingEdgeConditions(id: string, edges: MateriaEdgeConfig[], 
       });
       continue;
     }
-    if (edgeGuard(edge) === "unconditional") firstUnconditional = index;
+    if (validCondition && edgeGuard(edge) === "unconditional") firstUnconditional = index;
   }
 }
 

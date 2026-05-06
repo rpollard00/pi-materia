@@ -80,7 +80,7 @@ describe("native utility node execution", () => {
 
   test("parses JSON output, assigns state, and routes edges", async () => {
     const harness = await makeHarness(utilityConfig(
-      { utility: "echo", parse: "json", params: { output: { route: "done", value: 7 } }, assign: { answer: "$.value" }, edges: [{ when: "$.route == 'done'", to: "second" }] },
+      { utility: "echo", parse: "json", params: { output: { satisfied: true, value: 7 } }, assign: { answer: "$.value" }, edges: [{ when: "satisfied", to: "second" }] },
       { second: { type: "utility", utility: "echo", params: { text: "second" } } },
     ));
 
@@ -89,7 +89,7 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; lastJson?: unknown; runDir?: string; visits?: Record<string, number> };
     expect(state.phase).toBe("complete");
     expect(state.data?.answer).toBe(7);
-    expect(state.lastJson).toEqual({ route: "done", value: 7 });
+    expect(state.lastJson).toEqual({ satisfied: true, value: 7 });
     expect(state.visits?.second).toBe(1);
     const parsed = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "hello", "1.json"), "utf8"));
     expect(parsed.value).toBe(7);
@@ -103,7 +103,7 @@ describe("native utility node execution", () => {
       process.stdin.on("end", () => {
         const state = JSON.parse(input).state ?? {};
         const cycle = Number(state.evalCycle ?? 0) + 1;
-        process.stdout.write(JSON.stringify({ cycle, done: cycle >= 3, satisfied: cycle === 2 }));
+        process.stdout.write(JSON.stringify({ cycle, satisfied: cycle === 2 }));
       });
     `;
     const harness = await makeHarness({
@@ -120,13 +120,12 @@ describe("native utility node execution", () => {
               parse: "json",
               assign: { evalCycle: "$.cycle" },
               edges: [
-                { when: "$.done == true", to: "end" },
                 { when: "satisfied", to: "Maintain" },
                 { when: "not_satisfied", to: "Build", maxTraversals: 3 },
               ],
               limits: { maxVisits: 5 },
             },
-            Maintain: { type: "utility", utility: "echo", params: { text: "maintain" }, next: "Build", limits: { maxVisits: 3 } },
+            Maintain: { type: "utility", utility: "echo", params: { text: "maintain" }, next: "end", limits: { maxVisits: 3 } },
           },
         },
       },
@@ -137,8 +136,8 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; visits?: Record<string, number>; edgeTraversals?: Record<string, number>; runDir?: string };
     expect(state.phase).toBe("complete");
-    expect(state.data?.evalCycle).toBe(3);
-    expect(state.visits).toMatchObject({ Build: 3, "Auto-Eval": 3, Maintain: 1 });
+    expect(state.data?.evalCycle).toBe(2);
+    expect(state.visits).toMatchObject({ Build: 2, "Auto-Eval": 2, Maintain: 1 });
     expect(state.edgeTraversals).toMatchObject({ "Auto-Eval->Build": 1, "Auto-Eval->Maintain": 1 });
     await expect(readFile(path.join(state.runDir!, "nodes", "Maintain", "1.md"), "utf8")).resolves.toBe("maintain");
   });

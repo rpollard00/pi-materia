@@ -74,11 +74,11 @@
           },
           "edges": [
             {
-              "when": "$.passed == true",
+              "when": "satisfied",
               "to": "Maintain"
             },
             {
-              "when": "$.passed == false",
+              "when": "not_satisfied",
               "to": "Build",
               "maxTraversals": 3
             }
@@ -106,7 +106,7 @@
           },
           "edges": [
             {
-              "when": "$.satisfied == false",
+              "when": "not_satisfied",
               "to": "Maintain",
               "maxTraversals": 3
             }
@@ -177,11 +177,11 @@
           },
           "edges": [
             {
-              "when": "$.passed == true",
+              "when": "satisfied",
               "to": "Maintain"
             },
             {
-              "when": "$.passed == false",
+              "when": "not_satisfied",
               "to": "Build",
               "maxTraversals": 3
             }
@@ -209,7 +209,7 @@
           },
           "edges": [
             {
-              "when": "$.satisfied == false",
+              "when": "not_satisfied",
               "to": "Maintain",
               "maxTraversals": 3
             }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { MateriaEdgeCondition } from '../../../types.js';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
   buildMateriaPalette,
@@ -193,13 +194,13 @@ function edgeConditionLabel(when?: string) {
 
 function edgeConditionClass(when?: string) {
   const state = edgeConditionState({ when });
-  if (state === 'unsatisfied') return 'unsatisfied';
-  if (state === 'satisfied' && when) return 'satisfied';
+  if (state === 'not_satisfied') return 'unsatisfied';
+  if (state === 'satisfied') return 'satisfied';
   return 'default';
 }
 
 function toggledEdgeCondition(when?: string) {
-  return edgeConditionState({ when }) === 'unsatisfied' ? 'satisfied' : 'not_satisfied';
+  return edgeConditionState({ when }) === 'not_satisfied' ? 'satisfied' : 'not_satisfied';
 }
 
 function summarizeHoverText(value?: unknown): string | undefined {
@@ -588,7 +589,7 @@ export function App() {
   const [socketPropertyForm, setSocketPropertyForm] = useState<SocketPropertyFormState>(() => emptySocketPropertyForm());
   const [socketPropertyError, setSocketPropertyError] = useState('');
   const [edgeTargetId, setEdgeTargetId] = useState('');
-  const [edgeCondition, setEdgeCondition] = useState('satisfied');
+  const [edgeCondition, setEdgeCondition] = useState<MateriaEdgeCondition>('satisfied');
   const [edgeMutationError, setEdgeMutationError] = useState('');
   const [socketLayoutDrag, setSocketLayoutDrag] = useState<SocketLayoutDragState | undefined>();
   const suppressSocketClickRef = useRef(false);
@@ -951,7 +952,7 @@ export function App() {
         const node = loadout.nodes?.[from] as PipelineNode | undefined;
         if (!node || !loadout.nodes?.[to]) return;
         const edges = [...(node.edges ?? [])];
-        edges.push({ to, when: edgeCondition || undefined });
+        edges.push({ to, when: edgeCondition });
         node.edges = edges;
       },
       `Staged edge ${from} → ${to} as ${edgeConditionLabel(edgeCondition)}.`,
@@ -1344,7 +1345,7 @@ export function App() {
                           </select>
                         </label>
                         <label className="graph-field">Condition
-                          <select data-testid="edge-condition" value={edgeCondition} onChange={(event) => setEdgeCondition(event.target.value)}>
+                          <select data-testid="edge-condition" value={edgeCondition} onChange={(event) => setEdgeCondition(event.target.value as MateriaEdgeCondition)}>
                             <option value="satisfied">satisfied</option>
                             <option value="not_satisfied">not satisfied</option>
                           </select>

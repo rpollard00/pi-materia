@@ -126,13 +126,13 @@ describe("loadout-aware pipeline resolution", () => {
   test("resolvePipeline uses shared graph validation for ordered outgoing edges and missing endpoints", () => {
     const withUnreachableEdge = structuredClone(baseConfig) as PiMateriaConfig;
     activeLoadout(withUnreachableEdge).nodes.hello.edges = [
-      { to: "ignored" },
-      { when: "$.retry == true", to: "ignored" },
+      { when: "always", to: "ignored" },
+      { when: "satisfied", to: "ignored" },
     ];
     expect(() => resolvePipeline(withUnreachableEdge)).toThrow(/unreachable outgoing edge/);
 
     const withMissingEdgeEndpoint = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(withMissingEdgeEndpoint).nodes.hello.edges = [{ when: "$.retry == true", to: undefined as never }];
+    activeLoadout(withMissingEdgeEndpoint).nodes.hello.edges = [{ when: "satisfied", to: undefined as never }];
     expect(() => resolvePipeline(withMissingEdgeEndpoint)).toThrow(/Missing graph endpoint referenced by hello\.edges\[0\]\.to/);
   });
 
@@ -150,7 +150,7 @@ describe("loadout-aware pipeline resolution", () => {
               materia: "Auto-Eval",
               edges: [
                 { when: "satisfied", to: "Maintain" },
-                { when: "$.score >= 0", to: "Build", maxTraversals: 3 },
+                { when: "satisfied", to: "Build", maxTraversals: 3 },
                 { when: "not_satisfied", to: "Build", maxTraversals: 3 },
               ],
             },
@@ -346,7 +346,7 @@ describe("utility pipeline nodes", () => {
       parse: "json",
       assign: { lastMaintain: "$" },
       advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "$.satisfied == true" },
-      edges: [{ when: "$.satisfied == false", to: "Maintain", maxTraversals: 3 }],
+      edges: [{ when: "not_satisfied", to: "Maintain", maxTraversals: 3 }],
     });
 
     const maintainPrompt = config.materia.Maintain!.prompt;

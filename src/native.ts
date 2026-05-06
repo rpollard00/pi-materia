@@ -5,7 +5,6 @@ import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
-import { edgeConditionState } from "./graphValidation.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
@@ -335,7 +334,7 @@ function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode, parsed
 
 function selectNextTarget(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown, config: PiMateriaConfig): string {
   for (const edge of node.node.edges ?? []) {
-    if (!edge.when || evaluateCondition(edge.when, state, parsed)) {
+    if (evaluateEdgeCondition(edge.when, state, parsed)) {
       enforceEdgeLimit(state, node.id, edge, config);
       return edge.to;
     }
@@ -1059,19 +1058,25 @@ function materiaPrompt(materia: MateriaConfig, state: MateriaCastState, sections
   return ["<materia-instructions>", renderTemplate(materia.prompt, state), "</materia-instructions>", ...sections.filter(Boolean)].join("\n\n");
 }
 
+function evaluateEdgeCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
+  if (condition === "always") return true;
+  if (condition === "satisfied") return resolveValue("$.satisfied", state, parsed) === true;
+  if (condition === "not_satisfied") return resolveValue("$.satisfied", state, parsed) === false;
+  throw new Error(`Unsupported Materia edge condition: ${condition}`);
+}
+
 function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
   const text = condition.trim();
-  const shorthand = edgeConditionState({ when: text });
-  const normalized = text.replace(/\s+/g, " ").toLowerCase();
-  if (shorthand === "satisfied" && (normalized === "satisfied" || normalized === "not unsatisfied")) return resolveValue("$.satisfied", state, parsed) === true;
-  if (shorthand === "unsatisfied" && (normalized === "unsatisfied" || normalized === "not_satisfied" || normalized === "not satisfied")) return resolveValue("$.satisfied", state, parsed) === false;
+  if (text === "always") return true;
+  if (text === "satisfied") return resolveValue("$.satisfied", state, parsed) === true;
+  if (text === "not_satisfied") return resolveValue("$.satisfied", state, parsed) === false;
   const exists = text.match(/^!?exists\((.+)\)$/);
   if (exists) {
     const value = resolveValue(exists[1].trim(), state, parsed);
     return text.startsWith("!") ? value === undefined : value !== undefined;
   }
   const match = text.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
-  if (!match) throw new Error(`Unsupported Materia edge condition: ${condition}`);
+  if (!match) throw new Error(`Unsupported Materia condition: ${condition}`);
   const left = resolveValue(match[1].trim(), state, parsed);
   const right = parseLiteral(match[3].trim(), state, parsed);
   return match[2] === "==" ? left === right : left !== right;

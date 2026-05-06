@@ -732,7 +732,7 @@ describe('Materia loadout grid editor', () => {
 
   it('surfaces invalid edge creation without mutating draft state', async () => {
     const config = structuredClone(edgeEditorConfig);
-    config.loadouts.Edges.nodes.Start.edges = [{ to: 'Review' }];
+    config.loadouts.Edges.nodes.Start.edges = [{ when: 'always', to: 'Review' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));

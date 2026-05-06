@@ -283,8 +283,10 @@ export interface MateriaUtilityNodeConfig extends MateriaPipelineNodeCommonConfi
   timeoutMs?: number;
 }
 
+export type MateriaEdgeCondition = "always" | "satisfied" | "not_satisfied";
+
 export interface MateriaEdgeConfig {
-  when?: string;
+  when: MateriaEdgeCondition;
   to: string;
   maxTraversals?: number;
 }

@@ -10,8 +10,8 @@ const validGraph = (): MateriaPipelineConfig => ({
       type: "agent",
       materia: "Check",
       edges: [
-        { when: "$.passed == true", to: "Maintain" },
-        { when: "$.passed == false", to: "Build" },
+        { when: "satisfied", to: "Maintain" },
+        { when: "not_satisfied", to: "Build" },
       ],
     },
     Build: { type: "agent", materia: "Build", next: "Maintain" },
@@ -20,14 +20,14 @@ const validGraph = (): MateriaPipelineConfig => ({
 });
 
 describe("graph validation foundation", () => {
-  test("accepts a graph with known endpoints and one satisfied/unsatisfied branch", () => {
+  test("accepts a graph with known endpoints and one satisfied/not_satisfied branch", () => {
     expect(validatePipelineGraph(validGraph())).toEqual({ ok: true, errors: [] });
   });
 
   test("rejects missing and unknown endpoints", () => {
     const graph = validGraph();
     graph.entry = "MissingEntry";
-    graph.nodes.Check.edges = [{ to: "MissingTarget" }, { when: "$.passed == false" as string, to: undefined as never }];
+    graph.nodes.Check.edges = [{ when: "always", to: "MissingTarget" }, { when: "not_satisfied", to: undefined as never }];
 
     const result = validatePipelineGraph(graph);
 
@@ -37,26 +37,45 @@ describe("graph validation foundation", () => {
     expect(formatGraphValidationErrors(result.errors)).toContain("Missing graph endpoint referenced by Check.edges[1].to.");
   });
 
-  test("accepts repeated satisfied, unsatisfied, and custom guarded edges because runtime evaluates them in order", () => {
+  test("accepts repeated guarded edges because runtime evaluates them in order", () => {
     const graph = validGraph();
     graph.nodes.Check.edges = [
-      { when: "$.passed == true", to: "Maintain" },
-      { when: "$.reviewed != false", to: "Build" },
-      { when: "$.passed == false", to: "Build" },
-      { when: "$.retry != true", to: "Maintain" },
-      { when: "exists($.override)", to: "Build" },
-      { when: "state.reviewRequired == true", to: "Maintain" },
+      { when: "satisfied", to: "Maintain" },
+      { when: "satisfied", to: "Build" },
+      { when: "not_satisfied", to: "Build" },
+      { when: "not_satisfied", to: "Maintain" },
     ];
 
     expect(validatePipelineGraph(graph)).toEqual({ ok: true, errors: [] });
   });
 
-  test("rejects unreachable outgoing edges after an unconditional edge", () => {
+  test("rejects missing, empty, legacy, and free-form edge conditions", () => {
     const graph = validGraph();
     graph.nodes.Check.edges = [
-      { to: "Maintain" },
-      { when: "$.passed == false", to: "Build" },
-      { to: "Build" },
+      { to: "Maintain" } as never,
+      { when: "" as never, to: "Build" },
+      { when: "$.passed == true" as never, to: "Maintain" },
+      { when: "exists($.override)" as never, to: "Build" },
+    ];
+
+    const result = validatePipelineGraph(graph);
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.map((error) => error.code)).toEqual([
+      "invalid-edge-condition",
+      "invalid-edge-condition",
+      "invalid-edge-condition",
+      "invalid-edge-condition",
+    ]);
+    expect(formatGraphValidationErrors(result.errors)).toContain("Expected one of: always, satisfied, not_satisfied");
+  });
+
+  test("rejects unreachable outgoing edges after an always edge", () => {
+    const graph = validGraph();
+    graph.nodes.Check.edges = [
+      { when: "always", to: "Maintain" },
+      { when: "not_satisfied", to: "Build" },
+      { when: "always", to: "Build" },
     ];
 
     const result = validatePipelineGraph(graph);
@@ -111,7 +130,7 @@ describe("graph validation foundation", () => {
   test("stages valid graph mutations and leaves the original graph unchanged on validation errors", () => {
     const graph = validGraph();
     const accepted = stageValidatedPipelineGraphChange(graph, (draft) => {
-      draft.nodes.Check.edges = [{ when: "$.passed == true", to: "Maintain" }];
+      draft.nodes.Check.edges = [{ when: "satisfied", to: "Maintain" }];
     });
 
     expect(accepted.ok).toBe(true);
@@ -136,23 +155,21 @@ describe("graph validation foundation", () => {
     expect(graph.nodes.Maintain.next).toBeUndefined();
   });
 
-  test("classifies current satisfied and unsatisfied edge condition strings for WebUI display", () => {
-    expect(edgeConditionState({})).toBe("satisfied");
+  test("classifies only canonical edge condition strings", () => {
+    expect(edgeConditionState({})).toBe("invalid");
+    expect(edgeConditionState({ when: "always" })).toBe("always");
     expect(edgeConditionState({ when: "satisfied" })).toBe("satisfied");
-    expect(edgeConditionState({ when: "$.satisfied == true" })).toBe("satisfied");
-    expect(edgeConditionState({ when: "$.passed != false" })).toBe("satisfied");
-    expect(edgeConditionState({ when: "not_satisfied" })).toBe("unsatisfied");
-    expect(edgeConditionState({ when: "$.satisfied == false" })).toBe("unsatisfied");
-    expect(edgeConditionState({ when: "$.passed != true" })).toBe("unsatisfied");
-    expect(edgeConditionState({ when: "$.score > 2" })).toBe("other");
+    expect(edgeConditionState({ when: "not_satisfied" })).toBe("not_satisfied");
+    expect(edgeConditionState({ when: "$.satisfied == true" })).toBe("invalid");
+    expect(edgeConditionState({ when: "not satisfied" })).toBe("invalid");
   });
 
-  test("classifies edge guards according to runtime selection semantics", () => {
-    expect(edgeGuard({})).toBe("unconditional");
-    expect(edgeGuard({ when: "   " })).toBe("unconditional");
+  test("classifies edge guards according to canonical runtime selection semantics", () => {
+    expect(edgeGuard({})).toBe("guarded");
+    expect(edgeGuard({ when: "   " })).toBe("guarded");
+    expect(edgeGuard({ when: "always" })).toBe("unconditional");
     expect(edgeGuard({ when: "satisfied" })).toBe("guarded");
     expect(edgeGuard({ when: "not_satisfied" })).toBe("guarded");
     expect(edgeGuard({ when: "$.passed == true" })).toBe("guarded");
-    expect(edgeGuard({ when: "exists($.custom)" })).toBe("guarded");
   });
 });
