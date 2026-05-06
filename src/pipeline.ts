@@ -1,4 +1,5 @@
 import { resolveArtifactRoot } from "./config.js";
+import { assertValidPipelineGraph } from "./graphValidation.js";
 import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
@@ -31,12 +32,12 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   validateMateriaEntries(config);
   const effective = getEffectivePipelineConfig(config);
   validateLoadout(effective.loadoutName, effective.pipeline);
+  assertValidPipelineGraph(effective.pipeline);
   const nodes = Object.fromEntries(
     Object.keys(effective.pipeline.nodes).map((id) => [id, resolveNode(config, effective, id, `${pipelineSource(effective)}.nodes.${id}`)]),
   );
   const entry = nodes[effective.pipeline.entry];
   if (!entry) throw new Error(`Unknown pipeline entry slot "${effective.pipeline.entry}"`);
-  validateTargets(effective);
   return { entry, nodes };
 }
 
@@ -123,20 +124,6 @@ function validateCommand(id: string, command: unknown): void {
       throw new Error(`Utility pipeline slot "${id}" has malformed command element at index ${index}. Expected a non-empty string.`);
     }
   }
-}
-
-function validateTargets(effective: EffectiveMateriaPipelineConfig): void {
-  for (const [id, node] of Object.entries(effective.pipeline.nodes)) {
-    validateTarget(effective, node.next, `${id}.next`);
-    validateTarget(effective, node.foreach?.done, `${id}.foreach.done`);
-    validateTarget(effective, node.advance?.done, `${id}.advance.done`);
-    for (const edge of node.edges ?? []) validateTarget(effective, edge.to, `${id}.edges[].to`);
-  }
-}
-
-function validateTarget(effective: EffectiveMateriaPipelineConfig, target: string | undefined, source: string): void {
-  if (!target || target === "end") return;
-  if (!effective.pipeline.nodes[target]) throw new Error(`Unknown pipeline slot "${target}" referenced by ${source}`);
 }
 
 function pipelineSource(effective: EffectiveMateriaPipelineConfig): string {

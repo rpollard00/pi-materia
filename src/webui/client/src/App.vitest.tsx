@@ -153,20 +153,22 @@ describe('Materia loadout grid editor', () => {
     expect(savedEdge).toEqual({ when: 'not_satisfied', to: 'Maintain' });
   });
 
-  it('shows validation failures from edge condition toggles without mutating draft state', async () => {
+  it('shows validation failures from unreachable edge toggles without mutating draft state', async () => {
+    const config = structuredClone(testConfig);
+    config.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [{ to: 'Maintain' }, { when: 'satisfied', to: 'Build' }] as never;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
-      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
     });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
 
-    const edge = await screen.findByTestId('edge-Auto-Eval-Maintain-0');
+    const edge = await screen.findByTestId('edge-Auto-Eval-Build-1');
     fireEvent.click(edge);
 
-    expect(await screen.findByText(/Cannot toggle edge Auto-Eval → Maintain: Socket "Auto-Eval" has more than one outgoing unsatisfied edge/)).toBeTruthy();
-    expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-satisfied');
+    expect(await screen.findByText(/Cannot toggle edge Auto-Eval → Build: Socket "Auto-Eval" has an unreachable outgoing edge at Auto-Eval\.edges\[1\]/)).toBeTruthy();
+    expect(screen.getByTestId('edge-Auto-Eval-Build-1').getAttribute('class')).toContain('loadout-edge-satisfied');
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -651,7 +653,7 @@ describe('Materia loadout grid editor', () => {
 
   it('surfaces invalid edge creation without mutating draft state', async () => {
     const config = structuredClone(edgeEditorConfig);
-    config.loadouts.Edges.nodes.Start.edges = [{ to: 'Review', when: 'satisfied' }];
+    config.loadouts.Edges.nodes.Start.edges = [{ to: 'Review' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -666,7 +668,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'satisfied' } });
     fireEvent.click(screen.getByTestId('create-edge'));
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Socket "Start" has more than one outgoing satisfied edge');
+    expect((await screen.findByRole('alert')).textContent).toContain('Socket "Start" has an unreachable outgoing edge at Start.edges[1]');
     expect(screen.queryByTestId('edge-Start-Ship-1')).toBeNull();
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

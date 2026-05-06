@@ -1,9 +1,10 @@
 import type { MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
 
 export type MateriaGraphEdgeCondition = "satisfied" | "unsatisfied" | "other";
+export type MateriaGraphEdgeGuard = "unconditional" | "guarded";
 
 export interface MateriaGraphValidationError {
-  code: "missing-endpoint" | "unknown-endpoint" | "duplicate-condition";
+  code: "missing-endpoint" | "unknown-endpoint" | "unreachable-edge";
   message: string;
   source?: string;
   from?: string;
@@ -26,8 +27,9 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig): MateriaGrap
   validateTarget(errors, nodeIds, graph.entry, "entry");
 
   for (const [id, node] of Object.entries(graph.nodes ?? {})) {
+    const errorCountBeforeNode = errors.length;
     validateNodeLinks(id, node, errors, nodeIds);
-    validateOutgoingEdgeConditions(id, node.edges ?? [], errors);
+    if (errors.length === errorCountBeforeNode) validateOutgoingEdgeConditions(id, node.edges ?? [], errors);
   }
 
   // Materia graphs are workflow state machines, not DAGs: transitions may
@@ -64,6 +66,10 @@ export function edgeConditionState(edge: Pick<MateriaEdgeConfig, "when">): Mater
   return "other";
 }
 
+export function edgeGuard(edge: Pick<MateriaEdgeConfig, "when">): MateriaGraphEdgeGuard {
+  return edge.when?.trim() ? "guarded" : "unconditional";
+}
+
 function validateNodeLinks(id: string, node: MateriaPipelineNodeConfig, errors: MateriaGraphValidationError[], nodeIds: Set<string>): void {
   validateOptionalTarget(errors, nodeIds, id, node.next, `${id}.next`);
   validateOptionalTarget(errors, nodeIds, id, node.foreach?.done, `${id}.foreach.done`);
@@ -74,21 +80,23 @@ function validateNodeLinks(id: string, node: MateriaPipelineNodeConfig, errors: 
 }
 
 function validateOutgoingEdgeConditions(id: string, edges: MateriaEdgeConfig[], errors: MateriaGraphValidationError[]): void {
-  const seen = new Map<MateriaGraphEdgeCondition, number>();
+  // Runtime treats outgoing edges as an ordered guard list: the first edge with
+  // no `when`, or whose `when` evaluates truthy, wins. Guarded edges are not
+  // mutually exclusive at validation time, so repeated satisfied/unsatisfied or
+  // custom predicates are valid. Only edges after an unconditional edge are
+  // structurally unreachable and rejected.
+  let firstUnconditional: number | undefined;
   for (const [index, edge] of edges.entries()) {
-    const condition = edgeConditionState(edge);
-    if (condition === "other") continue;
-    const prior = seen.get(condition);
-    if (prior !== undefined) {
+    if (firstUnconditional !== undefined) {
       errors.push({
-        code: "duplicate-condition",
+        code: "unreachable-edge",
         source: `${id}.edges[${index}]`,
         from: id,
-        message: `Socket "${id}" has more than one outgoing ${condition} edge (${id}.edges[${prior}] and ${id}.edges[${index}]).`,
+        message: `Socket "${id}" has an unreachable outgoing edge at ${id}.edges[${index}] because ${id}.edges[${firstUnconditional}] is unconditional and runtime selects the first satisfied edge in order.`,
       });
-    } else {
-      seen.set(condition, index);
+      continue;
     }
+    if (edgeGuard(edge) === "unconditional") firstUnconditional = index;
   }
 }
 

@@ -122,6 +122,51 @@ describe("loadout-aware pipeline resolution", () => {
 
     expect(() => resolvePipeline(config)).toThrow(/Unknown active Materia loadout "Missing"\. Available loadouts: Full-Auto, Planning-Consult/);
   });
+
+  test("resolvePipeline uses shared graph validation for ordered outgoing edges and missing endpoints", () => {
+    const withUnreachableEdge = structuredClone(baseConfig) as PiMateriaConfig;
+    activeLoadout(withUnreachableEdge).nodes.hello.edges = [
+      { to: "ignored" },
+      { when: "$.retry == true", to: "ignored" },
+    ];
+    expect(() => resolvePipeline(withUnreachableEdge)).toThrow(/unreachable outgoing edge/);
+
+    const withMissingEdgeEndpoint = structuredClone(baseConfig) as PiMateriaConfig;
+    activeLoadout(withMissingEdgeEndpoint).nodes.hello.edges = [{ when: "$.retry == true", to: undefined as never }];
+    expect(() => resolvePipeline(withMissingEdgeEndpoint)).toThrow(/Missing graph endpoint referenced by hello\.edges\[0\]\.to/);
+  });
+
+  test("resolvePipeline accepts repeated guarded iterative workflow branches", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Build",
+          nodes: {
+            Build: { type: "agent", materia: "Build", next: "Auto-Eval" },
+            "Auto-Eval": {
+              type: "agent",
+              materia: "Auto-Eval",
+              edges: [
+                { when: "satisfied", to: "Maintain" },
+                { when: "$.score >= 0", to: "Build", maxTraversals: 3 },
+                { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+              ],
+            },
+            Maintain: { type: "agent", materia: "Maintain", next: "Build" },
+          },
+        },
+      },
+      materia: {
+        Build: { tools: "coding", prompt: "Build." },
+        "Auto-Eval": { tools: "none", prompt: "Evaluate." },
+        Maintain: { tools: "coding", prompt: "Maintain." },
+      },
+    };
+
+    expect(resolvePipeline(config).entry.id).toBe("Build");
+  });
 });
 
 describe("utility pipeline nodes", () => {

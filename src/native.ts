@@ -5,6 +5,7 @@ import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
+import { edgeConditionState } from "./graphValidation.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
@@ -1060,6 +1061,10 @@ function materiaPrompt(materia: MateriaConfig, state: MateriaCastState, sections
 
 function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
   const text = condition.trim();
+  const shorthand = edgeConditionState({ when: text });
+  const normalized = text.replace(/\s+/g, " ").toLowerCase();
+  if (shorthand === "satisfied" && (normalized === "satisfied" || normalized === "not unsatisfied")) return resolveValue("$.satisfied", state, parsed) === true;
+  if (shorthand === "unsatisfied" && (normalized === "unsatisfied" || normalized === "not_satisfied" || normalized === "not satisfied")) return resolveValue("$.satisfied", state, parsed) === false;
   const exists = text.match(/^!?exists\((.+)\)$/);
   if (exists) {
     const value = resolveValue(exists[1].trim(), state, parsed);

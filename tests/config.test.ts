@@ -176,6 +176,68 @@ describe("config loadouts", () => {
     }
   });
 
+  test("saved config patches use shared graph edge validation semantics", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-graph-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: {
+          Custom: {
+            entry: "Check",
+            nodes: {
+              Check: {
+                type: "agent",
+                materia: "Check",
+                edges: [
+                  { to: "Done" },
+                  { when: "$.retry == true", to: "Check" },
+                ],
+              },
+              Done: { type: "agent", materia: "Done" },
+            },
+          },
+        },
+      })).rejects.toThrow(/loadout "Custom" graph is invalid: .*unreachable outgoing edge/);
+
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: {
+          Custom: {
+            entry: "Check",
+            nodes: {
+              Check: { type: "agent", materia: "Check", edges: [{ when: "$.retry == true", to: undefined as never }] },
+            },
+          },
+        },
+      })).rejects.toThrow(/Missing graph endpoint referenced by Check\.edges\[0\]\.to/);
+
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: {
+          Custom: {
+            entry: "Build",
+            nodes: {
+              Build: { type: "agent", materia: "Build", next: "Auto-Eval" },
+              "Auto-Eval": {
+                type: "agent",
+                materia: "Auto-Eval",
+                edges: [
+                  { when: "satisfied", to: "Maintain" },
+                  { when: "$.score >= 0", to: "Build", maxTraversals: 3 },
+                  { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+                ],
+              },
+              Maintain: { type: "agent", materia: "Maintain", next: "Build" },
+            },
+          },
+        },
+      })).resolves.toBe(getUserMateriaAssetPath());
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("project config can define loadouts and activeLoadout without duplicating materia", async () => {
     const { dir, file } = await writeConfig({
       activeLoadout: "Planning-Consult",

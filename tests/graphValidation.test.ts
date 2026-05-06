@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange, validatePipelineGraph } from "../src/graphValidation.js";
+import { edgeConditionState, edgeGuard, formatGraphValidationErrors, stageValidatedPipelineGraphChange, validatePipelineGraph } from "../src/graphValidation.js";
 import type { MateriaPipelineConfig } from "../src/types.js";
 
 const validGraph = (): MateriaPipelineConfig => ({
@@ -37,22 +37,57 @@ describe("graph validation foundation", () => {
     expect(formatGraphValidationErrors(result.errors)).toContain("Missing graph endpoint referenced by Check.edges[1].to.");
   });
 
-  test("enforces at most one outgoing satisfied and one outgoing unsatisfied edge per socket", () => {
+  test("accepts repeated satisfied, unsatisfied, and custom guarded edges because runtime evaluates them in order", () => {
     const graph = validGraph();
     graph.nodes.Check.edges = [
       { when: "$.passed == true", to: "Maintain" },
       { when: "$.reviewed != false", to: "Build" },
       { when: "$.passed == false", to: "Build" },
       { when: "$.retry != true", to: "Maintain" },
+      { when: "exists($.override)", to: "Build" },
+      { when: "state.reviewRequired == true", to: "Maintain" },
+    ];
+
+    expect(validatePipelineGraph(graph)).toEqual({ ok: true, errors: [] });
+  });
+
+  test("rejects unreachable outgoing edges after an unconditional edge", () => {
+    const graph = validGraph();
+    graph.nodes.Check.edges = [
+      { to: "Maintain" },
+      { when: "$.passed == false", to: "Build" },
+      { to: "Build" },
     ];
 
     const result = validatePipelineGraph(graph);
 
     expect(result.ok).toBe(false);
-    expect(result.errors.filter((error) => error.code === "duplicate-condition").map((error) => error.message)).toEqual([
-      'Socket "Check" has more than one outgoing satisfied edge (Check.edges[0] and Check.edges[1]).',
-      'Socket "Check" has more than one outgoing unsatisfied edge (Check.edges[2] and Check.edges[3]).',
+    expect(result.errors.filter((error) => error.code === "unreachable-edge").map((error) => error.message)).toEqual([
+      'Socket "Check" has an unreachable outgoing edge at Check.edges[1] because Check.edges[0] is unconditional and runtime selects the first satisfied edge in order.',
+      'Socket "Check" has an unreachable outgoing edge at Check.edges[2] because Check.edges[0] is unconditional and runtime selects the first satisfied edge in order.',
     ]);
+  });
+
+  test("accepts Auto-Eval branches to Maintain and Build even when both are satisfied guarded transitions", () => {
+    const graph = validGraph();
+    graph.nodes.Build.next = "Auto-Eval";
+    graph.nodes["Auto-Eval"] = {
+      type: "agent",
+      materia: "Auto-Eval",
+      edges: [
+        { when: "satisfied", to: "Maintain" },
+        { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+      ],
+    };
+
+    const result = stageValidatedPipelineGraphChange(graph, (draft) => {
+      const retryEdge = draft.nodes["Auto-Eval"].edges?.[1];
+      if (retryEdge) retryEdge.when = "satisfied";
+    });
+
+    expect(validatePipelineGraph(graph)).toEqual({ ok: true, errors: [] });
+    expect(result.ok).toBe(true);
+    expect(result.graph.nodes["Auto-Eval"].edges?.[1]?.when).toBe("satisfied");
   });
 
   test("accepts intentional iterative workflow loops bounded by runtime traversal limits", () => {
@@ -101,7 +136,7 @@ describe("graph validation foundation", () => {
     expect(graph.nodes.Maintain.next).toBeUndefined();
   });
 
-  test("classifies current satisfied and unsatisfied edge condition strings", () => {
+  test("classifies current satisfied and unsatisfied edge condition strings for WebUI display", () => {
     expect(edgeConditionState({})).toBe("satisfied");
     expect(edgeConditionState({ when: "satisfied" })).toBe("satisfied");
     expect(edgeConditionState({ when: "$.satisfied == true" })).toBe("satisfied");
@@ -110,5 +145,14 @@ describe("graph validation foundation", () => {
     expect(edgeConditionState({ when: "$.satisfied == false" })).toBe("unsatisfied");
     expect(edgeConditionState({ when: "$.passed != true" })).toBe("unsatisfied");
     expect(edgeConditionState({ when: "$.score > 2" })).toBe("other");
+  });
+
+  test("classifies edge guards according to runtime selection semantics", () => {
+    expect(edgeGuard({})).toBe("unconditional");
+    expect(edgeGuard({ when: "   " })).toBe("unconditional");
+    expect(edgeGuard({ when: "satisfied" })).toBe("guarded");
+    expect(edgeGuard({ when: "not_satisfied" })).toBe("guarded");
+    expect(edgeGuard({ when: "$.passed == true" })).toBe("guarded");
+    expect(edgeGuard({ when: "exists($.custom)" })).toBe("guarded");
   });
 });

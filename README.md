@@ -226,7 +226,7 @@ Generic node mechanics:
 - `materia`: named top-level materia assigned to an agent node
 - `parse`: `"text"` or `"json"`
 - `assign`: copy parsed output/state values into generic cast state
-- `edges`: condition-driven links, e.g. `$.passed == true`
+- `edges`: ordered condition-driven links, e.g. `$.passed == true`; runtime selects the first edge whose guard matches, so repeated guarded predicates are allowed, while edges after an unconditional edge are invalid because they are unreachable
 - `next`: fallback link when no edge matches
 - `foreach`: iterate a node over an array in state
 - `advance`: advance a configured cursor

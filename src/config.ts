@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
-import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig } from "./types.js";
+import { assertValidPipelineGraph } from "./graphValidation.js";
+import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
@@ -67,6 +68,7 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   const existing = existsSync(file) ? await readConfigPartial(file) : {};
   const next = mergeConfigPatch(existing, patch);
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
+  validateLoadoutGraphs(next.loadouts);
   await writeJsonAtomic(file, next);
   return file;
 }
@@ -158,6 +160,7 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
+  validateLoadoutGraphs(config.loadouts);
   return config;
 }
 
@@ -210,6 +213,16 @@ function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria:
     merged[name] = { ...(baseMateria[name] ?? {}), ...materia } as MateriaConfig;
   }
   return merged;
+}
+
+function validateLoadoutGraphs(loadouts: PiMateriaConfig["loadouts"] | undefined): void {
+  for (const [name, loadout] of Object.entries(loadouts ?? {}) as Array<[string, MateriaPipelineConfig]>) {
+    try {
+      assertValidPipelineGraph(loadout);
+    } catch (error) {
+      throw new Error(`Materia loadout "${name}" graph is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
