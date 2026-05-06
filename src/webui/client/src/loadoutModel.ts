@@ -41,7 +41,7 @@ export interface MateriaReference {
   materia: string;
 }
 
-export const emptySocketLabel = 'Empty socket';
+export const emptySocketLabel = 'Empty';
 
 export const paletteColors = [
   'from-sky-200 via-cyan-300 to-blue-600',

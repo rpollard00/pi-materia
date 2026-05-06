@@ -169,7 +169,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
 
     expect(await screen.findByTestId('socket-Entry')).toBeTruthy();
-    expect(screen.getByText('Empty socket')).toBeTruthy();
+    expect(screen.getByText('Empty')).toBeTruthy();
+    expect(screen.queryByText('Empty socket')).toBeNull();
     expect(screen.getByText('entry')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -180,6 +181,33 @@ describe('Materia loadout grid editor', () => {
     expect(created.entry).toBe('Entry');
     expect(created.nodes.Entry).toEqual({ empty: true });
     expect(created.nodes.Entry.type).toBeUndefined();
+  });
+
+  it('creates connected sockets with the same Empty display model', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByTestId('socket-planner');
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    const entry = await screen.findByTestId('socket-Entry');
+    fireEvent.click(entry);
+    fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
+
+    expect(await screen.findByTestId('socket-Entry-Socket')).toBeTruthy();
+    expect(screen.getAllByText('Empty')).toHaveLength(2);
+    expect(screen.queryByText('Empty socket')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
+    const created = savedConfig.loadouts[savedConfig.activeLoadout];
+    expect(created.nodes.Entry).toEqual({ empty: true, next: 'Entry-Socket' });
+    expect(created.nodes['Entry-Socket']).toEqual({ empty: true });
   });
 
   it('opens a valid tab from the URL query parameter', async () => {

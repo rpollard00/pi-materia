@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMateriaPalette,
+  getNodeLabel,
   makeEmptyEntryLoadout,
   makeEmptySocket,
   placeMateriaInSocket,
@@ -11,6 +12,23 @@ import {
 } from './loadoutModel.js';
 
 const paletteSignature = (definitions: Record<string, MateriaBehaviorConfig>) => JSON.stringify(buildMateriaPalette(definitions));
+
+describe('loadout socket display model', () => {
+  it('labels the initial entry socket as Empty through the shared display helper', () => {
+    const loadout = makeEmptyEntryLoadout();
+
+    expect(getNodeLabel('Entry', loadout.nodes!.Entry)).toBe('Empty');
+  });
+
+  it('labels newly added compatible empty sockets as Empty while preserving socket structure', () => {
+    const loadout = makeEmptyEntryLoadout();
+    loadout.nodes!.Entry.next = 'Entry-Socket';
+    loadout.nodes!['Entry-Socket'] = makeEmptySocket({ next: 'After', layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+
+    expect(getNodeLabel('Entry-Socket', loadout.nodes!['Entry-Socket'])).toBe('Empty');
+    expect(loadout.nodes!['Entry-Socket']).toEqual({ empty: true, next: 'After', layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+  });
+});
 
 describe('loadout materia palette model', () => {
   it('derives the palette only from configured materia definitions', () => {
