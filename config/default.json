@@ -98,7 +98,7 @@
             "cursor": "taskIndex",
             "items": "state.tasks",
             "done": "end",
-            "when": "$.satisfied == true"
+            "when": "satisfied"
           },
           "next": "Build",
           "assign": {
@@ -201,7 +201,7 @@
             "cursor": "taskIndex",
             "items": "state.tasks",
             "done": "end",
-            "when": "$.satisfied == true"
+            "when": "satisfied"
           },
           "next": "Build",
           "assign": {

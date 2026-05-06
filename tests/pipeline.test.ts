@@ -345,7 +345,7 @@ describe("utility pipeline nodes", () => {
       materia: "Maintain",
       parse: "json",
       assign: { lastMaintain: "$" },
-      advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "$.satisfied == true" },
+      advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "satisfied" },
       edges: [{ when: "not_satisfied", to: "Maintain", maxTraversals: 3 }],
     });
 

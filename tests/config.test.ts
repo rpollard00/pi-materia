@@ -155,6 +155,20 @@ describe("config loadouts", () => {
     await expect(loadConfig(withSystemPrompt.dir, withSystemPrompt.file)).rejects.toThrow(/loadout "Custom" configures obsolete systemPrompt/);
   });
 
+  test("bundled default loadout edges use explicit canonical conditions", async () => {
+    const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
+    const canonical = new Set(["always", "satisfied", "not_satisfied"]);
+
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
+      for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {
+        for (const [index, edge] of (node.edges ?? []).entries()) {
+          expect(edge.when, `${loadoutName}.${nodeName}.edges[${index}].when`).toBeDefined();
+          expect(canonical.has(edge.when as string), `${loadoutName}.${nodeName}.edges[${index}].when`).toBe(true);
+        }
+      }
+    }
+  });
+
   test("rejects saved patches that try to add loadout-level prompt fields", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-reject-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
@@ -211,6 +225,28 @@ describe("config loadouts", () => {
           },
         },
       })).rejects.toThrow(/Missing graph endpoint referenced by Check\.edges\[0\]\.to/);
+
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: {
+          Custom: {
+            entry: "Check",
+            nodes: {
+              Check: { type: "agent", materia: "Check", edges: [{ to: "Check" } as never] },
+            },
+          },
+        },
+      })).rejects.toThrow(/invalid edge condition at Check\.edges\[0\]\.when/);
+
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: {
+          Custom: {
+            entry: "Check",
+            nodes: {
+              Check: { type: "agent", materia: "Check", edges: [{ when: "$.passed == true" as never, to: "Check" }] },
+            },
+          },
+        },
+      })).rejects.toThrow(/Expected one of: always, satisfied, not_satisfied/);
 
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: {
