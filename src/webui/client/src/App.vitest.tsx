@@ -175,7 +175,7 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByTestId('socket-Entry')).toBeTruthy();
     expect(screen.getByText('Empty')).toBeTruthy();
     expect(screen.queryByText('Empty socket')).toBeNull();
-    expect(screen.getByText('entry')).toBeTruthy();
+    expect(screen.queryByText('entry')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

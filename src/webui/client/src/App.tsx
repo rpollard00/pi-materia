@@ -248,7 +248,7 @@ function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[];
     };
   });
   const width = Math.max(560, ...sockets.map((socket) => socket.x + 230));
-  const height = Math.max(320, ...sockets.map((socket) => socket.y + 190));
+  const height = Math.max(320, ...sockets.map((socket) => socket.y + 230));
   return { sockets, edges, width, height };
 }
 
@@ -1057,12 +1057,12 @@ export function App() {
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDrop(id, event)}
                 >
-                  <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
-                    <Orb color={nodeColor(id, index, materia, node)} label={getNodeLabel(id, node)} empty={isEmptySocket(node)} />
+                  <div className="materia-socket-orb-stage">
+                    <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
+                      <Orb color={nodeColor(id, index, materia, node)} label={getNodeLabel(id, node)} empty={isEmptySocket(node)} />
+                    </div>
                   </div>
-                  <span className="relative z-10 mt-4 text-sm font-semibold uppercase tracking-widest text-slate-100">{id}</span>
-                  <span className="relative z-10 mt-1 text-xs text-cyan-100/80">{getNodeLabel(id, node)}</span>
-                  {id === activeLoadout?.entry && <span className="entry-rune">entry</span>}
+                  <span className="materia-socket-label">{getNodeLabel(id, node)}</span>
                 </button>
                 );
               })}

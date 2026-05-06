@@ -149,8 +149,25 @@
 .materia-socket {
   position: relative;
   display: flex;
-  min-height: 13.5rem;
   flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  transition: transform 160ms ease;
+}
+
+.materia-socket:hover,
+.materia-socket-selectable {
+  transform: translateY(-2px);
+}
+
+.materia-socket-orb-stage {
+  position: relative;
+  display: flex;
+  height: 11.5rem;
+  width: 12rem;
   align-items: center;
   justify-content: center;
   overflow: hidden;
@@ -161,22 +178,21 @@
     conic-gradient(from 0deg, rgb(103 232 249 / 0.13), transparent, rgb(216 180 254 / 0.12), transparent, rgb(103 232 249 / 0.13));
   padding: 1.5rem;
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), inset 0 0 4px rgb(255 255 255 / 0.16), 0 0 26px rgb(34 211 238 / 0.12);
-  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
-.materia-socket:hover,
-.materia-socket-selectable {
-  transform: translateY(-2px);
+.materia-socket:hover .materia-socket-orb-stage,
+.materia-socket-selectable .materia-socket-orb-stage {
   border-color: rgb(34 211 238 / 0.58);
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 34px rgb(34 211 238 / 0.22);
 }
 
-.materia-socket-active {
+.materia-socket-active .materia-socket-orb-stage {
   border-color: rgb(250 204 21 / 0.82);
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 42px rgb(250 204 21 / 0.26), 0 0 90px rgb(34 211 238 / 0.16);
 }
 
-.materia-socket::before {
+.materia-socket-orb-stage::before {
   content: '';
   position: absolute;
   inset: 1rem;
@@ -185,7 +201,7 @@
   box-shadow: inset 0 0 34px rgb(0 0 0 / 0.82), inset 0 0 10px rgb(34 211 238 / 0.13);
 }
 
-.materia-socket::after {
+.materia-socket-orb-stage::after {
   content: '';
   position: absolute;
   inset: 2.2rem;
@@ -193,10 +209,26 @@
   border: 1px dashed rgb(165 243 252 / 0.18);
 }
 
+.materia-socket-label {
+  position: relative;
+  z-index: 10;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 9999px;
+  background: rgb(2 6 23 / 0.72);
+  padding: 0.25rem 0.75rem;
+  color: rgb(241 245 249);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .graph-materia-socket {
   position: absolute;
   z-index: 2;
-  min-height: 11.5rem;
+  min-height: 14.25rem;
   width: 12rem;
   cursor: grab;
   touch-action: none;
@@ -206,6 +238,9 @@
   z-index: 4;
   cursor: grabbing;
   transform: scale(1.02);
+}
+
+.graph-materia-socket-dragging .materia-socket-orb-stage {
   border-color: rgb(125 211 252 / 0.78);
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 42px rgb(34 211 238 / 0.3);
 }
