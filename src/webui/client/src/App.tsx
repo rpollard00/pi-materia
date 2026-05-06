@@ -187,9 +187,16 @@ function buildLoadouts(config: MateriaConfig): Record<string, PipelineConfig> {
   return {};
 }
 
-function edgeConditionLabel(when?: string) {
-  if (!when) return 'flow';
-  return when.replace(/_/g, ' ');
+const edgeConditionLabels: Record<MateriaEdgeCondition, string> = {
+  always: 'Always',
+  satisfied: 'Satisfied',
+  not_satisfied: 'Not Satisfied',
+};
+
+function edgeConditionLabel(when?: string, missingLabel = 'flow') {
+  const state = edgeConditionState({ when });
+  if (state !== 'invalid') return edgeConditionLabels[state];
+  return when === undefined ? missingLabel : 'Invalid';
 }
 
 function edgeConditionClass(when?: string) {
@@ -199,8 +206,11 @@ function edgeConditionClass(when?: string) {
   return 'default';
 }
 
-function toggledEdgeCondition(when?: string) {
-  return edgeConditionState({ when }) === 'not_satisfied' ? 'satisfied' : 'not_satisfied';
+function toggledEdgeCondition(when?: string): MateriaEdgeCondition {
+  const state = edgeConditionState({ when });
+  if (state === 'always') return 'satisfied';
+  if (state === 'satisfied') return 'not_satisfied';
+  return 'always';
 }
 
 function summarizeHoverText(value?: unknown): string | undefined {
@@ -232,7 +242,7 @@ function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: 
   }
   if (node?.next) lines.push(`Next: ${node.next}`);
   if (node?.edges?.length) {
-    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when)} → ${edge.to}`).join(', ')}`);
+    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when, 'Invalid')} → ${edge.to}`).join(', ')}`);
   }
   if (node?.limits) {
     const limits = [
@@ -1233,7 +1243,7 @@ export function App() {
                       }}
                     >
                       <path d={path} markerEnd="url(#materia-edge-arrow)" />
-                      <text x={labelX} y={labelY} transform={`rotate(${labelRotate} ${labelX} ${labelY})`}>{edgeConditionLabel(edge.when)}</text>
+                      <text x={labelX} y={labelY} transform={`rotate(${labelRotate} ${labelX} ${labelY})`}>{edgeConditionLabel(edge.when, edge.kind === 'edge' ? 'Invalid' : 'flow')}</text>
                     </g>
                   );
                 })}
@@ -1336,7 +1346,7 @@ export function App() {
                     </div>
                   ) : socketActionMode === 'connect' ? (
                     <div className="mt-5 space-y-4" data-testid="edge-connector">
-                      <p className="text-sm text-slate-300">Create a validated conditional edge from this socket to an existing socket.</p>
+                      <p className="text-sm text-slate-300">Create a validated canonical edge from this socket to an existing socket.</p>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="graph-field">Target socket
                           <select data-testid="edge-target" value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}>
@@ -1346,8 +1356,9 @@ export function App() {
                         </label>
                         <label className="graph-field">Condition
                           <select data-testid="edge-condition" value={edgeCondition} onChange={(event) => setEdgeCondition(event.target.value as MateriaEdgeCondition)}>
-                            <option value="satisfied">satisfied</option>
-                            <option value="not_satisfied">not satisfied</option>
+                            <option value="always">Always</option>
+                            <option value="satisfied">Satisfied</option>
+                            <option value="not_satisfied">Not Satisfied</option>
                           </select>
                         </label>
                       </div>
@@ -1375,7 +1386,7 @@ export function App() {
                         )}
                         {(activeLoadout.nodes[socketActionId].edges ?? []).map((edge, index) => (
                           <button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>
-                            Remove {edgeConditionLabel(edge.when)} edge to {edge.to}
+                            Remove {edgeConditionLabel(edge.when, 'Invalid')} edge to {edge.to}
                           </button>
                         ))}
                         {!activeLoadout.nodes[socketActionId].next && (activeLoadout.nodes[socketActionId].edges ?? []).length === 0 && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}

@@ -122,8 +122,8 @@ describe('Materia loadout grid editor', () => {
     expect(planner.style.left).toBe('32px');
     expect(build.style.left).toBe('292px');
     expect(screen.getAllByText('flow').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('satisfied')).toBeTruthy();
-    expect(screen.getByText('not satisfied')).toBeTruthy();
+    expect(screen.getByText('Satisfied')).toBeTruthy();
+    expect(screen.getByText('Not Satisfied')).toBeTruthy();
     expect(container.querySelector('.loadout-edge-satisfied')).toBeTruthy();
     expect(container.querySelector('.loadout-edge-unsatisfied')).toBeTruthy();
     expect(container.querySelectorAll('.loadout-edge path[marker-end]').length).toBe(4);
@@ -175,9 +175,28 @@ describe('Materia loadout grid editor', () => {
     expect(byId.get('C:edge:0:D:satisfied')?.labelY).not.toBe(byId.get('B:edge:0:D:not_satisfied')?.labelY);
   });
 
-  it('toggles a clickable edge condition through validated staged state', async () => {
+  it('renders loaded edge labels from canonical values without raw predicates', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    config.loadouts.Edges.nodes.Start.edges = [
+      { when: 'always', to: 'Review' },
+      { when: 'satisfied', to: 'Ship' },
+      { when: 'not_satisfied', to: 'Start' },
+      { when: '$.passed == true', to: 'Review' },
+    ] as never;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    expect(await screen.findByText('Always')).toBeTruthy();
+    expect(screen.getByText('Satisfied')).toBeTruthy();
+    expect(screen.getByText('Not Satisfied')).toBeTruthy();
+    expect(screen.getByText('Invalid')).toBeTruthy();
+    expect(screen.queryByText('$.passed == true')).toBeNull();
+  });
+
+  it('toggles a clickable edge condition through the canonical cycle and saves canonical values', async () => {
     const singleEdgeConfig = structuredClone(testConfig);
-    singleEdgeConfig.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [{ when: 'satisfied', to: 'Maintain' }];
+    singleEdgeConfig.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [{ when: 'always', to: 'Maintain' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: singleEdgeConfig }));
@@ -187,16 +206,28 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     const edge = await screen.findByTestId('edge-Auto-Eval-Maintain-0');
-    expect(edge.getAttribute('class')).toContain('loadout-edge-satisfied');
-    fireEvent.click(edge);
+    expect(edge.getAttribute('class')).toContain('loadout-edge-default');
+    expect(edge.querySelector('text')?.textContent).toBe('Always');
 
-    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as not satisfied\./)).toBeTruthy();
+    fireEvent.click(edge);
+    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Satisfied\./)).toBeTruthy();
+    expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-satisfied');
+
+    fireEvent.click(screen.getByTestId('edge-Auto-Eval-Maintain-0'));
+    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Not Satisfied\./)).toBeTruthy();
     expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
+
+    fireEvent.click(screen.getByTestId('edge-Auto-Eval-Maintain-0'));
+    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Always\./)).toBeTruthy();
+    expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-default');
+
+    fireEvent.click(screen.getByTestId('edge-Auto-Eval-Maintain-0'));
+    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Satisfied\./)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedEdge = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes['Auto-Eval'].edges[0];
-    expect(savedEdge).toEqual({ when: 'not_satisfied', to: 'Maintain' });
+    expect(savedEdge).toEqual({ when: 'satisfied', to: 'Maintain' });
   });
 
   it('stages iterative retry edge toggles without rejecting looped satisfied routes', async () => {
@@ -218,23 +249,23 @@ describe('Materia loadout grid editor', () => {
     expect(retryEdge.getAttribute('class')).toContain('loadout-edge-unsatisfied');
     fireEvent.click(retryEdge);
 
-    expect(await screen.findByText(/Staged edge Auto-Eval → Build as satisfied\./)).toBeTruthy();
+    expect(await screen.findByText(/Staged edge Auto-Eval → Build as Always\./)).toBeTruthy();
     expect(screen.queryByText(/Cannot toggle edge Auto-Eval → Build/)).toBeNull();
-    expect(screen.getByTestId('edge-Auto-Eval-Build-1').getAttribute('class')).toContain('loadout-edge-satisfied');
+    expect(screen.getByTestId('edge-Auto-Eval-Build-1').getAttribute('class')).toContain('loadout-edge-default');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedNodes = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
     expect(savedNodes['Auto-Eval'].edges).toEqual([
       { when: 'satisfied', to: 'Maintain' },
-      { when: 'satisfied', to: 'Build' },
+      { when: 'always', to: 'Build' },
     ]);
     expect(savedNodes.Maintain.next).toBe('Build');
   });
 
   it('shows validation failures from unreachable edge toggles without mutating draft state', async () => {
     const config = structuredClone(testConfig);
-    config.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [{ to: 'Maintain' }, { when: 'satisfied', to: 'Build' }] as never;
+    config.loadouts['Full-Auto'].nodes['Auto-Eval'].edges = [{ when: 'always', to: 'Maintain' }, { when: 'satisfied', to: 'Build' }] as never;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -695,7 +726,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'not_satisfied' } });
     fireEvent.click(screen.getByTestId('create-edge'));
 
-    expect(await screen.findByText(/Staged edge Start → Review as not satisfied\./)).toBeTruthy();
+    expect(await screen.findByText(/Staged edge Start → Review as Not Satisfied\./)).toBeTruthy();
     expect(screen.getByTestId('edge-Start-Review-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
