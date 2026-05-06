@@ -500,6 +500,24 @@ describe('Materia loadout grid editor', () => {
     expect(savedBuild.edges).toBeUndefined();
   });
 
+  it('renders socketed materia with the same configured color as its palette materia after drop', async () => {
+    const colorConfig = structuredClone(testConfig) as typeof testConfig & { materia: typeof testConfig.materia & { Maintain: typeof testConfig.materia.Maintain & { color?: string } } };
+    colorConfig.materia.Maintain.color = 'from-rose-200 via-red-300 to-red-700';
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: colorConfig })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const paletteOrbClass = (await screen.findByTestId('palette-Maintain')).querySelector('.materia-orb-small')?.className;
+    expect(paletteOrbClass).toContain('from-rose-200 via-red-300 to-red-700');
+    const dataTransfer = createDataTransfer();
+    fireEvent.dragStart(screen.getByTestId('palette-Maintain'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('socket-Build'), { dataTransfer });
+
+    await waitFor(() => expect(screen.getByTestId('socket-Build').querySelector('.materia-orb')?.className).toContain('from-rose-200 via-red-300 to-red-700'));
+    expect(screen.getByTestId('socket-Build').querySelector('.materia-orb')?.className).toBe(paletteOrbClass?.replace('materia-orb-small', 'materia-orb'));
+  });
+
   it('ignores invalid palette-to-socket drops without corrupting draft state', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
@@ -716,6 +734,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.change(screen.getByTestId('materia-model'), { target: { value: 'openai/gpt-review' } });
+    fireEvent.change(screen.getByTestId('materia-color'), { target: { value: 'from-violet-200 via-indigo-300 to-slate-700' } });
     fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
@@ -724,7 +743,7 @@ describe('Materia loadout grid editor', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', multiTurn: true });
+    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', color: 'from-violet-200 via-indigo-300 to-slate-700', multiTurn: true });
     expect(fetchMock.mock.calls[2][0]).toBe('/api/config');
     expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));

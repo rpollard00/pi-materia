@@ -332,6 +332,8 @@ export interface MateriaConfig {
   prompt: string;
   model?: string;
   thinking?: string;
+  /** Tailwind gradient classes used by the Loadout UI for this materia. */
+  color?: string;
   /** Keep agent nodes using this materia active for interactive refinement until finalized. */
   multiTurn?: boolean;
 }

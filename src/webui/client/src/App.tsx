@@ -25,6 +25,7 @@ interface MateriaFormState {
   toolAccess: 'none' | 'readOnly' | 'coding';
   model: string;
   thinking: string;
+  color: string;
   outputFormat: 'text' | 'json';
   multiTurn: boolean;
   utility: string;
@@ -147,6 +148,7 @@ const emptyMateriaForm = (): MateriaFormState => ({
   toolAccess: 'none',
   model: '',
   thinking: '',
+  color: '',
   outputFormat: 'text',
   multiTurn: false,
   utility: '',
@@ -323,6 +325,7 @@ function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
         prompt: form.prompt,
         model: form.model.trim() || undefined,
         thinking: form.thinking.trim() || undefined,
+        color: form.color.trim() || undefined,
         multiTurn: form.multiTurn || undefined,
       },
     },
@@ -862,6 +865,7 @@ export function App() {
       toolAccess: definition.tools ?? 'none',
       model: String(definition.model ?? ''),
       thinking: String(definition.thinking ?? ''),
+      color: String(definition.color ?? ''),
       outputFormat: 'text',
       multiTurn: Boolean(definition.multiTurn),
       utility: '',
@@ -1275,7 +1279,7 @@ export function App() {
           </div>
 
           {materiaForm.behavior === 'prompt' ? (
-            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_14rem_14rem_10rem]">
+            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_14rem_14rem_14rem_10rem]">
               <label className="graph-field">Prompt
                 <textarea data-testid="materia-prompt" className="min-h-32" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
               </label>
@@ -1288,6 +1292,9 @@ export function App() {
                   <option value="readOnly">read only</option>
                   <option value="coding">coding</option>
                 </select>
+              </label>
+              <label className="graph-field">Color
+                <input data-testid="materia-color" value={materiaForm.color} onChange={(event) => setMateriaForm({ ...materiaForm, color: event.target.value })} placeholder="from-sky-200 via-cyan-300 to-blue-600" />
               </label>
               <label className="graph-field">Multiturn
                 <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />

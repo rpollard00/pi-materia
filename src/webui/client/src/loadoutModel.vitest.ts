@@ -5,6 +5,7 @@ import {
   makeEmptyEntryLoadout,
   makeEmptySocket,
   placeMateriaInSocket,
+  resolveMateriaColor,
   type MateriaBehaviorConfig,
   type MateriaConfig,
   type PipelineConfig,
@@ -27,6 +28,27 @@ describe('loadout socket display model', () => {
 
     expect(getNodeLabel('Entry-Socket', loadout.nodes!['Entry-Socket'])).toBe('Empty');
     expect(loadout.nodes!['Entry-Socket']).toEqual({ empty: true, next: 'After', layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+  });
+});
+
+describe('loadout materia color model', () => {
+  it('resolves configured colors by materia identity for both palette and socketed materia', () => {
+    const materia = {
+      Build: { prompt: 'build', color: 'from-emerald-200 via-lime-300 to-green-700' },
+      Maintain: { prompt: 'maintain', color: 'from-fuchsia-200 via-pink-300 to-purple-700' },
+    } satisfies Record<string, MateriaBehaviorConfig>;
+    const paletteMaintain = buildMateriaPalette(materia).find(([id]) => id === 'Maintain')?.[1];
+    const socketedMaintain = placeMateriaInSocket(makeEmptySocket({ layout: { x: 1, y: 0 } }), paletteMaintain);
+
+    expect(resolveMateriaColor('Maintain', materia)).toBe('from-fuchsia-200 via-pink-300 to-purple-700');
+    expect(resolveMateriaColor(socketedMaintain.materia as string, materia)).toBe(resolveMateriaColor('Maintain', materia));
+  });
+
+  it('uses a deterministic centralized fallback for materia without configured colors', () => {
+    const first = resolveMateriaColor('User-Created-Materia', {});
+    const second = resolveMateriaColor('User-Created-Materia', { Other: { color: 'from-sky-200 via-cyan-300 to-blue-600' } });
+
+    expect(first).toBe(second);
   });
 });
 

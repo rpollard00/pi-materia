@@ -131,14 +131,18 @@ export function getNodeLabel(id: string, node?: PipelineNode): string {
   return node?.materia ?? node?.utility ?? id;
 }
 
-export function nodeColor(id: string, index: number, definitions?: Record<string, MateriaBehaviorConfig>, node?: PipelineNode): string {
-  const reference = extractMateriaReference(node)?.materia ?? id;
-  const configured = definitions?.[reference]?.color;
+function fallbackColorIndex(materiaId: string): number {
+  let hash = 0;
+  for (const char of materiaId) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  return Math.abs(hash) % paletteColors.length;
+}
+
+export function resolveMateriaColor(materiaId: string, definitions?: Record<string, MateriaBehaviorConfig>): string {
+  const configured = definitions?.[materiaId]?.color;
   if (configured) return configured;
-  const lowered = reference.toLowerCase();
-  if (lowered.includes('plan')) return paletteColors[0];
-  if (lowered.includes('build')) return paletteColors[1];
-  if (lowered.includes('check') || lowered.includes('eval')) return paletteColors[2];
-  if (lowered.includes('maintain')) return paletteColors[3];
-  return paletteColors[index % paletteColors.length];
+  return paletteColors[fallbackColorIndex(materiaId)];
+}
+
+export function nodeColor(id: string, _index: number, definitions?: Record<string, MateriaBehaviorConfig>, node?: PipelineNode): string {
+  return resolveMateriaColor(extractMateriaReference(node)?.materia ?? id, definitions);
 }
