@@ -88,6 +88,10 @@ export function materiaPaletteNode(id: string): PipelineNode {
   return { ...createMateriaReference(id) };
 }
 
+export function buildMateriaPalette(definitions: Record<string, MateriaBehaviorConfig> = {}): Array<[string, PipelineNode]> {
+  return Object.keys(definitions).map((id) => [id, materiaPaletteNode(id)]);
+}
+
 export function extractMateriaReference(node?: PipelineNode): MateriaReference | undefined {
   if (!node || node.empty || node.type !== 'agent' || typeof node.materia !== 'string' || !node.materia) return undefined;
   return createMateriaReference(node.materia);

@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
+  buildMateriaPalette,
   clearSocketMateria,
   getNodeLabel,
   isEmptySocket,
   makeEmptyEntryLoadout,
   makeEmptySocket,
-  materiaPaletteNode,
   nodeColor,
   placeMateriaInSocket,
   type MateriaConfig,
@@ -440,15 +440,7 @@ export function App() {
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
   const materia = draftConfig?.materia ?? {};
   const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
-  const palette = useMemo(() => {
-    const byId = new Map<string, PipelineNode>();
-    for (const id of Object.keys(materia)) byId.set(id, materiaPaletteNode(id));
-    const allNodes = Object.values(loadouts).flatMap((loadout) => Object.entries(loadout.nodes ?? {}));
-    for (const [id, node] of allNodes) {
-      if (!isEmptySocket(node) && !byId.has(id)) byId.set(id, node);
-    }
-    return [...byId.entries()];
-  }, [loadouts, materia]);
+  const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
   const isDirty = JSON.stringify(baselineConfig) !== JSON.stringify(draftConfig);
   const currentMonitorNode = monitor?.activeCast?.currentNode;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
@@ -541,8 +533,8 @@ export function App() {
         return false;
       }
     } else {
-      const currentSource = palette.find(([id]) => id === materiaId)?.[1] ?? currentLoadout.nodes[materiaId];
-      if (isEmptySocket(currentSource)) {
+      const currentSource = palette.find(([id]) => id === materiaId)?.[1];
+      if (!currentSource || isEmptySocket(currentSource)) {
         setStatus(`Ignored drop: materia ${materiaId} is not available.`);
         return false;
       }
@@ -558,9 +550,9 @@ export function App() {
         loadout.nodes[socketId] = placeMateriaInSocket(target, source);
         loadout.nodes[fromSocket] = placeMateriaInSocket(source, target);
       } else {
-        const sourceNode = palette.find(([id]) => id === materiaId)?.[1] ?? loadout.nodes[materiaId];
+        const sourceNode = palette.find(([id]) => id === materiaId)?.[1];
         const target = loadout.nodes[socketId];
-        if (!isEmptySocket(sourceNode) && target) loadout.nodes[socketId] = placeMateriaInSocket(target, sourceNode);
+        if (sourceNode && !isEmptySocket(sourceNode) && target) loadout.nodes[socketId] = placeMateriaInSocket(target, sourceNode);
       }
     });
     setSelectedMateriaId(undefined);

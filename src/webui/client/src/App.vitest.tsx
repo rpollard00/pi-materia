@@ -789,7 +789,7 @@ describe('Materia loadout grid editor', () => {
     await openTab('Loadout');
     expect(await screen.findByTestId('palette-RunTests')).toBeTruthy();
     expect(screen.getByTestId('palette-DetachedMateria')).toBeTruthy();
-    expect(screen.getByTestId('palette-SocketOnly')).toBeTruthy();
+    expect(screen.queryByTestId('palette-SocketOnly')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: /Alternate/ }));
     await openTab('Materia Editor');
     const afterLoadoutSwitch = Array.from((await screen.findByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value);
