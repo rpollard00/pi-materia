@@ -76,10 +76,27 @@
   box-shadow: 0 0 22px rgb(34 211 238 / 0.16);
 }
 
-.loadout-graph-canvas {
+.loadout-workspace,
+.loadout-graph-panel,
+.loadout-side-panel {
+  min-width: 0;
+}
+
+.loadout-graph-panel {
+  display: flex;
+  min-height: clamp(34rem, 76vh, 58rem);
+  flex-direction: column;
+}
+
+.loadout-graph-viewport {
   position: relative;
-  min-height: 22rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 28rem;
+  height: clamp(28rem, 62vh, 48rem);
+  max-width: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
   border-radius: 1.5rem;
   border: 1px solid rgb(103 232 249 / 0.16);
   background:
@@ -89,6 +106,12 @@
     rgb(2 6 23 / 0.42);
   background-size: 44px 44px, 44px 44px, auto, auto;
   box-shadow: inset 0 0 44px rgb(0 0 0 / 0.32);
+}
+
+.loadout-graph-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
 }
 
 .loadout-edge-layer {

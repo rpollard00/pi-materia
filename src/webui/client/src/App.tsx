@@ -1217,8 +1217,8 @@ export function App() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
-      <section className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-6 py-8">
+    <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
+      <section className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-6 px-6 py-8">
         <header className="rounded-3xl border border-cyan-200/30 bg-slate-950/75 p-7 shadow-[0_0_55px_rgba(34,211,238,0.16)] backdrop-blur">
           <p className="text-sm uppercase tracking-[0.45em] text-cyan-200">pi-materia loadout editor</p>
           <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -1250,8 +1250,8 @@ export function App() {
         </nav>
 
         {selectedTab === 'loadout' && (
-        <div className="grid gap-6 xl:grid-cols-[18rem_1fr_20rem]">
-          <aside className="fantasy-panel p-5">
+        <div className="loadout-workspace grid gap-6 xl:grid-cols-[16rem_minmax(0,1fr)_18rem]">
+          <aside className="fantasy-panel loadout-side-panel p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-bold">Loadouts</h2>
               <button className="materia-button" onClick={createLoadout}>New</button>
@@ -1266,7 +1266,7 @@ export function App() {
             </div>
           </aside>
 
-          <section className="fantasy-panel p-6">
+          <section className="fantasy-panel loadout-graph-panel p-6">
             <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Visual materia grid</h2>
@@ -1277,7 +1277,8 @@ export function App() {
               </label>
             </div>
 
-            <div className="loadout-graph-canvas" data-testid="socket-grid" style={{ minWidth: `${loadoutGraph.width}px`, minHeight: `${loadoutGraph.height}px` }}>
+            <div className="loadout-graph-viewport" data-testid="socket-grid-viewport">
+              <div className="loadout-graph-canvas" data-testid="socket-grid" style={{ width: `${loadoutGraph.width}px`, height: `${loadoutGraph.height}px` }}>
               <svg className="loadout-edge-layer" width={loadoutGraph.width} height={loadoutGraph.height} aria-label="Loadout edges">
                 <defs>
                   <marker id="materia-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
@@ -1338,6 +1339,7 @@ export function App() {
                 </button>
                 );
               })}
+              </div>
             </div>
 
             {socketActionId && activeLoadout?.nodes?.[socketActionId] && (
@@ -1456,7 +1458,7 @@ export function App() {
             )}
           </section>
 
-          <aside className="flex flex-col gap-6">
+          <aside className="loadout-side-panel flex flex-col gap-6">
             <section className="fantasy-panel p-5">
               <h2 className="text-xl font-bold">Materia palette</h2>
               <p className="mt-1 text-sm text-slate-400">Click once to select for swap/insert, or drag into a socket.</p>

@@ -133,6 +133,28 @@ describe('Materia loadout grid editor', () => {
     expect(retryEdge.querySelector('path')?.getAttribute('d')).not.toBe(forwardPath);
   });
 
+  it('contains oversized graph dimensions inside a scrollable viewport', async () => {
+    const wideConfig = structuredClone(testConfig) as typeof testConfig & { activeLoadout: string; loadouts: Record<string, unknown> };
+    wideConfig.activeLoadout = 'Wide';
+    wideConfig.loadouts.Wide = {
+      entry: 'socket-0',
+      nodes: Object.fromEntries(Array.from({ length: 8 }, (_, index) => [
+        `socket-${index}`,
+        { type: 'agent', materia: 'Build', layout: { x: index, y: index % 2 }, next: index < 7 ? `socket-${index + 1}` : undefined },
+      ])),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: wideConfig }))));
+
+    render(<App />);
+
+    const viewport = await screen.findByTestId('socket-grid-viewport');
+    const grid = screen.getByTestId('socket-grid');
+    expect(viewport.classList.contains('loadout-graph-viewport')).toBe(true);
+    expect(grid.style.width).toBe('1678px');
+    expect(grid.style.minWidth).toBe('');
+    expect(grid.style.height).toBe('386px');
+  });
+
   it('routes parallel edges between the same sockets on separate visual lanes', async () => {
     const parallelConfig = structuredClone(edgeEditorConfig);
     parallelConfig.loadouts.Edges.nodes.Start.edges = [
