@@ -127,11 +127,19 @@ interface RoutedLoadoutEdge {
   routeClass: 'forward' | 'backward' | 'loop';
 }
 
+type SocketAnchorSide = 'top' | 'right' | 'bottom' | 'left';
+
+interface SocketAnchorPoint {
+  x: number;
+  y: number;
+  side: SocketAnchorSide;
+}
+
 const socketLayoutOffsetX = 32;
 const socketLayoutOffsetY = 28;
 const socketCardWidth = 160;
-const socketAnchorY = 74;
-const socketLoopHeight = 94;
+const socketStageHeight = 148;
+const socketAnchorY = socketStageHeight / 2;
 const socketLayoutUnitX = 208;
 const socketLayoutUnitY = 168;
 const socketLayoutRowGap = 176;
@@ -316,17 +324,65 @@ function lineIntersection(a: { startX: number; startY: number; endX: number; end
   return t > 0.08 && t < 0.92 && u > 0.08 && u < 0.92;
 }
 
+function socketCenter(socket: PositionedSocket) {
+  return { x: socket.x + socketCardWidth / 2, y: socket.y + socketStageHeight / 2 };
+}
+
+function socketAnchor(socket: PositionedSocket, side: SocketAnchorSide): SocketAnchorPoint {
+  const center = socketCenter(socket);
+  if (side === 'top') return { x: center.x, y: socket.y, side };
+  if (side === 'bottom') return { x: center.x, y: socket.y + socketStageHeight, side };
+  if (side === 'left') return { x: socket.x, y: center.y, side };
+  return { x: socket.x + socketCardWidth, y: center.y, side };
+}
+
+function chooseSocketAnchors(edge: LoadoutEdge, from: PositionedSocket, to: PositionedSocket): { source: SocketAnchorPoint; target: SocketAnchorPoint } {
+  if (edge.from === edge.to) {
+    return { source: socketAnchor(from, 'right'), target: socketAnchor(to, 'bottom') };
+  }
+
+  const sourceCenter = socketCenter(from);
+  const targetCenter = socketCenter(to);
+  const dx = targetCenter.x - sourceCenter.x;
+  const dy = targetCenter.y - sourceCenter.y;
+  const sameRow = Math.abs(dy) < socketStageHeight * 0.45;
+  const verticalTransition = !sameRow && Math.abs(dy) > Math.abs(dx) * 0.65;
+
+  if (sameRow) {
+    return dx >= 0
+      ? { source: socketAnchor(from, 'right'), target: socketAnchor(to, 'left') }
+      : { source: socketAnchor(from, 'left'), target: socketAnchor(to, 'right') };
+  }
+
+  if (verticalTransition) {
+    return dy >= 0
+      ? { source: socketAnchor(from, 'bottom'), target: socketAnchor(to, 'top') }
+      : { source: socketAnchor(from, 'top'), target: socketAnchor(to, 'bottom') };
+  }
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { source: socketAnchor(from, 'right'), target: socketAnchor(to, 'left') }
+      : { source: socketAnchor(from, 'left'), target: socketAnchor(to, 'right') };
+  }
+
+  return dy >= 0
+    ? { source: socketAnchor(from, 'bottom'), target: socketAnchor(to, 'top') }
+    : { source: socketAnchor(from, 'top'), target: socketAnchor(to, 'bottom') };
+}
+
 function routeLaneGroups(edges: LoadoutEdge[], positions: Map<string, PositionedSocket>) {
   const routeable = edges.flatMap((edge) => {
     const from = positions.get(edge.from);
     const to = positions.get(edge.to);
     if (!from || !to) return [];
+    const { source, target } = chooseSocketAnchors(edge, from, to);
     return [{
       edge,
-      startX: edge.from === edge.to ? from.x + socketCardWidth : (to.x + 36 < from.x ? from.x : from.x + socketCardWidth),
-      startY: from.y + socketAnchorY,
-      endX: edge.from === edge.to ? to.x + socketCardWidth : (to.x + 36 < from.x ? to.x + socketCardWidth : to.x),
-      endY: to.y + socketAnchorY,
+      startX: source.x,
+      startY: source.y,
+      endX: target.x,
+      endY: target.y,
     }];
   });
   const parent = new Map<string, string>();
@@ -364,12 +420,74 @@ function labelRotation(startX: number, startY: number, endX: number, endY: numbe
   return degrees > 90 || degrees < -90 ? degrees + 180 : degrees;
 }
 
+function anchorOutwardVector(side: SocketAnchorSide) {
+  if (side === 'left') return { x: -1, y: 0 };
+  if (side === 'right') return { x: 1, y: 0 };
+  if (side === 'top') return { x: 0, y: -1 };
+  return { x: 0, y: 1 };
+}
+
+function offsetAnchor(anchor: SocketAnchorPoint, distance: number) {
+  const vector = anchorOutwardVector(anchor.side);
+  return { x: anchor.x + vector.x * distance, y: anchor.y + vector.y * distance };
+}
+
+function formatOrthogonalPath(points: Array<{ x: number; y: number }>) {
+  const compact = points.filter((point, index) => {
+    const previous = points[index - 1];
+    return !previous || Math.abs(previous.x - point.x) > 0.1 || Math.abs(previous.y - point.y) > 0.1;
+  });
+  return compact.map((point, index) => `${index === 0 ? 'M' : 'L'} ${rounded(point.x)} ${rounded(point.y)}`).join(' ');
+}
+
+function orthogonalRoute(source: SocketAnchorPoint, target: SocketAnchorPoint, lane: number) {
+  const lead = 26;
+  const laneOffset = lane * 0.9;
+  const sourceLead = offsetAnchor(source, lead);
+  const targetLead = offsetAnchor(target, lead);
+  const sourceHorizontal = source.side === 'left' || source.side === 'right';
+  const targetHorizontal = target.side === 'left' || target.side === 'right';
+
+  if (sourceHorizontal && targetHorizontal && Math.abs(source.y - target.y) < 0.1 && Math.abs(laneOffset) < 0.1) {
+    const path = formatOrthogonalPath([{ x: source.x, y: source.y }, { x: target.x, y: target.y }]);
+    return { path, labelX: rounded((source.x + target.x) / 2), labelY: rounded(source.y - 10), labelRotate: rounded(labelRotation(source.x, source.y, target.x, target.y)) };
+  }
+  if (!sourceHorizontal && !targetHorizontal && Math.abs(source.x - target.x) < 0.1 && Math.abs(laneOffset) < 0.1) {
+    const path = formatOrthogonalPath([{ x: source.x, y: source.y }, { x: target.x, y: target.y }]);
+    return { path, labelX: rounded(source.x), labelY: rounded((source.y + target.y) / 2 - 10), labelRotate: rounded(labelRotation(source.x, source.y, target.x, target.y)) };
+  }
+
+  const points = [{ x: source.x, y: source.y }, sourceLead];
+
+  if (sourceHorizontal && targetHorizontal) {
+    const viaY = Math.abs(sourceLead.y - targetLead.y) < 0.1 ? sourceLead.y + laneOffset : (sourceLead.y + targetLead.y) / 2 + laneOffset;
+    points.push({ x: sourceLead.x, y: viaY }, { x: targetLead.x, y: viaY });
+  } else if (!sourceHorizontal && !targetHorizontal) {
+    const viaX = Math.abs(sourceLead.x - targetLead.x) < 0.1 ? sourceLead.x + laneOffset : (sourceLead.x + targetLead.x) / 2 + laneOffset;
+    points.push({ x: viaX, y: sourceLead.y }, { x: viaX, y: targetLead.y });
+  } else if (sourceHorizontal) {
+    const viaX = targetLead.x + laneOffset;
+    points.push({ x: viaX, y: sourceLead.y }, { x: viaX, y: targetLead.y });
+  } else {
+    const viaY = targetLead.y + laneOffset;
+    points.push({ x: sourceLead.x, y: viaY }, { x: targetLead.x, y: viaY });
+  }
+
+  points.push(targetLead, { x: target.x, y: target.y });
+  return {
+    path: formatOrthogonalPath(points),
+    labelX: rounded(points.reduce((sum, point) => sum + point.x, 0) / points.length),
+    labelY: rounded(points.reduce((sum, point) => sum + point.y, 0) / points.length - 10),
+    labelRotate: rounded(labelRotation(source.x, source.y, target.x, target.y)),
+  };
+}
+
 export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, PositionedSocket>): RoutedLoadoutEdge[] {
   // Keep routing deterministic and local instead of adding a physics/layout dependency:
   // the WebUI preserves user-authored socket positions, so force solvers would move
   // nodes unpredictably and make saved layouts harder to reason about. Edges are
-  // separated by stable lanes per unordered socket pair, with retry/backward routes
-  // leaving from the left side and arcing around cards so iterative loops are clear.
+  // separated by stable lanes and attached to the nearest sensible side of each
+  // socket so arrowheads follow the final segment into the target edge.
   const laneGroups = routeLaneGroups(edges, positions);
 
   return edges.map((edge) => {
@@ -377,70 +495,14 @@ export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, P
     const to = positions.get(edge.to);
     if (!from || !to) return undefined;
     const lane = orderedLane(laneGroups.get(edge.id) ?? [edge], edge, 30);
+    const anchors = chooseSocketAnchors(edge, from, to);
+    const route = orthogonalRoute(anchors.source, anchors.target, lane);
+    const backward = edge.from !== edge.to && anchors.source.side === 'left' && anchors.target.side === 'right';
 
-    if (edge.from === edge.to) {
-      const startX = from.x + socketCardWidth - 8;
-      const startY = from.y + socketAnchorY - 22;
-      const endX = from.x + socketCardWidth - 8;
-      const endY = from.y + socketAnchorY + 22;
-      const right = from.x + socketCardWidth + 72 + Math.max(-50, lane * 0.7);
-      const top = from.y + socketAnchorY - socketLoopHeight - lane * 0.6;
-      return {
-        edge,
-        routeClass: 'loop' as const,
-        path: `M ${rounded(startX)} ${rounded(startY)} C ${rounded(right)} ${rounded(top)}, ${rounded(right)} ${rounded(endY + 24)}, ${rounded(endX)} ${rounded(endY)}`,
-        labelX: rounded(right + 8),
-        labelY: rounded((top + endY) / 2),
-        labelRotate: 0,
-      };
-    }
-
-    const backward = to.x + 36 < from.x;
-    if (backward) {
-      const startX = from.x + 12;
-      const startY = from.y + socketAnchorY;
-      const endX = to.x + socketCardWidth - 12;
-      const endY = to.y + socketAnchorY;
-      const span = Math.max(90, Math.abs(startX - endX));
-      const verticalDirection = startY <= endY ? -1 : 1;
-      const arch = verticalDirection * (72 + Math.min(120, span * 0.18)) + lane * 0.75;
-      const control1X = startX - Math.max(70, span * 0.32);
-      const control2X = endX + Math.max(70, span * 0.32);
-      const labelX = (startX + endX) / 2;
-      const labelY = (startY + endY) / 2 + arch;
-      return {
-        edge,
-        routeClass: 'backward' as const,
-        path: `M ${rounded(startX)} ${rounded(startY)} C ${rounded(control1X)} ${rounded(startY + arch)}, ${rounded(control2X)} ${rounded(endY + arch)}, ${rounded(endX)} ${rounded(endY)}`,
-        labelX: rounded(labelX),
-        labelY: rounded(labelY - Math.sign(arch || -1) * 8),
-        labelRotate: 0,
-      };
-    }
-
-    const startX = from.x + socketCardWidth - 12;
-    const startY = from.y + socketAnchorY;
-    const endX = to.x + 12;
-    const endY = to.y + socketAnchorY;
-    const dx = endX - startX;
-    const dy = endY - startY;
-    const length = Math.max(1, Math.hypot(dx, dy));
-    const normalX = -dy / length;
-    const normalY = dx / length;
-    const offsetX = normalX * lane;
-    const offsetY = normalY * lane;
-    const curve = Math.max(54, Math.abs(dx) * 0.35, Math.abs(dy) * 0.22);
-    const control1X = startX + curve + offsetX;
-    const control1Y = startY + offsetY;
-    const control2X = endX - curve + offsetX;
-    const control2Y = endY + offsetY;
     return {
       edge,
-      routeClass: 'forward' as const,
-      path: `M ${rounded(startX)} ${rounded(startY)} C ${rounded(control1X)} ${rounded(control1Y)}, ${rounded(control2X)} ${rounded(control2Y)}, ${rounded(endX)} ${rounded(endY)}`,
-      labelX: rounded((startX + endX) / 2 + offsetX),
-      labelY: rounded((startY + endY) / 2 + offsetY - 10),
-      labelRotate: rounded(labelRotation(startX, startY, endX, endY)),
+      routeClass: edge.from === edge.to ? 'loop' as const : backward ? 'backward' as const : 'forward' as const,
+      ...route,
     };
   }).filter((route): route is RoutedLoadoutEdge => Boolean(route));
 }

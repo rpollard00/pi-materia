@@ -192,9 +192,24 @@ describe('Materia loadout grid editor', () => {
     expect(byId.get('A:edge:0:B:satisfied')?.path).not.toBe(byId.get('A:edge:1:B:not_satisfied')?.path);
     expect(byId.get('A:edge:0:B:satisfied')?.labelY).not.toBe(byId.get('A:edge:1:B:not_satisfied')?.labelY);
     expect(byId.get('A:edge:2:A:first')?.path).not.toBe(byId.get('A:edge:3:A:second')?.path);
-    expect(byId.get('A:edge:2:A:first')?.labelY).not.toBe(byId.get('A:edge:3:A:second')?.labelY);
+    expect(byId.get('A:edge:2:A:first')?.labelX).not.toBe(byId.get('A:edge:3:A:second')?.labelX);
     expect(byId.get('C:edge:0:D:satisfied')?.path).not.toBe(byId.get('B:edge:0:D:not_satisfied')?.path);
     expect(byId.get('C:edge:0:D:satisfied')?.labelY).not.toBe(byId.get('B:edge:0:D:not_satisfied')?.labelY);
+  });
+
+  it('snaps edge routes to horizontal and vertical socket anchors with aligned final segments', () => {
+    const positions = new Map<string, never>([
+      ['A', { id: 'A', node: { type: 'agent', materia: 'A' }, index: 0, x: 0, y: 0 } as never],
+      ['B', { id: 'B', node: { type: 'agent', materia: 'B' }, index: 1, x: 208, y: 0 } as never],
+      ['C', { id: 'C', node: { type: 'agent', materia: 'C' }, index: 2, x: 208, y: 176 } as never],
+    ]);
+    const sameRow = routeLoadoutEdges([{ id: 'A:next:B', from: 'A', to: 'B', kind: 'next' }] as never, positions)[0];
+    const rowTransition = routeLoadoutEdges([{ id: 'B:next:C', from: 'B', to: 'C', kind: 'next' }] as never, positions)[0];
+    const backward = routeLoadoutEdges([{ id: 'B:edge:0:A:satisfied', from: 'B', to: 'A', kind: 'edge', edgeIndex: 0, when: 'satisfied' }] as never, positions)[0];
+
+    expect(sameRow.path).toBe('M 160 74 L 208 74');
+    expect(rowTransition.path).toBe('M 288 148 L 288 176');
+    expect(backward.path.endsWith('L 160 74')).toBe(true);
   });
 
   it('renders loaded edge labels from canonical values without raw predicates', async () => {
