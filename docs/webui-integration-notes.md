@@ -92,7 +92,7 @@ The existing tests already cover loadout resolution, config precedence among exp
 
 - Inserting a node between `A -> B` preserves `A` and `B` node objects and changes only `A.next` (or the selected edge target) plus the new node.
 - Inserting into an edge preserves the original `when`/`maxTraversals` on the edge moved to the new node or otherwise matches an explicitly documented rule.
-- Adding satisfied/not-satisfied branches emits standard `edges` entries using current condition syntax such as `$.passed == true` and `$.passed == false`.
+- Adding satisfied/not-satisfied branches emits standard `edges` entries using canonical condition syntax: `when: "satisfied"` and `when: "not_satisfied"`. The routed handoff payload uses `satisfied` as the canonical boolean control field; legacy aliases such as `passed` must not be emitted as routing fields.
 - Editing retry behavior changes only `maxTraversals` on the chosen edge or `limits.maxVisits`/`limits.maxEdgeTraversals` on the chosen node.
 - Layout metadata, when introduced, must be stored separately from runtime routing fields so existing configs without layout continue to resolve and render identically.
 - Loadout insert/remove/swap operations must not rewrite top-level materia definitions or unrelated loadouts and must keep current `saveActiveLoadout()` minimal-active-loadout behavior intact until explicit project/user persistence is implemented.

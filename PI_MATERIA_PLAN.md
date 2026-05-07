@@ -89,10 +89,10 @@ Tasks:
         "evaluator": {
           "type": "agent",
           "role": "evaluator",
-          "edges": {
-            "passed": "maintainer",
-            "failed": "builder"
-          }
+          "edges": [
+            { "when": "satisfied", "to": "maintainer" },
+            { "when": "not_satisfied", "to": "builder" }
+          ]
         },
         "maintainer": {
           "type": "agent",
@@ -194,8 +194,8 @@ Tasks:
 - [x] Render configured graph as text/ASCII:
   ```text
   planner -> builder -> evaluator
-                         | passed -> maintainer
-                         | failed  -> builder
+                         | satisfied     -> maintainer
+                         | not_satisfied -> builder
   ```
 - [x] Show roles, tools, max attempts, artifact dir, and budget.
 - [ ] Show maintain policy once `maintainPolicy` exists in Phase 4.
@@ -908,8 +908,8 @@ Examples:
       "lastCheck": "$"
     },
     "edges": [
-      { "when": "$.passed == true", "to": "Maintain" },
-      { "when": "$.passed == false", "to": "Build", "maxTraversals": 3 }
+      { "when": "satisfied", "to": "Maintain" },
+      { "when": "not_satisfied", "to": "Build", "maxTraversals": 3 }
     ]
   }
 }
@@ -1022,7 +1022,7 @@ Generic assignment examples:
 "assign": {
   "tasks": "$.tasks",
   "lastFeedback": "$.feedback",
-  "lastPassed": "$.passed"
+  "lastSatisfied": "$.satisfied"
 }
 ```
 
@@ -1056,19 +1056,17 @@ Template support:
 {{lastJson.feedback}}
 ```
 
-Condition support for edges:
+Condition support for edges later converged on canonical named conditions:
 
 ```text
-$.passed == true
-$.passed == false
-$.status == "ok"
-exists($.missing)
-!exists($.missing)
+always
+satisfied
+not_satisfied
 ```
 
 Acceptance:
-- Default workflow can route pass/fail through config only.
-- Simple custom workflows can route on JSON fields without TypeScript changes.
+- Default workflow can route satisfaction/failure through config only.
+- Simple custom workflows can route on canonical JSON handoff control fields without TypeScript changes.
 
 ### 19. Implement generic edge traversal and cycle safety — Done
 
@@ -1094,7 +1092,7 @@ Support limits:
 and edge limits:
 
 ```json
-{ "when": "$.passed == false", "to": "repair", "maxTraversals": 3 }
+{ "when": "not_satisfied", "to": "repair", "maxTraversals": 3 }
 ```
 
 Acceptance:
@@ -1136,9 +1134,9 @@ The bundled default config should define the familiar Materia Grid entirely as d
 
 - planner node creates JSON `{ tasks: [...] }`
 - `Build` node works on current task item
-- `Auto-Eval` node returns JSON `{ passed, feedback, missing }`
+- `Auto-Eval` node returns JSON `{ satisfied, feedback, missing }`
 - `Maintain` node records jj/git description/commit
-- pass/fail routing is configured via JSON conditions
+- satisfied/not-satisfied routing is configured via canonical edge conditions
 - task advancement is configured on `Maintain` success with `advance.when`
 
 The framework source should not contain those names or behaviors.

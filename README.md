@@ -245,9 +245,9 @@ Provider/runtime limitations: explicit model switching requires Pi's runtime to 
 Generic node mechanics:
 
 - `materia`: named top-level materia assigned to an agent node
-- `parse`: `"text"` or `"json"`
+- `parse`: `"text"` or `"json"`; JSON-parsed node outputs follow the canonical [materia handoff JSON contract](docs/handoff-contract.md)
 - `assign`: copy parsed output/state values into generic cast state
-- `edges`: ordered condition-driven links, e.g. `$.passed == true`; runtime selects the first edge whose guard matches, so repeated guarded predicates are allowed, while edges after an unconditional edge are invalid because they are unreachable
+- `edges`: ordered condition-driven links using canonical conditions such as `satisfied`, `not_satisfied`, or `always`; runtime selects the first edge whose guard matches, so repeated guarded predicates are allowed, while edges after an unconditional edge are invalid because they are unreachable
 - `next`: fallback link when no edge matches
 - `foreach`: iterate a node over an array in state
 - `advance`: advance a configured cursor
