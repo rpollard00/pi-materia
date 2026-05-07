@@ -212,6 +212,25 @@ describe("native same-node recovery", () => {
     expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
   });
 
+  test("non-recoverable agent_end failures fail without retry", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast invalid request fail");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    await harness.emit("agent_end", { errorMessage: "invalid_request_error: provider rejected request" });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.nodeState).toBe("failed");
+    expect(latestState.failedReason).toContain("Non-recoverable turn failure");
+    expect(latestState.failedReason).toContain("invalid_request_error: provider rejected request");
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "cast_end" && event.data.ok === false)).toBe(true);
+  });
+
   test("forced compaction failure is recorded and fails clearly", async () => {
     const harness = await makeHarness(singleAgentConfig());
     harness.compactError = new Error("compaction provider unavailable");
