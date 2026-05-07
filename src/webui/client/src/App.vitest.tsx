@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App, routeLoadoutEdges } from './App.js';
@@ -131,6 +132,18 @@ describe('Materia loadout grid editor', () => {
     const retryEdge = screen.getByTestId('edge-Auto-Eval-Build-1');
     expect(retryEdge.getAttribute('class')).toContain('loadout-edge-route-backward');
     expect(retryEdge.querySelector('path')?.getAttribute('d')).not.toBe(forwardPath);
+  });
+
+  it('keeps compact graph sizing and overflow containment styles centralized in CSS', () => {
+    const css = readFileSync(`${process.cwd()}/src/webui/client/src/styles.css`, 'utf8');
+
+    expect(css).toContain('--materia-socket-width: 10rem;');
+    expect(css).toContain('--materia-socket-stage-height: 9.25rem;');
+    expect(css).toContain('--materia-socket-min-height: 11.5rem;');
+    expect(css).toContain('--materia-orb-size: 4.25rem;');
+    expect(css).toContain('--materia-orb-small-size: 2rem;');
+    expect(css).toMatch(/\.loadout-graph-viewport\s*{[^}]*max-width: 100%;[^}]*overflow: auto;/s);
+    expect(css).toMatch(/\.loadout-graph-canvas\s*{[^}]*min-width: 100%;[^}]*min-height: 100%;/s);
   });
 
   it('contains oversized graph dimensions inside a scrollable viewport', async () => {

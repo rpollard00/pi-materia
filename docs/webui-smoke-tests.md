@@ -56,6 +56,16 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 3. Add or change `satisfied` and `not_satisfied` branches.
 4. Tweak retry/visit limits and save; confirm unrelated graph metadata such as `insertedBy`, `inserted`, and `layout` remains intact.
 
+## Graph layout regression checks
+
+These complement the automated WebUI tests for graph sizing, routing, and drag/drop behavior.
+
+1. Open a loadout with at least six sockets without explicit `layout` values; confirm they use two columns in serpentine order (`left→right`, then `right→left`) and the page itself does not gain horizontal scroll.
+2. Open or create a loadout with many explicit wide coordinates; confirm the graph canvas scrolls inside the visual grid viewport while surrounding WebUI panels stay usable.
+3. Confirm the socket cards and materia orbs look compact but labels remain readable and socket/orb drag targets are still practical.
+4. Inspect same-row, row-transition, back, and self-loop edges; arrowheads should align to the final edge segment and point into the target socket side, including top/bottom anchors for vertical transitions.
+5. Drag an occupied socket's orb onto the graph background; confirm the socket becomes empty immediately, graph links/layout remain intact, and saving persists the empty socket.
+
 ## Session monitoring
 
 1. Start a short `/materia cast` from the same Pi session that launched the UI.
