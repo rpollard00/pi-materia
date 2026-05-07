@@ -50,6 +50,12 @@ interface ConfigResponse {
   source?: string;
 }
 
+interface RoleGenerationResponse {
+  ok?: boolean;
+  prompt?: string;
+  error?: string;
+}
+
 interface MateriaSavedEventDetail {
   id: string;
   name: string;
@@ -605,6 +611,10 @@ export function App() {
   const suppressSocketClickRef = useRef(false);
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
+  const [roleBrief, setRoleBrief] = useState('');
+  const [generatedRolePrompt, setGeneratedRolePrompt] = useState('');
+  const [roleGenerationError, setRoleGenerationError] = useState('');
+  const [roleGenerating, setRoleGenerating] = useState(false);
 
   useEffect(() => {
     const handlePopState = () => setSelectedTab(tabFromLocation());
@@ -1098,6 +1108,48 @@ export function App() {
     setStatus(`Editing reusable materia definition ${id}. Save the staged form to update definitions only.`);
   }
 
+  async function generateRolePrompt() {
+    const brief = roleBrief.trim();
+    if (!brief) {
+      setRoleGenerationError('Describe the desired role before generating a prompt.');
+      return;
+    }
+    setRoleGenerating(true);
+    setRoleGenerationError('');
+    setStatus('Generating Materia role prompt preview…');
+    try {
+      const response = await fetch('/api/generate/materia-role', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ brief }),
+      });
+      const body = await response.json() as RoleGenerationResponse;
+      if (!response.ok || body.ok === false || typeof body.prompt !== 'string') throw new Error(body.error ?? 'Materia role generation failed.');
+      setGeneratedRolePrompt(body.prompt);
+      setStatus('Generated role prompt preview. Review it before applying.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRoleGenerationError(message);
+      setStatus(`Materia role generation failed: ${message}`);
+    } finally {
+      setRoleGenerating(false);
+    }
+  }
+
+  function discardGeneratedRolePrompt() {
+    setGeneratedRolePrompt('');
+    setRoleGenerationError('');
+    setStatus('Discarded generated role prompt preview.');
+  }
+
+  function applyGeneratedRolePrompt() {
+    if (!generatedRolePrompt) return;
+    setMateriaForm((current) => ({ ...current, prompt: generatedRolePrompt }));
+    setGeneratedRolePrompt('');
+    setRoleGenerationError('');
+    setStatus('Applied generated role prompt to the form. Save when ready.');
+  }
+
   async function saveMateriaForm() {
     try {
       const patch = buildMateriaPatch(materiaForm);
@@ -1532,9 +1584,33 @@ export function App() {
             </div>
           )}
 
+          {materiaForm.behavior === 'prompt' && (
+            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generate role prompt instructions">
+              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+                <label className="graph-field">Generate role prompt from brief
+                  <textarea data-testid="role-generation-brief" className="min-h-24" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
+                </label>
+                <button type="button" className="materia-button" data-testid="generate-role-prompt" disabled={roleGenerating || !roleBrief.trim()} onClick={() => { void generateRolePrompt(); }}>
+                  {roleGenerating ? 'Generating…' : generatedRolePrompt ? 'Regenerate' : 'Generate'}
+                </button>
+              </div>
+              {roleGenerationError && <p className="mt-3 text-sm text-rose-200" role="alert" data-testid="role-generation-error">{roleGenerationError}</p>}
+              {generatedRolePrompt && (
+                <div className="mt-4 rounded-xl border border-cyan-200/20 bg-black/30 p-4" data-testid="role-generation-preview">
+                  <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Generated preview</p>
+                  <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm text-cyan-50">{generatedRolePrompt}</pre>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button type="button" className="materia-button" data-testid="apply-generated-role-prompt" onClick={applyGeneratedRolePrompt}>Apply to prompt field</button>
+                    <button type="button" className="materia-button-secondary" data-testid="discard-generated-role-prompt" onClick={discardGeneratedRolePrompt}>Discard</button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           <div className="mt-5 flex flex-wrap gap-3">
             <button className="materia-button" data-testid="save-materia-form" onClick={() => { void saveMateriaForm(); }}>{materiaForm.editingNodeId ? 'Update materia' : 'Create materia'}</button>
-            <button className="materia-button-secondary" onClick={() => setMateriaForm(emptyMateriaForm())}>Clear form</button>
+            <button className="materia-button-secondary" onClick={() => { setMateriaForm(emptyMateriaForm()); discardGeneratedRolePrompt(); }}>Clear form</button>
           </div>
           <p className="mt-3 min-h-10 text-sm text-cyan-100" data-testid="materia-save-status">{status}</p>
         </section>

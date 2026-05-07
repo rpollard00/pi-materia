@@ -919,6 +919,63 @@ describe('Materia loadout grid editor', () => {
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('generates, previews, regenerates, discards, and explicitly applies role prompts without overwriting existing text', async () => {
+    const generatedPrompts = ['Generated role prompt v1', 'Generated role prompt v2', 'Generated role prompt v1'];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/generate/materia-role') {
+        const body = JSON.parse(String(init?.body));
+        expect(body.brief).toBe('A careful reviewer materia');
+        return new Response(JSON.stringify({ ok: true, prompt: generatedPrompts.shift() }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('materia-prompt'), { target: { value: 'Keep this existing prompt.' } });
+    fireEvent.change(screen.getByTestId('role-generation-brief'), { target: { value: 'A careful reviewer materia' } });
+    fireEvent.click(screen.getByTestId('generate-role-prompt'));
+
+    expect((await screen.findByTestId('role-generation-preview')).textContent).toContain('Generated role prompt v1');
+    expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', 'Keep this existing prompt.');
+    expect(screen.getByTestId('generate-role-prompt').textContent).toContain('Regenerate');
+
+    fireEvent.click(screen.getByTestId('generate-role-prompt'));
+    await waitFor(() => expect(screen.getByTestId('role-generation-preview').textContent).toContain('Generated role prompt v2'));
+    expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', 'Keep this existing prompt.');
+
+    fireEvent.click(screen.getByTestId('discard-generated-role-prompt'));
+    expect(screen.queryByTestId('role-generation-preview')).toBeNull();
+    expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', 'Keep this existing prompt.');
+
+    fireEvent.click(screen.getByTestId('generate-role-prompt'));
+    await waitFor(() => expect(screen.getByTestId('role-generation-preview').textContent).toContain('Generated role prompt v1'));
+    fireEvent.click(screen.getByTestId('apply-generated-role-prompt'));
+    expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', 'Generated role prompt v1');
+    expect(screen.queryByTestId('role-generation-preview')).toBeNull();
+  });
+
+  it('shows role prompt generation errors without changing the prompt field', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/generate/materia-role') return new Response(JSON.stringify({ ok: false, error: 'generation unavailable' }), { status: 503 });
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('materia-prompt'), { target: { value: 'Manual prompt' } });
+    fireEvent.change(screen.getByTestId('role-generation-brief'), { target: { value: 'A careful reviewer materia' } });
+    fireEvent.click(screen.getByTestId('generate-role-prompt'));
+
+    expect((await screen.findByTestId('role-generation-error')).textContent).toContain('generation unavailable');
+    expect(screen.queryByTestId('role-generation-preview')).toBeNull();
+    expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', 'Manual prompt');
+  });
+
   it('creates prompt materia in legacy pipeline configs without materializing loadouts', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
