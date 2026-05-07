@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
@@ -140,6 +140,14 @@ interface LoopRegion {
   height: number;
   summary: string;
   cyclePath: string;
+  accent: string;
+  accentSoft: string;
+}
+
+interface LoopMembership {
+  loopIds: string[];
+  accent: string;
+  accentSoft: string;
 }
 
 type SocketAnchorSide = 'top' | 'right' | 'bottom' | 'left';
@@ -164,6 +172,17 @@ const loopCyclePadding = 24;
 const loopHeaderOffset = 54;
 const loopHeaderHeight = 48;
 const loopHeaderMinWidth = 240;
+const loopAccentPalette = [
+  { accent: 'rgb(165 180 252)', accentSoft: 'rgb(165 180 252 / 0.22)' },
+  { accent: 'rgb(103 232 249)', accentSoft: 'rgb(103 232 249 / 0.22)' },
+  { accent: 'rgb(52 211 153)', accentSoft: 'rgb(52 211 153 / 0.22)' },
+  { accent: 'rgb(251 191 36)', accentSoft: 'rgb(251 191 36 / 0.22)' },
+  { accent: 'rgb(244 114 182)', accentSoft: 'rgb(244 114 182 / 0.22)' },
+];
+
+function loopAccent(index: number) {
+  return loopAccentPalette[index % loopAccentPalette.length];
+}
 
 interface SocketLayoutDragState {
   socketId: string;
@@ -643,7 +662,7 @@ function estimateLoopHeaderWidth(label: string, summary: string) {
 }
 
 export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>): LoopRegion[] {
-  return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop]) => {
+  return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop], index) => {
     const sockets = loop.nodes.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
     if (sockets.length === 0) return [];
     const minX = Math.min(...sockets.map((socket) => socket.x));
@@ -656,8 +675,22 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const headerWidth = Math.min(Math.max(estimateLoopHeaderWidth(label, summary), Math.min(maxX - minX + 24, 420)), 620);
     const headerX = minX;
     const headerY = minY - loopHeaderOffset;
-    return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(sockets) }];
+    return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(sockets), ...loopAccent(index) }];
   });
+}
+
+export function getLoopMemberships(loadout: PipelineConfig | undefined): Map<string, LoopMembership> {
+  const memberships = new Map<string, LoopMembership>();
+  Object.entries(loadout?.loops ?? {}).forEach(([loopId, loop], index) => {
+    const accent = loopAccent(index);
+    for (const socketId of loop.nodes) {
+      const existing = memberships.get(socketId);
+      memberships.set(socketId, existing
+        ? { ...existing, loopIds: [...existing.loopIds, loopId] }
+        : { loopIds: [loopId], ...accent });
+    }
+  });
+  return memberships;
 }
 
 function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[]; edges: LoadoutEdge[]; width: number; height: number } {
@@ -921,6 +954,7 @@ export function App() {
   const loadoutGraph = useMemo(() => layoutSockets(activeLoadout), [activeLoadout]);
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
   const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout, socketPositions]);
+  const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
   const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
@@ -1738,7 +1772,7 @@ export function App() {
                   </marker>
                 </defs>
                 {loopRegions.map((loop) => (
-                  <g key={loop.id} className="loadout-loop-cycle-edge" data-testid={`loop-cycle-edge-${loop.id}`} aria-label={`${loop.label} cycle indicator`}>
+                  <g key={loop.id} className="loadout-loop-cycle-edge" data-testid={`loop-cycle-edge-${loop.id}`} aria-label={`${loop.label} cycle indicator`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
                     <path d={loop.cyclePath} className="loadout-loop-cycle-edge-echo" />
                     <path d={loop.cyclePath} markerEnd="url(#materia-loop-cycle-arrow)" />
                   </g>
@@ -1773,7 +1807,7 @@ export function App() {
                   key={loop.id}
                   className="loadout-loop-region"
                   data-testid={`loop-region-${loop.id}`}
-                  style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px` }}
+                  style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px`, '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}
                   title={loop.summary}
                   aria-label={`${loop.label} loop: ${loop.summary}`}
                 >
@@ -1800,12 +1834,20 @@ export function App() {
                 const isGenerator = isGeneratorSocket(node, materia);
                 const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia) : undefined;
                 const isLoopSelected = selectedLoopSocketSet.has(id);
+                const loopMembership = loopMemberships.get(id);
+                const socketStyle = loopMembership ? {
+                  left: `${socketX}px`,
+                  top: `${socketY}px`,
+                  '--loop-accent': loopMembership.accent,
+                  '--loop-accent-soft': loopMembership.accentSoft,
+                } as CSSProperties : { left: `${socketX}px`, top: `${socketY}px` };
                 return (
                 <button
                   key={id}
                   data-testid={`socket-${id}`}
-                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`}
-                  style={{ left: `${socketX}px`, top: `${socketY}px` }}
+                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`}
+                  style={socketStyle}
+                  data-loop-ids={loopMembership?.loopIds.join(' ')}
                   aria-pressed={isLoopSelected}
                   onClick={(event) => handleSocketClick(id, event)}
                   onPointerDown={(event) => beginSocketLayoutDrag(socket, event)}

@@ -141,9 +141,9 @@
   justify-content: flex-start;
   gap: 0.1rem;
   overflow: hidden;
-  border-left: 2px solid rgb(165 180 252 / 0.4);
+  border-left: 2px solid color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 48%, transparent);
   border-radius: 0.85rem;
-  background: linear-gradient(90deg, rgb(30 41 59 / 0.36), rgb(15 23 42 / 0.08));
+  background: linear-gradient(90deg, var(--loop-accent-soft, rgb(165 180 252 / 0.22)), rgb(15 23 42 / 0.08));
   padding: 0.45rem 0.75rem;
   color: rgb(224 231 255 / 0.88);
   pointer-events: none;
@@ -155,7 +155,7 @@
 
 .loadout-loop-cycle-edge path {
   fill: none;
-  stroke: rgb(165 180 252 / 0.46);
+  stroke: color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 46%, transparent);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -164,18 +164,18 @@
 }
 
 .loadout-loop-cycle-edge .loadout-loop-cycle-edge-echo {
-  stroke: rgb(34 211 238 / 0.16);
+  stroke: var(--loop-accent-soft, rgb(34 211 238 / 0.16));
   stroke-width: 5;
   stroke-dasharray: none;
 }
 
 .loadout-loop-cycle-arrow {
-  fill: rgb(165 180 252 / 0.58);
+  fill: color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 58%, transparent);
 }
 
 .loadout-loop-badge {
   border-radius: 999px;
-  border: 1px solid rgb(199 210 254 / 0.5);
+  border: 1px solid color-mix(in srgb, var(--loop-accent, rgb(199 210 254)) 54%, transparent);
   background: rgb(30 41 59 / 0.74);
   padding: 0.08rem 0.45rem;
   font-size: 0.58rem;
@@ -333,7 +333,37 @@
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 42px rgb(250 204 21 / 0.26), 0 0 90px rgb(34 211 238 / 0.16);
 }
 
+.materia-socket-loop-member {
+  isolation: isolate;
+}
+
+.materia-socket-loop-member::before {
+  content: '';
+  position: absolute;
+  inset: -0.42rem -0.28rem 0.35rem;
+  z-index: -1;
+  border-radius: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 24%, transparent);
+  background: radial-gradient(circle at 50% 34%, var(--loop-accent-soft, rgb(165 180 252 / 0.22)), transparent 68%);
+  box-shadow: 0 0 26px var(--loop-accent-soft, rgb(165 180 252 / 0.22));
+  opacity: 0.78;
+  pointer-events: none;
+}
+
+.materia-socket-loop-member .materia-socket-orb-stage {
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 88%, white 12%);
+  box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 0 3px var(--loop-accent-soft, rgb(165 180 252 / 0.22)), 0 0 42px var(--loop-accent-soft, rgb(165 180 252 / 0.22));
+}
+
+.materia-socket-loop-member .materia-socket-label {
+  border: 1px solid color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 36%, transparent);
+  background: linear-gradient(90deg, rgb(2 6 23 / 0.78), var(--loop-accent-soft, rgb(165 180 252 / 0.22)));
+  color: rgb(238 242 255);
+}
+
 .materia-socket-loop-selected .materia-socket-orb-stage {
+  border-width: 2px;
   border-color: rgb(103 232 249 / 0.95);
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 0 4px rgb(34 211 238 / 0.22), 0 0 48px rgb(34 211 238 / 0.38);
 }

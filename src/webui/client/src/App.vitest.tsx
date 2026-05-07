@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { App, getLoopRegions, routeLoadoutEdges } from './App.js';
+import { App, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './App.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
@@ -193,6 +193,46 @@ describe('Materia loadout grid editor', () => {
     expect(build.textContent).not.toContain('Loop consumer');
     expect(build.getAttribute('title')).toContain('Loop consumes: planner.tasks');
     expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Loop consumes: planner.tasks');
+  });
+
+  it('highlights only loop-member sockets with coordinated per-loop accents', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
+      taskIteration: {
+        label: 'Build → Eval → Maintain until all tasks complete',
+        nodes: ['Build', 'Auto-Eval', 'Maintain'],
+        consumes: { from: 'planner', output: 'tasks' },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const build = await screen.findByTestId('socket-Build');
+    const autoEval = screen.getByTestId('socket-Auto-Eval');
+    const planner = screen.getByTestId('socket-planner');
+    const cycleEdge = await screen.findByTestId('loop-cycle-edge-taskIteration');
+
+    expect(build.classList.contains('materia-socket-loop-member')).toBe(true);
+    expect(autoEval.classList.contains('materia-socket-loop-member')).toBe(true);
+    expect(build.dataset.loopIds).toBe('taskIteration');
+    expect(planner.classList.contains('materia-socket-loop-member')).toBe(false);
+    expect(build.style.getPropertyValue('--loop-accent')).toBe(cycleEdge.style.getPropertyValue('--loop-accent'));
+  });
+
+  it('tracks overlapping loop memberships without collapsing loop identities', () => {
+    const memberships = getLoopMemberships({
+      nodes: {},
+      loops: {
+        first: { nodes: ['Build', 'Auto-Eval'], iterator: { items: 'state.first' } },
+        second: { nodes: ['Auto-Eval', 'Maintain'], iterator: { items: 'state.second' } },
+      },
+    } as never);
+
+    expect(memberships.get('Build')?.loopIds).toEqual(['first']);
+    expect(memberships.get('Auto-Eval')?.loopIds).toEqual(['first', 'second']);
+    expect(memberships.get('Maintain')?.loopIds).toEqual(['second']);
+    expect(memberships.has('planner')).toBe(false);
   });
 
   it('renders explicit loop regions and can create the build-eval-maintain task loop', async () => {
