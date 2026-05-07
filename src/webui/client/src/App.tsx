@@ -5,6 +5,7 @@ import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipeline
 import {
   buildMateriaPalette,
   clearSocketMateria,
+  extractMateriaReference,
   getNodeLabel,
   isEmptySocket,
   makeEmptyEntryLoadout,
@@ -244,18 +245,36 @@ function toggledEdgeCondition(when?: string): MateriaEdgeCondition {
   return 'always';
 }
 
+function hasIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig, socketId?: string): boolean {
+  if (node?.foreach) return true;
+  const referenced = extractMateriaReference(node);
+  if (referenced && definitions?.[referenced.materia]?.foreach) return true;
+  if (socketId && Object.values(loadout?.loops ?? {}).some((loop) => Boolean(loop.iterator) && loop.nodes.includes(socketId))) return true;
+  return false;
+}
+
+function formatIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig, socketId?: string): string {
+  const referenced = extractMateriaReference(node);
+  const foreach = node?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
+  if (foreach) return `Iterator: ${foreach.items}${foreach.as ? ` as ${foreach.as}` : ''}${foreach.done ? ` until ${foreach.done}` : ''}`;
+  const loop = socketId ? Object.values(loadout?.loops ?? {}).find((candidate) => Boolean(candidate.iterator) && candidate.nodes.includes(socketId)) : undefined;
+  if (loop?.iterator) return `Iterator: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}`;
+  return 'Iterator materia';
+}
+
 function summarizeHoverText(value?: unknown): string | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
 }
 
-function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: MateriaConfig['materia']): string {
+function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig): string {
   const lines = [`Socket: ${id}`];
   if (isEmptySocket(node)) return [...lines, 'Empty socket'].join('\n');
 
   const label = getNodeLabel(id, node);
   lines.push(`Label: ${label}`);
+  if (hasIteratorBehavior(node, definitions, loadout, id)) lines.push(formatIteratorBehavior(node, definitions, loadout, id));
   if (node?.type) lines.push(`Type: ${node.type}`);
   if (node?.type === 'agent' && node.materia) {
     lines.push(`Materia: ${node.materia}`);
@@ -705,8 +724,8 @@ function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
   window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
 }
 
-function Orb({ color, label, small = false, empty = false }: { color: string; label: string; small?: boolean; empty?: boolean }) {
-  return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : `bg-gradient-to-br ${color}`}`} title={label} />;
+function Orb({ color, label, small = false, empty = false, iterator = false }: { color: string; label: string; small?: boolean; empty?: boolean; iterator?: boolean }) {
+  return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : `bg-gradient-to-br ${color}`} ${iterator && !empty ? 'materia-orb-iterator' : ''}`} title={label} />;
 }
 
 function formatElapsed(startedAt?: number, now = Date.now()) {
@@ -1560,12 +1579,14 @@ export function App() {
                 const socketX = dragPreview?.currentX ?? x;
                 const socketY = dragPreview?.currentY ?? y;
                 const nodeLabel = getNodeLabel(id, node);
-                const socketHoverDetails = buildSocketHoverDetails(id, node, materia);
+                const socketHoverDetails = buildSocketHoverDetails(id, node, materia, activeLoadout);
+                const isIterator = hasIteratorBehavior(node, materia, activeLoadout, id);
+                const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia, activeLoadout, id) : undefined;
                 return (
                 <button
                   key={id}
                   data-testid={`socket-${id}`}
-                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''}`}
+                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''}`}
                   style={{ left: `${socketX}px`, top: `${socketY}px` }}
                   onClick={() => handleSocketClick(id)}
                   onPointerDown={(event) => beginSocketLayoutDrag(socket, event)}
@@ -1579,8 +1600,9 @@ export function App() {
                 >
                   <div className="materia-socket-orb-stage">
                     <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
-                      <Orb color={nodeColor(id, index, materia, node)} label={socketHoverDetails} empty={isEmptySocket(node)} />
+                      <Orb color={nodeColor(id, index, materia, node)} label={socketHoverDetails} empty={isEmptySocket(node)} iterator={isIterator} />
                     </div>
+                    {isIterator && <span className="materia-iterator-badge graph-iterator-badge" title={iteratorDetails}>Iterator</span>}
                   </div>
                   <span className="materia-socket-label">{nodeLabel}</span>
                 </button>
@@ -1747,12 +1769,16 @@ export function App() {
                   const definition = materia[id];
                   const group = typeof definition?.group === 'string' ? definition.group : undefined;
                   const description = typeof definition?.description === 'string' ? definition.description : undefined;
+                  const isIterator = hasIteratorBehavior(node, materia);
+                  const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia) : undefined;
+                  const title = [description, iteratorDetails].filter(Boolean).join('\n') || undefined;
                   return (
-                    <button key={id} draggable title={description} data-testid={`palette-${id}`} onDragStart={(event) => dragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => setSelectedMateriaId(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''}`}>
-                      <Orb small color={nodeColor(id, index, materia, node)} label={id} />
+                    <button key={id} draggable title={title} data-testid={`palette-${id}`} onDragStart={(event) => dragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => setSelectedMateriaId(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''} ${isIterator ? 'palette-orb-iterator' : ''}`}>
+                      <Orb small color={nodeColor(id, index, materia, node)} label={id} iterator={isIterator} />
                       <span className="flex flex-col items-start leading-tight">
                         <span>{getNodeLabel(id, node)}</span>
                         {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
+                        {isIterator && <span className="materia-iterator-badge palette-iterator-badge" title={iteratorDetails}>Iterator</span>}
                       </span>
                     </button>
                   );

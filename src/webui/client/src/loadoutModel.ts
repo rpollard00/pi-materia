@@ -9,6 +9,7 @@ export interface PipelineNode {
   command?: string[];
   label?: string;
   edges?: { to: string; when: MateriaEdgeCondition; maxTraversals?: number }[];
+  foreach?: { items: string; as?: string; cursor?: string; done?: string };
   empty?: boolean;
   layout?: { x?: number; y?: number };
   limits?: { maxVisits?: number; maxEdgeTraversals?: number; maxOutputBytes?: number };
@@ -69,6 +70,7 @@ export interface MateriaBehaviorConfig {
   timeoutMs?: number;
   parse?: 'text' | 'json';
   assign?: Record<string, string>;
+  foreach?: { items: string; as?: string; cursor?: string; done?: string };
   [key: string]: unknown;
 }
 
@@ -103,6 +105,7 @@ const materiaBehaviorKeys = new Set([
   'params',
   'timeoutMs',
   'assign',
+  'foreach',
   'model',
   'modelSettings',
   'outputFormat',
@@ -138,10 +141,11 @@ export function materiaPaletteNode(id: string, definition?: MateriaBehaviorConfi
       timeoutMs: definition.timeoutMs,
       parse: definition.parse,
       assign: cloneValue(definition.assign),
+      foreach: cloneValue(definition.foreach),
       label: definition.label,
     };
   }
-  return { ...createMateriaReference(id) };
+  return { ...createMateriaReference(id), foreach: cloneValue(definition?.foreach) };
 }
 
 export function buildMateriaPalette(definitions: Record<string, MateriaBehaviorConfig> = {}): Array<[string, PipelineNode]> {

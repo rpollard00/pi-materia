@@ -383,6 +383,68 @@
   opacity: 0.18;
 }
 
+.materia-orb-iterator {
+  overflow: hidden;
+  outline: 1px solid rgb(226 232 240 / 0.58);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 30px rgb(226 232 240 / 0.72),
+    0 0 70px rgb(34 211 238 / 0.3),
+    inset -12px -16px 24px rgb(0 0 0 / 0.34),
+    inset 10px 10px 18px rgb(255 255 255 / 0.5);
+}
+
+.materia-orb-iterator::after {
+  content: '';
+  position: absolute;
+  inset: -28%;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 18% 24%, rgb(255 255 255 / 0.9) 0 1px, transparent 2px),
+    radial-gradient(circle at 68% 32%, rgb(203 213 225 / 0.78) 0 1px, transparent 2px),
+    radial-gradient(circle at 46% 74%, rgb(255 255 255 / 0.7) 0 1px, transparent 2px),
+    linear-gradient(120deg, transparent 22%, rgb(255 255 255 / 0.38) 36%, transparent 48%, rgb(148 163 184 / 0.24) 62%, transparent 78%);
+  mix-blend-mode: screen;
+  opacity: 0.82;
+  transform: rotate(-18deg);
+  pointer-events: none;
+}
+
+.materia-socket-iterator .materia-socket-orb-stage {
+  border-color: rgb(226 232 240 / 0.55);
+  box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 36px rgb(226 232 240 / 0.18), 0 0 54px rgb(34 211 238 / 0.16);
+}
+
+.materia-iterator-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1px solid rgb(226 232 240 / 0.54);
+  background: linear-gradient(135deg, rgb(15 23 42 / 0.92), rgb(71 85 105 / 0.72), rgb(14 116 144 / 0.46));
+  color: rgb(248 250 252);
+  font-size: 0.56rem;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 0 14px rgb(226 232 240 / 0.16);
+}
+
+.graph-iterator-badge {
+  position: absolute;
+  bottom: 0.35rem;
+  left: 50%;
+  z-index: 12;
+  padding: 0.18rem 0.42rem;
+  transform: translateX(-50%);
+}
+
+.palette-iterator-badge {
+  margin-top: 0.12rem;
+  padding: 0.16rem 0.36rem;
+}
+
 .socket-action-backdrop {
   position: fixed;
   inset: 0;
@@ -528,6 +590,19 @@
   border-color: rgb(103 232 249 / 0.62);
   background: rgb(8 47 73 / 0.72);
   box-shadow: 0 0 24px rgb(34 211 238 / 0.16);
+}
+
+.palette-orb-iterator {
+  border-color: rgb(226 232 240 / 0.34);
+  background:
+    linear-gradient(135deg, rgb(15 23 42 / 0.84), rgb(51 65 85 / 0.52)),
+    radial-gradient(circle at 20% 0%, rgb(226 232 240 / 0.16), transparent 36%);
+}
+
+.palette-orb-iterator:hover,
+.palette-orb-iterator.palette-orb-selected {
+  border-color: rgb(226 232 240 / 0.68);
+  box-shadow: 0 0 28px rgb(226 232 240 / 0.18), 0 0 34px rgb(34 211 238 / 0.14);
 }
 
 .materia-button,

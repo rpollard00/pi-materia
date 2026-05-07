@@ -108,6 +108,31 @@ describe('Materia loadout grid editor', () => {
     expect(build.getAttribute('title')).toContain('Edges: Always → Auto-Eval');
   });
 
+  it('marks iterator materia in both the palette and graph without changing non-iterators', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: typeof testConfig.materia & { Build: typeof testConfig.materia.Build & { foreach?: { items: string; as?: string; done?: string } } } };
+    config.materia.Build.foreach = { items: 'state.tasks', as: 'task', done: 'end' };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const paletteBuild = await screen.findByTestId('palette-Build');
+    expect(paletteBuild.classList.contains('palette-orb-iterator')).toBe(true);
+    expect(paletteBuild.querySelector('.materia-orb-iterator')).toBeTruthy();
+    expect(paletteBuild.textContent).toContain('Iterator');
+    expect(paletteBuild.getAttribute('title')).toContain('Iterator: state.tasks as task until end');
+
+    const socketBuild = screen.getByTestId('socket-Build');
+    expect(socketBuild.classList.contains('materia-socket-iterator')).toBe(true);
+    expect(socketBuild.querySelector('.materia-orb-iterator')).toBeTruthy();
+    expect(socketBuild.textContent).toContain('Iterator');
+    expect(socketBuild.getAttribute('title')).toContain('Iterator: state.tasks as task until end');
+
+    const paletteMaintain = screen.getByTestId('palette-Maintain');
+    expect(paletteMaintain.classList.contains('palette-orb-iterator')).toBe(false);
+    expect(paletteMaintain.querySelector('.materia-orb-iterator')).toBeNull();
+    expect(paletteMaintain.textContent).not.toContain('Iterator');
+  });
+
   it('renders the active loadout as a directional left-to-right graph', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
@@ -230,6 +255,11 @@ describe('Materia loadout grid editor', () => {
     expect(css).toContain('--materia-orb-small-size: 2rem;');
     expect(css).toMatch(/\.loadout-graph-viewport\s*{[^}]*max-width: 100%;[^}]*overflow: auto;/s);
     expect(css).toMatch(/\.loadout-graph-canvas\s*{[^}]*min-width: 100%;[^}]*min-height: 100%;/s);
+    expect(css).toMatch(/\.materia-orb-iterator\s*{[^}]*outline: 1px solid/s);
+    expect(css).toMatch(/\.materia-orb-iterator::after\s*{[^}]*radial-gradient/s);
+    expect(css).toMatch(/\.materia-iterator-badge\s*{[^}]*text-transform: uppercase;/s);
+    expect(css).toContain('.palette-orb-iterator');
+    expect(css).toContain('.materia-socket-iterator');
   });
 
   it('contains oversized graph dimensions inside a scrollable viewport', async () => {
