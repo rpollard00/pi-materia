@@ -34,6 +34,12 @@ interface MateriaWebUiArtifactOptions {
   projectRoot?: string;
 }
 
+interface MateriaWebUiBuildOptions extends MateriaWebUiArtifactOptions {
+  runBuild?: () => Promise<void>;
+}
+
+let materiaWebUiBuildPromise: Promise<void> | undefined;
+
 export async function assertMateriaWebUiArtifactAvailable(options: MateriaWebUiArtifactOptions = {}): Promise<void> {
   const projectRoot = options.projectRoot ?? materiaPackageRoot();
   const clientEntrypoint = options.clientEntrypoint ?? join(projectRoot, "dist", "webui", "client", "index.html");
@@ -44,6 +50,32 @@ export async function assertMateriaWebUiArtifactAvailable(options: MateriaWebUiA
     + "Build the WebUI before starting it (for example, run `npm run build:webui`) "
     + "or include the committed dist/webui artifacts in the installed package.",
   );
+}
+
+async function ensureMateriaWebUiBuilt(options: MateriaWebUiBuildOptions = {}): Promise<void> {
+  const projectRoot = options.projectRoot ?? materiaPackageRoot();
+  const clientEntrypoint = options.clientEntrypoint ?? join(projectRoot, "dist", "webui", "client", "index.html");
+  if (await fileExists(clientEntrypoint)) return;
+
+  if (!materiaWebUiBuildPromise) {
+    materiaWebUiBuildPromise = (async () => {
+      try {
+        await (options.runBuild?.() ?? Promise.reject(new Error("runBuild is required")));
+        if (!(await fileExists(clientEntrypoint))) {
+          throw new Error(`npm run build:webui completed but ${clientEntrypoint} was not created.`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`npm run build:webui failed: ${message}`);
+      }
+    })();
+  }
+
+  return materiaWebUiBuildPromise;
+}
+
+function resetMateriaWebUiBuildPromise(): void {
+  materiaWebUiBuildPromise = undefined;
 }
 
 export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<MateriaWebUiLaunchResult> {
@@ -269,6 +301,8 @@ function openBrowser(url: string): void {
 
 export const webUiLauncherTestInternals = {
   assertMateriaWebUiArtifactAvailable,
+  ensureMateriaWebUiBuilt,
+  resetMateriaWebUiBuildPromise,
   loadMateriaWebUiProfileConfig: loadProfileConfig,
   webUiSessionKey,
 };

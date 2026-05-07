@@ -40,6 +40,15 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 3. Create a tool/utility materia and explicitly choose `project`; confirm it is written to `.pi/pi-materia.json`.
 4. Edit an existing prompt materia and confirm graph links, layout, and inserted metadata on the socket are preserved.
 
+## Role prompt generator
+
+1. In the materia editor, type existing text into the prompt field and enter a concise role brief in **Generate role prompt from brief**.
+2. Click **Generate** and confirm the button enters a loading state, then a generated preview appears without changing the prompt field.
+3. Click **Regenerate** and confirm the preview updates while the prompt field still keeps its original text.
+4. Click **Discard** and confirm the preview is removed and the prompt field remains unchanged.
+5. Generate again, then click **Apply to prompt field** and confirm only this explicit action replaces the prompt field with the preview.
+6. Save only if you want to persist the applied prompt; generation/preview/discard alone should not write user or project config.
+
 ## Pipeline graph editor
 
 1. Add a new node and save; confirm existing nodes keep their previous layout.
