@@ -113,12 +113,16 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    const autoEvalLabel = (await screen.findByTestId('socket-Auto-Eval')).querySelector('.materia-socket-label');
+    const autoEvalSocket = await screen.findByTestId('socket-Auto-Eval');
+    const autoEvalLabel = autoEvalSocket.querySelector('.materia-socket-label');
     expect(autoEvalLabel?.textContent).toBe('Auto-Eval');
+    expect(autoEvalSocket.textContent).not.toContain('Auto-E...');
 
     fireEvent.click(screen.getByRole('button', { name: /Planning-Consult/ }));
-    const interactivePlanLabel = (await screen.findByTestId('socket-planner')).querySelector('.materia-socket-label');
+    const interactivePlanSocket = await screen.findByTestId('socket-planner');
+    const interactivePlanLabel = interactivePlanSocket.querySelector('.materia-socket-label');
     expect(interactivePlanLabel?.textContent).toBe('interactivePlan');
+    expect(interactivePlanSocket.textContent).not.toContain('interac...');
 
     const css = readFileSync(`${process.cwd()}/src/webui/client/src/styles.css`, 'utf8');
     expect(css).toContain('--materia-socket-width: 8.25rem;');
@@ -271,14 +275,20 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     const region = await screen.findByTestId('loop-region-taskIteration');
-    expect(region.textContent).toContain('Loop');
+    const buildSocket = screen.getByTestId('socket-Build');
+    const summary = 'Loop consumes: state.tasks as task until end • Exit: Maintain (Maintain).Satisfied → end';
+    expect(region.querySelector('.loadout-loop-badge')?.textContent).toBe('Loop');
+    expect(region.querySelector('.loadout-loop-title')?.textContent).toBe('Build → Eval → Maintain until all tasks complete');
+    expect(region.querySelector('.loadout-loop-summary')?.textContent).toBe(summary);
+    expect(parseFloat(region.style.height)).toBeGreaterThanOrEqual(92);
+    expect(parseFloat(buildSocket.style.top) - (parseFloat(region.style.top) + parseFloat(region.style.height))).toBeGreaterThanOrEqual(16);
     expect(region.style.clipPath).toBe('');
     expect(region.getAttribute('style')).not.toContain('--loop-region-polygon');
     expect(await screen.findByTestId('loop-cycle-edge-taskIteration')).toBeTruthy();
     expect(parseFloat(region.style.top)).toBeGreaterThanOrEqual(28);
     expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
-    expect(region.getAttribute('title')).toContain('Loop consumes: state.tasks as task until end');
-    expect(region.getAttribute('title')).toContain('Exit: Maintain (Maintain).Satisfied → end');
+    expect(region.textContent).toContain(summary);
+    expect(region.getAttribute('title')).toBe(summary);
     expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
     const sourceOptions = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.getAttribute('value'));
     expect(sourceOptions).toEqual(['Build', 'Auto-Eval', 'Maintain']);
