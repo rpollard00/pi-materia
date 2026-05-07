@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoffContract.js";
 import { buildRoleGenerationPrompt, generateMateriaRolePrompt, resolveRoleGenerationSettings } from "../src/roleGeneration.js";
 
 const activeModel = { provider: "active-provider", id: "active-model", name: "Active", api: "active-api" };
@@ -57,6 +58,16 @@ describe("Materia role prompt generation service", () => {
       api: "active-api",
       thinking: "high",
     });
+  });
+
+  test("builds generator prompts with the central handoff contract guidance", () => {
+    const prompt = buildRoleGenerationPrompt("create an evaluator role", { extraInstructions: "Keep it terse." });
+
+    expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(prompt).toContain('"satisfied" is the canonical boolean control field');
+    expect(prompt).toContain("Legacy names such as \"passed\" are not canonical handoff fields");
+    expect(prompt).toContain("Additional operator instructions:\nKeep it terse.");
+    expect(prompt).toContain("User brief:\ncreate an evaluator role");
   });
 
   test("applies roleGeneration model and thinking overrides", () => {

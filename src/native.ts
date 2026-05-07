@@ -7,7 +7,7 @@ import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
-import { HANDOFF_SATISFIED_FIELD } from "./handoffContract.js";
+import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_SATISFIED_FIELD } from "./handoffContract.js";
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
@@ -900,7 +900,7 @@ function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
 
 function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
-  return materiaPrompt(node.materia, state, [multiTurnTurnInstruction(state, node)]);
+  return materiaPrompt(node.materia, state, [multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)]);
 }
 
 function buildMultiTurnFinalizationPrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
@@ -921,18 +921,27 @@ function multiTurnRefinementGuidance(): string {
   return "Current multi-turn mode: refinement conversation. /materia continue is the only way to finalize this multi-turn node. Until the user runs /materia continue, respond conversationally, incorporate refinement feedback, and do not emit final JSON, final structured output, or other final machine-parseable output. If the refinement appears complete or the conversation is stalling, prompt the user to run /materia continue when they are ready for the final output.";
 }
 
+function singleTurnJsonFormatInstruction(node: ResolvedMateriaNode): string | undefined {
+  if (!isAgentResolvedNode(node)) return undefined;
+  if (node.materia.multiTurn === true) return undefined;
+  return node.node.parse === "json" ? finalFormatInstruction(node) : undefined;
+}
+
 function finalFormatInstruction(node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) return "";
   if (node.node.parse === "json") {
-    return "Final output format: Return only JSON for this node, with no markdown fences, prose, or extra commentary. Follow the schema/shape requested by the node prompt exactly.";
+    return [
+      "Final output format: Return only JSON for this node, with no markdown fences, prose, or extra commentary. Follow the schema/shape requested by the node prompt exactly.",
+      HANDOFF_CONTRACT_PROMPT_TEXT,
+    ].join("\n\n");
   }
   return "Final output format: return the final plain-text output for this node, with no extra refinement questions.";
 }
 
 export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaConfig): string {
   const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
-  const suffix = node && isAgentResolvedNode(node) ? multiTurnTurnInstruction(state, node) : undefined;
-  return [renderTemplate(materia.prompt, state), suffix].filter(Boolean).join("\n\n");
+  const suffixes = node && isAgentResolvedNode(node) ? [multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)] : [];
+  return [renderTemplate(materia.prompt, state), ...suffixes].filter(Boolean).join("\n\n");
 }
 
 function renderTemplate(template: string, state: MateriaCastState): string {

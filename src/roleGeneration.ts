@@ -3,6 +3,7 @@ import { createAgentSession, SessionManager } from "@mariozechner/pi-coding-agen
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { loadProfileConfig } from "./config.js";
+import { HANDOFF_CONTRACT_PROMPT_TEXT } from "./handoffContract.js";
 import { getActiveModelInfo } from "./modelSettings.js";
 import type { MateriaRoleGenerationProfileConfig } from "./types.js";
 
@@ -120,6 +121,8 @@ export function buildRoleGenerationPrompt(brief: string, profile: MateriaRoleGen
     "You generate concise pi-materia role prompt instructions.",
     "Return only the role prompt text to place in a Materia config `prompt` field.",
     "The prompt should define the agent's responsibilities, operating style, constraints, and expected output behavior.",
+    "When the generated role prompt asks for JSON or handoff output, it must instruct the materia to follow this central contract instead of inventing a local JSON contract:",
+    HANDOFF_CONTRACT_PROMPT_TEXT,
     "Do not include markdown fences, commentary about generation, or UI instructions.",
     profile.extraInstructions ? `Additional operator instructions:\n${profile.extraInstructions}` : undefined,
     `User brief:\n${brief}`,
