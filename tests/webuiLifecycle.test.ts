@@ -1,15 +1,16 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
-import { launchMateriaWebUi } from "../src/webui/launcher.js";
+import { launchMateriaWebUi, webUiLauncherTestInternals } from "../src/webui/launcher.js";
 import { getUserProfileConfigPath } from "../src/config.js";
 import { FakePiHarness } from "./fakePi.js";
 
 const previousProfileDir = process.env.PI_MATERIA_PROFILE_DIR;
 
 afterEach(() => {
+  webUiLauncherTestInternals.resetMateriaWebUiBuildPromise();
   if (previousProfileDir === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
   else process.env.PI_MATERIA_PROFILE_DIR = previousProfileDir;
 });
@@ -24,6 +25,95 @@ async function harnessWithProfile(prefix = "pi-materia-webui-") {
 }
 
 describe("/materia ui lifecycle", () => {
+  test("does not build the WebUI when the built client entrypoint already exists", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-built-"));
+    const clientEntrypoint = path.join(projectRoot, "dist", "webui", "client", "index.html");
+    await mkdir(path.dirname(clientEntrypoint), { recursive: true });
+    await writeFile(clientEntrypoint, "<html></html>", "utf8");
+    let builds = 0;
+
+    await webUiLauncherTestInternals.ensureMateriaWebUiBuilt({
+      projectRoot,
+      clientEntrypoint,
+      runBuild: async () => {
+        builds += 1;
+        throw new Error("should not build");
+      },
+    });
+
+    expect(builds).toBe(0);
+  });
+
+  test("builds the WebUI when the built client entrypoint is missing", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-missing-"));
+    const clientEntrypoint = path.join(projectRoot, "dist", "webui", "client", "index.html");
+    let builds = 0;
+
+    await webUiLauncherTestInternals.ensureMateriaWebUiBuilt({
+      projectRoot,
+      clientEntrypoint,
+      runBuild: async () => {
+        builds += 1;
+        await mkdir(path.dirname(clientEntrypoint), { recursive: true });
+        await writeFile(clientEntrypoint, "<html></html>", "utf8");
+      },
+    });
+
+    expect(builds).toBe(1);
+  });
+
+  test("reports a useful WebUI build failure", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-fails-"));
+    const clientEntrypoint = path.join(projectRoot, "dist", "webui", "client", "index.html");
+
+    await expect(webUiLauncherTestInternals.ensureMateriaWebUiBuilt({
+      projectRoot,
+      clientEntrypoint,
+      runBuild: async () => {
+        throw new Error("vite exploded on stderr");
+      },
+    })).rejects.toThrow(/npm run build:webui failed: vite exploded on stderr/);
+  });
+
+  test("deduplicates concurrent WebUI builds", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-concurrent-"));
+    const clientEntrypoint = path.join(projectRoot, "dist", "webui", "client", "index.html");
+    let builds = 0;
+    let markBuildStarted!: () => void;
+    let releaseBuild!: () => void;
+    const buildStarted = new Promise<void>((resolve) => {
+      markBuildStarted = resolve;
+    });
+    const buildRelease = new Promise<void>((resolve) => {
+      releaseBuild = resolve;
+    });
+
+    const first = webUiLauncherTestInternals.ensureMateriaWebUiBuilt({
+      projectRoot,
+      clientEntrypoint,
+      runBuild: async () => {
+        builds += 1;
+        markBuildStarted();
+        await buildRelease;
+        await mkdir(path.dirname(clientEntrypoint), { recursive: true });
+        await writeFile(clientEntrypoint, "<html></html>", "utf8");
+      },
+    });
+    await buildStarted;
+    const second = webUiLauncherTestInternals.ensureMateriaWebUiBuilt({
+      projectRoot,
+      clientEntrypoint,
+      runBuild: async () => {
+        builds += 1;
+      },
+    });
+
+    expect(builds).toBe(1);
+    releaseBuild();
+    await Promise.all([first, second]);
+    expect(builds).toBe(1);
+  });
+
   test("command launches a session-scoped server in the background without waiting for idle and reuses it", async () => {
     const { harness } = await harnessWithProfile();
 
