@@ -59,7 +59,7 @@
           "label": "Build → Eval → Maintain until all tasks complete",
           "nodes": ["Build", "Auto-Eval", "Maintain"],
           "consumes": { "from": "planner", "output": "tasks" },
-          "exit": { "when": "satisfied", "to": "end" }
+          "exit": { "from": "Maintain", "when": "satisfied", "to": "end" }
         }
       }
     }

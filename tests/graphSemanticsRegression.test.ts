@@ -99,7 +99,7 @@ function regressionConfig(): PiMateriaConfig {
             label: "Build → Eval → Maintain until all tasks complete",
             nodes: ["Build", "Auto-Eval", "Maintain"],
             iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
-            exit: { when: "satisfied", to: "end" },
+            exit: { from: "Maintain", when: "satisfied", to: "end" },
           },
         },
       },

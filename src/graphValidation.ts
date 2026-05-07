@@ -1,5 +1,5 @@
 import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
-import type { LegacyMateriaPipelineNodeConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
+import type { LegacyMateriaPipelineNodeConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopExitConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
 export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
@@ -152,11 +152,23 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
     validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.from, `loops.${loopId}.consumes.from`);
     validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.done, `loops.${loopId}.consumes.done`);
     validateOptionalTarget(errors, nodeIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
-    validateOptionalTarget(errors, nodeIds, loopId, loop.exit?.to, `loops.${loopId}.exit.to`);
-    if (loop.exit && !isCanonicalEdgeCondition(loop.exit.when)) {
-      errors.push({ code: "invalid-edge-condition", source: `loops.${loopId}.exit.when`, to: loop.exit.to, message: `Loop "${loopId}" has invalid exit condition at loops.${loopId}.exit.when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
-    }
+    validateLoopExit(errors, nodeIds, loopId, loop.nodes, loop.exit);
     if (loop.consumes && loop.nodes.every((nodeId) => nodeIds.has(nodeId))) validateLoopTopology(graph, errors, loopId, loop.nodes, loop.consumes.from, options);
+  }
+}
+
+function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<string>, loopId: string, loopNodes: string[], exit: MateriaLoopExitConfig | undefined): void {
+  if (!exit) return;
+  validateOptionalTarget(errors, nodeIds, loopId, exit.to, `loops.${loopId}.exit.to`);
+  if (!exit.from) {
+    errors.push({ code: "missing-endpoint", source: `loops.${loopId}.exit.from`, message: `Missing graph endpoint referenced by loops.${loopId}.exit.from.` });
+  } else if (!nodeIds.has(exit.from)) {
+    errors.push({ code: "unknown-endpoint", source: `loops.${loopId}.exit.from`, from: exit.from, message: `Unknown graph endpoint "${exit.from}" referenced by loops.${loopId}.exit.from.` });
+  } else if (!loopNodes.includes(exit.from)) {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.exit.from`, from: exit.from, message: `Loop "${loopId}" exit source "${exit.from}" must be one of its member sockets: ${loopNodes.join(", ")}.` });
+  }
+  if (!isCanonicalEdgeCondition(exit.when)) {
+    errors.push({ code: "invalid-edge-condition", source: `loops.${loopId}.exit.when`, from: exit.from, to: exit.to, message: `Loop "${loopId}" has invalid exit condition at loops.${loopId}.exit.when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
   }
 }
 

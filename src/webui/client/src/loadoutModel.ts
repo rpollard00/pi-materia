@@ -21,7 +21,7 @@ export interface PipelineLoop {
   nodes: string[];
   consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
-  exit?: { when: MateriaEdgeCondition; to: string };
+  exit?: { from: string; when: MateriaEdgeCondition; to: string };
   [key: string]: unknown;
 }
 

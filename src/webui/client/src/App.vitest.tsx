@@ -166,7 +166,7 @@ describe('Materia loadout grid editor', () => {
         label: 'Build → Eval → Maintain until all tasks complete',
         nodes: ['Build', 'Auto-Eval', 'Maintain'],
         consumes: { from: 'planner', output: 'tasks' },
-        exit: { when: 'satisfied', to: 'end' },
+        exit: { from: 'Maintain', when: 'satisfied', to: 'end' },
       },
     } as never;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
@@ -202,7 +202,7 @@ describe('Materia loadout grid editor', () => {
         label: 'Build → Eval → Maintain until all tasks complete',
         nodes: ['Build', 'Auto-Eval', 'Maintain'],
         iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
-        exit: { when: 'satisfied', to: 'end' },
+        exit: { from: 'Maintain', when: 'satisfied', to: 'end' },
       },
     } as never;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
@@ -213,8 +213,10 @@ describe('Materia loadout grid editor', () => {
     expect(region.textContent).toContain('Loop');
     expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
     expect(region.getAttribute('title')).toContain('Loop consumes: state.tasks as task until end');
-    expect(region.getAttribute('title')).toContain('Exit: Satisfied → end');
+    expect(region.getAttribute('title')).toContain('Exit: Maintain.Satisfied → end');
     expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
+    const sourceOptions = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.getAttribute('value'));
+    expect(sourceOptions).toEqual(['Build', 'Auto-Eval', 'Maintain']);
     expect(screen.getByTestId('loop-exit-condition-taskIteration')).toBeTruthy();
     expect(screen.getByTestId('loop-exit-target-taskIteration')).toBeTruthy();
   });
@@ -226,7 +228,7 @@ describe('Materia loadout grid editor', () => {
         label: 'Build → Eval → Maintain until all tasks complete',
         nodes: ['Build', 'Auto-Eval', 'Maintain'],
         iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
-        exit: { when: 'satisfied', to: 'end' },
+        exit: { from: 'Maintain', when: 'satisfied', to: 'end' },
       },
     } as never;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -237,15 +239,17 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    fireEvent.change(await screen.findByTestId('loop-exit-condition-taskIteration'), { target: { value: 'not_satisfied' } });
-    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Not Satisfied → end'));
+    fireEvent.change(await screen.findByTestId('loop-exit-source-taskIteration'), { target: { value: 'Auto-Eval' } });
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval.Satisfied → end'));
+    fireEvent.change(screen.getByTestId('loop-exit-condition-taskIteration'), { target: { value: 'not_satisfied' } });
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval.Not Satisfied → end'));
     fireEvent.change(screen.getByTestId('loop-exit-target-taskIteration'), { target: { value: 'Maintain' } });
-    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Not Satisfied → Maintain'));
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval.Not Satisfied → Maintain'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    expect(saved.loops.taskIteration.exit).toEqual({ when: 'not_satisfied', to: 'Maintain' });
+    expect(saved.loops.taskIteration.exit).toEqual({ from: 'Auto-Eval', when: 'not_satisfied', to: 'Maintain' });
   });
 
   it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
@@ -277,7 +281,7 @@ describe('Materia loadout grid editor', () => {
       label: 'Loop: Build → Auto-Eval → Maintain',
       nodes: ['Build', 'Auto-Eval', 'Maintain'],
       consumes: { from: 'planner', output: 'tasks' },
-      exit: { when: 'satisfied', to: 'end' },
+      exit: { from: 'Maintain', when: 'satisfied', to: 'end' },
     });
   });
 

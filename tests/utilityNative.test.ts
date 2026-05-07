@@ -238,7 +238,7 @@ describe("native utility node execution", () => {
               label: "Runtime item loop",
               nodes: ["loop"],
               iterator: { items: "state.items", as: "work", cursor: "itemCursor", done: "end" },
-              exit: { when: "satisfied", to: "end" },
+              exit: { from: "loop", when: "satisfied", to: "end" },
             },
           },
         },

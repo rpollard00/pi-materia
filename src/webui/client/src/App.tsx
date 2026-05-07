@@ -610,7 +610,7 @@ function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<stri
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
     const maxY = Math.max(...sockets.map((socket) => socket.y + socketStageHeight));
     const consumer = loopConsumerSummary(loop);
-    const exit = loop.exit ? `Exit: ${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to}` : undefined;
+    const exit = loop.exit ? `Exit: ${loop.exit.from}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to}` : undefined;
     return [{ id, label: loop.label ?? id, x: minX - 34, y: minY - 48, width: Math.max(180, maxX - minX + 68), height: Math.max(150, maxY - minY + 86), summary: [consumer, exit].filter(Boolean).join(' • ') }];
   });
 }
@@ -1275,7 +1275,7 @@ export function App() {
             label,
             nodes: selectedIds,
             consumes: { from: generator.from, output: generator.output },
-            exit: { when: 'satisfied', to: 'end' },
+            exit: { from: selectedIds[selectedIds.length - 1], when: 'satisfied', to: 'end' },
           },
         };
       },
@@ -1288,10 +1288,10 @@ export function App() {
     }
   }
 
-  function updateLoopExit(loopId: string, patch: Partial<{ when: MateriaEdgeCondition; to: string }>) {
+  function updateLoopExit(loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) {
     const loop = activeLoadout?.loops?.[loopId];
     if (!loop) return;
-    const currentExit = loop.exit ?? { when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
+    const currentExit = loop.exit ?? { from: loop.nodes[loop.nodes.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
     const nextExit = { ...currentExit, ...patch };
     commitGraphMutation(
       `Updated loop ${loopId} exit.`,
@@ -1300,7 +1300,7 @@ export function App() {
         if (!draftLoop) return;
         draftLoop.exit = nextExit;
       },
-      `Staged loop ${loopId} exit as ${edgeConditionLabel(nextExit.when)} → ${nextExit.to}.`,
+      `Staged loop ${loopId} exit as ${nextExit.from}.${edgeConditionLabel(nextExit.when)} → ${nextExit.to}.`,
       (message) => `Cannot update loop ${loopId} exit: ${message}`,
     );
   }
@@ -1777,13 +1777,18 @@ export function App() {
                 <p className="mt-1 text-xs text-slate-400">Loop exit conditions use the same canonical edge model as graph edges.</p>
                 <div className="mt-3 grid gap-3">
                   {Object.entries(activeLoadout?.loops ?? {}).map(([loopId, loop]) => {
-                    const exit = loop.exit ?? { when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
+                    const exit = loop.exit ?? { from: loop.nodes[loop.nodes.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
                     return (
                       <div key={loopId} className="flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200/10 bg-slate-900/60 p-3" data-testid={`loop-editor-${loopId}`}>
                         <div className="min-w-48 flex-1">
                           <div className="font-semibold text-cyan-100">{loop.label ?? loopId}</div>
                           <div className="text-xs text-slate-400">Members: {loop.nodes.join(', ')}</div>
                         </div>
+                        <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit source
+                          <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-source-${loopId}`} value={exit.from} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>
+                            {loop.nodes.map((nodeId) => <option key={nodeId} value={nodeId}>{nodeId}</option>)}
+                          </select>
+                        </label>
                         <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit condition
                           <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-condition-${loopId}`} value={exit.when} onChange={(event) => updateLoopExit(loopId, { when: event.target.value as MateriaEdgeCondition })}>
                             {Object.entries(edgeConditionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

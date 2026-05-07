@@ -148,7 +148,7 @@ describe("loadout-aware pipeline resolution", () => {
               label: "Generated task loop",
               nodes: ["Build"],
               consumes: { from: "Plan", output: "tasks" },
-              exit: { when: "satisfied", to: "end" },
+              exit: { from: "Build", when: "satisfied", to: "end" },
             },
           },
           nodes: {
@@ -169,7 +169,7 @@ describe("loadout-aware pipeline resolution", () => {
     expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
     expect(loopIteratorForNode(pipeline, "Build")?.items).toBe("state.tasks");
     expect(lines).toContain("- planner: tools=readOnly, model=active Pi model, thinking=active Pi thinking, generates=tasks:array<task>");
-    expect(lines).toContain("loop taskIteration (Generated task loop): [Build] consumes=Plan.tasks iterator=state.tasks as task done end exit=satisfied->end");
+    expect(lines).toContain("loop taskIteration (Generated task loop): [Build] consumes=Plan.tasks iterator=state.tasks as task done end exit=Build.satisfied->end");
   });
 
   test("resolvePipeline migrates legacy iterator loops when one inbound generator edge identifies the consumer", () => {
@@ -184,7 +184,7 @@ describe("loadout-aware pipeline resolution", () => {
               label: "Legacy generated task loop",
               nodes: ["Build", "Check"],
               iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
-              exit: { when: "satisfied", to: "end" },
+              exit: { from: "Check", when: "satisfied", to: "end" },
             },
           },
           nodes: {
@@ -246,7 +246,7 @@ describe("loadout-aware pipeline resolution", () => {
               label: "Build → Eval → Maintain until all tasks complete",
               nodes: ["Build", "Auto-Eval", "Maintain"],
               iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
-              exit: { when: "satisfied", to: "end" },
+              exit: { from: "Maintain", when: "satisfied", to: "end" },
             },
           },
           nodes: {
@@ -268,7 +268,7 @@ describe("loadout-aware pipeline resolution", () => {
 
     expect(pipeline.loops?.taskIteration.nodes).toEqual(["Build", "Auto-Eval", "Maintain"]);
     expect(loopIteratorForNode(pipeline, "Maintain")?.cursor).toBe("taskIndex");
-    expect(lines).toContain("loop taskIteration (Build → Eval → Maintain until all tasks complete): [Build, Auto-Eval, Maintain] iterator=state.tasks as task done end exit=satisfied->end");
+    expect(lines).toContain("loop taskIteration (Build → Eval → Maintain until all tasks complete): [Build, Auto-Eval, Maintain] iterator=state.tasks as task done end exit=Maintain.satisfied->end");
   });
 
   test("resolvePipeline accepts repeated guarded iterative workflow branches", () => {

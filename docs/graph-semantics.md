@@ -20,7 +20,7 @@ Edges are evaluated in order and the first matching edge wins. Put guarded edges
 
 ## Generator and loop-consumer regions
 
-Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's `generates` declaration, and documents an exit condition using the same canonical edge conditions as normal edges.
+Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's `generates` declaration, and documents an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. The `exit.from` socket must exist and be one of the loop members.
 
 A generator materia declares its list contract at the top level:
 
@@ -49,7 +49,7 @@ A loadout declares the consumer region separately from the generator materia:
     "label": "Build → Eval → Maintain until all tasks complete",
     "nodes": ["Build", "Auto-Eval", "Maintain"],
     "consumes": { "from": "planner", "output": "tasks" },
-    "exit": { "when": "satisfied", "to": "end" }
+    "exit": { "from": "Maintain", "when": "satisfied", "to": "end" }
   }
 }
 ```
@@ -65,7 +65,7 @@ Build --always--> Auto-Eval --satisfied--> Maintain --always--> Build
                          └--not_satisfied--> Build
 ```
 
-The loop consumes the planner generator's `tasks` output, which derives an iterator over `state.tasks`; each member node handles the current task until `Maintain` advances the cursor. The loop exits to `end` when the cursor reaches the generator-derived `done` target.
+The loop consumes the planner generator's `tasks` output, which derives an iterator over `state.tasks`; each member node handles the current task until `Maintain` advances the cursor. Its documented exit summary renders source-aware, for example `exit=Maintain.satisfied->end`, and the loop exits to `end` when the cursor reaches the generator-derived `done` target.
 
 ## Utility materia and generator/consumer styling
 

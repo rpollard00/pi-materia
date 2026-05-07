@@ -369,6 +369,8 @@ export interface MateriaLoopConsumerConfig {
 }
 
 export interface MateriaLoopExitConfig {
+  /** Socket id within the loop whose canonical edge condition controls this exit. */
+  from: string;
   when: MateriaEdgeCondition;
   to: string;
 }

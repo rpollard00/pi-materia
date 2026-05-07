@@ -124,7 +124,7 @@ describe("graph validation foundation", () => {
         label: "Build → Eval → Maintain until complete",
         nodes: ["Build", "Auto-Eval", "Maintain"],
         iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
-        exit: { when: "satisfied", to: "end" },
+        exit: { from: "Maintain", when: "satisfied", to: "end" },
       },
     };
 
@@ -136,13 +136,23 @@ describe("graph validation foundation", () => {
 
   test("rejects loop regions that reference missing sockets or invalid exit conditions", () => {
     const graph = validGraph();
-    graph.loops = { bad: { nodes: ["Build", "Missing"], exit: { when: "done" as never, to: "AlsoMissing" } } };
+    graph.loops = { bad: { nodes: ["Build", "Missing"], exit: { from: "Missing", when: "done" as never, to: "AlsoMissing" } } };
 
     const result = validatePipelineGraph(graph);
 
     expect(result.ok).toBe(false);
     expect(result.errors.map((error) => error.code)).toContain("unknown-endpoint");
     expect(result.errors.map((error) => error.code)).toContain("invalid-edge-condition");
+  });
+
+  test("rejects loop exits whose source is not a loop member", () => {
+    const graph = validGraph();
+    graph.loops = { bad: { nodes: ["Build"], exit: { from: "Maintain", when: "satisfied", to: "end" } } };
+
+    const result = validatePipelineGraph(graph);
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exit.from" }));
   });
 
   test("normalizes legacy next and flow edges into canonical always edges", () => {

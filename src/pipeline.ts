@@ -305,7 +305,7 @@ function renderGraph(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): 
     const label = loop.label ? `${id} (${loop.label})` : id;
     const consumer = loop.consumes ? ` consumes=${loop.consumes.from}.${loop.consumes.output ?? generatorForLoop(config, pipeline, id)?.output ?? "<generated>"}` : "";
     const iterator = loop.iterator ? ` iterator=${formatForeach(loop.iterator)}` : "";
-    const exit = loop.exit ? ` exit=${loop.exit.when}->${loop.exit.to}` : "";
+    const exit = loop.exit ? ` exit=${loop.exit.from}.${loop.exit.when}->${loop.exit.to}` : "";
     lines.push(`loop ${label}: [${loop.nodes.join(", ")}]${consumer}${iterator}${exit}`);
   }
   return lines.length > 0 ? lines : ["<empty>"];
