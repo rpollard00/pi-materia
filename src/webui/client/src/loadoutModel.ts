@@ -7,6 +7,7 @@ export interface PipelineNode {
   materia?: string;
   utility?: string;
   command?: string[];
+  label?: string;
   edges?: { to: string; when: MateriaEdgeCondition; maxTraversals?: number }[];
   empty?: boolean;
   layout?: { x?: number; y?: number };
@@ -52,12 +53,22 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
 }
 
 export interface MateriaBehaviorConfig {
+  type?: NodeType;
   tools?: 'none' | 'readOnly' | 'coding';
   prompt?: string;
   model?: string;
   thinking?: string;
   multiTurn?: boolean;
   color?: string;
+  label?: string;
+  description?: string;
+  group?: string;
+  utility?: string;
+  command?: string[];
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
+  parse?: 'text' | 'json';
+  assign?: Record<string, string>;
   [key: string]: unknown;
 }
 
@@ -91,6 +102,7 @@ const materiaBehaviorKeys = new Set([
   'command',
   'params',
   'timeoutMs',
+  'assign',
   'model',
   'modelSettings',
   'outputFormat',
@@ -116,12 +128,24 @@ export function createMateriaReference(materiaId: string): MateriaReference {
   return { type: 'agent', materia: materiaId };
 }
 
-export function materiaPaletteNode(id: string): PipelineNode {
+export function materiaPaletteNode(id: string, definition?: MateriaBehaviorConfig): PipelineNode {
+  if (definition?.type === 'utility') {
+    return {
+      type: 'utility',
+      utility: definition.utility,
+      command: cloneValue(definition.command),
+      params: cloneValue(definition.params),
+      timeoutMs: definition.timeoutMs,
+      parse: definition.parse,
+      assign: cloneValue(definition.assign),
+      label: definition.label,
+    };
+  }
   return { ...createMateriaReference(id) };
 }
 
 export function buildMateriaPalette(definitions: Record<string, MateriaBehaviorConfig> = {}): Array<[string, PipelineNode]> {
-  return Object.keys(definitions).map((id) => [id, materiaPaletteNode(id)]);
+  return Object.keys(definitions).map((id) => [id, materiaPaletteNode(id, definitions[id])]);
 }
 
 export function extractMateriaReference(node?: PipelineNode): MateriaReference | undefined {
@@ -159,7 +183,7 @@ export function clearSocketMateria(socket?: PipelineNode): PipelineNode {
 export function getNodeLabel(id: string, node?: PipelineNode): string {
   if (isEmptySocket(node)) return emptySocketLabel;
   if (node?.type === 'agent') return node.materia ?? id;
-  if (node?.type === 'utility') return node.utility ?? node.command?.join(' ') ?? id;
+  if (node?.type === 'utility') return node.label ?? node.utility ?? node.command?.join(' ') ?? id;
   return node?.materia ?? node?.utility ?? id;
 }
 

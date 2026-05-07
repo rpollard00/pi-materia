@@ -72,6 +72,55 @@ describe('loadout materia palette model', () => {
     expect(Object.values(loadouts.Active.nodes ?? {}).some((node) => node.materia === 'AdHoc')).toBe(true);
   });
 
+  it('includes first-class utility materia in the palette with executable bindings', () => {
+    const materia = {
+      ensureArtifactsIgnored: {
+        type: 'utility',
+        label: 'Ensure artifacts ignored',
+        description: 'Ensure artifacts are ignored',
+        group: 'Utility',
+        utility: 'project.ensureIgnored',
+        parse: 'json',
+        params: { patterns: ['.pi/pi-materia/'] },
+        assign: { artifactIgnore: '$' },
+      },
+      detectVcs: {
+        type: 'utility',
+        label: 'Detect VCS',
+        group: 'Utility',
+        utility: 'vcs.detect',
+        parse: 'json',
+        assign: { vcs: '$' },
+      },
+      Build: { prompt: 'build' },
+    } satisfies Record<string, MateriaBehaviorConfig>;
+
+    const palette = buildMateriaPalette(materia);
+    expect(palette.map(([id]) => id)).toEqual(['ensureArtifactsIgnored', 'detectVcs', 'Build']);
+    expect(palette.find(([id]) => id === 'ensureArtifactsIgnored')?.[1]).toMatchObject({
+      type: 'utility',
+      label: 'Ensure artifacts ignored',
+      utility: 'project.ensureIgnored',
+      parse: 'json',
+      params: { patterns: ['.pi/pi-materia/'] },
+      assign: { artifactIgnore: '$' },
+    });
+    expect(materia.ensureArtifactsIgnored.group).toBe('Utility');
+  });
+
+  it('places palette-created utility materia as normal executable utility nodes', () => {
+    const materia = {
+      detectVcs: { type: 'utility', label: 'Detect VCS', group: 'Utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' } },
+    } satisfies Record<string, MateriaBehaviorConfig>;
+    const loadout = makeEmptyEntryLoadout();
+    const utilityMateria = buildMateriaPalette(materia)[0][1];
+
+    loadout.nodes!.Entry = placeMateriaInSocket(loadout.nodes!.Entry, utilityMateria);
+
+    expect(loadout.nodes!.Entry).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false });
+    expect(getNodeLabel('Entry', loadout.nodes!.Entry)).toBe('vcs.detect');
+  });
+
   it('keeps palette contents stable when palette materia is placed into a new loadout socket', () => {
     const materia = {
       Build: { prompt: 'build' },

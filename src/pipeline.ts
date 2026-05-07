@@ -1,6 +1,6 @@
 import { resolveArtifactRoot } from "./config.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
-import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
   pipeline: MateriaPipelineConfig;
@@ -49,7 +49,7 @@ function resolveNode(config: PiMateriaConfig, effective: EffectiveMateriaPipelin
   if (node.type === "agent") {
     const materia = config.materia[node.materia];
     if (!materia) throw new Error(`Pipeline slot "${id}" references unknown materia "${node.materia}"`);
-    validateMateriaEntry(node.materia, materia);
+    validateAgentMateriaEntry(node.materia, materia);
     return { id, node, materia };
   }
 
@@ -103,12 +103,32 @@ function validateMateriaEntries(config: PiMateriaConfig): void {
 function validateMateriaEntry(name: string, materia: MateriaConfig): void {
   const rawMateria = materia as unknown as Record<string, unknown>;
   if (!isPlainObject(rawMateria)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
+  if (rawMateria.type === "utility") {
+    validateUtilityMateriaEntry(name, rawMateria);
+    return;
+  }
+  validateAgentMateriaEntry(name, materia);
+}
+
+function validateAgentMateriaEntry(name: string, materia: MateriaConfig): asserts materia is MateriaAgentConfig {
+  const rawMateria = materia as unknown as Record<string, unknown>;
+  if (!isPlainObject(rawMateria)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
   if ("systemPrompt" in rawMateria) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
+  if (rawMateria.type !== undefined && rawMateria.type !== "agent") throw new Error(`Materia "${name}" has unsupported type "${String(rawMateria.type)}".`);
   if (rawMateria.prompt === undefined || typeof rawMateria.prompt !== "string") {
     throw new Error(`Materia "${name}" has invalid prompt. Expected a string.`);
   }
-  if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
+  if (rawMateria.multiTurn !== undefined && typeof rawMateria.multiTurn !== "boolean") {
     throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
+  }
+}
+
+function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, unknown>): void {
+  if ("systemPrompt" in rawMateria || "prompt" in rawMateria) throw new Error(`Utility materia "${name}" must not configure prompt/systemPrompt.`);
+  if (!rawMateria.utility && !rawMateria.command) throw new Error(`Utility materia "${name}" must configure either "utility" or "command".`);
+  if (rawMateria.command !== undefined) validateCommand(name, rawMateria.command);
+  if (rawMateria.timeoutMs !== undefined && (!Number.isFinite(rawMateria.timeoutMs) || Number(rawMateria.timeoutMs) <= 0)) {
+    throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
 }
 
@@ -168,9 +188,10 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
   const details: string[] = [`type=${node.type}`];
   if (node.type === "agent") {
     const materia = config.materia[node.materia];
-    details.push(`materia=${node.materia}`, `tools=${materia?.tools ?? "unknown"}`);
-    if (materia?.multiTurn) details.push("materia.multiTurn=true");
-    if (materia) details.push(formatMateriaModelSettings(materia));
+    const agentMateria = materia && materia.type !== "utility" ? materia : undefined;
+    details.push(`materia=${node.materia}`, `tools=${agentMateria?.tools ?? "unknown"}`);
+    if (agentMateria?.multiTurn) details.push("materia.multiTurn=true");
+    if (agentMateria) details.push(formatMateriaModelSettings(agentMateria));
   } else {
     details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);
   }
@@ -187,7 +208,10 @@ function formatCommand(command: string[] | undefined): string {
   return command?.length ? command.map((part) => JSON.stringify(part)).join(" ") : "<missing>";
 }
 
-function formatMateriaDetails(materia: { tools?: string; model?: string; thinking?: string; multiTurn?: boolean }): string {
+function formatMateriaDetails(materia: MateriaConfig): string {
+  if (materia.type === "utility") {
+    return [`type=utility`, materia.utility ? `utility=${materia.utility}` : `command=${formatCommand(materia.command)}`, `parse=${materia.parse ?? "text"}`].join(", ");
+  }
   return [
     `tools=${materia.tools}`,
     materia.multiTurn ? "multiTurn=true" : undefined,

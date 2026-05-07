@@ -1240,7 +1240,7 @@ describe('Materia loadout grid editor', () => {
     expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.' });
   });
 
-  it('rejects reusable tool invocation materia outside loadout graphs', async () => {
+  it('creates reusable tool invocation materia as first-class utility definitions', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'project' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
@@ -1259,8 +1259,18 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '90000' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Reusable tool definitions are no longer saved outside loadout graphs.'));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.target).toBe('project');
+    expect(body.config.materia.RunTests).toMatchObject({
+      type: 'utility',
+      label: 'RunTests',
+      group: 'Utility',
+      utility: 'shell',
+      command: ['npm', 'test'],
+      params: { ci: true },
+      timeoutMs: 90000,
+    });
   });
 
   it('populates the edit selector from reusable definitions instead of active loadout sockets', async () => {
@@ -1329,8 +1339,11 @@ describe('Materia loadout grid editor', () => {
     await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'RunTests' } });
     expect(screen.getByTestId('materia-name')).toHaveProperty('value', 'RunTests');
-    expect(screen.getByTestId('materia-behavior')).toHaveProperty('value', 'prompt');
-    expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', '');
+    expect(screen.getByTestId('materia-behavior')).toHaveProperty('value', 'tool');
+    expect(screen.getByTestId('materia-utility')).toHaveProperty('value', 'shell');
+    expect(screen.getByTestId('materia-command')).toHaveProperty('value', 'npm test');
+    expect(screen.getByTestId('materia-params')).toHaveProperty('value', JSON.stringify({ ci: true }, null, 2));
+    expect(screen.getByTestId('materia-timeout')).toHaveProperty('value', '90000');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

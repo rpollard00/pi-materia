@@ -306,6 +306,35 @@
     }
   },
   "materia": {
+    "ensureArtifactsIgnored": {
+      "type": "utility",
+      "label": "Ensure artifacts ignored",
+      "description": "Ensures the pi-materia artifact directory is present in the project ignore file.",
+      "group": "Utility",
+      "color": "from-slate-200 via-cyan-300 to-slate-700",
+      "utility": "project.ensureIgnored",
+      "parse": "json",
+      "params": {
+        "patterns": [
+          ".pi/pi-materia/"
+        ]
+      },
+      "assign": {
+        "artifactIgnore": "$"
+      }
+    },
+    "detectVcs": {
+      "type": "utility",
+      "label": "Detect VCS",
+      "description": "Detects jj/git availability and the current project version-control root.",
+      "group": "Utility",
+      "color": "from-slate-200 via-violet-300 to-slate-700",
+      "utility": "vcs.detect",
+      "parse": "json",
+      "assign": {
+        "vcs": "$"
+      }
+    },
     "planner": {
       "tools": "readOnly",
       "color": "from-sky-200 via-cyan-300 to-blue-600",

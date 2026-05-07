@@ -211,7 +211,26 @@ describe("config loadouts", () => {
 
       expect(effective.loadoutName).toBe("Full-Auto");
       expect(loaded.config.loadouts?.["Full-Auto"]).toBeDefined();
+      expect(loaded.config.materia.ensureArtifactsIgnored).toMatchObject({
+        type: "utility",
+        label: "Ensure artifacts ignored",
+        group: "Utility",
+        utility: "project.ensureIgnored",
+        parse: "json",
+        params: { patterns: [".pi/pi-materia/"] },
+        assign: { artifactIgnore: "$" },
+      });
+      expect(loaded.config.materia.detectVcs).toMatchObject({
+        type: "utility",
+        label: "Detect VCS",
+        group: "Utility",
+        utility: "vcs.detect",
+        parse: "json",
+        assign: { vcs: "$" },
+      });
       expect(pipeline.entry.id).toBe("ensureArtifactsIgnored");
+      expect(pipeline.nodes.ensureArtifactsIgnored.node).toMatchObject({ type: "utility", utility: "project.ensureIgnored" });
+      expect(pipeline.nodes.detectVcs.node).toMatchObject({ type: "utility", utility: "vcs.detect" });
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

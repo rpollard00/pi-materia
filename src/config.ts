@@ -311,6 +311,11 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
   for (const [name, materia] of Object.entries(materiaConfig as Record<string, unknown>)) {
     if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
     if ("systemPrompt" in materia) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
+    if (materia.type === "utility") {
+      validateUtilityMateria(name, materia);
+      continue;
+    }
+    if (materia.type !== undefined && materia.type !== "agent") throw new Error(`Materia "${name}" has unsupported type "${String(materia.type)}".`);
     if (materia.prompt === undefined || typeof materia.prompt !== "string") {
       throw new Error(`Materia "${name}" has invalid prompt. Expected a string.`);
     }
@@ -326,6 +331,22 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
       throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
     }
+  }
+}
+
+function validateUtilityMateria(name: string, materia: Record<string, unknown>): void {
+  if ("prompt" in materia) throw new Error(`Utility materia "${name}" must not configure prompt.`);
+  if (!materia.utility && !materia.command) throw new Error(`Utility materia "${name}" must configure either "utility" or "command".`);
+  if (materia.utility !== undefined && typeof materia.utility !== "string") throw new Error(`Utility materia "${name}" has invalid utility. Expected a string.`);
+  if (materia.command !== undefined) validateUtilityCommandMateria(name, materia.command);
+  if (materia.timeoutMs !== undefined && (!Number.isFinite(materia.timeoutMs) || Number(materia.timeoutMs) <= 0)) {
+    throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
+  }
+}
+
+function validateUtilityCommandMateria(name: string, command: unknown): void {
+  if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== "string" || part.length === 0)) {
+    throw new Error(`Utility materia "${name}" has invalid command. Expected a non-empty string array.`);
   }
 }
 

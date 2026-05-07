@@ -7,7 +7,7 @@ export interface PiMateriaConfig {
   loadouts?: Record<string, MateriaPipelineConfig>;
   /** Name of the loadout to use. */
   activeLoadout?: string;
-  /** Top-level materia behavior definitions. */
+  /** Top-level reusable materia behavior definitions. */
   materia: Record<string, MateriaConfig>;
 }
 
@@ -358,7 +358,7 @@ export type ResolvedMateriaNode = ResolvedMateriaAgentNode | ResolvedMateriaUtil
 export interface ResolvedMateriaAgentNode {
   id: string;
   node: MateriaAgentNodeConfig;
-  materia: MateriaConfig;
+  materia: MateriaAgentConfig;
 }
 
 export interface ResolvedMateriaUtilityNode {
@@ -366,13 +366,35 @@ export interface ResolvedMateriaUtilityNode {
   node: MateriaUtilityNodeConfig;
 }
 
-export interface MateriaConfig {
+export type MateriaConfig = MateriaAgentConfig | MateriaUtilityConfig;
+
+export interface MateriaDefinitionMetadata {
+  /** Human-readable display label used by palette UIs. */
+  label?: string;
+  /** Short user-facing description used by palette UIs. */
+  description?: string;
+  /** Palette grouping/tag, for example "Utility". */
+  group?: string;
+  /** Tailwind gradient classes used by the Loadout UI for this materia. */
+  color?: string;
+}
+
+export interface MateriaAgentConfig extends MateriaDefinitionMetadata {
+  type?: "agent";
   tools: "none" | "readOnly" | "coding";
   prompt: string;
   model?: string;
   thinking?: string;
-  /** Tailwind gradient classes used by the Loadout UI for this materia. */
-  color?: string;
   /** Keep agent nodes using this materia active for interactive refinement until finalized. */
   multiTurn?: boolean;
+}
+
+export interface MateriaUtilityConfig extends MateriaDefinitionMetadata {
+  type: "utility";
+  utility?: string;
+  command?: string[];
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
+  parse?: MateriaParseMode;
+  assign?: Record<string, string>;
 }

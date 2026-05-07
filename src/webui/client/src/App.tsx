@@ -649,10 +649,33 @@ function parseOptionalFiniteNumber(label: string, raw: string, errors: string[])
 function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
   const name = form.name.trim();
   if (!name) throw new Error('Materia name is required.');
-  if (form.behavior !== 'prompt') throw new Error('Reusable tool definitions are no longer saved outside loadout graphs.');
+  if (form.behavior === 'tool') {
+    const utility = form.utility.trim() || undefined;
+    const command = form.command.trim() ? form.command.trim().split(/\s+/) : undefined;
+    const params = JSON.parse(form.params.trim() || '{}') as Record<string, unknown>;
+    const timeoutMs = form.timeoutMs.trim() ? Number(form.timeoutMs.trim()) : undefined;
+    if (!utility && !command) throw new Error('Tool materia must configure a utility alias or command.');
+    if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) throw new Error('Timeout ms must be a positive number.');
+    return {
+      materia: {
+        [name]: {
+          type: 'utility',
+          label: name,
+          group: 'Utility',
+          utility,
+          command,
+          params,
+          timeoutMs,
+          parse: form.outputFormat,
+          color: form.color.trim() || undefined,
+        },
+      },
+    };
+  }
   return {
     materia: {
       [name]: {
+        type: 'agent',
         tools: form.toolAccess,
         prompt: form.prompt,
         model: form.model.trim() || undefined,
@@ -1278,21 +1301,22 @@ export function App() {
   function editMateria(id: string) {
     const definition = materia[id];
     if (!definition) return;
+    const isUtility = definition.type === 'utility';
     setMateriaForm({
       editingNodeId: id,
       name: id,
-      behavior: 'prompt',
-      prompt: String(definition.prompt ?? ''),
-      toolAccess: definition.tools ?? 'none',
-      model: String(definition.model ?? ''),
-      thinking: String(definition.thinking ?? ''),
+      behavior: isUtility ? 'tool' : 'prompt',
+      prompt: isUtility ? '' : String(definition.prompt ?? ''),
+      toolAccess: isUtility ? 'none' : (definition.tools ?? 'none'),
+      model: isUtility ? '' : String(definition.model ?? ''),
+      thinking: isUtility ? '' : String(definition.thinking ?? ''),
       color: String(definition.color ?? ''),
-      outputFormat: 'text',
-      multiTurn: Boolean(definition.multiTurn),
-      utility: '',
-      command: '',
-      params: '{}',
-      timeoutMs: '',
+      outputFormat: definition.parse === 'json' ? 'json' : 'text',
+      multiTurn: isUtility ? false : Boolean(definition.multiTurn),
+      utility: isUtility ? String(definition.utility ?? '') : '',
+      command: isUtility ? (definition.command ?? []).join(' ') : '',
+      params: isUtility ? JSON.stringify(definition.params ?? {}, null, 2) : '{}',
+      timeoutMs: isUtility && definition.timeoutMs !== undefined ? String(definition.timeoutMs) : '',
       persistScope: 'user',
     });
     setStatus(`Editing reusable materia definition ${id}. Save the staged form to update definitions only.`);
@@ -1719,12 +1743,20 @@ export function App() {
               <h2 className="text-xl font-bold">Materia palette</h2>
               <p className="mt-1 text-sm text-slate-400">Click once to select for swap/insert, or drag into a socket.</p>
               <div className="mt-4 grid grid-cols-2 gap-3">
-                {palette.map(([id, node], index) => (
-                  <button key={id} draggable data-testid={`palette-${id}`} onDragStart={(event) => dragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => setSelectedMateriaId(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''}`}>
-                    <Orb small color={nodeColor(id, index, materia, node)} label={id} />
-                    <span>{getNodeLabel(id, node)}</span>
-                  </button>
-                ))}
+                {palette.map(([id, node], index) => {
+                  const definition = materia[id];
+                  const group = typeof definition?.group === 'string' ? definition.group : undefined;
+                  const description = typeof definition?.description === 'string' ? definition.description : undefined;
+                  return (
+                    <button key={id} draggable title={description} data-testid={`palette-${id}`} onDragStart={(event) => dragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => setSelectedMateriaId(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''}`}>
+                      <Orb small color={nodeColor(id, index, materia, node)} label={id} />
+                      <span className="flex flex-col items-start leading-tight">
+                        <span>{getNodeLabel(id, node)}</span>
+                        {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
 

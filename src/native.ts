@@ -12,7 +12,7 @@ import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_SATISFIED_FIELD } from "./handoff
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
+import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, PiMateriaConfig, ResolvedMateriaAgentNode, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
@@ -940,7 +940,7 @@ function finalFormatInstruction(node: ResolvedMateriaNode): string {
   return "Final output format: return the final plain-text output for this node, with no extra refinement questions.";
 }
 
-export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaConfig): string {
+export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaAgentConfig): string {
   const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
   const suffixes = node && isAgentResolvedNode(node) ? [multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)] : [];
   return [renderTemplate(materia.prompt, state), ...suffixes].filter(Boolean).join("\n\n");
@@ -1068,7 +1068,7 @@ function messageContentText(content: unknown): string {
   }).join("\n");
 }
 
-function materiaPrompt(materia: MateriaConfig, state: MateriaCastState, sections: (string | undefined)[]): string {
+function materiaPrompt(materia: MateriaAgentConfig, state: MateriaCastState, sections: (string | undefined)[]): string {
   return ["<materia-instructions>", renderTemplate(materia.prompt, state), "</materia-instructions>", ...sections.filter(Boolean)].join("\n\n");
 }
 
@@ -1272,7 +1272,7 @@ function captureUsage(state: MateriaCastState, message: unknown): void {
   addUsage(state.runState.usage, usage, { node, materia, taskId: state.currentItemKey, attempt: currentTaskAttempt(state), materiaModel: state.currentMateriaModel, messageModel: extractMessageModelInfo(message) });
 }
 
-function updateToolScope(pi: ExtensionAPI, materia: MateriaConfig): void {
+function updateToolScope(pi: ExtensionAPI, materia: MateriaAgentConfig): void {
   const all = pi.getAllTools().map((tool) => tool.name);
   const readOnly = all.filter((name) => ["read", "grep", "find", "ls"].includes(name));
   if (materia.tools === "none") pi.setActiveTools([]);
@@ -1280,7 +1280,7 @@ function updateToolScope(pi: ExtensionAPI, materia: MateriaConfig): void {
   else pi.setActiveTools(all);
 }
 
-export function currentMateria(state: MateriaCastState): MateriaConfig {
+export function currentMateria(state: MateriaCastState): MateriaAgentConfig {
   const node = currentNodeOrThrow(state);
   if (!isAgentResolvedNode(node)) throw new Error(`Current Materia node "${node.id}" is a utility node and has no materia.`);
   return node.materia;
@@ -1290,11 +1290,11 @@ function nodeMateriaName(node: ResolvedMateriaNode): string | undefined {
   return isAgentResolvedNode(node) ? node.node.materia : undefined;
 }
 
-function isAgentResolvedNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { materia: MateriaConfig }> {
+function isAgentResolvedNode(node: ResolvedMateriaNode): node is ResolvedMateriaAgentNode {
   return node.node.type === "agent";
 }
 
-function isMultiTurnResolvedAgentNode(node: ResolvedMateriaNode): node is Extract<ResolvedMateriaNode, { materia: MateriaConfig }> {
+function isMultiTurnResolvedAgentNode(node: ResolvedMateriaNode): node is ResolvedMateriaAgentNode {
   return isAgentResolvedNode(node) && node.materia.multiTurn === true;
 }
 
