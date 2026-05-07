@@ -422,13 +422,15 @@ describe('Materia loadout grid editor', () => {
     };
 
     const socketWidth = cssRem('--materia-socket-width');
-    const socketStageHeight = cssRem('--materia-socket-stage-height');
+    const socketStageSize = cssRem('--materia-socket-stage-size');
     const socketMinHeight = cssRem('--materia-socket-min-height');
     const orbSize = cssRem('--materia-orb-size');
     expect(socketWidth).toBeGreaterThanOrEqual(8.25);
     expect(socketWidth / orbSize).toBeLessThanOrEqual(2);
-    expect(socketStageHeight / orbSize).toBeLessThanOrEqual(1.55);
+    expect(socketStageSize / orbSize).toBeLessThanOrEqual(1.55);
     expect(socketMinHeight / orbSize).toBeLessThanOrEqual(2.1);
+    expect(css).toMatch(/\.materia-socket-orb-stage\s*{[^}]*height: var\(--materia-socket-stage-size\);[^}]*width: var\(--materia-socket-stage-size\);/s);
+    expect(css).toMatch(/\.materia-socket-label\s*{[^}]*max-width: var\(--materia-socket-width\);/s);
     expect(css).toContain('--materia-orb-small-size: 2rem;');
     expect(css).toMatch(/\.loadout-graph-viewport\s*{[^}]*max-width: 100%;[^}]*overflow: auto;/s);
     expect(css).toMatch(/\.loadout-graph-canvas\s*{[^}]*min-width: 100%;[^}]*min-height: 100%;/s);

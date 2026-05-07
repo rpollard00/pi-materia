@@ -2,7 +2,7 @@
 
 :root {
   --materia-socket-width: 8.25rem;
-  --materia-socket-stage-height: 5.75rem;
+  --materia-socket-stage-size: 5.75rem;
   --materia-socket-min-height: 8.5rem;
   --materia-orb-size: 4.25rem;
   --materia-orb-small-size: 2rem;
@@ -311,8 +311,9 @@
 .materia-socket-orb-stage {
   position: relative;
   display: flex;
-  height: var(--materia-socket-stage-height);
-  width: var(--materia-socket-width);
+  flex: none;
+  height: var(--materia-socket-stage-size);
+  width: var(--materia-socket-stage-size);
   align-items: center;
   justify-content: center;
   overflow: hidden;

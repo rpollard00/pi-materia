@@ -161,8 +161,9 @@ interface SocketAnchorPoint {
 const socketLayoutOffsetX = 32;
 const socketLayoutOffsetY = 28;
 const socketCardWidth = 132;
-const socketStageHeight = 92;
-const socketAnchorY = socketStageHeight / 2;
+const socketStageSize = 92;
+const socketStageHeight = socketStageSize;
+const socketStageOffsetX = (socketCardWidth - socketStageSize) / 2;
 const socketLayoutUnitX = 208;
 const socketLayoutUnitY = 168;
 const socketLayoutRowGap = 240;
@@ -428,15 +429,15 @@ function lineIntersection(a: { startX: number; startY: number; endX: number; end
 }
 
 function socketCenter(socket: PositionedSocket) {
-  return { x: socket.x + socketCardWidth / 2, y: socket.y + socketStageHeight / 2 };
+  return { x: socket.x + socketStageOffsetX + socketStageSize / 2, y: socket.y + socketStageHeight / 2 };
 }
 
 function socketAnchor(socket: PositionedSocket, side: SocketAnchorSide): SocketAnchorPoint {
   const center = socketCenter(socket);
   if (side === 'top') return { x: center.x, y: socket.y, side };
   if (side === 'bottom') return { x: center.x, y: socket.y + socketStageHeight, side };
-  if (side === 'left') return { x: socket.x, y: center.y, side };
-  return { x: socket.x + socketCardWidth, y: center.y, side };
+  if (side === 'left') return { x: socket.x + socketStageOffsetX, y: center.y, side };
+  return { x: socket.x + socketStageOffsetX + socketStageSize, y: center.y, side };
 }
 
 function chooseSocketAnchors(edge: LoadoutEdge, from: PositionedSocket, to: PositionedSocket): { source: SocketAnchorPoint; target: SocketAnchorPoint } {
@@ -660,7 +661,7 @@ function loopCyclePath(sockets: PositionedSocket[]): string {
   const centers = sockets.map(socketCenter);
   if (centers.length === 1) {
     const center = centers[0];
-    const rx = socketCardWidth / 2 + loopCyclePadding;
+    const rx = socketStageSize / 2 + loopCyclePadding;
     const ry = socketStageHeight / 2 + loopCyclePadding;
     return [
       `M ${rounded(center.x - rx)} ${rounded(center.y)}`,
