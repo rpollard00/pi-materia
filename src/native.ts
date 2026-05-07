@@ -197,6 +197,10 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     const eventFailure = agentEndFailureMessage(event);
     if (!eventFailure) return;
     const error = new Error(`Pi agent turn failed before producing an assistant response for node "${state.currentNode ?? state.phase}": ${eventFailure}`);
+    if (classifyTurnFailure(error) === "transient_transport") {
+      await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error);
+      return;
+    }
     const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error);
     if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error));
     return;
@@ -575,6 +579,19 @@ async function recordUtilityInput(state: MateriaCastState, node: ResolvedMateria
   await writeFile(path.join(state.runDir, artifact), JSON.stringify(input, null, 2));
   await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:input`, artifact });
   return artifact;
+}
+
+async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<void> {
+  state.active = true;
+  state.awaitingResponse = true;
+  state.nodeState = "awaiting_agent_response";
+  state.updatedAt = Date.now();
+  state.runState.lastMessage = `Transient transport failure while awaiting ${recoveryDiagnosticLabel(state)}; preserving active Pi turn: ${errorMessage(error)}`;
+  await appendEvent(state.runState, "transient_transport_turn_failure", { warning: true, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), mode: recoveryTurnMode(state) });
+  await writeUsage(state.runState);
+  saveCastState(pi, state);
+  updateWidget(ctx, state.runState);
+  ctx.ui.notify(`pi-materia warning: ${state.runState.lastMessage}`, "warning");
 }
 
 async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<boolean> {
