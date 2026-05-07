@@ -709,9 +709,26 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
   }
 }
 
+export type TurnFailureClassification = "context_window" | "transient_transport";
+
+export function classifyTurnFailure(error: unknown): TurnFailureClassification | undefined {
+  const message = errorMessage(error);
+  if (isContextWindowFailureMessage(message)) return "context_window";
+  if (isPlainWebSocketTransportFailure(message)) return "transient_transport";
+  return undefined;
+}
+
 function classifyRecoverableTurnFailure(error: unknown): "context_window" | undefined {
-  const message = errorMessage(error).toLowerCase();
-  return /context[_-]?length[_-]?exceeded|context[_-]?window[_-]?exceeded|context (window|length|limit|overflow)|token limit|max(?:imum)? tokens|input too long|request too large|too many tokens/.test(message) ? "context_window" : undefined;
+  return classifyTurnFailure(error) === "context_window" ? "context_window" : undefined;
+}
+
+function isContextWindowFailureMessage(message: string): boolean {
+  return /context[_-]?length[_-]?exceeded|context[_-]?window[_-]?exceeded|context (window|length|limit|overflow)|token limit|max(?:imum)? tokens|input too long|request too large|too many tokens/i.test(message);
+}
+
+function isPlainWebSocketTransportFailure(message: string): boolean {
+  const normalized = message.trim().replace(/\s+/g, " ");
+  return /(?:^|:\s*)(?:error:\s*)?websocket (?:error|closed|close|connection (?:closed|error|lost)|disconnected)(?:\s+\d{3,4})?\.?$/i.test(normalized);
 }
 
 function buildSameNodeRecoveryPrompt(state: MateriaCastState): string {
