@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
@@ -139,6 +139,7 @@ interface LoopRegion {
   width: number;
   height: number;
   summary: string;
+  polygon: string;
 }
 
 type SocketAnchorSide = 'top' | 'right' | 'bottom' | 'left';
@@ -158,6 +159,11 @@ const socketLayoutUnitX = 208;
 const socketLayoutUnitY = 168;
 const socketLayoutRowGap = 240;
 const socketGraphExtent = 190;
+const loopCanvasPadding = 28;
+const loopSocketPaddingX = 64;
+const loopSocketPaddingY = 82;
+const loopHeaderHeight = 86;
+const loopHeaderMinWidth = 240;
 
 interface SocketLayoutDragState {
   socketId: string;
@@ -603,7 +609,70 @@ function serpentineAutoPosition(autoIndex: number, rowGap = socketLayoutRowGap) 
   };
 }
 
-function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>): LoopRegion[] {
+type Rect = { x1: number; y1: number; x2: number; y2: number };
+
+type Point = { x: number; y: number };
+
+function rectsToPolygon(rects: Rect[]): Point[] {
+  const xs = Array.from(new Set(rects.flatMap((rect) => [rect.x1, rect.x2]))).sort((a, b) => a - b);
+  const ys = Array.from(new Set(rects.flatMap((rect) => [rect.y1, rect.y2]))).sort((a, b) => a - b);
+  const covered = new Set<string>();
+
+  for (let yIndex = 0; yIndex < ys.length - 1; yIndex++) {
+    for (let xIndex = 0; xIndex < xs.length - 1; xIndex++) {
+      const centerX = (xs[xIndex] + xs[xIndex + 1]) / 2;
+      const centerY = (ys[yIndex] + ys[yIndex + 1]) / 2;
+      if (rects.some((rect) => centerX >= rect.x1 && centerX <= rect.x2 && centerY >= rect.y1 && centerY <= rect.y2)) {
+        covered.add(`${xIndex},${yIndex}`);
+      }
+    }
+  }
+
+  const edges: Array<[Point, Point]> = [];
+  const hasCell = (xIndex: number, yIndex: number) => covered.has(`${xIndex},${yIndex}`);
+  for (const key of covered) {
+    const [xIndex, yIndex] = key.split(',').map(Number);
+    const x1 = xs[xIndex];
+    const x2 = xs[xIndex + 1];
+    const y1 = ys[yIndex];
+    const y2 = ys[yIndex + 1];
+    if (!hasCell(xIndex, yIndex - 1)) edges.push([{ x: x1, y: y1 }, { x: x2, y: y1 }]);
+    if (!hasCell(xIndex + 1, yIndex)) edges.push([{ x: x2, y: y1 }, { x: x2, y: y2 }]);
+    if (!hasCell(xIndex, yIndex + 1)) edges.push([{ x: x2, y: y2 }, { x: x1, y: y2 }]);
+    if (!hasCell(xIndex - 1, yIndex)) edges.push([{ x: x1, y: y2 }, { x: x1, y: y1 }]);
+  }
+
+  if (edges.length === 0) return [];
+  const startIndex = edges.reduce((best, edge, index) => edge[0].y < edges[best][0].y || (edge[0].y === edges[best][0].y && edge[0].x < edges[best][0].x) ? index : best, 0);
+  const [start, firstEnd] = edges.splice(startIndex, 1)[0];
+  const points = [start, firstEnd];
+  while (edges.length > 0) {
+    const current = points[points.length - 1];
+    const nextIndex = edges.findIndex(([edgeStart]) => edgeStart.x === current.x && edgeStart.y === current.y);
+    if (nextIndex < 0) break;
+    const [, edgeEnd] = edges.splice(nextIndex, 1)[0];
+    if (edgeEnd.x === start.x && edgeEnd.y === start.y) break;
+    points.push(edgeEnd);
+  }
+
+  return points.filter((point, index, all) => {
+    const previous = all[(index + all.length - 1) % all.length];
+    const next = all[(index + 1) % all.length];
+    return !((previous.x === point.x && point.x === next.x) || (previous.y === point.y && point.y === next.y));
+  });
+}
+
+function polygonCss(points: Point[], bounds: Rect): string {
+  const width = bounds.x2 - bounds.x1 || 1;
+  const height = bounds.y2 - bounds.y1 || 1;
+  return `polygon(${points.map((point) => `${rounded((point.x - bounds.x1) / width * 100)}% ${rounded((point.y - bounds.y1) / height * 100)}%`).join(', ')})`;
+}
+
+function estimateLoopHeaderWidth(label: string, summary: string) {
+  return Math.max(loopHeaderMinWidth, Math.min(520, Math.max(label.length * 7.5, summary.length * 4.8) + 72));
+}
+
+export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>): LoopRegion[] {
   return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop]) => {
     const sockets = loop.nodes.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
     if (sockets.length === 0) return [];
@@ -613,7 +682,26 @@ function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<stri
     const maxY = Math.max(...sockets.map((socket) => socket.y + socketStageHeight));
     const consumer = loopConsumerSummary(loop);
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.nodes?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to])}` : undefined;
-    return [{ id, label: loop.label ?? id, x: minX - 34, y: minY - 48, width: Math.max(180, maxX - minX + 68), height: Math.max(150, maxY - minY + 86), summary: [consumer, exit].filter(Boolean).join(' • ') }];
+    const summary = [consumer, exit].filter(Boolean).join(' • ');
+    const label = loop.label ?? id;
+    const headerWidth = Math.min(Math.max(estimateLoopHeaderWidth(label, summary), maxX - minX + loopSocketPaddingX * 2), 620);
+    const rects: Rect[] = [
+      { x1: minX - loopSocketPaddingX, y1: minY - loopHeaderHeight, x2: minX - loopSocketPaddingX + headerWidth, y2: minY + 18 },
+      ...sockets.map((socket) => ({
+        x1: socket.x - loopSocketPaddingX,
+        y1: socket.y - loopSocketPaddingY,
+        x2: socket.x + socketCardWidth + loopSocketPaddingX,
+        y2: socket.y + socketStageHeight + loopSocketPaddingY,
+      })),
+    ];
+    const bounds = {
+      x1: Math.min(...rects.map((rect) => rect.x1)),
+      y1: Math.min(...rects.map((rect) => rect.y1)),
+      x2: Math.max(...rects.map((rect) => rect.x2)),
+      y2: Math.max(...rects.map((rect) => rect.y2)),
+    };
+    const polygon = polygonCss(rectsToPolygon(rects), bounds);
+    return [{ id, label, x: bounds.x1, y: bounds.y1, width: bounds.x2 - bounds.x1, height: bounds.y2 - bounds.y1, summary, polygon }];
   });
 }
 
@@ -630,7 +718,7 @@ function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[];
 
   const hasExplicitLayout = entries.some(([, node]) => typeof node.layout?.x === 'number' || typeof node.layout?.y === 'number');
   const autoRowGap = hasExplicitLayout ? socketLayoutUnitY + 8 : socketLayoutRowGap;
-  const sockets = entries.map(([id, node], index) => {
+  let sockets = entries.map(([id, node], index) => {
     const autoPosition = serpentineAutoPosition(autoIndexById.get(id) ?? index, autoRowGap);
     const explicitX = typeof node.layout?.x === 'number' ? layoutUnit(node.layout.x, socketLayoutUnitX) : undefined;
     const explicitY = typeof node.layout?.y === 'number' ? layoutUnit(node.layout.y, socketLayoutUnitY) : undefined;
@@ -642,8 +730,20 @@ function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[];
       y: socketLayoutOffsetY + (explicitY ?? autoPosition.y),
     };
   });
-  const width = Math.max(448, ...sockets.map((socket) => socket.x + socketGraphExtent));
-  const height = Math.max(256, ...sockets.map((socket) => socket.y + socketGraphExtent));
+
+  const positionMap = () => new Map(sockets.map((socket) => [socket.id, socket]));
+  let loopRegions = getLoopRegions(loadout, positionMap());
+  const minRenderedX = Math.min(...sockets.map((socket) => socket.x), ...loopRegions.map((loop) => loop.x), loopCanvasPadding);
+  const minRenderedY = Math.min(...sockets.map((socket) => socket.y), ...loopRegions.map((loop) => loop.y), loopCanvasPadding);
+  const shiftX = Math.max(0, loopCanvasPadding - minRenderedX);
+  const shiftY = Math.max(0, loopCanvasPadding - minRenderedY);
+  if (shiftX > 0 || shiftY > 0) {
+    sockets = sockets.map((socket) => ({ ...socket, x: socket.x + shiftX, y: socket.y + shiftY }));
+    loopRegions = getLoopRegions(loadout, positionMap());
+  }
+
+  const width = Math.max(448, ...sockets.map((socket) => socket.x + socketGraphExtent), ...loopRegions.map((loop) => loop.x + loop.width + loopCanvasPadding));
+  const height = Math.max(256, ...sockets.map((socket) => socket.y + socketGraphExtent), ...loopRegions.map((loop) => loop.y + loop.height + loopCanvasPadding));
   return { sockets, edges, width, height };
 }
 
@@ -1709,7 +1809,7 @@ export function App() {
                   key={loop.id}
                   className="loadout-loop-region"
                   data-testid={`loop-region-${loop.id}`}
-                  style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px` }}
+                  style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px`, '--loop-region-polygon': loop.polygon } as CSSProperties}
                   title={loop.summary}
                   aria-label={`${loop.label} loop: ${loop.summary}`}
                 >

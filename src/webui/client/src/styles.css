@@ -140,13 +140,32 @@
   align-items: flex-start;
   justify-content: flex-start;
   gap: 0.15rem;
-  border: 2px dashed rgb(165 180 252 / 0.7);
-  border-radius: 1.75rem;
-  background: radial-gradient(circle at 30% 0%, rgb(129 140 248 / 0.18), transparent 55%), rgb(15 23 42 / 0.18);
-  box-shadow: inset 0 0 28px rgb(99 102 241 / 0.14), 0 0 18px rgb(99 102 241 / 0.12);
   padding: 0.75rem 1rem;
   color: rgb(224 231 255);
   pointer-events: none;
+}
+
+.loadout-loop-region::before,
+.loadout-loop-region::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  clip-path: var(--loop-region-polygon);
+  pointer-events: none;
+}
+
+.loadout-loop-region::before {
+  background: radial-gradient(circle at 30% 0%, rgb(129 140 248 / 0.22), transparent 55%), rgb(15 23 42 / 0.2);
+  box-shadow: inset 0 0 28px rgb(99 102 241 / 0.16), 0 0 18px rgb(99 102 241 / 0.14);
+}
+
+.loadout-loop-region::after {
+  border: 2px dashed rgb(165 180 252 / 0.72);
+}
+
+.loadout-loop-region > * {
+  position: relative;
+  z-index: 1;
 }
 
 .loadout-loop-badge {

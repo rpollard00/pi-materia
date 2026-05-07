@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { App, routeLoadoutEdges } from './App.js';
+import { App, getLoopRegions, routeLoadoutEdges } from './App.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
@@ -211,6 +211,9 @@ describe('Materia loadout grid editor', () => {
 
     const region = await screen.findByTestId('loop-region-taskIteration');
     expect(region.textContent).toContain('Loop');
+    expect(region.style.clipPath).toBe('');
+    expect(region.getAttribute('style')).toContain('--loop-region-polygon: polygon(');
+    expect(parseFloat(region.style.top)).toBeGreaterThanOrEqual(28);
     expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
     expect(region.getAttribute('title')).toContain('Loop consumes: state.tasks as task until end');
     expect(region.getAttribute('title')).toContain('Exit: Maintain (Maintain).Satisfied → end');
@@ -386,6 +389,54 @@ describe('Materia loadout grid editor', () => {
     expect(grid.style.width).toBe('1678px');
     expect(grid.style.minWidth).toBe('');
     expect(grid.style.height).toBe('386px');
+  });
+
+  it('pads loop regions inside the canvas and leaves serpentine loop headers clear of sockets', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Planning-Consult'] as { loops?: unknown }).loops = {
+      consultLoop: {
+        label: 'Consultation loop header should not collide',
+        nodes: ['planner', 'Build'],
+        iterator: { items: 'state.questions', as: 'question' },
+      },
+    } as never;
+    config.activeLoadout = 'Planning-Consult';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const region = await screen.findByTestId('loop-region-consultLoop');
+    const planner = screen.getByTestId('socket-planner');
+    expect(parseFloat(region.style.left)).toBeGreaterThanOrEqual(28);
+    expect(parseFloat(region.style.top)).toBeGreaterThanOrEqual(28);
+    expect(parseFloat(planner.style.top) - parseFloat(region.style.top)).toBeGreaterThanOrEqual(86);
+    expect(screen.getByTestId('socket-grid').style.height).not.toBe('256px');
+  });
+
+  it('builds concave loop polygons for three-of-four corner membership', () => {
+    const loadout = {
+      nodes: {
+        a: { type: 'agent', materia: 'Build' },
+        b: { type: 'agent', materia: 'Build' },
+        c: { type: 'agent', materia: 'Build' },
+        excluded: { type: 'agent', materia: 'Build' },
+      },
+      loops: {
+        cornerLoop: { label: 'Three corners', nodes: ['a', 'b', 'c'], iterator: { items: 'state.items' } },
+      },
+    } as never;
+    const positions = new Map<string, never>([
+      ['a', { id: 'a', node: {}, index: 0, x: 100, y: 100 } as never],
+      ['b', { id: 'b', node: {}, index: 1, x: 308, y: 100 } as never],
+      ['c', { id: 'c', node: {}, index: 2, x: 100, y: 268 } as never],
+      ['excluded', { id: 'excluded', node: {}, index: 3, x: 308, y: 268 } as never],
+    ]);
+
+    const [region] = getLoopRegions(loadout, positions);
+    expect(region.polygon).toContain('polygon(');
+    expect(region.polygon.split(',').length).toBeGreaterThan(4);
+    expect(region.polygon).toContain('51.4% 100%');
+    expect(region.polygon).not.toContain('100% 100%');
   });
 
   it('routes parallel edges between the same sockets on separate visual lanes', async () => {
