@@ -883,6 +883,67 @@ describe('Materia loadout grid editor', () => {
     expect(build.style.top).toBe('28px');
   });
 
+  it('places automatic sockets in a bounded two-column serpentine layout', async () => {
+    const snakeConfig = structuredClone(testConfig) as typeof testConfig & { activeLoadout: string; loadouts: Record<string, unknown> };
+    snakeConfig.activeLoadout = 'Snake';
+    snakeConfig.loadouts.Snake = {
+      entry: 'A',
+      nodes: {
+        A: { type: 'agent', materia: 'Build', next: 'B' },
+        B: { type: 'agent', materia: 'Build', next: 'C' },
+        C: { type: 'agent', materia: 'Build', next: 'D' },
+        D: { type: 'agent', materia: 'Build', next: 'E' },
+        E: { type: 'agent', materia: 'Build', next: 'F' },
+        F: { type: 'agent', materia: 'Build' },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: snakeConfig }))));
+
+    render(<App />);
+
+    const a = await screen.findByTestId('socket-A');
+    const b = await screen.findByTestId('socket-B');
+    const c = await screen.findByTestId('socket-C');
+    const d = await screen.findByTestId('socket-D');
+    const e = await screen.findByTestId('socket-E');
+    const f = await screen.findByTestId('socket-F');
+
+    expect([a.style.left, a.style.top]).toEqual(['32px', '28px']);
+    expect([b.style.left, b.style.top]).toEqual(['240px', '28px']);
+    expect([c.style.left, c.style.top]).toEqual(['240px', '204px']);
+    expect([d.style.left, d.style.top]).toEqual(['32px', '204px']);
+    expect([e.style.left, e.style.top]).toEqual(['32px', '380px']);
+    expect([f.style.left, f.style.top]).toEqual(['240px', '380px']);
+    expect(screen.getByTestId('socket-grid').style.width).toBe('448px');
+  });
+
+  it('preserves explicit socket coordinates while ordering remaining automatic sockets by graph flow', async () => {
+    const mixedConfig = structuredClone(testConfig) as typeof testConfig & { activeLoadout: string; loadouts: Record<string, unknown> };
+    mixedConfig.activeLoadout = 'Mixed';
+    mixedConfig.loadouts.Mixed = {
+      entry: 'A',
+      nodes: {
+        A: { type: 'agent', materia: 'Build', next: 'B' },
+        B: { type: 'agent', materia: 'Build', next: 'C' },
+        C: { type: 'agent', materia: 'Build', layout: { x: 7, y: 3 }, next: 'D' },
+        D: { type: 'agent', materia: 'Build' },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: mixedConfig }))));
+
+    render(<App />);
+
+    const a = await screen.findByTestId('socket-A');
+    const b = await screen.findByTestId('socket-B');
+    const c = await screen.findByTestId('socket-C');
+    const d = await screen.findByTestId('socket-D');
+
+    expect([a.style.left, a.style.top]).toEqual(['32px', '28px']);
+    expect([b.style.left, b.style.top]).toEqual(['240px', '28px']);
+    expect([c.style.left, c.style.top]).toEqual(['1488px', '532px']);
+    expect([d.style.left, d.style.top]).toEqual(['240px', '204px']);
+  });
+
   it('switches the active loadout as a staged client-side edit', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 

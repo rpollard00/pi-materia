@@ -445,38 +445,60 @@ export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, P
   }).filter((route): route is RoutedLoadoutEdge => Boolean(route));
 }
 
+function getAutomaticSocketOrder(entries: Array<[string, PipelineNode]>, edges: LoadoutEdge[], entryId?: string) {
+  const entryIds = entries.map(([id]) => id);
+  const knownIds = new Set(entryIds);
+  const visited = new Set<string>();
+  const ordered: string[] = [];
+  const queue = entryId ? [entryId] : [];
+
+  while (queue.length > 0) {
+    const id = queue.shift() as string;
+    if (visited.has(id) || !knownIds.has(id)) continue;
+    visited.add(id);
+    ordered.push(id);
+    for (const edge of edges) {
+      if (edge.from === id && !visited.has(edge.to)) queue.push(edge.to);
+    }
+  }
+
+  for (const id of entryIds) {
+    if (!visited.has(id)) ordered.push(id);
+  }
+  return ordered;
+}
+
+function serpentineAutoPosition(autoIndex: number) {
+  const row = Math.floor(autoIndex / 2);
+  const offsetInRow = autoIndex % 2;
+  const column = row % 2 === 0 ? offsetInRow : 1 - offsetInRow;
+  return {
+    x: column * socketLayoutUnitX,
+    y: row * socketLayoutRowGap,
+  };
+}
+
 function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[]; edges: LoadoutEdge[]; width: number; height: number } {
   const nodes = loadout?.nodes ?? {};
   const entries = Object.entries(nodes);
   const edges = getLoadoutEdges(nodes);
   const entryId = loadout?.entry && nodes[loadout.entry] ? loadout.entry : entries[0]?.[0];
-  const depth = new Map<string, number>();
-  if (entryId) depth.set(entryId, 0);
-  const queue = entryId ? [entryId] : [];
-  while (queue.length > 0) {
-    const from = queue.shift() as string;
-    const nextDepth = (depth.get(from) ?? 0) + 1;
-    for (const edge of edges.filter((candidate) => candidate.from === from)) {
-      if (!depth.has(edge.to) || nextDepth < (depth.get(edge.to) ?? Infinity)) {
-        depth.set(edge.to, nextDepth);
-        queue.push(edge.to);
-      }
-    }
-  }
+  const orderedAutoIds = getAutomaticSocketOrder(entries, edges, entryId).filter((id) => {
+    const node = nodes[id];
+    return typeof node.layout?.x !== 'number' || typeof node.layout?.y !== 'number';
+  });
+  const autoIndexById = new Map(orderedAutoIds.map((id, index) => [id, index]));
 
-  const rowsByDepth = new Map<number, number>();
   const sockets = entries.map(([id, node], index) => {
-    const automaticDepth = depth.get(id) ?? Math.max(0, ...depth.values(), 0) + 1;
-    const row = rowsByDepth.get(automaticDepth) ?? 0;
-    rowsByDepth.set(automaticDepth, row + 1);
+    const autoPosition = serpentineAutoPosition(autoIndexById.get(id) ?? index);
     const explicitX = typeof node.layout?.x === 'number' ? layoutUnit(node.layout.x, socketLayoutUnitX) : undefined;
     const explicitY = typeof node.layout?.y === 'number' ? layoutUnit(node.layout.y, socketLayoutUnitY) : undefined;
     return {
       id,
       node,
       index,
-      x: socketLayoutOffsetX + (explicitX ?? automaticDepth * socketLayoutUnitX),
-      y: socketLayoutOffsetY + (explicitY ?? row * socketLayoutRowGap),
+      x: socketLayoutOffsetX + (explicitX ?? autoPosition.x),
+      y: socketLayoutOffsetY + (explicitY ?? autoPosition.y),
     };
   });
   const width = Math.max(448, ...sockets.map((socket) => socket.x + socketGraphExtent));
