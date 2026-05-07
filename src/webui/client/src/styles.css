@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+:root {
+  --materia-socket-width: 10rem;
+  --materia-socket-stage-height: 9.25rem;
+  --materia-socket-min-height: 11.5rem;
+  --materia-orb-size: 4.25rem;
+  --materia-orb-small-size: 2rem;
+  --materia-socket-stage-padding: 1.2rem;
+}
+
 .fantasy-panel {
   border-radius: 1.5rem;
   border: 1px solid rgb(207 250 254 / 0.16);
@@ -165,7 +174,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   border: 0;
   background: transparent;
   color: inherit;
@@ -180,8 +189,8 @@
 .materia-socket-orb-stage {
   position: relative;
   display: flex;
-  height: 11.5rem;
-  width: 12rem;
+  height: var(--materia-socket-stage-height);
+  width: var(--materia-socket-width);
   align-items: center;
   justify-content: center;
   overflow: hidden;
@@ -190,8 +199,8 @@
   background:
     radial-gradient(circle at 50% 42%, rgb(14 116 144 / 0.28), rgb(15 23 42 / 0.96) 62%, rgb(2 6 23)),
     conic-gradient(from 0deg, rgb(103 232 249 / 0.13), transparent, rgb(216 180 254 / 0.12), transparent, rgb(103 232 249 / 0.13));
-  padding: 1.5rem;
-  box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), inset 0 0 4px rgb(255 255 255 / 0.16), 0 0 26px rgb(34 211 238 / 0.12);
+  padding: var(--materia-socket-stage-padding);
+  box-shadow: inset 0 0 28px rgb(8 47 73 / 0.95), inset 0 0 4px rgb(255 255 255 / 0.16), 0 0 22px rgb(34 211 238 / 0.12);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
@@ -209,7 +218,7 @@
 .materia-socket-orb-stage::before {
   content: '';
   position: absolute;
-  inset: 1rem;
+  inset: 0.8rem;
   border-radius: 9999px;
   border: 1px solid rgb(255 255 255 / 0.12);
   box-shadow: inset 0 0 34px rgb(0 0 0 / 0.82), inset 0 0 10px rgb(34 211 238 / 0.13);
@@ -218,7 +227,7 @@
 .materia-socket-orb-stage::after {
   content: '';
   position: absolute;
-  inset: 2.2rem;
+  inset: 1.75rem;
   border-radius: 9999px;
   border: 1px dashed rgb(165 243 252 / 0.18);
 }
@@ -226,7 +235,7 @@
 .materia-socket-label {
   position: relative;
   z-index: 10;
-  max-width: 12rem;
+  max-width: var(--materia-socket-width);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -242,8 +251,8 @@
 .graph-materia-socket {
   position: absolute;
   z-index: 2;
-  min-height: 14.25rem;
-  width: 12rem;
+  min-height: var(--materia-socket-min-height);
+  width: var(--materia-socket-width);
   cursor: grab;
   touch-action: none;
 }
@@ -272,13 +281,13 @@
 }
 
 .materia-orb {
-  height: 5.25rem;
-  width: 5.25rem;
+  height: var(--materia-orb-size);
+  width: var(--materia-orb-size);
 }
 
 .materia-orb-small {
-  height: 2.5rem;
-  width: 2.5rem;
+  height: var(--materia-orb-small-size);
+  width: var(--materia-orb-small-size);
   flex: none;
 }
 
@@ -424,15 +433,15 @@
 
 .palette-orb {
   display: flex;
-  min-height: 5.25rem;
+  min-height: 4.25rem;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.55rem;
+  gap: 0.45rem;
   border-radius: 1rem;
   border: 1px solid rgb(255 255 255 / 0.08);
   background: rgb(15 23 42 / 0.74);
-  padding: 0.75rem;
+  padding: 0.65rem;
   color: rgb(226 232 240);
   font-size: 0.78rem;
   transition: 160ms ease;

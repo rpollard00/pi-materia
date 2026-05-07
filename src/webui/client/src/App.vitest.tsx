@@ -120,7 +120,7 @@ describe('Materia loadout grid editor', () => {
     expect(parseFloat(build.style.left)).toBeLessThan(parseFloat(evaluate.style.left));
     expect(parseFloat(evaluate.style.left)).toBeLessThan(parseFloat(maintain.style.left));
     expect(planner.style.left).toBe('32px');
-    expect(build.style.left).toBe('292px');
+    expect(build.style.left).toBe('240px');
     expect(screen.getAllByText('flow').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Satisfied')).toBeTruthy();
     expect(screen.getByText('Not Satisfied')).toBeTruthy();
@@ -841,8 +841,8 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedStart = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes.Start;
-    expect(savedStart.layout.x).toBeCloseTo(8 / 260);
-    expect(savedStart.layout.y).toBeCloseTo(7 / 210);
+    expect(savedStart.layout.x).toBeCloseTo(8 / 208);
+    expect(savedStart.layout.y).toBeCloseTo(7 / 168);
     expect(savedStart.edges).toEqual([]);
   });
 
@@ -857,7 +857,7 @@ describe('Materia loadout grid editor', () => {
 
     expect(planner.style.left).toBe('32px');
     expect(planner.style.top).toBe('28px');
-    expect(build.style.left).toBe('292px');
+    expect(build.style.left).toBe('240px');
     expect(build.style.top).toBe('28px');
   });
 

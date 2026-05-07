@@ -127,9 +127,15 @@ interface RoutedLoadoutEdge {
   routeClass: 'forward' | 'backward' | 'loop';
 }
 
-const socketCardWidth = 196;
-const socketAnchorY = 92;
-const socketLoopHeight = 118;
+const socketLayoutOffsetX = 32;
+const socketLayoutOffsetY = 28;
+const socketCardWidth = 160;
+const socketAnchorY = 74;
+const socketLoopHeight = 94;
+const socketLayoutUnitX = 208;
+const socketLayoutUnitY = 168;
+const socketLayoutRowGap = 176;
+const socketGraphExtent = 190;
 
 interface SocketLayoutDragState {
   socketId: string;
@@ -463,18 +469,18 @@ function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[];
     const automaticDepth = depth.get(id) ?? Math.max(0, ...depth.values(), 0) + 1;
     const row = rowsByDepth.get(automaticDepth) ?? 0;
     rowsByDepth.set(automaticDepth, row + 1);
-    const explicitX = typeof node.layout?.x === 'number' ? layoutUnit(node.layout.x, 260) : undefined;
-    const explicitY = typeof node.layout?.y === 'number' ? layoutUnit(node.layout.y, 210) : undefined;
+    const explicitX = typeof node.layout?.x === 'number' ? layoutUnit(node.layout.x, socketLayoutUnitX) : undefined;
+    const explicitY = typeof node.layout?.y === 'number' ? layoutUnit(node.layout.y, socketLayoutUnitY) : undefined;
     return {
       id,
       node,
       index,
-      x: 32 + (explicitX ?? automaticDepth * 260),
-      y: 28 + (explicitY ?? row * 220),
+      x: socketLayoutOffsetX + (explicitX ?? automaticDepth * socketLayoutUnitX),
+      y: socketLayoutOffsetY + (explicitY ?? row * socketLayoutRowGap),
     };
   });
-  const width = Math.max(560, ...sockets.map((socket) => socket.x + 230));
-  const height = Math.max(320, ...sockets.map((socket) => socket.y + 230));
+  const width = Math.max(448, ...sockets.map((socket) => socket.x + socketGraphExtent));
+  const height = Math.max(256, ...sockets.map((socket) => socket.y + socketGraphExtent));
   return { sockets, edges, width, height };
 }
 
@@ -902,8 +908,8 @@ export function App() {
     suppressSocketClickRef.current = true;
     const finalX = Math.max(0, current.originX + deltaX);
     const finalY = Math.max(0, current.originY + deltaY);
-    const layoutX = layoutValueForPosition(finalX, 32, 260);
-    const layoutY = layoutValueForPosition(finalY, 28, 210);
+    const layoutX = layoutValueForPosition(finalX, socketLayoutOffsetX, socketLayoutUnitX);
+    const layoutY = layoutValueForPosition(finalY, socketLayoutOffsetY, socketLayoutUnitY);
     updateDraft((config) => {
       const node = buildLoadouts(config)[activeLoadoutName]?.nodes?.[socketId];
       if (!node) return;
