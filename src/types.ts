@@ -36,6 +36,24 @@ export interface MateriaProfileConfig {
     host?: string;
   };
   defaultSaveTarget?: "user" | "project";
+  roleGeneration?: MateriaRoleGenerationProfileConfig;
+}
+
+export interface MateriaRoleGenerationProfileConfig {
+  /** Whether WebUI materia role-generation helpers are available. Defaults to true. */
+  enabled?: boolean;
+  /** Optional model override for isolated role-generation sessions. Defaults to Pi's active model. */
+  model?: string;
+  /** Optional provider override for isolated role-generation sessions when model is not provider-qualified. */
+  provider?: string;
+  /** Optional API override/metadata for provider-specific isolated role-generation sessions. */
+  api?: string;
+  /** Optional thinking override for isolated role-generation sessions. Defaults to Pi's active thinking setting. */
+  thinking?: string;
+  /** Extra operator instructions appended to the role-generation system prompt. */
+  extraInstructions?: string;
+  /** Whether future generation may include limited read-only project context. Defaults to false. */
+  useReadOnlyProjectContext?: boolean;
 }
 
 export interface MateriaBudgetConfig {

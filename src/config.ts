@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
 import { assertValidPipelineGraph } from "./graphValidation.js";
-import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
+import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
@@ -45,10 +45,16 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
 
 export async function loadProfileConfig(): Promise<MateriaProfileConfig> {
   await ensureUserProfileConfig();
+  const file = getUserProfileConfigPath();
   try {
-    const parsed = JSON.parse(await readFile(getUserProfileConfigPath(), "utf8")) as MateriaProfileConfig;
-    return isPlainObject(parsed) ? parsed : defaultProfileConfig();
-  } catch {
+    const parsed = JSON.parse(await readFile(file, "utf8"));
+    if (!isPlainObject(parsed)) {
+      warnInvalidProfileConfig(file, "Expected a JSON object; using profile defaults.");
+      return defaultProfileConfig();
+    }
+    return normalizeProfileConfig(parsed, file);
+  } catch (error) {
+    warnInvalidProfileConfig(file, `Could not read profile config; using profile defaults: ${error instanceof Error ? error.message : String(error)}`);
     return defaultProfileConfig();
   }
 }
@@ -125,7 +131,73 @@ function getWritableConfigPath(cwd: string, configuredPath?: string, target: Mat
 }
 
 function defaultProfileConfig(): MateriaProfileConfig {
-  return { webui: { autoOpenBrowser: false }, defaultSaveTarget: "user" };
+  return { webui: { autoOpenBrowser: false }, defaultSaveTarget: "user", roleGeneration: defaultRoleGenerationProfileConfig() };
+}
+
+function defaultRoleGenerationProfileConfig(): MateriaRoleGenerationProfileConfig {
+  return { enabled: true, useReadOnlyProjectContext: false };
+}
+
+function normalizeProfileConfig(parsed: Record<string, unknown>, file: string): MateriaProfileConfig {
+  const defaults = defaultProfileConfig();
+  const profile: MateriaProfileConfig = { ...defaults };
+
+  if (parsed.webui !== undefined) {
+    if (isPlainObject(parsed.webui)) profile.webui = parsed.webui as MateriaProfileConfig["webui"];
+    else warnInvalidProfileConfig(file, "Ignoring invalid webui profile config. Expected an object.");
+  }
+
+  if (parsed.defaultSaveTarget !== undefined) {
+    if (parsed.defaultSaveTarget === "user" || parsed.defaultSaveTarget === "project") profile.defaultSaveTarget = parsed.defaultSaveTarget;
+    else warnInvalidProfileConfig(file, 'Ignoring invalid defaultSaveTarget. Expected "user" or "project".');
+  }
+
+  profile.roleGeneration = normalizeRoleGenerationProfileConfig(parsed.roleGeneration, file);
+  return profile;
+}
+
+function normalizeRoleGenerationProfileConfig(value: unknown, file: string): MateriaRoleGenerationProfileConfig {
+  const config = defaultRoleGenerationProfileConfig();
+  if (value === undefined) return config;
+  if (!isPlainObject(value)) {
+    warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration profile config. Expected an object.");
+    return config;
+  }
+
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled === "boolean") config.enabled = value.enabled;
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.enabled. Expected a boolean.");
+  }
+  if (value.model !== undefined) {
+    if (typeof value.model === "string" && value.model.trim()) config.model = value.model.trim();
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.model. Expected a non-empty string.");
+  }
+  if (value.provider !== undefined) {
+    if (typeof value.provider === "string" && value.provider.trim()) config.provider = value.provider.trim();
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.provider. Expected a non-empty string.");
+  }
+  if (value.api !== undefined) {
+    if (typeof value.api === "string" && value.api.trim()) config.api = value.api.trim();
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.api. Expected a non-empty string.");
+  }
+  if (value.thinking !== undefined) {
+    if (typeof value.thinking === "string" && value.thinking.trim()) config.thinking = value.thinking.trim();
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.thinking. Expected a non-empty string.");
+  }
+  if (value.extraInstructions !== undefined) {
+    if (typeof value.extraInstructions === "string") config.extraInstructions = value.extraInstructions.trim() || undefined;
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.extraInstructions. Expected a string.");
+  }
+  if (value.useReadOnlyProjectContext !== undefined) {
+    if (typeof value.useReadOnlyProjectContext === "boolean") config.useReadOnlyProjectContext = value.useReadOnlyProjectContext;
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.useReadOnlyProjectContext. Expected a boolean.");
+  }
+
+  return config;
+}
+
+function warnInvalidProfileConfig(file: string, message: string): void {
+  console.warn(`[pi-materia] Profile config ${file}: ${message}`);
 }
 
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {

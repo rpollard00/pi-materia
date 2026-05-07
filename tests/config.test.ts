@@ -22,8 +22,95 @@ describe("layered config loading and persistence", () => {
       const raw = JSON.parse(await readFile(getUserProfileConfigPath(), "utf8"));
 
       expect(profile.defaultSaveTarget).toBe("user");
+      expect(profile.roleGeneration).toEqual({ enabled: true, useReadOnlyProjectContext: false });
       expect(raw.webui.autoOpenBrowser).toBe(false);
+      expect(raw.roleGeneration.enabled).toBe(true);
     } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("fills safe role-generation defaults for legacy profiles without the section", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        webui: { preferredPort: 4321 },
+        defaultSaveTarget: "project",
+      }), "utf8");
+
+      const profile = await loadProfileConfig();
+
+      expect(profile.webui?.preferredPort).toBe(4321);
+      expect(profile.defaultSaveTarget).toBe("project");
+      expect(profile.roleGeneration).toEqual({ enabled: true, useReadOnlyProjectContext: false });
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("normalizes role-generation profile config and warns for invalid fields", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    const previousWarn = console.warn;
+    const warnings: string[] = [];
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    console.warn = (message?: unknown) => warnings.push(String(message));
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        defaultSaveTarget: "project",
+        roleGeneration: {
+          enabled: false,
+          model: "  role-model  ",
+          provider: "  provider  ",
+          api: "  openai-compatible  ",
+          thinking: "  medium  ",
+          extraInstructions: "  Prefer terse operational bullets.  ",
+          useReadOnlyProjectContext: true,
+          ignoredFutureField: 123,
+        },
+      }), "utf8");
+
+      const profile = await loadProfileConfig();
+
+      expect(profile.defaultSaveTarget).toBe("project");
+      expect(profile.roleGeneration).toEqual({
+        enabled: false,
+        model: "role-model",
+        provider: "provider",
+        api: "openai-compatible",
+        thinking: "medium",
+        extraInstructions: "Prefer terse operational bullets.",
+        useReadOnlyProjectContext: true,
+      });
+      expect(warnings).toEqual([]);
+
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        roleGeneration: {
+          enabled: "yes",
+          model: "",
+          provider: "",
+          api: false,
+          thinking: 42,
+          extraInstructions: ["nope"],
+          useReadOnlyProjectContext: "sometimes",
+        },
+      }), "utf8");
+
+      const fallback = await loadProfileConfig();
+
+      expect(fallback.roleGeneration).toEqual({ enabled: true, useReadOnlyProjectContext: false });
+      expect(warnings.join("\n")).toContain("roleGeneration.enabled");
+      expect(warnings.join("\n")).toContain("roleGeneration.provider");
+      expect(warnings.join("\n")).toContain("roleGeneration.api");
+      expect(warnings.join("\n")).toContain("roleGeneration.useReadOnlyProjectContext");
+    } finally {
+      console.warn = previousWarn;
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
     }

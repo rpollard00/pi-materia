@@ -89,9 +89,28 @@ pi-materia layers config from lowest to highest precedence:
 4. `MATERIA_CONFIG=/path/to/config.json`
 5. `--materia-config /path/to/config.json`
 
-The user profile directory and `~/.config/pi/pi-materia/config.json` are created on demand for WebUI/profile preferences such as `webui.autoOpenBrowser`, `webui.preferredPort`, and `defaultSaveTarget`.
+The user profile directory and `~/.config/pi/pi-materia/config.json` are created on demand for WebUI/profile preferences such as `webui.autoOpenBrowser`, `webui.preferredPort`, and `defaultSaveTarget`. Set `PI_MATERIA_PROFILE_DIR` to override the profile directory. Optional `roleGeneration` preferences are normalized safely before use: `enabled` (default `true`), `model`, `provider`, `api`, `thinking`, `extraInstructions`, and `useReadOnlyProjectContext` (default `false`). Invalid role-generation fields are ignored with a warning. Omit `model`/`provider`/`api`/`thinking` to use Pi's active generation settings; set them to make isolated Materia role prompt generation use a specific profile override.
 
-Example:
+Example profile config (`~/.config/pi/pi-materia/config.json`):
+
+```json
+{
+  "webui": { "autoOpenBrowser": false, "preferredPort": 4317 },
+  "defaultSaveTarget": "user",
+  "roleGeneration": {
+    "enabled": true,
+    "provider": "openai-codex",
+    "model": "gpt-5.5",
+    "thinking": "medium",
+    "extraInstructions": "Prefer concise operational instructions for generated Materia roles.",
+    "useReadOnlyProjectContext": false
+  }
+}
+```
+
+You can also use a provider-qualified model string, such as `"model": "openai-codex/gpt-5.5"`; in that case `provider` is optional.
+
+CLI config example:
 
 ```bash
 pi -e /path/to/pi-materia/src/index.ts --materia-config ./my-loadout.json
