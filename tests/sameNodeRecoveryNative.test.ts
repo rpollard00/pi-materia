@@ -159,6 +159,41 @@ describe("native same-node recovery", () => {
     expect(events.filter((event) => event.type === "cast_end")).toHaveLength(0);
   });
 
+  test("plain WebSocket assistant error entries are ignored and later success completes the same node", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast websocket assistant blip");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    const transientEntry = harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "WebSocket error" });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.nodeState).toBe("awaiting_agent_response");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.lastProcessedEntryId).toBe(transientEntry.id);
+
+    const successEntry = harness.appendAssistantMessage("done after websocket blip");
+    await harness.emit("agent_end", { messages: [] });
+
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.awaitingResponse).toBe(false);
+    expect(latestState.nodeState).toBe("complete");
+    expect(latestState.lastProcessedEntryId).toBe(successEntry.id);
+    expect(latestState.lastAssistantText).toBe("done after websocket blip");
+    expect(latestState.failedReason).toBeUndefined();
+
+    const events = await readEvents(harness);
+    expect(events.some((event) => event.type === "transient_transport_turn_failure" && event.data.entryId === transientEntry.id)).toBe(true);
+    expect(events.some((event) => event.type === "node_complete" && event.data.entryId === successEntry.id && event.data.node === "work")).toBe(true);
+    expect(events.some((event) => event.type === "cast_end" && event.data.ok === true && event.data.entryId === successEntry.id)).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
+  });
+
   test("non-recoverable assistant errors fail without retry", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast fail me");

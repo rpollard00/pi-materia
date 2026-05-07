@@ -215,6 +215,10 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 
   if (agentError) {
     const error = new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
+    if (classifyTurnFailure(error) === "transient_transport") {
+      await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error, { entryId: latest.entry.id });
+      return;
+    }
     const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id });
     if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error), latest.entry.id);
     return;
