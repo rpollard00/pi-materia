@@ -212,7 +212,7 @@ describe('Materia loadout grid editor', () => {
     expect(saved.loops.taskIteration.exit).toEqual({ when: 'not_satisfied', to: 'Maintain' });
   });
 
-  it('creates and saves an explicit task loop around Build, Auto-Eval, and Maintain', async () => {
+  it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -223,18 +223,77 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByTestId('create-task-loop'));
-    expect(await screen.findByTestId('loop-region-taskIteration')).toBeTruthy();
+    const createLoop = await screen.findByTestId('create-task-loop');
+    expect(createLoop).toHaveProperty('disabled', true);
+    fireEvent.click(await screen.findByTestId('socket-Build'), { shiftKey: true });
+    fireEvent.click(screen.getByTestId('socket-Auto-Eval'), { shiftKey: true });
+    fireEvent.click(screen.getByTestId('socket-Maintain'), { shiftKey: true });
+    expect(createLoop).toHaveProperty('disabled', false);
+    expect(screen.getByTestId('socket-Build').classList.contains('materia-socket-loop-selected')).toBe(true);
+
+    fireEvent.click(createLoop);
+    expect(await screen.findByTestId('loop-region-loopSelection')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    expect(saved.loops.taskIteration).toEqual({
-      label: 'Build → Eval → Maintain until all tasks complete',
+    expect(saved.loops.loopSelection).toEqual({
+      label: 'Loop: Build → Auto-Eval → Maintain',
       nodes: ['Build', 'Auto-Eval', 'Maintain'],
       consumes: { from: 'planner', output: 'tasks' },
       exit: { when: 'satisfied', to: 'end' },
     });
+  });
+
+  it('creates a loop from selected sockets on a fresh non-Build layout', async () => {
+    const config = {
+      activeLoadout: 'Fresh Loop',
+      materia: {
+        planner: { tools: 'none', prompt: 'Plan', generates: { output: 'items', listType: 'array', itemType: 'task' } },
+        worker: { tools: 'coding', prompt: 'Work' },
+        checker: { tools: 'readOnly', prompt: 'Check' },
+      },
+      loadouts: {
+        'Fresh Loop': {
+          entry: 'PlanSocket',
+          nodes: {
+            PlanSocket: { type: 'agent', materia: 'planner', assign: { items: '$.items' }, edges: [{ when: 'always', to: 'DoWork' }], layout: { x: 0, y: 0 } },
+            DoWork: { type: 'agent', materia: 'worker', edges: [{ when: 'always', to: 'CheckWork' }], layout: { x: 1, y: 0 } },
+            CheckWork: { type: 'agent', materia: 'checker', edges: [{ when: 'not_satisfied', to: 'DoWork' }], layout: { x: 2, y: 0 } },
+          },
+        },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-DoWork'), { shiftKey: true });
+    fireEvent.click(screen.getByTestId('socket-CheckWork'), { shiftKey: true });
+    fireEvent.click(screen.getByTestId('create-task-loop'));
+
+    const region = await screen.findByTestId('loop-region-loopSelection');
+    expect(region.getAttribute('title')).toContain('Loop consumes: PlanSocket.items');
+  });
+
+  it('selects loop sockets by dragging a region box before creating a loop', async () => {
+    const config = structuredClone(testConfig);
+    delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const grid = await screen.findByTestId('socket-grid');
+    fireEvent.pointerDown(grid, { button: 0, pointerId: 1, clientX: 230, clientY: 0 });
+    fireEvent.pointerMove(grid, { pointerId: 1, clientX: 760, clientY: 120 });
+    expect(screen.getByTestId('loop-selection-rectangle')).toBeTruthy();
+    fireEvent.pointerUp(grid, { pointerId: 1, clientX: 760, clientY: 120 });
+
+    expect(screen.getByTestId('socket-Build').classList.contains('materia-socket-loop-selected')).toBe(true);
+    expect(screen.getByTestId('socket-Auto-Eval').classList.contains('materia-socket-loop-selected')).toBe(true);
+    expect(screen.getByTestId('socket-Maintain').classList.contains('materia-socket-loop-selected')).toBe(true);
+    fireEvent.click(screen.getByTestId('create-task-loop'));
+    expect(await screen.findByTestId('loop-region-loopSelection')).toBeTruthy();
   });
 
   it('keeps socket shells only modestly larger than their materia orb while preserving overflow containment', () => {

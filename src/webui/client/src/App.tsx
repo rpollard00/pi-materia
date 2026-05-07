@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
@@ -167,6 +167,14 @@ interface SocketLayoutDragState {
   currentX: number;
   currentY: number;
   moved: boolean;
+}
+
+interface SocketRegionSelectionDragState {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
 }
 
 type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor';
@@ -346,6 +354,10 @@ function layoutValueForPosition(position: number, offset: number, unit: number) 
 
 function rounded(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function rectanglesIntersect(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) {
+  return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y;
 }
 
 function edgeOrderKey(edge: LoadoutEdge) {
@@ -765,6 +777,8 @@ export function App() {
   const [edgeCondition, setEdgeCondition] = useState<MateriaEdgeCondition>('satisfied');
   const [edgeMutationError, setEdgeMutationError] = useState('');
   const [socketLayoutDrag, setSocketLayoutDrag] = useState<SocketLayoutDragState | undefined>();
+  const [selectedLoopSocketIds, setSelectedLoopSocketIds] = useState<string[]>([]);
+  const [socketRegionSelectionDrag, setSocketRegionSelectionDrag] = useState<SocketRegionSelectionDragState | undefined>();
   const suppressSocketClickRef = useRef(false);
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
@@ -830,6 +844,15 @@ export function App() {
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
   const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout, socketPositions]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
+  const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
+  const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
+  const loopSelectionRectangle = socketRegionSelectionDrag ? {
+    x: Math.min(socketRegionSelectionDrag.startX, socketRegionSelectionDrag.currentX),
+    y: Math.min(socketRegionSelectionDrag.startY, socketRegionSelectionDrag.currentY),
+    width: Math.abs(socketRegionSelectionDrag.currentX - socketRegionSelectionDrag.startX),
+    height: Math.abs(socketRegionSelectionDrag.currentY - socketRegionSelectionDrag.startY),
+  } : undefined;
+  const createLoopDisabled = selectedLoopSocketIds.length === 0;
   const materia = draftConfig?.materia ?? {};
   const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
@@ -882,6 +905,7 @@ export function App() {
     setSelectedMateriaId(undefined);
     setSocketActionId(undefined);
     setSocketActionMode('actions');
+    setSelectedLoopSocketIds([]);
     setStatus(`Active loadout staged: ${name}`);
   }
 
@@ -1010,9 +1034,19 @@ export function App() {
     setStatus(`Created a connected empty socket after ${afterSocketId}.`);
   }
 
-  function handleSocketClick(socketId: string) {
+  function toggleLoopSocketSelection(socketId: string) {
+    setSelectedLoopSocketIds((current) => current.includes(socketId) ? current.filter((id) => id !== socketId) : [...current, socketId]);
+  }
+
+  function handleSocketClick(socketId: string, event: ReactMouseEvent<HTMLButtonElement>) {
     if (suppressSocketClickRef.current) {
       suppressSocketClickRef.current = false;
+      return;
+    }
+    if (event.shiftKey) {
+      toggleLoopSocketSelection(socketId);
+      setSocketActionId(undefined);
+      setSocketPropertyError('');
       return;
     }
     if (selectedMateriaId) {
@@ -1025,10 +1059,11 @@ export function App() {
   }
 
   function beginSocketLayoutDrag(socket: PositionedSocket, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.shiftKey) return;
     if (event.button !== 0 || selectedMateriaId) return;
     const target = event.target as HTMLElement;
     if (target.closest('[draggable="true"]')) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     setSocketLayoutDrag({
       socketId: socket.id,
       pointerId: event.pointerId,
@@ -1060,7 +1095,7 @@ export function App() {
   function finishSocketLayoutDrag(socketId: string, event: ReactPointerEvent<HTMLButtonElement>) {
     const current = socketLayoutDrag;
     if (!current || current.pointerId !== event.pointerId || current.socketId !== socketId) return;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
     setSocketLayoutDrag(undefined);
     const deltaX = event.clientX - current.startClientX;
     const deltaY = event.clientY - current.startClientY;
@@ -1093,6 +1128,50 @@ export function App() {
   function cancelSocketLayoutDrag(event: ReactPointerEvent<HTMLButtonElement>) {
     if (socketLayoutDrag?.pointerId !== event.pointerId) return;
     setSocketLayoutDrag(undefined);
+  }
+
+  function canvasPoint(event: ReactPointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  function beginSocketRegionSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || selectedMateriaId || event.target !== event.currentTarget) return;
+    const point = canvasPoint(event);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setSocketRegionSelectionDrag({ pointerId: event.pointerId, startX: point.x, startY: point.y, currentX: point.x, currentY: point.y });
+    setSocketActionId(undefined);
+  }
+
+  function moveSocketRegionSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    const point = canvasPoint(event);
+    const pointerId = event.pointerId;
+    setSocketRegionSelectionDrag((current) => {
+      if (!current || current.pointerId !== pointerId) return current;
+      return { ...current, currentX: point.x, currentY: point.y };
+    });
+  }
+
+  function finishSocketRegionSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    const current = socketRegionSelectionDrag;
+    if (!current || current.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const point = canvasPoint(event);
+    const rect = {
+      x: Math.min(current.startX, point.x),
+      y: Math.min(current.startY, point.y),
+      width: Math.abs(point.x - current.startX),
+      height: Math.abs(point.y - current.startY),
+    };
+    const selected = loadoutGraph.sockets.filter((socket) => rectanglesIntersect(rect, { x: socket.x, y: socket.y, width: socketCardWidth, height: socketStageHeight })).map((socket) => socket.id);
+    setSocketRegionSelectionDrag(undefined);
+    setSelectedLoopSocketIds(selected);
+    if (selected.length > 0) setStatus(`Selected loop sockets: ${selected.join(', ')}.`);
+  }
+
+  function cancelSocketRegionSelection(event: ReactPointerEvent<HTMLDivElement>) {
+    if (socketRegionSelectionDrag?.pointerId !== event.pointerId) return;
+    setSocketRegionSelectionDrag(undefined);
   }
 
   function replaceMateriaFromModal(socketId: string, materiaId: string) {
@@ -1142,39 +1221,50 @@ export function App() {
   }
 
   function createTaskIteratorLoop() {
-    const required = ['Build', 'Auto-Eval', 'Maintain'];
-    const missing = required.filter((id) => !activeLoadout?.nodes?.[id]);
-    if (missing.length > 0) {
-      setStatus(`Cannot create task loop; missing sockets: ${missing.join(', ')}.`);
+    if (!activeLoadout?.nodes || selectedLoopSockets.length === 0) {
+      setStatus('Cannot create loop; select the cycle sockets first with shift-click or a drag box.');
       return;
     }
-    const generatorEntry = Object.entries(activeLoadout?.nodes ?? {}).find(([, node]) => {
-      const referenced = extractMateriaReference(node);
-      return Boolean(referenced && materia[referenced.materia]?.generates);
+    const selectedIds = selectedLoopSockets.map((socket) => socket.id);
+    const selected = new Set(selectedIds);
+    const generatorInputs = loadoutGraph.edges.flatMap((edge) => {
+      if (selected.has(edge.from) || !selected.has(edge.to)) return [];
+      const referenced = extractMateriaReference(activeLoadout.nodes?.[edge.from]);
+      const generator = referenced ? materia[referenced.materia]?.generates : undefined;
+      return generator ? [{ from: edge.from, output: generator.output }] : [];
     });
-    const generatorRef = generatorEntry ? extractMateriaReference(generatorEntry[1]) : undefined;
-    const generator = generatorRef ? materia[generatorRef.materia]?.generates : undefined;
-    if (!generatorEntry || !generator) {
-      setStatus('Cannot create task loop; no generator materia with generates metadata exists in the active loadout.');
+    const uniqueGeneratorInputs = Array.from(new Map(generatorInputs.map((input) => [`${input.from}\u0000${input.output}`, input])).values());
+    if (uniqueGeneratorInputs.length !== 1) {
+      setStatus(`Cannot create loop; selected sockets need exactly one inbound generator edge, found ${uniqueGeneratorInputs.length}.`);
       return;
     }
+    const generator = uniqueGeneratorInputs[0];
+    const baseId = 'loopSelection';
+    const existingLoops = activeLoadout.loops ?? {};
+    let loopId = baseId;
+    let suffix = 2;
+    while (existingLoops[loopId]) loopId = `${baseId}${suffix++}`;
+    const label = `Loop: ${selectedIds.join(' → ')}`;
     const created = commitGraphMutation(
-      'Staged Build → Eval → Maintain task loop.',
+      `Staged loop around ${selectedIds.join(', ')}.`,
       (loadout) => {
         loadout.loops = {
           ...(loadout.loops ?? {}),
-          taskIteration: {
-            label: 'Build → Eval → Maintain until all tasks complete',
-            nodes: required,
-            consumes: { from: generatorEntry[0], output: generator.output },
+          [loopId]: {
+            label,
+            nodes: selectedIds,
+            consumes: { from: generator.from, output: generator.output },
             exit: { when: 'satisfied', to: 'end' },
           },
         };
       },
-      `Staged task loop around Build, Auto-Eval, and Maintain consuming ${generatorEntry[0]}.${generator.output}.`,
-      (message) => `Cannot create task loop: ${message}`,
+      `Staged loop around ${selectedIds.join(', ')} consuming ${generator.from}.${generator.output}.`,
+      (message) => `Cannot create loop: ${message}`,
     );
-    if (created) setSocketActionId(undefined);
+    if (created) {
+      setSocketActionId(undefined);
+      setSelectedLoopSocketIds([]);
+    }
   }
 
   function updateLoopExit(loopId: string, patch: Partial<{ when: MateriaEdgeCondition; to: string }>) {
@@ -1546,7 +1636,7 @@ export function App() {
                 <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop}>Create Task Loop</button>
+                <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.join(', ')}`}>Create Loop</button>
               <label className="text-sm text-slate-300">Edit name
                 <input className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" value={activeLoadoutName ?? ''} onChange={(event) => renameActiveLoadout(event.target.value)} />
               </label>
@@ -1554,7 +1644,15 @@ export function App() {
             </div>
 
             <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onDragOver={(event) => event.preventDefault()} onDrop={handleGraphDrop}>
-              <div className="loadout-graph-canvas" data-testid="socket-grid" style={{ width: `${loadoutGraph.width}px`, height: `${loadoutGraph.height}px` }}>
+              <div
+                className="loadout-graph-canvas"
+                data-testid="socket-grid"
+                style={{ width: `${loadoutGraph.width}px`, height: `${loadoutGraph.height}px` }}
+                onPointerDown={beginSocketRegionSelection}
+                onPointerMove={moveSocketRegionSelection}
+                onPointerUp={finishSocketRegionSelection}
+                onPointerCancel={cancelSocketRegionSelection}
+              >
               <svg className="loadout-edge-layer" width={loadoutGraph.width} height={loadoutGraph.height} aria-label="Loadout edges">
                 <defs>
                   <marker id="materia-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
@@ -1597,6 +1695,13 @@ export function App() {
                   <span className="loadout-loop-summary">{loop.summary}</span>
                 </div>
               ))}
+              {loopSelectionRectangle && (
+                <div
+                  className="loadout-loop-selection-rectangle"
+                  data-testid="loop-selection-rectangle"
+                  style={{ left: `${loopSelectionRectangle.x}px`, top: `${loopSelectionRectangle.y}px`, width: `${loopSelectionRectangle.width}px`, height: `${loopSelectionRectangle.height}px` }}
+                />
+              )}
               {loadoutGraph.sockets.map((socket) => {
                 const { id, node, index, x, y } = socket;
                 const dragPreview = socketLayoutDrag?.socketId === id ? socketLayoutDrag : undefined;
@@ -1606,13 +1711,15 @@ export function App() {
                 const socketHoverDetails = buildSocketHoverDetails(id, node, materia, activeLoadout);
                 const isIterator = hasIteratorBehavior(node, materia, activeLoadout, id);
                 const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia, activeLoadout, id) : undefined;
+                const isLoopSelected = selectedLoopSocketSet.has(id);
                 return (
                 <button
                   key={id}
                   data-testid={`socket-${id}`}
-                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''}`}
+                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`}
                   style={{ left: `${socketX}px`, top: `${socketY}px` }}
-                  onClick={() => handleSocketClick(id)}
+                  aria-pressed={isLoopSelected}
+                  onClick={(event) => handleSocketClick(id, event)}
                   onPointerDown={(event) => beginSocketLayoutDrag(socket, event)}
                   onPointerMove={moveSocketLayoutDrag}
                   onPointerUp={(event) => finishSocketLayoutDrag(id, event)}
