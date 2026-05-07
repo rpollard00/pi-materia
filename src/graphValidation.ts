@@ -1,6 +1,7 @@
+import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
 import type { MateriaEdgeCondition, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
 
-export const CANONICAL_EDGE_CONDITIONS = ["always", "satisfied", "not_satisfied"] as const satisfies readonly MateriaEdgeCondition[];
+export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
 export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
 export type MateriaGraphEdgeGuard = "unconditional" | "guarded";
 
