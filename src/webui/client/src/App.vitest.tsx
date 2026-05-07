@@ -459,6 +459,40 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('socket-grid').style.height).not.toBe('256px');
   });
 
+  it('sizes long loop labels and summaries wide enough to remain readable', () => {
+    const loadout = {
+      nodes: {
+        Consult: { type: 'agent', materia: 'Consult' },
+        Build: { type: 'agent', materia: 'Build' },
+        Maintain: { type: 'agent', materia: 'Maintain' },
+        Finish: { type: 'utility', utility: 'finish' },
+      },
+      loops: {
+        readableLoop: {
+          label: 'Loop: Consult → Build → Maintain',
+          nodes: ['Consult', 'Build', 'Maintain'],
+          consumes: { from: 'Consult', output: 'detailed_task_backlog' },
+          exit: { from: 'Maintain', when: 'not_satisfied', to: 'Finish' },
+        },
+      },
+    } as never;
+    const positions = new Map<string, never>([
+      ['Consult', { id: 'Consult', node: {}, index: 0, x: 320, y: 100 } as never],
+      ['Build', { id: 'Build', node: {}, index: 1, x: 408, y: 100 } as never],
+      ['Maintain', { id: 'Maintain', node: {}, index: 2, x: 496, y: 100 } as never],
+      ['Finish', { id: 'Finish', node: {}, index: 3, x: 672, y: 100 } as never],
+    ]);
+
+    const [region] = getLoopRegions(loadout, positions);
+    expect(region.label).toBe('Loop: Consult → Build → Maintain');
+    expect(region.summary).toContain('Loop consumes: Consult.detailed_task_backlog');
+    expect(region.summary).toContain('Exit: Maintain (Maintain).Not Satisfied → Finish (finish)');
+    expect(region.width).toBeGreaterThan(360);
+    expect(region.width).toBeLessThanOrEqual(780);
+    expect(region.width).toBeGreaterThan(520);
+    expect(region.x).toBeGreaterThanOrEqual(0);
+  });
+
   it('builds fitted virtual cycle paths for three-of-four corner membership', () => {
     const loadout = {
       nodes: {
@@ -499,6 +533,27 @@ describe('Materia loadout grid editor', () => {
     const unsatisfied = await screen.findByTestId('edge-Start-Review-1');
     expect(satisfied.querySelector('path')?.getAttribute('d')).not.toBe(unsatisfied.querySelector('path')?.getAttribute('d'));
     expect(satisfied.querySelector('text')?.getAttribute('y')).not.toBe(unsatisfied.querySelector('text')?.getAttribute('y'));
+  });
+
+  it('routes self edges outside the socket bounds with readable label clearance', () => {
+    const socket = { id: 'Maintain', node: { type: 'agent', materia: 'Maintain' }, index: 0, x: 320, y: 80 } as never;
+    const positions = new Map<string, never>([['Maintain', socket]]);
+    const [route] = routeLoadoutEdges([
+      { id: 'Maintain:edge:0:Maintain:not_satisfied', from: 'Maintain', to: 'Maintain', kind: 'edge', edgeIndex: 0, when: 'not_satisfied' },
+    ] as never, positions);
+    const socketRight = 320 + 92;
+    const socketBottom = 80 + 92;
+    const pathNumbers = route.path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+    const xValues = pathNumbers.filter((_, index) => index % 2 === 0);
+    const yValues = pathNumbers.filter((_, index) => index % 2 === 1);
+
+    expect(route.routeClass).toBe('loop');
+    expect(route.path).toMatch(/^M /);
+    expect(route.path).toMatch(/ C /);
+    expect(Math.max(...xValues)).toBeGreaterThan(socketRight + 100);
+    expect(Math.max(...yValues)).toBeGreaterThan(socketBottom + 80);
+    expect(route.labelX).toBeGreaterThan(socketRight + 56);
+    expect(route.labelY).toBeGreaterThan(socketBottom + 24);
   });
 
   it('routes parallel backward, loop, nearby, and crossing edges on separate lanes', () => {
