@@ -139,33 +139,38 @@
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
-  gap: 0.15rem;
-  padding: 0.75rem 1rem;
-  color: rgb(224 231 255);
+  gap: 0.1rem;
+  overflow: hidden;
+  border-left: 2px solid rgb(165 180 252 / 0.4);
+  border-radius: 0.85rem;
+  background: linear-gradient(90deg, rgb(30 41 59 / 0.36), rgb(15 23 42 / 0.08));
+  padding: 0.45rem 0.75rem;
+  color: rgb(224 231 255 / 0.88);
   pointer-events: none;
 }
 
-.loadout-loop-region::before,
-.loadout-loop-region::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  clip-path: var(--loop-region-polygon);
+.loadout-loop-cycle-edge {
   pointer-events: none;
 }
 
-.loadout-loop-region::before {
-  background: radial-gradient(circle at 30% 0%, rgb(129 140 248 / 0.22), transparent 55%), rgb(15 23 42 / 0.2);
-  box-shadow: inset 0 0 28px rgb(99 102 241 / 0.16), 0 0 18px rgb(99 102 241 / 0.14);
+.loadout-loop-cycle-edge path {
+  fill: none;
+  stroke: rgb(165 180 252 / 0.46);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 18 10 4 10;
+  filter: drop-shadow(0 0 10px rgb(129 140 248 / 0.18));
 }
 
-.loadout-loop-region::after {
-  border: 2px dashed rgb(165 180 252 / 0.72);
+.loadout-loop-cycle-edge .loadout-loop-cycle-edge-echo {
+  stroke: rgb(34 211 238 / 0.16);
+  stroke-width: 5;
+  stroke-dasharray: none;
 }
 
-.loadout-loop-region > * {
-  position: relative;
-  z-index: 1;
+.loadout-loop-cycle-arrow {
+  fill: rgb(165 180 252 / 0.58);
 }
 
 .loadout-loop-badge {

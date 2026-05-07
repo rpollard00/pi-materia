@@ -212,7 +212,8 @@ describe('Materia loadout grid editor', () => {
     const region = await screen.findByTestId('loop-region-taskIteration');
     expect(region.textContent).toContain('Loop');
     expect(region.style.clipPath).toBe('');
-    expect(region.getAttribute('style')).toContain('--loop-region-polygon: polygon(');
+    expect(region.getAttribute('style')).not.toContain('--loop-region-polygon');
+    expect(await screen.findByTestId('loop-cycle-edge-taskIteration')).toBeTruthy();
     expect(parseFloat(region.style.top)).toBeGreaterThanOrEqual(28);
     expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
     expect(region.getAttribute('title')).toContain('Loop consumes: state.tasks as task until end');
@@ -391,7 +392,7 @@ describe('Materia loadout grid editor', () => {
     expect(grid.style.height).toBe('386px');
   });
 
-  it('pads loop regions inside the canvas and leaves serpentine loop headers clear of sockets', async () => {
+  it('pads loop labels inside the canvas and leaves serpentine loop headers clear of sockets', async () => {
     const config = structuredClone(testConfig);
     (config.loadouts['Planning-Consult'] as { loops?: unknown }).loops = {
       consultLoop: {
@@ -409,11 +410,11 @@ describe('Materia loadout grid editor', () => {
     const planner = screen.getByTestId('socket-planner');
     expect(parseFloat(region.style.left)).toBeGreaterThanOrEqual(28);
     expect(parseFloat(region.style.top)).toBeGreaterThanOrEqual(28);
-    expect(parseFloat(planner.style.top) - parseFloat(region.style.top)).toBeGreaterThanOrEqual(86);
+    expect(parseFloat(planner.style.top) - parseFloat(region.style.top)).toBeGreaterThanOrEqual(48);
     expect(screen.getByTestId('socket-grid').style.height).not.toBe('256px');
   });
 
-  it('builds concave loop polygons for three-of-four corner membership', () => {
+  it('builds fitted virtual cycle paths for three-of-four corner membership', () => {
     const loadout = {
       nodes: {
         a: { type: 'agent', materia: 'Build' },
@@ -433,10 +434,10 @@ describe('Materia loadout grid editor', () => {
     ]);
 
     const [region] = getLoopRegions(loadout, positions);
-    expect(region.polygon).toContain('polygon(');
-    expect(region.polygon.split(',').length).toBeGreaterThan(4);
-    expect(region.polygon).toContain('51.4% 100%');
-    expect(region.polygon).not.toContain('100% 100%');
+    expect(region.cyclePath).toContain('Q 146 146');
+    expect(region.cyclePath).toContain('Q 354 146');
+    expect(region.cyclePath).toContain('Q 146 314');
+    expect(region.cyclePath).not.toContain('354 314');
   });
 
   it('routes parallel edges between the same sockets on separate visual lanes', async () => {
