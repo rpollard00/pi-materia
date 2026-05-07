@@ -31,6 +31,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   if ("materiaDefinitions" in rawConfig) throw new Error(`Materia config configures obsolete materiaDefinitions.`);
   validateMateriaEntries(config);
   const effective = getEffectivePipelineConfig(config);
+  migrateLegacyLoopConsumers(config, effective.pipeline);
   validateLoadout(effective.loadoutName, effective.pipeline);
   assertValidPipelineGraph(effective.pipeline, { isGeneratorNode: (nodeId) => isGeneratorPipelineNode(config, effective.pipeline, nodeId) });
   const nodes = Object.fromEntries(
@@ -149,6 +150,27 @@ function validateGeneratorDeclaration(name: string, generates: unknown): void {
 function isGeneratorPipelineNode(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, nodeId: string): boolean {
   const node = pipeline.nodes[nodeId];
   return Boolean(node?.type === "agent" && config.materia[node.materia]?.generates);
+}
+
+function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
+  for (const [loopId, loop] of Object.entries(pipeline.loops ?? {})) {
+    if (loop.consumes || !loop.iterator) continue;
+    const loopSet = new Set(loop.nodes);
+    const inboundGeneratorEdges = Object.entries(pipeline.nodes ?? {}).flatMap(([from, node]) => {
+      if (loopSet.has(from) || !isGeneratorPipelineNode(config, pipeline, from)) return [];
+      return (node.edges ?? []).filter((edge) => loopSet.has(edge.to)).map(() => from);
+    });
+    const uniqueGeneratorIds = Array.from(new Set(inboundGeneratorEdges));
+    if (uniqueGeneratorIds.length === 1) {
+      const from = uniqueGeneratorIds[0];
+      const source = pipeline.nodes[from];
+      if (source?.type !== "agent") continue;
+      const output = config.materia[source.materia]?.generates?.output;
+      if (output) loop.consumes = { from, output };
+    } else if (uniqueGeneratorIds.length > 1) {
+      throw new Error(`Legacy loop "${loopId}" declares iterator metadata but no consumes generator. Add loops.${loopId}.consumes with exactly one generator source; found inbound generator sockets: ${uniqueGeneratorIds.join(", ")}.`);
+    }
+  }
 }
 
 function validateGeneratorNodeContracts(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): void {

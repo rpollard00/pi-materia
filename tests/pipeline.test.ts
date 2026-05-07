@@ -172,6 +172,68 @@ describe("loadout-aware pipeline resolution", () => {
     expect(lines).toContain("loop taskIteration (Generated task loop): [Build] consumes=Plan.tasks iterator=state.tasks as task done end exit=satisfied->end");
   });
 
+  test("resolvePipeline migrates legacy iterator loops when one inbound generator edge identifies the consumer", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Plan",
+          loops: {
+            taskIteration: {
+              label: "Legacy generated task loop",
+              nodes: ["Build", "Check"],
+              iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
+              exit: { when: "satisfied", to: "end" },
+            },
+          },
+          nodes: {
+            Plan: { type: "agent", materia: "planner", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "Build" }] },
+            Build: { type: "agent", materia: "Build", edges: [{ when: "always", to: "Check" }] },
+            Check: { type: "agent", materia: "Check", edges: [{ when: "always", to: "Build" }] },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generates: { output: "tasks", as: "task", cursor: "taskIndex", done: "end", listType: "array", itemType: "task" } },
+        Build: { tools: "coding", prompt: "Build." },
+        Check: { tools: "none", prompt: "Check." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+
+    expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Plan", output: "tasks" });
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
+  });
+
+  test("resolvePipeline gives clear guidance when a legacy iterator loop has multiple inbound generators", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Plan",
+          loops: { taskIteration: { nodes: ["Build", "Check"], iterator: { items: "state.tasks" } } },
+          nodes: {
+            Plan: { type: "agent", materia: "planner", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "Build" }] },
+            OtherPlan: { type: "agent", materia: "otherPlanner", parse: "json", assign: { work: "$.work" }, edges: [{ when: "always", to: "Check" }] },
+            Build: { type: "agent", materia: "Build", edges: [{ when: "always", to: "Check" }] },
+            Check: { type: "agent", materia: "Check", edges: [{ when: "always", to: "Build" }] },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generates: { output: "tasks", listType: "array", itemType: "task" } },
+        otherPlanner: { tools: "readOnly", prompt: "Plan more.", generates: { output: "work", listType: "array", itemType: "task" } },
+        Build: { tools: "coding", prompt: "Build." },
+        Check: { tools: "none", prompt: "Check." },
+      },
+    };
+
+    expect(() => resolvePipeline(config)).toThrow(/Legacy loop "taskIteration" declares iterator metadata but no consumes generator.*Plan, OtherPlan/);
+  });
+
   test("resolvePipeline preserves explicit loop iterator metadata for runtime lookup and grid rendering", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",

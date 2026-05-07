@@ -41,6 +41,23 @@ A generator materia declares its list contract at the top level:
 
 Any node whose loop consumes that generator must parse JSON and assign the declared output from the handoff JSON, for example `"parse": "json"` and `"assign": { "tasks": "$.tasks" }`. The derived loop iterator defaults to `state.<output>` unless `generates.items` supplies an explicit runtime state path.
 
+A loadout declares the consumer region separately from the generator materia:
+
+```json
+"loops": {
+  "taskIteration": {
+    "label": "Build → Eval → Maintain until all tasks complete",
+    "nodes": ["Build", "Auto-Eval", "Maintain"],
+    "consumes": { "from": "planner", "output": "tasks" },
+    "exit": { "when": "satisfied", "to": "end" }
+  }
+}
+```
+
+`consumes.from` is the socket id of the generator node, not the materia definition name. `consumes.output` must match the generator's declared `generates.output`; omit it only when the default is unambiguous. Optional `as`, `cursor`, and `done` overrides belong on `consumes` only when that loop intentionally differs from the generator defaults.
+
+The WebUI creates these regions from selected sockets. Select the sockets that form the cycle using shift-click or by dragging a selection rectangle around the socket cards, then choose **Create Loop**. Creation succeeds only when the selected sockets already contain a directed cycle and exactly one edge enters that cycle from a Generator materia. The generator edge is highlighted and the loop region label shows which generated output it consumes.
+
 The default software workflow models task iteration as:
 
 ```text
@@ -55,6 +72,12 @@ The loop consumes the planner generator's `tasks` output, which derives an itera
 Built-in setup/discovery steps such as `ensureArtifactsIgnored` and `detectVcs` are first-class utility materia. They appear in the WebUI palette under the Utility group and can be placed in sockets like agent materia. Palette-created utility nodes render and execute through the same graph runtime as generated utility nodes.
 
 Generator materia are marked with a **Generator** badge. Sockets inside loop regions are marked as **Loop consumer** instead of labeling arbitrary loop members as iterators. The badge is the accessible cue; the overlay preserves the materia's configured base color.
+
+## Legacy iterator migration
+
+Older layouts may have loop regions with direct `iterator` metadata but no `consumes` generator declaration. pi-materia preserves explicit iterator-only loops for non-generator workflows. When a legacy iterator loop has exactly one inbound edge from a generator materia, `resolvePipeline` migrates the resolved loop by adding `consumes: { from, output }` from that generator while preserving the original iterator fields for runtime compatibility.
+
+If a legacy iterator loop has more than one inbound generator edge, pi-materia fails with a remediation error that names the candidate generator sockets. Fix the layout by adding an explicit `loops.<id>.consumes` entry and ensuring only one generator edge enters the selected cycle. If the intended generator is not detected, declare `generates` on that materia and make the generator socket parse JSON with `assign: { "<output>": "$.<output>" }`.
 
 ## Example
 

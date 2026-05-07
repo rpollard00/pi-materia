@@ -52,7 +52,7 @@ npm run test:webui         # Vitest client smoke tests
 npm run typecheck          # extension, client, and server type checks
 ```
 
-WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md). Manual regression coverage for the shipped UI is documented in [docs/webui-smoke-tests.md](docs/webui-smoke-tests.md). Canonical edge conditions, loop/iterator regions, utility materia, and iterator styling are documented in [docs/graph-semantics.md](docs/graph-semantics.md).
+WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md). Manual regression coverage for the shipped UI is documented in [docs/webui-smoke-tests.md](docs/webui-smoke-tests.md). Canonical edge conditions, generator materia, loop-consumer regions, utility materia, migration notes, and affected check commands are documented in [docs/graph-semantics.md](docs/graph-semantics.md).
 
 ## Usage
 
@@ -70,6 +70,8 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 pi-materia reports the config source, artifact directory, active loadout, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full materia prompts are hidden behind compact Materia cast messages, and each materia turn receives a curated Materia context instead of the full previous conversation.
 
 Use `/materia ui` to start or reuse a background WebUI server scoped to the current Pi session. It prints a clickable local URL. Browser auto-open is disabled by default and can be enabled in `~/.config/pi/pi-materia/config.json` with `{ "webui": { "autoOpenBrowser": true } }`; `preferredPort` and `host` are also supported.
+
+In the WebUI loadout editor, create generator-driven loops by selecting the sockets that form a cycle with shift-click or a drag-selection box, then clicking **Create Loop**. The selected cycle must have exactly one inbound edge from a materia that declares `generates`; see [Graph semantics](docs/graph-semantics.md#generator-and-loop-consumer-regions) for the configuration contract and legacy iterator migration notes.
 
 In the WebUI materia editor, the **Generate role prompt from brief** panel can draft prompt instructions for a prompt materia. Enter a short description of the role, click **Generate**, review the generated preview, then either **Regenerate**, **Discard**, or explicitly **Apply to prompt field**. Generation calls `POST /api/generate/materia-role` from the session-scoped WebUI server and uses an isolated in-memory context, so it does not append to or mutate the active Pi chat. Existing prompt text is not overwritten until you choose Apply.
 
