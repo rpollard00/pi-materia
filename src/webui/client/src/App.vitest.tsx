@@ -134,13 +134,21 @@ describe('Materia loadout grid editor', () => {
     expect(retryEdge.querySelector('path')?.getAttribute('d')).not.toBe(forwardPath);
   });
 
-  it('keeps compact graph sizing and overflow containment styles centralized in CSS', () => {
+  it('keeps socket shells only modestly larger than their materia orb while preserving overflow containment', () => {
     const css = readFileSync(`${process.cwd()}/src/webui/client/src/styles.css`, 'utf8');
+    const cssRem = (name: string) => {
+      const match = css.match(new RegExp(`${name}:\\s*([0-9.]+)rem;`));
+      if (!match) throw new Error(`Missing CSS custom property ${name}`);
+      return Number(match[1]);
+    };
 
-    expect(css).toContain('--materia-socket-width: 10rem;');
-    expect(css).toContain('--materia-socket-stage-height: 9.25rem;');
-    expect(css).toContain('--materia-socket-min-height: 11.5rem;');
-    expect(css).toContain('--materia-orb-size: 4.25rem;');
+    const socketWidth = cssRem('--materia-socket-width');
+    const socketStageHeight = cssRem('--materia-socket-stage-height');
+    const socketMinHeight = cssRem('--materia-socket-min-height');
+    const orbSize = cssRem('--materia-orb-size');
+    expect(socketWidth / orbSize).toBeLessThanOrEqual(1.45);
+    expect(socketStageHeight / orbSize).toBeLessThanOrEqual(1.55);
+    expect(socketMinHeight / orbSize).toBeLessThanOrEqual(2.1);
     expect(css).toContain('--materia-orb-small-size: 2rem;');
     expect(css).toMatch(/\.loadout-graph-viewport\s*{[^}]*max-width: 100%;[^}]*overflow: auto;/s);
     expect(css).toMatch(/\.loadout-graph-canvas\s*{[^}]*min-width: 100%;[^}]*min-height: 100%;/s);
@@ -210,7 +218,7 @@ describe('Materia loadout grid editor', () => {
     expect(byId.get('C:edge:0:D:satisfied')?.labelY).not.toBe(byId.get('B:edge:0:D:not_satisfied')?.labelY);
   });
 
-  it('snaps edge routes to horizontal and vertical socket anchors with aligned final segments', () => {
+  it('renders edge routes as organic curves instead of right-angle-only polylines', () => {
     const positions = new Map<string, never>([
       ['A', { id: 'A', node: { type: 'agent', materia: 'A' }, index: 0, x: 0, y: 0 } as never],
       ['B', { id: 'B', node: { type: 'agent', materia: 'B' }, index: 1, x: 208, y: 0 } as never],
@@ -220,9 +228,11 @@ describe('Materia loadout grid editor', () => {
     const rowTransition = routeLoadoutEdges([{ id: 'B:next:C', from: 'B', to: 'C', kind: 'next' }] as never, positions)[0];
     const backward = routeLoadoutEdges([{ id: 'B:edge:0:A:satisfied', from: 'B', to: 'A', kind: 'edge', edgeIndex: 0, when: 'satisfied' }] as never, positions)[0];
 
-    expect(sameRow.path).toBe('M 160 74 L 208 74');
-    expect(rowTransition.path).toBe('M 288 148 L 288 176');
-    expect(backward.path.endsWith('L 160 74')).toBe(true);
+    for (const route of [sameRow, rowTransition, backward]) {
+      expect(route.path).toMatch(/^M /);
+      expect(route.path, route.edge.id).toMatch(/[CQ]/);
+      expect(route.path, route.edge.id).not.toMatch(/^(?:M|L) [-0-9.]+ [-0-9.]+(?: L [-0-9.]+ [-0-9.]+)+$/);
+    }
   });
 
   it('renders loaded edge labels from canonical values without raw predicates', async () => {
@@ -903,6 +913,42 @@ describe('Materia loadout grid editor', () => {
     expect(savedStart.edges).toEqual([]);
   });
 
+  it('does not move unrelated automatic sockets during the first manual socket drag', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { activeLoadout: string; loadouts: Record<string, unknown> };
+    config.activeLoadout = 'Drag-Stability';
+    config.loadouts['Drag-Stability'] = {
+      entry: 'A',
+      nodes: {
+        A: { type: 'agent', materia: 'Build', next: 'B' },
+        B: { type: 'agent', materia: 'Build', next: 'C' },
+        C: { type: 'agent', materia: 'Build' },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const a = await screen.findByTestId('socket-A');
+    const b = await screen.findByTestId('socket-B');
+    const c = await screen.findByTestId('socket-C');
+    a.setPointerCapture = vi.fn();
+    a.releasePointerCapture = vi.fn();
+    const unrelatedBefore = {
+      B: { left: b.style.left, top: b.style.top },
+      C: { left: c.style.left, top: c.style.top },
+    };
+
+    fireEvent.pointerDown(a, { button: 0, pointerId: 11, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(a, { pointerId: 11, clientX: 160, clientY: 135 });
+    fireEvent.pointerUp(a, { pointerId: 11, clientX: 160, clientY: 135 });
+
+    expect(await screen.findByText(/Moved socket A; explicit layout will be saved with the loadout\./)).toBeTruthy();
+    expect(screen.getByTestId('socket-B').style.left).toBe(unrelatedBefore.B.left);
+    expect(screen.getByTestId('socket-B').style.top).toBe(unrelatedBefore.B.top);
+    expect(screen.getByTestId('socket-C').style.left).toBe(unrelatedBefore.C.left);
+    expect(screen.getByTestId('socket-C').style.top).toBe(unrelatedBefore.C.top);
+  });
+
   it('falls back to automatic graph layout when sockets have no explicit layout', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
@@ -945,10 +991,12 @@ describe('Materia loadout grid editor', () => {
 
     expect([a.style.left, a.style.top]).toEqual(['32px', '28px']);
     expect([b.style.left, b.style.top]).toEqual(['240px', '28px']);
-    expect([c.style.left, c.style.top]).toEqual(['240px', '204px']);
-    expect([d.style.left, d.style.top]).toEqual(['32px', '204px']);
-    expect([e.style.left, e.style.top]).toEqual(['32px', '380px']);
-    expect([f.style.left, f.style.top]).toEqual(['240px', '380px']);
+    expect([c.style.left, c.style.top]).toEqual(['240px', '268px']);
+    expect([d.style.left, d.style.top]).toEqual(['32px', '268px']);
+    expect([e.style.left, e.style.top]).toEqual(['32px', '508px']);
+    expect([f.style.left, f.style.top]).toEqual(['240px', '508px']);
+    expect(parseFloat(c.style.top) - parseFloat(a.style.top)).toBeGreaterThanOrEqual(240);
+    expect(parseFloat(e.style.top) - parseFloat(c.style.top)).toBeGreaterThanOrEqual(240);
     expect(screen.getByTestId('socket-grid').style.width).toBe('448px');
   });
 
