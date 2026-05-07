@@ -885,7 +885,16 @@ export function App() {
   }
 
   function removeMateria(socketId: string) {
-    if (!activeLoadoutName) return;
+    if (!activeLoadoutName) return false;
+    const currentNode = loadouts[activeLoadoutName]?.nodes?.[socketId];
+    if (!currentNode) {
+      setStatus(`Ignored unsocket: socket ${socketId} is not available in the active loadout.`);
+      return false;
+    }
+    if (isEmptySocket(currentNode)) {
+      setStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
+      return false;
+    }
     updateDraft((config) => {
       const loadout = buildLoadouts(config)[activeLoadoutName];
       if (!loadout?.nodes || !loadout.nodes[socketId]) return;
@@ -894,6 +903,7 @@ export function App() {
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
+    return true;
   }
 
   function makeNewSocketId(nodes: Record<string, PipelineNode>, afterSocketId: string) {
@@ -1264,6 +1274,7 @@ export function App() {
 
   function handleDrop(socketId: string, event: DragEvent) {
     event.preventDefault();
+    event.stopPropagation();
     const raw = event.dataTransfer.getData('application/json');
     if (!raw) return;
     const payload = parseDragPayload(raw);
@@ -1272,6 +1283,26 @@ export function App() {
       return;
     }
     putMateria(socketId, payload.materiaId, payload.kind === 'socket' ? payload.fromSocket : undefined);
+  }
+
+  function handleGraphDrop(event: DragEvent) {
+    event.preventDefault();
+    const raw = event.dataTransfer.getData('application/json');
+    if (!raw) return;
+    const payload = parseDragPayload(raw);
+    if (!payload) {
+      setStatus('Ignored drop: unsupported drag payload.');
+      return;
+    }
+    if (payload.kind !== 'socket' || !payload.fromSocket) {
+      setStatus('Ignored drop: drag palette materia onto a socket to place it.');
+      return;
+    }
+    if (payload.fromLoadout && payload.fromLoadout !== activeLoadoutName) {
+      setStatus('Ignored unsocket: dragged materia belongs to a different loadout.');
+      return;
+    }
+    removeMateria(payload.fromSocket);
   }
 
   function dragMateria(payload: DragPayload, event: DragEvent) {
@@ -1354,14 +1385,14 @@ export function App() {
             <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Visual materia grid</h2>
-                <p className="text-sm text-slate-400">Drag orbs into sockets, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
+                <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
               </div>
               <label className="text-sm text-slate-300">Edit name
                 <input className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" value={activeLoadoutName ?? ''} onChange={(event) => renameActiveLoadout(event.target.value)} />
               </label>
             </div>
 
-            <div className="loadout-graph-viewport" data-testid="socket-grid-viewport">
+            <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onDragOver={(event) => event.preventDefault()} onDrop={handleGraphDrop}>
               <div className="loadout-graph-canvas" data-testid="socket-grid" style={{ width: `${loadoutGraph.width}px`, height: `${loadoutGraph.height}px` }}>
               <svg className="loadout-edge-layer" width={loadoutGraph.width} height={loadoutGraph.height} aria-label="Loadout edges">
                 <defs>
@@ -1514,8 +1545,9 @@ export function App() {
                     </div>
                   ) : (
                     <div className="mt-5 space-y-4">
+                      <p className="text-sm text-slate-300">Tip: drag this socket's orb onto the graph background to clear it without opening this menu.</p>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <button type="button" className="socket-action-button" onClick={() => removeMateria(socketActionId)}>Unsocket</button>
+                        <button type="button" className="socket-action-button socket-action-button-muted" onClick={() => removeMateria(socketActionId)}>Clear socket</button>
                         <button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button>
                         <button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button>
                         <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
@@ -1584,7 +1616,7 @@ export function App() {
                   if (payload.kind === 'socket' && payload.fromSocket) removeMateria(payload.fromSocket);
                 }}
               >
-                Drag socket here to remove non-entry materia
+                Drag socket here or onto the graph background to unsocket materia
               </div>
               <div className="mt-4 flex gap-3">
                 <button className="materia-button flex-1" disabled={!isDirty} onClick={() => saveDraft().catch((error) => setStatus(error.message))}>Save</button>

@@ -525,7 +525,8 @@ describe('Materia loadout grid editor', () => {
     await screen.findByTestId('socket-Auto-Eval');
     const dataTransfer = createDataTransfer();
     fireEvent.dragStart(screen.getByTestId('socket-Auto-Eval').querySelector('[draggable="true"]') as HTMLElement, { dataTransfer });
-    fireEvent.drop(screen.getByTestId('trash-socket'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('socket-grid-viewport'), { dataTransfer });
+    expect(await screen.findByText(/Cleared materia from Auto-Eval/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -547,12 +548,13 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(await screen.findByTestId('socket-Build'));
 
     expect(await screen.findByTestId('socket-action-modal')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Unsocket' })).toBeTruthy();
+    expect(screen.getByText(/drag this socket's orb onto the graph background/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Clear socket' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Replace' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'New Socket' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Unsocket' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear socket' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -741,6 +743,11 @@ describe('Materia loadout grid editor', () => {
     dataTransfer.setData('application/json', JSON.stringify({ kind: 'palette', materiaId: 'Missing-Materia' }));
     fireEvent.drop(screen.getByTestId('socket-Build'), { dataTransfer });
     expect(await screen.findByText('Ignored drop: materia Missing-Materia is not available.')).toBeTruthy();
+    expect(screen.queryByText('staged edits')).toBeNull();
+
+    dataTransfer.setData('application/json', JSON.stringify({ kind: 'palette', materiaId: 'Build' }));
+    fireEvent.drop(screen.getByTestId('socket-grid-viewport'), { dataTransfer });
+    expect(await screen.findByText('Ignored drop: drag palette materia onto a socket to place it.')).toBeTruthy();
     expect(screen.queryByText('staged edits')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

@@ -372,6 +372,13 @@
   transition: 160ms ease;
 }
 
+.socket-action-button-muted {
+  border-color: rgb(148 163 184 / 0.16);
+  background: rgb(15 23 42 / 0.42);
+  color: rgb(203 213 225 / 0.82);
+  font-size: 0.78rem;
+}
+
 .socket-action-button:hover,
 .socket-action-button:focus {
   border-color: rgb(103 232 249 / 0.64);
