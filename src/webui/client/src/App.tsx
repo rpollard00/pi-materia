@@ -160,7 +160,7 @@ interface SocketAnchorPoint {
 
 const socketLayoutOffsetX = 32;
 const socketLayoutOffsetY = 28;
-const socketCardWidth = 92;
+const socketCardWidth = 132;
 const socketStageHeight = 92;
 const socketAnchorY = socketStageHeight / 2;
 const socketLayoutUnitX = 208;

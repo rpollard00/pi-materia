@@ -108,6 +108,24 @@ describe('Materia loadout grid editor', () => {
     expect(build.getAttribute('title')).toContain('Edges: Always → Auto-Eval');
   });
 
+  it('renders longer loadout socket labels in full while keeping them single-line', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    const autoEvalLabel = (await screen.findByTestId('socket-Auto-Eval')).querySelector('.materia-socket-label');
+    expect(autoEvalLabel?.textContent).toBe('Auto-Eval');
+
+    fireEvent.click(screen.getByRole('button', { name: /Planning-Consult/ }));
+    const interactivePlanLabel = (await screen.findByTestId('socket-planner')).querySelector('.materia-socket-label');
+    expect(interactivePlanLabel?.textContent).toBe('interactivePlan');
+
+    const css = readFileSync(`${process.cwd()}/src/webui/client/src/styles.css`, 'utf8');
+    expect(css).toContain('--materia-socket-width: 8.25rem;');
+    expect(css).toMatch(/\.materia-socket-label\s*{[^}]*max-width: var\(--materia-socket-width\);[^}]*white-space: nowrap;/s);
+    expect(css).toMatch(/\.graph-materia-socket\s*{[^}]*width: var\(--materia-socket-width\);/s);
+  });
+
   it('marks iterator materia in both the palette and graph without changing non-iterators', async () => {
     const config = structuredClone(testConfig) as typeof testConfig & { materia: typeof testConfig.materia & { Build: typeof testConfig.materia.Build & { foreach?: { items: string; as?: string; done?: string } } } };
     config.materia.Build.foreach = { items: 'state.tasks', as: 'task', done: 'end' };
@@ -397,7 +415,8 @@ describe('Materia loadout grid editor', () => {
     const socketStageHeight = cssRem('--materia-socket-stage-height');
     const socketMinHeight = cssRem('--materia-socket-min-height');
     const orbSize = cssRem('--materia-orb-size');
-    expect(socketWidth / orbSize).toBeLessThanOrEqual(1.45);
+    expect(socketWidth).toBeGreaterThanOrEqual(8.25);
+    expect(socketWidth / orbSize).toBeLessThanOrEqual(2);
     expect(socketStageHeight / orbSize).toBeLessThanOrEqual(1.55);
     expect(socketMinHeight / orbSize).toBeLessThanOrEqual(2.1);
     expect(css).toContain('--materia-orb-small-size: 2rem;');
@@ -513,10 +532,10 @@ describe('Materia loadout grid editor', () => {
     ]);
 
     const [region] = getLoopRegions(loadout, positions);
-    expect(region.cyclePath).toContain('Q 146 146');
-    expect(region.cyclePath).toContain('Q 354 146');
-    expect(region.cyclePath).toContain('Q 146 314');
-    expect(region.cyclePath).not.toContain('354 314');
+    expect(region.cyclePath).toContain('Q 166 146');
+    expect(region.cyclePath).toContain('Q 374 146');
+    expect(region.cyclePath).toContain('Q 166 314');
+    expect(region.cyclePath).not.toContain('374 314');
   });
 
   it('routes parallel edges between the same sockets on separate visual lanes', async () => {
