@@ -181,6 +181,9 @@ describe('Materia loadout grid editor', () => {
     const planner = screen.getByTestId('socket-planner');
     expect(planner.classList.contains('materia-socket-generator')).toBe(true);
     expect(planner.textContent).toContain('Generator');
+    const plannerBadge = planner.querySelector('.graph-iterator-badge');
+    expect(plannerBadge?.classList.contains('materia-generator-badge')).toBe(true);
+    expect(plannerBadge?.textContent).toBe('Generator');
 
     const generatorEdge = screen.getByTestId('edge-planner-Build-0');
     expect(generatorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
@@ -403,6 +406,8 @@ describe('Materia loadout grid editor', () => {
     expect(css).toMatch(/\.materia-orb-iterator\s*{[^}]*outline: 1px solid/s);
     expect(css).toMatch(/\.materia-orb-iterator::after\s*{[^}]*radial-gradient/s);
     expect(css).toMatch(/\.materia-iterator-badge\s*{[^}]*text-transform: uppercase;/s);
+    expect(css).toMatch(/\.materia-socket-generator \.materia-socket-orb-stage\s*{[^}]*overflow: visible;/s);
+    expect(css).toMatch(/\.materia-generator-badge\s*{[^}]*min-width: max-content;[^}]*white-space: nowrap;/s);
     expect(css).toContain('.palette-orb-iterator');
     expect(css).toContain('.materia-socket-iterator');
     expect(css).toContain('.palette-orb-generator');

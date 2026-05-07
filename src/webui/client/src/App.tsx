@@ -1863,7 +1863,7 @@ export function App() {
                     <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
                       <Orb color={nodeColor(id, index, materia, node)} label={socketHoverDetails} empty={isEmptySocket(node)} iterator={isIterator} />
                     </div>
-                    {isIterator && <span className="materia-iterator-badge graph-iterator-badge" title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
+                    {isIterator && <span className={`materia-iterator-badge graph-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
                   </div>
                   <span className="materia-socket-label">{nodeLabel}</span>
                 </button>
@@ -2045,7 +2045,7 @@ export function App() {
                       <span className="flex flex-col items-start leading-tight">
                         <span>{getNodeLabel(id, node)}</span>
                         {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
-                        {isIterator && <span className="materia-iterator-badge palette-iterator-badge" title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
+                        {isIterator && <span className={`materia-iterator-badge palette-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
                       </span>
                     </button>
                   );

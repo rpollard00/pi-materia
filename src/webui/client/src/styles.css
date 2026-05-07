@@ -505,6 +505,7 @@
 }
 
 .materia-socket-generator .materia-socket-orb-stage {
+  overflow: visible;
   border-color: rgb(216 180 254 / 0.72);
   box-shadow: inset 0 0 34px rgb(59 7 100 / 0.55), 0 0 34px rgb(168 85 247 / 0.28), 0 0 58px rgb(34 211 238 / 0.14);
 }
@@ -537,6 +538,15 @@
 .palette-iterator-badge {
   margin-top: 0.12rem;
   padding: 0.16rem 0.36rem;
+}
+
+.materia-generator-badge {
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+.graph-iterator-badge.materia-generator-badge {
+  padding-inline: 0.5rem;
 }
 
 .socket-action-backdrop {
