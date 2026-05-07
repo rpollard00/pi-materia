@@ -137,12 +137,12 @@ interface SocketAnchorPoint {
 
 const socketLayoutOffsetX = 32;
 const socketLayoutOffsetY = 28;
-const socketCardWidth = 160;
-const socketStageHeight = 148;
+const socketCardWidth = 92;
+const socketStageHeight = 92;
 const socketAnchorY = socketStageHeight / 2;
 const socketLayoutUnitX = 208;
 const socketLayoutUnitY = 168;
-const socketLayoutRowGap = 176;
+const socketLayoutRowGap = 240;
 const socketGraphExtent = 190;
 
 interface SocketLayoutDragState {
@@ -292,14 +292,15 @@ function getLoadoutEdges(nodes: Record<string, PipelineNode>): LoadoutEdge[] {
 }
 
 function layoutUnit(value: number, unit: number) {
-  return Math.abs(value) <= 20 ? value * unit : value;
+  const position = Math.abs(value) <= 20 ? value * unit : value;
+  return Math.round(position * 1000) / 1000;
 }
 
 function layoutValueForPosition(position: number, offset: number, unit: number) {
   const raw = position - offset;
   const asUnits = raw / unit;
   const value = Math.abs(asUnits) <= 20 ? asUnits : raw;
-  return Math.round(value * 100) / 100;
+  return Math.round(value * 1000000000000) / 1000000000000;
 }
 
 function rounded(value: number) {
@@ -432,52 +433,38 @@ function offsetAnchor(anchor: SocketAnchorPoint, distance: number) {
   return { x: anchor.x + vector.x * distance, y: anchor.y + vector.y * distance };
 }
 
-function formatOrthogonalPath(points: Array<{ x: number; y: number }>) {
-  const compact = points.filter((point, index) => {
-    const previous = points[index - 1];
-    return !previous || Math.abs(previous.x - point.x) > 0.1 || Math.abs(previous.y - point.y) > 0.1;
-  });
-  return compact.map((point, index) => `${index === 0 ? 'M' : 'L'} ${rounded(point.x)} ${rounded(point.y)}`).join(' ');
+function formatCurvedPath(points: Array<{ x: number; y: number }>) {
+  return `M ${rounded(points[0].x)} ${rounded(points[0].y)} C ${rounded(points[1].x)} ${rounded(points[1].y)}, ${rounded(points[2].x)} ${rounded(points[2].y)}, ${rounded(points[3].x)} ${rounded(points[3].y)}`;
 }
 
-function orthogonalRoute(source: SocketAnchorPoint, target: SocketAnchorPoint, lane: number) {
-  const lead = 26;
-  const laneOffset = lane * 0.9;
-  const sourceLead = offsetAnchor(source, lead);
-  const targetLead = offsetAnchor(target, lead);
-  const sourceHorizontal = source.side === 'left' || source.side === 'right';
-  const targetHorizontal = target.side === 'left' || target.side === 'right';
+function perpendicularOffset(source: SocketAnchorPoint, target: SocketAnchorPoint, lane: number) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const length = Math.hypot(dx, dy) || 1;
+  return { x: -dy / length * lane, y: dx / length * lane };
+}
 
-  if (sourceHorizontal && targetHorizontal && Math.abs(source.y - target.y) < 0.1 && Math.abs(laneOffset) < 0.1) {
-    const path = formatOrthogonalPath([{ x: source.x, y: source.y }, { x: target.x, y: target.y }]);
-    return { path, labelX: rounded((source.x + target.x) / 2), labelY: rounded(source.y - 10), labelRotate: rounded(labelRotation(source.x, source.y, target.x, target.y)) };
-  }
-  if (!sourceHorizontal && !targetHorizontal && Math.abs(source.x - target.x) < 0.1 && Math.abs(laneOffset) < 0.1) {
-    const path = formatOrthogonalPath([{ x: source.x, y: source.y }, { x: target.x, y: target.y }]);
-    return { path, labelX: rounded(source.x), labelY: rounded((source.y + target.y) / 2 - 10), labelRotate: rounded(labelRotation(source.x, source.y, target.x, target.y)) };
-  }
+function curvedRoute(source: SocketAnchorPoint, target: SocketAnchorPoint, lane: number) {
+  const distance = Math.hypot(target.x - source.x, target.y - source.y);
+  const lead = Math.max(32, Math.min(96, distance * 0.38));
+  const sourceVector = anchorOutwardVector(source.side);
+  const targetVector = anchorOutwardVector(target.side);
+  const laneOffset = perpendicularOffset(source, target, lane);
+  const sourceControl = {
+    x: source.x + sourceVector.x * lead + laneOffset.x,
+    y: source.y + sourceVector.y * lead + laneOffset.y,
+  };
+  const targetControl = {
+    x: target.x + targetVector.x * lead + laneOffset.x,
+    y: target.y + targetVector.y * lead + laneOffset.y,
+  };
+  const labelX = rounded((source.x + sourceControl.x + targetControl.x + target.x) / 4);
+  const labelY = rounded((source.y + sourceControl.y + targetControl.y + target.y) / 4 - 10);
 
-  const points = [{ x: source.x, y: source.y }, sourceLead];
-
-  if (sourceHorizontal && targetHorizontal) {
-    const viaY = Math.abs(sourceLead.y - targetLead.y) < 0.1 ? sourceLead.y + laneOffset : (sourceLead.y + targetLead.y) / 2 + laneOffset;
-    points.push({ x: sourceLead.x, y: viaY }, { x: targetLead.x, y: viaY });
-  } else if (!sourceHorizontal && !targetHorizontal) {
-    const viaX = Math.abs(sourceLead.x - targetLead.x) < 0.1 ? sourceLead.x + laneOffset : (sourceLead.x + targetLead.x) / 2 + laneOffset;
-    points.push({ x: viaX, y: sourceLead.y }, { x: viaX, y: targetLead.y });
-  } else if (sourceHorizontal) {
-    const viaX = targetLead.x + laneOffset;
-    points.push({ x: viaX, y: sourceLead.y }, { x: viaX, y: targetLead.y });
-  } else {
-    const viaY = targetLead.y + laneOffset;
-    points.push({ x: sourceLead.x, y: viaY }, { x: targetLead.x, y: viaY });
-  }
-
-  points.push(targetLead, { x: target.x, y: target.y });
   return {
-    path: formatOrthogonalPath(points),
-    labelX: rounded(points.reduce((sum, point) => sum + point.x, 0) / points.length),
-    labelY: rounded(points.reduce((sum, point) => sum + point.y, 0) / points.length - 10),
+    path: formatCurvedPath([{ x: source.x, y: source.y }, sourceControl, targetControl, { x: target.x, y: target.y }]),
+    labelX,
+    labelY,
     labelRotate: rounded(labelRotation(source.x, source.y, target.x, target.y)),
   };
 }
@@ -496,7 +483,7 @@ export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, P
     if (!from || !to) return undefined;
     const lane = orderedLane(laneGroups.get(edge.id) ?? [edge], edge, 30);
     const anchors = chooseSocketAnchors(edge, from, to);
-    const route = orthogonalRoute(anchors.source, anchors.target, lane);
+    const route = curvedRoute(anchors.source, anchors.target, lane);
     const backward = edge.from !== edge.to && anchors.source.side === 'left' && anchors.target.side === 'right';
 
     return {
@@ -530,13 +517,13 @@ function getAutomaticSocketOrder(entries: Array<[string, PipelineNode]>, edges: 
   return ordered;
 }
 
-function serpentineAutoPosition(autoIndex: number) {
+function serpentineAutoPosition(autoIndex: number, rowGap = socketLayoutRowGap) {
   const row = Math.floor(autoIndex / 2);
   const offsetInRow = autoIndex % 2;
   const column = row % 2 === 0 ? offsetInRow : 1 - offsetInRow;
   return {
     x: column * socketLayoutUnitX,
-    y: row * socketLayoutRowGap,
+    y: row * rowGap,
   };
 }
 
@@ -551,8 +538,10 @@ function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[];
   });
   const autoIndexById = new Map(orderedAutoIds.map((id, index) => [id, index]));
 
+  const hasExplicitLayout = entries.some(([, node]) => typeof node.layout?.x === 'number' || typeof node.layout?.y === 'number');
+  const autoRowGap = hasExplicitLayout ? socketLayoutUnitY + 8 : socketLayoutRowGap;
   const sockets = entries.map(([id, node], index) => {
-    const autoPosition = serpentineAutoPosition(autoIndexById.get(id) ?? index);
+    const autoPosition = serpentineAutoPosition(autoIndexById.get(id) ?? index, autoRowGap);
     const explicitX = typeof node.layout?.x === 'number' ? layoutUnit(node.layout.x, socketLayoutUnitX) : undefined;
     const explicitY = typeof node.layout?.y === 'number' ? layoutUnit(node.layout.y, socketLayoutUnitY) : undefined;
     return {
@@ -1005,8 +994,19 @@ export function App() {
     const layoutX = layoutValueForPosition(finalX, socketLayoutOffsetX, socketLayoutUnitX);
     const layoutY = layoutValueForPosition(finalY, socketLayoutOffsetY, socketLayoutUnitY);
     updateDraft((config) => {
-      const node = buildLoadouts(config)[activeLoadoutName]?.nodes?.[socketId];
-      if (!node) return;
+      const loadout = buildLoadouts(config)[activeLoadoutName];
+      const nodes = loadout?.nodes;
+      const node = nodes?.[socketId];
+      if (!node || !nodes) return;
+      for (const socket of loadoutGraph.sockets) {
+        const socketNode = nodes[socket.id];
+        if (!socketNode || socket.id === socketId || (typeof socketNode.layout?.x === 'number' && typeof socketNode.layout?.y === 'number')) continue;
+        socketNode.layout = {
+          ...(socketNode.layout ?? {}),
+          x: layoutValueForPosition(socket.x, socketLayoutOffsetX, socketLayoutUnitX),
+          y: layoutValueForPosition(socket.y, socketLayoutOffsetY, socketLayoutUnitY),
+        };
+      }
       node.layout = { ...(node.layout ?? {}), x: layoutX, y: layoutY };
     });
     setStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);

@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --materia-socket-width: 10rem;
-  --materia-socket-stage-height: 9.25rem;
-  --materia-socket-min-height: 11.5rem;
+  --materia-socket-width: 5.75rem;
+  --materia-socket-stage-height: 5.75rem;
+  --materia-socket-min-height: 8.5rem;
   --materia-orb-size: 4.25rem;
   --materia-orb-small-size: 2rem;
-  --materia-socket-stage-padding: 1.2rem;
+  --materia-socket-stage-padding: 0.7rem;
 }
 
 .fantasy-panel {
