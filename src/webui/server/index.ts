@@ -4,6 +4,9 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 type MateriaSaveTarget = 'user' | 'project' | 'explicit';
+type MateriaRolePromptGenerationResult =
+  | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true }
+  | { ok: false; error: string; code: 'invalid_brief' | 'disabled' | 'generation_failed' };
 type MateriaConfigPatch = Record<string, unknown>;
 
 export interface MateriaMonitorArtifactEntry {
@@ -68,6 +71,7 @@ export interface MateriaWebUiServerOptions {
     getSnapshot: () => MateriaWebUiSessionSnapshot | Promise<MateriaWebUiSessionSnapshot>;
     getConfig?: () => Promise<unknown>;
     saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
+    generateMateriaRole?: (request: { brief: string }) => Promise<MateriaRolePromptGenerationResult>;
   };
 }
 
@@ -117,6 +121,26 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const MAX_ROLE_BRIEF_CHARS = 4_000;
+
+function validateMateriaRoleBrief(brief: unknown): { ok: true; brief: string } | Extract<MateriaRolePromptGenerationResult, { ok: false }> {
+  if (typeof brief !== 'string') return { ok: false, code: 'invalid_brief', error: 'Expected brief to be a string.' };
+  const trimmed = brief.trim();
+  if (!trimmed) return { ok: false, code: 'invalid_brief', error: 'Role brief cannot be empty.' };
+  if (trimmed.length > MAX_ROLE_BRIEF_CHARS) return { ok: false, code: 'invalid_brief', error: `Role brief is too long; limit is ${MAX_ROLE_BRIEF_CHARS} characters.` };
+  return { ok: true, brief: trimmed };
+}
+
+function roleGenerationStatus(result: Extract<MateriaRolePromptGenerationResult, { ok: false }>): number {
+  if (result.code === 'invalid_brief') return 400;
+  if (result.code === 'disabled') return 403;
+  return 500;
+}
+
+function sendRoleGenerationError(res: ServerResponse, status: number, code: string, message: string) {
+  sendJson(res, status, { ok: false, error: { code, message } });
 }
 
 function serveStatic(req: IncomingMessage, res: ServerResponse, staticDir: string) {
@@ -199,6 +223,48 @@ export function createMateriaWebUiServer(options: MateriaWebUiServerOptions = {}
         sendJson(res, 200, { ok: true, target, written });
       } catch (error) {
         sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (req.url?.startsWith('/api/generate/materia-role')) {
+      if (req.method !== 'POST') {
+        sendRoleGenerationError(res, 405, 'method_not_allowed', 'Use POST to generate a Materia role prompt.');
+        return;
+      }
+      if (!options.session?.generateMateriaRole) {
+        sendRoleGenerationError(res, 503, 'unavailable', 'Materia role generation API is unavailable for this server.');
+        return;
+      }
+      try {
+        const body = await readJsonBody(req);
+        if (!isPlainObject(body) || !('brief' in body)) {
+          sendRoleGenerationError(res, 400, 'invalid_request', 'Expected JSON body with string field "brief".');
+          return;
+        }
+        const validation = validateMateriaRoleBrief(body.brief);
+        if (!validation.ok) {
+          sendRoleGenerationError(res, 400, validation.code, validation.error);
+          return;
+        }
+        const result = await options.session.generateMateriaRole({ brief: validation.brief });
+        if (!result.ok) {
+          sendRoleGenerationError(res, roleGenerationStatus(result), result.code, result.error);
+          return;
+        }
+        sendJson(res, 200, {
+          ok: true,
+          prompt: result.prompt,
+          model: result.model,
+          provider: result.provider,
+          api: result.api,
+          thinking: result.thinking,
+          isolated: result.isolated,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const invalidJson = message === 'Invalid JSON body' || message === 'Request body too large';
+        sendRoleGenerationError(res, invalidJson ? 400 : 500, invalidJson ? 'invalid_request' : 'generation_failed', message);
       }
       return;
     }

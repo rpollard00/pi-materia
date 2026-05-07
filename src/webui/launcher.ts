@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createMateriaWebUiServer, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../native.js";
 import { loadConfig, loadProfileConfig, saveMateriaConfigPatch } from "../config.js";
+import { generateMateriaRolePrompt } from "../roleGeneration.js";
 
 export interface MateriaWebUiLaunchResult {
   url: string;
@@ -45,7 +46,7 @@ export async function assertMateriaWebUiArtifactAvailable(options: MateriaWebUiA
   );
 }
 
-export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?: string): Promise<MateriaWebUiLaunchResult> {
+export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<MateriaWebUiLaunchResult> {
   const sessionKey = webUiSessionKey(ctx);
   const existing = servers.get(sessionKey);
   if (existing?.server.listening) {
@@ -55,7 +56,7 @@ export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?:
   const inFlight = pending.get(sessionKey);
   if (inFlight) return inFlight;
 
-  const launch = startServer(ctx, sessionKey, configuredPath).finally(() => pending.delete(sessionKey));
+  const launch = startServer(ctx, sessionKey, configuredPath, pi).finally(() => pending.delete(sessionKey));
   pending.set(sessionKey, launch);
   return launch;
 }
@@ -73,7 +74,7 @@ export function webUiSessionKey(ctx: ExtensionContext): string {
   return createHash("sha256").update(raw).digest("hex").slice(0, 24);
 }
 
-async function startServer(ctx: ExtensionContext, sessionKey: string, configuredPath?: string): Promise<MateriaWebUiLaunchResult> {
+async function startServer(ctx: ExtensionContext, sessionKey: string, configuredPath?: string, pi?: ExtensionAPI): Promise<MateriaWebUiLaunchResult> {
   await assertMateriaWebUiArtifactAvailable();
 
   const profile = await loadProfileConfig();
@@ -97,6 +98,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt),
       getConfig: () => loadConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
+      generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
     },
   });
 
