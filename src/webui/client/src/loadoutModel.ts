@@ -14,9 +14,18 @@ export interface PipelineNode {
   [key: string]: unknown;
 }
 
+export interface PipelineLoop {
+  label?: string;
+  nodes: string[];
+  iterator?: { items: string; as?: string; cursor?: string; done?: string };
+  exit?: { when: MateriaEdgeCondition; to: string };
+  [key: string]: unknown;
+}
+
 export interface PipelineConfig {
   entry?: string;
   nodes?: Record<string, PipelineNode>;
+  loops?: Record<string, PipelineLoop>;
   [key: string]: unknown;
 }
 

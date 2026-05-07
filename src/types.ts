@@ -272,6 +272,8 @@ export interface MateriaRunContext {
 export interface MateriaPipelineConfig {
   entry: string;
   nodes: Record<string, MateriaPipelineNodeConfig>;
+  /** Explicit loop/iterator regions that group sockets and optionally provide shared foreach behavior. */
+  loops?: Record<string, MateriaLoopConfig>;
 }
 
 export type MateriaParseMode = "text" | "json";
@@ -323,6 +325,22 @@ export interface MateriaAdvanceConfig {
   when?: string;
 }
 
+export interface MateriaLoopConfig {
+  /** Human-readable label for graph/UI display. */
+  label?: string;
+  /** Socket ids contained by this loop region. */
+  nodes: string[];
+  /** Optional shared iterator; used by loop member nodes without their own foreach. */
+  iterator?: MateriaForeachConfig;
+  /** Optional documented exit edge/condition for UI and validation. Runtime routing remains canonical edges. */
+  exit?: MateriaLoopExitConfig;
+}
+
+export interface MateriaLoopExitConfig {
+  when: MateriaEdgeCondition;
+  to: string;
+}
+
 export interface MateriaNodeLimitsConfig {
   maxVisits?: number;
   maxEdgeTraversals?: number;
@@ -332,6 +350,7 @@ export interface MateriaNodeLimitsConfig {
 export interface ResolvedMateriaPipeline {
   entry: ResolvedMateriaNode;
   nodes: Record<string, ResolvedMateriaNode>;
+  loops?: Record<string, MateriaLoopConfig>;
 }
 
 export type ResolvedMateriaNode = ResolvedMateriaAgentNode | ResolvedMateriaUtilityNode;

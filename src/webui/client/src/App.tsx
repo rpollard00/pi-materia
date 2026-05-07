@@ -128,6 +128,16 @@ interface RoutedLoadoutEdge {
   routeClass: 'forward' | 'backward' | 'loop';
 }
 
+interface LoopRegion {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  summary: string;
+}
+
 type SocketAnchorSide = 'top' | 'right' | 'bottom' | 'left';
 
 interface SocketAnchorPoint {
@@ -530,6 +540,20 @@ function serpentineAutoPosition(autoIndex: number, rowGap = socketLayoutRowGap) 
   };
 }
 
+function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>): LoopRegion[] {
+  return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop]) => {
+    const sockets = loop.nodes.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
+    if (sockets.length === 0) return [];
+    const minX = Math.min(...sockets.map((socket) => socket.x));
+    const minY = Math.min(...sockets.map((socket) => socket.y));
+    const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
+    const maxY = Math.max(...sockets.map((socket) => socket.y + socketStageHeight));
+    const iterator = loop.iterator ? `Iterator: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}` : 'Loop region';
+    const exit = loop.exit ? `Exit: ${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to}` : undefined;
+    return [{ id, label: loop.label ?? id, x: minX - 34, y: minY - 48, width: Math.max(180, maxX - minX + 68), height: Math.max(150, maxY - minY + 86), summary: [iterator, exit].filter(Boolean).join(' • ') }];
+  });
+}
+
 function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[]; edges: LoadoutEdge[]; width: number; height: number } {
   const nodes = loadout?.nodes ?? {};
   const entries = Object.entries(nodes);
@@ -753,6 +777,7 @@ export function App() {
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
   const loadoutGraph = useMemo(() => layoutSockets(activeLoadout), [activeLoadout]);
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
+  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout, socketPositions]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const materia = draftConfig?.materia ?? {};
   const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
@@ -1058,6 +1083,61 @@ export function App() {
     setEdgeMutationError('');
     setStatus(onSuccess || description);
     return true;
+  }
+
+  function createTaskIteratorLoop() {
+    const required = ['Build', 'Auto-Eval', 'Maintain'];
+    const missing = required.filter((id) => !activeLoadout?.nodes?.[id]);
+    if (missing.length > 0) {
+      setStatus(`Cannot create task loop; missing sockets: ${missing.join(', ')}.`);
+      return;
+    }
+    const created = commitGraphMutation(
+      'Staged Build → Eval → Maintain task loop.',
+      (loadout) => {
+        loadout.loops = {
+          ...(loadout.loops ?? {}),
+          taskIteration: {
+            label: 'Build → Eval → Maintain until all tasks complete',
+            nodes: required,
+            iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
+            exit: { when: 'satisfied', to: 'end' },
+          },
+        };
+      },
+      'Staged explicit task iterator loop around Build, Auto-Eval, and Maintain.',
+      (message) => `Cannot create task loop: ${message}`,
+    );
+    if (created) setSocketActionId(undefined);
+  }
+
+  function updateLoopExit(loopId: string, patch: Partial<{ when: MateriaEdgeCondition; to: string }>) {
+    const loop = activeLoadout?.loops?.[loopId];
+    if (!loop) return;
+    const currentExit = loop.exit ?? { when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
+    const nextExit = { ...currentExit, ...patch };
+    commitGraphMutation(
+      `Updated loop ${loopId} exit.`,
+      (loadout) => {
+        const draftLoop = loadout.loops?.[loopId];
+        if (!draftLoop) return;
+        draftLoop.exit = nextExit;
+      },
+      `Staged loop ${loopId} exit as ${edgeConditionLabel(nextExit.when)} → ${nextExit.to}.`,
+      (message) => `Cannot update loop ${loopId} exit: ${message}`,
+    );
+  }
+
+  function clearLoopExit(loopId: string) {
+    commitGraphMutation(
+      `Cleared loop ${loopId} exit.`,
+      (loadout) => {
+        const draftLoop = loadout.loops?.[loopId];
+        if (draftLoop) delete draftLoop.exit;
+      },
+      `Cleared loop ${loopId} exit condition.`,
+      (message) => `Cannot clear loop ${loopId} exit: ${message}`,
+    );
   }
 
   function createEdge(from: string) {
@@ -1398,9 +1478,12 @@ export function App() {
                 <h2 className="text-2xl font-bold">Visual materia grid</h2>
                 <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
               </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop}>Create Task Loop</button>
               <label className="text-sm text-slate-300">Edit name
                 <input className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" value={activeLoadoutName ?? ''} onChange={(event) => renameActiveLoadout(event.target.value)} />
               </label>
+              </div>
             </div>
 
             <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onDragOver={(event) => event.preventDefault()} onDrop={handleGraphDrop}>
@@ -1433,6 +1516,20 @@ export function App() {
                   );
                 })}
               </svg>
+              {loopRegions.map((loop) => (
+                <div
+                  key={loop.id}
+                  className="loadout-loop-region"
+                  data-testid={`loop-region-${loop.id}`}
+                  style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px` }}
+                  title={loop.summary}
+                  aria-label={`${loop.label} loop: ${loop.summary}`}
+                >
+                  <span className="loadout-loop-badge">Loop</span>
+                  <span className="loadout-loop-title">{loop.label}</span>
+                  <span className="loadout-loop-summary">{loop.summary}</span>
+                </div>
+              ))}
               {loadoutGraph.sockets.map((socket) => {
                 const { id, node, index, x, y } = socket;
                 const dragPreview = socketLayoutDrag?.socketId === id ? socketLayoutDrag : undefined;
@@ -1467,6 +1564,38 @@ export function App() {
               })}
               </div>
             </div>
+
+            {Object.keys(activeLoadout?.loops ?? {}).length > 0 && (
+              <div className="mt-4 rounded-2xl border border-cyan-200/15 bg-slate-950/55 p-4" data-testid="loop-editor-panel">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Loop exits</h3>
+                <p className="mt-1 text-xs text-slate-400">Loop exit conditions use the same canonical edge model as graph edges.</p>
+                <div className="mt-3 grid gap-3">
+                  {Object.entries(activeLoadout?.loops ?? {}).map(([loopId, loop]) => {
+                    const exit = loop.exit ?? { when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
+                    return (
+                      <div key={loopId} className="flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200/10 bg-slate-900/60 p-3" data-testid={`loop-editor-${loopId}`}>
+                        <div className="min-w-48 flex-1">
+                          <div className="font-semibold text-cyan-100">{loop.label ?? loopId}</div>
+                          <div className="text-xs text-slate-400">Members: {loop.nodes.join(', ')}</div>
+                        </div>
+                        <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit condition
+                          <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-condition-${loopId}`} value={exit.when} onChange={(event) => updateLoopExit(loopId, { when: event.target.value as MateriaEdgeCondition })}>
+                            {Object.entries(edgeConditionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit target
+                          <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-target-${loopId}`} value={exit.to} onChange={(event) => updateLoopExit(loopId, { to: event.target.value })}>
+                            <option value="end">end</option>
+                            {Object.keys(activeLoadout?.nodes ?? {}).map((nodeId) => <option key={nodeId} value={nodeId}>{nodeId}</option>)}
+                          </select>
+                        </label>
+                        {loop.exit && <button type="button" className="materia-button-secondary" data-testid={`loop-exit-clear-${loopId}`} onClick={() => clearLoopExit(loopId)}>Clear exit</button>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {socketActionId && activeLoadout?.nodes?.[socketActionId] && (
               <div className="socket-action-backdrop" role="presentation" onMouseDown={closeSocketActionModal}>

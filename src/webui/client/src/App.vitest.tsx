@@ -134,6 +134,84 @@ describe('Materia loadout grid editor', () => {
     expect(retryEdge.querySelector('path')?.getAttribute('d')).not.toBe(forwardPath);
   });
 
+  it('renders explicit loop regions and can create the build-eval-maintain task loop', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
+      taskIteration: {
+        label: 'Build → Eval → Maintain until all tasks complete',
+        nodes: ['Build', 'Auto-Eval', 'Maintain'],
+        iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
+        exit: { when: 'satisfied', to: 'end' },
+      },
+    } as never;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const region = await screen.findByTestId('loop-region-taskIteration');
+    expect(region.textContent).toContain('Loop');
+    expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
+    expect(region.getAttribute('title')).toContain('Iterator: state.tasks as task until end');
+    expect(region.getAttribute('title')).toContain('Exit: Satisfied → end');
+    expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
+    expect(screen.getByTestId('loop-exit-condition-taskIteration')).toBeTruthy();
+    expect(screen.getByTestId('loop-exit-target-taskIteration')).toBeTruthy();
+  });
+
+  it('edits loop exit conditions with the canonical edge model', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
+      taskIteration: {
+        label: 'Build → Eval → Maintain until all tasks complete',
+        nodes: ['Build', 'Auto-Eval', 'Maintain'],
+        iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
+        exit: { when: 'satisfied', to: 'end' },
+      },
+    } as never;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByTestId('loop-exit-condition-taskIteration'), { target: { value: 'not_satisfied' } });
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Not Satisfied → end'));
+    fireEvent.change(screen.getByTestId('loop-exit-target-taskIteration'), { target: { value: 'Maintain' } });
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Not Satisfied → Maintain'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
+    expect(saved.loops.taskIteration.exit).toEqual({ when: 'not_satisfied', to: 'Maintain' });
+  });
+
+  it('creates and saves an explicit task loop around Build, Auto-Eval, and Maintain', async () => {
+    const config = structuredClone(testConfig);
+    delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('create-task-loop'));
+    expect(await screen.findByTestId('loop-region-taskIteration')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
+    expect(saved.loops.taskIteration).toEqual({
+      label: 'Build → Eval → Maintain until all tasks complete',
+      nodes: ['Build', 'Auto-Eval', 'Maintain'],
+      iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
+      exit: { when: 'satisfied', to: 'end' },
+    });
+  });
+
   it('keeps socket shells only modestly larger than their materia orb while preserving overflow containment', () => {
     const css = readFileSync(`${process.cwd()}/src/webui/client/src/styles.css`, 'utf8');
     const cssRem = (name: string) => {

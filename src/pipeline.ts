@@ -1,6 +1,6 @@
 import { resolveArtifactRoot } from "./config.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
-import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
   pipeline: MateriaPipelineConfig;
@@ -38,7 +38,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   );
   const entry = nodes[effective.pipeline.entry];
   if (!entry) throw new Error(`Unknown pipeline entry slot "${effective.pipeline.entry}"`);
-  return { entry, nodes };
+  return { entry, nodes, loops: effective.pipeline.loops };
 }
 
 function resolveNode(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig, id: string, source: string): ResolvedMateriaNode {
@@ -216,7 +216,28 @@ function renderGraph(pipeline: MateriaPipelineConfig): string[] {
     for (const edge of node.edges ?? []) lines.push(`${id} --${edgeLabel(edge)}--> ${edge.to}`);
     if (!node.edges?.length) lines.push(`${id}`);
   }
+  for (const [id, loop] of Object.entries(pipeline.loops ?? {})) {
+    const label = loop.label ? `${id} (${loop.label})` : id;
+    const iterator = loop.iterator ? ` iterator=${formatForeach(loop.iterator)}` : "";
+    const exit = loop.exit ? ` exit=${loop.exit.when}->${loop.exit.to}` : "";
+    lines.push(`loop ${label}: [${loop.nodes.join(", ")}]${iterator}${exit}`);
+  }
   return lines.length > 0 ? lines : ["<empty>"];
+}
+
+export function loopIteratorForNode(pipeline: Pick<MateriaPipelineConfig, "nodes" | "loops"> | Pick<ResolvedMateriaPipeline, "nodes" | "loops">, nodeId: string): MateriaForeachConfig | undefined {
+  const entry = pipeline.nodes[nodeId] as (MateriaPipelineNodeConfig | ResolvedMateriaNode | undefined);
+  const node = entry && "node" in entry ? entry.node : entry;
+  const direct = node?.foreach;
+  if (direct) return direct;
+  for (const loop of Object.values(pipeline.loops ?? {})) {
+    if (loop.iterator && loop.nodes.includes(nodeId)) return loop.iterator;
+  }
+  return undefined;
+}
+
+function formatForeach(loop: MateriaForeachConfig): string {
+  return `${loop.items}${loop.as ? ` as ${loop.as}` : ""}${loop.done ? ` done ${loop.done}` : ""}`;
 }
 
 function edgeLabel(edge: MateriaEdgeConfig): string {

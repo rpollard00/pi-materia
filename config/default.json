@@ -136,6 +136,26 @@
           ],
           "materia": "Maintain"
         }
+      },
+      "loops": {
+        "taskIteration": {
+          "label": "Build → Eval → Maintain until all tasks complete",
+          "nodes": [
+            "Build",
+            "Auto-Eval",
+            "Maintain"
+          ],
+          "iterator": {
+            "items": "state.tasks",
+            "as": "task",
+            "cursor": "taskIndex",
+            "done": "end"
+          },
+          "exit": {
+            "when": "satisfied",
+            "to": "end"
+          }
+        }
       }
     },
     "Planning-Consult": {
@@ -261,6 +281,26 @@
             }
           ],
           "materia": "Maintain"
+        }
+      },
+      "loops": {
+        "taskIteration": {
+          "label": "Build → Eval → Maintain until all tasks complete",
+          "nodes": [
+            "Build",
+            "Auto-Eval",
+            "Maintain"
+          ],
+          "iterator": {
+            "items": "state.tasks",
+            "as": "task",
+            "cursor": "taskIndex",
+            "done": "end"
+          },
+          "exit": {
+            "when": "satisfied",
+            "to": "end"
+          }
         }
       }
     }

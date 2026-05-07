@@ -5,7 +5,7 @@ import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
-import { getEffectivePipelineConfig } from "./pipeline.js";
+import { getEffectivePipelineConfig, loopIteratorForNode } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { canonicalOutgoingEdges } from "./graphValidation.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_SATISFIED_FIELD } from "./handoffContract.js";
@@ -365,7 +365,8 @@ async function advanceToNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mat
 async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, node: ResolvedMateriaNode): Promise<void> {
   const config = await loadConfigFromState(state);
   const hasItem = setCurrentItem(state, node);
-  if (node.node.foreach && !hasItem) return await advanceToNode(pi, ctx, state, node.node.foreach.done ?? "end", "foreach-empty");
+  const loop = loopIteratorForNode(state.pipeline, node.id);
+  if (loop && !hasItem) return await advanceToNode(pi, ctx, state, loop.done ?? "end", "foreach-empty");
   enforceNodeLimit(state, node, config);
   const attempt = startTaskAttempt(state, node.id);
 
@@ -547,7 +548,7 @@ function formatCommandForError(command: string[]): string {
 }
 
 function buildUtilityInput(state: MateriaCastState, node: Extract<ResolvedMateriaNode, { node: { type: "utility" } }>): Record<string, unknown> {
-  const loop = node.node.foreach;
+  const loop = node.node.foreach ?? loopIteratorForNode(state.pipeline, node.id);
   const cursorName = loop?.cursor ?? (loop ? `${node.id}Index` : undefined);
   return {
     cwd: state.cwd,
@@ -769,7 +770,7 @@ function enforceNodeLimit(state: MateriaCastState, node: ResolvedMateriaNode, co
 }
 
 function setCurrentItem(state: MateriaCastState, node: ResolvedMateriaNode): boolean {
-  const loop = node.node.foreach;
+  const loop = node.node.foreach ?? loopIteratorForNode(state.pipeline, node.id);
   if (!loop) {
     state.currentItemKey = undefined;
     state.currentItemLabel = undefined;

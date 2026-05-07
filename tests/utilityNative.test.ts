@@ -222,6 +222,46 @@ describe("native utility node execution", () => {
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
   });
 
+  test("explicit loop iterator metadata drives runtime item selection for member nodes", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "seed",
+          nodes: {
+            seed: { type: "utility", utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, edges: [{ when: "always", to: "loop" }] },
+            loop: { type: "utility", utility: "echo", params: { text: "loop item" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, edges: [{ when: "always", to: "loop" }] },
+          },
+          loops: {
+            taskIteration: {
+              label: "Runtime item loop",
+              nodes: ["loop"],
+              iterator: { items: "state.items", as: "work", cursor: "itemCursor", done: "end" },
+              exit: { when: "satisfied", to: "end" },
+            },
+          },
+        },
+      },
+      materia: {},
+    });
+
+    await harness.runCommand("materia", "cast explicit loop");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; runDir?: string; visits?: Record<string, number>; cursors?: Record<string, number> };
+    expect(state.phase).toBe("complete");
+    expect(state.visits?.loop).toBe(2);
+    expect(state.cursors?.itemCursor).toBe(2);
+    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "loop", "1-a.input.json"), "utf8"));
+    expect(firstInput.item).toEqual({ id: "a", title: "Alpha" });
+    expect(firstInput.state.work).toEqual({ id: "a", title: "Alpha" });
+    expect(firstInput.cursor).toEqual({ name: "itemCursor", index: 0 });
+    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "loop", "2-b.input.json"), "utf8"));
+    expect(secondInput.itemKey).toBe("b");
+    expect(secondInput.itemLabel).toBe("Beta");
+    expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
+  });
+
   test("command utility receives JSON stdin, captures stdout result, and writes stderr artifact", async () => {
     const script = `let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const i=JSON.parse(s);console.error("diagnostic stderr");process.stdout.write(JSON.stringify({cwd:i.cwd===process.cwd(),runDir:!!i.runDir,request:i.request,castId:!!i.castId,nodeId:i.nodeId,params:i.params,state:i.state,item:i.item,itemKey:i.itemKey,itemLabel:i.itemLabel}));});`;
     const harness = await makeHarness(utilityConfig({ command: ["node", "-e", script], parse: "json", params: { greeting: "hi" }, assign: { seenRequest: "$.request" } }));

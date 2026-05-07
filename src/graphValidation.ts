@@ -6,7 +6,7 @@ export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
 export type MateriaGraphEdgeGuard = "unconditional" | "guarded";
 
 export interface MateriaGraphValidationError {
-  code: "missing-endpoint" | "unknown-endpoint" | "invalid-edge-condition" | "unreachable-edge";
+  code: "missing-endpoint" | "unknown-endpoint" | "invalid-edge-condition" | "unreachable-edge" | "invalid-loop";
   message: string;
   source?: string;
   from?: string;
@@ -58,6 +58,7 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig): MateriaGrap
     validateNodeLinks(id, node, errors, nodeIds);
     if (errors.length === errorCountBeforeNode) validateOutgoingEdgeConditions(id, node.edges ?? [], errors);
   }
+  validateLoops(normalized, errors, nodeIds);
 
   // Materia graphs are workflow state machines, not DAGs: transitions may
   // intentionally revisit earlier sockets (for example Build -> Eval -> Maintain
@@ -132,6 +133,23 @@ function validateOutgoingEdgeConditions(id: string, edges: MateriaEdgeConfig[], 
       continue;
     }
     if (validCondition && edgeGuard(edge) === "unconditional") firstUnconditional = index;
+  }
+}
+
+function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], nodeIds: Set<string>): void {
+  for (const [loopId, loop] of Object.entries(graph.loops ?? {})) {
+    if (!Array.isArray(loop.nodes) || loop.nodes.length === 0) {
+      errors.push({ code: "invalid-loop", source: `loops.${loopId}.nodes`, message: `Loop "${loopId}" must include at least one socket id in loops.${loopId}.nodes.` });
+      continue;
+    }
+    for (const [index, nodeId] of loop.nodes.entries()) {
+      if (!nodeIds.has(nodeId)) errors.push({ code: "unknown-endpoint", source: `loops.${loopId}.nodes[${index}]`, to: nodeId, message: `Unknown graph endpoint "${nodeId}" referenced by loops.${loopId}.nodes[${index}].` });
+    }
+    validateOptionalTarget(errors, nodeIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
+    validateOptionalTarget(errors, nodeIds, loopId, loop.exit?.to, `loops.${loopId}.exit.to`);
+    if (loop.exit && !isCanonicalEdgeCondition(loop.exit.when)) {
+      errors.push({ code: "invalid-edge-condition", source: `loops.${loopId}.exit.when`, to: loop.exit.to, message: `Loop "${loopId}" has invalid exit condition at loops.${loopId}.exit.when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
-import { renderGrid, resolvePipeline } from "../src/pipeline.js";
+import { loopIteratorForNode, renderGrid, resolvePipeline } from "../src/pipeline.js";
 import type { PiMateriaConfig } from "../src/types.js";
 
 const baseLoadout = {
@@ -134,6 +134,43 @@ describe("loadout-aware pipeline resolution", () => {
     const withMissingEdgeEndpoint = structuredClone(baseConfig) as PiMateriaConfig;
     activeLoadout(withMissingEdgeEndpoint).nodes.hello.edges = [{ when: "satisfied", to: undefined as never }];
     expect(() => resolvePipeline(withMissingEdgeEndpoint)).toThrow(/Missing graph endpoint referenced by hello\.edges\[0\]\.to/);
+  });
+
+  test("resolvePipeline preserves explicit loop iterator metadata for runtime lookup and grid rendering", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Build",
+          loops: {
+            taskIteration: {
+              label: "Build → Eval → Maintain until all tasks complete",
+              nodes: ["Build", "Auto-Eval", "Maintain"],
+              iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
+              exit: { when: "satisfied", to: "end" },
+            },
+          },
+          nodes: {
+            Build: { type: "agent", materia: "Build", edges: [{ when: "always", to: "Auto-Eval" }] },
+            "Auto-Eval": { type: "agent", materia: "Auto-Eval", edges: [{ when: "satisfied", to: "Maintain" }, { when: "not_satisfied", to: "Build" }] },
+            Maintain: { type: "agent", materia: "Maintain", edges: [{ when: "always", to: "Build" }] },
+          },
+        },
+      },
+      materia: {
+        Build: { tools: "coding", prompt: "Build." },
+        "Auto-Eval": { tools: "none", prompt: "Evaluate." },
+        Maintain: { tools: "coding", prompt: "Maintain." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+    const lines = renderGrid(config, pipeline, "test", "/tmp/project");
+
+    expect(pipeline.loops?.taskIteration.nodes).toEqual(["Build", "Auto-Eval", "Maintain"]);
+    expect(loopIteratorForNode(pipeline, "Maintain")?.cursor).toBe("taskIndex");
+    expect(lines).toContain("loop taskIteration (Build → Eval → Maintain until all tasks complete): [Build, Auto-Eval, Maintain] iterator=state.tasks as task done end exit=satisfied->end");
   });
 
   test("resolvePipeline accepts repeated guarded iterative workflow branches", () => {

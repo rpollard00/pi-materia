@@ -274,6 +274,7 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
       ...(baseLoadout ?? {}),
       ...loadout,
       nodes: loadout.nodes ?? baseLoadout?.nodes ?? {},
+      loops: loadout.loops ?? (loadout.nodes ? undefined : baseLoadout?.loops),
     } as MateriaPipelineConfig);
   }
   return merged;
