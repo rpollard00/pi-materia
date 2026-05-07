@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { edgeConditionState, edgeGuard, formatGraphValidationErrors, stageValidatedPipelineGraphChange, validatePipelineGraph } from "../src/graphValidation.js";
+import { edgeConditionState, edgeGuard, formatGraphValidationErrors, normalizePipelineGraph, stageValidatedPipelineGraphChange, validatePipelineGraph } from "../src/graphValidation.js";
 import type { MateriaPipelineConfig } from "../src/types.js";
 
 const validGraph = (): MateriaPipelineConfig => ({
@@ -49,11 +49,10 @@ describe("graph validation foundation", () => {
     expect(validatePipelineGraph(graph)).toEqual({ ok: true, errors: [] });
   });
 
-  test("rejects missing, empty, legacy, and free-form edge conditions", () => {
+  test("rejects empty and free-form edge conditions while accepting legacy flow aliases through normalization", () => {
     const graph = validGraph();
     graph.nodes.Check.edges = [
-      { to: "Maintain" } as never,
-      { when: "" as never, to: "Build" },
+      { when: " " as never, to: "Build" },
       { when: "$.passed == true" as never, to: "Maintain" },
       { when: "exists($.override)" as never, to: "Build" },
     ];
@@ -62,7 +61,6 @@ describe("graph validation foundation", () => {
 
     expect(result.ok).toBe(false);
     expect(result.errors.map((error) => error.code)).toEqual([
-      "invalid-edge-condition",
       "invalid-edge-condition",
       "invalid-edge-condition",
       "invalid-edge-condition",
@@ -127,6 +125,20 @@ describe("graph validation foundation", () => {
     expect(result).toEqual({ ok: true, errors: [] });
   });
 
+  test("normalizes legacy next and flow edges into canonical always edges", () => {
+    const graph = validGraph();
+    graph.nodes.Plan.edges = [{ to: "Maintain" } as never, { when: "Flow" as never, to: "Check" }];
+
+    const normalized = normalizePipelineGraph(graph);
+
+    expect(normalized.nodes.Plan.next).toBeUndefined();
+    expect(normalized.nodes.Plan.edges).toEqual([
+      { to: "Maintain", when: "always" },
+      { to: "Check", when: "always" },
+      { when: "always", to: "Check" },
+    ]);
+  });
+
   test("stages valid graph mutations and leaves the original graph unchanged on validation errors", () => {
     const graph = validGraph();
     const accepted = stageValidatedPipelineGraphChange(graph, (draft) => {
@@ -143,7 +155,7 @@ describe("graph validation foundation", () => {
     });
 
     expect(acceptedLoop.ok).toBe(true);
-    expect(acceptedLoop.graph.nodes.Maintain.next).toBe("Build");
+    expect(acceptedLoop.graph.nodes.Maintain.edges).toEqual([{ when: "always", to: "Build" }]);
 
     const rejected = stageValidatedPipelineGraphChange(graph, (draft) => {
       draft.nodes.Maintain.next = "MissingTarget";

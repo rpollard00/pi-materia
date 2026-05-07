@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
-import { assertValidPipelineGraph } from "./graphValidation.js";
+import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -74,6 +74,7 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   const existing = existsSync(file) ? await readConfigPartial(file) : {};
   const next = mergeConfigPatch(existing, patch);
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
+  next.loadouts = normalizeLoadouts(next.loadouts);
   validateLoadoutGraphs(next.loadouts);
   await writeJsonAtomic(file, next);
   return file;
@@ -232,6 +233,7 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
+  config.loadouts = normalizeLoadouts(config.loadouts);
   validateLoadoutGraphs(config.loadouts);
   return config;
 }
@@ -268,11 +270,11 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
   for (const [name, loadout] of Object.entries(parsedLoadouts)) {
     if (!isPlainObject(loadout)) throw new Error(`Materia loadout "${name}" is invalid. Expected a pipeline object.`);
     const baseLoadout = baseLoadouts?.[name];
-    merged[name] = {
+    merged[name] = normalizePipelineGraph({
       ...(baseLoadout ?? {}),
       ...loadout,
       nodes: loadout.nodes ?? baseLoadout?.nodes ?? {},
-    };
+    } as MateriaPipelineConfig);
   }
   return merged;
 }
@@ -285,6 +287,13 @@ function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria:
     merged[name] = { ...(baseMateria[name] ?? {}), ...materia } as MateriaConfig;
   }
   return merged;
+}
+
+function normalizeLoadouts(loadouts: PiMateriaConfig["loadouts"] | undefined): PiMateriaConfig["loadouts"] {
+  if (!loadouts) return loadouts;
+  return Object.fromEntries(
+    Object.entries(loadouts).map(([name, loadout]) => [name, normalizePipelineGraph(loadout as MateriaPipelineConfig)]),
+  );
 }
 
 function validateLoadoutGraphs(loadouts: PiMateriaConfig["loadouts"] | undefined): void {

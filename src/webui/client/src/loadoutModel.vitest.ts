@@ -23,11 +23,11 @@ describe('loadout socket display model', () => {
 
   it('labels newly added compatible empty sockets as Empty while preserving socket structure', () => {
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!.Entry.next = 'Entry-Socket';
-    loadout.nodes!['Entry-Socket'] = makeEmptySocket({ next: 'After', layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+    loadout.nodes!.Entry.edges = [{ when: 'always', to: 'Entry-Socket' }];
+    loadout.nodes!['Entry-Socket'] = makeEmptySocket({ edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
 
     expect(getNodeLabel('Entry-Socket', loadout.nodes!['Entry-Socket'])).toBe('Empty');
-    expect(loadout.nodes!['Entry-Socket']).toEqual({ empty: true, next: 'After', layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+    expect(loadout.nodes!['Entry-Socket']).toEqual({ empty: true, edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
   });
 });
 
@@ -94,7 +94,7 @@ describe('loadout materia palette model', () => {
     } satisfies Record<string, MateriaBehaviorConfig>;
     const before = paletteSignature(materia);
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!.Entry.next = 'Entry-Socket';
+    loadout.nodes!.Entry.edges = [{ when: 'always', to: 'Entry-Socket' }];
     loadout.nodes!['Entry-Socket'] = makeEmptySocket({ layout: { x: 1, y: 0 } });
 
     expect(Object.keys(loadout.nodes!)).toEqual(['Entry', 'Entry-Socket']);
@@ -105,8 +105,7 @@ describe('loadout materia palette model', () => {
     const source: PipelineNode = {
       type: 'agent',
       materia: 'Build',
-      next: 'AfterSource',
-      edges: [{ to: 'SourceEdge', when: 'satisfied' }],
+      edges: [{ to: 'SourceEdge', when: 'satisfied' }, { to: 'AfterSource', when: 'always' }],
       layout: { x: 1, y: 2 },
       limits: { maxVisits: 3 },
       socketKind: 'source-metadata',
@@ -114,8 +113,7 @@ describe('loadout materia palette model', () => {
     const target: PipelineNode = {
       type: 'agent',
       materia: 'Check',
-      next: 'AfterTarget',
-      edges: [{ to: 'TargetEdge', when: 'not_satisfied' }],
+      edges: [{ to: 'TargetEdge', when: 'not_satisfied' }, { to: 'AfterTarget', when: 'always' }],
       layout: { x: 5, y: 6 },
       limits: { maxOutputBytes: 1024 },
       socketKind: 'target-metadata',
@@ -124,10 +122,10 @@ describe('loadout materia palette model', () => {
     const newTarget = placeMateriaInSocket(target, source);
     const newSource = placeMateriaInSocket(source, target);
 
-    expect(newTarget).toMatchObject({ type: 'agent', materia: 'Build', next: 'AfterTarget', layout: { x: 5, y: 6 }, limits: { maxOutputBytes: 1024 }, socketKind: 'target-metadata' });
-    expect(newTarget.edges).toEqual([{ to: 'TargetEdge', when: 'not_satisfied' }]);
-    expect(newSource).toMatchObject({ type: 'agent', materia: 'Check', next: 'AfterSource', layout: { x: 1, y: 2 }, limits: { maxVisits: 3 }, socketKind: 'source-metadata' });
-    expect(newSource.edges).toEqual([{ to: 'SourceEdge', when: 'satisfied' }]);
+    expect(newTarget).toMatchObject({ type: 'agent', materia: 'Build', layout: { x: 5, y: 6 }, limits: { maxOutputBytes: 1024 }, socketKind: 'target-metadata' });
+    expect(newTarget.edges).toEqual([{ to: 'TargetEdge', when: 'not_satisfied' }, { to: 'AfterTarget', when: 'always' }]);
+    expect(newSource).toMatchObject({ type: 'agent', materia: 'Check', layout: { x: 1, y: 2 }, limits: { maxVisits: 3 }, socketKind: 'source-metadata' });
+    expect(newSource.edges).toEqual([{ to: 'SourceEdge', when: 'satisfied' }, { to: 'AfterSource', when: 'always' }]);
   });
 
   it('does not add socketed materia into config.materia when saving grid edits', () => {

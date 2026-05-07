@@ -27,7 +27,12 @@
           "assign": {
             "artifactIgnore": "$"
           },
-          "next": "detectVcs"
+          "edges": [
+            {
+              "when": "always",
+              "to": "detectVcs"
+            }
+          ]
         },
         "detectVcs": {
           "type": "utility",
@@ -36,7 +41,12 @@
           "assign": {
             "vcs": "$"
           },
-          "next": "planner"
+          "edges": [
+            {
+              "when": "always",
+              "to": "planner"
+            }
+          ]
         },
         "planner": {
           "type": "agent",
@@ -44,8 +54,13 @@
           "assign": {
             "tasks": "$.tasks"
           },
-          "next": "Build",
-          "materia": "planner"
+          "materia": "planner",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Build"
+            }
+          ]
         },
         "Build": {
           "type": "agent",
@@ -56,8 +71,13 @@
             "cursor": "taskIndex",
             "done": "end"
           },
-          "next": "Auto-Eval",
-          "materia": "Build"
+          "materia": "Build",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Auto-Eval"
+            }
+          ]
         },
         "Auto-Eval": {
           "type": "agent",
@@ -100,7 +120,6 @@
             "done": "end",
             "when": "satisfied"
           },
-          "next": "Build",
           "assign": {
             "lastMaintain": "$"
           },
@@ -109,6 +128,10 @@
               "when": "not_satisfied",
               "to": "Maintain",
               "maxTraversals": 3
+            },
+            {
+              "when": "always",
+              "to": "Build"
             }
           ],
           "materia": "Maintain"
@@ -130,7 +153,12 @@
           "assign": {
             "artifactIgnore": "$"
           },
-          "next": "detectVcs"
+          "edges": [
+            {
+              "when": "always",
+              "to": "detectVcs"
+            }
+          ]
         },
         "detectVcs": {
           "type": "utility",
@@ -139,7 +167,12 @@
           "assign": {
             "vcs": "$"
           },
-          "next": "planner"
+          "edges": [
+            {
+              "when": "always",
+              "to": "planner"
+            }
+          ]
         },
         "planner": {
           "type": "agent",
@@ -147,8 +180,13 @@
           "assign": {
             "tasks": "$.tasks"
           },
-          "next": "Build",
-          "materia": "interactivePlan"
+          "materia": "interactivePlan",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Build"
+            }
+          ]
         },
         "Build": {
           "type": "agent",
@@ -159,8 +197,13 @@
             "cursor": "taskIndex",
             "done": "end"
           },
-          "next": "Auto-Eval",
-          "materia": "Build"
+          "materia": "Build",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Auto-Eval"
+            }
+          ]
         },
         "Auto-Eval": {
           "type": "agent",
@@ -203,7 +246,6 @@
             "done": "end",
             "when": "satisfied"
           },
-          "next": "Build",
           "assign": {
             "lastMaintain": "$"
           },
@@ -212,6 +254,10 @@
               "when": "not_satisfied",
               "to": "Maintain",
               "maxTraversals": 3
+            },
+            {
+              "when": "always",
+              "to": "Build"
             }
           ],
           "materia": "Maintain"

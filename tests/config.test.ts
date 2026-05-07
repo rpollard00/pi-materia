@@ -246,8 +246,9 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const canonical = new Set(["always", "satisfied", "not_satisfied"]);
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { next?: unknown; edges?: Array<{ when?: unknown }> }> }]>) {
       for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {
+        expect(node.next, `${loadoutName}.${nodeName}.next`).toBeUndefined();
         for (const [index, edge] of (node.edges ?? []).entries()) {
           expect(edge.when, `${loadoutName}.${nodeName}.edges[${index}].when`).toBeDefined();
           expect(canonical.has(edge.when as string), `${loadoutName}.${nodeName}.edges[${index}].when`).toBe(true);
@@ -325,7 +326,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Check",
             nodes: {
-              Check: { type: "agent", materia: "Check", edges: [{ to: "Check" } as never] },
+              Check: { type: "agent", materia: "Check", edges: [{ when: " " as never, to: "Check" }] },
             },
           },
         },
@@ -342,12 +343,12 @@ describe("config loadouts", () => {
         },
       })).rejects.toThrow(/Expected one of: always, satisfied, not_satisfied/);
 
-      await expect(saveMateriaConfigPatch(cwd, {
+      const savedPath = await saveMateriaConfigPatch(cwd, {
         loadouts: {
           Custom: {
             entry: "Build",
             nodes: {
-              Build: { type: "agent", materia: "Build", next: "Auto-Eval" },
+              Build: { type: "agent", materia: "Build", next: "Auto-Eval" } as never,
               "Auto-Eval": {
                 type: "agent",
                 materia: "Auto-Eval",
@@ -357,11 +358,13 @@ describe("config loadouts", () => {
                   { when: "not_satisfied", to: "Build", maxTraversals: 3 },
                 ],
               },
-              Maintain: { type: "agent", materia: "Maintain", next: "Build" },
+              Maintain: { type: "agent", materia: "Maintain", next: "Build" } as never,
             },
           },
         },
-      })).resolves.toBe(getUserMateriaAssetPath());
+      });
+      expect(savedPath).toBe(getUserMateriaAssetPath());
+      expect(await readFile(savedPath, "utf8")).not.toContain('"next"');
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

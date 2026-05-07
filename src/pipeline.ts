@@ -1,5 +1,5 @@
 import { resolveArtifactRoot } from "./config.js";
-import { assertValidPipelineGraph } from "./graphValidation.js";
+import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
 import type { MateriaBudgetConfig, MateriaEdgeConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
@@ -22,7 +22,7 @@ export function getEffectivePipelineConfig(config: PiMateriaConfig): EffectiveMa
   if (!pipeline) {
     throw new Error(`Unknown active Materia loadout "${activeLoadout}". Available loadouts: ${loadoutNames.join(", ")}.`);
   }
-  return { pipeline, loadoutName: activeLoadout };
+  return { pipeline: normalizePipelineGraph(pipeline), loadoutName: activeLoadout };
 }
 
 export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipeline {
@@ -175,7 +175,6 @@ function formatNodeSlot(config: PiMateriaConfig, node: MateriaPipelineNodeConfig
     details.push(node.utility ? `utility=${node.utility}` : `command=${formatCommand(node.command)}`);
   }
   details.push(`parse=${node.parse ?? "text"}`);
-  if (node.next) details.push(`next=${node.next}`);
   if (node.edges?.length) details.push(`edges=${node.edges.map((edge) => `${edgeLabel(edge)}->${edge.to}`).join(",")}`);
   if (node.foreach) details.push(`foreach=${node.foreach.items}${node.foreach.as ? ` as ${node.foreach.as}` : ""}${node.foreach.done ? ` done ${node.foreach.done}` : ""}`);
   if (node.advance) details.push(`advance=${node.advance.cursor}:${node.advance.items}${node.advance.when ? ` when ${node.advance.when}` : ""}${node.advance.done ? ` done ${node.advance.done}` : ""}`);
@@ -214,9 +213,8 @@ function formatNodeLimits(limits: NonNullable<MateriaPipelineNodeConfig["limits"
 function renderGraph(pipeline: MateriaPipelineConfig): string[] {
   const lines: string[] = [];
   for (const [id, node] of Object.entries(pipeline.nodes)) {
-    if (node.next) lines.push(`${id} -> ${node.next}`);
     for (const edge of node.edges ?? []) lines.push(`${id} --${edgeLabel(edge)}--> ${edge.to}`);
-    if (!node.next && !node.edges?.length) lines.push(`${id}`);
+    if (!node.edges?.length) lines.push(`${id}`);
   }
   return lines.length > 0 ? lines : ["<empty>"];
 }

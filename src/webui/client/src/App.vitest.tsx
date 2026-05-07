@@ -16,8 +16,8 @@ const testConfig = {
     'Full-Auto': {
       entry: 'planner',
       nodes: {
-        planner: { type: 'agent', materia: 'planner', next: 'Build', layout: { x: 0, y: 0 } },
-        Build: { type: 'agent', materia: 'Build', next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
+        planner: { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Build' }], layout: { x: 0, y: 0 } },
+        Build: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Auto-Eval' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
         'Auto-Eval': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }], layout: { x: 2, y: 0 } },
         Maintain: { type: 'agent', materia: 'Maintain', layout: { x: 3, y: 0 } },
       },
@@ -25,7 +25,7 @@ const testConfig = {
     'Planning-Consult': {
       entry: 'planner',
       nodes: {
-        planner: { type: 'agent', materia: 'interactivePlan', next: 'Build' },
+        planner: { type: 'agent', materia: 'interactivePlan', edges: [{ when: 'always', to: 'Build' }] },
         Build: { type: 'agent', materia: 'Build' },
       },
     },
@@ -53,8 +53,8 @@ const legacyPipelineConfig = {
   pipeline: {
     entry: 'planner',
     nodes: {
-      planner: { type: 'agent', materia: 'planner', next: 'Build', layout: { x: 0, y: 0 } },
-      Build: { type: 'agent', materia: 'Build', next: 'Done', edges: [{ when: 'not_satisfied', to: 'planner' }], layout: { x: 1, y: 0 } },
+      planner: { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Build' }], layout: { x: 0, y: 0 } },
+      Build: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Done' }, { when: 'not_satisfied', to: 'planner' }], layout: { x: 1, y: 0 } },
       Done: { type: 'utility', utility: 'finish', command: ['echo', 'done'], layout: { x: 2, y: 0 } },
     },
   },
@@ -105,7 +105,7 @@ describe('Materia loadout grid editor', () => {
     expect(build.getAttribute('title')).toContain('Socket: Build');
     expect(build.getAttribute('title')).toContain('Materia: Build');
     expect(build.getAttribute('title')).toContain('Model: openai/gpt-test');
-    expect(build.getAttribute('title')).toContain('Next: Auto-Eval');
+    expect(build.getAttribute('title')).toContain('Edges: Always → Auto-Eval');
   });
 
   it('renders the active loadout as a directional left-to-right graph', async () => {
@@ -122,13 +122,13 @@ describe('Materia loadout grid editor', () => {
     expect(parseFloat(evaluate.style.left)).toBeLessThan(parseFloat(maintain.style.left));
     expect(planner.style.left).toBe('32px');
     expect(build.style.left).toBe('240px');
-    expect(screen.getAllByText('flow').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Always').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Satisfied')).toBeTruthy();
     expect(screen.getByText('Not Satisfied')).toBeTruthy();
     expect(container.querySelector('.loadout-edge-satisfied')).toBeTruthy();
     expect(container.querySelector('.loadout-edge-unsatisfied')).toBeTruthy();
     expect(container.querySelectorAll('.loadout-edge path[marker-end]').length).toBe(4);
-    const forwardPath = screen.getByTestId('edge-Build-Auto-Eval-next').querySelector('path')?.getAttribute('d');
+    const forwardPath = screen.getByTestId('edge-Build-Auto-Eval-0').querySelector('path')?.getAttribute('d');
     const retryEdge = screen.getByTestId('edge-Auto-Eval-Build-1');
     expect(retryEdge.getAttribute('class')).toContain('loadout-edge-route-backward');
     expect(retryEdge.querySelector('path')?.getAttribute('d')).not.toBe(forwardPath);
@@ -161,7 +161,7 @@ describe('Materia loadout grid editor', () => {
       entry: 'socket-0',
       nodes: Object.fromEntries(Array.from({ length: 8 }, (_, index) => [
         `socket-${index}`,
-        { type: 'agent', materia: 'Build', layout: { x: index, y: index % 2 }, next: index < 7 ? `socket-${index + 1}` : undefined },
+        { type: 'agent', materia: 'Build', layout: { x: index, y: index % 2 }, edges: index < 7 ? [{ when: 'always', to: `socket-${index + 1}` }] : undefined },
       ])),
     };
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: wideConfig }))));
@@ -224,8 +224,8 @@ describe('Materia loadout grid editor', () => {
       ['B', { id: 'B', node: { type: 'agent', materia: 'B' }, index: 1, x: 208, y: 0 } as never],
       ['C', { id: 'C', node: { type: 'agent', materia: 'C' }, index: 2, x: 208, y: 176 } as never],
     ]);
-    const sameRow = routeLoadoutEdges([{ id: 'A:next:B', from: 'A', to: 'B', kind: 'next' }] as never, positions)[0];
-    const rowTransition = routeLoadoutEdges([{ id: 'B:next:C', from: 'B', to: 'C', kind: 'next' }] as never, positions)[0];
+    const sameRow = routeLoadoutEdges([{ id: 'A:edge:0:B:always', from: 'A', to: 'B', edgeIndex: 0, when: 'always' }] as never, positions)[0];
+    const rowTransition = routeLoadoutEdges([{ id: 'B:edge:0:C:always', from: 'B', to: 'C', edgeIndex: 0, when: 'always' }] as never, positions)[0];
     const backward = routeLoadoutEdges([{ id: 'B:edge:0:A:satisfied', from: 'B', to: 'A', kind: 'edge', edgeIndex: 0, when: 'satisfied' }] as never, positions)[0];
 
     for (const route of [sameRow, rowTransition, backward]) {
@@ -296,7 +296,7 @@ describe('Materia loadout grid editor', () => {
       { when: 'satisfied', to: 'Maintain' },
       { when: 'not_satisfied', to: 'Build' },
     ];
-    (iterativeConfig.loadouts['Full-Auto'].nodes.Maintain as { next?: string }).next = 'Build';
+    (iterativeConfig.loadouts['Full-Auto'].nodes.Maintain as { edges?: Array<{ when: 'always'; to: string }> }).edges = [{ when: 'always', to: 'Build' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: iterativeConfig }));
@@ -320,7 +320,7 @@ describe('Materia loadout grid editor', () => {
       { when: 'satisfied', to: 'Maintain' },
       { when: 'always', to: 'Build' },
     ]);
-    expect(savedNodes.Maintain.next).toBe('Build');
+    expect(savedNodes.Maintain.edges).toEqual([{ when: 'always', to: 'Build' }]);
   });
 
   it('shows validation failures from unreachable edge toggles without mutating draft state', async () => {
@@ -396,7 +396,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(created.nodes.Entry).toEqual({ empty: true, next: 'Entry-Socket' });
+    expect(created.nodes.Entry).toEqual({ empty: true, edges: [{ when: 'always', to: 'Entry-Socket' }] });
     expect(created.nodes['Entry-Socket']).toEqual({ empty: true });
   });
 
@@ -432,7 +432,7 @@ describe('Materia loadout grid editor', () => {
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
     expect(savedConfig.materia).toEqual(initialMateria);
-    expect(created.nodes.Entry).toEqual({ type: 'agent', materia: 'Build', empty: false, next: 'Entry-Socket' });
+    expect(created.nodes.Entry).toEqual({ type: 'agent', materia: 'Build', empty: false, edges: [{ when: 'always', to: 'Entry-Socket' }] });
     expect(created.nodes['Entry-Socket']).toEqual({ empty: true });
   });
 
@@ -504,7 +504,7 @@ describe('Materia loadout grid editor', () => {
     expect(JSON.parse(String(saveCall[1]?.body)).target).toBe('user');
     const savedBuild = JSON.parse(String(saveCall[1]?.body)).config.loadouts['Full-Auto'].nodes.Build;
     expect(savedBuild.materia).toBe('Maintain');
-    expect(savedBuild.next).toBe('Auto-Eval');
+    expect(savedBuild.edges).toEqual([{ when: 'always', to: 'Auto-Eval' }]);
     expect(savedBuild.layout).toEqual({ x: 1, y: 0 });
     expect(savedBuild.insertedBy).toBe('node-shift');
   });
@@ -527,12 +527,12 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
     expect(saved.Build.materia).toBe('Maintain');
-    expect(saved.Build.next).toBe('Auto-Eval');
+    expect(saved.Build.edges).toEqual([{ when: 'always', to: 'Auto-Eval' }]);
     expect(saved.Build.layout).toEqual({ x: 1, y: 0 });
     expect(saved.Build.insertedBy).toBe('node-shift');
     expect(saved.Maintain.materia).toBe('Build');
     expect(saved.Maintain.layout).toEqual({ x: 3, y: 0 });
-    expect(saved.planner.next).toBe('Build');
+    expect(saved.planner.edges).toEqual([{ when: 'always', to: 'Build' }]);
     expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
   });
 
@@ -556,7 +556,7 @@ describe('Materia loadout grid editor', () => {
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
     expect(saved['Auto-Eval']).toMatchObject({ empty: true, layout: { x: 2, y: 0 }, edges: [{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }] });
     expect(Object.keys(saved)).toContain('Auto-Eval');
-    expect(saved.Build.next).toBe('Auto-Eval');
+    expect(saved.Build.edges).toEqual([{ when: 'always', to: 'Auto-Eval' }]);
   });
 
   it('opens a socket action modal and unsockets materia while preserving graph metadata', async () => {
@@ -582,7 +582,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedBuild = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes.Build;
-    expect(savedBuild).toMatchObject({ empty: true, next: 'Auto-Eval', layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
+    expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Auto-Eval' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
     expect(savedBuild.materia).toBeUndefined();
   });
 
@@ -603,7 +603,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Planning-Consult'].nodes;
-    expect(saved.Build.next).toBe('Build-Socket');
+    expect(saved.Build.edges).toEqual([{ when: 'always', to: 'Build-Socket' }]);
     expect(saved['Build-Socket']).toEqual({ empty: true });
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Planning-Consult');
   });
@@ -628,7 +628,7 @@ describe('Materia loadout grid editor', () => {
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
     expect(Object.keys(saved)).toContain('Build');
     expect(saved.Build.materia).toBe('Maintain');
-    expect(saved.Build.next).toBe('Auto-Eval');
+    expect(saved.Build.edges).toEqual([{ when: 'always', to: 'Auto-Eval' }]);
     expect(saved.Build.layout).toEqual({ x: 1, y: 0 });
     expect(saved.Build.insertedBy).toBe('node-shift');
     expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
@@ -677,7 +677,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
-    expect(saved.Build).toMatchObject({ materia: 'Build', next: 'Auto-Eval', insertedBy: 'node-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 }, layout: { x: 4, y: 1.5 } });
+    expect(saved.Build).toMatchObject({ materia: 'Build', edges: [{ when: 'always', to: 'Auto-Eval' }], insertedBy: 'node-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 }, layout: { x: 4, y: 1.5 } });
     expect(saved.planner.layout).toEqual({ x: 0, y: 0 });
     expect(saved['Auto-Eval'].edges).toEqual([{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }]);
   });
@@ -722,10 +722,9 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedBuild = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes.Build;
     expect(savedBuild.materia).toBe('Maintain');
-    expect(savedBuild.next).toBe('Auto-Eval');
+    expect(savedBuild.edges).toEqual([{ when: 'always', to: 'Auto-Eval' }]);
     expect(savedBuild.layout).toEqual({ x: 1, y: 0 });
     expect(savedBuild.insertedBy).toBe('node-shift');
-    expect(savedBuild.edges).toBeUndefined();
   });
 
   it('renders socketed materia with the same configured color as its palette materia after drop', async () => {
@@ -852,7 +851,7 @@ describe('Materia loadout grid editor', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('removes a default flow without dropping conditional edges or sockets', async () => {
+  it('removes a legacy default flow without dropping conditional edges or sockets', async () => {
     const config = structuredClone(edgeEditorConfig);
     const startNode = config.loadouts.Edges.nodes.Start as typeof config.loadouts.Edges.nodes.Start & { next?: string };
     startNode.next = 'Review';
@@ -865,13 +864,13 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    expect(await screen.findByTestId('edge-Start-Review-next')).toBeTruthy();
+    expect(await screen.findByTestId('edge-Start-Review-1')).toBeTruthy();
     expect(screen.getByTestId('edge-Start-Ship-0')).toBeTruthy();
     fireEvent.click(screen.getByTestId('socket-Start'));
-    fireEvent.click(await screen.findByTestId('remove-next-edge-Start'));
+    fireEvent.click(await screen.findByTestId('remove-edge-Start-1'));
 
-    expect(await screen.findByText(/Removed default flow Start → Review; conditional edges and sockets were preserved\./)).toBeTruthy();
-    expect(screen.queryByTestId('edge-Start-Review-next')).toBeNull();
+    expect(await screen.findByText(/Removed edge Start → Review; sockets were preserved\./)).toBeTruthy();
+    expect(screen.queryByTestId('edge-Start-Review-1')).toBeNull();
     expect(screen.getByTestId('edge-Start-Ship-0')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -910,7 +909,7 @@ describe('Materia loadout grid editor', () => {
     const savedStart = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes.Start;
     expect(savedStart.layout.x).toBeCloseTo(8 / 208);
     expect(savedStart.layout.y).toBeCloseTo(7 / 168);
-    expect(savedStart.edges).toEqual([]);
+    expect(savedStart.edges).toBeUndefined();
   });
 
   it('does not move unrelated automatic sockets during the first manual socket drag', async () => {
@@ -919,8 +918,8 @@ describe('Materia loadout grid editor', () => {
     config.loadouts['Drag-Stability'] = {
       entry: 'A',
       nodes: {
-        A: { type: 'agent', materia: 'Build', next: 'B' },
-        B: { type: 'agent', materia: 'Build', next: 'C' },
+        A: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'B' }] },
+        B: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'C' }] },
         C: { type: 'agent', materia: 'Build' },
       },
     };
@@ -970,11 +969,11 @@ describe('Materia loadout grid editor', () => {
     snakeConfig.loadouts.Snake = {
       entry: 'A',
       nodes: {
-        A: { type: 'agent', materia: 'Build', next: 'B' },
-        B: { type: 'agent', materia: 'Build', next: 'C' },
-        C: { type: 'agent', materia: 'Build', next: 'D' },
-        D: { type: 'agent', materia: 'Build', next: 'E' },
-        E: { type: 'agent', materia: 'Build', next: 'F' },
+        A: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'B' }] },
+        B: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'C' }] },
+        C: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'D' }] },
+        D: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'E' }] },
+        E: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'F' }] },
         F: { type: 'agent', materia: 'Build' },
       },
     };
@@ -1006,9 +1005,9 @@ describe('Materia loadout grid editor', () => {
     mixedConfig.loadouts.Mixed = {
       entry: 'A',
       nodes: {
-        A: { type: 'agent', materia: 'Build', next: 'B' },
-        B: { type: 'agent', materia: 'Build', next: 'C' },
-        C: { type: 'agent', materia: 'Build', layout: { x: 7, y: 3 }, next: 'D' },
+        A: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'B' }] },
+        B: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'C' }] },
+        C: { type: 'agent', materia: 'Build', layout: { x: 7, y: 3 }, edges: [{ when: 'always', to: 'D' }] },
         D: { type: 'agent', materia: 'Build' },
       },
     };

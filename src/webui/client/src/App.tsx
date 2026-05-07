@@ -10,8 +10,10 @@ import {
   makeEmptyEntryLoadout,
   makeEmptySocket,
   nodeColor,
+  normalizeMateriaConfigEdges,
   placeMateriaInSocket,
   type MateriaConfig,
+  type LegacyPipelineNode,
   type PipelineConfig,
   type PipelineNode,
 } from './loadoutModel.js';
@@ -105,8 +107,7 @@ interface LoadoutEdge {
   id: string;
   from: string;
   to: string;
-  when?: string;
-  kind: 'next' | 'edge';
+  when: MateriaEdgeCondition;
   edgeIndex?: number;
 }
 
@@ -213,10 +214,10 @@ const edgeConditionLabels: Record<MateriaEdgeCondition, string> = {
   not_satisfied: 'Not Satisfied',
 };
 
-function edgeConditionLabel(when?: string, missingLabel = 'flow') {
+function edgeConditionLabel(when?: string) {
   const state = edgeConditionState({ when });
   if (state !== 'invalid') return edgeConditionLabels[state];
-  return when === undefined ? missingLabel : 'Invalid';
+  return 'Invalid';
 }
 
 function edgeConditionClass(when?: string) {
@@ -260,10 +261,11 @@ function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: 
     if (node.utility) lines.push(`Utility: ${node.utility}`);
     if (node.command?.length) lines.push(`Command: ${node.command.join(' ')}`);
   }
-  if (node?.next) lines.push(`Next: ${node.next}`);
   if (node?.edges?.length) {
-    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when, 'Invalid')} → ${edge.to}`).join(', ')}`);
+    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when)} → ${edge.to}`).join(', ')}`);
   }
+  const legacyNext = (node as LegacyPipelineNode | undefined)?.next;
+  if (legacyNext) lines.push(`Legacy flow: Always → ${legacyNext}`);
   if (node?.limits) {
     const limits = [
       node.limits.maxVisits !== undefined ? `max visits ${node.limits.maxVisits}` : undefined,
@@ -281,11 +283,12 @@ function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: 
 function getLoadoutEdges(nodes: Record<string, PipelineNode>): LoadoutEdge[] {
   const edges: LoadoutEdge[] = [];
   for (const [from, node] of Object.entries(nodes)) {
-    if (typeof node.next === 'string' && nodes[node.next]) {
-      edges.push({ id: `${from}:next:${node.next}`, from, to: node.next, kind: 'next' });
-    }
     for (const [index, edge] of (node.edges ?? []).entries()) {
-      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when ?? 'flow'}`, from, to: edge.to, when: edge.when, kind: 'edge', edgeIndex: index });
+      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when}`, from, to: edge.to, when: edge.when, edgeIndex: index });
+    }
+    const legacyNext = (node as LegacyPipelineNode).next;
+    if (typeof legacyNext === 'string' && nodes[legacyNext]) {
+      edges.push({ id: `${from}:legacy-next:${legacyNext}`, from, to: legacyNext, when: 'always' });
     }
   }
   return edges;
@@ -308,7 +311,7 @@ function rounded(value: number) {
 }
 
 function edgeOrderKey(edge: LoadoutEdge) {
-  return `${edge.from}\u0000${edge.to}\u0000${edge.kind}\u0000${edge.edgeIndex ?? -1}\u0000${edge.when ?? ''}`;
+  return `${edge.from}\u0000${edge.to}\u0000${edge.edgeIndex ?? -1}\u0000${edge.when ?? ''}`;
 }
 
 function orderedLane(edges: LoadoutEdge[], edge: LoadoutEdge, spacing: number) {
@@ -640,15 +643,15 @@ function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
 async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string }> {
   const response = await fetch('/api/config');
   const body = await response.json() as ConfigResponse;
-  return { config: body.config ?? (body as MateriaConfig), source: body.source ?? 'unknown' };
+  return { config: normalizeMateriaConfigEdges(body.config ?? (body as MateriaConfig)), source: body.source ?? 'unknown' };
 }
 
 function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
-  if (!preserveLoadoutEdits || !current) return cloneConfig(reloaded);
-  return {
+  if (!preserveLoadoutEdits || !current) return normalizeMateriaConfigEdges(reloaded);
+  return normalizeMateriaConfigEdges({
     ...cloneConfig(current),
     materia: reloaded.materia ? cloneConfig(reloaded.materia) : undefined,
-  };
+  });
 }
 
 function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
@@ -712,9 +715,9 @@ export function App() {
           'Demo Loadout': {
             entry: 'planner',
             nodes: {
-              planner: { type: 'agent', materia: 'planner', next: 'Build' },
-              Build: { type: 'agent', materia: 'Build', next: 'Auto-Eval' },
-              'Auto-Eval': { type: 'agent', materia: 'Auto-Eval', next: 'Maintain' },
+              planner: { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Build' }] },
+              Build: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Auto-Eval' }] },
+              'Auto-Eval': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Maintain' }] },
               Maintain: { type: 'agent', materia: 'Maintain' },
             },
           },
@@ -763,14 +766,14 @@ export function App() {
       const next = cloneConfig(current ?? {});
       if (!next.loadouts) next.loadouts = buildLoadouts(next);
       updater(next);
-      return next;
+      return normalizeMateriaConfigEdges(next);
     });
   }
 
   async function reloadConfig({ preserveLoadoutEdits = false, readyStatus = 'Draft ready. Changes are staged until you save.', cancelled = () => false }: { preserveLoadoutEdits?: boolean; readyStatus?: string; cancelled?: () => boolean } = {}) {
     const loaded = await fetchMateriaConfig();
     if (cancelled()) return;
-    setBaselineConfig(cloneConfig(loaded.config));
+    setBaselineConfig(normalizeMateriaConfigEdges(loaded.config));
     setDraftConfig((current) => mergeReloadedConfigIntoDraft(current, loaded.config, preserveLoadoutEdits));
     setSource(loaded.source);
     setStatus(readyStatus);
@@ -909,14 +912,13 @@ export function App() {
       if (!loadout.nodes?.[afterSocketId]) return;
       const source = loadout.nodes[afterSocketId] as PipelineNode;
       const newId = makeNewSocketId(loadout.nodes as Record<string, PipelineNode>, afterSocketId);
-      const priorNext = source.next;
+      const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
       const sourceLayout = source.layout;
       loadout.nodes[newId] = makeEmptySocket({
-        next: priorNext,
+        edges: priorAlways ? [{ when: 'always', to: priorAlways }] : undefined,
         layout: sourceLayout ? { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 } : undefined,
       }) as unknown as import('../../../types.js').MateriaPipelineNodeConfig;
-      if (!priorNext) delete (loadout.nodes[newId] as PipelineNode).next;
-      source.next = newId;
+      source.edges = [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }];
     });
     if (!result.ok) {
       setStatus(`Cannot create socket after ${afterSocketId}: ${formatGraphValidationErrors(result.errors)}`);
@@ -1104,17 +1106,17 @@ export function App() {
     }
   }
 
-  function removeNextEdge(from: string) {
-    const to = activeLoadout?.nodes?.[from]?.next;
+  function removeLegacyNextEdge(from: string) {
+    const to = (activeLoadout?.nodes?.[from] as LegacyPipelineNode | undefined)?.next;
     if (!to) return;
     const removed = commitGraphMutation(
-      `Removed default flow ${from} → ${to}.`,
+      `Removed legacy flow ${from} → ${to}.`,
       (loadout) => {
-        const node = loadout.nodes?.[from] as PipelineNode | undefined;
+        const node = loadout.nodes?.[from] as LegacyPipelineNode | undefined;
         if (node) delete node.next;
       },
-      `Removed default flow ${from} → ${to}; conditional edges and sockets were preserved.`,
-      (message) => `Cannot remove default flow ${from} → ${to}: ${message}`,
+      `Removed legacy flow ${from} → ${to}; conditional edges and sockets were preserved.`,
+      (message) => `Cannot remove legacy flow ${from} → ${to}: ${message}`,
     );
     if (removed) {
       setSocketActionId(undefined);
@@ -1167,10 +1169,17 @@ export function App() {
   }
 
   function toggleEdgeCondition(edge: LoadoutEdge) {
-    if (!activeLoadoutName || edge.kind !== 'edge' || edge.edgeIndex === undefined || !activeLoadout) return;
+    if (!activeLoadoutName || !activeLoadout) return;
     const edgeIndex = edge.edgeIndex;
     const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, (loadout) => {
-      const candidate = loadout.nodes?.[edge.from]?.edges?.[edgeIndex];
+      const node = loadout.nodes?.[edge.from] as PipelineNode | undefined;
+      if (!node) return;
+      if (edgeIndex === undefined) {
+        node.edges = [...(node.edges ?? []), { to: edge.to, when: toggledEdgeCondition(edge.when) }];
+        delete (node as LegacyPipelineNode).next;
+        return;
+      }
+      const candidate = node.edges?.[edgeIndex];
       if (candidate) candidate.when = toggledEdgeCondition(candidate.when);
     });
     if (!result.ok) {
@@ -1182,7 +1191,8 @@ export function App() {
       draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
       config.loadouts = draftLoadouts;
     });
-    setStatus(`Staged edge ${edge.from} → ${edge.to} as ${edgeConditionLabel(result.graph.nodes?.[edge.from]?.edges?.[edge.edgeIndex]?.when)}.`);
+    const updatedEdge = edge.edgeIndex === undefined ? result.graph.nodes?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : result.graph.nodes?.[edge.from]?.edges?.[edge.edgeIndex];
+    setStatus(`Staged edge ${edge.from} → ${edge.to} as ${edgeConditionLabel(updatedEdge?.when)}.`);
   }
 
   function editMateria(id: string) {
@@ -1323,11 +1333,12 @@ export function App() {
     const response = await fetch('/api/config', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ target: saveTarget, config: draftConfig }),
+      body: JSON.stringify({ target: saveTarget, config: normalizeMateriaConfigEdges(draftConfig) }),
     });
     const body = await response.json();
     if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Save failed');
-    setBaselineConfig(cloneConfig(draftConfig));
+    setBaselineConfig(normalizeMateriaConfigEdges(draftConfig));
+    setDraftConfig(normalizeMateriaConfigEdges(draftConfig));
     setStatus(`Saved staged loadout edits to ${body.target ?? saveTarget} scope.`);
   }
 
@@ -1405,19 +1416,19 @@ export function App() {
                     <g
                       key={edge.id}
                       data-testid={`edge-${edge.from}-${edge.to}-${edge.edgeIndex ?? 'next'}`}
-                      role={edge.kind === 'edge' ? 'button' : undefined}
-                      tabIndex={edge.kind === 'edge' ? 0 : undefined}
-                      className={`loadout-edge loadout-edge-${edgeConditionClass(edge.when)} loadout-edge-route-${routeClass} ${edge.kind === 'edge' ? 'loadout-edge-clickable' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      className={`loadout-edge loadout-edge-${edgeConditionClass(edge.when)} loadout-edge-route-${routeClass} loadout-edge-clickable`}
                       onClick={() => toggleEdgeCondition(edge)}
                       onKeyDown={(event) => {
-                        if (edge.kind === 'edge' && (event.key === 'Enter' || event.key === ' ')) {
+                        if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
                           toggleEdgeCondition(edge);
                         }
                       }}
                     >
                       <path d={path} markerEnd="url(#materia-edge-arrow)" />
-                      <text x={labelX} y={labelY} transform={`rotate(${labelRotate} ${labelX} ${labelY})`}>{edgeConditionLabel(edge.when, edge.kind === 'edge' ? 'Invalid' : 'flow')}</text>
+                      <text x={labelX} y={labelY} transform={`rotate(${labelRotate} ${labelX} ${labelY})`}>{edgeConditionLabel(edge.when)}</text>
                     </g>
                   );
                 })}
@@ -1555,17 +1566,17 @@ export function App() {
                       </div>
                       <div className="edge-removal-list" data-testid="edge-removal-list">
                         <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>
-                        {activeLoadout.nodes[socketActionId].next && (
-                          <button type="button" className="edge-removal-row" data-testid={`remove-next-edge-${socketActionId}`} onClick={() => removeNextEdge(socketActionId)}>
-                            Remove default flow to {activeLoadout.nodes[socketActionId].next}
+                        {((activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next) && (
+                          <button type="button" className="edge-removal-row" data-testid={`remove-next-edge-${socketActionId}`} onClick={() => removeLegacyNextEdge(socketActionId)}>
+                            Remove legacy flow to {(activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next}
                           </button>
                         )}
                         {(activeLoadout.nodes[socketActionId].edges ?? []).map((edge, index) => (
                           <button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>
-                            Remove {edgeConditionLabel(edge.when, 'Invalid')} edge to {edge.to}
+                            Remove {edgeConditionLabel(edge.when)} edge to {edge.to}
                           </button>
                         ))}
-                        {!activeLoadout.nodes[socketActionId].next && (activeLoadout.nodes[socketActionId].edges ?? []).length === 0 && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}
+                        {!(activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next && (activeLoadout.nodes[socketActionId].edges ?? []).length === 0 && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}
                       </div>
                     </div>
                   )}

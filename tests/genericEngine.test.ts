@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { nativeTestInternals } from "../src/native.js";
 import { resolvePipeline } from "../src/pipeline.js";
-import type { MateriaCastState, PiMateriaConfig } from "../src/types.js";
+import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaNode } from "../src/types.js";
 
 function makeState(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
   return {
@@ -75,6 +75,29 @@ describe("generic engine helper mechanics", () => {
     expect(nativeTestInternals.evaluateCondition("$.count != 3", state, parsed)).toBe(true);
     expect(nativeTestInternals.evaluateCondition("exists($.ok)", state, parsed)).toBe(true);
     expect(nativeTestInternals.evaluateCondition("!exists($.missing)", state, parsed)).toBe(true);
+  });
+
+  test("routes canonical always/satisfied/not_satisfied edges and legacy next with one handoff contract", () => {
+    const state = makeState();
+    const config = { limits: { maxEdgeTraversals: 5 } } as PiMateriaConfig;
+    const node = {
+      id: "Check",
+      node: {
+        type: "agent",
+        materia: "Check",
+        edges: [
+          { when: "satisfied", to: "Done" },
+          { when: "not_satisfied", to: "Build" },
+          { when: "always", to: "Fallback" },
+        ],
+      },
+      materia: { tools: "none", prompt: "check" },
+    } satisfies ResolvedMateriaNode;
+
+    expect(nativeTestInternals.selectNextTarget(state, node, { satisfied: true }, config)).toBe("Done");
+    expect(nativeTestInternals.selectNextTarget(state, node, { satisfied: false }, config)).toBe("Build");
+    expect(nativeTestInternals.selectNextTarget(state, node, {}, config)).toBe("Fallback");
+    expect(nativeTestInternals.selectNextTarget(state, { ...node, node: { ...node.node, edges: undefined, next: "Legacy" } }, {}, config)).toBe("Legacy");
   });
 
   test("sets nested assignment paths", () => {

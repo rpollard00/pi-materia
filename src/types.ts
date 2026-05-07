@@ -277,11 +277,11 @@ export interface MateriaPipelineConfig {
 export type MateriaParseMode = "text" | "json";
 
 export type MateriaPipelineNodeConfig = MateriaAgentNodeConfig | MateriaUtilityNodeConfig;
+export type LegacyMateriaPipelineNodeConfig = MateriaPipelineNodeConfig & { next?: string };
 
 export interface MateriaPipelineNodeCommonConfig {
   parse?: MateriaParseMode;
   assign?: Record<string, string>;
-  next?: string;
   edges?: MateriaEdgeConfig[];
   foreach?: MateriaForeachConfig;
   advance?: MateriaAdvanceConfig;

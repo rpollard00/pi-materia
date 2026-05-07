@@ -187,7 +187,7 @@ describe("utility pipeline nodes", () => {
     expect(hello).toContain("type=utility");
     expect(hello).toContain('command="node" "hello.js"');
     expect(hello).toContain("parse=json");
-    expect(hello).toContain("next=ignored");
+    expect(hello).toContain("edges=always->ignored");
     expect(hello).toContain("foreach=state.items as item done end");
     expect(hello).toContain("limits=visits 2/edges 3/output 1024B");
     expect(hello).toContain("timeoutMs=5000");
@@ -322,14 +322,15 @@ describe("utility pipeline nodes", () => {
     expect(loadout.nodes.ensureArtifactsIgnored).toMatchObject({
       type: "utility",
       utility: "project.ensureIgnored",
-      next: "detectVcs",
+      edges: [{ when: "always", to: "detectVcs" }],
     });
     expect(loadout.nodes.detectVcs).toMatchObject({
       type: "utility",
       utility: "vcs.detect",
       assign: { vcs: "$" },
-      next: "planner",
+      edges: [{ when: "always", to: "planner" }],
     });
+    expect(JSON.stringify(loadout.nodes)).not.toContain('"next"');
 
     const slotsIndex = lines.indexOf("Slots:");
     const ensureLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- ensureArtifactsIgnored:"));
@@ -346,7 +347,10 @@ describe("utility pipeline nodes", () => {
       parse: "json",
       assign: { lastMaintain: "$" },
       advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "satisfied" },
-      edges: [{ when: "not_satisfied", to: "Maintain", maxTraversals: 3 }],
+      edges: [
+        { when: "not_satisfied", to: "Maintain", maxTraversals: 3 },
+        { when: "always", to: "Build" },
+      ],
     });
 
     const maintainPrompt = config.materia.Maintain!.prompt;

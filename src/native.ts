@@ -7,6 +7,7 @@ import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
+import { canonicalOutgoingEdges } from "./graphValidation.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_SATISFIED_FIELD } from "./handoffContract.js";
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
@@ -336,13 +337,13 @@ function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode, parsed
 }
 
 function selectNextTarget(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown, config: PiMateriaConfig): string {
-  for (const edge of node.node.edges ?? []) {
+  for (const edge of canonicalOutgoingEdges(node.node)) {
     if (evaluateEdgeCondition(edge.when, state, parsed)) {
       enforceEdgeLimit(state, node.id, edge, config);
       return edge.to;
     }
   }
-  return node.node.next ?? "end";
+  return "end";
 }
 
 function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEdgeConfig, config: PiMateriaConfig): void {
@@ -1161,6 +1162,7 @@ export const nativeTestInternals = {
   evaluateCondition,
   renderTemplate,
   resolveValue,
+  selectNextTarget,
   setPath,
 };
 

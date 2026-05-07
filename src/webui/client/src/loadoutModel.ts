@@ -7,7 +7,6 @@ export interface PipelineNode {
   materia?: string;
   utility?: string;
   command?: string[];
-  next?: string;
   edges?: { to: string; when: MateriaEdgeCondition; maxTraversals?: number }[];
   empty?: boolean;
   layout?: { x?: number; y?: number };
@@ -19,6 +18,28 @@ export interface PipelineConfig {
   entry?: string;
   nodes?: Record<string, PipelineNode>;
   [key: string]: unknown;
+}
+
+export type LegacyPipelineNode = PipelineNode & { next?: string };
+
+function normalizeEdgeConditionForClient(when: unknown): MateriaEdgeCondition {
+  if (when === undefined || when === '' || when === 'flow' || when === 'Flow') return 'always';
+  if (when === 'always' || when === 'satisfied' || when === 'not_satisfied') return when;
+  return when as MateriaEdgeCondition;
+}
+
+export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfig {
+  const normalized = cloneValue(config);
+  for (const loadout of Object.values(normalized.loadouts ?? {})) {
+    for (const node of Object.values(loadout.nodes ?? {}) as LegacyPipelineNode[]) {
+      const edges = (node.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
+      if (typeof node.next === 'string' && node.next) edges.push({ when: 'always', to: node.next });
+      if (edges.length > 0) node.edges = edges;
+      else delete node.edges;
+      delete node.next;
+    }
+  }
+  return normalized;
 }
 
 export interface MateriaBehaviorConfig {
@@ -111,7 +132,7 @@ export function extractMateriaBehavior(node?: PipelineNode): PipelineNode {
 export function extractSocketStructure(node?: PipelineNode): PipelineNode {
   const structure: PipelineNode = {};
   for (const [key, value] of Object.entries(node ?? {})) {
-    if (!materiaBehaviorKeys.has(key) && key !== 'empty') structure[key] = cloneValue(value);
+    if (!materiaBehaviorKeys.has(key) && key !== 'empty' && key !== 'next') structure[key] = cloneValue(value);
   }
   return structure;
 }
