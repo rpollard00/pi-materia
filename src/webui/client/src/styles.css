@@ -139,12 +139,13 @@
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
-  gap: 0.1rem;
+  gap: 0.18rem;
+  box-sizing: border-box;
   overflow: hidden;
   border-left: 2px solid color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 48%, transparent);
-  border-radius: 0.85rem;
+  border-radius: 1rem;
   background: linear-gradient(90deg, var(--loop-accent-soft, rgb(165 180 252 / 0.22)), rgb(15 23 42 / 0.08));
-  padding: 0.45rem 0.75rem;
+  padding: 0.65rem 1rem;
   color: rgb(224 231 255 / 0.88);
   pointer-events: none;
 }
@@ -194,7 +195,7 @@
 }
 
 .loadout-loop-summary {
-  max-width: min(24rem, 100%);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

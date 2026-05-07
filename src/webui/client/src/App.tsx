@@ -169,9 +169,10 @@ const socketLayoutRowGap = 240;
 const socketGraphExtent = 190;
 const loopCanvasPadding = 28;
 const loopCyclePadding = 24;
-const loopHeaderOffset = 54;
-const loopHeaderHeight = 48;
-const loopHeaderMinWidth = 240;
+const loopHeaderOffset = 72;
+const loopHeaderHeight = 64;
+const loopHeaderMinWidth = 360;
+const loopHeaderMaxWidth = 780;
 const loopAccentPalette = [
   { accent: 'rgb(165 180 252)', accentSoft: 'rgb(165 180 252 / 0.22)' },
   { accent: 'rgb(103 232 249)', accentSoft: 'rgb(103 232 249 / 0.22)' },
@@ -658,7 +659,9 @@ function loopCyclePath(sockets: PositionedSocket[]): string {
 }
 
 function estimateLoopHeaderWidth(label: string, summary: string) {
-  return Math.max(loopHeaderMinWidth, Math.min(520, Math.max(label.length * 7.5, summary.length * 4.8) + 72));
+  const titleWidth = label.length * 8.2 + 132;
+  const summaryWidth = summary.length * 5.4 + 52;
+  return Math.max(loopHeaderMinWidth, Math.min(loopHeaderMaxWidth, Math.max(titleWidth, summaryWidth)));
 }
 
 export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>): LoopRegion[] {
@@ -672,8 +675,9 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.nodes?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to])}` : undefined;
     const summary = [consumer, exit].filter(Boolean).join(' • ');
     const label = loop.label ?? id;
-    const headerWidth = Math.min(Math.max(estimateLoopHeaderWidth(label, summary), Math.min(maxX - minX + 24, 420)), 620);
-    const headerX = minX;
+    const socketSpanWidth = maxX - minX;
+    const headerWidth = Math.min(loopHeaderMaxWidth, Math.max(estimateLoopHeaderWidth(label, summary), socketSpanWidth + 48));
+    const headerX = rounded(minX + socketSpanWidth / 2 - headerWidth / 2);
     const headerY = minY - loopHeaderOffset;
     return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(sockets), ...loopAccent(index) }];
   });
