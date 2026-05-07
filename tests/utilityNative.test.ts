@@ -96,6 +96,20 @@ describe("native utility node execution", () => {
     await expect(readFile(path.join(state.runDir!, "nodes", "second", "1.md"), "utf8")).resolves.toBe("second");
   });
 
+  test("canonical not_satisfied routes only when satisfied is false", async () => {
+    const harness = await makeHarness(utilityConfig(
+      { utility: "echo", parse: "json", params: { output: { satisfied: false, feedback: "retry" } }, edges: [{ when: "not_satisfied", to: "retry" }] },
+      { retry: { type: "utility", utility: "echo", params: { text: "retry" } } },
+    ));
+
+    await harness.runCommand("materia", "cast canonical retry");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; visits?: Record<string, number>; lastJson?: unknown };
+    expect(state.phase).toBe("complete");
+    expect(state.lastJson).toEqual({ satisfied: false, feedback: "retry" });
+    expect(state.visits?.retry).toBe(1);
+  });
+
   test("satisfied edge conditions reject legacy passed JSON without canonical satisfied", async () => {
     const harness = await makeHarness(utilityConfig(
       { utility: "echo", parse: "json", params: { output: { passed: true, feedback: "ok" } }, edges: [{ when: "satisfied", to: "second" }] },
