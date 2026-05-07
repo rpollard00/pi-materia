@@ -272,7 +272,7 @@ export interface MateriaRunContext {
 export interface MateriaPipelineConfig {
   entry: string;
   nodes: Record<string, MateriaPipelineNodeConfig>;
-  /** Explicit loop/iterator regions that group sockets and optionally provide shared foreach behavior. */
+  /** Explicit loop consumer regions that group sockets and can consume a generator-provided list. */
   loops?: Record<string, MateriaLoopConfig>;
 }
 
@@ -318,6 +318,23 @@ export interface MateriaForeachConfig {
   done?: string;
 }
 
+export interface MateriaGeneratorConfig {
+  /** Output key in the materia handoff JSON that contains the generated list. */
+  output: string;
+  /** Runtime state path for the generated list consumed by loops; defaults to `state.${output}`. */
+  items?: string;
+  /** Metadata describing the generated list type. Must be "array" for loop consumers. */
+  listType: "array";
+  /** Metadata describing each generated item type. */
+  itemType: string;
+  /** Item variable name used by loop consumers when not overridden on the loop. */
+  as?: string;
+  /** Cursor name used by loop consumers when not overridden on the loop. */
+  cursor?: string;
+  /** Graph target used when the generated list is exhausted. */
+  done?: string;
+}
+
 export interface MateriaAdvanceConfig {
   cursor: string;
   items: string;
@@ -330,10 +347,25 @@ export interface MateriaLoopConfig {
   label?: string;
   /** Socket ids contained by this loop region. */
   nodes: string[];
-  /** Optional shared iterator; used by loop member nodes without their own foreach. */
+  /** Optional generator consumed by this loop region. Prefer this over directly tagging loop members as iterators. */
+  consumes?: MateriaLoopConsumerConfig;
+  /** Legacy/shared iterator metadata. Prefer consumes so this is derived from generator metadata. */
   iterator?: MateriaForeachConfig;
   /** Optional documented exit edge/condition for UI and validation. Runtime routing remains canonical edges. */
   exit?: MateriaLoopExitConfig;
+}
+
+export interface MateriaLoopConsumerConfig {
+  /** Socket id of an agent node whose referenced materia declares generates metadata. */
+  from: string;
+  /** Generated output key to consume. Defaults to the generator declaration output. */
+  output?: string;
+  /** Loop item variable override. Defaults to generator.as. */
+  as?: string;
+  /** Cursor override. Defaults to generator.cursor. */
+  cursor?: string;
+  /** Exhaustion target override. Defaults to generator.done. */
+  done?: string;
 }
 
 export interface MateriaLoopExitConfig {
@@ -377,6 +409,8 @@ export interface MateriaDefinitionMetadata {
   group?: string;
   /** Tailwind gradient classes used by the Loadout UI for this materia. */
   color?: string;
+  /** Declares that this materia generates a list output consumable by loop regions. */
+  generates?: MateriaGeneratorConfig;
 }
 
 export interface MateriaAgentConfig extends MateriaDefinitionMetadata {

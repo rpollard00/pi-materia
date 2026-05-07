@@ -19,6 +19,7 @@ export interface PipelineNode {
 export interface PipelineLoop {
   label?: string;
   nodes: string[];
+  consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
   exit?: { when: MateriaEdgeCondition; to: string };
   [key: string]: unknown;
@@ -71,6 +72,7 @@ export interface MateriaBehaviorConfig {
   parse?: 'text' | 'json';
   assign?: Record<string, string>;
   foreach?: { items: string; as?: string; cursor?: string; done?: string };
+  generates?: { output: string; items?: string; listType: 'array'; itemType: string; as?: string; cursor?: string; done?: string };
   [key: string]: unknown;
 }
 
@@ -106,6 +108,7 @@ const materiaBehaviorKeys = new Set([
   'timeoutMs',
   'assign',
   'foreach',
+  'generates',
   'model',
   'modelSettings',
   'outputFormat',

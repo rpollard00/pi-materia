@@ -145,6 +145,8 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
     for (const [index, nodeId] of loop.nodes.entries()) {
       if (!nodeIds.has(nodeId)) errors.push({ code: "unknown-endpoint", source: `loops.${loopId}.nodes[${index}]`, to: nodeId, message: `Unknown graph endpoint "${nodeId}" referenced by loops.${loopId}.nodes[${index}].` });
     }
+    validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.from, `loops.${loopId}.consumes.from`);
+    validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.done, `loops.${loopId}.consumes.done`);
     validateOptionalTarget(errors, nodeIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
     validateOptionalTarget(errors, nodeIds, loopId, loop.exit?.to, `loops.${loopId}.exit.to`);
     if (loop.exit && !isCanonicalEdgeCondition(loop.exit.when)) {

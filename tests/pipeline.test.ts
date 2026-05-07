@@ -136,6 +136,42 @@ describe("loadout-aware pipeline resolution", () => {
     expect(() => resolvePipeline(withMissingEdgeEndpoint)).toThrow(/Missing graph endpoint referenced by hello\.edges\[0\]\.to/);
   });
 
+  test("resolvePipeline derives loop iterator metadata from a declared generator consumer", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Plan",
+          loops: {
+            taskIteration: {
+              label: "Generated task loop",
+              nodes: ["Build"],
+              consumes: { from: "Plan", output: "tasks" },
+              exit: { when: "satisfied", to: "end" },
+            },
+          },
+          nodes: {
+            Plan: { type: "agent", materia: "planner", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "Build" }] },
+            Build: { type: "agent", materia: "Build", edges: [{ when: "always", to: "Build" }] },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generates: { output: "tasks", as: "task", cursor: "taskIndex", done: "end", listType: "array", itemType: "task" } },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+    const lines = renderGrid(config, pipeline, "test", "/tmp/project");
+
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
+    expect(loopIteratorForNode(pipeline, "Build")?.items).toBe("state.tasks");
+    expect(lines).toContain("- planner: tools=readOnly, model=active Pi model, thinking=active Pi thinking, generates=tasks:array<task>");
+    expect(lines).toContain("loop taskIteration (Generated task loop): [Build] consumes=Plan.tasks iterator=state.tasks as task done end exit=satisfied->end");
+  });
+
   test("resolvePipeline preserves explicit loop iterator metadata for runtime lookup and grid rendering", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
@@ -322,6 +358,41 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
 
+  test("generator declarations must map to JSON-assigned list outputs", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "planner",
+          nodes: {
+            planner: { type: "agent", materia: "planner", parse: "text", edges: [{ when: "always", to: "Build" }] },
+            Build: { type: "agent", materia: "Build" },
+          },
+          loops: { taskIteration: { nodes: ["Build"], consumes: { from: "planner", output: "tasks" } } },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generates: { output: "tasks", listType: "array", itemType: "task" } },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+
+    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "planner" must parse JSON/);
+
+    config.loadouts!.Test.nodes.planner.parse = "json";
+    expect(() => resolvePipeline(config)).toThrow(/must assign generated output "tasks"/);
+
+    config.loadouts!.Test.nodes.planner.assign = { tasks: "$.tasks" };
+    expect(resolvePipeline(config).entry.materia.generates?.output).toBe("tasks");
+
+    config.materia.planner!.generates = { output: "tasks", itemType: "task" } as never;
+    expect(() => resolvePipeline(config)).toThrow(/invalid generates\.listType/);
+
+    config.materia.planner!.generates = { output: "tasks", listType: "array", itemType: "" } as never;
+    expect(() => resolvePipeline(config)).toThrow(/invalid generates\.itemType/);
+  });
+
   test("rejects malformed multiTurn values on materia", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,
@@ -378,6 +449,9 @@ describe("utility pipeline nodes", () => {
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
+    expect(config.materia.planner?.generates).toMatchObject({ output: "tasks", listType: "array", itemType: "task" });
+    expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "planner", output: "tasks" });
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
     expect(loadout.nodes.Maintain).toMatchObject({
       type: "agent",
       materia: "Maintain",

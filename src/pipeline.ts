@@ -1,6 +1,6 @@
 import { resolveArtifactRoot } from "./config.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
-import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
+import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
   pipeline: MateriaPipelineConfig;
@@ -36,9 +36,10 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   const nodes = Object.fromEntries(
     Object.keys(effective.pipeline.nodes).map((id) => [id, resolveNode(config, effective, id, `${pipelineSource(effective)}.nodes.${id}`)]),
   );
+  validateGeneratorNodeContracts(config, effective);
   const entry = nodes[effective.pipeline.entry];
   if (!entry) throw new Error(`Unknown pipeline entry slot "${effective.pipeline.entry}"`);
-  return { entry, nodes, loops: effective.pipeline.loops };
+  return { entry, nodes, loops: resolveLoopIterators(config, effective) };
 }
 
 function resolveNode(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig, id: string, source: string): ResolvedMateriaNode {
@@ -121,6 +122,7 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
   if (rawMateria.multiTurn !== undefined && typeof rawMateria.multiTurn !== "boolean") {
     throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
   }
+  validateGeneratorDeclaration(name, rawMateria.generates);
 }
 
 function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, unknown>): void {
@@ -129,6 +131,35 @@ function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, un
   if (rawMateria.command !== undefined) validateCommand(name, rawMateria.command);
   if (rawMateria.timeoutMs !== undefined && (!Number.isFinite(rawMateria.timeoutMs) || Number(rawMateria.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
+  }
+  validateGeneratorDeclaration(name, rawMateria.generates);
+}
+
+function validateGeneratorDeclaration(name: string, generates: unknown): void {
+  if (generates === undefined) return;
+  if (!isPlainObject(generates)) throw new Error(`Materia "${name}" has invalid generates. Expected an object.`);
+  if (typeof generates.output !== "string" || generates.output.length === 0) throw new Error(`Materia "${name}" has invalid generates.output. Expected a non-empty string.`);
+  if (generates.listType !== "array") throw new Error(`Materia "${name}" has invalid generates.listType. Expected "array" for loop-consumable list outputs.`);
+  if (typeof generates.itemType !== "string" || generates.itemType.length === 0) throw new Error(`Materia "${name}" has invalid generates.itemType. Expected a non-empty string.`);
+  for (const field of ["items", "as", "cursor", "done"] as const) {
+    if (generates[field] !== undefined && (typeof generates[field] !== "string" || generates[field].length === 0)) throw new Error(`Materia "${name}" has invalid generates.${field}. Expected a non-empty string when configured.`);
+  }
+}
+
+function validateGeneratorNodeContracts(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): void {
+  const consumedGeneratorIds = new Set(Object.values(effective.pipeline.loops ?? {}).map((loop) => loop.consumes?.from).filter((id): id is string => typeof id === "string"));
+  for (const id of consumedGeneratorIds) {
+    const node = effective.pipeline.nodes[id];
+    if (!node || node.type !== "agent") continue;
+    const generator = config.materia[node.materia]?.generates;
+    if (!generator) continue;
+    if (generator.listType !== "array") throw new Error(`Generator materia "${node.materia}" must declare generates.listType="array" for loop-consumable output "${generator.output}".`);
+    if (!generator.itemType) throw new Error(`Generator materia "${node.materia}" must declare generates.itemType for loop-consumable output "${generator.output}".`);
+    if (node.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON to expose generated output "${generator.output}".`);
+    const assignedPath = node.assign?.[generator.output];
+    if (assignedPath !== `$.${generator.output}`) {
+      throw new Error(`Generator pipeline slot "${id}" must assign generated output "${generator.output}" from the handoff JSON.`);
+    }
   }
 }
 
@@ -161,7 +192,7 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     `loadout: ${effective.loadoutName}`,
     "",
     "Graph:",
-    ...renderGraph(effective.pipeline),
+    ...renderGraph(config, effective.pipeline),
     "",
     "Resolved entry:",
     pipeline.entry.id,
@@ -209,13 +240,15 @@ function formatCommand(command: string[] | undefined): string {
 }
 
 function formatMateriaDetails(materia: MateriaConfig): string {
+  const generator = materia.generates ? `generates=${materia.generates.output}:${materia.generates.listType}<${materia.generates.itemType}>` : undefined;
   if (materia.type === "utility") {
-    return [`type=utility`, materia.utility ? `utility=${materia.utility}` : `command=${formatCommand(materia.command)}`, `parse=${materia.parse ?? "text"}`].join(", ");
+    return [`type=utility`, materia.utility ? `utility=${materia.utility}` : `command=${formatCommand(materia.command)}`, `parse=${materia.parse ?? "text"}`, generator].filter(Boolean).join(", ");
   }
   return [
     `tools=${materia.tools}`,
     materia.multiTurn ? "multiTurn=true" : undefined,
     formatMateriaModelSettings(materia),
+    generator,
   ].filter(Boolean).join(", ");
 }
 
@@ -234,19 +267,50 @@ function formatNodeLimits(limits: NonNullable<MateriaPipelineNodeConfig["limits"
   ].filter(Boolean).join("/") || "default";
 }
 
-function renderGraph(pipeline: MateriaPipelineConfig): string[] {
+function renderGraph(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): string[] {
   const lines: string[] = [];
   for (const [id, node] of Object.entries(pipeline.nodes)) {
     for (const edge of node.edges ?? []) lines.push(`${id} --${edgeLabel(edge)}--> ${edge.to}`);
     if (!node.edges?.length) lines.push(`${id}`);
   }
-  for (const [id, loop] of Object.entries(pipeline.loops ?? {})) {
+  const loops = resolveLoopIterators(config, { pipeline, loadoutName: "<render>" });
+  for (const [id, loop] of Object.entries(loops ?? {})) {
     const label = loop.label ? `${id} (${loop.label})` : id;
+    const consumer = loop.consumes ? ` consumes=${loop.consumes.from}.${loop.consumes.output ?? generatorForLoop(config, pipeline, id)?.output ?? "<generated>"}` : "";
     const iterator = loop.iterator ? ` iterator=${formatForeach(loop.iterator)}` : "";
     const exit = loop.exit ? ` exit=${loop.exit.when}->${loop.exit.to}` : "";
-    lines.push(`loop ${label}: [${loop.nodes.join(", ")}]${iterator}${exit}`);
+    lines.push(`loop ${label}: [${loop.nodes.join(", ")}]${consumer}${iterator}${exit}`);
   }
   return lines.length > 0 ? lines : ["<empty>"];
+}
+
+function resolveLoopIterators(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): Record<string, MateriaLoopConfig> | undefined {
+  if (!effective.pipeline.loops) return undefined;
+  return Object.fromEntries(Object.entries(effective.pipeline.loops).map(([id, loop]) => [id, { ...loop, iterator: loop.iterator ?? generatedIteratorForLoop(config, effective.pipeline, id, loop) }]));
+}
+
+function generatedIteratorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, loopId: string, loop: MateriaLoopConfig): MateriaForeachConfig | undefined {
+  if (!loop.consumes) return undefined;
+  const generator = generatorForLoop(config, pipeline, loopId);
+  const output = loop.consumes.output ?? generator.output;
+  if (output !== generator.output) throw new Error(`Loop "${loopId}" consumes output "${output}" but generator "${loop.consumes.from}" declares output "${generator.output}".`);
+  return {
+    items: generator.items ?? `state.${generator.output}`,
+    as: loop.consumes.as ?? generator.as,
+    cursor: loop.consumes.cursor ?? generator.cursor,
+    done: loop.consumes.done ?? generator.done,
+  };
+}
+
+function generatorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, loopId: string): MateriaGeneratorConfig {
+  const consumer = pipeline.loops?.[loopId]?.consumes;
+  if (!consumer) throw new Error(`Loop "${loopId}" does not declare a generator consumer.`);
+  const source = pipeline.nodes[consumer.from];
+  if (!source) throw new Error(`Loop "${loopId}" consumes unknown generator socket "${consumer.from}".`);
+  if (source.type !== "agent") throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but only agent materia can declare generated outputs.`);
+  const generator = config.materia[source.materia]?.generates;
+  if (!generator) throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but materia "${source.materia}" does not declare generates metadata.`);
+  return generator;
 }
 
 export function loopIteratorForNode(pipeline: Pick<MateriaPipelineConfig, "nodes" | "loops"> | Pick<ResolvedMateriaPipeline, "nodes" | "loops">, nodeId: string): MateriaForeachConfig | undefined {

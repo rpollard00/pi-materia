@@ -6,7 +6,7 @@ import { App, routeLoadoutEdges } from './App.js';
 const testConfig = {
   activeLoadout: 'Full-Auto',
   materia: {
-    planner: { tools: 'none', prompt: 'Plan the work' },
+    planner: { tools: 'none', prompt: 'Plan the work', generates: { output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' } },
     Build: { tools: 'coding', prompt: 'Build the work', model: 'openai/gpt-test' },
     'Auto-Eval': { tools: 'readOnly', prompt: 'Evaluate the work' },
     Maintain: { tools: 'coding', prompt: 'Maintain the work' },
@@ -16,7 +16,7 @@ const testConfig = {
     'Full-Auto': {
       entry: 'planner',
       nodes: {
-        planner: { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Build' }], layout: { x: 0, y: 0 } },
+        planner: { type: 'agent', materia: 'planner', parse: 'json', assign: { tasks: '$.tasks' }, edges: [{ when: 'always', to: 'Build' }], layout: { x: 0, y: 0 } },
         Build: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Auto-Eval' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
         'Auto-Eval': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Maintain' }, { when: 'not_satisfied', to: 'Build' }], layout: { x: 2, y: 0 } },
         Maintain: { type: 'agent', materia: 'Maintain', layout: { x: 3, y: 0 } },
@@ -176,7 +176,7 @@ describe('Materia loadout grid editor', () => {
     const region = await screen.findByTestId('loop-region-taskIteration');
     expect(region.textContent).toContain('Loop');
     expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
-    expect(region.getAttribute('title')).toContain('Iterator: state.tasks as task until end');
+    expect(region.getAttribute('title')).toContain('Loop consumer: state.tasks as task until end');
     expect(region.getAttribute('title')).toContain('Exit: Satisfied → end');
     expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
     expect(screen.getByTestId('loop-exit-condition-taskIteration')).toBeTruthy();
@@ -232,7 +232,7 @@ describe('Materia loadout grid editor', () => {
     expect(saved.loops.taskIteration).toEqual({
       label: 'Build → Eval → Maintain until all tasks complete',
       nodes: ['Build', 'Auto-Eval', 'Maintain'],
-      iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
+      consumes: { from: 'planner', output: 'tasks' },
       exit: { when: 'satisfied', to: 'end' },
     });
   });

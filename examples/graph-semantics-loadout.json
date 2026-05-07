@@ -58,7 +58,7 @@
         "taskIteration": {
           "label": "Build → Eval → Maintain until all tasks complete",
           "nodes": ["Build", "Auto-Eval", "Maintain"],
-          "iterator": { "items": "state.tasks", "as": "task", "cursor": "taskIndex", "done": "end" },
+          "consumes": { "from": "planner", "output": "tasks" },
           "exit": { "when": "satisfied", "to": "end" }
         }
       }
@@ -86,7 +86,15 @@
     },
     "planner": {
       "tools": "readOnly",
-      "prompt": "Return JSON: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }."
+      "prompt": "Return JSON: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.",
+      "generates": {
+        "output": "tasks",
+        "listType": "array",
+        "itemType": "task",
+        "as": "task",
+        "cursor": "taskIndex",
+        "done": "end"
+      }
     },
     "Build": { "tools": "coding", "prompt": "Implement the current task: {{itemJson}}" },
     "Auto-Eval": { "tools": "readOnly", "prompt": "Return { \"satisfied\": boolean, \"feedback\": string } for {{itemJson}}." },

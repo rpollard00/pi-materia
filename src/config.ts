@@ -331,6 +331,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
       throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
     }
+    validateGeneratorDeclaration(name, materia.generates);
   }
 }
 
@@ -341,6 +342,18 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
   if (materia.command !== undefined) validateUtilityCommandMateria(name, materia.command);
   if (materia.timeoutMs !== undefined && (!Number.isFinite(materia.timeoutMs) || Number(materia.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
+  }
+  validateGeneratorDeclaration(name, materia.generates);
+}
+
+function validateGeneratorDeclaration(name: string, generates: unknown): void {
+  if (generates === undefined) return;
+  if (!isPlainObject(generates)) throw new Error(`Materia "${name}" has invalid generates. Expected an object.`);
+  if (typeof generates.output !== "string" || generates.output.length === 0) throw new Error(`Materia "${name}" has invalid generates.output. Expected a non-empty string.`);
+  if (generates.listType !== "array") throw new Error(`Materia "${name}" has invalid generates.listType. Expected "array" for loop-consumable list outputs.`);
+  if (typeof generates.itemType !== "string" || generates.itemType.length === 0) throw new Error(`Materia "${name}" has invalid generates.itemType. Expected a non-empty string.`);
+  for (const field of ["items", "as", "cursor", "done"] as const) {
+    if (generates[field] !== undefined && (typeof generates[field] !== "string" || generates[field].length === 0)) throw new Error(`Materia "${name}" has invalid generates.${field}. Expected a non-empty string when configured.`);
   }
 }
 

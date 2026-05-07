@@ -248,18 +248,27 @@ function toggledEdgeCondition(when?: string): MateriaEdgeCondition {
 function hasIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig, socketId?: string): boolean {
   if (node?.foreach) return true;
   const referenced = extractMateriaReference(node);
-  if (referenced && definitions?.[referenced.materia]?.foreach) return true;
-  if (socketId && Object.values(loadout?.loops ?? {}).some((loop) => Boolean(loop.iterator) && loop.nodes.includes(socketId))) return true;
+  if (referenced && (definitions?.[referenced.materia]?.foreach || definitions?.[referenced.materia]?.generates)) return true;
+  if (socketId && Object.values(loadout?.loops ?? {}).some((loop) => (Boolean(loop.iterator) || Boolean(loop.consumes)) && loop.nodes.includes(socketId))) return true;
   return false;
 }
 
 function formatIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig, socketId?: string): string {
   const referenced = extractMateriaReference(node);
+  const generator = referenced ? definitions?.[referenced.materia]?.generates : undefined;
+  if (generator) return `Generator: ${generator.output}${generator.itemType ? ` (${generator.itemType} list)` : ''}`;
   const foreach = node?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
   if (foreach) return `Iterator: ${foreach.items}${foreach.as ? ` as ${foreach.as}` : ''}${foreach.done ? ` until ${foreach.done}` : ''}`;
-  const loop = socketId ? Object.values(loadout?.loops ?? {}).find((candidate) => Boolean(candidate.iterator) && candidate.nodes.includes(socketId)) : undefined;
-  if (loop?.iterator) return `Iterator: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}`;
-  return 'Iterator materia';
+  const loop = socketId ? Object.values(loadout?.loops ?? {}).find((candidate) => (Boolean(candidate.iterator) || Boolean(candidate.consumes)) && candidate.nodes.includes(socketId)) : undefined;
+  if (loop?.consumes) return `Loop consumer: ${loop.consumes.from}.${loop.consumes.output ?? 'generated list'}`;
+  if (loop?.iterator) return `Loop consumer: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}`;
+  return 'Loop consumer materia';
+}
+
+function iteratorBadgeLabel(details?: string): string {
+  if (details?.startsWith('Generator:')) return 'Generator';
+  if (details?.startsWith('Loop consumer:')) return 'Loop consumer';
+  return 'Iterator';
 }
 
 function summarizeHoverText(value?: unknown): string | undefined {
@@ -567,7 +576,7 @@ function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<stri
     const minY = Math.min(...sockets.map((socket) => socket.y));
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
     const maxY = Math.max(...sockets.map((socket) => socket.y + socketStageHeight));
-    const iterator = loop.iterator ? `Iterator: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}` : 'Loop region';
+    const iterator = loop.consumes ? `Loop consumes: ${loop.consumes.from}.${loop.consumes.output ?? 'generated list'}` : loop.iterator ? `Loop consumer: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}` : 'Loop region';
     const exit = loop.exit ? `Exit: ${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to}` : undefined;
     return [{ id, label: loop.label ?? id, x: minX - 34, y: minY - 48, width: Math.max(180, maxX - minX + 68), height: Math.max(150, maxY - minY + 86), summary: [iterator, exit].filter(Boolean).join(' • ') }];
   });
@@ -1134,6 +1143,16 @@ export function App() {
       setStatus(`Cannot create task loop; missing sockets: ${missing.join(', ')}.`);
       return;
     }
+    const generatorEntry = Object.entries(activeLoadout?.nodes ?? {}).find(([, node]) => {
+      const referenced = extractMateriaReference(node);
+      return Boolean(referenced && materia[referenced.materia]?.generates);
+    });
+    const generatorRef = generatorEntry ? extractMateriaReference(generatorEntry[1]) : undefined;
+    const generator = generatorRef ? materia[generatorRef.materia]?.generates : undefined;
+    if (!generatorEntry || !generator) {
+      setStatus('Cannot create task loop; no generator materia with generates metadata exists in the active loadout.');
+      return;
+    }
     const created = commitGraphMutation(
       'Staged Build → Eval → Maintain task loop.',
       (loadout) => {
@@ -1142,12 +1161,12 @@ export function App() {
           taskIteration: {
             label: 'Build → Eval → Maintain until all tasks complete',
             nodes: required,
-            iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
+            consumes: { from: generatorEntry[0], output: generator.output },
             exit: { when: 'satisfied', to: 'end' },
           },
         };
       },
-      'Staged explicit task iterator loop around Build, Auto-Eval, and Maintain.',
+      `Staged task loop around Build, Auto-Eval, and Maintain consuming ${generatorEntry[0]}.${generator.output}.`,
       (message) => `Cannot create task loop: ${message}`,
     );
     if (created) setSocketActionId(undefined);
@@ -1602,7 +1621,7 @@ export function App() {
                     <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
                       <Orb color={nodeColor(id, index, materia, node)} label={socketHoverDetails} empty={isEmptySocket(node)} iterator={isIterator} />
                     </div>
-                    {isIterator && <span className="materia-iterator-badge graph-iterator-badge" title={iteratorDetails}>Iterator</span>}
+                    {isIterator && <span className="materia-iterator-badge graph-iterator-badge" title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
                   </div>
                   <span className="materia-socket-label">{nodeLabel}</span>
                 </button>
@@ -1778,7 +1797,7 @@ export function App() {
                       <span className="flex flex-col items-start leading-tight">
                         <span>{getNodeLabel(id, node)}</span>
                         {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
-                        {isIterator && <span className="materia-iterator-badge palette-iterator-badge" title={iteratorDetails}>Iterator</span>}
+                        {isIterator && <span className="materia-iterator-badge palette-iterator-badge" title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
                       </span>
                     </button>
                   );

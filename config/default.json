@@ -65,12 +65,6 @@
         "Build": {
           "type": "agent",
           "parse": "text",
-          "foreach": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "materia": "Build",
           "edges": [
             {
@@ -82,12 +76,6 @@
         "Auto-Eval": {
           "type": "agent",
           "parse": "json",
-          "foreach": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "assign": {
             "lastFeedback": "$.feedback",
             "lastCheck": "$"
@@ -108,12 +96,6 @@
         "Maintain": {
           "type": "agent",
           "parse": "json",
-          "foreach": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "advance": {
             "cursor": "taskIndex",
             "items": "state.tasks",
@@ -145,15 +127,13 @@
             "Auto-Eval",
             "Maintain"
           ],
-          "iterator": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "exit": {
             "when": "satisfied",
             "to": "end"
+          },
+          "consumes": {
+            "from": "planner",
+            "output": "tasks"
           }
         }
       }
@@ -211,12 +191,6 @@
         "Build": {
           "type": "agent",
           "parse": "text",
-          "foreach": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "materia": "Build",
           "edges": [
             {
@@ -228,12 +202,6 @@
         "Auto-Eval": {
           "type": "agent",
           "parse": "json",
-          "foreach": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "assign": {
             "lastFeedback": "$.feedback",
             "lastCheck": "$"
@@ -254,12 +222,6 @@
         "Maintain": {
           "type": "agent",
           "parse": "json",
-          "foreach": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "advance": {
             "cursor": "taskIndex",
             "items": "state.tasks",
@@ -291,15 +253,13 @@
             "Auto-Eval",
             "Maintain"
           ],
-          "iterator": {
-            "items": "state.tasks",
-            "as": "task",
-            "cursor": "taskIndex",
-            "done": "end"
-          },
           "exit": {
             "when": "satisfied",
             "to": "end"
+          },
+          "consumes": {
+            "from": "planner",
+            "output": "tasks"
           }
         }
       }
@@ -338,13 +298,29 @@
     "planner": {
       "tools": "readOnly",
       "color": "from-sky-200 via-cyan-300 to-blue-600",
-      "prompt": "You are the pi-materia planning materia. Break high-level software requests into small, ordered implementation tasks with objective acceptance criteria. When producing JSON, follow the runtime-provided canonical handoff JSON contract.\n\nCreate an implementation plan for this request. Be directive about repository bootstrap. If the repository appears empty, uninitialized, or missing common project hygiene, make the first task a bootstrap task. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Bootstrap tasks should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Return only JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.\n\nRequest: {{request}}"
+      "prompt": "You are the pi-materia planning materia. Break high-level software requests into small, ordered implementation tasks with objective acceptance criteria. When producing JSON, follow the runtime-provided canonical handoff JSON contract.\n\nCreate an implementation plan for this request. Be directive about repository bootstrap. If the repository appears empty, uninitialized, or missing common project hygiene, make the first task a bootstrap task. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Bootstrap tasks should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Return only JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.\n\nRequest: {{request}}",
+      "generates": {
+        "output": "tasks",
+        "as": "task",
+        "cursor": "taskIndex",
+        "done": "end",
+        "listType": "array",
+        "itemType": "task"
+      }
     },
     "interactivePlan": {
       "tools": "readOnly",
       "multiTurn": true,
       "color": "from-sky-200 via-cyan-300 to-blue-600",
-      "prompt": "You are the pi-materia interactive planning materia. Collaborate with the user over multiple turns to refine goals, constraints, task ordering, and acceptance criteria before work is finalized. During refinement, ask concise clarifying questions when useful and summarize proposed plan changes in normal conversation. Do not emit final task JSON during refinement. /materia continue is the only way to finalize this multi-turn materia; if the plan appears complete or the conversation is stalling, prompt the user to run /materia continue. After /materia continue is run, follow the runtime-provided canonical handoff JSON contract and return JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }. The finalized JSON must contain no markdown or extra commentary.\n\nCollaboratively refine an implementation plan for this request through normal conversation before producing task artifacts. Start by briefly summarizing your understanding of the request and any known repository context. Ask concise clarifying questions when useful, propose and refine task breakdowns and acceptance criteria conversationally, and incorporate the user's feedback over multiple turns. Keep repository bootstrap considerations in mind: if the repository appears empty, uninitialized, or missing common project hygiene, include a bootstrap task in the eventual finalized plan. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Any finalized bootstrap task should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Do not emit the structured task JSON during refinement. Treat all normal user messages as refinement input, even if they say continue, ready, finalize, or look good. Only after the user runs /materia continue, return valid JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }. The finalized JSON must contain no markdown or extra commentary.\n\nRequest: {{request}}"
+      "prompt": "You are the pi-materia interactive planning materia. Collaborate with the user over multiple turns to refine goals, constraints, task ordering, and acceptance criteria before work is finalized. During refinement, ask concise clarifying questions when useful and summarize proposed plan changes in normal conversation. Do not emit final task JSON during refinement. /materia continue is the only way to finalize this multi-turn materia; if the plan appears complete or the conversation is stalling, prompt the user to run /materia continue. After /materia continue is run, follow the runtime-provided canonical handoff JSON contract and return JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }. The finalized JSON must contain no markdown or extra commentary.\n\nCollaboratively refine an implementation plan for this request through normal conversation before producing task artifacts. Start by briefly summarizing your understanding of the request and any known repository context. Ask concise clarifying questions when useful, propose and refine task breakdowns and acceptance criteria conversationally, and incorporate the user's feedback over multiple turns. Keep repository bootstrap considerations in mind: if the repository appears empty, uninitialized, or missing common project hygiene, include a bootstrap task in the eventual finalized plan. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Any finalized bootstrap task should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Do not emit the structured task JSON during refinement. Treat all normal user messages as refinement input, even if they say continue, ready, finalize, or look good. Only after the user runs /materia continue, return valid JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }. The finalized JSON must contain no markdown or extra commentary.\n\nRequest: {{request}}",
+      "generates": {
+        "output": "tasks",
+        "as": "task",
+        "cursor": "taskIndex",
+        "done": "end",
+        "listType": "array",
+        "itemType": "task"
+      }
     },
     "Build": {
       "tools": "coding",
