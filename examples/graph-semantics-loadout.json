@@ -1,0 +1,95 @@
+{
+  "artifactDir": ".pi/pi-materia",
+  "activeLoadout": "Graph Semantics Example",
+  "loadouts": {
+    "Graph Semantics Example": {
+      "entry": "ensureArtifactsIgnored",
+      "nodes": {
+        "ensureArtifactsIgnored": {
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "parse": "json",
+          "params": { "patterns": [".pi/pi-materia/"] },
+          "assign": { "artifactIgnore": "$" },
+          "edges": [{ "when": "always", "to": "detectVcs" }]
+        },
+        "detectVcs": {
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": { "vcs": "$" },
+          "edges": [{ "when": "always", "to": "planner" }]
+        },
+        "planner": {
+          "type": "agent",
+          "materia": "planner",
+          "parse": "json",
+          "assign": { "tasks": "$.tasks" },
+          "edges": [{ "when": "always", "to": "Build" }]
+        },
+        "Build": {
+          "type": "agent",
+          "materia": "Build",
+          "edges": [{ "when": "always", "to": "Auto-Eval" }]
+        },
+        "Auto-Eval": {
+          "type": "agent",
+          "materia": "Auto-Eval",
+          "parse": "json",
+          "assign": { "lastCheck": "$", "lastFeedback": "$.feedback" },
+          "edges": [
+            { "when": "satisfied", "to": "Maintain" },
+            { "when": "not_satisfied", "to": "Build", "maxTraversals": 3 }
+          ]
+        },
+        "Maintain": {
+          "type": "agent",
+          "materia": "Maintain",
+          "parse": "json",
+          "assign": { "lastMaintain": "$" },
+          "advance": { "cursor": "taskIndex", "items": "state.tasks", "done": "end", "when": "satisfied" },
+          "edges": [
+            { "when": "not_satisfied", "to": "Maintain", "maxTraversals": 3 },
+            { "when": "always", "to": "Build" }
+          ]
+        }
+      },
+      "loops": {
+        "taskIteration": {
+          "label": "Build → Eval → Maintain until all tasks complete",
+          "nodes": ["Build", "Auto-Eval", "Maintain"],
+          "iterator": { "items": "state.tasks", "as": "task", "cursor": "taskIndex", "done": "end" },
+          "exit": { "when": "satisfied", "to": "end" }
+        }
+      }
+    }
+  },
+  "materia": {
+    "ensureArtifactsIgnored": {
+      "type": "utility",
+      "label": "Ensure artifacts ignored",
+      "description": "Ensures .pi/pi-materia/ is ignored by the project.",
+      "group": "Utility",
+      "utility": "project.ensureIgnored",
+      "parse": "json",
+      "params": { "patterns": [".pi/pi-materia/"] },
+      "assign": { "artifactIgnore": "$" }
+    },
+    "detectVcs": {
+      "type": "utility",
+      "label": "Detect VCS",
+      "description": "Detects jj/git availability and repository root.",
+      "group": "Utility",
+      "utility": "vcs.detect",
+      "parse": "json",
+      "assign": { "vcs": "$" }
+    },
+    "planner": {
+      "tools": "readOnly",
+      "prompt": "Return JSON: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }."
+    },
+    "Build": { "tools": "coding", "prompt": "Implement the current task: {{itemJson}}" },
+    "Auto-Eval": { "tools": "readOnly", "prompt": "Return { \"satisfied\": boolean, \"feedback\": string } for {{itemJson}}." },
+    "Maintain": { "tools": "coding", "prompt": "Checkpoint accepted work and return { \"satisfied\": boolean, \"commitMessage\": string }." }
+  }
+}

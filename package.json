@@ -19,6 +19,7 @@
     "src/**/tsconfig.json",
     "config/default.json",
     "docs/*.md",
+    "examples/*.json",
     "README.md",
     "PI_MATERIA_PLAN.md",
     "LICENSE"

@@ -52,7 +52,7 @@ npm run test:webui         # Vitest client smoke tests
 npm run typecheck          # extension, client, and server type checks
 ```
 
-WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md). Manual regression coverage for the shipped UI is documented in [docs/webui-smoke-tests.md](docs/webui-smoke-tests.md).
+WebUI implementation inspection notes for future `/materia ui` work live in [docs/webui-integration-notes.md](docs/webui-integration-notes.md). Manual regression coverage for the shipped UI is documented in [docs/webui-smoke-tests.md](docs/webui-smoke-tests.md). Canonical edge conditions, loop/iterator regions, utility materia, and iterator styling are documented in [docs/graph-semantics.md](docs/graph-semantics.md).
 
 ## Usage
 
@@ -247,13 +247,13 @@ Generic node mechanics:
 - `materia`: named top-level materia assigned to an agent node
 - `parse`: `"text"` or `"json"`; JSON-parsed node outputs follow the canonical [materia handoff JSON contract](docs/handoff-contract.md)
 - `assign`: copy parsed output/state values into generic cast state
-- `edges`: ordered condition-driven links using canonical conditions such as `satisfied`, `not_satisfied`, or `always`; runtime selects the first edge whose guard matches, so repeated guarded predicates are allowed, while edges after an unconditional edge are invalid because they are unreachable
+- `edges`: ordered condition-driven links using canonical conditions such as `satisfied`, `not_satisfied`, or `always`; runtime selects the first edge whose guard matches, so repeated guarded predicates are allowed, while edges after an unconditional edge are invalid because they are unreachable. The WebUI's **Flow** label is the `always` condition, not a separate edge model.
 - `next`: fallback link when no edge matches
 - `foreach`: iterate a node over an array in state
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
 
-Materia graphs are workflow state machines, not DAGs. Loops such as `Build -> Auto-Eval -> Maintain -> Build` are valid and model repeated task sections/retry paths; runtime node-visit and edge-traversal limits bound execution instead of config validation rejecting cycles.
+Materia graphs are workflow state machines, not DAGs. Loops such as `Build -> Auto-Eval -> Maintain -> Build` are valid and model repeated task sections/retry paths; runtime node-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Add a loadout-level `loops` region to make that intent visible in the graph, attach shared iterator metadata (for example `state.tasks` with cursor `taskIndex`), and document/edit loop exits with the same `always`/`satisfied`/`not_satisfied` edge conditions. See [docs/graph-semantics.md](docs/graph-semantics.md) and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
 
 Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, and optional `multiTurn`. Set `"multiTurn": true` on a materia to let any agent node using that materia pause for interactive refinement until the user runs `/materia continue`.
 
