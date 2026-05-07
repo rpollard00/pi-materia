@@ -96,6 +96,19 @@ describe("native utility node execution", () => {
     await expect(readFile(path.join(state.runDir!, "nodes", "second", "1.md"), "utf8")).resolves.toBe("second");
   });
 
+  test("satisfied edge conditions route legacy Auto-Eval passed JSON", async () => {
+    const harness = await makeHarness(utilityConfig(
+      { utility: "echo", parse: "json", params: { output: { passed: true, feedback: "ok" } }, edges: [{ when: "satisfied", to: "second" }] },
+      { second: { type: "utility", utility: "echo", params: { text: "second" } } },
+    ));
+
+    await harness.runCommand("materia", "cast legacy eval");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; visits?: Record<string, number> };
+    expect(state.phase).toBe("complete");
+    expect(state.visits?.second).toBe(1);
+  });
+
   test("runtime traverses iterative Build/Eval/Maintain retry loops as ordered guarded transitions", async () => {
     const evalScript = `
       let input = "";

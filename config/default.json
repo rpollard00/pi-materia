@@ -239,7 +239,7 @@
     "Auto-Eval": {
       "tools": "readOnly",
       "color": "from-amber-100 via-yellow-300 to-orange-600",
-      "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict. Return only valid JSON when asked.\n\nEvaluate whether the current task is complete. Inspect the repository as needed. Return only JSON with shape: { \"passed\": boolean, \"feedback\": string, \"missing\": string[] }.\n\nTask: {{itemJson}}\n\nImplementation summary: {{lastOutput}}"
+      "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict. Return only valid JSON when asked.\n\nEvaluate whether the current task is complete. Inspect the repository as needed. Return only JSON with shape: { \"satisfied\": boolean, \"feedback\": string, \"missing\": string[] }.\n\nTask: {{itemJson}}\n\nImplementation summary: {{lastOutput}}"
     },
     "Maintain": {
       "tools": "coding",

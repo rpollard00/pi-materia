@@ -1060,9 +1060,16 @@ function materiaPrompt(materia: MateriaConfig, state: MateriaCastState, sections
 
 function evaluateEdgeCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
   if (condition === "always") return true;
-  if (condition === "satisfied") return resolveValue("$.satisfied", state, parsed) === true;
-  if (condition === "not_satisfied") return resolveValue("$.satisfied", state, parsed) === false;
+  const satisfied = resolveSatisfiedValue(state, parsed);
+  if (condition === "satisfied") return satisfied === true;
+  if (condition === "not_satisfied") return satisfied === false;
   throw new Error(`Unsupported Materia edge condition: ${condition}`);
+}
+
+function resolveSatisfiedValue(state: MateriaCastState, parsed: unknown): unknown {
+  const satisfied = resolveValue("$.satisfied", state, parsed);
+  if (satisfied !== undefined) return satisfied;
+  return resolveValue("$.passed", state, parsed);
 }
 
 function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {

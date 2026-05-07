@@ -169,6 +169,13 @@ describe("config loadouts", () => {
     }
   });
 
+  test("bundled Auto-Eval prompt emits the field consumed by satisfied edges", async () => {
+    const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
+    const prompt = rawDefault.materia?.["Auto-Eval"]?.prompt;
+    expect(prompt).toContain('"satisfied": boolean');
+    expect(prompt).not.toContain('"passed": boolean');
+  });
+
   test("rejects saved patches that try to add loadout-level prompt fields", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-reject-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
