@@ -1,0 +1,41 @@
+import {
+  HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
+  HANDOFF_SATISFIED_FIELD,
+} from "./handoffContract.js";
+import type { MateriaPipelineNodeConfig } from "./types.js";
+
+export interface HandoffValidationOptions {
+  nodeId: string;
+  node: MateriaPipelineNodeConfig;
+}
+
+export function validateHandoffJsonOutput(value: unknown, options: HandoffValidationOptions): Record<string, unknown> {
+  if (!isPlainJsonObject(value)) {
+    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": expected a JSON object at the top level.`);
+  }
+
+  const satisfied = value[HANDOFF_SATISFIED_FIELD];
+  if (satisfied !== undefined && typeof satisfied !== "boolean") {
+    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": reserved control field "${HANDOFF_SATISFIED_FIELD}" must be a boolean when present.`);
+  }
+
+  if (requiresSatisfiedControl(options.node) && satisfied === undefined) {
+    const legacyFields = HANDOFF_LEGACY_NON_CANONICAL_ALIASES.filter((field) => Object.prototype.hasOwnProperty.call(value, field));
+    const legacyHint = legacyFields.length
+      ? ` Legacy field ${legacyFields.map((field) => JSON.stringify(field)).join(", ")} is not canonical and is not used for routing.`
+      : "";
+    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": this node has satisfied/not_satisfied control flow and must include reserved boolean field "${HANDOFF_SATISFIED_FIELD}".${legacyHint}`);
+  }
+
+  return value;
+}
+
+export function requiresSatisfiedControl(node: MateriaPipelineNodeConfig): boolean {
+  if (node.edges?.some((edge) => edge.when === "satisfied" || edge.when === "not_satisfied")) return true;
+  const advanceWhen = node.advance?.when?.trim();
+  return advanceWhen === "satisfied" || advanceWhen === "not_satisfied";
+}
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

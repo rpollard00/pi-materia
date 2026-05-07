@@ -7,6 +7,8 @@ import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
 import { parseJson } from "./json.js";
+import { HANDOFF_SATISFIED_FIELD } from "./handoffContract.js";
+import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
 import type { LoadedConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
@@ -276,6 +278,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(`Invalid JSON output for node "${node.id}": ${detail}`);
     }
+    parsed = validateHandoffJsonOutput(parsed, { nodeId: node.id, node: node.node });
     state.lastJson = parsed;
     await writeFile(path.join(state.runDir, "nodes", safePathSegment(node.id), `${nodeVisit(state, node.id)}.json`), JSON.stringify(parsed, null, 2));
   }
@@ -1060,16 +1063,10 @@ function materiaPrompt(materia: MateriaConfig, state: MateriaCastState, sections
 
 function evaluateEdgeCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
   if (condition === "always") return true;
-  const satisfied = resolveSatisfiedValue(state, parsed);
+  const satisfied = resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed);
   if (condition === "satisfied") return satisfied === true;
   if (condition === "not_satisfied") return satisfied === false;
   throw new Error(`Unsupported Materia edge condition: ${condition}`);
-}
-
-function resolveSatisfiedValue(state: MateriaCastState, parsed: unknown): unknown {
-  const satisfied = resolveValue("$.satisfied", state, parsed);
-  if (satisfied !== undefined) return satisfied;
-  return resolveValue("$.passed", state, parsed);
 }
 
 function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {

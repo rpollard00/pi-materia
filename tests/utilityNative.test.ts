@@ -96,7 +96,7 @@ describe("native utility node execution", () => {
     await expect(readFile(path.join(state.runDir!, "nodes", "second", "1.md"), "utf8")).resolves.toBe("second");
   });
 
-  test("satisfied edge conditions route legacy Auto-Eval passed JSON", async () => {
+  test("satisfied edge conditions reject legacy passed JSON without canonical satisfied", async () => {
     const harness = await makeHarness(utilityConfig(
       { utility: "echo", parse: "json", params: { output: { passed: true, feedback: "ok" } }, edges: [{ when: "satisfied", to: "second" }] },
       { second: { type: "utility", utility: "echo", params: { text: "second" } } },
@@ -104,9 +104,33 @@ describe("native utility node execution", () => {
 
     await harness.runCommand("materia", "cast legacy eval");
 
-    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; visits?: Record<string, number> };
-    expect(state.phase).toBe("complete");
-    expect(state.visits?.second).toBe(1);
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string; visits?: Record<string, number> };
+    expect(state.phase).toBe("failed");
+    expect(state.failedReason).toContain('must include reserved boolean field "satisfied"');
+    expect(state.failedReason).toContain('Legacy field "passed" is not canonical');
+    expect(state.visits?.second).toBeUndefined();
+  });
+
+  test("parse json utility rejects non-object handoff output", async () => {
+    const harness = await makeHarness(utilityConfig({ utility: "echo", parse: "json", params: { output: ["not", "an", "object"] } }));
+
+    await harness.runCommand("materia", "cast array json");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string };
+    expect(state.phase).toBe("failed");
+    expect(state.failedReason).toContain('Invalid handoff JSON output for node "hello"');
+    expect(state.failedReason).toContain("expected a JSON object at the top level");
+  });
+
+  test("parse json utility rejects wrong satisfied field type", async () => {
+    const harness = await makeHarness(utilityConfig({ utility: "echo", parse: "json", params: { output: { satisfied: "true" } }, edges: [{ when: "satisfied", to: "second" }] }, { second: { type: "utility", utility: "echo", params: { text: "second" } } }));
+
+    await harness.runCommand("materia", "cast bad satisfied");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string; visits?: Record<string, number> };
+    expect(state.phase).toBe("failed");
+    expect(state.failedReason).toContain('reserved control field "satisfied" must be a boolean');
+    expect(state.visits?.second).toBeUndefined();
   });
 
   test("runtime traverses iterative Build/Eval/Maintain retry loops as ordered guarded transitions", async () => {
