@@ -248,6 +248,21 @@
   fill: rgb(251 191 36 / 0.95);
 }
 
+.loadout-edge-generator-input path {
+  stroke: rgb(168 85 247 / 0.96);
+  stroke-width: 4;
+  stroke-dasharray: 2 7;
+  filter: drop-shadow(0 0 10px rgb(168 85 247 / 0.46)) drop-shadow(0 0 18px rgb(34 211 238 / 0.18));
+}
+
+.loadout-edge-generator-input text {
+  fill: rgb(233 213 255 / 0.96);
+}
+
+.loadout-generator-edge-arrow {
+  fill: rgb(192 132 252 / 0.98);
+}
+
 .materia-socket {
   position: relative;
   display: flex;
@@ -433,6 +448,11 @@
 .materia-socket-iterator .materia-socket-orb-stage {
   border-color: rgb(226 232 240 / 0.55);
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 36px rgb(226 232 240 / 0.18), 0 0 54px rgb(34 211 238 / 0.16);
+}
+
+.materia-socket-generator .materia-socket-orb-stage {
+  border-color: rgb(216 180 254 / 0.72);
+  box-shadow: inset 0 0 34px rgb(59 7 100 / 0.55), 0 0 34px rgb(168 85 247 / 0.28), 0 0 58px rgb(34 211 238 / 0.14);
 }
 
 .materia-iterator-badge {
@@ -623,6 +643,19 @@
 .palette-orb-iterator.palette-orb-selected {
   border-color: rgb(226 232 240 / 0.68);
   box-shadow: 0 0 28px rgb(226 232 240 / 0.18), 0 0 34px rgb(34 211 238 / 0.14);
+}
+
+.palette-orb-generator {
+  border-color: rgb(216 180 254 / 0.46);
+  background:
+    linear-gradient(135deg, rgb(30 41 59 / 0.84), rgb(88 28 135 / 0.42)),
+    radial-gradient(circle at 18% 0%, rgb(192 132 252 / 0.2), transparent 38%);
+}
+
+.palette-orb-generator:hover,
+.palette-orb-generator.palette-orb-selected {
+  border-color: rgb(216 180 254 / 0.78);
+  box-shadow: 0 0 28px rgb(168 85 247 / 0.22), 0 0 34px rgb(34 211 238 / 0.12);
 }
 
 .materia-button,

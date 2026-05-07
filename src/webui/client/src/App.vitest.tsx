@@ -159,6 +159,42 @@ describe('Materia loadout grid editor', () => {
     expect(retryEdge.querySelector('path')?.getAttribute('d')).not.toBe(forwardPath);
   });
 
+  it('marks generator materia and generator edges distinctly without tagging loop members as iterators', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
+      taskIteration: {
+        label: 'Build → Eval → Maintain until all tasks complete',
+        nodes: ['Build', 'Auto-Eval', 'Maintain'],
+        consumes: { from: 'planner', output: 'tasks' },
+        exit: { when: 'satisfied', to: 'end' },
+      },
+    } as never;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const palettePlanner = await screen.findByTestId('palette-planner');
+    expect(palettePlanner.classList.contains('palette-orb-generator')).toBe(true);
+    expect(palettePlanner.textContent).toContain('Generator');
+    expect(palettePlanner.getAttribute('title')).toContain('Generator: tasks (task list)');
+
+    const planner = screen.getByTestId('socket-planner');
+    expect(planner.classList.contains('materia-socket-generator')).toBe(true);
+    expect(planner.textContent).toContain('Generator');
+
+    const generatorEdge = screen.getByTestId('edge-planner-Build-0');
+    expect(generatorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
+    expect(generatorEdge.textContent).toContain('Generates tasks');
+    expect(generatorEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-generator-edge-arrow)');
+
+    const build = screen.getByTestId('socket-Build');
+    expect(build.classList.contains('materia-socket-iterator')).toBe(false);
+    expect(build.textContent).not.toContain('Iterator');
+    expect(build.textContent).not.toContain('Loop consumer');
+    expect(build.getAttribute('title')).toContain('Loop consumes: planner.tasks');
+    expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Loop consumes: planner.tasks');
+  });
+
   it('renders explicit loop regions and can create the build-eval-maintain task loop', async () => {
     const config = structuredClone(testConfig);
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
@@ -176,7 +212,7 @@ describe('Materia loadout grid editor', () => {
     const region = await screen.findByTestId('loop-region-taskIteration');
     expect(region.textContent).toContain('Loop');
     expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
-    expect(region.getAttribute('title')).toContain('Loop consumer: state.tasks as task until end');
+    expect(region.getAttribute('title')).toContain('Loop consumes: state.tasks as task until end');
     expect(region.getAttribute('title')).toContain('Exit: Satisfied → end');
     expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
     expect(screen.getByTestId('loop-exit-condition-taskIteration')).toBeTruthy();
@@ -319,6 +355,9 @@ describe('Materia loadout grid editor', () => {
     expect(css).toMatch(/\.materia-iterator-badge\s*{[^}]*text-transform: uppercase;/s);
     expect(css).toContain('.palette-orb-iterator');
     expect(css).toContain('.materia-socket-iterator');
+    expect(css).toContain('.palette-orb-generator');
+    expect(css).toContain('.materia-socket-generator');
+    expect(css).toContain('.loadout-edge-generator-input');
   });
 
   it('contains oversized graph dimensions inside a scrollable viewport', async () => {
