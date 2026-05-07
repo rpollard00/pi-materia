@@ -213,10 +213,12 @@ describe('Materia loadout grid editor', () => {
     expect(region.textContent).toContain('Loop');
     expect(region.textContent).toContain('Build → Eval → Maintain until all tasks complete');
     expect(region.getAttribute('title')).toContain('Loop consumes: state.tasks as task until end');
-    expect(region.getAttribute('title')).toContain('Exit: Maintain.Satisfied → end');
+    expect(region.getAttribute('title')).toContain('Exit: Maintain (Maintain).Satisfied → end');
     expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
     const sourceOptions = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.getAttribute('value'));
     expect(sourceOptions).toEqual(['Build', 'Auto-Eval', 'Maintain']);
+    const sourceOptionLabels = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.textContent);
+    expect(sourceOptionLabels).toEqual(['Build (Build)', 'Auto-Eval (Auto-Eval)', 'Maintain (Maintain)']);
     expect(screen.getByTestId('loop-exit-condition-taskIteration')).toBeTruthy();
     expect(screen.getByTestId('loop-exit-target-taskIteration')).toBeTruthy();
   });
@@ -240,11 +242,11 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     fireEvent.change(await screen.findByTestId('loop-exit-source-taskIteration'), { target: { value: 'Auto-Eval' } });
-    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval.Satisfied → end'));
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval (Auto-Eval).Satisfied → end'));
     fireEvent.change(screen.getByTestId('loop-exit-condition-taskIteration'), { target: { value: 'not_satisfied' } });
-    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval.Not Satisfied → end'));
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval (Auto-Eval).Not Satisfied → end'));
     fireEvent.change(screen.getByTestId('loop-exit-target-taskIteration'), { target: { value: 'Maintain' } });
-    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval.Not Satisfied → Maintain'));
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Auto-Eval (Auto-Eval).Not Satisfied → Maintain (Maintain)'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -480,19 +482,19 @@ describe('Materia loadout grid editor', () => {
     expect(edge.querySelector('text')?.textContent).toBe('Always');
 
     fireEvent.click(edge);
-    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Satisfied\./)).toBeTruthy();
+    expect(await screen.findByText(/Staged edge Auto-Eval \(Auto-Eval\) → Maintain \(Maintain\) as Satisfied\./)).toBeTruthy();
     expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-satisfied');
 
     fireEvent.click(screen.getByTestId('edge-Auto-Eval-Maintain-0'));
-    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Not Satisfied\./)).toBeTruthy();
+    expect(await screen.findByText(/Staged edge Auto-Eval \(Auto-Eval\) → Maintain \(Maintain\) as Not Satisfied\./)).toBeTruthy();
     expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
 
     fireEvent.click(screen.getByTestId('edge-Auto-Eval-Maintain-0'));
-    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Always\./)).toBeTruthy();
+    expect(await screen.findByText(/Staged edge Auto-Eval \(Auto-Eval\) → Maintain \(Maintain\) as Always\./)).toBeTruthy();
     expect(screen.getByTestId('edge-Auto-Eval-Maintain-0').getAttribute('class')).toContain('loadout-edge-default');
 
     fireEvent.click(screen.getByTestId('edge-Auto-Eval-Maintain-0'));
-    expect(await screen.findByText(/Staged edge Auto-Eval → Maintain as Satisfied\./)).toBeTruthy();
+    expect(await screen.findByText(/Staged edge Auto-Eval \(Auto-Eval\) → Maintain \(Maintain\) as Satisfied\./)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -519,8 +521,8 @@ describe('Materia loadout grid editor', () => {
     expect(retryEdge.getAttribute('class')).toContain('loadout-edge-unsatisfied');
     fireEvent.click(retryEdge);
 
-    expect(await screen.findByText(/Staged edge Auto-Eval → Build as Always\./)).toBeTruthy();
-    expect(screen.queryByText(/Cannot toggle edge Auto-Eval → Build/)).toBeNull();
+    expect(await screen.findByText(/Staged edge Auto-Eval \(Auto-Eval\) → Build \(Build\) as Always\./)).toBeTruthy();
+    expect(screen.queryByText(/Cannot toggle edge Auto-Eval \(Auto-Eval\) → Build \(Build\)/)).toBeNull();
     expect(screen.getByTestId('edge-Auto-Eval-Build-1').getAttribute('class')).toContain('loadout-edge-default');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -568,7 +570,7 @@ describe('Materia loadout grid editor', () => {
 
     const entry = await screen.findByTestId('socket-Socket-1');
     expect(entry).toBeTruthy();
-    expect(entry.getAttribute('title')).toBe('Socket: Socket-1\nEmpty socket');
+    expect(entry.getAttribute('title')).toBe('Socket: Socket-1\nDisplay: Socket-1 (Empty)\nEmpty socket');
     expect(screen.getByText('Empty')).toBeTruthy();
     expect(screen.queryByText('Empty socket')).toBeNull();
     expect(screen.queryByText('entry')).toBeNull();
@@ -998,11 +1000,13 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(await screen.findByTestId('socket-Start'));
     fireEvent.click(await screen.findByRole('button', { name: 'Connect Edge' }));
     expect(await screen.findByTestId('edge-connector')).toBeTruthy();
+    const targetOptionLabels = Array.from(screen.getByTestId('edge-target').querySelectorAll('option')).map((option) => option.textContent);
+    expect(targetOptionLabels).toContain('Review (Review)');
     fireEvent.change(screen.getByTestId('edge-target'), { target: { value: 'Review' } });
     fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'not_satisfied' } });
     fireEvent.click(screen.getByTestId('create-edge'));
 
-    expect(await screen.findByText(/Staged edge Start → Review as Not Satisfied\./)).toBeTruthy();
+    expect(await screen.findByText(/Staged edge Start \(Start\) → Review \(Review\) as Not Satisfied\./)).toBeTruthy();
     expect(screen.getByTestId('edge-Start-Review-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 

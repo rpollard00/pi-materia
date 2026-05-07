@@ -6,6 +6,7 @@ import {
   buildMateriaPalette,
   clearSocketMateria,
   extractMateriaReference,
+  formatSocketLabel,
   getNodeLabel,
   isEmptySocket,
   makeEmptyEntryLoadout,
@@ -306,7 +307,7 @@ function summarizeHoverText(value?: unknown): string | undefined {
 }
 
 function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig): string {
-  const lines = [`Socket: ${id}`];
+  const lines = [`Socket: ${id}`, `Display: ${formatSocketLabel(id, node)}`];
   if (isEmptySocket(node)) return [...lines, 'Empty socket'].join('\n');
 
   const label = getNodeLabel(id, node);
@@ -330,7 +331,7 @@ function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: 
     if (node.command?.length) lines.push(`Command: ${node.command.join(' ')}`);
   }
   if (node?.edges?.length) {
-    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when)} → ${edge.to}`).join(', ')}`);
+    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when)} → ${formatSocketLabel(edge.to, loadout?.nodes?.[edge.to])}`).join(', ')}`);
   }
   const legacyNext = (node as LegacyPipelineNode | undefined)?.next;
   if (legacyNext) lines.push(`Legacy flow: Always → ${legacyNext}`);
@@ -611,7 +612,7 @@ function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<stri
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
     const maxY = Math.max(...sockets.map((socket) => socket.y + socketStageHeight));
     const consumer = loopConsumerSummary(loop);
-    const exit = loop.exit ? `Exit: ${loop.exit.from}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to}` : undefined;
+    const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.nodes?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to])}` : undefined;
     return [{ id, label: loop.label ?? id, x: minX - 34, y: minY - 48, width: Math.max(180, maxX - minX + 68), height: Math.max(150, maxY - minY + 86), summary: [consumer, exit].filter(Boolean).join(' • ') }];
   });
 }
@@ -868,6 +869,7 @@ export function App() {
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
   const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
+  const socketLabel = (id: string) => formatSocketLabel(id, activeLoadout?.nodes?.[id]);
   const loopSelectionRectangle = socketRegionSelectionDrag ? {
     x: Math.min(socketRegionSelectionDrag.startX, socketRegionSelectionDrag.currentX),
     y: Math.min(socketRegionSelectionDrag.startY, socketRegionSelectionDrag.currentY),
@@ -1035,7 +1037,7 @@ export function App() {
       source.edges = [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }];
     });
     if (!result.ok) {
-      setStatus(`Cannot create socket after ${afterSocketId}: ${formatGraphValidationErrors(result.errors)}`);
+      setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${formatGraphValidationErrors(result.errors)}`);
       return;
     }
     updateDraft((config) => {
@@ -1327,8 +1329,8 @@ export function App() {
         edges.push({ to, when: edgeCondition });
         node.edges = edges;
       },
-      `Staged edge ${from} → ${to} as ${edgeConditionLabel(edgeCondition)}.`,
-      (message) => `Cannot create edge ${from} → ${to}: ${message}`,
+      `Staged edge ${socketLabel(from)} → ${socketLabel(to)} as ${edgeConditionLabel(edgeCondition)}.`,
+      (message) => `Cannot create edge ${socketLabel(from)} → ${socketLabel(to)}: ${message}`,
     );
     if (created) {
       setSocketActionId(undefined);
@@ -1442,7 +1444,7 @@ export function App() {
       config.loadouts = draftLoadouts;
     });
     const updatedEdge = edge.edgeIndex === undefined ? result.graph.nodes?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : result.graph.nodes?.[edge.from]?.edges?.[edge.edgeIndex];
-    setStatus(`Staged edge ${edge.from} → ${edge.to} as ${edgeConditionLabel(updatedEdge?.when)}.`);
+    setStatus(`Staged edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)} as ${edgeConditionLabel(updatedEdge?.when)}.`);
   }
 
   function editMateria(id: string) {
@@ -1651,7 +1653,7 @@ export function App() {
                 <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.</p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.join(', ')}`}>Create Loop</button>
+                <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>
               <label className="text-sm text-slate-300">Edit name
                 <input className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" value={activeLoadoutName ?? ''} onChange={(event) => renameActiveLoadout(event.target.value)} />
               </label>
@@ -1775,11 +1777,11 @@ export function App() {
                       <div key={loopId} className="flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200/10 bg-slate-900/60 p-3" data-testid={`loop-editor-${loopId}`}>
                         <div className="min-w-48 flex-1">
                           <div className="font-semibold text-cyan-100">{loop.label ?? loopId}</div>
-                          <div className="text-xs text-slate-400">Members: {loop.nodes.join(', ')}</div>
+                          <div className="text-xs text-slate-400">Members: {loop.nodes.map(socketLabel).join(', ')}</div>
                         </div>
                         <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit source
                           <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-source-${loopId}`} value={exit.from} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>
-                            {loop.nodes.map((nodeId) => <option key={nodeId} value={nodeId}>{nodeId}</option>)}
+                            {loop.nodes.map((nodeId) => <option key={nodeId} value={nodeId}>{socketLabel(nodeId)}</option>)}
                           </select>
                         </label>
                         <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit condition
@@ -1790,7 +1792,7 @@ export function App() {
                         <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit target
                           <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-target-${loopId}`} value={exit.to} onChange={(event) => updateLoopExit(loopId, { to: event.target.value })}>
                             <option value="end">end</option>
-                            {Object.keys(activeLoadout?.nodes ?? {}).map((nodeId) => <option key={nodeId} value={nodeId}>{nodeId}</option>)}
+                            {Object.keys(activeLoadout?.nodes ?? {}).map((nodeId) => <option key={nodeId} value={nodeId}>{socketLabel(nodeId)}</option>)}
                           </select>
                         </label>
                         {loop.exit && <button type="button" className="materia-button-secondary" data-testid={`loop-exit-clear-${loopId}`} onClick={() => clearLoopExit(loopId)}>Clear exit</button>}
@@ -1814,8 +1816,8 @@ export function App() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : socketActionMode === 'connect' ? 'connect edge' : 'socket actions'}</p>
-                      <h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{socketActionId}</h3>
-                      <p className="mt-1 text-sm text-slate-300">{getNodeLabel(socketActionId, activeLoadout.nodes[socketActionId])}</p>
+                      <h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{formatSocketLabel(socketActionId, activeLoadout.nodes[socketActionId])}</h3>
+                      <p className="mt-1 text-sm text-slate-300">Socket id: {socketActionId}</p>
                     </div>
                     <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' || socketActionMode === 'connect' ? 'Cancel' : 'Close'}</button>
                   </div>
@@ -1870,7 +1872,7 @@ export function App() {
                         <label className="graph-field">Target socket
                           <select data-testid="edge-target" value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}>
                             <option value="">choose socket…</option>
-                            {Object.keys(activeLoadout.nodes ?? {}).filter((id) => id !== socketActionId).map((id) => <option key={id} value={id}>{id}</option>)}
+                            {Object.keys(activeLoadout.nodes ?? {}).filter((id) => id !== socketActionId).map((id) => <option key={id} value={id}>{socketLabel(id)}</option>)}
                           </select>
                         </label>
                         <label className="graph-field">Condition
@@ -1901,12 +1903,12 @@ export function App() {
                         <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>
                         {((activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next) && (
                           <button type="button" className="edge-removal-row" data-testid={`remove-next-edge-${socketActionId}`} onClick={() => removeLegacyNextEdge(socketActionId)}>
-                            Remove legacy flow to {(activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next}
+                            Remove legacy flow to {socketLabel((activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next as string)}
                           </button>
                         )}
                         {(activeLoadout.nodes[socketActionId].edges ?? []).map((edge, index) => (
                           <button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>
-                            Remove {edgeConditionLabel(edge.when)} edge to {edge.to}
+                            Remove {edgeConditionLabel(edge.when)} edge to {socketLabel(edge.to)}
                           </button>
                         ))}
                         {!(activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next && (activeLoadout.nodes[socketActionId].edges ?? []).length === 0 && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}

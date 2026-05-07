@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMateriaPalette,
+  formatSocketLabel,
   getNodeLabel,
   makeEmptyEntryLoadout,
   makeEmptySocket,
@@ -22,6 +23,7 @@ describe('loadout socket display model', () => {
     expect(loadout.entry).toBe('Socket-1');
     expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1']);
     expect(getNodeLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Empty');
+    expect(formatSocketLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Socket-1 (Empty)');
   });
 
   it('labels newly added compatible empty sockets as Empty while preserving socket structure', () => {
@@ -31,6 +33,12 @@ describe('loadout socket display model', () => {
 
     expect(getNodeLabel('Socket-2', loadout.nodes!['Socket-2'])).toBe('Empty');
     expect(loadout.nodes!['Socket-2']).toEqual({ empty: true, edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+  });
+
+  it('formats contextual socket labels without renaming the socket id', () => {
+    expect(formatSocketLabel('Socket-2', { type: 'agent', materia: 'Consult' })).toBe('Socket-2 (Consult)');
+    expect(formatSocketLabel('Socket-3', { type: 'utility', label: 'Detect VCS', utility: 'vcs.detect' })).toBe('Socket-3 (Detect VCS)');
+    expect(formatSocketLabel('Socket-4', { type: 'utility', utility: 'vcs.detect' })).toBe('Socket-4 (vcs.detect)');
   });
 });
 

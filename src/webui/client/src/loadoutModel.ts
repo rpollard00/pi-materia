@@ -205,6 +205,10 @@ export function getNodeLabel(id: string, node?: PipelineNode): string {
   return node?.materia ?? node?.utility ?? id;
 }
 
+export function formatSocketLabel(id: string, node?: PipelineNode): string {
+  return `${id} (${getNodeLabel(id, node)})`;
+}
+
 function fallbackColorIndex(materiaId: string): number {
   let hash = 0;
   for (const char of materiaId) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
