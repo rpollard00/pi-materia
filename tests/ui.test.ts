@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { formatCostLabel, formatUsage, renderUsageSummary } from "../src/ui.js";
-import type { UsageReport, UsageTotals } from "../src/types.js";
+import { formatCostLabel, formatUsage, renderCompactUsageWidget, renderMateriaRunWidget, renderUsageSummary } from "../src/ui.js";
+import type { MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 
 function totals(tokens: number, cost: number): UsageTotals {
   return {
@@ -14,6 +14,65 @@ function costFromLine(line: string): number {
   if (!match) throw new Error(`missing cost in line: ${line}`);
   return Number(match[1]);
 }
+
+describe("persistent Materia widget formatting", () => {
+  test("renders compact active cast details in at most four lines", () => {
+    const state: MateriaRunState = {
+      runId: "2026-05-07T14-53-49-729Z",
+      startedAt: 1_000,
+      runDir: "/tmp/cast",
+      eventsFile: "/tmp/cast/events.jsonl",
+      usageFile: "/tmp/cast/usage.json",
+      currentNode: "planner",
+      currentMateria: "Interactive Planning Consult With A Very Long Name",
+      currentTask: "task-123 - Implement a very long task title that should not be allowed to wrap across the terminal widget",
+      attempt: 2,
+      lastMessage: "Multi-turn node planner waiting for refinement; run /materia continue to finalize.",
+      usage: { ...totals(0, 0), tokens: { input: 19381, output: 2100, cacheRead: 4000, cacheWrite: 10, total: 25491 } },
+      budgetWarned: false,
+    };
+
+    const lines = renderMateriaRunWidget(state, 70_000);
+    expect(lines.length).toBeLessThanOrEqual(4);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("Cast 2026-05-07 14:53:49.729Z");
+    expect(lines[0]).toContain("Interactive Planning");
+    expect(lines[0]).toContain("attempt 2");
+    expect(lines[1]).toContain("Task task-123");
+    expect(lines[1]).toContain("1m09s");
+    expect(lines[1]).toContain("tok 23k/2.1k");
+    expect(lines[2]).toContain("Last Multi-turn node planner waiting");
+    expect(lines.every((line) => line.length <= 78)).toBe(true);
+  });
+
+  test("renders compact completion usage without billing disclaimers", () => {
+    const lines = renderCompactUsageWidget(totals(19381, 0.0497));
+    expect(lines).toEqual(["Usage total 19k tokens"]);
+    expect(lines.join("\n")).not.toContain("estimated token value");
+    expect(lines.join("\n")).not.toContain("billing");
+  });
+
+  test("truncates long persistent widget values instead of emitting extra lines", () => {
+    const state: MateriaRunState = {
+      runId: "2026-05-07T14-53-49-729Z-extra-long-cast-id-that-keeps-going",
+      startedAt: 0,
+      runDir: "/tmp/cast",
+      eventsFile: "/tmp/cast/events.jsonl",
+      usageFile: "/tmp/cast/usage.json",
+      currentMateria: "M".repeat(200),
+      currentTask: "T".repeat(200),
+      attempt: 1,
+      lastMessage: "L".repeat(300),
+      usage: { ...totals(0, 0), tokens: { input: 1_234_567, output: 98_765, cacheRead: 0, cacheWrite: 0, total: 1_333_332 } },
+      budgetWarned: false,
+    };
+
+    const lines = renderMateriaRunWidget(state, 1_000);
+    expect(lines).toHaveLength(3);
+    expect(lines.every((line) => line.length <= 78)).toBe(true);
+    expect(lines.join("\n")).not.toContain("estimated token value");
+  });
+});
 
 describe("usage UI formatting", () => {
   test("labels actual costs as billed cost", () => {

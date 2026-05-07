@@ -233,7 +233,7 @@ describe("native multi-turn runtime", () => {
     expect(pausedState.lastJson).toBeUndefined();
 
     await harness.runCommand("materia", "status");
-    expect(harness.widgets.get("materia-status")?.content).toContain("waiting: user refinement; run /materia continue to finalize this multi-turn node");
+    expect(harness.widgets.get("materia")?.content).toContain("Last waiting for refinement; /materia continue to finalize");
 
     const inputResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
     expect(inputResults.at(-1)).toBeUndefined();
@@ -458,7 +458,7 @@ describe("native multi-turn runtime", () => {
     await harness.emit("agent_end", { messages: [] });
 
     await harness.runCommand("materia", "status");
-    const statusText = (harness.widgets.get("materia-status")?.content ?? []).join("\n");
+    const statusText = (harness.widgets.get("materia")?.content ?? []).join("\n");
     expect(statusText).toContain("/materia continue");
     expect(statusText).not.toContain("say you are ready to continue/finalize");
 

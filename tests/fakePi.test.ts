@@ -52,15 +52,18 @@ describe("FakePiHarness", () => {
     piMateria(harness.pi);
 
     await harness.runCommand("materia", "loadout");
-    const listed = harness.widgets.get("materia-loadouts")?.content ?? [];
-    expect(listed).toContain("- Full-Auto (active)");
-    expect(listed).toContain("- Planning-Consult");
+    const listed = harness.sentMessages.at(-1)?.message as { content?: string };
+    expect(listed.content).toContain("Loadout: Full-Auto");
+    expect(listed.content).toContain("Full-Auto*");
+    expect(listed.content).toContain("Planning-Consult");
+    expect(harness.widgets.get("materia-loadouts")?.content).toBeUndefined();
 
     await harness.runCommand("materia", "loadout Planning-Consult");
-    const switched = harness.widgets.get("materia-loadouts")?.content ?? [];
+    const switched = harness.sentMessages.at(-1)?.message as { content?: string };
     const raw = JSON.parse(await readFile(configFile, "utf8"));
     expect(raw.activeLoadout).toBe("Planning-Consult");
-    expect(switched).toContain("- Planning-Consult (active)");
+    expect(switched.content).toContain("Loadout: Planning-Consult");
+    expect(switched.content).toContain("Planning-Consult*");
     expect(harness.operationLog).not.toContain("triggerTurn");
     expect(harness.userMessages).toHaveLength(0);
   });
@@ -76,11 +79,12 @@ describe("FakePiHarness", () => {
     await harness.runCommand("materia", "loadout Planning-Consult");
 
     const raw = JSON.parse(await readFile(projectFile, "utf8"));
-    const switched = harness.widgets.get("materia-loadouts")?.content ?? [];
+    const switched = harness.sentMessages.at(-1)?.message as { content?: string };
     expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
-    expect(switched).toContain("- Planning-Consult (active)");
-    expect(switched).toContain("- Full-Auto");
+    expect(switched.content).toContain("Loadout: Planning-Consult");
+    expect(switched.content).toContain("Planning-Consult*");
+    expect(switched.content).toContain("Full-Auto");
     expect(harness.operationLog).not.toContain("triggerTurn");
   });
 
@@ -122,7 +126,8 @@ describe("FakePiHarness", () => {
     const first = harness.sentMessages.at(-1)?.message as { content?: string; details?: { url?: string; sessionKey?: string } };
     const firstUrl = first.details?.url;
     expect(firstUrl).toStartWith("http://127.0.0.1:");
-    expect(first.content).toContain("scope: this Pi session only");
+    expect(first.content).toContain("WebUI started: http://127.0.0.1:");
+    expect(first.content).not.toContain("scope: this Pi session only");
     expect(harness.operationLog).not.toContain("triggerTurn");
     expect(harness.operationLog).not.toContain("waitForIdle");
     expect(harness.waitForIdleCalls).toBe(0);
@@ -135,7 +140,7 @@ describe("FakePiHarness", () => {
     await harness.runCommand("materia", "ui");
     const second = harness.sentMessages.at(-1)?.message as { content?: string; details?: { url?: string; sessionKey?: string } };
     expect(second.details?.url).toBe(firstUrl);
-    expect(second.content).toContain("reused existing session-scoped server");
+    expect(second.content).toContain("WebUI ready: http://127.0.0.1:");
     expect(harness.waitForIdleCalls).toBe(0);
 
     await harness.emit("session_shutdown");
@@ -149,8 +154,21 @@ describe("FakePiHarness", () => {
 
     expect(harness.commands.has("materia")).toBe(true);
     expect(harness.registeredRenderers.has("pi-materia")).toBe(true);
-    expect(harness.widgets.get("materia-grid")?.content?.[0]).toContain("Materia Grid");
-    expect(harness.sentMessages).toHaveLength(0);
+    expect(harness.widgets.get("materia-grid")?.content).toBeUndefined();
+    const gridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
+    expect(gridMessage.content).toContain("Materia Grid");
     expect(harness.userMessages).toHaveLength(0);
+  });
+
+  test("/materia grid clears stale persistent grid widgets instead of adding below-editor noise", async () => {
+    const harness = new FakePiHarness(process.cwd());
+    piMateria(harness.pi);
+    harness.widgets.set("materia-grid", { content: ["old", "noisy", "persistent", "grid", "widget"], options: { placement: "belowEditor" } });
+
+    await harness.runCommand("materia", "grid");
+
+    expect(harness.widgets.get("materia-grid")?.content).toBeUndefined();
+    const gridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
+    expect(gridMessage.content).toContain("Materia Grid");
   });
 });

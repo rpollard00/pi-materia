@@ -7,6 +7,7 @@ import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
+import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget } from "./ui.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -53,6 +54,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", (_event, ctx) => {
+    clearWidgetTicker(ctx);
     closeMateriaWebUiForSession(ctx);
   });
 
@@ -66,14 +68,8 @@ export default function piMateria(pi: ExtensionAPI) {
       if (subcommand === "ui") {
         try {
           const result = await launchMateriaWebUi(ctx, getConfiguredConfigPath(pi), pi);
-          const lines = [
-            "Materia WebUI",
-            result.reused ? "reused existing session-scoped server" : "started session-scoped server in background",
-            `url: ${result.url}`,
-            `browser auto-open: ${result.autoOpenBrowser ? "enabled" : "disabled"}`,
-            "scope: this Pi session only",
-          ];
-          ctx.ui.setWidget("materia-webui", lines, { placement: "belowEditor" });
+          const lines = [`WebUI ${result.reused ? "ready" : "started"}: ${truncateLine(result.url, 110)}`];
+          clearMateriaAuxiliaryWidgets(ctx);
           ctx.ui.notify(`Materia WebUI ${result.reused ? "ready" : "started"}: ${result.url}`, "info");
           pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "ui", materiaName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey } });
           pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused: result.reused, startedAt: Date.now() });
@@ -90,8 +86,9 @@ export default function piMateria(pi: ExtensionAPI) {
           const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
           const pipeline = resolvePipeline(loaded.config);
           const lines = renderGrid(loaded.config, pipeline, loaded.source, ctx.cwd);
-          ctx.ui.setWidget("materia-grid", lines, { placement: "belowEditor" });
+          clearMateriaAuxiliaryWidgets(ctx);
           ctx.ui.notify(`pi-materia grid loaded from ${loaded.source}`, "info");
+          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "grid", materiaName: "orchestrator", eventType: "grid" } });
           pi.appendEntry("pi-materia-grid", { source: loaded.source, lines });
         } catch (error) {
           ctx.ui.notify(`pi-materia grid failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -108,7 +105,7 @@ export default function piMateria(pi: ExtensionAPI) {
           }
           const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
           const lines = renderLoadoutList(loaded.config, loaded.source);
-          ctx.ui.setWidget("materia-loadouts", lines, { placement: "belowEditor" });
+          clearMateriaAuxiliaryWidgets(ctx);
           pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout" } });
         } catch (error) {
           ctx.ui.notify(`pi-materia loadout failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -122,7 +119,7 @@ export default function piMateria(pi: ExtensionAPI) {
           const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
           const artifactRoot = resolveArtifactRoot(ctx.cwd, loaded.config.artifactDir);
           const lines = await renderCastList(artifactRoot, listLatestCastStates(ctx));
-          ctx.ui.setWidget("materia-casts", lines, { placement: "belowEditor" });
+          clearMateriaAuxiliaryWidgets(ctx);
           pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "casts", materiaName: "orchestrator", eventType: "casts" } });
         } catch (error) {
           ctx.ui.notify(`pi-materia casts failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -136,22 +133,9 @@ export default function piMateria(pi: ExtensionAPI) {
           ctx.ui.notify("No pi-materia cast state in this session.", "info");
           return;
         }
-        const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase === "complete" ? "complete" : state.phase === "failed" ? "failed" : "idle");
-        const lines = [
-          `Materia Cast ${state.castId}`,
-          `active: ${state.active}`,
-          `phase: ${state.phase}`,
-          `node state: ${nodeState}`,
-          nodeState === "awaiting_user_refinement" ? "waiting: user refinement; run /materia continue to finalize this multi-turn node" : undefined,
-          `awaiting response: ${state.awaitingResponse}`,
-          `node: ${state.currentNode ?? "-"}`,
-          `materia: ${state.currentMateria ?? "-"}`,
-          `item: ${state.currentItemKey ? `${state.currentItemKey} - ${state.currentItemLabel ?? ""}` : "-"}`,
-          `visits: ${JSON.stringify(state.visits)}`,
-          `artifacts: ${state.runDir}`,
-          state.failedReason ? `failed: ${state.failedReason}` : undefined,
-        ].filter((line): line is string => Boolean(line));
-        ctx.ui.setWidget("materia-status", lines, { placement: "belowEditor" });
+        const lines = renderMateriaCastStatusWidget(state);
+        clearMateriaAuxiliaryWidgets(ctx);
+        ctx.ui.setWidget("materia", lines, { placement: "belowEditor" });
         pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "status", materiaName: "orchestrator", eventType: "status" } });
         return;
       }
@@ -225,19 +209,18 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 }
 
-function renderLoadoutList(config: PiMateriaConfig, source: string): string[] {
+function renderLoadoutList(config: PiMateriaConfig, _source: string): string[] {
   const loadoutNames = Object.keys(config.loadouts ?? {});
+  const active = config.activeLoadout ?? "-";
   if (loadoutNames.length === 0) {
-    return ["Materia Loadouts", `source: ${source}`, "", "No loadouts configured. Define named loadouts and set activeLoadout."];
+    return ["Loadouts: none configured", "Active: -"];
   }
 
-  const active = config.activeLoadout;
+  const visible = loadoutNames.slice(0, 4).map((name) => `${name}${name === config.activeLoadout ? "*" : ""}`);
+  const suffix = loadoutNames.length > visible.length ? ` +${loadoutNames.length - visible.length}` : "";
   return [
-    "Materia Loadouts",
-    `source: ${source}`,
-    `active: ${active ?? "-"}`,
-    "",
-    ...loadoutNames.map((name) => `- ${name}${name === active ? " (active)" : ""}`),
+    `Loadout: ${truncateLine(active, 96)}`,
+    `Available: ${truncateLine(visible.join(", ") + suffix, 108)}`,
   ];
 }
 

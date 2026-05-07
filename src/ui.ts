@@ -1,23 +1,63 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { MateriaRunState, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
+import type { MateriaCastState, MateriaRunState, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
+
+const WIDGET_MAX_LINE_LENGTH = 78;
+const widgetTickerState = new WeakMap<ExtensionContext, MateriaRunState>();
+const widgetTickers = new WeakMap<ExtensionContext, ReturnType<typeof setInterval>>();
 
 export function updateWidget(ctx: ExtensionContext, state: MateriaRunState): void {
-  const elapsed = Math.max(0, Math.round((Date.now() - state.startedAt) / 1000));
-  ctx.ui.setWidget("materia", [
-    `Materia Cast ${state.runId}`,
-    `node: ${state.currentNode ?? "-"}`,
-    `materia: ${state.currentMateria ?? "-"}`,
-    `task: ${state.currentTask ?? "-"}`,
-    `attempt: ${state.attempt ?? "-"}`,
-    `elapsed: ${elapsed}s`,
-    `tokens: ${state.usage.tokens.total}`,
-    formatCostLine(state.usage, state.usage.costKind),
-    `last: ${state.lastMessage ?? "-"}`,
-  ], { placement: "belowEditor" });
+  widgetTickerState.set(ctx, state);
+  clearMateriaAuxiliaryWidgets(ctx);
+  ctx.ui.setWidget("materia", renderMateriaRunWidget(state), { placement: "belowEditor" });
+  if (!widgetTickers.has(ctx)) {
+    const ticker = setInterval(() => {
+      const latest = widgetTickerState.get(ctx);
+      if (latest) ctx.ui.setWidget("materia", renderMateriaRunWidget(latest), { placement: "belowEditor" });
+    }, 5000);
+    ticker.unref?.();
+    widgetTickers.set(ctx, ticker);
+  }
+}
+
+export function clearWidgetTicker(ctx: ExtensionContext): void {
+  const ticker = widgetTickers.get(ctx);
+  if (ticker) clearInterval(ticker);
+  widgetTickers.delete(ctx);
+  widgetTickerState.delete(ctx);
+}
+
+export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
+  const materia = state.currentMateria ?? state.currentNode ?? "-";
+  const attempt = state.attempt ?? "-";
+  const task = state.currentTask ?? "-";
+  const usage = state.usage.tokens;
+  const lines = [
+    `Cast ${shortCastId(state.runId)} | ${truncateValue(materia, 24)} | attempt ${attempt}`,
+    `Task ${truncateValue(task, 24)} | ${formatElapsed(now - state.startedAt)} | tok ${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
+    `Last ${truncateValue(state.lastMessage ?? "-", 68)}`,
+  ];
+  return lines.map((line) => truncateLine(line));
+}
+
+export function renderMateriaCastStatusWidget(state: MateriaCastState, now = Date.now()): string[] {
+  const runLines = renderMateriaRunWidget(state.runState, now);
+  const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
+  const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${state.phase}${state.active ? " active" : ""}`;
+  return [...runLines.slice(0, 2), `Last ${truncateValue(status, 68)}`].map((line) => truncateLine(line));
+}
+
+export function clearMateriaAuxiliaryWidgets(ctx: ExtensionContext): void {
+  for (const key of ["materia-webui", "materia-loadouts", "materia-status", "materia-casts", "materia-usage", "materia-grid"] as const) {
+    ctx.ui.setWidget(key, undefined, { placement: "belowEditor" });
+  }
 }
 
 export function showUsageSummary(ctx: ExtensionContext, state: MateriaRunState): void {
-  ctx.ui.setWidget("materia-usage", renderUsageSummary(state.usage), { placement: "belowEditor" });
+  ctx.ui.setWidget("materia-usage", renderCompactUsageWidget(state.usage), { placement: "belowEditor" });
+}
+
+export function renderCompactUsageWidget(usage: UsageReport): string[] {
+  return [`Usage total ${formatCompactNumber(usage.tokens.total)} tokens`];
 }
 
 export function renderUsageSummary(usage: UsageReport): string[] {
@@ -64,6 +104,37 @@ export function usageCostNote(costKind: UsageCostKind = "actual"): string {
   return "Cost display: billed USD cost.";
 }
 
-function formatCostLine(usage: UsageTotals, costKind: UsageCostKind = "actual"): string {
-  return costKind === "actual" ? `cost: $${usage.cost.total.toFixed(4)}` : formatCostLabel(usage.cost.total, costKind);
+function shortCastId(runId: string): string {
+  return truncateValue(runId.replace(/T(\d{2})-(\d{2})-(\d{2})-/, " $1:$2:$3."), 30);
+}
+
+function formatElapsed(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h${minutes.toString().padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m${seconds.toString().padStart(2, "0")}s`;
+  return `${seconds}s`;
+}
+
+function formatCompactNumber(value: number): string {
+  if (value >= 1_000_000) return `${trimFixed(value / 1_000_000)}m`;
+  if (value >= 1_000) return `${trimFixed(value / 1_000)}k`;
+  return String(value);
+}
+
+function trimFixed(value: number): string {
+  return value.toFixed(value >= 10 ? 0 : 1).replace(/\.0$/, "");
+}
+
+function truncateLine(line: string): string {
+  return truncateValue(line, WIDGET_MAX_LINE_LENGTH);
+}
+
+function truncateValue(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  if (maxLength <= 1) return "…".slice(0, maxLength);
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
