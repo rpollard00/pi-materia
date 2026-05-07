@@ -10,6 +10,7 @@ import {
   isEmptySocket,
   makeEmptyEntryLoadout,
   makeEmptySocket,
+  makeNewSocketId,
   nodeColor,
   normalizeMateriaConfigEdges,
   placeMateriaInSocket,
@@ -1019,20 +1020,12 @@ export function App() {
     return true;
   }
 
-  function makeNewSocketId(nodes: Record<string, PipelineNode>, afterSocketId: string) {
-    const base = `${afterSocketId}-Socket`;
-    if (!nodes[base]) return base;
-    let index = 2;
-    while (nodes[`${base}-${index}`]) index += 1;
-    return `${base}-${index}`;
-  }
-
   function createConnectedSocket(afterSocketId: string) {
     if (!activeLoadoutName || !activeLoadout) return;
     const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, (loadout) => {
       if (!loadout.nodes?.[afterSocketId]) return;
       const source = loadout.nodes[afterSocketId] as PipelineNode;
-      const newId = makeNewSocketId(loadout.nodes as Record<string, PipelineNode>, afterSocketId);
+      const newId = makeNewSocketId(loadout.nodes as Record<string, PipelineNode>);
       const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
       const sourceLayout = source.layout;
       loadout.nodes[newId] = makeEmptySocket({

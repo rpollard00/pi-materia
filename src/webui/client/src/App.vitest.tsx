@@ -566,9 +566,9 @@ describe('Materia loadout grid editor', () => {
     await screen.findByTestId('socket-planner');
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
 
-    const entry = await screen.findByTestId('socket-Entry');
+    const entry = await screen.findByTestId('socket-Socket-1');
     expect(entry).toBeTruthy();
-    expect(entry.getAttribute('title')).toBe('Socket: Entry\nEmpty socket');
+    expect(entry.getAttribute('title')).toBe('Socket: Socket-1\nEmpty socket');
     expect(screen.getByText('Empty')).toBeTruthy();
     expect(screen.queryByText('Empty socket')).toBeNull();
     expect(screen.queryByText('entry')).toBeNull();
@@ -577,10 +577,10 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(Object.keys(created.nodes)).toEqual(['Entry']);
-    expect(created.entry).toBe('Entry');
-    expect(created.nodes.Entry).toEqual({ empty: true });
-    expect(created.nodes.Entry.type).toBeUndefined();
+    expect(Object.keys(created.nodes)).toEqual(['Socket-1']);
+    expect(created.entry).toBe('Socket-1');
+    expect(created.nodes['Socket-1']).toEqual({ empty: true });
+    expect(created.nodes['Socket-1'].type).toBeUndefined();
   });
 
   it('creates connected sockets with the same Empty display model', async () => {
@@ -594,11 +594,11 @@ describe('Materia loadout grid editor', () => {
 
     await screen.findByTestId('socket-planner');
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
-    const entry = await screen.findByTestId('socket-Entry');
+    const entry = await screen.findByTestId('socket-Socket-1');
     fireEvent.click(entry);
     fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
 
-    expect(await screen.findByTestId('socket-Entry-Socket')).toBeTruthy();
+    expect(await screen.findByTestId('socket-Socket-2')).toBeTruthy();
     expect(screen.getAllByText('Empty')).toHaveLength(2);
     expect(screen.queryByText('Empty socket')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -606,8 +606,8 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(created.nodes.Entry).toEqual({ empty: true, edges: [{ when: 'always', to: 'Entry-Socket' }] });
-    expect(created.nodes['Entry-Socket']).toEqual({ empty: true });
+    expect(created.nodes['Socket-1']).toEqual({ empty: true, edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created.nodes['Socket-2']).toEqual({ empty: true });
   });
 
   it('keeps palette definitions and save payload materia stable during new loadout grid edits', async () => {
@@ -626,14 +626,14 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
     const dataTransfer = createDataTransfer();
     fireEvent.dragStart(screen.getByTestId('palette-Build'), { dataTransfer });
-    fireEvent.drop(await screen.findByTestId('socket-Entry'), { dataTransfer });
+    fireEvent.drop(await screen.findByTestId('socket-Socket-1'), { dataTransfer });
 
     expect(paletteIds()).toEqual(initialPaletteIds);
 
-    fireEvent.click(screen.getByTestId('socket-Entry'));
+    fireEvent.click(screen.getByTestId('socket-Socket-1'));
     fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
 
-    expect(await screen.findByTestId('socket-Entry-Socket')).toBeTruthy();
+    expect(await screen.findByTestId('socket-Socket-2')).toBeTruthy();
     expect(paletteIds()).toEqual(initialPaletteIds);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -642,8 +642,8 @@ describe('Materia loadout grid editor', () => {
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
     expect(savedConfig.materia).toEqual(initialMateria);
-    expect(created.nodes.Entry).toEqual({ type: 'agent', materia: 'Build', empty: false, edges: [{ when: 'always', to: 'Entry-Socket' }] });
-    expect(created.nodes['Entry-Socket']).toEqual({ empty: true });
+    expect(created.nodes['Socket-1']).toEqual({ type: 'agent', materia: 'Build', empty: false, edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created.nodes['Socket-2']).toEqual({ empty: true });
   });
 
   it('opens a valid tab from the URL query parameter', async () => {
@@ -808,13 +808,13 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Planning-Consult/ }));
     fireEvent.click(await screen.findByTestId('socket-Build'));
     fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
-    expect(await screen.findByTestId('socket-Build-Socket')).toBeTruthy();
+    expect(await screen.findByTestId('socket-Socket-1')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Planning-Consult'].nodes;
-    expect(saved.Build.edges).toEqual([{ when: 'always', to: 'Build-Socket' }]);
-    expect(saved['Build-Socket']).toEqual({ empty: true });
+    expect(saved.Build.edges).toEqual([{ when: 'always', to: 'Socket-1' }]);
+    expect(saved['Socket-1']).toEqual({ empty: true });
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Planning-Consult');
   });
 

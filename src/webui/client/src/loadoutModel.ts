@@ -126,8 +126,19 @@ export function makeEmptySocket(structure: PipelineNode = {}): PipelineNode {
   return { ...extractSocketStructure(structure), empty: true };
 }
 
-export function makeEmptyEntryLoadout(entry = 'Entry'): PipelineConfig {
+export function makeEmptyEntryLoadout(entry = 'Socket-1'): PipelineConfig {
   return { entry, nodes: { [entry]: makeEmptySocket() } };
+}
+
+export function makeNewSocketId(nodes: Record<string, PipelineNode>): string {
+  const usedNumbers = new Set<number>();
+  for (const id of Object.keys(nodes)) {
+    const match = /^Socket-([1-9]\d*)$/.exec(id);
+    if (match) usedNumbers.add(Number(match[1]));
+  }
+  let index = 1;
+  while (usedNumbers.has(index) || nodes[`Socket-${index}`]) index += 1;
+  return `Socket-${index}`;
 }
 
 export function createMateriaReference(materiaId: string): MateriaReference {

@@ -4,6 +4,7 @@ import {
   getNodeLabel,
   makeEmptyEntryLoadout,
   makeEmptySocket,
+  makeNewSocketId,
   placeMateriaInSocket,
   resolveMateriaColor,
   type MateriaBehaviorConfig,
@@ -18,16 +19,18 @@ describe('loadout socket display model', () => {
   it('labels the initial entry socket as Empty through the shared display helper', () => {
     const loadout = makeEmptyEntryLoadout();
 
-    expect(getNodeLabel('Entry', loadout.nodes!.Entry)).toBe('Empty');
+    expect(loadout.entry).toBe('Socket-1');
+    expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1']);
+    expect(getNodeLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Empty');
   });
 
   it('labels newly added compatible empty sockets as Empty while preserving socket structure', () => {
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!.Entry.edges = [{ when: 'always', to: 'Entry-Socket' }];
-    loadout.nodes!['Entry-Socket'] = makeEmptySocket({ edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+    loadout.nodes!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
+    loadout.nodes!['Socket-2'] = makeEmptySocket({ edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
 
-    expect(getNodeLabel('Entry-Socket', loadout.nodes!['Entry-Socket'])).toBe('Empty');
-    expect(loadout.nodes!['Entry-Socket']).toEqual({ empty: true, edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+    expect(getNodeLabel('Socket-2', loadout.nodes!['Socket-2'])).toBe('Empty');
+    expect(loadout.nodes!['Socket-2']).toEqual({ empty: true, edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
   });
 });
 
@@ -60,9 +63,9 @@ describe('loadout materia palette model', () => {
     } satisfies Record<string, MateriaBehaviorConfig>;
     const loadouts: Record<string, PipelineConfig> = {
       Active: {
-        entry: 'Entry',
+        entry: 'Socket-1',
         nodes: {
-          Entry: { type: 'agent', materia: 'Build' },
+          'Socket-1': { type: 'agent', materia: 'Build' },
           'Socket-only': { type: 'agent', materia: 'AdHoc' },
         },
       },
@@ -115,10 +118,10 @@ describe('loadout materia palette model', () => {
     const loadout = makeEmptyEntryLoadout();
     const utilityMateria = buildMateriaPalette(materia)[0][1];
 
-    loadout.nodes!.Entry = placeMateriaInSocket(loadout.nodes!.Entry, utilityMateria);
+    loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], utilityMateria);
 
-    expect(loadout.nodes!.Entry).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false });
-    expect(getNodeLabel('Entry', loadout.nodes!.Entry)).toBe('vcs.detect');
+    expect(loadout.nodes!['Socket-1']).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false });
+    expect(getNodeLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('vcs.detect');
   });
 
   it('keeps palette contents stable when palette materia is placed into a new loadout socket', () => {
@@ -130,9 +133,9 @@ describe('loadout materia palette model', () => {
     const loadout = makeEmptyEntryLoadout();
     const buildMateria = buildMateriaPalette(materia).find(([id]) => id === 'Build')?.[1];
 
-    loadout.nodes!.Entry = placeMateriaInSocket(loadout.nodes!.Entry, buildMateria);
+    loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], buildMateria);
 
-    expect(loadout.nodes!.Entry).toMatchObject({ type: 'agent', materia: 'Build', empty: false });
+    expect(loadout.nodes!['Socket-1']).toMatchObject({ type: 'agent', materia: 'Build', empty: false });
     expect(paletteSignature(materia)).toBe(before);
   });
 
@@ -143,10 +146,10 @@ describe('loadout materia palette model', () => {
     } satisfies Record<string, MateriaBehaviorConfig>;
     const before = paletteSignature(materia);
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!.Entry.edges = [{ when: 'always', to: 'Entry-Socket' }];
-    loadout.nodes!['Entry-Socket'] = makeEmptySocket({ layout: { x: 1, y: 0 } });
+    loadout.nodes!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
+    loadout.nodes!['Socket-2'] = makeEmptySocket({ layout: { x: 1, y: 0 } });
 
-    expect(Object.keys(loadout.nodes!)).toEqual(['Entry', 'Entry-Socket']);
+    expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1', 'Socket-2']);
     expect(paletteSignature(materia)).toBe(before);
   });
 
@@ -182,8 +185,8 @@ describe('loadout materia palette model', () => {
       Build: { prompt: 'build' },
     } satisfies Record<string, MateriaBehaviorConfig>;
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!.Entry = placeMateriaInSocket(loadout.nodes!.Entry, buildMateriaPalette(materia)[0][1]);
-    loadout.nodes!['Entry-Socket'] = { type: 'agent', materia: 'SocketOnly' };
+    loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], buildMateriaPalette(materia)[0][1]);
+    loadout.nodes!['Socket-2'] = { type: 'agent', materia: 'SocketOnly' };
     const savePayload: MateriaConfig = {
       activeLoadout: 'Draft',
       materia,
@@ -191,6 +194,11 @@ describe('loadout materia palette model', () => {
     };
 
     expect(Object.keys(savePayload.materia ?? {})).toEqual(['Build']);
-    expect(savePayload.loadouts!.Draft.nodes!['Entry-Socket'].materia).toBe('SocketOnly');
+    expect(savePayload.loadouts!.Draft.nodes!['Socket-2'].materia).toBe('SocketOnly');
+  });
+
+  it('finds the next unused static Socket-N id independent of predecessor names', () => {
+    expect(makeNewSocketId({ 'Socket-1': {}, 'Socket-3': {}, Build: {} })).toBe('Socket-2');
+    expect(makeNewSocketId({ Build: {}, 'Build-Socket': {}, 'Socket-1': {}, 'Socket-2': {} })).toBe('Socket-3');
   });
 });
