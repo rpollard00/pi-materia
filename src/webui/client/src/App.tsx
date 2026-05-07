@@ -571,6 +571,26 @@ function curvedRoute(source: SocketAnchorPoint, target: SocketAnchorPoint, lane:
   };
 }
 
+function selfLoopRoute(socket: PositionedSocket, lane: number) {
+  const source = socketAnchor(socket, 'right');
+  const target = socketAnchor(socket, 'bottom');
+  // Self/retry routes need much more clearance than normal edge lanes: keep the
+  // curve outside the socket body so labels such as "not satisfied" are readable.
+  const outward = Math.max(108, 124 + lane);
+  const drop = 96 + Math.abs(lane) * 0.55;
+  const sourceControl = { x: source.x + outward, y: source.y };
+  const targetControl = { x: source.x + outward, y: target.y + drop };
+  const labelX = rounded(source.x + outward * 0.72);
+  const labelY = rounded(target.y + drop * 0.36);
+
+  return {
+    path: formatCurvedPath([source, sourceControl, targetControl, target]),
+    labelX,
+    labelY,
+    labelRotate: 0,
+  };
+}
+
 export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, PositionedSocket>): RoutedLoadoutEdge[] {
   // Keep routing deterministic and local instead of adding a physics/layout dependency:
   // the WebUI preserves user-authored socket positions, so force solvers would move
@@ -584,13 +604,14 @@ export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, P
     const to = positions.get(edge.to);
     if (!from || !to) return undefined;
     const lane = orderedLane(laneGroups.get(edge.id) ?? [edge], edge, 30);
+    const isSelfLoop = edge.from === edge.to;
     const anchors = chooseSocketAnchors(edge, from, to);
-    const route = curvedRoute(anchors.source, anchors.target, lane);
-    const backward = edge.from !== edge.to && anchors.source.side === 'left' && anchors.target.side === 'right';
+    const route = isSelfLoop ? selfLoopRoute(from, lane) : curvedRoute(anchors.source, anchors.target, lane);
+    const backward = !isSelfLoop && anchors.source.side === 'left' && anchors.target.side === 'right';
 
     return {
       edge,
-      routeClass: edge.from === edge.to ? 'loop' as const : backward ? 'backward' as const : 'forward' as const,
+      routeClass: isSelfLoop ? 'loop' as const : backward ? 'backward' as const : 'forward' as const,
       ...route,
     };
   }).filter((route): route is RoutedLoadoutEdge => Boolean(route));
