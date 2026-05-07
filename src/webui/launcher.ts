@@ -27,37 +27,22 @@ interface RunningWebUiServer {
 
 const servers = new Map<string, RunningWebUiServer>();
 const pending = new Map<string, Promise<MateriaWebUiLaunchResult>>();
-let webUiBuildPromise: Promise<void> | undefined;
 
-interface EnsureMateriaWebUiBuiltOptions {
+interface MateriaWebUiArtifactOptions {
   clientEntrypoint?: string;
   projectRoot?: string;
-  runBuild?: (projectRoot: string) => Promise<void>;
 }
 
-export async function ensureMateriaWebUiBuilt(options: EnsureMateriaWebUiBuiltOptions = {}): Promise<void> {
+export async function assertMateriaWebUiArtifactAvailable(options: MateriaWebUiArtifactOptions = {}): Promise<void> {
   const projectRoot = options.projectRoot ?? materiaPackageRoot();
   const clientEntrypoint = options.clientEntrypoint ?? join(projectRoot, "dist", "webui", "client", "index.html");
   if (await fileExists(clientEntrypoint)) return;
 
-  if (webUiBuildPromise) return webUiBuildPromise;
-
-  webUiBuildPromise = (async () => {
-    const runBuild = options.runBuild ?? runNpmBuildWebUi;
-    try {
-      await runBuild(projectRoot);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(message.includes("npm run build:webui failed") ? message : `npm run build:webui failed: ${message}`);
-    }
-    if (!(await fileExists(clientEntrypoint))) {
-      throw new Error(`npm run build:webui failed: expected client entrypoint was not created at ${clientEntrypoint}`);
-    }
-  })().finally(() => {
-    webUiBuildPromise = undefined;
-  });
-
-  return webUiBuildPromise;
+  throw new Error(
+    `Materia WebUI build artifact is missing: expected ${clientEntrypoint}. `
+    + "Build the WebUI before starting it (for example, run `npm run build:webui`) "
+    + "or include the committed dist/webui artifacts in the installed package.",
+  );
 }
 
 export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?: string): Promise<MateriaWebUiLaunchResult> {
@@ -89,7 +74,7 @@ export function webUiSessionKey(ctx: ExtensionContext): string {
 }
 
 async function startServer(ctx: ExtensionContext, sessionKey: string, configuredPath?: string): Promise<MateriaWebUiLaunchResult> {
-  await ensureMateriaWebUiBuilt();
+  await assertMateriaWebUiArtifactAvailable();
 
   const profile = await loadProfileConfig();
   const host = profile.webui?.host?.trim() || "127.0.0.1";
@@ -271,33 +256,6 @@ async function fileExists(file: string): Promise<boolean> {
   }
 }
 
-function runNpmBuildWebUi(projectRoot: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("npm", ["run", "build:webui"], { cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"], env: process.env });
-    let settled = false;
-    let stdout = "";
-    let stderr = "";
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      error ? reject(error) : resolve();
-    };
-    child.stdout?.on("data", (chunk) => {
-      stdout = truncate(`${stdout}${String(chunk)}`, 8000);
-    });
-    child.stderr?.on("data", (chunk) => {
-      stderr = truncate(`${stderr}${String(chunk)}`, 8000);
-    });
-    child.on("error", (error) => finish(new Error(`npm run build:webui failed to start: ${error.message}`)));
-    child.on("close", (code, signal) => {
-      if (code === 0) return finish();
-      const output = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n");
-      const status = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
-      finish(new Error(`npm run build:webui failed with ${status}.${output ? `\n${output}` : ""}`));
-    });
-  });
-}
-
 function openBrowser(url: string): void {
   const os = platform();
   const command = os === "darwin" ? "open" : os === "win32" ? "cmd" : process.env.TERMUX_VERSION ? "termux-open-url" : "xdg-open";
@@ -308,10 +266,7 @@ function openBrowser(url: string): void {
 }
 
 export const webUiLauncherTestInternals = {
-  ensureMateriaWebUiBuilt,
+  assertMateriaWebUiArtifactAvailable,
   loadMateriaWebUiProfileConfig: loadProfileConfig,
-  resetMateriaWebUiBuildPromise: () => {
-    webUiBuildPromise = undefined;
-  },
   webUiSessionKey,
 };

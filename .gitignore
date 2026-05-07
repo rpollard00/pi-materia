@@ -8,7 +8,9 @@ config/.pi/pi-materia/
 
 # Build outputs
 _build/
-dist/
+dist/*
+!dist/webui/
+!dist/webui/**
 build/
 coverage/
 
