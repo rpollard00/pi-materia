@@ -358,6 +358,45 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
 
+  test("loop generator consumers require a selected cycle and exactly one inbound generator edge", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "ListMaker",
+          nodes: {
+            ListMaker: { type: "agent", materia: "customGenerator", parse: "json", assign: { work: "$.work" }, edges: [{ when: "always", to: "Build" }] },
+            Build: { type: "agent", materia: "Build", edges: [{ when: "always", to: "Check" }] },
+            Check: { type: "agent", materia: "Check", edges: [{ when: "always", to: "Build" }] },
+          },
+          loops: { workLoop: { nodes: ["Build", "Check"], consumes: { from: "ListMaker", output: "work" } } },
+        },
+      },
+      materia: {
+        customGenerator: { tools: "readOnly", prompt: "Make work.", generates: { output: "work", listType: "array", itemType: "work-item", as: "workItem" } },
+        Build: { tools: "coding", prompt: "Build." },
+        Check: { tools: "none", prompt: "Check." },
+      },
+    };
+
+    const resolved = resolvePipeline(config);
+    expect(resolved.loops?.workLoop.iterator).toMatchObject({ items: "state.work", as: "workItem" });
+
+    const noCycle = structuredClone(config) as PiMateriaConfig;
+    noCycle.loadouts!.Loop.nodes.Check.edges = [{ when: "always", to: "end" }];
+    expect(() => resolvePipeline(noCycle)).toThrow(/must contain a directed cycle/);
+
+    const missingGeneratorInput = structuredClone(config) as PiMateriaConfig;
+    missingGeneratorInput.loadouts!.Loop.nodes.ListMaker.edges = [{ when: "always", to: "end" }];
+    expect(() => resolvePipeline(missingGeneratorInput)).toThrow(/exactly one inbound edge from a generator socket.*found none/s);
+
+    const multipleGeneratorInputs = structuredClone(config) as PiMateriaConfig;
+    multipleGeneratorInputs.loadouts!.Loop.nodes.OtherMaker = { type: "agent", materia: "otherGenerator", parse: "json", assign: { moreWork: "$.moreWork" }, edges: [{ when: "always", to: "Check" }] };
+    multipleGeneratorInputs.materia.otherGenerator = { tools: "readOnly", prompt: "Make more work.", generates: { output: "moreWork", listType: "array", itemType: "work-item" } };
+    expect(() => resolvePipeline(multipleGeneratorInputs)).toThrow(/exactly one inbound edge from a generator socket.*found 2/s);
+  });
+
   test("generator declarations must map to JSON-assigned list outputs", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
@@ -367,7 +406,7 @@ describe("utility pipeline nodes", () => {
           entry: "planner",
           nodes: {
             planner: { type: "agent", materia: "planner", parse: "text", edges: [{ when: "always", to: "Build" }] },
-            Build: { type: "agent", materia: "Build" },
+            Build: { type: "agent", materia: "Build", edges: [{ when: "always", to: "Build" }] },
           },
           loops: { taskIteration: { nodes: ["Build"], consumes: { from: "planner", output: "tasks" } } },
         },

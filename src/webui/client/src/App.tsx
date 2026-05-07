@@ -1119,7 +1119,12 @@ export function App() {
 
   function commitGraphMutation(description: string, mutator: (loadout: import('../../../types.js').MateriaPipelineConfig) => void, onSuccess: string, onError: (message: string) => string) {
     if (!activeLoadoutName || !activeLoadout) return false;
-    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, mutator);
+    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, mutator, {
+      isGeneratorNode: (nodeId) => {
+        const referenced = extractMateriaReference(activeLoadout.nodes?.[nodeId]);
+        return Boolean(referenced && materia[referenced.materia]?.generates);
+      },
+    });
     if (!result.ok) {
       const message = formatGraphValidationErrors(result.errors);
       setEdgeMutationError(message);

@@ -32,7 +32,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   validateMateriaEntries(config);
   const effective = getEffectivePipelineConfig(config);
   validateLoadout(effective.loadoutName, effective.pipeline);
-  assertValidPipelineGraph(effective.pipeline);
+  assertValidPipelineGraph(effective.pipeline, { isGeneratorNode: (nodeId) => isGeneratorPipelineNode(config, effective.pipeline, nodeId) });
   const nodes = Object.fromEntries(
     Object.keys(effective.pipeline.nodes).map((id) => [id, resolveNode(config, effective, id, `${pipelineSource(effective)}.nodes.${id}`)]),
   );
@@ -144,6 +144,11 @@ function validateGeneratorDeclaration(name: string, generates: unknown): void {
   for (const field of ["items", "as", "cursor", "done"] as const) {
     if (generates[field] !== undefined && (typeof generates[field] !== "string" || generates[field].length === 0)) throw new Error(`Materia "${name}" has invalid generates.${field}. Expected a non-empty string when configured.`);
   }
+}
+
+function isGeneratorPipelineNode(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, nodeId: string): boolean {
+  const node = pipeline.nodes[nodeId];
+  return Boolean(node?.type === "agent" && config.materia[node.materia]?.generates);
 }
 
 function validateGeneratorNodeContracts(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): void {

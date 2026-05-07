@@ -18,6 +18,10 @@ export interface MateriaGraphValidationResult {
   errors: MateriaGraphValidationError[];
 }
 
+export interface MateriaGraphValidationOptions {
+  isGeneratorNode?: (nodeId: string) => boolean;
+}
+
 export interface ValidatedGraphChangeResult<TGraph extends MateriaPipelineConfig = MateriaPipelineConfig> extends MateriaGraphValidationResult {
   graph: TGraph;
 }
@@ -46,7 +50,7 @@ export function canonicalOutgoingEdges(node: MateriaPipelineNodeConfig): Materia
   return edges;
 }
 
-export function validatePipelineGraph(graph: MateriaPipelineConfig): MateriaGraphValidationResult {
+export function validatePipelineGraph(graph: MateriaPipelineConfig, options: MateriaGraphValidationOptions = {}): MateriaGraphValidationResult {
   const normalized = normalizePipelineGraph(graph);
   const errors: MateriaGraphValidationError[] = [];
   const nodeIds = new Set(Object.keys(normalized.nodes ?? {}));
@@ -58,7 +62,7 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig): MateriaGrap
     validateNodeLinks(id, node, errors, nodeIds);
     if (errors.length === errorCountBeforeNode) validateOutgoingEdgeConditions(id, node.edges ?? [], errors);
   }
-  validateLoops(normalized, errors, nodeIds);
+  validateLoops(normalized, errors, nodeIds, options);
 
   // Materia graphs are workflow state machines, not DAGs: transitions may
   // intentionally revisit earlier sockets (for example Build -> Eval -> Maintain
@@ -67,16 +71,16 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig): MateriaGrap
   return { ok: errors.length === 0, errors };
 }
 
-export function assertValidPipelineGraph(graph: MateriaPipelineConfig): void {
-  const result = validatePipelineGraph(graph);
+export function assertValidPipelineGraph(graph: MateriaPipelineConfig, options: MateriaGraphValidationOptions = {}): void {
+  const result = validatePipelineGraph(graph, options);
   if (!result.ok) throw new Error(formatGraphValidationErrors(result.errors));
 }
 
-export function stageValidatedPipelineGraphChange<TGraph extends MateriaPipelineConfig>(graph: TGraph, mutator: (draft: TGraph) => void): ValidatedGraphChangeResult<TGraph> {
+export function stageValidatedPipelineGraphChange<TGraph extends MateriaPipelineConfig>(graph: TGraph, mutator: (draft: TGraph) => void, options: MateriaGraphValidationOptions = {}): ValidatedGraphChangeResult<TGraph> {
   const draft = cloneGraph(graph);
   mutator(draft);
   const normalized = normalizePipelineGraph(draft);
-  const result = validatePipelineGraph(normalized);
+  const result = validatePipelineGraph(normalized, options);
   return { graph: result.ok ? normalized : graph, ok: result.ok, errors: result.errors };
 }
 
@@ -136,7 +140,7 @@ function validateOutgoingEdgeConditions(id: string, edges: MateriaEdgeConfig[], 
   }
 }
 
-function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], nodeIds: Set<string>): void {
+function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], nodeIds: Set<string>, options: MateriaGraphValidationOptions): void {
   for (const [loopId, loop] of Object.entries(graph.loops ?? {})) {
     if (!Array.isArray(loop.nodes) || loop.nodes.length === 0) {
       errors.push({ code: "invalid-loop", source: `loops.${loopId}.nodes`, message: `Loop "${loopId}" must include at least one socket id in loops.${loopId}.nodes.` });
@@ -152,7 +156,47 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
     if (loop.exit && !isCanonicalEdgeCondition(loop.exit.when)) {
       errors.push({ code: "invalid-edge-condition", source: `loops.${loopId}.exit.when`, to: loop.exit.to, message: `Loop "${loopId}" has invalid exit condition at loops.${loopId}.exit.when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
     }
+    if (loop.consumes && loop.nodes.every((nodeId) => nodeIds.has(nodeId))) validateLoopTopology(graph, errors, loopId, loop.nodes, loop.consumes.from, options);
   }
+}
+
+function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopNodes: string[], consumesFrom: string, options: MateriaGraphValidationOptions): void {
+  const loopSet = new Set(loopNodes);
+  if (!containsDirectedCycle(graph, loopSet)) {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.nodes`, message: `Loop "${loopId}" must contain a directed cycle among its selected sockets before it can be created.` });
+  }
+  if (!options.isGeneratorNode) return;
+
+  const inboundGeneratorEdges = Object.entries(graph.nodes ?? {}).flatMap(([from, node]) => {
+    if (loopSet.has(from) || !options.isGeneratorNode?.(from)) return [];
+    return (node.edges ?? []).filter((edge) => loopSet.has(edge.to)).map((edge) => ({ from, to: edge.to }));
+  });
+
+  if (inboundGeneratorEdges.length === 0) {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.consumes`, message: `Loop "${loopId}" must have exactly one inbound edge from a generator socket into the selected cycle; found none.` });
+  } else if (inboundGeneratorEdges.length > 1) {
+    const details = inboundGeneratorEdges.map((edge) => `${edge.from}->${edge.to}`).join(", ");
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.consumes`, message: `Loop "${loopId}" must have exactly one inbound edge from a generator socket into the selected cycle; found ${inboundGeneratorEdges.length}: ${details}.` });
+  } else if (inboundGeneratorEdges[0]?.from !== consumesFrom) {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.consumes.from`, from: consumesFrom, message: `Loop "${loopId}" consumes "${consumesFrom}" but its only inbound generator edge comes from "${inboundGeneratorEdges[0]?.from}".` });
+  }
+}
+
+function containsDirectedCycle(graph: MateriaPipelineConfig, loopSet: Set<string>): boolean {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (nodeId: string): boolean => {
+    if (visiting.has(nodeId)) return true;
+    if (visited.has(nodeId)) return false;
+    visiting.add(nodeId);
+    for (const edge of graph.nodes[nodeId]?.edges ?? []) {
+      if (loopSet.has(edge.to) && visit(edge.to)) return true;
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+    return false;
+  };
+  return Array.from(loopSet).some((nodeId) => visit(nodeId));
 }
 
 function validateOptionalTarget(errors: MateriaGraphValidationError[], nodeIds: Set<string>, from: string, to: string | undefined, source: string): void {
