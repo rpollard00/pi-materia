@@ -152,6 +152,25 @@ describe("generic engine helper mechanics", () => {
     expect(state.data).not.toHaveProperty("tasks");
   });
 
+  test("does not let evaluator context workItems replace the generated iterator list", () => {
+    const generatedWorkItems = [
+      { id: "one", title: "First", description: "Do first", acceptance: ["first done"], context: { constraints: [], dependencies: [], risks: [] } },
+      { id: "two", title: "Second", description: "Do second", acceptance: ["second done"], context: { constraints: [], dependencies: [], risks: [] } },
+    ];
+    const echoedCurrentWorkItem = [generatedWorkItems[0]];
+    const state = makeState({ data: { workItems: generatedWorkItems } });
+    const evaluator = {
+      id: "Socket-5",
+      node: { type: "agent", materia: "Auto-Eval", parse: "json" },
+      materia: { tools: "coding", prompt: "evaluate" },
+    } satisfies ResolvedMateriaNode;
+
+    nativeTestInternals.applyGenericHandoffEnvelope(state, { workItems: echoedCurrentWorkItem, satisfied: true }, evaluator);
+
+    expect(state.data.envelope).toMatchObject({ workItems: echoedCurrentWorkItem, satisfied: true });
+    expect(state.data.workItems).toEqual(generatedWorkItems);
+  });
+
   test("assigns generated workItems, iterates current workItem, and advances on satisfied", () => {
     const workItems = [
       { id: "one", title: "First", description: "Do first", acceptance: ["first done"], context: { constraints: [], dependencies: [], risks: [] } },

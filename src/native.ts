@@ -292,7 +292,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
     await writeFile(path.join(state.runDir, "nodes", safePathSegment(node.id), `${nodeVisit(state, node.id)}.json`), JSON.stringify(parsed, null, 2));
   }
 
-  applyGenericHandoffEnvelope(state, parsed);
+  applyGenericHandoffEnvelope(state, parsed, node);
   applyAssignments(state, node, parsed);
   const advanceTarget = applyAdvance(state, node, parsed);
   const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
@@ -327,7 +327,7 @@ async function recordMultiTurnRefinement(state: MateriaCastState, node: Resolved
   return { artifact, turn };
 }
 
-function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown): void {
+function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, node?: ResolvedMateriaNode): void {
   if (!isPlainObject(parsed)) return;
 
   const envelope = isPlainObject(state.data.envelope)
@@ -338,7 +338,7 @@ function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown): 
   }
   if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
 
-  if (Array.isArray(parsed.workItems) && parsed.workItems.length > 0) {
+  if (Array.isArray(parsed.workItems) && parsed.workItems.length > 0 && shouldAdoptEnvelopeWorkItems(state, node)) {
     state.data.workItems = parsed.workItems;
   }
   if (isPlainObject(parsed.guidance)) {
@@ -348,6 +348,11 @@ function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown): 
   if (typeof parsed.summary === "string" && parsed.summary.trim()) state.data.summary = parsed.summary;
   if (Array.isArray(parsed.decisions) && parsed.decisions.length > 0) state.data.decisions = parsed.decisions;
   if (Array.isArray(parsed.risks) && parsed.risks.length > 0) state.data.risks = parsed.risks;
+}
+
+function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, node?: ResolvedMateriaNode): boolean {
+  if (!Array.isArray(state.data.workItems) || state.data.workItems.length === 0) return true;
+  return Boolean(node && isAgentResolvedNode(node) && node.materia.generates?.output === "workItems");
 }
 
 function applyAssignments(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): void {
