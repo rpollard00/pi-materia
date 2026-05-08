@@ -197,19 +197,19 @@ describe('Materia loadout grid editor', () => {
 
     const palettePlanner = await screen.findByTestId('palette-planner');
     expect(palettePlanner.classList.contains('palette-orb-generator')).toBe(true);
-    expect(palettePlanner.textContent).toContain('Generator');
-    expect(palettePlanner.getAttribute('title')).toContain('Generator: tasks (task list)');
+    expect(palettePlanner.textContent).toContain('List: tasks');
+    expect(palettePlanner.getAttribute('title')).toContain('Generated list output: tasks (task list)');
 
     const planner = screen.getByTestId('socket-planner');
     expect(planner.classList.contains('materia-socket-generator')).toBe(true);
-    expect(planner.textContent).toContain('Generator');
+    expect(planner.textContent).toContain('List: tasks');
     const plannerBadge = planner.querySelector('.graph-iterator-badge');
     expect(plannerBadge?.classList.contains('materia-generator-badge')).toBe(true);
-    expect(plannerBadge?.textContent).toBe('Generator');
+    expect(plannerBadge?.textContent).toBe('List: tasks');
 
     const generatorEdge = screen.getByTestId('edge-planner-Build-0');
     expect(generatorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
-    expect(generatorEdge.textContent).toContain('Generates tasks');
+    expect(generatorEdge.textContent).toContain('Generates output: tasks');
     expect(generatorEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-generator-edge-arrow)');
 
     const build = screen.getByTestId('socket-Build');

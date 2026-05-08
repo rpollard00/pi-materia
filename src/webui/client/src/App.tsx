@@ -310,7 +310,7 @@ function hasIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['m
 function formatIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia']): string {
   const referenced = extractMateriaReference(node);
   const generator = referenced ? definitions?.[referenced.materia]?.generates : undefined;
-  if (generator) return `Generator: ${generator.output}${generator.itemType ? ` (${generator.itemType} list)` : ''}`;
+  if (generator) return `Generated list output: ${generator.output}${generator.itemType ? ` (${generator.itemType} list)` : ''}`;
   const foreach = node?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
   if (foreach) return `Iterator: ${foreach.items}${foreach.as ? ` as ${foreach.as}` : ''}${foreach.done ? ` until ${foreach.done}` : ''}`;
   return 'Iterator materia';
@@ -333,11 +333,14 @@ function isGeneratorLoopInputEdge(edge: LoadoutEdge, loadout: PipelineConfig | u
 
 function generatorLoopEdgeLabel(edge: LoadoutEdge, loadout: PipelineConfig | undefined): string {
   const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.consumes?.from === edge.from && candidate.nodes.includes(edge.to));
-  return loop?.consumes ? `Generates ${loop.consumes.output ?? 'list'}` : edgeConditionLabel(edge.when);
+  return loop?.consumes ? `Generates output: ${loop.consumes.output ?? 'list'}` : edgeConditionLabel(edge.when);
 }
 
 function iteratorBadgeLabel(details?: string): string {
-  if (details?.startsWith('Generator:')) return 'Generator';
+  if (details?.startsWith('Generated list output:')) {
+    const output = details.slice('Generated list output:'.length).trim().split(/\s|\(/)[0];
+    return output ? `List: ${output}` : 'Generated list';
+  }
   return 'Iterator';
 }
 
@@ -1431,7 +1434,7 @@ export function App() {
     });
     const uniqueGeneratorInputs = Array.from(new Map(generatorInputs.map((input) => [`${input.from}\u0000${input.output}`, input])).values());
     if (uniqueGeneratorInputs.length !== 1) {
-      setStatus(`Cannot create loop; selected sockets need exactly one inbound generator edge, found ${uniqueGeneratorInputs.length}.`);
+      setStatus(`Cannot create loop; selected sockets need exactly one inbound generated-list edge, found ${uniqueGeneratorInputs.length}.`);
       return;
     }
     const generator = uniqueGeneratorInputs[0];
@@ -1840,7 +1843,7 @@ export function App() {
               <div>
                 <h2 className="text-2xl font-bold">Visual materia grid</h2>
                 <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
-                <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.</p>
+                <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a generated-list materia.</p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>
