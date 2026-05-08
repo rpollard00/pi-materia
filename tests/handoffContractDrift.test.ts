@@ -51,6 +51,8 @@ describe("handoff contract drift regressions", () => {
     expect(plannerPrompt).toContain("runtime-provided canonical handoff JSON");
     expect(plannerPrompt).toContain("workItems");
     expect(plannerPrompt).not.toContain('"tasks"');
+    expect(interactivePrompt).toContain("Do not emit final workItems JSON during refinement");
+    expect(interactivePrompt).toContain("runtime-provided canonical handoff JSON contract");
 
     const maintainPrompt = String(rawDefault.materia?.Maintain?.prompt ?? "");
     const gitMaintainPrompt = String(rawDefault.materia?.GitMaintain?.prompt ?? "");
@@ -60,6 +62,9 @@ describe("handoff contract drift regressions", () => {
     expect(gitMaintainPrompt).not.toContain("return JSON with shape");
 
     const bundledPromptText = [plannerPrompt, interactivePrompt, prompt, maintainPrompt, gitMaintainPrompt].join("\n");
+    expect(bundledPromptText).not.toContain("Return only the runtime-provided canonical handoff JSON object");
+    expect(bundledPromptText).not.toContain("return only JSON using the runtime-provided canonical handoff contract");
+    expect(bundledPromptText).not.toMatch(/(?:include|place|put|emit)\s+(?:generated\s+)?work items\s+in\s+tasks/i);
     expect(bundledPromptText).not.toContain('"summary": string');
     expect(bundledPromptText).not.toContain('"workItems": []');
     expect(bundledPromptText).not.toContain('"satisfied": boolean');
