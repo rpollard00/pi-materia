@@ -14,11 +14,22 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
+const socketAliases: Record<string, string> = { second: "Socket-2", retry: "Socket-2", loop: "Socket-2", seed: "Socket-1", Build: "Socket-1", "Auto-Eval": "Socket-2", Maintain: "Socket-3" };
+
+function canonicalizeFixtureSockets<T>(value: T, parentKey = ""): T {
+  if (typeof value === "string") return (["to", "next", "from", "done"].includes(parentKey) ? (socketAliases[value] ?? value) : value) as T;
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => canonicalizeFixtureSockets(item, parentKey)) as T;
+  const mapped: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) mapped[socketAliases[key] ?? key] = canonicalizeFixtureSockets(child, key);
+  return mapped as T;
+}
+
 function utilityConfig(node: Record<string, unknown>, extraNodes: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "hello", nodes: { hello: { type: "utility", ...node }, ...extraNodes } } },
+    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": canonicalizeFixtureSockets({ type: "utility", ...node }), ...canonicalizeFixtureSockets(extraNodes) } } },
     materia: {},
   };
 }
@@ -39,7 +50,7 @@ describe("native utility node execution", () => {
     expect(state.lastJson?.unchanged).toEqual([".pi/pi-materia/", "dist/"]);
     expect(state.lastJson?.file).toBe(path.join(harness.cwd, ".gitignore"));
     expect(state.data?.ignored).toEqual([".pi/pi-materia/", "dist/"]);
-    await expect(readFile(path.join(state.runDir!, "nodes", "hello", "1.json"), "utf8")).resolves.toContain('"ok": true');
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.json"), "utf8")).resolves.toContain('"ok": true');
   });
 
   test("vcs.detect returns JSON with kind, root, and tool availability", async () => {
@@ -71,11 +82,11 @@ describe("native utility node execution", () => {
 
     const manifest = JSON.parse(await readFile(path.join(state.runDir!, "manifest.json"), "utf8"));
     const outputEntry = manifest.entries.find((entry: { artifact?: string }) => entry.artifact?.endsWith("1.md"));
-    expect(outputEntry.artifact).toBe(path.join("nodes", "hello", "1.md"));
+    expect(outputEntry.artifact).toBe(path.join("nodes", "Socket-1", "1.md"));
     await expect(readFile(path.join(state.runDir!, outputEntry.artifact), "utf8")).resolves.toBe("HELLO WORLD");
     const events = await readFile(path.join(state.runDir!, "events.jsonl"), "utf8");
     expect(events).toContain('"type":"node_complete"');
-    expect(events).toContain('"artifact":"nodes/hello/1.md"');
+    expect(events).toContain('"artifact":"nodes/Socket-1/1.md"');
   });
 
   test("parses JSON output, assigns state, and routes edges", async () => {
@@ -90,10 +101,10 @@ describe("native utility node execution", () => {
     expect(state.phase).toBe("complete");
     expect(state.data?.answer).toBe(7);
     expect(state.lastJson).toEqual({ satisfied: true, value: 7 });
-    expect(state.visits?.second).toBe(1);
-    const parsed = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "hello", "1.json"), "utf8"));
+    expect(state.visits?.["Socket-2"]).toBe(1);
+    const parsed = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.json"), "utf8"));
     expect(parsed.value).toBe(7);
-    await expect(readFile(path.join(state.runDir!, "nodes", "second", "1.md"), "utf8")).resolves.toBe("second");
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-2", "1.md"), "utf8")).resolves.toBe("second");
   });
 
   test("canonical not_satisfied routes only when satisfied is false", async () => {
@@ -107,7 +118,7 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; visits?: Record<string, number>; lastJson?: unknown };
     expect(state.phase).toBe("complete");
     expect(state.lastJson).toEqual({ satisfied: false, feedback: "retry" });
-    expect(state.visits?.retry).toBe(1);
+    expect(state.visits?.["Socket-2"]).toBe(1);
   });
 
   test("satisfied edge conditions reject legacy passed JSON without canonical satisfied", async () => {
@@ -122,7 +133,7 @@ describe("native utility node execution", () => {
     expect(state.phase).toBe("failed");
     expect(state.failedReason).toContain('must include reserved boolean field "satisfied"');
     expect(state.failedReason).toContain('Legacy field "passed" is not canonical');
-    expect(state.visits?.second).toBeUndefined();
+    expect(state.visits?.["Socket-2"]).toBeUndefined();
   });
 
   test("parse json utility rejects non-object handoff output", async () => {
@@ -132,7 +143,7 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string };
     expect(state.phase).toBe("failed");
-    expect(state.failedReason).toContain('Invalid handoff JSON output for node "hello"');
+    expect(state.failedReason).toContain('Invalid handoff JSON output for node "Socket-1"');
     expect(state.failedReason).toContain("expected a JSON object at the top level");
   });
 
@@ -144,7 +155,7 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string; visits?: Record<string, number> };
     expect(state.phase).toBe("failed");
     expect(state.failedReason).toContain('reserved control field "satisfied" must be a boolean');
-    expect(state.visits?.second).toBeUndefined();
+    expect(state.visits?.["Socket-2"]).toBeUndefined();
   });
 
   test("runtime traverses iterative Build/Eval/Maintain retry loops as ordered guarded transitions", async () => {
@@ -162,21 +173,21 @@ describe("native utility node execution", () => {
       activeLoadout: "Loop",
       loadouts: {
         Loop: {
-          entry: "Build",
+          entry: "Socket-1",
           nodes: {
-            Build: { type: "utility", utility: "echo", params: { text: "build" }, next: "Auto-Eval", limits: { maxVisits: 5 } },
-            "Auto-Eval": {
+            "Socket-1": { type: "utility", utility: "echo", params: { text: "build" }, next: "Socket-2", limits: { maxVisits: 5 } },
+            "Socket-2": {
               type: "utility",
               command: ["node", "-e", evalScript],
               parse: "json",
               assign: { evalCycle: "$.cycle" },
               edges: [
-                { when: "satisfied", to: "Maintain" },
-                { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+                { when: "satisfied", to: "Socket-3" },
+                { when: "not_satisfied", to: "Socket-1", maxTraversals: 3 },
               ],
               limits: { maxVisits: 5 },
             },
-            Maintain: { type: "utility", utility: "echo", params: { text: "maintain" }, next: "end", limits: { maxVisits: 3 } },
+            "Socket-3": { type: "utility", utility: "echo", params: { text: "maintain" }, next: "end", limits: { maxVisits: 3 } },
           },
         },
       },
@@ -188,9 +199,9 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; visits?: Record<string, number>; edgeTraversals?: Record<string, number>; runDir?: string };
     expect(state.phase).toBe("complete");
     expect(state.data?.evalCycle).toBe(2);
-    expect(state.visits).toMatchObject({ Build: 2, "Auto-Eval": 2, Maintain: 1 });
-    expect(state.edgeTraversals).toMatchObject({ "Auto-Eval->Build": 1, "Auto-Eval->Maintain": 1 });
-    await expect(readFile(path.join(state.runDir!, "nodes", "Maintain", "1.md"), "utf8")).resolves.toBe("maintain");
+    expect(state.visits).toMatchObject({ "Socket-1": 2, "Socket-2": 2, "Socket-3": 1 });
+    expect(state.edgeTraversals).toMatchObject({ "Socket-2->Socket-1": 1, "Socket-2->Socket-3": 1 });
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-3", "1.md"), "utf8")).resolves.toBe("maintain");
   });
 
   test("foreach utility nodes expose item and cursor metadata in input artifacts", async () => {
@@ -211,12 +222,12 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; runDir?: string };
     expect(state.phase).toBe("complete");
-    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "loop", "1-a.input.json"), "utf8"));
+    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "1-a.input.json"), "utf8"));
     expect(firstInput.item).toEqual({ id: "a", title: "Alpha" });
     expect(firstInput.itemKey).toBe("a");
     expect(firstInput.itemLabel).toBe("Alpha");
     expect(firstInput.cursor).toEqual({ name: "itemCursor", index: 0 });
-    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "loop", "2-b.input.json"), "utf8"));
+    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "2-b.input.json"), "utf8"));
     expect(secondInput.itemKey).toBe("b");
     expect(secondInput.itemLabel).toBe("Beta");
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
@@ -228,17 +239,17 @@ describe("native utility node execution", () => {
       activeLoadout: "Test",
       loadouts: {
         Test: {
-          entry: "seed",
+          entry: "Socket-1",
           nodes: {
-            seed: { type: "utility", utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, edges: [{ when: "always", to: "loop" }] },
-            loop: { type: "utility", utility: "echo", params: { text: "loop item" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, edges: [{ when: "always", to: "loop" }] },
+            "Socket-1": { type: "utility", utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { type: "utility", utility: "echo", params: { text: "loop item" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, edges: [{ when: "always", to: "Socket-2" }] },
           },
           loops: {
             taskIteration: {
               label: "Runtime item loop",
-              nodes: ["loop"],
+              nodes: ["Socket-2"],
               iterator: { items: "state.items", as: "work", cursor: "itemCursor", done: "end" },
-              exit: { from: "loop", when: "satisfied", to: "end" },
+              exit: { from: "Socket-2", when: "satisfied", to: "end" },
             },
           },
         },
@@ -250,13 +261,13 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; runDir?: string; visits?: Record<string, number>; cursors?: Record<string, number> };
     expect(state.phase).toBe("complete");
-    expect(state.visits?.loop).toBe(2);
+    expect(state.visits?.["Socket-2"]).toBe(2);
     expect(state.cursors?.itemCursor).toBe(2);
-    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "loop", "1-a.input.json"), "utf8"));
+    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "1-a.input.json"), "utf8"));
     expect(firstInput.item).toEqual({ id: "a", title: "Alpha" });
     expect(firstInput.state.work).toEqual({ id: "a", title: "Alpha" });
     expect(firstInput.cursor).toEqual({ name: "itemCursor", index: 0 });
-    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "loop", "2-b.input.json"), "utf8"));
+    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "2-b.input.json"), "utf8"));
     expect(secondInput.itemKey).toBe("b");
     expect(secondInput.itemLabel).toBe("Beta");
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
@@ -271,8 +282,8 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; lastJson?: Record<string, unknown>; runDir?: string };
     expect(state.phase).toBe("complete");
     expect(state.data?.seenRequest).toBe("command request");
-    expect(state.lastJson).toMatchObject({ cwd: true, runDir: true, request: "command request", castId: true, nodeId: "hello", params: { greeting: "hi" }, state: {}, item: null, itemKey: null, itemLabel: null });
-    await expect(readFile(path.join(state.runDir!, "nodes", "hello", "1.command.stderr.txt"), "utf8")).resolves.toBe("diagnostic stderr\n");
+    expect(state.lastJson).toMatchObject({ cwd: true, runDir: true, request: "command request", castId: true, nodeId: "Socket-1", params: { greeting: "hi" }, state: {}, item: null, itemKey: null, itemLabel: null });
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.command.stderr.txt"), "utf8")).resolves.toBe("diagnostic stderr\n");
     const events = await readFile(path.join(state.runDir!, "events.jsonl"), "utf8");
     expect(events).toContain('"type":"utility_command"');
   });
@@ -285,7 +296,7 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; lastOutput?: string; runDir?: string };
     expect(state.phase).toBe("complete");
     expect(state.lastOutput).toBe("plain text result");
-    await expect(readFile(path.join(state.runDir!, "nodes", "hello", "1.md"), "utf8")).resolves.toBe("plain text result");
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.md"), "utf8")).resolves.toBe("plain text result");
   });
 
   test("command utility failure includes exit diagnostics and artifact paths", async () => {
@@ -297,8 +308,8 @@ describe("native utility node execution", () => {
     expect(state.phase).toBe("failed");
     expect(state.failedReason).toContain("exited with code 7");
     expect(state.failedReason).toContain("bad things happened");
-    expect(state.failedReason).toContain("nodes/hello/1.command.stdout.txt");
-    await expect(readFile(path.join(state.runDir!, "nodes", "hello", "1.command.stderr.txt"), "utf8")).resolves.toBe("bad things happened\n");
+    expect(state.failedReason).toContain("nodes/Socket-1/1.command.stdout.txt");
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.command.stderr.txt"), "utf8")).resolves.toBe("bad things happened\n");
   });
 
   test("command utility parse json fails clearly on invalid JSON", async () => {
@@ -308,7 +319,7 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string };
     expect(state.phase).toBe("failed");
-    expect(state.failedReason).toContain('Invalid JSON output for node "hello"');
+    expect(state.failedReason).toContain('Invalid JSON output for node "Socket-1"');
   });
 
   test("command utility timeout terminates the process and fails the cast", async () => {
@@ -330,7 +341,7 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; lastOutput?: string; runDir?: string };
     expect(state.phase).toBe("complete");
     expect(state.lastOutput?.length).toBe(1024 * 1024);
-    const meta = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "hello", "1.command.json"), "utf8"));
+    const meta = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.command.json"), "utf8"));
     expect(meta.stdoutTruncated).toBe(true);
     expect(meta.stderrTruncated).toBe(false);
   });
@@ -348,6 +359,6 @@ describe("native utility node execution", () => {
     expect(state.active).toBe(false);
     expect(state.phase).toBe("failed");
     expect(state.failedReason).toContain('Unknown utility alias "missing.alias"');
-    expect(state.visits?.second).toBeUndefined();
+    expect(state.visits?.["Socket-2"]).toBeUndefined();
   });
 });

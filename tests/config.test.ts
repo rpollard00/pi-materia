@@ -126,18 +126,18 @@ describe("layered config loading and persistence", () => {
       await writeFile(getUserMateriaAssetPath(), JSON.stringify({
         activeLoadout: "UserLoadout",
         materia: { Build: { model: "user/model" } },
-        loadouts: { UserLoadout: { entry: "planner", nodes: { planner: { type: "agent", materia: "planner" } } } },
+        loadouts: { UserLoadout: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "planner" } } } },
       }), "utf8");
       await mkdir(path.join(cwd, ".pi"), { recursive: true });
       await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
         activeLoadout: "ProjectLoadout",
         materia: { Build: { model: "project/model" } },
-        loadouts: { ProjectLoadout: { entry: "builder", nodes: { builder: { type: "agent", materia: "Build" } } } },
+        loadouts: { ProjectLoadout: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } },
       }), "utf8");
       await writeFile(explicit, JSON.stringify({
         activeLoadout: "ExplicitLoadout",
         materia: { Build: { model: "explicit/model" } },
-        loadouts: { ExplicitLoadout: { entry: "checker", nodes: { checker: { type: "agent", materia: "Check" } } } },
+        loadouts: { ExplicitLoadout: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Check" } } } },
       }), "utf8");
 
       const loaded = await loadConfig(cwd, explicit);
@@ -167,14 +167,14 @@ describe("layered config loading and persistence", () => {
 
       const userWritten = await saveMateriaConfigPatch(cwd, {
         materia: { Custom: { tools: "none", prompt: "custom user materia" } },
-        loadouts: { UserCreated: { entry: "custom", nodes: { custom: { type: "agent", materia: "Custom" } } } },
+        loadouts: { UserCreated: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Custom" } } } },
       });
       expect(userWritten).toBe(getUserMateriaAssetPath());
       expect(await readFile(projectFile, "utf8")).toBe(beforeProject);
 
       const reloaded = await loadConfig(cwd);
       expect(reloaded.config.materia.Custom.prompt).toBe("custom user materia");
-      expect(reloaded.config.loadouts?.UserCreated?.entry).toBe("custom");
+      expect(reloaded.config.loadouts?.UserCreated?.entry).toBe("Socket-1");
 
       const projectWritten = await saveMateriaConfigPatch(cwd, { activeLoadout: "Planning-Consult" }, { target: "project" });
       expect(projectWritten).toBe(projectFile);
@@ -241,9 +241,9 @@ describe("config loadouts", () => {
     const withPrompt = await writeConfig({
       loadouts: {
         Custom: {
-          entry: "planner",
+          entry: "Socket-1",
           prompt: "obsolete loadout behavior",
-          nodes: { planner: { type: "agent", materia: "planner" } },
+          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
         },
       },
     });
@@ -252,9 +252,9 @@ describe("config loadouts", () => {
     const withSystemPrompt = await writeConfig({
       loadouts: {
         Custom: {
-          entry: "planner",
+          entry: "Socket-1",
           systemPrompt: "obsolete loadout system behavior",
-          nodes: { planner: { type: "agent", materia: "planner" } },
+          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
         },
       },
     });
@@ -323,9 +323,9 @@ describe("config loadouts", () => {
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: {
           Custom: {
-            entry: "planner",
+            entry: "Socket-1",
             prompt: "obsolete saved behavior",
-            nodes: { planner: { type: "agent", materia: "planner" } },
+            nodes: { "Socket-1": { type: "agent", materia: "planner" } },
           } as never,
         },
       })).rejects.toThrow(/loadout "Custom" configures obsolete prompt/);
@@ -344,17 +344,17 @@ describe("config loadouts", () => {
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: {
           Custom: {
-            entry: "Check",
+            entry: "Socket-1",
             nodes: {
-              Check: {
+              "Socket-1": {
                 type: "agent",
                 materia: "Check",
                 edges: [
-                  { when: "always", to: "Done" },
-                  { when: "satisfied", to: "Check" },
+                  { when: "always", to: "Socket-2" },
+                  { when: "satisfied", to: "Socket-1" },
                 ],
               },
-              Done: { type: "agent", materia: "Done" },
+              "Socket-2": { type: "agent", materia: "Done" },
             },
           },
         },
@@ -363,31 +363,31 @@ describe("config loadouts", () => {
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: {
           Custom: {
-            entry: "Check",
+            entry: "Socket-1",
             nodes: {
-              Check: { type: "agent", materia: "Check", edges: [{ when: "satisfied", to: undefined as never }] },
+              "Socket-1": { type: "agent", materia: "Check", edges: [{ when: "satisfied", to: undefined as never }] },
             },
           },
         },
-      })).rejects.toThrow(/Missing graph endpoint referenced by Check\.edges\[0\]\.to/);
+      })).rejects.toThrow(/Missing graph endpoint referenced by Socket-1\.edges\[0\]\.to/);
 
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: {
           Custom: {
-            entry: "Check",
+            entry: "Socket-1",
             nodes: {
-              Check: { type: "agent", materia: "Check", edges: [{ when: " " as never, to: "Check" }] },
+              "Socket-1": { type: "agent", materia: "Check", edges: [{ when: " " as never, to: "Socket-1" }] },
             },
           },
         },
-      })).rejects.toThrow(/invalid edge condition at Check\.edges\[0\]\.when/);
+      })).rejects.toThrow(/invalid edge condition at Socket-1\.edges\[0\]\.when/);
 
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: {
           Custom: {
-            entry: "Check",
+            entry: "Socket-1",
             nodes: {
-              Check: { type: "agent", materia: "Check", edges: [{ when: "$.passed == true" as never, to: "Check" }] },
+              "Socket-1": { type: "agent", materia: "Check", edges: [{ when: "$.passed == true" as never, to: "Socket-1" }] },
             },
           },
         },
@@ -396,19 +396,19 @@ describe("config loadouts", () => {
       const savedPath = await saveMateriaConfigPatch(cwd, {
         loadouts: {
           Custom: {
-            entry: "Build",
+            entry: "Socket-1",
             nodes: {
-              Build: { type: "agent", materia: "Build", next: "Auto-Eval" } as never,
-              "Auto-Eval": {
+              "Socket-1": { type: "agent", materia: "Build", next: "Socket-2" } as never,
+              "Socket-2": {
                 type: "agent",
                 materia: "Auto-Eval",
                 edges: [
-                  { when: "satisfied", to: "Maintain" },
-                  { when: "satisfied", to: "Build", maxTraversals: 3 },
-                  { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+                  { when: "satisfied", to: "Socket-3" },
+                  { when: "satisfied", to: "Socket-1", maxTraversals: 3 },
+                  { when: "not_satisfied", to: "Socket-1", maxTraversals: 3 },
                 ],
               },
-              Maintain: { type: "agent", materia: "Maintain", next: "Build" } as never,
+              "Socket-3": { type: "agent", materia: "Maintain", next: "Socket-1" } as never,
             },
           },
         },
@@ -426,12 +426,12 @@ describe("config loadouts", () => {
       activeLoadout: "Planning-Consult",
       loadouts: {
         "Full-Auto": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", materia: "planner" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
-          entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", materia: "interactivePlan" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
         },
       },
     });
@@ -443,7 +443,7 @@ describe("config loadouts", () => {
     expect(Object.keys(loaded.config.loadouts ?? {})).toContain("Full-Auto");
     expect(loaded.config.materia.planner.prompt).toContain("planning materia");
     expect(loaded.config.materia.interactivePlan.prompt).toContain("interactive");
-    expect(pipeline.entry.id).toBe("interactivePlan");
+    expect(pipeline.entry.id).toBe("Socket-1");
   });
 
   test("bundled Planning-Consult resolves an interactive multi-turn JSON planner", async () => {
@@ -509,12 +509,12 @@ describe("active loadout persistence", () => {
     const { dir, file } = await writeConfig({
       loadouts: {
         "Full-Auto": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", materia: "planner" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
-          entry: "interactivePlan",
-          nodes: { interactivePlan: { type: "agent", materia: "interactivePlan" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
         },
       },
     });
@@ -527,7 +527,7 @@ describe("active loadout persistence", () => {
     expect(raw.activeLoadout).toBe("Planning-Consult");
     expect(raw.materia).toBeUndefined();
     expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
-    expect(resolvePipeline(reloaded.config).entry.id).toBe("interactivePlan");
+    expect(resolvePipeline(reloaded.config).entry.id).toBe("Socket-1");
   });
 
   test("creates a minimal project config override when using bundled defaults", async () => {
@@ -552,8 +552,8 @@ describe("active loadout persistence", () => {
       activeLoadout: "Full-Auto",
       loadouts: {
         "Full-Auto": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", materia: "planner" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
         },
       },
     });

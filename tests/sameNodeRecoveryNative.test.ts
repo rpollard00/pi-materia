@@ -24,7 +24,7 @@ function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "work", nodes: { work: { type: "agent", materia: "Build", next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build", next: "end" } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
@@ -33,7 +33,7 @@ function multiTurnConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "plan", nodes: { plan: { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
     materia: { Plan: { tools: "readOnly", prompt: "Collaborative planner", multiTurn: true } },
   };
 }
@@ -44,23 +44,23 @@ function foreachConfig() {
     activeLoadout: "Test",
     loadouts: {
       Test: {
-        entry: "seed",
+        entry: "Socket-1",
         nodes: {
-          seed: {
+          "Socket-1": {
             type: "utility",
             utility: "echo",
             parse: "json",
             params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
             assign: { items: "$.items" },
-            next: "work",
+            next: "Socket-2",
           },
-          work: {
+          "Socket-2": {
             type: "agent",
             materia: "Build",
             parse: "json",
             foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "end" },
             advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "end" },
-            next: "work",
+            next: "Socket-2",
             limits: { maxVisits: 5 },
           },
         },
@@ -89,8 +89,8 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.currentNode).toBe("work");
-    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(latestState.recoveryAttempts).toBeDefined();
 
     const events = await readEvents(harness);
@@ -113,8 +113,8 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.currentNode).toBe("work");
-    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
 
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "same_node_recovery_start" && event.data.reason === "context_window" && event.data.error.includes(errorMessage))).toBe(true);
@@ -133,7 +133,7 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
   });
 
   test("plain WebSocket agent_end failures preserve awaiting state without retrying", async () => {
@@ -150,7 +150,7 @@ describe("native same-node recovery", () => {
     expect(latestState.awaitingResponse).toBe(true);
     expect(latestState.nodeState).toBe("awaiting_agent_response");
     expect(latestState.failedReason).toBeUndefined();
-    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Transient transport failure"))).toBe(true);
 
     const events = await readEvents(harness);
@@ -189,7 +189,7 @@ describe("native same-node recovery", () => {
 
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "transient_transport_turn_failure" && event.data.entryId === transientEntry.id)).toBe(true);
-    expect(events.some((event) => event.type === "node_complete" && event.data.entryId === successEntry.id && event.data.node === "work")).toBe(true);
+    expect(events.some((event) => event.type === "node_complete" && event.data.entryId === successEntry.id && event.data.node === "Socket-1")).toBe(true);
     expect(events.some((event) => event.type === "cast_end" && event.data.ok === true && event.data.entryId === successEntry.id)).toBe(true);
     expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
   });
@@ -261,8 +261,8 @@ describe("native same-node recovery", () => {
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.currentNode).toBe("work");
-    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Proactive compaction failed"))).toBe(true);
 
     harness.contextUsage = undefined;
@@ -274,7 +274,7 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
-    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
 
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "proactive_compaction_start" && event.data.action === "compact" && event.data.reason === "context_pressure")).toBe(true);
@@ -311,7 +311,7 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
     expect(latestState.failedReason).toContain("Same-node recovery exhausted");
-    expect(latestState.visits).toEqual({ work: 1 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "same_node_recovery_exhausted")).toBe(true);
   });
@@ -334,10 +334,10 @@ describe("native same-node recovery", () => {
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
     expect(latestState.nodeState).toBe("awaiting_agent_response");
-    expect(latestState.currentNode).toBe("plan");
+    expect(latestState.currentNode).toBe("Socket-1");
     expect(latestState.multiTurnFinalizing).toBe(false);
-    expect(latestState.multiTurnRefinements).toEqual({ '["plan","__singleton__",1]': 1 });
-    expect(latestState.visits).toEqual({ plan: 1 });
+    expect(latestState.multiTurnRefinements).toEqual({ '["Socket-1","__singleton__",1]': 1 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
     const retryPrompt = promptMessages(harness).at(-1)?.content;
     expect(retryPrompt).toContain("Current multi-turn mode: refinement conversation");
     expect(retryPrompt).toContain("Previous output:\nDraft plan; please clarify scope.");
@@ -361,11 +361,11 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(triggerTurnsBefore + 1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
-    expect(latestState.currentNode).toBe("plan");
+    expect(latestState.currentNode).toBe("Socket-1");
     expect(latestState.awaitingResponse).toBe(true);
     expect(latestState.multiTurnFinalizing).toBe(true);
     expect(latestState.data.tasks).toBeUndefined();
-    expect(latestState.visits).toEqual({ plan: 1 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
     const retryPrompt = promptMessages(harness).at(-1)?.content;
     expect(retryPrompt).toContain("Command-triggered finalization");
     expect(retryPrompt).toContain("Return only JSON");
@@ -386,24 +386,24 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(triggerTurnsBefore + 1);
     expect(harness.operationLog).toContain("compact");
     expect(latestState.active).toBe(true);
-    expect(latestState.currentNode).toBe("work");
+    expect(latestState.currentNode).toBe("Socket-2");
     expect(latestState.currentItemKey).toBe("a");
     expect(latestState.currentItemLabel).toBe("Alpha");
     expect(latestState.cursors).toEqual({ itemCursor: 0 });
-    expect(latestState.visits).toEqual({ seed: 1, work: 1 });
-    expect(latestState.taskAttempts).toEqual({ '["seed","__singleton__"]': 1, '["work","a"]': 1 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 1 });
+    expect(latestState.taskAttempts).toEqual({ '["Socket-1","__singleton__"]': 1, '["Socket-2","a"]': 1 });
     expect(latestState.recoveryAttempts).toBeDefined();
-    const nodeStartsBeforeCompletion = (await readEvents(harness)).filter((event) => event.type === "node_start" && event.data.node === "work");
+    const nodeStartsBeforeCompletion = (await readEvents(harness)).filter((event) => event.type === "node_start" && event.data.node === "Socket-2");
     expect(nodeStartsBeforeCompletion).toHaveLength(1);
 
     harness.appendAssistantMessage('{"done":true}');
     await harness.emit("agent_end", { messages: [] });
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
-    expect(latestState.currentNode).toBe("work");
+    expect(latestState.currentNode).toBe("Socket-2");
     expect(latestState.currentItemKey).toBe("b");
     expect(latestState.currentItemLabel).toBe("Beta");
     expect(latestState.cursors).toEqual({ itemCursor: 1 });
-    expect(latestState.visits).toEqual({ seed: 1, work: 2 });
+    expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 2 });
   });
 });

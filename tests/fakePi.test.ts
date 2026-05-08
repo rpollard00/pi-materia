@@ -39,12 +39,12 @@ describe("FakePiHarness", () => {
       activeLoadout: "Full-Auto",
       loadouts: {
         "Full-Auto": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", materia: "planner" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", materia: "interactivePlan" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
         },
       },
     }), "utf8");
@@ -96,12 +96,12 @@ describe("FakePiHarness", () => {
       activeLoadout: "Full-Auto",
       loadouts: {
         "Full-Auto": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", materia: "planner" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
-          entry: "planner",
-          nodes: { planner: { type: "agent", materia: "interactivePlan" } },
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
         },
       },
     }), "utf8");

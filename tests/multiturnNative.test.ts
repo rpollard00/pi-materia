@@ -27,9 +27,9 @@ function multiTurnConfig(overrides: Record<string, unknown> = {}) {
     activeLoadout: "Test",
     loadouts: {
       Test: {
-        entry: "plan",
+        entry: "Socket-1",
         nodes: {
-          plan: { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
+          "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
         },
       },
     },
@@ -43,10 +43,10 @@ function singleTurnConfig() {
     activeLoadout: "Test",
     loadouts: {
       Test: {
-        entry: "plan",
+        entry: "Socket-1",
         nodes: {
-          plan: { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "build" },
-          build: { type: "agent", materia: "Build" },
+          "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "Socket-2" },
+          "Socket-2": { type: "agent", materia: "Build" },
         },
       },
     },
@@ -59,17 +59,17 @@ function singleTurnConfig() {
 
 function multiTurnWithDownstreamConfig(parse: "json" | "text") {
   const plan = parse === "json"
-    ? { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "build" }
-    : { type: "agent", materia: "Plan", parse: "text", assign: { summary: "$" }, next: "build" };
+    ? { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "Socket-2" }
+    : { type: "agent", materia: "Plan", parse: "text", assign: { summary: "$" }, next: "Socket-2" };
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
     loadouts: {
       Test: {
-        entry: "plan",
+        entry: "Socket-1",
         nodes: {
-          plan,
-          build: { type: "agent", materia: "Build" },
+          "Socket-1": plan,
+          "Socket-2": { type: "agent", materia: "Build" },
         },
       },
     },
@@ -86,12 +86,12 @@ function loadoutSwitchingConfig() {
     activeLoadout: "Single",
     loadouts: {
       Single: {
-        entry: "plan",
-        nodes: { plan: { type: "agent", materia: "PlanSingle", parse: "json", assign: { tasks: "$.tasks" } } },
+        entry: "Socket-1",
+        nodes: { "Socket-1": { type: "agent", materia: "PlanSingle", parse: "json", assign: { tasks: "$.tasks" } } },
       },
       Interactive: {
-        entry: "plan",
-        nodes: { plan: { type: "agent", materia: "PlanInteractive", parse: "json", assign: { tasks: "$.tasks" } } },
+        entry: "Socket-1",
+        nodes: { "Socket-1": { type: "agent", materia: "PlanInteractive", parse: "json", assign: { tasks: "$.tasks" } } },
       },
     },
     materia: {
@@ -111,7 +111,7 @@ describe("native multi-turn runtime", () => {
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
-    expect(state.currentNode).toBe("build");
+    expect(state.currentNode).toBe("Socket-2");
     expect(state.nodeState).toBe("awaiting_agent_response");
     expect(state.awaitingResponse).toBe(true);
     expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
@@ -200,7 +200,7 @@ describe("native multi-turn runtime", () => {
 
     const singleState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(singleState.active).toBe(false);
-    expect(singleState.currentNode).toBe("plan");
+    expect(singleState.currentNode).toBe("Socket-1");
     expect(singleState.currentMateria).toBe("PlanSingle");
     expect(singleState.nodeState).toBe("complete");
     expect(singleState.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
@@ -212,7 +212,7 @@ describe("native multi-turn runtime", () => {
 
     const interactiveState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(interactiveState.active).toBe(true);
-    expect(interactiveState.currentNode).toBe("plan");
+    expect(interactiveState.currentNode).toBe("Socket-1");
     expect(interactiveState.currentMateria).toBe("PlanInteractive");
     expect(interactiveState.nodeState).toBe("awaiting_user_refinement");
     expect(interactiveState.data.tasks).toBeUndefined();
@@ -229,7 +229,7 @@ describe("native multi-turn runtime", () => {
     expect(pausedState.active).toBe(true);
     expect(pausedState.awaitingResponse).toBe(false);
     expect(pausedState.nodeState).toBe("awaiting_user_refinement");
-    expect(pausedState.currentNode).toBe("plan");
+    expect(pausedState.currentNode).toBe("Socket-1");
     expect(pausedState.lastJson).toBeUndefined();
 
     await harness.runCommand("materia", "status");
@@ -253,7 +253,7 @@ describe("native multi-turn runtime", () => {
     const failedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(failedState.active).toBe(false);
     expect(failedState.nodeState).toBe("failed");
-    expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for node \"plan\"");
+    expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for node \"Socket-1\"");
   });
 
   test("normal CRT refinement text does not finalize or parse paused JSON multi-turn output", async () => {
@@ -307,7 +307,7 @@ describe("native multi-turn runtime", () => {
 
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", refinedState.castId);
     const manifestBeforeCommand = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
-    expect(manifestBeforeCommand.entries.some((entry: any) => entry.kind === "node_output" && entry.node === "plan")).toBe(false);
+    expect(manifestBeforeCommand.entries.some((entry: any) => entry.kind === "node_output" && entry.node === "Socket-1")).toBe(false);
 
     const commandLikeTextResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
     expect(commandLikeTextResults.at(-1)).toBeUndefined();
@@ -355,7 +355,7 @@ describe("native multi-turn runtime", () => {
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", refinedState.castId);
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
     expect(manifest.entries.some((entry: any) => entry.kind === "node_refinement" && entry.artifact.includes(".refinement-2-"))).toBe(true);
-    expect(manifest.entries.some((entry: any) => entry.kind === "node_output" && entry.node === "plan")).toBe(false);
+    expect(manifest.entries.some((entry: any) => entry.kind === "node_output" && entry.node === "Socket-1")).toBe(false);
   });
 
   test("multi-turn input finalizes only on explicit /materia continue command", async () => {
@@ -425,7 +425,7 @@ describe("native multi-turn runtime", () => {
     const refinementTurnState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(refinementTurnState.nodeState).toBe("awaiting_agent_response");
     expect(refinementTurnState.awaitingResponse).toBe(true);
-    expect((beforeResults.at(-1) as any).systemPrompt).toContain("Materia active materia (plan):\nCollaborative planner");
+    expect((beforeResults.at(-1) as any).systemPrompt).toContain("Materia active materia (Socket-1):\nCollaborative planner");
     expect(harness.activeTools).toEqual(["read", "grep", "find", "ls"]);
     expect(harness.setModelCalls.length).toBeGreaterThanOrEqual(2);
     expect(harness.setThinkingLevelCalls.at(-1)).toBe("high");
@@ -440,7 +440,7 @@ describe("native multi-turn runtime", () => {
     const contextResults = await harness.emit("context", { messages });
     const isolated = (contextResults.at(-1) as any).messages;
     const synthetic = isolated[0].content as string;
-    expect(synthetic).toContain("Current node: plan");
+    expect(synthetic).toContain("Current node: Socket-1");
     expect(synthetic).toContain("Current materia: Plan");
     expect(synthetic).toContain("Artifact directory:");
     expect(synthetic).toContain("Previous output:\ndraft response");
@@ -542,7 +542,7 @@ describe("native multi-turn runtime", () => {
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
     const artifacts = manifest.entries.map((entry: any) => entry.artifact).filter(Boolean);
     expect(artifacts.some((artifact: string) => artifact.includes(".refinement-"))).toBe(true);
-    expect(artifacts).toContain(path.join("nodes", "plan", "1.md"));
+    expect(artifacts).toContain(path.join("nodes", "Socket-1", "1.md"));
   });
 
   test("finalized multi-turn JSON artifacts and downstream state match single-turn shape", async () => {
@@ -561,24 +561,24 @@ describe("native multi-turn runtime", () => {
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
-    expect(state.currentNode).toBe("build");
+    expect(state.currentNode).toBe("Socket-2");
     expect(state.nodeState).toBe("awaiting_agent_response");
     expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
     expect(state.lastJson).toEqual({ tasks: [{ id: "1", title: "Ship it" }] });
 
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", state.castId);
-    expect(await readFile(path.join(castDir, "nodes", "plan", "1.md"), "utf8")).toBe(finalJson);
-    expect(JSON.parse(await readFile(path.join(castDir, "nodes", "plan", "1.json"), "utf8"))).toEqual({ tasks: [{ id: "1", title: "Ship it" }] });
+    expect(await readFile(path.join(castDir, "nodes", "Socket-1", "1.md"), "utf8")).toBe(finalJson);
+    expect(JSON.parse(await readFile(path.join(castDir, "nodes", "Socket-1", "1.json"), "utf8"))).toEqual({ tasks: [{ id: "1", title: "Ship it" }] });
 
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
-    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "node_output" && entry.node === "plan");
-    expect(nodeOutput.artifact).toBe(path.join("nodes", "plan", "1.md"));
+    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "node_output" && entry.node === "Socket-1");
+    expect(nodeOutput.artifact).toBe(path.join("nodes", "Socket-1", "1.md"));
     expect(nodeOutput.finalized).toBe(true);
     expect(nodeOutput.refinementTurn).toBe(2);
 
     const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    const completeEvent = events.find((event: any) => event.type === "node_complete" && event.data.node === "plan");
-    expect(completeEvent.data.artifact).toBe(path.join("nodes", "plan", "1.md"));
+    const completeEvent = events.find((event: any) => event.type === "node_complete" && event.data.node === "Socket-1");
+    expect(completeEvent.data.artifact).toBe(path.join("nodes", "Socket-1", "1.md"));
     expect(completeEvent.data.parsed).toBe(true);
     expect(completeEvent.data.finalizedRefinement).toBe(true);
 
@@ -603,15 +603,15 @@ describe("native multi-turn runtime", () => {
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
-    expect(state.currentNode).toBe("build");
+    expect(state.currentNode).toBe("Socket-2");
     expect(state.data.summary).toBe(finalText);
     expect(state.lastJson).toBeUndefined();
 
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", state.castId);
-    expect(await readFile(path.join(castDir, "nodes", "plan", "1.md"), "utf8")).toBe(finalText);
+    expect(await readFile(path.join(castDir, "nodes", "Socket-1", "1.md"), "utf8")).toBe(finalText);
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
-    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "node_output" && entry.node === "plan");
-    expect(nodeOutput.artifact).toBe(path.join("nodes", "plan", "1.md"));
+    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "node_output" && entry.node === "Socket-1");
+    expect(nodeOutput.artifact).toBe(path.join("nodes", "Socket-1", "1.md"));
     expect(nodeOutput.finalized).toBe(true);
     expect(nodeOutput.kind).toBe("node_output");
 

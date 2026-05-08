@@ -29,9 +29,9 @@ describe("native JSON prompt handoff contract guidance", () => {
       activeLoadout: "Test",
       loadouts: {
         Test: {
-          entry: "seed",
+          entry: "Socket-1",
           nodes: {
-            seed: {
+            "Socket-1": {
               type: "utility",
               utility: "echo",
               parse: "json",
@@ -47,9 +47,9 @@ describe("native JSON prompt handoff contract guidance", () => {
                   missing: [],
                 },
               },
-              edges: [{ when: "always", to: "build" }],
+              edges: [{ when: "always", to: "Socket-2" }],
             },
-            build: { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
+            "Socket-2": { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
           },
         },
       },
@@ -76,9 +76,9 @@ describe("native JSON prompt handoff contract guidance", () => {
       activeLoadout: "Test",
       loadouts: {
         Test: {
-          entry: "check",
+          entry: "Socket-1",
           nodes: {
-            check: { type: "agent", materia: "Check", parse: "json" },
+            "Socket-1": { type: "agent", materia: "Check", parse: "json" },
           },
         },
       },
@@ -105,9 +105,9 @@ describe("native JSON prompt handoff contract guidance", () => {
       activeLoadout: "Test",
       loadouts: {
         Test: {
-          entry: "speak",
+          entry: "Socket-1",
           nodes: {
-            speak: { type: "agent", materia: "Speak" },
+            "Socket-1": { type: "agent", materia: "Speak" },
           },
         },
       },

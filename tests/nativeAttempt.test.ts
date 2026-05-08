@@ -26,26 +26,26 @@ function attemptConfig() {
     activeLoadout: "Test",
     loadouts: {
       Test: {
-        entry: "seed",
+        entry: "Socket-1",
         nodes: {
-          seed: {
+          "Socket-1": {
             type: "utility",
             utility: "echo",
             parse: "json",
             params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
             assign: { items: "$.items" },
-            next: "work",
+            next: "Socket-2",
           },
-          work: {
+          "Socket-2": {
             type: "agent",
             materia: "Build",
             parse: "json",
-            foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "review" },
-            advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "review" },
-            next: "work",
+            foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "Socket-3" },
+            advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "Socket-3" },
+            next: "Socket-2",
             limits: { maxVisits: 5 },
           },
-          review: { type: "agent", materia: "Build" },
+          "Socket-3": { type: "agent", materia: "Build" },
         },
       },
     },
@@ -73,10 +73,10 @@ describe("native attempt identity", () => {
 
     const usage = await readUsage(harness);
     expect(usage.turns.map((turn: { node: string; taskId?: string; attempt?: number }) => ({ node: turn.node, taskId: turn.taskId, attempt: turn.attempt }))).toEqual([
-      { node: "work", taskId: "a", attempt: 1 },
-      { node: "work", taskId: "a", attempt: 2 },
-      { node: "work", taskId: "b", attempt: 1 },
-      { node: "review", taskId: undefined, attempt: 1 },
+      { node: "Socket-2", taskId: "a", attempt: 1 },
+      { node: "Socket-2", taskId: "a", attempt: 2 },
+      { node: "Socket-2", taskId: "b", attempt: 1 },
+      { node: "Socket-3", taskId: undefined, attempt: 1 },
     ]);
     expect(Object.keys(usage.byAttempt).sort()).toEqual(["a:1", "a:2", "b:1"]);
   });

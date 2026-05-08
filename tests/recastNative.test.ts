@@ -8,7 +8,7 @@ import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(options: { nodeId?: string; materia?: string } = {}): Promise<FakePiHarness> {
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-recast-"));
-  const nodeId = options.nodeId ?? "work";
+  const nodeId = options.nodeId ?? "Socket-1";
   const materia = options.materia ?? "Build";
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
@@ -80,7 +80,7 @@ describe("/materia recast", () => {
     expect(resumed.castId).toBe(aborted.castId);
     expect(resumed.active).toBe(true);
     expect(resumed.nodeState).toBe("awaiting_agent_response");
-    expect(resumed.runState.lastMessage).toBe("Recasting from node work.");
+    expect(resumed.runState.lastMessage).toBe("Recasting from node Socket-1.");
     expect(secondRunning.castId).toBe(aborted.castId);
   });
 
@@ -95,7 +95,7 @@ describe("/materia recast", () => {
     const resumed = latestState(harness);
     expect(resumed.castId).toBe(failed.castId);
     expect(resumed.active).toBe(true);
-    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${failed.castId} recast from node "work".`);
+    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${failed.castId} recast from node "Socket-1".`);
   });
 
   test("explicit id resumes an aborted cast", async () => {
@@ -110,7 +110,7 @@ describe("/materia recast", () => {
     const resumed = latestState(harness);
     expect(resumed.castId).toBe(aborted.castId);
     expect(resumed.active).toBe(true);
-    expect(resumed.runState.lastMessage).toBe("Recasting from node work.");
+    expect(resumed.runState.lastMessage).toBe("Recasting from node Socket-1.");
   });
 
   test("reports clear errors for complete, running, missing, and non-resumable casts", async () => {

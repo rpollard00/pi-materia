@@ -253,7 +253,7 @@ describe("agent and utility validation", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
-      loadouts: { Test: { entry: "planner", nodes: { planner: { type: "agent", materia: "planner", parse: "text" } } } },
+      loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "planner", parse: "text" } } } },
       materia: { planner: { tools: "readOnly", prompt: "Plan." } },
     };
 
@@ -267,17 +267,17 @@ describe("agent and utility validation", () => {
       activeLoadout: "Test",
       loadouts: {
         Test: {
-          entry: "cmd",
+          entry: "Socket-1",
           nodes: {
-            cmd: { type: "utility", command: ["node", "script.js"], next: "alias" },
-            alias: { type: "utility", utility: "project.ensureIgnored", parse: "json" },
+            "Socket-1": { type: "utility", command: ["node", "script.js"], next: "Socket-2" },
+            "Socket-2": { type: "utility", utility: "project.ensureIgnored", parse: "json" },
           },
         },
       },
       materia: {},
-    }).nodes.alias.node.type).toBe("utility");
+    }).nodes["Socket-2"].node.type).toBe("utility");
 
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "bad", nodes: { bad: { type: "utility" } } } }, materia: {} })).toThrow(/must configure either "utility" or "command"/);
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "bad", nodes: { bad: { type: "utility", command: [] } } } }, materia: {} })).toThrow(/Expected at least one command element/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "utility" } } } }, materia: {} })).toThrow(/must configure either "utility" or "command"/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "utility", command: [] } } } }, materia: {} })).toThrow(/Expected at least one command element/);
   });
 });

@@ -22,7 +22,7 @@ function agentConfig(overrides: Record<string, unknown> = {}, node: Record<strin
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "agent", nodes: { agent: { type: "agent", materia: "Build", ...node } } } },
+    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build", ...node } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia", ...overrides } },
   };
 }
@@ -33,10 +33,10 @@ function twoAgentConfig() {
     activeLoadout: "Test",
     loadouts: {
       Test: {
-        entry: "build",
+        entry: "Socket-1",
         nodes: {
-          build: { type: "agent", materia: "Build", next: "review" },
-          review: { type: "agent", materia: "Review" },
+          "Socket-1": { type: "agent", materia: "Build", next: "Socket-2" },
+          "Socket-2": { type: "agent", materia: "Review" },
         },
       },
     },
@@ -140,7 +140,7 @@ describe("native per-materia model settings", () => {
     await harness.emit("agent_end", { messages: [] });
 
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", (await readdir(path.join(harness.cwd, ".pi", "pi-materia")))[0]);
-    const context = await readFile(path.join(castDir, "contexts", "agent-1.md"), "utf8");
+    const context = await readFile(path.join(castDir, "contexts", "Socket-1-1.md"), "utf8");
     expect(context).toContain("model: anthropic/claude-test");
     expect(context).toContain("thinking: high");
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
@@ -149,8 +149,8 @@ describe("native per-materia model settings", () => {
     expect(events.some((event) => event.type === "materia_model_settings" && event.data.materiaModel.model === "claude-test")).toBe(true);
     const usage = JSON.parse(await readFile(path.join(castDir, "usage.json"), "utf8"));
     expect(usage.tokens.total).toBe(7);
-    expect(usage.modelSelections[0]).toMatchObject({ node: "agent", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
-    expect(usage.turns[0]).toMatchObject({ node: "agent", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+    expect(usage.modelSelections[0]).toMatchObject({ node: "Socket-1", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+    expect(usage.turns[0]).toMatchObject({ node: "Socket-1", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
   });
 
   test("fallback model metadata is labeled as the active Pi model", async () => {
@@ -161,7 +161,7 @@ describe("native per-materia model settings", () => {
     await harness.runCommand("materia", "cast fallback model metadata");
 
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", (await readdir(path.join(harness.cwd, ".pi", "pi-materia")))[0]);
-    const context = await readFile(path.join(castDir, "contexts", "agent-1.md"), "utf8");
+    const context = await readFile(path.join(castDir, "contexts", "Socket-1-1.md"), "utf8");
     expect(context).toContain("model: openai/gpt-test");
     expect(context).toContain("model source: active Pi model fallback");
     const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
@@ -172,7 +172,7 @@ describe("native per-materia model settings", () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
-      loadouts: { Test: { entry: "utility", nodes: { utility: { type: "utility", utility: "echo", params: { text: "done" } } } } },
+      loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "utility", utility: "echo", params: { text: "done" } } } } },
       materia: { Build: { tools: "coding", prompt: "Build materia", model: "anthropic/claude-test", thinking: "high" } },
     });
 

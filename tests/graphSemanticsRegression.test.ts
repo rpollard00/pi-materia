@@ -37,50 +37,50 @@ function regressionConfig(): PiMateriaConfig {
     activeLoadout: "Regression",
     loadouts: {
       Regression: {
-        entry: "ensureArtifactsIgnored",
+        entry: "Socket-1",
         nodes: {
-          ensureArtifactsIgnored: {
+          "Socket-1": {
             type: "utility",
             utility: "project.ensureIgnored",
             parse: "json",
             params: { patterns: [".pi/pi-materia/"] },
             assign: { artifactIgnore: "$" },
-            edges: [{ when: "always", to: "detectVcs" }],
+            edges: [{ when: "always", to: "Socket-2" }],
           },
-          detectVcs: {
+          "Socket-2": {
             type: "utility",
             utility: "vcs.detect",
             parse: "json",
             assign: { vcs: "$" },
-            edges: [{ when: "always", to: "seedTasks" }],
+            edges: [{ when: "always", to: "Socket-3" }],
           },
-          seedTasks: {
+          "Socket-3": {
             type: "utility",
             utility: "echo",
             parse: "json",
             params: { output: { tasks: [{ id: "alpha", title: "Alpha" }, { id: "beta", title: "Beta" }] } },
             assign: { tasks: "$.tasks" },
-            edges: [{ when: "always", to: "Build" }],
+            edges: [{ when: "always", to: "Socket-4" }],
           },
-          Build: {
+          "Socket-4": {
             type: "utility",
             utility: "echo",
             params: { text: "build" },
-            edges: [{ when: "always", to: "Auto-Eval" }],
+            edges: [{ when: "always", to: "Socket-5" }],
             limits: { maxVisits: 5 },
           },
-          "Auto-Eval": {
+          "Socket-5": {
             type: "utility",
             command: ["node", "-e", evalScript],
             parse: "json",
             assign: { lastFeedback: "$.feedback", evalAttempts: "$.evalAttempts" },
             edges: [
-              { when: "satisfied", to: "Maintain" },
-              { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+              { when: "satisfied", to: "Socket-6" },
+              { when: "not_satisfied", to: "Socket-4", maxTraversals: 3 },
             ],
             limits: { maxVisits: 5 },
           },
-          Maintain: {
+          "Socket-6": {
             type: "utility",
             utility: "echo",
             parse: "json",
@@ -88,8 +88,8 @@ function regressionConfig(): PiMateriaConfig {
             assign: { lastMaintain: "$" },
             advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "satisfied" },
             edges: [
-              { when: "not_satisfied", to: "Maintain", maxTraversals: 3 },
-              { when: "always", to: "Build" },
+              { when: "not_satisfied", to: "Socket-6", maxTraversals: 3 },
+              { when: "always", to: "Socket-4" },
             ],
             limits: { maxVisits: 5 },
           },
@@ -97,9 +97,9 @@ function regressionConfig(): PiMateriaConfig {
         loops: {
           taskIteration: {
             label: "Build → Eval → Maintain until all tasks complete",
-            nodes: ["Build", "Auto-Eval", "Maintain"],
+            nodes: ["Socket-4", "Socket-5", "Socket-6"],
             iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
-            exit: { from: "Maintain", when: "satisfied", to: "end" },
+            exit: { from: "Socket-6", when: "satisfied", to: "end" },
           },
         },
       },
@@ -150,21 +150,21 @@ describe("graph semantics regression", () => {
     expect(state.data?.artifactIgnore).toMatchObject({ ok: true, patterns: [".pi/pi-materia/"] });
     expect(state.data?.vcs).toMatchObject({ kind: "none" });
     expect(state.data?.evalAttempts).toEqual({ alpha: 2, beta: 1 });
-    expect(state.visits).toMatchObject({ ensureArtifactsIgnored: 1, detectVcs: 1, seedTasks: 1, Build: 3, "Auto-Eval": 3, Maintain: 2 });
+    expect(state.visits).toMatchObject({ "Socket-1": 1, "Socket-2": 1, "Socket-3": 1, "Socket-4": 3, "Socket-5": 3, "Socket-6": 2 });
     expect(state.edgeTraversals).toMatchObject({
-      "ensureArtifactsIgnored->detectVcs": 1,
-      "detectVcs->seedTasks": 1,
-      "seedTasks->Build": 1,
-      "Build->Auto-Eval": 3,
-      "Auto-Eval->Build": 1,
-      "Auto-Eval->Maintain": 2,
-      "Maintain->Build": 1,
+      "Socket-1->Socket-2": 1,
+      "Socket-2->Socket-3": 1,
+      "Socket-3->Socket-4": 1,
+      "Socket-4->Socket-5": 3,
+      "Socket-5->Socket-4": 1,
+      "Socket-5->Socket-6": 2,
+      "Socket-6->Socket-4": 1,
     });
     expect(state.cursors?.taskIndex).toBe(2);
     await expect(readFile(path.join(harness.cwd, ".gitignore"), "utf8")).resolves.toContain(".pi/pi-materia/");
-    const alphaRetryInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Build", "2-alpha.input.json"), "utf8"));
+    const alphaRetryInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-4", "2-alpha.input.json"), "utf8"));
     expect(alphaRetryInput.itemKey).toBe("alpha");
-    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Build", "3-beta.input.json"), "utf8"));
+    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-4", "3-beta.input.json"), "utf8"));
     expect(betaInput.itemKey).toBe("beta");
   });
 });
