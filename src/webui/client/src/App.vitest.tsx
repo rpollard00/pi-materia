@@ -1464,11 +1464,30 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.change(screen.getByTestId('materia-model'), { target: { value: 'openai/gpt-review' } });
-    expect(screen.getByTestId('materia-color').textContent).toContain('Green');
-    expect(screen.getByRole('radiogroup', { name: 'Materia color' })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: 'Purple' }).getAttribute('aria-checked')).toBe('false');
-    fireEvent.click(screen.getByTestId('materia-color-purple'));
-    expect(screen.getByRole('radio', { name: 'Purple' }).getAttribute('aria-checked')).toBe('true');
+    const colorPicker = screen.getByTestId('materia-color');
+    expect(screen.queryByRole('radiogroup', { name: /materia color/i })).toBeNull();
+    expect(screen.queryByRole('radio', { name: /purple/i })).toBeNull();
+
+    const colorTrigger = within(colorPicker).getByRole('button', { name: 'Select materia color' });
+    expect(colorTrigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(colorTrigger);
+
+    const colorChoices = within(colorPicker).getByRole('listbox', { name: 'Materia color choices' });
+    const colorOptions = within(colorChoices).getAllByRole('option');
+    expect(colorOptions).toHaveLength(8);
+    expect(colorOptions.every((option) => option.textContent === '')).toBe(true);
+    expect(within(colorChoices).getByRole('option', { name: 'Green materia color' }).getAttribute('aria-selected')).toBe('true');
+    expect(within(colorChoices).getByRole('option', { name: 'Purple materia color' }).getAttribute('aria-selected')).toBe('false');
+
+    const css = readFileSync(`${process.cwd()}/src/webui/client/src/styles.css`, 'utf8');
+    expect(css).toMatch(/\.materia-color-options\s*{[^}]*display: grid;[^}]*grid-template-columns: repeat\(2, 3\.25rem\);[^}]*grid-template-rows: repeat\(4, 3\.25rem\);/s);
+
+    fireEvent.click(within(colorChoices).getByRole('option', { name: 'Purple materia color' }));
+    expect(colorTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(within(colorPicker).queryByRole('listbox', { name: 'Materia color choices' })).toBeNull();
+
+    fireEvent.click(colorTrigger);
+    expect(within(screen.getByRole('listbox', { name: 'Materia color choices' })).getByRole('option', { name: 'Purple materia color' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
