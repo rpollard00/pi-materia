@@ -44,6 +44,45 @@ describe("graph validation foundation", () => {
     expect(formatGraphValidationErrors(result.errors)).toContain("store human-readable labels or materia names in metadata fields");
   });
 
+  test("validates all loadout socket references as canonical ids while preserving end only for targets", () => {
+    const graph = validGraph();
+    graph.nodes["Socket-1"].foreach = { items: "state.items", done: "Socket 3" };
+    graph.nodes["Socket-2"].advance = { cursor: "i", items: "state.items", done: "Socket-03" };
+    graph.loops = {
+      bad: {
+        nodes: ["Socket-3", "end"],
+        consumes: { from: "Auto-Eval", done: "end" },
+        iterator: { items: "state.items", done: "end" },
+        exit: { from: "Socket-3", when: "satisfied", to: "end" },
+      },
+    };
+
+    const result = validatePipelineGraph(graph);
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "invalid-socket-id", source: "Socket-1.foreach.done" }),
+      expect.objectContaining({ code: "invalid-socket-id", source: "Socket-2.advance.done" }),
+      expect.objectContaining({ code: "invalid-socket-id", source: "loops.bad.nodes[1]" }),
+      expect.objectContaining({ code: "invalid-socket-id", source: "loops.bad.consumes.from" }),
+    ]));
+    expect(result.errors).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "loops.bad.consumes.done" }),
+      expect.objectContaining({ source: "loops.bad.iterator.done" }),
+      expect.objectContaining({ source: "loops.bad.exit.to" }),
+    ]));
+  });
+
+  test("rejects end as a loadout entry because entry must be a socket", () => {
+    const graph = validGraph();
+    graph.entry = "end";
+
+    const result = validatePipelineGraph(graph);
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ code: "invalid-socket-id", source: "entry" }));
+  });
+
   test("accepts a graph with known endpoints and one satisfied/not_satisfied branch", () => {
     expect(validatePipelineGraph(validGraph())).toEqual({ ok: true, errors: [] });
   });
