@@ -37,6 +37,27 @@ describe("handoff contract drift regressions", () => {
     expect(checkedDocs).not.toMatch(/when["`:\s]+passed/);
   });
 
+  test("canonical Generator docs and examples keep generates migration-only and workItems-based", async () => {
+    const readme = await readFile(path.resolve("README.md"), "utf8");
+    const graphSemantics = await readFile(path.resolve("docs", "graph-semantics.md"), "utf8");
+    const handoffContract = await readFile(path.resolve("docs", "handoff-contract.md"), "utf8");
+    const exampleLoadout = await readFile(path.resolve("examples", "graph-semantics-loadout.json"), "utf8");
+    const canonicalDocs = `${readme}\n${graphSemantics}\n${handoffContract}`;
+
+    expect(canonicalDocs).toContain("generator: true");
+    expect(canonicalDocs).toContain("workItems");
+    expect(canonicalDocs).toContain("Generated units of work use `workItems`, not `tasks`");
+    expect(canonicalDocs).toMatch(/generates[^.\n]*migration-only compatibility/i);
+    expect(canonicalDocs).toContain("not as the canonical schema");
+    expect(canonicalDocs).not.toContain("Generated List");
+
+    const parsedExample = JSON.parse(exampleLoadout) as { materia?: Record<string, unknown> };
+    expect(parsedExample.materia?.planner).toMatchObject({ generator: true });
+    expect(exampleLoadout).toContain('"workItems"');
+    expect(exampleLoadout).not.toContain('"tasks"');
+    expect(exampleLoadout).not.toContain('"generates"');
+  });
+
   test("bundled default config references the central handoff contract instead of inline schema blocks", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const prompt = String(rawDefault.materia?.["Auto-Eval"]?.prompt ?? "");

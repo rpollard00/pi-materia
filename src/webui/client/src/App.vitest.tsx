@@ -1465,8 +1465,10 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.change(screen.getByTestId('materia-model'), { target: { value: 'openai/gpt-review' } });
     expect(screen.getByTestId('materia-color').textContent).toContain('Green');
+    expect(screen.getByRole('radiogroup', { name: 'Materia color' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Purple' }).getAttribute('aria-checked')).toBe('false');
     fireEvent.click(screen.getByTestId('materia-color-purple'));
-    expect(screen.getByTestId('materia-color-purple').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('radio', { name: 'Purple' }).getAttribute('aria-checked')).toBe('true');
     fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
@@ -1501,6 +1503,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
     expect(screen.queryByTestId('materia-generated-output')).toBeNull();
+    expect(screen.queryByText(/Generated List/)).toBeNull();
     expect(screen.getByText(/canonical/).textContent).toContain('workItems');
 
     fireEvent.click(screen.getByTestId('save-materia-form'));
