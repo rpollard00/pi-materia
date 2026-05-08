@@ -1,3 +1,4 @@
+import { parseCanonicalSocketId } from '../../../socketIds.js';
 import type { MateriaEdgeCondition } from '../../../types.js';
 
 type NodeType = 'agent' | 'utility';
@@ -133,8 +134,8 @@ export function makeEmptyEntryLoadout(entry = 'Socket-1'): PipelineConfig {
 export function makeNewSocketId(nodes: Record<string, PipelineNode>): string {
   const usedNumbers = new Set<number>();
   for (const id of Object.keys(nodes)) {
-    const match = /^Socket-([1-9]\d*)$/.exec(id);
-    if (match) usedNumbers.add(Number(match[1]));
+    const parsed = parseCanonicalSocketId(id);
+    if (parsed) usedNumbers.add(parsed.ordinal);
   }
   let index = 1;
   while (usedNumbers.has(index) || nodes[`Socket-${index}`]) index += 1;

@@ -1,4 +1,5 @@
 import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
+import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "./socketIds.js";
 import type { LegacyMateriaPipelineNodeConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopExitConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
@@ -6,7 +7,7 @@ export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
 export type MateriaGraphEdgeGuard = "unconditional" | "guarded";
 
 export interface MateriaGraphValidationError {
-  code: "missing-endpoint" | "unknown-endpoint" | "invalid-edge-condition" | "unreachable-edge" | "invalid-loop";
+  code: "missing-endpoint" | "unknown-endpoint" | "invalid-socket-id" | "invalid-edge-condition" | "unreachable-edge" | "invalid-loop";
   message: string;
   source?: string;
   from?: string;
@@ -55,6 +56,7 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig, options: Mat
   const errors: MateriaGraphValidationError[] = [];
   const nodeIds = new Set(Object.keys(normalized.nodes ?? {}));
 
+  for (const id of nodeIds) validateSocketId(errors, id, `nodes.${id}`);
   validateTarget(errors, nodeIds, graph.entry, "entry");
 
   for (const [id, node] of Object.entries(normalized.nodes ?? {})) {
@@ -147,7 +149,7 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
       continue;
     }
     for (const [index, nodeId] of loop.nodes.entries()) {
-      if (!nodeIds.has(nodeId)) errors.push({ code: "unknown-endpoint", source: `loops.${loopId}.nodes[${index}]`, to: nodeId, message: `Unknown graph endpoint "${nodeId}" referenced by loops.${loopId}.nodes[${index}].` });
+      validateTarget(errors, nodeIds, nodeId, `loops.${loopId}.nodes[${index}]`);
     }
     validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.from, `loops.${loopId}.consumes.from`);
     validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.done, `loops.${loopId}.consumes.done`);
@@ -162,6 +164,8 @@ function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<st
   validateOptionalTarget(errors, nodeIds, loopId, exit.to, `loops.${loopId}.exit.to`);
   if (!exit.from) {
     errors.push({ code: "missing-endpoint", source: `loops.${loopId}.exit.from`, message: `Missing graph endpoint referenced by loops.${loopId}.exit.from.` });
+  } else if (!validateSocketId(errors, exit.from, `loops.${loopId}.exit.from`, { from: exit.from })) {
+    return;
   } else if (!nodeIds.has(exit.from)) {
     errors.push({ code: "unknown-endpoint", source: `loops.${loopId}.exit.from`, from: exit.from, message: `Unknown graph endpoint "${exit.from}" referenced by loops.${loopId}.exit.from.` });
   } else if (!loopNodes.includes(exit.from)) {
@@ -216,7 +220,9 @@ function validateOptionalTarget(errors: MateriaGraphValidationError[], nodeIds: 
     if (source.includes(".edges[")) errors.push({ code: "missing-endpoint", source, from, message: `Missing graph endpoint referenced by ${source}.` });
     return;
   }
-  if (to !== "end" && !nodeIds.has(to)) errors.push({ code: "unknown-endpoint", source, from, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
+  if (to === "end") return;
+  if (!validateSocketId(errors, to, source, { from, to })) return;
+  if (!nodeIds.has(to)) errors.push({ code: "unknown-endpoint", source, from, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
 }
 
 function validateTarget(errors: MateriaGraphValidationError[], nodeIds: Set<string>, to: string | undefined, source: string): void {
@@ -224,7 +230,15 @@ function validateTarget(errors: MateriaGraphValidationError[], nodeIds: Set<stri
     errors.push({ code: "missing-endpoint", source, message: `Missing graph endpoint referenced by ${source}.` });
     return;
   }
-  if (to !== "end" && !nodeIds.has(to)) errors.push({ code: "unknown-endpoint", source, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
+  if (to === "end") return;
+  if (!validateSocketId(errors, to, source, { to })) return;
+  if (!nodeIds.has(to)) errors.push({ code: "unknown-endpoint", source, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
+}
+
+function validateSocketId(errors: MateriaGraphValidationError[], value: string, source: string, endpoint: Pick<MateriaGraphValidationError, "from" | "to"> = {}): boolean {
+  if (isCanonicalSocketId(value)) return true;
+  errors.push({ code: "invalid-socket-id", source, ...endpoint, message: formatInvalidSocketIdMessage(value, source) });
+  return false;
 }
 
 
