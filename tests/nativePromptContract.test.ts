@@ -119,6 +119,43 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(prompt).toContain('Legacy names such as "passed" are not canonical handoff fields');
   });
 
+  test("injects the central handoff contract only on multi-turn JSON finalization", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          nodes: {
+            "Socket-1": { type: "agent", materia: "Plan", parse: "json" },
+          },
+        },
+      },
+      materia: {
+        Plan: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
+      },
+    });
+
+    await harness.runCommand("materia", "cast refine before final JSON");
+
+    const refinementPrompt = promptMessages(harness).at(-1) ?? "";
+    expect(refinementPrompt).toContain("Plan collaboratively.");
+    expect(refinementPrompt).toContain("Current multi-turn mode: refinement conversation");
+    expect(refinementPrompt).toContain("do not emit final JSON");
+    expect(refinementPrompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(refinementPrompt).not.toContain("Final output format: Return only JSON");
+
+    harness.appendAssistantMessage("Let's refine the plan before finalizing.");
+    await harness.emit("agent_end", { messages: [] });
+    await harness.runCommand("materia", "continue");
+
+    const finalizationPrompt = promptMessages(harness).at(-1) ?? "";
+    expect(finalizationPrompt).toContain("Command-triggered finalization");
+    expect(finalizationPrompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(finalizationPrompt).toContain("Final output format: Return only JSON for this node");
+    expect(finalizationPrompt).toContain("Generated units of work belong in workItems, never tasks");
+  });
+
   test("does not append JSON handoff contract guidance to plain-text agent nodes", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",

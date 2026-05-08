@@ -983,6 +983,11 @@ function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
   return path.join("contexts", `${node}${item}-${visit}${extra}.md`);
 }
 
+// Central prompt assembly policy for the handoff contract:
+// - single-turn JSON agent nodes receive the canonical contract via singleTurnJsonFormatInstruction();
+// - multi-turn JSON agent nodes receive refinement guidance during normal turns and the
+//   same canonical contract only during /materia continue finalization;
+// - plain-text agent nodes receive no JSON-only handoff contract unless their local prompt asks for one.
 function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
   return materiaPrompt(node.materia, state, [nodeAdapterContextInstruction(state, node), multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)]);
@@ -1010,13 +1015,17 @@ function multiTurnRefinementGuidance(): string {
 function singleTurnJsonFormatInstruction(node: ResolvedMateriaNode): string | undefined {
   if (!isAgentResolvedNode(node)) return undefined;
   if (node.materia.multiTurn === true) return undefined;
-  return node.node.parse === "json" ? finalFormatInstruction(node) : undefined;
+  return jsonHandoffContractInstruction(node);
+}
+
+function jsonHandoffContractInstruction(node: ResolvedMateriaNode): string | undefined {
+  if (!isAgentResolvedNode(node)) return undefined;
+  return node.node.parse === "json" ? formatHandoffJsonFinalInstruction() : undefined;
 }
 
 function finalFormatInstruction(node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) return "";
-  if (node.node.parse === "json") return formatHandoffJsonFinalInstruction();
-  return "Final output format: return the final plain-text implementation summary for this node. Do not emit routing JSON or evaluator control fields unless the local node prompt explicitly asks for them.";
+  return jsonHandoffContractInstruction(node) ?? "Final output format: return the final plain-text implementation summary for this node. Do not emit routing JSON or evaluator control fields unless the local node prompt explicitly asks for them.";
 }
 
 function nodeAdapterContextInstruction(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
