@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { nativeTestInternals } from "../src/native.js";
+import { activeMateriaSystemPrompt, nativeTestInternals } from "../src/native.js";
 import { resolvePipeline } from "../src/pipeline.js";
 import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaNode } from "../src/types.js";
 
@@ -104,6 +104,128 @@ describe("generic engine helper mechanics", () => {
     const target: Record<string, unknown> = {};
     nativeTestInternals.setPath(target, "utility.result.value", 7);
     expect(target).toEqual({ utility: { result: { value: 7 } } });
+  });
+
+  test("preserves and augments the generic handoff envelope from JSON node output", () => {
+    const state = makeState({
+      data: {
+        envelope: {
+          summary: "existing summary",
+          workItems: [],
+          guidance: { framework: "keep" },
+          decisions: ["keep decision"],
+          risks: [],
+          satisfied: false,
+          feedback: "old feedback",
+          missing: ["old missing"],
+        },
+        guidance: { framework: "keep", style: "concise" },
+      },
+    });
+    const parsed = {
+      summary: "updated summary",
+      workItems: [
+        {
+          id: "stable-id",
+          title: "Short title",
+          description: "Actionable work",
+          acceptance: ["observable criterion"],
+          context: { architecture: "adapter-owned flow", constraints: ["no tasks"], dependencies: [], risks: ["drift"] },
+        },
+      ],
+      guidance: { style: "detailed", testCommand: "bun test" },
+      decisions: ["use generic envelope"],
+      risks: ["routing regression"],
+      satisfied: true,
+      feedback: "looks good",
+      missing: [],
+    };
+
+    nativeTestInternals.applyGenericHandoffEnvelope(state, parsed);
+
+    expect(state.data.envelope).toMatchObject(parsed);
+    expect(state.data.workItems).toEqual(parsed.workItems);
+    expect(state.data.guidance).toEqual({ framework: "keep", style: "detailed", testCommand: "bun test" });
+    expect(state.data.summary).toBe("updated summary");
+    expect(state.data.decisions).toEqual(["use generic envelope"]);
+    expect(state.data.risks).toEqual(["routing regression"]);
+    expect(state.data).not.toHaveProperty("tasks");
+  });
+
+  test("assigns generated workItems, iterates current workItem, and advances on satisfied", () => {
+    const workItems = [
+      { id: "one", title: "First", description: "Do first", acceptance: ["first done"], context: { constraints: [], dependencies: [], risks: [] } },
+      { id: "two", title: "Second", description: "Do second", acceptance: ["second done"], context: { constraints: [], dependencies: [], risks: [] } },
+    ];
+    const state = makeState({ data: {}, cursors: {}, currentItemKey: undefined, currentItemLabel: undefined });
+    const planner = {
+      id: "Socket-3",
+      node: { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" } },
+      materia: { tools: "readOnly", prompt: "plan" },
+    } satisfies ResolvedMateriaNode;
+    const builder = {
+      id: "Socket-4",
+      node: { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
+      materia: { tools: "coding", prompt: "build {{item.id}}" },
+    } satisfies ResolvedMateriaNode;
+    const maintainer = {
+      id: "Socket-6",
+      node: { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" } },
+      materia: { tools: "coding", prompt: "maintain" },
+    } satisfies ResolvedMateriaNode;
+
+    nativeTestInternals.applyAssignments(state, planner, { workItems });
+    expect(state.data.workItems).toEqual(workItems);
+
+    expect(nativeTestInternals.setCurrentItem(state, builder)).toBe(true);
+    expect(state.data.item).toEqual(workItems[0]);
+    expect(state.data.workItem).toEqual(workItems[0]);
+    expect(state.data.currentWorkItem).toEqual(workItems[0]);
+    expect(state.currentItemKey).toBe("one");
+    expect(state.currentItemLabel).toBe("First");
+
+    expect(nativeTestInternals.applyAdvance(state, maintainer, { satisfied: false })).toBeUndefined();
+    expect(state.cursors.workItemIndex).toBe(0);
+    expect(nativeTestInternals.applyAdvance(state, maintainer, { satisfied: true })).toBeUndefined();
+    expect(state.cursors.workItemIndex).toBe(1);
+    expect(nativeTestInternals.setCurrentItem(state, builder)).toBe(true);
+    expect(state.data.workItem).toEqual(workItems[1]);
+    expect(nativeTestInternals.applyAdvance(state, maintainer, { satisfied: true })).toBe("end");
+  });
+
+  test("builder text prompt includes adapter-provided current workItem and global guidance", () => {
+    const workItem = {
+      id: "validate-generic-handoff-flow",
+      title: "Validate handoff flow with tests or fixtures",
+      description: "Add tests for generic handoff flow.",
+      acceptance: ["builder consumes current workItem plus guidance"],
+      context: { constraints: ["small safe edits"], dependencies: [], risks: [] },
+    };
+    const state = makeState({
+      currentNode: "Socket-4",
+      currentMateria: "Build",
+      data: { item: workItem, workItem, guidance: { testCommand: "bun test", architecture: "materia are reusable behavior" } },
+      pipeline: {
+        entry: undefined as never,
+        nodes: {
+          "Socket-4": {
+            id: "Socket-4",
+            node: { type: "agent", materia: "Build", parse: "text" },
+            materia: { tools: "coding", prompt: "Build {{item.id}} with {{state.guidance.testCommand}}." },
+          },
+        },
+      },
+    });
+
+    const prompt = activeMateriaSystemPrompt(state, { tools: "coding", prompt: "Build {{item.id}} with {{state.guidance.testCommand}}." });
+
+    expect(prompt).toContain("Build validate-generic-handoff-flow with bun test.");
+    expect(prompt).toContain("Node/socket adapter context");
+    expect(prompt).toContain("Current workItem JSON");
+    expect(prompt).toContain("Global guidance JSON");
+    expect(prompt).toContain("materia are reusable behavior");
+    expect(prompt).toContain("return a concise implementation summary");
+    expect(prompt).not.toContain("Final output format: Return only JSON");
   });
 });
 

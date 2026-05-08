@@ -1242,10 +1242,14 @@ function stringifyTemplateValue(value: unknown): string {
 }
 
 export const nativeTestInternals = {
+  applyAdvance,
+  applyAssignments,
+  applyGenericHandoffEnvelope,
   evaluateCondition,
   renderTemplate,
   resolveValue,
   selectNextTarget,
+  setCurrentItem,
   setPath,
 };
 

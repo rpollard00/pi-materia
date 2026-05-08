@@ -281,6 +281,8 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
 
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { entry?: string; nodes?: Record<string, { materia?: string; utility?: string; edges?: Array<{ to?: string }>; advance?: { done?: string } }>; loops?: Record<string, { nodes?: string[]; exit?: { from?: string; to?: string }; consumes?: { from?: string } }> }]>) {
+      expect(() => resolvePipeline({ ...rawDefault, activeLoadout: loadoutName })).not.toThrow();
+
       const nodeIds = Object.keys(loadout.nodes ?? {});
       expect(loadout.entry, `${loadoutName}.entry`).toBe("Socket-1");
       expect(nodeIds, `${loadoutName}.nodes`).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
