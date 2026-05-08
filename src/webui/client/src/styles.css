@@ -775,8 +775,41 @@
   box-shadow: 0 0 24px rgb(248 113 113 / 0.2);
 }
 
+.materia-form-section {
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid rgb(207 250 254 / 0.18);
+  background: rgb(2 6 23 / 0.58);
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.materia-form-section-title {
+  margin-bottom: 1rem;
+  color: rgb(207 250 254);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.materia-compact-grid,
+.materia-generated-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 0.9rem;
+}
+
+.materia-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+}
+
 .graph-field {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 0.3rem;
   font-size: 0.72rem;
@@ -787,20 +820,25 @@
 }
 
 .graph-field-inline {
+  flex: 0 1 auto;
   flex-direction: row;
   align-items: center;
   gap: 0.65rem;
+  white-space: nowrap;
 }
 
 .graph-field-inline input[type="checkbox"] {
   width: 1rem;
   height: 1rem;
+  flex: 0 0 auto;
+  padding: 0;
 }
 
 .graph-field input,
 .graph-field select,
 .graph-field textarea {
   min-width: 0;
+  max-width: 100%;
   border-radius: 0.75rem;
   border: 1px solid rgb(207 250 254 / 0.16);
   background: rgb(2 6 23 / 0.82);
@@ -812,11 +850,34 @@
   outline: none;
 }
 
+.graph-field textarea {
+  resize: vertical;
+}
+
+.materia-prompt-field textarea {
+  line-height: 1.5;
+}
+
 .graph-field input:focus,
 .graph-field select:focus,
 .graph-field textarea:focus {
   border-color: rgb(103 232 249 / 0.72);
   box-shadow: 0 0 0 3px rgb(34 211 238 / 0.12);
+}
+
+@media (max-width: 640px) {
+  .materia-form-section {
+    padding: 0.85rem;
+  }
+
+  .materia-toggle-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .graph-field-inline {
+    white-space: normal;
+  }
 }
 
 .monitor-stat-grid {

@@ -2198,16 +2198,16 @@ export function App() {
         )}
 
         {selectedTab === 'materia-editor' && (
-        <section className="fantasy-panel p-6" aria-label="Materia creation editor">
+        <section className="fantasy-panel p-4 sm:p-6" aria-label="Materia creation editor">
           <div className="mb-5">
             <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">materia forge</p>
             <h2 className="mt-2 text-3xl font-black text-white">Create / edit materia</h2>
             <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge reusable prompt materia or tool-invocation materia as staged definition edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
           </div>
 
-          <section className="rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Materia settings">
-            <p className="mb-4 text-sm font-semibold text-cyan-100">Settings</p>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <section className="materia-form-section" aria-label="Materia settings">
+            <p className="materia-form-section-title">Settings</p>
+            <div className="materia-compact-grid">
               <label className="graph-field">Edit existing
                 <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : setMateriaForm(emptyMateriaForm())}>
                   <option value="">new materia…</option>
@@ -2269,9 +2269,9 @@ export function App() {
           </section>
 
           {materiaForm.behavior === 'prompt' && (
-            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Boolean materia controls">
-              <p className="mb-3 text-sm font-semibold text-cyan-100">Toggles</p>
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <section className="materia-form-section mt-5" aria-label="Boolean materia controls">
+              <p className="materia-form-section-title mb-3">Toggles</p>
+              <div className="materia-toggle-row">
                 <label className="graph-field graph-field-inline text-sm">Multiturn
                   <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
                 </label>
@@ -2283,8 +2283,8 @@ export function App() {
           )}
 
           {materiaForm.behavior === 'prompt' && (
-            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generate role prompt instructions">
-              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+            <section className="materia-form-section mt-5" aria-label="Generate role prompt instructions">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
                 <label className="graph-field">Generate role prompt from brief
                   <textarea data-testid="role-generation-brief" className="min-h-16" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
                 </label>
@@ -2307,12 +2307,12 @@ export function App() {
           )}
 
           {materiaForm.behavior === 'prompt' && materiaForm.generatesList && (
-            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generated list output configuration">
+            <section className="materia-form-section mt-5" aria-label="Generated list output configuration">
               <div>
-                <p className="text-sm font-semibold text-cyan-100">Generated list output</p>
+                <p className="materia-form-section-title">Generated list output</p>
                 <p className="mt-1 text-xs text-slate-400">Declare that this role emits a configurable array output that loop regions can consume.</p>
               </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="materia-generated-grid mt-4">
                 <label className="graph-field">Output key
                   <input data-testid="materia-generated-output" value={materiaForm.generatedOutput} onChange={(event) => setMateriaForm({ ...materiaForm, generatedOutput: event.target.value })} placeholder="tasks" />
                 </label>
@@ -2336,12 +2336,12 @@ export function App() {
           )}
 
           {materiaForm.behavior === 'prompt' ? (
-            <label className="graph-field mt-5">Prompt
-              <textarea data-testid="materia-prompt" className="min-h-64" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
+            <label className="graph-field materia-prompt-field mt-5">Prompt
+              <textarea data-testid="materia-prompt" className="min-h-72" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
             </label>
           ) : (
-            <label className="graph-field mt-5">Params JSON
-              <textarea data-testid="materia-params" className="min-h-40" value={materiaForm.params} onChange={(event) => setMateriaForm({ ...materiaForm, params: event.target.value })} />
+            <label className="graph-field materia-prompt-field mt-5">Params JSON
+              <textarea data-testid="materia-params" className="min-h-44" value={materiaForm.params} onChange={(event) => setMateriaForm({ ...materiaForm, params: event.target.value })} />
             </label>
           )}
 
