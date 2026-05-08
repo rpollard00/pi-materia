@@ -285,7 +285,11 @@ function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria:
   const merged: Record<string, MateriaConfig> = { ...baseMateria };
   for (const [name, materia] of Object.entries(parsedMateria as Record<string, unknown>)) {
     if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
-    merged[name] = { ...(baseMateria[name] ?? {}), ...materia } as MateriaConfig;
+    const next = { ...(baseMateria[name] ?? {}), ...materia } as Record<string, unknown>;
+    for (const [key, value] of Object.entries(materia)) {
+      if (value === null) delete next[key];
+    }
+    merged[name] = next as unknown as MateriaConfig;
   }
   return merged;
 }

@@ -1481,6 +1481,56 @@ describe('Materia loadout grid editor', () => {
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('views, edits, creates, and removes generic generated list output config', async () => {
+    const generatorConfig = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    (generatorConfig.materia.planner as any).generates = { output: 'ideas', items: 'state.ideas', listType: 'array', itemType: 'idea', as: 'idea', cursor: 'ideaIndex', done: 'archive' };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: generatorConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
+    expect(screen.getByTestId('materia-generates-list')).toHaveProperty('checked', true);
+    expect(screen.getByTestId('materia-generated-output')).toHaveProperty('value', 'ideas');
+    expect(screen.getByTestId('materia-generated-items')).toHaveProperty('value', 'state.ideas');
+    expect(screen.getByTestId('materia-generated-item-type')).toHaveProperty('value', 'idea');
+    expect(screen.getByTestId('materia-generated-as')).toHaveProperty('value', 'idea');
+    expect(screen.getByTestId('materia-generated-cursor')).toHaveProperty('value', 'ideaIndex');
+    expect(screen.getByTestId('materia-generated-done')).toHaveProperty('value', 'archive');
+
+    fireEvent.change(screen.getByTestId('materia-generated-output'), { target: { value: 'stories' } });
+    fireEvent.change(screen.getByTestId('materia-generated-item-type'), { target: { value: 'story' } });
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    let body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.config.materia.planner.generates).toEqual({ output: 'stories', items: 'state.ideas', listType: 'array', itemType: 'story', as: 'idea', cursor: 'ideaIndex', done: 'archive' });
+
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    expect(screen.getByTestId('materia-generates-list')).toHaveProperty('checked', false);
+    fireEvent.click(screen.getByTestId('materia-generates-list'));
+    expect(screen.getByTestId('materia-generated-output')).toHaveProperty('value', 'tasks');
+    expect(screen.getByTestId('materia-generated-item-type')).toHaveProperty('value', 'task');
+    expect(screen.getByTestId('materia-generated-as')).toHaveProperty('value', 'task');
+    expect(screen.getByTestId('materia-generated-cursor')).toHaveProperty('value', 'taskIndex');
+    expect(screen.getByTestId('materia-generated-done')).toHaveProperty('value', 'end');
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    body = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
+    expect(body.config.materia.Build.generates).toEqual({ output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' });
+
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
+    fireEvent.click(screen.getByTestId('materia-generates-list'));
+    expect(screen.queryByTestId('materia-generated-output')).toBeNull();
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+    body = JSON.parse(String(fetchMock.mock.calls[5][1]?.body));
+    expect(body.config.materia.planner.generates).toBeNull();
+  });
+
   it('generates, previews, regenerates, discards, and explicitly applies role prompts without overwriting existing text', async () => {
     const generatedPrompts = ['Generated role prompt v1', 'Generated role prompt v2', 'Generated role prompt v1'];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

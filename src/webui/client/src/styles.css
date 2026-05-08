@@ -786,6 +786,17 @@
   color: rgb(165 243 252 / 0.82);
 }
 
+.graph-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.graph-field-inline input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+}
+
 .graph-field input,
 .graph-field select,
 .graph-field textarea {

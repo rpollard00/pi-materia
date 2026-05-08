@@ -34,6 +34,13 @@ interface MateriaFormState {
   color: string;
   outputFormat: 'text' | 'json';
   multiTurn: boolean;
+  generatesList: boolean;
+  generatedOutput: string;
+  generatedItems: string;
+  generatedItemType: string;
+  generatedAs: string;
+  generatedCursor: string;
+  generatedDone: string;
   utility: string;
   command: string;
   params: string;
@@ -234,6 +241,13 @@ const emptyMateriaForm = (): MateriaFormState => ({
   color: '',
   outputFormat: 'text',
   multiTurn: false,
+  generatesList: false,
+  generatedOutput: '',
+  generatedItems: '',
+  generatedItemType: '',
+  generatedAs: '',
+  generatedCursor: '',
+  generatedDone: '',
   utility: '',
   command: '',
   params: '{}',
@@ -823,6 +837,55 @@ function parseOptionalFiniteNumber(label: string, raw: string, errors: string[])
   return value;
 }
 
+function defaultGeneratedListFields(form: MateriaFormState): MateriaFormState {
+  return {
+    ...form,
+    generatesList: true,
+    generatedOutput: form.generatedOutput.trim() || 'tasks',
+    generatedItemType: form.generatedItemType.trim() || 'task',
+    generatedAs: form.generatedAs.trim() || 'task',
+    generatedCursor: form.generatedCursor.trim() || 'taskIndex',
+    generatedDone: form.generatedDone.trim() || 'end',
+  };
+}
+
+function clearGeneratedListFields(form: MateriaFormState): MateriaFormState {
+  return {
+    ...form,
+    generatesList: false,
+    generatedOutput: '',
+    generatedItems: '',
+    generatedItemType: '',
+    generatedAs: '',
+    generatedCursor: '',
+    generatedDone: '',
+  };
+}
+
+function optionalTrimmed(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  return trimmed || undefined;
+}
+
+type GeneratedListOutputConfig = NonNullable<NonNullable<MateriaConfig['materia']>[string]['generates']>;
+
+function buildGeneratedListConfig(form: MateriaFormState): GeneratedListOutputConfig {
+  if (!form.generatesList) throw new Error('Generated list output is not enabled.');
+  const output = form.generatedOutput.trim();
+  const itemType = form.generatedItemType.trim();
+  if (!output) throw new Error('Generated list output key is required when enabled.');
+  if (!itemType) throw new Error('Generated list item type is required when enabled.');
+  return {
+    output,
+    items: optionalTrimmed(form.generatedItems),
+    listType: 'array',
+    itemType,
+    as: optionalTrimmed(form.generatedAs),
+    cursor: optionalTrimmed(form.generatedCursor),
+    done: optionalTrimmed(form.generatedDone),
+  };
+}
+
 function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
   const name = form.name.trim();
   if (!name) throw new Error('Materia name is required.');
@@ -849,17 +912,19 @@ function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
       },
     };
   }
+  const agentDefinition = {
+    type: 'agent',
+    tools: form.toolAccess,
+    prompt: form.prompt,
+    model: form.model.trim() || undefined,
+    thinking: form.thinking.trim() || undefined,
+    color: form.color.trim() || undefined,
+    multiTurn: form.multiTurn || undefined,
+    ...(form.generatesList ? { generates: buildGeneratedListConfig(form) } : form.editingNodeId ? { generates: null } : {}),
+  };
   return {
     materia: {
-      [name]: {
-        type: 'agent',
-        tools: form.toolAccess,
-        prompt: form.prompt,
-        model: form.model.trim() || undefined,
-        thinking: form.thinking.trim() || undefined,
-        color: form.color.trim() || undefined,
-        multiTurn: form.multiTurn || undefined,
-      },
+      [name]: agentDefinition as NonNullable<MateriaConfig['materia']>[string],
     },
   };
 }
@@ -1566,6 +1631,7 @@ export function App() {
     const definition = materia[id];
     if (!definition) return;
     const isUtility = definition.type === 'utility';
+    const generates = definition.generates;
     setMateriaForm({
       editingNodeId: id,
       name: id,
@@ -1577,6 +1643,13 @@ export function App() {
       color: String(definition.color ?? ''),
       outputFormat: definition.parse === 'json' ? 'json' : 'text',
       multiTurn: isUtility ? false : Boolean(definition.multiTurn),
+      generatesList: !isUtility && Boolean(generates),
+      generatedOutput: !isUtility && generates ? String(generates.output ?? '') : '',
+      generatedItems: !isUtility && generates ? String(generates.items ?? '') : '',
+      generatedItemType: !isUtility && generates ? String(generates.itemType ?? '') : '',
+      generatedAs: !isUtility && generates ? String(generates.as ?? '') : '',
+      generatedCursor: !isUtility && generates ? String(generates.cursor ?? '') : '',
+      generatedDone: !isUtility && generates ? String(generates.done ?? '') : '',
       utility: isUtility ? String(definition.utility ?? '') : '',
       command: isUtility ? (definition.command ?? []).join(' ') : '',
       params: isUtility ? JSON.stringify(definition.params ?? {}, null, 2) : '{}',
@@ -2179,6 +2252,42 @@ export function App() {
                     <button type="button" className="materia-button" data-testid="apply-generated-role-prompt" onClick={applyGeneratedRolePrompt}>Apply to prompt field</button>
                     <button type="button" className="materia-button-secondary" data-testid="discard-generated-role-prompt" onClick={discardGeneratedRolePrompt}>Discard</button>
                   </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {materiaForm.behavior === 'prompt' && (
+            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generated list output configuration">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-cyan-100">Generated list output</p>
+                  <p className="mt-1 text-xs text-slate-400">Declare that this role emits a configurable array output that loop regions can consume.</p>
+                </div>
+                <label className="graph-field graph-field-inline text-sm">Enable generated list
+                  <input data-testid="materia-generates-list" type="checkbox" checked={materiaForm.generatesList} onChange={(event) => setMateriaForm(event.target.checked ? defaultGeneratedListFields(materiaForm) : clearGeneratedListFields(materiaForm))} />
+                </label>
+              </div>
+              {materiaForm.generatesList && (
+                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <label className="graph-field">Output key
+                    <input data-testid="materia-generated-output" value={materiaForm.generatedOutput} onChange={(event) => setMateriaForm({ ...materiaForm, generatedOutput: event.target.value })} placeholder="tasks" />
+                  </label>
+                  <label className="graph-field">Item type
+                    <input data-testid="materia-generated-item-type" value={materiaForm.generatedItemType} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItemType: event.target.value })} placeholder="task" />
+                  </label>
+                  <label className="graph-field">Items state path (optional)
+                    <input data-testid="materia-generated-items" value={materiaForm.generatedItems} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItems: event.target.value })} placeholder="state.tasks" />
+                  </label>
+                  <label className="graph-field">Item alias
+                    <input data-testid="materia-generated-as" value={materiaForm.generatedAs} onChange={(event) => setMateriaForm({ ...materiaForm, generatedAs: event.target.value })} placeholder="task" />
+                  </label>
+                  <label className="graph-field">Cursor name
+                    <input data-testid="materia-generated-cursor" value={materiaForm.generatedCursor} onChange={(event) => setMateriaForm({ ...materiaForm, generatedCursor: event.target.value })} placeholder="taskIndex" />
+                  </label>
+                  <label className="graph-field">Done target
+                    <input data-testid="materia-generated-done" value={materiaForm.generatedDone} onChange={(event) => setMateriaForm({ ...materiaForm, generatedDone: event.target.value })} placeholder="end" />
+                  </label>
                 </div>
               )}
             </section>
