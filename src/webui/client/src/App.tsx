@@ -2321,13 +2321,6 @@ export function App() {
             </section>
           )}
 
-          {materiaForm.behavior === 'prompt' && materiaForm.generator && (
-            <section className="materia-form-section mt-5" aria-label="Generator behavior help">
-              <p className="materia-form-section-title">Generator</p>
-              <p className="mt-1 text-xs text-slate-400">Generator materia produce the canonical <code>workItems</code> list for downstream loop regions. The generated list shape is runtime-defined and is not configurable in authored materia definitions.</p>
-            </section>
-          )}
-
           {materiaForm.behavior === 'prompt' ? (
             <label className="graph-field materia-prompt-field mt-5">Prompt
               <textarea data-testid="materia-prompt" className="min-h-72" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />

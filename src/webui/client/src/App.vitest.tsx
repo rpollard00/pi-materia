@@ -1525,7 +1525,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
     expect(screen.queryByTestId('materia-generated-output')).toBeNull();
     expect(screen.queryByText(/Generated List/)).toBeNull();
-    expect(screen.getByText(/canonical/).textContent).toContain('workItems');
+    expect(screen.queryByRole('region', { name: 'Generator behavior help' })).toBeNull();
+    expect(screen.getByLabelText('Generator').closest('label')?.getAttribute('title')).toContain('canonical workItems');
 
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
@@ -1544,6 +1545,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', false);
     fireEvent.click(screen.getByTestId('materia-generator'));
+    expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
+    expect(screen.queryByRole('region', { name: 'Generator behavior help' })).toBeNull();
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
     body = JSON.parse(String(fetchMock.mock.calls[5][1]?.body));
