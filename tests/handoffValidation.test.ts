@@ -7,8 +7,8 @@ function node(overrides: Partial<MateriaPipelineNodeConfig> = {}): MateriaPipeli
 }
 
 describe("handoff JSON runtime validation", () => {
-  test("accepts JSON objects with arbitrary payload fields", () => {
-    const value = { tasks: [{ title: "Build" }], feedback: "ok" };
+  test("accepts JSON objects with generic work item payload fields", () => {
+    const value = { workItems: [{ title: "Build" }], feedback: "ok", missing: [] };
     expect(validateHandoffJsonOutput(value, { nodeId: "Plan", node: node() })).toBe(value);
   });
 
@@ -22,13 +22,15 @@ describe("handoff JSON runtime validation", () => {
     expect(() => validateHandoffJsonOutput(null, { nodeId: "Plan", node: node() })).toThrow(/expected a JSON object at the top level/);
   });
 
-  test("rejects malformed reserved satisfied fields", () => {
+  test("rejects malformed reserved evaluator/route fields", () => {
     expect(() => validateHandoffJsonOutput({ satisfied: "true" }, { nodeId: "Check", node: node() })).toThrow(/reserved control field "satisfied" must be a boolean/);
+    expect(() => validateHandoffJsonOutput({ feedback: ["retry"] }, { nodeId: "Check", node: node() })).toThrow(/reserved evaluator field "feedback" must be a string/);
+    expect(() => validateHandoffJsonOutput({ missing: "retry" }, { nodeId: "Check", node: node() })).toThrow(/reserved evaluator field "missing" must be an array/);
   });
 
   test("requires satisfied when satisfied\/not_satisfied control flow consumes it", () => {
     expect(() => validateHandoffJsonOutput({ feedback: "missing" }, { nodeId: "Check", node: node({ edges: [{ when: "satisfied", to: "Maintain" }] }) })).toThrow(/must include reserved boolean field "satisfied"/);
-    expect(() => validateHandoffJsonOutput({ feedback: "missing" }, { nodeId: "Maintain", node: node({ advance: { cursor: "taskIndex", items: "state.tasks", when: "satisfied" } }) })).toThrow(/must include reserved boolean field "satisfied"/);
+    expect(() => validateHandoffJsonOutput({ feedback: "missing" }, { nodeId: "Maintain", node: node({ advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" } }) })).toThrow(/must include reserved boolean field "satisfied"/);
   });
 
   test("does not accept legacy passed as a canonical satisfied substitute", () => {

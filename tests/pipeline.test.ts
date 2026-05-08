@@ -550,15 +550,15 @@ describe("utility pipeline nodes", () => {
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
-    expect(config.materia.planner?.generates).toMatchObject({ output: "tasks", listType: "array", itemType: "task" });
-    expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "planner", output: "tasks" });
-    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
+    expect(config.materia.planner?.generates).toMatchObject({ output: "workItems", listType: "array", itemType: "workItem" });
+    expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "planner", output: "workItems" });
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
     expect(loadout.nodes.Maintain).toMatchObject({
       type: "agent",
       materia: "Maintain",
       parse: "json",
       assign: { lastMaintain: "$" },
-      advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "satisfied" },
+      advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
       edges: [
         { when: "not_satisfied", to: "Maintain", maxTraversals: 3 },
         { when: "always", to: "Build" },
@@ -569,13 +569,13 @@ describe("utility pipeline nodes", () => {
     expect(maintainPrompt).toContain("Always inspect repository state before checkpointing");
     expect(maintainPrompt).toContain("Inspect the repository state first");
     expect(maintainPrompt).toContain("checkpointCreated=false");
-    expect(maintainPrompt).toContain("No-op tasks must not create empty commits/checkpoints");
+    expect(maintainPrompt).toContain("No-op work items must not create empty commits/checkpoints");
     expect(maintainPrompt).toContain("do not run jj describe, jj new, git add, git commit");
 
     const gitMaintainPrompt = config.materia.GitMaintain!.prompt;
     expect(gitMaintainPrompt).toContain("Inspect repository state before committing");
     expect(gitMaintainPrompt).toContain("checkpointCreated=false");
-    expect(gitMaintainPrompt).toContain("No-op tasks must not create empty commits/checkpoints");
+    expect(gitMaintainPrompt).toContain("No-op work items must not create empty commits/checkpoints");
     expect(gitMaintainPrompt).toContain("do not run git add, git commit");
   });
 });

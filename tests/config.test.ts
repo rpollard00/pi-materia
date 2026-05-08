@@ -442,16 +442,17 @@ describe("config loadouts", () => {
 
     const fullAutoPrompt = loaded.config.materia.planner.prompt;
     const planningConsultPrompt = loaded.config.materia.interactivePlan.prompt;
-    expect(fullAutoPrompt).toContain("Return only JSON with shape");
+    expect(fullAutoPrompt).toContain("Return only JSON with the generic envelope shape");
     expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
+    expect(fullAutoPrompt).toContain('"workItems"');
     expect(planningConsultPrompt).toContain("Collaboratively refine an implementation plan");
     expect(planningConsultPrompt).toContain("normal conversation");
     expect(planningConsultPrompt).toContain("Ask concise clarifying questions");
-    expect(planningConsultPrompt).toContain("propose and refine task breakdowns and acceptance criteria conversationally");
-    expect(planningConsultPrompt).toContain("Do not emit the structured task JSON during refinement");
+    expect(planningConsultPrompt).toContain("propose and refine work-item breakdowns and acceptance criteria conversationally");
+    expect(planningConsultPrompt).toContain("Do not emit the structured workItems JSON during refinement");
     expect(planningConsultPrompt).toContain("Only after the user runs /materia continue");
     expect(planningConsultPrompt).toContain("Treat all normal user messages as refinement input");
-    expect(planningConsultPrompt).toContain('{ "tasks": [{ "id": string, "title": string, "description": string, "acceptance": string[] }] }');
+    expect(planningConsultPrompt).toContain('"workItems"');
     expect(planningConsultPrompt).not.toContain("Return only JSON");
 
     const fullAuto = resolvePipeline(loaded.config);

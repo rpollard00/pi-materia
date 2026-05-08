@@ -120,7 +120,7 @@ describe("native multi-turn runtime", () => {
 
   test("bundled Planning-Consult pauses after planner output until /materia continue advances to Build", async () => {
     const harness = await makeBundledDefaultHarness();
-    const finalPlan = '{"tasks":[{"id":"1","title":"Ship it","description":"Do the work","acceptance":["Done"]}]}';
+    const finalPlan = '{"summary":"Plan","workItems":[{"id":"1","title":"Ship it","description":"Do the work","acceptance":["Done"],"context":{"architecture":"","constraints":[],"dependencies":[],"risks":[]}}],"guidance":{},"decisions":[],"risks":[],"satisfied":true,"feedback":"","missing":[]}';
 
     await harness.runCommand("materia", "loadout Planning-Consult");
     expect(JSON.parse(await readFile(path.join(harness.cwd, ".pi", "pi-materia.json"), "utf8"))).toEqual({ activeLoadout: "Planning-Consult" });
@@ -134,7 +134,7 @@ describe("native multi-turn runtime", () => {
     const firstPrompt = harness.sentMessages.find((sent) => (sent.message as any).customType === "pi-materia-prompt")?.message as any;
     expect(firstPrompt.content).toContain("Collaboratively refine an implementation plan");
     expect(firstPrompt.content).toContain("normal conversation");
-    expect(firstPrompt.content).toContain("Do not emit the structured task JSON during refinement");
+    expect(firstPrompt.content).toContain("Do not emit the structured workItems JSON during refinement");
     expect(firstPrompt.content).toContain("/materia continue is the only way to finalize this multi-turn node");
     expect(firstPrompt.content).toContain("do not emit final JSON");
     expect(firstPrompt.content).not.toContain("Return only JSON");
@@ -148,12 +148,12 @@ describe("native multi-turn runtime", () => {
     expect(pausedState.currentMateria).toBe("interactivePlan");
     expect(pausedState.nodeState).toBe("awaiting_user_refinement");
     expect(pausedState.awaitingResponse).toBe(false);
-    expect(pausedState.data.tasks).toBeUndefined();
+    expect(pausedState.data.workItems).toBeUndefined();
     expect(pausedState.lastAssistantText).toContain("Should docs be included too?");
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
     expect(harness.sentMessages.map(({ message }) => (message as any).content).join("\n")).not.toContain("Task 1: Ship it");
 
-    harness.appendUserMessage("Yes, include docs and finalize the task artifacts.");
+    harness.appendUserMessage("Yes, include docs and finalize the work item artifacts.");
     harness.appendAssistantMessage(finalPlan);
     await harness.emit("agent_end", { messages: [] });
 
@@ -161,7 +161,7 @@ describe("native multi-turn runtime", () => {
     expect(finalizedButPausedState.active).toBe(true);
     expect(finalizedButPausedState.currentNode).toBe("planner");
     expect(finalizedButPausedState.nodeState).toBe("awaiting_user_refinement");
-    expect(finalizedButPausedState.data.tasks).toBeUndefined();
+    expect(finalizedButPausedState.data.workItems).toBeUndefined();
     expect(finalizedButPausedState.lastAssistantText).toBe(finalPlan);
 
     const inputResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
@@ -185,9 +185,9 @@ describe("native multi-turn runtime", () => {
     expect(buildState.currentNode).toBe("Build");
     expect(buildState.currentMateria).toBe("Build");
     expect(buildState.nodeState).toBe("awaiting_agent_response");
-    expect(buildState.data.tasks).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"] }]);
+    expect(buildState.data.workItems).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(3);
-    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Task 1: Ship it");
+    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Work item 1: Ship it");
   });
 
   test("loadout switching changes multi-turn behavior only by selecting multi-turn materia", async () => {

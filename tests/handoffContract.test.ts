@@ -5,14 +5,16 @@ import {
   HANDOFF_EDGE_CONDITIONS,
   HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
   HANDOFF_RESERVED_CONTROL_FIELDS,
+  HANDOFF_RESERVED_EVALUATOR_FIELDS,
   HANDOFF_SATISFIED_FIELD,
 } from "../src/handoffContract.js";
 import { CANONICAL_EDGE_CONDITIONS } from "../src/graphValidation.js";
 
 describe("canonical handoff contract", () => {
-  test("exports satisfied as the reserved runtime control field", () => {
+  test("exports satisfied as the reserved runtime control field and evaluator fields", () => {
     expect(HANDOFF_SATISFIED_FIELD).toBe("satisfied");
     expect(HANDOFF_RESERVED_CONTROL_FIELDS).toEqual(["satisfied"]);
+    expect(HANDOFF_RESERVED_EVALUATOR_FIELDS).toEqual(["satisfied", "feedback", "missing"]);
   });
 
   test("keeps graph edge conditions aligned with the central handoff contract", () => {
@@ -20,11 +22,12 @@ describe("canonical handoff contract", () => {
     expect(CANONICAL_EDGE_CONDITIONS).toBe(HANDOFF_EDGE_CONDITIONS);
   });
 
-  test("provides prompt guidance that separates reserved controls from payload fields", () => {
-    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("flat handoff message object");
+  test("provides prompt guidance for the generic envelope and reserved evaluator fields", () => {
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("generic handoff envelope");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"workItems"');
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("never tasks");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"satisfied" is the canonical boolean control field');
-    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("arbitrary additional payload fields");
-    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("must not redefine or alias reserved control semantics");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("must not redefine or alias reserved evaluator/route semantics");
   });
 
   test("does not document legacy aliases as canonical routing fields", () => {

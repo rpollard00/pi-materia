@@ -17,6 +17,7 @@ describe("handoff contract drift regressions", () => {
 
     const generated = buildRoleGenerationPrompt("write a JSON evaluator role");
     expect(generated).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(generated).toContain("generic handoff envelope");
     expect(generated).toContain('"satisfied" is the canonical boolean control field');
   });
 
@@ -26,6 +27,7 @@ describe("handoff contract drift regressions", () => {
     const checkedDocs = `${docs}\n${readme}`;
 
     expect(docs).toContain("`satisfied` is the canonical routing field");
+    expect(docs).toContain("`workItems`, not `tasks`");
     expect(docs).toContain('{ "when": "satisfied", "to": "Maintain" }');
     expect(docs).toContain('{ "when": "not_satisfied", "to": "Build"');
     expect(checkedDocs).not.toMatch(/\$\.passed\s*==/);
@@ -39,6 +41,10 @@ describe("handoff contract drift regressions", () => {
 
     expect(prompt).toContain('"satisfied": boolean');
     expect(prompt).not.toContain('"passed": boolean');
+
+    const plannerPrompt = String(rawDefault.materia?.planner?.prompt ?? "");
+    expect(plannerPrompt).toContain('"workItems"');
+    expect(plannerPrompt).not.toContain('"tasks"');
 
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
       for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {
