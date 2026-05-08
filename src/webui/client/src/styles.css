@@ -460,6 +460,15 @@
   box-shadow: inset 0 0 28px rgb(0 0 0 / 0.82), 0 0 18px rgb(34 211 238 / 0.08);
 }
 
+.materia-color-green { background: radial-gradient(circle at 35% 25%, #f0fff4 0 8%, #4ade80 28%, #16a34a 58%, #064e3b 100%); }
+.materia-color-red { background: radial-gradient(circle at 35% 25%, #fff1f2 0 8%, #fb7185 30%, #dc2626 60%, #7f1d1d 100%); }
+.materia-color-yellow { background: radial-gradient(circle at 35% 25%, #fffbeb 0 8%, #fde047 30%, #f59e0b 60%, #713f12 100%); }
+.materia-color-purple { background: radial-gradient(circle at 35% 25%, #faf5ff 0 8%, #c084fc 30%, #7e22ce 60%, #3b0764 100%); }
+.materia-color-blue { background: radial-gradient(circle at 35% 25%, #eff6ff 0 8%, #60a5fa 30%, #2563eb 60%, #1e3a8a 100%); }
+.materia-color-cyan { background: radial-gradient(circle at 35% 25%, #ecfeff 0 8%, #67e8f9 30%, #0891b2 60%, #164e63 100%); }
+.materia-color-white { background: radial-gradient(circle at 35% 25%, #ffffff 0 8%, #f8fafc 30%, #cbd5e1 62%, #64748b 100%); }
+.materia-color-black-gray { background: radial-gradient(circle at 35% 25%, #f8fafc 0 7%, #94a3b8 24%, #334155 56%, #020617 100%); }
+
 .materia-orb::before,
 .materia-orb-small::before {
   content: '';
@@ -859,6 +868,66 @@
 
 .graph-field textarea {
   resize: vertical;
+}
+
+.materia-color-picker {
+  grid-column: 1 / -1;
+  border: 0;
+  padding: 0;
+}
+
+.materia-color-picker legend {
+  margin-bottom: 0.3rem;
+}
+
+.materia-color-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+}
+
+.materia-color-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(207 250 254 / 0.16);
+  background: rgb(2 6 23 / 0.72);
+  padding: 0.45rem 0.55rem;
+  color: rgb(224 242 254);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.materia-color-option:hover,
+.materia-color-option:focus-visible,
+.materia-color-option-selected {
+  border-color: rgb(103 232 249 / 0.72);
+  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.12);
+  outline: none;
+}
+
+.materia-color-option-selected {
+  background: rgb(8 47 73 / 0.72);
+}
+
+.materia-color-swatch {
+  width: 1.45rem;
+  height: 1.45rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  box-shadow: inset -5px -6px 8px rgb(0 0 0 / 0.35), inset 4px 4px 6px rgb(255 255 255 / 0.42), 0 0 12px rgb(125 211 252 / 0.35);
+}
+
+.materia-color-legacy {
+  margin: 0;
+  color: rgb(254 240 138 / 0.9);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .materia-prompt-field textarea {

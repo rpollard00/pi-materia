@@ -13,6 +13,7 @@ import {
   makeEmptyEntryLoadout,
   makeEmptySocket,
   makeNewSocketId,
+  materiaColorChoices,
   nodeColor,
   normalizeMateriaConfigEdges,
   placeMateriaInSocket,
@@ -233,7 +234,7 @@ const emptyMateriaForm = (): MateriaFormState => ({
   toolAccess: 'none',
   model: '',
   thinking: '',
-  color: '',
+  color: materiaColorChoices[0]?.value ?? '',
   outputFormat: 'text',
   multiTurn: false,
   generator: false,
@@ -907,8 +908,14 @@ function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
   window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
 }
 
+function materiaColorClass(color: string): string {
+  if (!color) return '';
+  // Existing saved configs may still contain Tailwind gradient stops; keep them renderable as migration compatibility.
+  return color.includes('from-') ? `bg-gradient-to-br ${color}` : color;
+}
+
 function Orb({ color, label, small = false, empty = false, iterator = false }: { color: string; label: string; small?: boolean; empty?: boolean; iterator?: boolean }) {
-  return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : `bg-gradient-to-br ${color}`} ${iterator && !empty ? 'materia-orb-iterator' : ''}`} title={label} />;
+  return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : materiaColorClass(color)} ${iterator && !empty ? 'materia-orb-iterator' : ''}`} title={label} />;
 }
 
 function formatElapsed(startedAt?: number, now = Date.now()) {
@@ -2199,9 +2206,30 @@ export function App() {
                       <option value="coding">coding</option>
                     </select>
                   </label>
-                  <label className="graph-field">Color
-                    <input data-testid="materia-color" value={materiaForm.color} onChange={(event) => setMateriaForm({ ...materiaForm, color: event.target.value })} placeholder="from-sky-200 via-cyan-300 to-blue-600" />
-                  </label>
+                  <fieldset className="graph-field materia-color-picker" data-testid="materia-color" aria-label="Color">
+                    <legend>Color</legend>
+                    <div className="materia-color-options" role="radiogroup" aria-label="Materia color">
+                      {materiaColorChoices.map((choice) => {
+                        const selected = materiaForm.color === choice.value;
+                        return (
+                          <button
+                            key={choice.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            data-testid={`materia-color-${choice.id}`}
+                            className={`materia-color-option ${selected ? 'materia-color-option-selected' : ''}`}
+                            onClick={() => setMateriaForm({ ...materiaForm, color: choice.value })}
+                            title={`${choice.label} materia color`}
+                          >
+                            <span className={`materia-color-swatch ${choice.value}`} aria-hidden />
+                            <span>{choice.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {materiaForm.color && !materiaColorChoices.some((choice) => choice.value === materiaForm.color) && <p className="materia-color-legacy">Legacy custom color is selected; choose a palette color to replace it.</p>}
+                  </fieldset>
                   <div className="materia-toggle-row materia-settings-toggle-row" aria-label="Boolean materia controls">
                     <label className="graph-field graph-field-inline text-sm">Multiturn
                       <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />

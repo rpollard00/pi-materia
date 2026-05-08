@@ -92,14 +92,24 @@ export interface MateriaReference {
 
 export const emptySocketLabel = 'Empty';
 
-export const paletteColors = [
-  'from-sky-200 via-cyan-300 to-blue-600',
-  'from-emerald-200 via-lime-300 to-green-700',
-  'from-amber-100 via-yellow-300 to-orange-600',
-  'from-fuchsia-200 via-pink-300 to-purple-700',
-  'from-rose-200 via-red-300 to-red-700',
-  'from-violet-200 via-indigo-300 to-slate-700',
+export interface MateriaColorChoice {
+  id: string;
+  label: string;
+  value: string;
+}
+
+export const materiaColorChoices: MateriaColorChoice[] = [
+  { id: 'green', label: 'Green', value: 'materia-color-green' },
+  { id: 'red', label: 'Red', value: 'materia-color-red' },
+  { id: 'yellow', label: 'Yellow', value: 'materia-color-yellow' },
+  { id: 'purple', label: 'Purple', value: 'materia-color-purple' },
+  { id: 'blue', label: 'Blue', value: 'materia-color-blue' },
+  { id: 'cyan', label: 'Cyan', value: 'materia-color-cyan' },
+  { id: 'white', label: 'White', value: 'materia-color-white' },
+  { id: 'black-gray', label: 'Black / Gray', value: 'materia-color-black-gray' },
 ];
+
+export const paletteColors = materiaColorChoices.map((choice) => choice.value);
 
 const materiaBehaviorKeys = new Set([
   'type',
