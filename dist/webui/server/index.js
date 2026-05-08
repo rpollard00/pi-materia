@@ -63,6 +63,39 @@ function roleGenerationStatus(result) {
         return 403;
     return 500;
 }
+function validateMateriaGeneratorConfig(value) {
+    if (value === undefined)
+        return undefined;
+    if (value === null)
+        return null;
+    if (!isPlainObject(value))
+        throw new Error('Expected generates to be an object or null.');
+    const output = trimmedRequired(value.output, 'generates.output');
+    const itemType = trimmedRequired(value.itemType, 'generates.itemType');
+    if (value.listType !== 'array')
+        throw new Error('Expected generates.listType to be "array".');
+    return {
+        output,
+        items: optionalTrimmed(value.items, 'generates.items'),
+        listType: 'array',
+        itemType,
+        as: optionalTrimmed(value.as, 'generates.as'),
+        cursor: optionalTrimmed(value.cursor, 'generates.cursor'),
+        done: optionalTrimmed(value.done, 'generates.done'),
+    };
+}
+function trimmedRequired(value, field) {
+    if (typeof value !== 'string' || !value.trim())
+        throw new Error(`Expected ${field} to be a non-empty string.`);
+    return value.trim();
+}
+function optionalTrimmed(value, field) {
+    if (value === undefined)
+        return undefined;
+    if (typeof value !== 'string' || !value.trim())
+        throw new Error(`Expected ${field} to be a non-empty string when configured.`);
+    return value.trim();
+}
 function sendRoleGenerationError(res, status, code, message) {
     sendJson(res, status, { ok: false, error: { code, message } });
 }
@@ -165,7 +198,15 @@ export function createMateriaWebUiServer(options = {}) {
                     sendRoleGenerationError(res, 400, validation.code, validation.error);
                     return;
                 }
-                const result = await options.session.generateMateriaRole({ brief: validation.brief });
+                let generates;
+                try {
+                    generates = validateMateriaGeneratorConfig(body.generates);
+                }
+                catch (error) {
+                    sendRoleGenerationError(res, 400, 'invalid_request', error instanceof Error ? error.message : String(error));
+                    return;
+                }
+                const result = await options.session.generateMateriaRole({ brief: validation.brief, generates });
                 if (!result.ok) {
                     sendRoleGenerationError(res, roleGenerationStatus(result), result.code, result.error);
                     return;
