@@ -92,6 +92,9 @@ describe("Materia role prompt generation service", () => {
     expect(prompt).toContain("- item alias: task");
     expect(prompt).toContain("- cursor: taskIndex");
     expect(prompt).toContain("- done behavior: end");
+    expect(prompt).toContain("adapter metadata for assignment and iteration");
+    expect(prompt).toContain("generated role prompt must still use the canonical handoff envelope");
+    expect(prompt).toContain("workItems, not in a placement-specific output key such as tasks");
   });
 
   test("applies roleGeneration model and thinking overrides", () => {

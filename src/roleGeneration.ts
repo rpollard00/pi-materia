@@ -148,7 +148,7 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
     generates.as ? `- item alias: ${generates.as}` : undefined,
     generates.cursor ? `- cursor: ${generates.cursor}` : undefined,
     generates.done ? `- done behavior: ${generates.done}` : undefined,
-    "If this configuration is present, the generated role prompt should describe how to produce that list in the handoff JSON using the configured output key and item semantics.",
+    "If this configuration is present, treat it as node/socket adapter metadata for assignment and iteration. The generated role prompt must still use the canonical handoff envelope and put generated units of work in workItems, not in a placement-specific output key such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
   ].filter(Boolean).join("\n");
 }
 

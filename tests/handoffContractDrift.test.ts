@@ -40,6 +40,9 @@ describe("handoff contract drift regressions", () => {
     const prompt = String(rawDefault.materia?.["Auto-Eval"]?.prompt ?? "");
 
     expect(prompt).toContain('"satisfied": boolean');
+    expect(prompt).toContain('"workItems": []');
+    expect(prompt).toContain("generic envelope shape");
+    expect(prompt).toContain("do not emit tasks");
     expect(prompt).not.toContain('"passed": boolean');
 
     const plannerPrompt = String(rawDefault.materia?.planner?.prompt ?? "");

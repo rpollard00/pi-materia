@@ -46,6 +46,8 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(prompt).toContain("Return { \"satisfied\": true }.");
     expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).toContain("generic handoff envelope");
+    expect(prompt).toContain("emit generated work units as workItems");
+    expect(prompt).toContain("Preserve and augment useful existing envelope context");
     expect(prompt).toContain('"satisfied" is the canonical boolean control field');
     expect(prompt).toContain('Legacy names such as "passed" are not canonical handoff fields');
   });

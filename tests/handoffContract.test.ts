@@ -28,6 +28,8 @@ describe("canonical handoff contract", () => {
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("never tasks");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"satisfied" is the canonical boolean control field');
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("must not redefine or alias reserved evaluator/route semantics");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("legacy placement terminology");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context");
   });
 
   test("does not document legacy aliases as canonical routing fields", () => {

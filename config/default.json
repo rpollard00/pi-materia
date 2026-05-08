@@ -332,7 +332,7 @@
     "Auto-Eval": {
       "tools": "readOnly",
       "color": "from-amber-100 via-yellow-300 to-orange-600",
-      "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict. When producing JSON, follow the runtime-provided canonical handoff JSON contract.\n\nEvaluate whether the current work item is complete. Inspect the repository as needed. Return only JSON with shape: { \"satisfied\": boolean, \"feedback\": string, \"missing\": string[] }.\n\nWork item: {{itemJson}}\n\nImplementation summary: {{lastOutput}}"
+      "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict. When producing JSON, follow the runtime-provided canonical handoff JSON contract. Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context from Generic cast data when applicable; augment evaluator fields instead of replacing the envelope with placement-specific payloads.\n\nEvaluate whether the current work item is complete. Inspect the repository as needed. Return only JSON with the generic envelope shape: { \"summary\": string, \"workItems\": [], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": boolean, \"feedback\": string, \"missing\": string[] }. Include the current work item in workItems only when useful to preserve context; do not emit tasks.\n\nWork item: {{itemJson}}\n\nImplementation summary: {{lastOutput}}"
     },
     "Maintain": {
       "tools": "coding",
