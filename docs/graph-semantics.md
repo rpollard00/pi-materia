@@ -7,7 +7,7 @@ Materia graphs are ordered workflow state machines. They may branch, loop, and r
 All graph links use the same canonical edge model:
 
 ```json
-{ "when": "always", "to": "Build" }
+{ "when": "always", "to": "Socket-4" }
 ```
 
 The supported `when` values are:
@@ -22,50 +22,52 @@ Edges are evaluated in order and the first matching edge wins. Put guarded edges
 
 Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's `generates` declaration, and documents an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. The `exit.from` socket must exist and be one of the loop members.
 
-A generator materia declares its list contract at the top level:
+A generator materia declares its list contract at the top level. For reusable work planning, use the generic handoff envelope and generate `workItems`; do not retain `tasks` as a compatibility output for newly generated units of work:
 
 ```json
 "planner": {
   "tools": "readOnly",
-  "prompt": "Return { \"tasks\": [...] }.",
+  "prompt": "Return the generic handoff envelope with workItems.",
   "generates": {
-    "output": "tasks",
+    "output": "workItems",
     "listType": "array",
-    "itemType": "task",
-    "as": "task",
-    "cursor": "taskIndex",
+    "itemType": "workItem",
+    "as": "workItem",
+    "cursor": "workItemIndex",
     "done": "end"
   }
 }
 ```
 
-Any node whose loop consumes that generator must parse JSON and assign the declared output from the handoff JSON, for example `"parse": "json"` and `"assign": { "tasks": "$.tasks" }`. The derived loop iterator defaults to `state.<output>` unless `generates.items` supplies an explicit runtime state path.
+Any node whose loop consumes that generator must parse JSON and assign the declared output from the handoff JSON, for example `"parse": "json"` and `"assign": { "workItems": "$.workItems" }`. The derived loop iterator defaults to `state.<output>` unless `generates.items` supplies an explicit runtime state path.
 
 A loadout declares the consumer region separately from the generator materia:
 
 ```json
 "loops": {
-  "taskIteration": {
-    "label": "Build → Eval → Maintain until all tasks complete",
-    "nodes": ["Build", "Auto-Eval", "Maintain"],
-    "consumes": { "from": "planner", "output": "tasks" },
-    "exit": { "from": "Maintain", "when": "satisfied", "to": "end" }
+  "workItemIteration": {
+    "label": "Build → Eval → Maintain until all work items complete",
+    "nodes": ["Socket-4", "Socket-5", "Socket-6"],
+    "consumes": { "from": "Socket-3", "output": "workItems" },
+    "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" }
   }
 }
 ```
 
 `consumes.from` is the socket id of the generator node, not the materia definition name. `consumes.output` must match the generator's declared `generates.output`; omit it only when the default is unambiguous. Optional `as`, `cursor`, and `done` overrides belong on `consumes` only when that loop intentionally differs from the generator defaults.
 
+In the bundled default loadouts, socket ids are sequential placement identifiers (`Socket-1`, `Socket-2`, ...). Keep materia identity in the node's `materia`, `utility`, labels, or palette metadata rather than encoding names such as `Build` or `planner` into socket ids. User-facing displays may combine both, for example `Socket-4 (Build)`, but routing, loop `nodes`, `consumes.from`, `exit.from`, and `advance` references should use the socket ids.
+
 The WebUI creates these regions from selected sockets. Select the sockets that form the cycle using shift-click or by dragging a selection rectangle around the socket cards, then choose **Create Loop**. Creation succeeds only when the selected sockets already contain a directed cycle and exactly one edge enters that cycle from a Generator materia. The generator edge is highlighted and the loop region label shows which generated output it consumes.
 
-The default software workflow models task iteration as:
+The default software workflow models work-item iteration as:
 
 ```text
-Build --always--> Auto-Eval --satisfied--> Maintain --always--> Build
-                         └--not_satisfied--> Build
+Socket-4 (Build) --always--> Socket-5 (Auto-Eval) --satisfied--> Socket-6 (Maintain) --always--> Socket-4 (Build)
+                                               └--not_satisfied--> Socket-4 (Build)
 ```
 
-The loop consumes the planner generator's `tasks` output, which derives an iterator over `state.tasks`; each member node handles the current task until `Maintain` advances the cursor. Its documented exit summary renders source-aware, for example `exit=Maintain.satisfied->end`, and the loop exits to `end` when the cursor reaches the generator-derived `done` target.
+The loop consumes the planner generator's `workItems` output, which derives an iterator over `state.workItems`; each member node handles the current work item until `Maintain` advances the cursor. Build-style text nodes consume the current `workItem` plus global guidance supplied by the adapter context and summarize implementation; they do not decide parsing, assignment, routing, or iteration themselves. The documented exit summary renders source-aware, for example `exit=Socket-6.satisfied->end`, and the loop exits to `end` when the cursor reaches the generator-derived `done` target.
 
 ## Utility materia and generator/consumer styling
 
@@ -81,7 +83,7 @@ If a legacy iterator loop has more than one inbound generator edge, pi-materia f
 
 ## Example
 
-See [`../examples/graph-semantics-loadout.json`](../examples/graph-semantics-loadout.json) for a complete loadout that combines utility materia, `always`/`satisfied`/`not_satisfied` edges, a generator materia, and the Build → Eval → Maintain task loop.
+See [`../examples/graph-semantics-loadout.json`](../examples/graph-semantics-loadout.json) for a complete loadout that combines utility materia, `always`/`satisfied`/`not_satisfied` edges, a generic-envelope generator materia, sequential `Socket-N` ids, and the Build → Eval → Maintain work-item loop.
 
 ## Contributor commands
 

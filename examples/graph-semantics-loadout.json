@@ -3,63 +3,64 @@
   "activeLoadout": "Graph Semantics Example",
   "loadouts": {
     "Graph Semantics Example": {
-      "entry": "ensureArtifactsIgnored",
+      "entry": "Socket-1",
       "nodes": {
-        "ensureArtifactsIgnored": {
+        "Socket-1": {
           "type": "utility",
           "utility": "project.ensureIgnored",
           "parse": "json",
           "params": { "patterns": [".pi/pi-materia/"] },
           "assign": { "artifactIgnore": "$" },
-          "edges": [{ "when": "always", "to": "detectVcs" }]
+          "edges": [{ "when": "always", "to": "Socket-2" }]
         },
-        "detectVcs": {
+        "Socket-2": {
           "type": "utility",
           "utility": "vcs.detect",
           "parse": "json",
           "assign": { "vcs": "$" },
-          "edges": [{ "when": "always", "to": "planner" }]
+          "edges": [{ "when": "always", "to": "Socket-3" }]
         },
-        "planner": {
+        "Socket-3": {
           "type": "agent",
           "materia": "planner",
           "parse": "json",
-          "assign": { "tasks": "$.tasks" },
-          "edges": [{ "when": "always", "to": "Build" }]
+          "assign": { "workItems": "$.workItems", "guidance": "$.guidance" },
+          "edges": [{ "when": "always", "to": "Socket-4" }]
         },
-        "Build": {
+        "Socket-4": {
           "type": "agent",
           "materia": "Build",
-          "edges": [{ "when": "always", "to": "Auto-Eval" }]
+          "parse": "text",
+          "edges": [{ "when": "always", "to": "Socket-5" }]
         },
-        "Auto-Eval": {
+        "Socket-5": {
           "type": "agent",
           "materia": "Auto-Eval",
           "parse": "json",
           "assign": { "lastCheck": "$", "lastFeedback": "$.feedback" },
           "edges": [
-            { "when": "satisfied", "to": "Maintain" },
-            { "when": "not_satisfied", "to": "Build", "maxTraversals": 3 }
+            { "when": "satisfied", "to": "Socket-6" },
+            { "when": "not_satisfied", "to": "Socket-4", "maxTraversals": 3 }
           ]
         },
-        "Maintain": {
+        "Socket-6": {
           "type": "agent",
           "materia": "Maintain",
           "parse": "json",
           "assign": { "lastMaintain": "$" },
-          "advance": { "cursor": "taskIndex", "items": "state.tasks", "done": "end", "when": "satisfied" },
+          "advance": { "cursor": "workItemIndex", "items": "state.workItems", "done": "end", "when": "satisfied" },
           "edges": [
-            { "when": "not_satisfied", "to": "Maintain", "maxTraversals": 3 },
-            { "when": "always", "to": "Build" }
+            { "when": "not_satisfied", "to": "Socket-6", "maxTraversals": 3 },
+            { "when": "always", "to": "Socket-4" }
           ]
         }
       },
       "loops": {
-        "taskIteration": {
-          "label": "Build → Eval → Maintain until all tasks complete",
-          "nodes": ["Build", "Auto-Eval", "Maintain"],
-          "consumes": { "from": "planner", "output": "tasks" },
-          "exit": { "from": "Maintain", "when": "satisfied", "to": "end" }
+        "workItemIteration": {
+          "label": "Build → Eval → Maintain until all work items complete",
+          "nodes": ["Socket-4", "Socket-5", "Socket-6"],
+          "consumes": { "from": "Socket-3", "output": "workItems" },
+          "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" }
         }
       }
     }
@@ -86,18 +87,27 @@
     },
     "planner": {
       "tools": "readOnly",
-      "prompt": "Return JSON: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }.",
+      "prompt": "Return only the generic handoff JSON envelope: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks.",
       "generates": {
-        "output": "tasks",
+        "output": "workItems",
         "listType": "array",
-        "itemType": "task",
-        "as": "task",
-        "cursor": "taskIndex",
+        "itemType": "workItem",
+        "as": "workItem",
+        "cursor": "workItemIndex",
         "done": "end"
       }
     },
-    "Build": { "tools": "coding", "prompt": "Implement the current task: {{itemJson}}" },
-    "Auto-Eval": { "tools": "readOnly", "prompt": "Return { \"satisfied\": boolean, \"feedback\": string } for {{itemJson}}." },
-    "Maintain": { "tools": "coding", "prompt": "Checkpoint accepted work and return { \"satisfied\": boolean, \"commitMessage\": string }." }
+    "Build": {
+      "tools": "coding",
+      "prompt": "Implement the current workItem supplied by the socket adapter, using global guidance from state.guidance. Return a concise text implementation summary."
+    },
+    "Auto-Eval": {
+      "tools": "readOnly",
+      "prompt": "Evaluate the current workItem and return the generic handoff envelope with satisfied, feedback, and missing populated as reserved evaluator fields."
+    },
+    "Maintain": {
+      "tools": "coding",
+      "prompt": "Checkpoint accepted work and return JSON with satisfied plus maintenance details."
+    }
   }
 }

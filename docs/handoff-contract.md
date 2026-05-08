@@ -19,7 +19,7 @@ When applicable, JSON-producing agent materia return this envelope:
 }
 ```
 
-Generated units of work use `workItems`, not `tasks`:
+Generated units of work use `workItems`, not `tasks`. pi-materia intentionally does not keep a `tasks` compatibility layer for newly generated work units; adapters should assign and iterate `workItems` directly:
 
 ```json
 {

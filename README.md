@@ -1,8 +1,8 @@
 # pi-materia
 
-pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent workflows. A Materia Grid is a data-driven graph: each slot renders a prompt, exposes a configured tool scope, optionally parses output, assigns state, and follows configured links.
+pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent workflows. A Materia Grid is a data-driven graph: each socket/node renders a reusable materia behavior, exposes a configured tool scope, optionally parses output, assigns state, and follows configured links.
 
-The bundled default loadout is a software-development workflow, but the engine itself is generic. You can replace the grid with a single slot that says `HELLO WORLD`, or with any arbitrary sequence/loop of materia turns.
+The bundled default loadout is a software-development workflow, but the engine itself is generic. Materia are reusable behaviors/skills; nodes and sockets are placement adapters that decide parse mode, assignment, routing, and iteration. You can replace the grid with a single socket that says `HELLO WORLD`, or with any arbitrary sequence/loop of materia turns.
 
 ## Current status
 
@@ -81,7 +81,7 @@ Use `/materia loadout` to list configured graph loadouts and mark the active one
 
 Usage costs are reported in USD from Pi assistant-message usage metadata. When Pi provides a total cost, Materia preserves that total; otherwise it sums the available input/output/cache cost components.
 
-Attempt counts are per exact Materia task identity: the node id plus the current `foreach` item key, or a singleton key for non-`foreach` nodes. A retry/self-loop of the same node/item increments the attempt; moving to a different `foreach` item or another node starts at attempt 1. Node visit counts are still used for visit limits and artifact file names.
+Attempt counts are per exact Materia work-item identity: the node id plus the current `foreach` item key, or a singleton key for non-`foreach` nodes. A retry/self-loop of the same node/item increments the attempt; moving to a different `foreach` item or another node starts at attempt 1. Node visit counts are still used for visit limits and artifact file names.
 
 ## Configuration
 
@@ -172,7 +172,7 @@ Configs can also define named `loadouts` that share the top-level `materia`, `li
   "materia": {
     "planner": { "tools": "readOnly", "prompt": "Plan automatically." },
     "interactivePlan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaborate, then finalize only after /materia continue." },
-    "Build": { "tools": "coding", "prompt": "Implement exactly the assigned task." }
+    "Build": { "tools": "coding", "prompt": "Implement exactly the adapter-provided current workItem." }
   }
 }
 ```
@@ -216,19 +216,19 @@ Example loadout excerpt where planner and evaluator materia use a cheaper model,
       "tools": "readOnly",
       "model": "openai/gpt-4o-mini",
       "thinking": "low",
-      "prompt": "Break requests into small implementation tasks."
+      "prompt": "Return the generic handoff envelope with ordered workItems."
     },
     "Build": {
       "tools": "coding",
       "model": "anthropic/claude-sonnet-4-5",
       "thinking": "high",
-      "prompt": "Implement exactly the assigned work item."
+      "prompt": "Implement exactly the adapter-provided current workItem."
     },
     "Auto-Eval": {
       "tools": "readOnly",
       "model": "openai/gpt-4o-mini",
       "thinking": "medium",
-      "prompt": "Verify the task strictly and return JSON."
+      "prompt": "Verify the current workItem strictly and return the generic evaluator envelope JSON with satisfied, feedback, and missing."
     },
     "Maintain": {
       "tools": "coding",
@@ -255,7 +255,7 @@ Generic node mechanics:
 - `advance`: advance a configured cursor
 - `limits`: node/edge cycle safety
 
-Materia graphs are workflow state machines, not DAGs. Loops such as `Build -> Auto-Eval -> Maintain -> Build` are valid and model repeated task sections/retry paths; runtime node-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Prefer declaring a top-level generator materia with `generates: { output, listType: "array", itemType, ... }`, wiring its JSON node with `parse: "json"` and an assign entry that maps the output key from the matching JSON handoff path (for example `"tasks": "$.tasks"`), then adding a loadout-level `loops` region with `consumes: { from, output }`. pi-materia derives the loop consumer iterator path from that generator declaration (defaulting to `state.${output}`) instead of tagging arbitrary loop members as iterators. See [docs/graph-semantics.md](docs/graph-semantics.md) and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
+Materia graphs are workflow state machines, not DAGs. Loops such as `Socket-4 (Build) -> Socket-5 (Auto-Eval) -> Socket-6 (Maintain) -> Socket-4 (Build)` are valid and model repeated work-item sections/retry paths; runtime node-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Prefer declaring a top-level generator materia with `generates: { output: "workItems", listType: "array", itemType: "workItem", ... }`, wiring its JSON node with `parse: "json"` and an assign entry that maps the output key from the matching JSON handoff path (for example `"workItems": "$.workItems"`), then adding a loadout-level `loops` region with `consumes: { from, output }`. pi-materia derives the loop consumer iterator path from that generator declaration (defaulting to `state.${output}`) instead of tagging arbitrary loop members as iterators. Generated units of work intentionally use `workItems`; pi-materia does not retain a `tasks` compatibility output for new generated work units. See [docs/handoff-contract.md](docs/handoff-contract.md), [docs/graph-semantics.md](docs/graph-semantics.md), and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
 
 Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, optional `multiTurn`, and optional `generates` metadata for list-producing materia. Set `"multiTurn": true` on a materia to let any agent node using that materia pause for interactive refinement until the user runs `/materia continue`.
 
@@ -267,7 +267,7 @@ Examples of refinement replies that do **not** finalize or advance the node:
 
 - `Let's do a full CRT-inspired shader with phosphor glow.`
 - `Add rollback steps before we continue.`
-- `Can you split the bootstrap work into its own task?`
+- `Can you split the bootstrap work into its own work item?`
 - `Continue refining the risk section.`
 
 Natural-language replies never finalize or advance the node, even when they say things like `ready to continue`, `looks good, proceed`, or `finalize`. When the latest draft is ready, run `/materia continue`; this command is the only supported way to finalize a paused multi-turn node.
@@ -303,16 +303,16 @@ The bundled config wires the `interactivePlan` materia, which has `multiTurn: tr
           "type": "agent",
           "materia": "interactivePlan",
           "parse": "json",
-          "assign": { "tasks": "$.tasks" },
+          "assign": { "workItems": "$.workItems", "guidance": "$.guidance" },
           "next": "Build"
         },
-        "Build": { "type": "agent", "materia": "Build", "foreach": { "items": "state.tasks", "as": "task", "cursor": "taskIndex", "done": "end" }, "next": "end" }
+        "Build": { "type": "agent", "materia": "Build", "foreach": { "items": "state.workItems", "as": "workItem", "cursor": "workItemIndex", "done": "end" }, "next": "end" }
       }
     }
   },
   "materia": {
-    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return JSON with shape: { \"tasks\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[] }] }. Request: {{request}}" },
-    "Build": { "tools": "coding", "prompt": "Implement exactly the assigned task." }
+    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return the generic handoff envelope with shape: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks. Request: {{request}}" },
+    "Build": { "tools": "coding", "prompt": "Implement exactly the assigned workItem using adapter-provided guidance." }
   }
 }
 ```
@@ -359,9 +359,9 @@ Each cast writes enough information to debug the run after the fact:
 
 The bundled defaults live at `config/default.json` and set `activeLoadout` to `Full-Auto`.
 
-- `Full-Auto`: the autonomous software-development workflow. The `planner` materia immediately produces structured task artifacts from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
-- `Planning-Consult`: the conversational planning workflow. The planner node uses the `interactivePlan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate task JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
+- `Full-Auto`: the autonomous software-development workflow. The `planner` materia immediately produces a generic handoff envelope with structured `workItems` from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
+- `Planning-Consult`: the conversational planning workflow. The planner node uses the `interactivePlan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate work-item JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
 
-When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate task"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured `{ "tasks": [...] }` artifacts, and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
+When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured generic envelope (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing`), and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 
-Both loadouts are defined entirely as config using top-level materia prompts, JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
+Both loadouts are defined entirely as config using top-level reusable materia prompts plus socket/node adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-6`); materia identity stays in node fields such as `materia` or `utility`, while displays can add context like `Socket-4 (Build)`. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
