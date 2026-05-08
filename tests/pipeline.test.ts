@@ -145,20 +145,20 @@ describe("loadout-aware pipeline resolution", () => {
           entry: "Socket-1",
           loops: {
             taskIteration: {
-              label: "Generated task loop",
+              label: "Generated workItems loop",
               nodes: ["Socket-2"],
-              consumes: { from: "Socket-1", output: "tasks" },
+              consumes: { from: "Socket-1", output: "workItems" },
               exit: { from: "Socket-2", when: "satisfied", to: "end" },
             },
           },
           nodes: {
-            "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
           },
         },
       },
       materia: {
-        planner: { tools: "readOnly", prompt: "Plan.", generates: { output: "tasks", as: "task", cursor: "taskIndex", done: "end", listType: "array", itemType: "task" } },
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
         Build: { tools: "coding", prompt: "Build." },
       },
     };
@@ -166,10 +166,10 @@ describe("loadout-aware pipeline resolution", () => {
     const pipeline = resolvePipeline(config);
     const lines = renderGrid(config, pipeline, "test", "/tmp/project");
 
-    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
-    expect(loopIteratorForNode(pipeline, "Socket-2")?.items).toBe("state.tasks");
-    expect(lines).toContain("- planner: tools=readOnly, model=active Pi model, thinking=active Pi thinking, generates=tasks:array<task>");
-    expect(lines).toContain("loop taskIteration (Generated task loop): [Socket-2] consumes=Socket-1.tasks iterator=state.tasks as task done end exit=Socket-2.satisfied->end");
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+    expect(loopIteratorForNode(pipeline, "Socket-2")?.items).toBe("state.workItems");
+    expect(lines).toContain("- planner: tools=readOnly, model=active Pi model, thinking=active Pi thinking, generator=workItems:array<workItem>");
+    expect(lines).toContain("loop taskIteration (Generated workItems loop): [Socket-2] consumes=Socket-1.workItems iterator=state.workItems as workItem done end exit=Socket-2.satisfied->end");
   });
 
   test("resolvePipeline migrates legacy iterator loops when one inbound generator edge identifies the consumer", () => {
@@ -551,7 +551,7 @@ describe("utility pipeline nodes", () => {
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
-    expect(config.materia.planner?.generates).toMatchObject({ output: "workItems", listType: "array", itemType: "workItem" });
+    expect(config.materia.planner?.generator).toBe(true);
     expect(loadout.loops?.taskIteration.nodes).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
     expect(loadout.loops?.taskIteration.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });
     expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "Socket-3", output: "workItems" });

@@ -183,11 +183,13 @@ describe('Materia loadout grid editor', () => {
 
   it('marks generator materia and generator edges distinctly without tagging loop members as iterators', async () => {
     const config = structuredClone(testConfig);
+    (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };
+    (config.loadouts['Full-Auto'].nodes['Socket-1'] as any).assign = { workItems: '$.workItems' };
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
-        label: 'Build → Eval → Maintain until all tasks complete',
+        label: 'Build → Eval → Maintain until all work items complete',
         nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
-        consumes: { from: 'Socket-1', output: 'tasks' },
+        consumes: { from: 'Socket-1', output: 'workItems' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
       },
     } as never;
@@ -197,27 +199,27 @@ describe('Materia loadout grid editor', () => {
 
     const palettePlanner = await screen.findByTestId('palette-planner');
     expect(palettePlanner.classList.contains('palette-orb-generator')).toBe(true);
-    expect(palettePlanner.textContent).toContain('List: tasks');
-    expect(palettePlanner.getAttribute('title')).toContain('Generated list output: tasks (task list)');
+    expect(palettePlanner.textContent).toContain('Generator');
+    expect(palettePlanner.getAttribute('title')).toContain('Generator: canonical workItems output');
 
     const planner = screen.getByTestId('socket-Socket-1');
     expect(planner.classList.contains('materia-socket-generator')).toBe(true);
-    expect(planner.textContent).toContain('List: tasks');
+    expect(planner.textContent).toContain('Generator');
     const plannerBadge = planner.querySelector('.graph-iterator-badge');
     expect(plannerBadge?.classList.contains('materia-generator-badge')).toBe(true);
-    expect(plannerBadge?.textContent).toBe('List: tasks');
+    expect(plannerBadge?.textContent).toBe('Generator');
 
     const generatorEdge = screen.getByTestId('edge-Socket-1-Socket-2-0');
     expect(generatorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
-    expect(generatorEdge.textContent).toContain('Generates output: tasks');
+    expect(generatorEdge.textContent).toContain('Generates output: workItems');
     expect(generatorEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-generator-edge-arrow)');
 
     const build = screen.getByTestId('socket-Socket-2');
     expect(build.classList.contains('materia-socket-iterator')).toBe(false);
     expect(build.textContent).not.toContain('Iterator');
     expect(build.textContent).not.toContain('Loop consumer');
-    expect(build.getAttribute('title')).toContain('Loop consumes: Socket-1.tasks');
-    expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Loop consumes: Socket-1.tasks');
+    expect(build.getAttribute('title')).toContain('Loop consumes: Socket-1.workItems');
+    expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Loop consumes: Socket-1.workItems');
   });
 
   it('highlights only loop-member sockets with coordinated per-loop accents', async () => {

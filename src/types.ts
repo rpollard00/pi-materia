@@ -356,9 +356,9 @@ export interface MateriaLoopConfig {
 }
 
 export interface MateriaLoopConsumerConfig {
-  /** Socket id of an agent node whose referenced materia declares generates metadata. */
+  /** Socket id of an agent node whose referenced materia is marked `generator: true`. */
   from: string;
-  /** Generated output key to consume. Defaults to the generator declaration output. */
+  /** Generated output key to consume. Defaults to the canonical generator output (`workItems`). */
   output?: string;
   /** Loop item variable override. Defaults to generator.as. */
   as?: string;

@@ -1,5 +1,6 @@
 import { resolveArtifactRoot } from "./config.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
+import { canonicalGeneratorConfigFor, isGeneratorMateria } from "./generator.js";
 import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
@@ -123,7 +124,8 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
   if (rawMateria.multiTurn !== undefined && typeof rawMateria.multiTurn !== "boolean") {
     throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
   }
-  validateGeneratorDeclaration(name, rawMateria.generates);
+  validateGeneratorMarker(name, rawMateria.generator);
+  validateLegacyGeneratorDeclaration(name, rawMateria.generates);
 }
 
 function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, unknown>): void {
@@ -133,10 +135,18 @@ function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, un
   if (rawMateria.timeoutMs !== undefined && (!Number.isFinite(rawMateria.timeoutMs) || Number(rawMateria.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
-  validateGeneratorDeclaration(name, rawMateria.generates);
+  validateGeneratorMarker(name, rawMateria.generator);
+  validateLegacyGeneratorDeclaration(name, rawMateria.generates);
 }
 
-function validateGeneratorDeclaration(name: string, generates: unknown): void {
+function validateGeneratorMarker(name: string, generator: unknown): void {
+  if (generator !== undefined && typeof generator !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
+  }
+}
+
+// Migration-only validation for existing saved configs that still author `generates`.
+function validateLegacyGeneratorDeclaration(name: string, generates: unknown): void {
   if (generates === undefined) return;
   if (!isPlainObject(generates)) throw new Error(`Materia "${name}" has invalid generates. Expected an object.`);
   if (typeof generates.output !== "string" || generates.output.length === 0) throw new Error(`Materia "${name}" has invalid generates.output. Expected a non-empty string.`);
@@ -149,7 +159,7 @@ function validateGeneratorDeclaration(name: string, generates: unknown): void {
 
 function isGeneratorPipelineNode(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, nodeId: string): boolean {
   const node = pipeline.nodes[nodeId];
-  return Boolean(node?.type === "agent" && config.materia[node.materia]?.generates);
+  return Boolean(node?.type === "agent" && isGeneratorMateria(config.materia[node.materia]));
 }
 
 function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
@@ -165,7 +175,7 @@ function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPi
       const from = uniqueGeneratorIds[0];
       const source = pipeline.nodes[from];
       if (source?.type !== "agent") continue;
-      const output = config.materia[source.materia]?.generates?.output;
+      const output = canonicalGeneratorConfigFor(config.materia[source.materia])?.output;
       if (output) loop.consumes = { from, output };
     } else if (uniqueGeneratorIds.length > 1) {
       throw new Error(`Legacy loop "${loopId}" declares iterator metadata but no consumes generator. Add loops.${loopId}.consumes with exactly one generator source; found inbound generator sockets: ${uniqueGeneratorIds.join(", ")}.`);
@@ -178,10 +188,10 @@ function validateGeneratorNodeContracts(config: PiMateriaConfig, effective: Effe
   for (const id of consumedGeneratorIds) {
     const node = effective.pipeline.nodes[id];
     if (!node || node.type !== "agent") continue;
-    const generator = config.materia[node.materia]?.generates;
+    const generator = canonicalGeneratorConfigFor(config.materia[node.materia]);
     if (!generator) continue;
-    if (generator.listType !== "array") throw new Error(`Generator materia "${node.materia}" must declare generates.listType="array" for loop-consumable output "${generator.output}".`);
-    if (!generator.itemType) throw new Error(`Generator materia "${node.materia}" must declare generates.itemType for loop-consumable output "${generator.output}".`);
+    if (generator.listType !== "array") throw new Error(`Generator materia "${node.materia}" must resolve listType="array" for loop-consumable output "${generator.output}".`);
+    if (!generator.itemType) throw new Error(`Generator materia "${node.materia}" must resolve an itemType for loop-consumable output "${generator.output}".`);
     if (node.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON to expose generated output "${generator.output}".`);
     const assignedPath = node.assign?.[generator.output];
     if (assignedPath !== `$.${generator.output}`) {
@@ -267,7 +277,8 @@ function formatCommand(command: string[] | undefined): string {
 }
 
 function formatMateriaDetails(materia: MateriaConfig): string {
-  const generator = materia.generates ? `generates=${materia.generates.output}:${materia.generates.listType}<${materia.generates.itemType}>` : undefined;
+  const generatorConfig = canonicalGeneratorConfigFor(materia);
+  const generator = generatorConfig ? `generator=${generatorConfig.output}:${generatorConfig.listType}<${generatorConfig.itemType}>` : undefined;
   if (materia.type === "utility") {
     return [`type=utility`, materia.utility ? `utility=${materia.utility}` : `command=${formatCommand(materia.command)}`, `parse=${materia.parse ?? "text"}`, generator].filter(Boolean).join(", ");
   }
@@ -335,8 +346,8 @@ function generatorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConf
   const source = pipeline.nodes[consumer.from];
   if (!source) throw new Error(`Loop "${loopId}" consumes unknown generator socket "${consumer.from}".`);
   if (source.type !== "agent") throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but only agent materia can declare generated outputs.`);
-  const generator = config.materia[source.materia]?.generates;
-  if (!generator) throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but materia "${source.materia}" does not declare generates metadata.`);
+  const generator = canonicalGeneratorConfigFor(config.materia[source.materia]);
+  if (!generator) throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but materia "${source.materia}" is not marked as a Generator.`);
   return generator;
 }
 

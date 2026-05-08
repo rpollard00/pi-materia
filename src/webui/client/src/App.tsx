@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
+import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG, canonicalGeneratorConfigFor, isGeneratorMateria } from '../../../generator.js';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
   buildMateriaPalette,
@@ -285,8 +286,7 @@ function toggledEdgeCondition(when?: string): MateriaEdgeCondition {
 }
 
 function materiaGeneratorOutput(definition?: NonNullable<MateriaConfig['materia']>[string]): string | undefined {
-  if (definition?.generator === true) return 'workItems';
-  return definition?.generates?.output;
+  return canonicalGeneratorConfigFor(definition)?.output;
 }
 
 function isGeneratorSocket(node?: PipelineNode, definitions?: MateriaConfig['materia']): boolean {
@@ -304,7 +304,12 @@ function formatIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig
   const referenced = extractMateriaReference(node);
   const definition = referenced ? definitions?.[referenced.materia] : undefined;
   const generatorOutput = materiaGeneratorOutput(definition);
-  if (generatorOutput) return definition?.generator === true ? 'Generator: canonical workItems output' : `Generated list output: ${generatorOutput}${definition?.generates?.itemType ? ` (${definition.generates.itemType} list)` : ''}`;
+  if (generatorOutput) {
+    const generatorConfig = canonicalGeneratorConfigFor(definition);
+    return definition?.generator === true
+      ? 'Generator: canonical workItems output'
+      : `Generator: migration-only ${generatorOutput}${generatorConfig?.itemType ? ` (${generatorConfig.itemType} list)` : ''}`;
+  }
   const foreach = node?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
   if (foreach) return `Iterator: ${foreach.items}${foreach.as ? ` as ${foreach.as}` : ''}${foreach.done ? ` until ${foreach.done}` : ''}`;
   return 'Iterator materia';
@@ -331,10 +336,10 @@ function generatorLoopEdgeLabel(edge: LoadoutEdge, loadout: PipelineConfig | und
 }
 
 function iteratorBadgeLabel(details?: string): string {
-  if (details?.startsWith('Generator:')) return 'Generator';
-  if (details?.startsWith('Generated list output:')) {
-    const output = details.slice('Generated list output:'.length).trim().split(/\s|\(/)[0];
-    return output ? `List: ${output}` : 'Generated list';
+  if (details?.startsWith('Generator: canonical')) return 'Generator';
+  if (details?.startsWith('Generator: migration-only')) {
+    const output = details.slice('Generator: migration-only'.length).trim().split(/\s|\(/)[0];
+    return output ? `Legacy: ${output}` : 'Legacy generator';
   }
   return 'Iterator';
 }
@@ -838,7 +843,7 @@ function parseOptionalFiniteNumber(label: string, raw: string, errors: string[])
 type GeneratedListOutputConfig = NonNullable<NonNullable<MateriaConfig['materia']>[string]['generates']>;
 
 function canonicalWorkItemsGeneratorConfig(): GeneratedListOutputConfig {
-  return { output: 'workItems', listType: 'array', itemType: 'workItem', as: 'workItem', cursor: 'workItemIndex', done: 'end' };
+  return { ...CANONICAL_WORK_ITEMS_GENERATOR_CONFIG };
 }
 
 function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
@@ -1386,7 +1391,7 @@ export function App() {
     });
     const uniqueGeneratorInputs = Array.from(new Map(generatorInputs.map((input) => [`${input.from}\u0000${input.output}`, input])).values());
     if (uniqueGeneratorInputs.length !== 1) {
-      setStatus(`Cannot create loop; selected sockets need exactly one inbound generated-list edge, found ${uniqueGeneratorInputs.length}.`);
+      setStatus(`Cannot create loop; selected sockets need exactly one inbound Generator edge, found ${uniqueGeneratorInputs.length}.`);
       return;
     }
     const generator = uniqueGeneratorInputs[0];
@@ -1586,7 +1591,7 @@ export function App() {
     const definition = materia[id];
     if (!definition) return;
     const isUtility = definition.type === 'utility';
-    const generator = definition.generator === true || Boolean(definition.generates);
+    const generator = isGeneratorMateria(definition);
     setMateriaForm({
       editingNodeId: id,
       name: id,
@@ -1789,7 +1794,7 @@ export function App() {
               <div>
                 <h2 className="text-2xl font-bold">Visual materia grid</h2>
                 <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
-                <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a generated-list materia.</p>
+                <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.</p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>

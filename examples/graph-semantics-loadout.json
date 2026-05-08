@@ -88,14 +88,7 @@
     "planner": {
       "tools": "readOnly",
       "prompt": "Return only the generic handoff JSON envelope: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks.",
-      "generates": {
-        "output": "workItems",
-        "listType": "array",
-        "itemType": "workItem",
-        "as": "workItem",
-        "cursor": "workItemIndex",
-        "done": "end"
-      }
+      "generator": true
     },
     "Build": {
       "tools": "coding",

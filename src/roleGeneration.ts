@@ -138,17 +138,17 @@ export function buildRoleGenerationPrompt(
 }
 
 function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefined): string {
-  if (!generates) return "Generated list output configuration: none configured.";
+  if (!generates) return "Generator role: none configured.";
   return [
-    "Generated list output configuration:",
-    `- output key: ${generates.output}`,
+    "Generator role: produce the canonical workItems list for downstream loop regions.",
+    `- canonical output key: ${generates.output}`,
     `- list type: ${generates.listType}`,
     `- item type: ${generates.itemType}`,
     generates.items ? `- items path: ${generates.items}` : undefined,
-    generates.as ? `- item alias: ${generates.as}` : undefined,
+    generates.as ? `- work item alias: ${generates.as}` : undefined,
     generates.cursor ? `- cursor: ${generates.cursor}` : undefined,
     generates.done ? `- done behavior: ${generates.done}` : undefined,
-    "If this configuration is present, treat it as node/socket adapter metadata for assignment and iteration. The generated role prompt must still use the canonical handoff envelope and put generated units of work in workItems, not in a placement-specific output key such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
+    "Treat this as node/socket adapter metadata for assignment and iteration. The generated role prompt must use the canonical handoff envelope and put generated units of work in workItems, not in reserved evaluator/route fields or legacy placement-specific outputs such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
   ].filter(Boolean).join("\n");
 }
 

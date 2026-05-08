@@ -20,26 +20,19 @@ Edges are evaluated in order and the first matching edge wins. Put guarded edges
 
 ## Generator and loop-consumer regions
 
-Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's `generates` declaration, and documents an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. The `exit.from` socket must exist and be one of the loop members.
+Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's canonical Generator config, and documents an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. The `exit.from` socket must exist and be one of the loop members.
 
-A generator materia declares its list contract at the top level. For reusable work planning, use the generic handoff envelope and generate `workItems`; do not retain `tasks` as a compatibility output for newly generated units of work:
+A Generator materia uses the semantic authored marker `generator: true`. Runtime resolves that marker to the canonical work-items contract (`workItems`, `workItem`, `workItemIndex`, `end`). For reusable work planning, use the generic handoff envelope and generate `workItems`; do not retain `tasks` as a compatibility output for newly generated units of work:
 
 ```json
 "planner": {
   "tools": "readOnly",
   "prompt": "Return the generic handoff envelope with workItems.",
-  "generates": {
-    "output": "workItems",
-    "listType": "array",
-    "itemType": "workItem",
-    "as": "workItem",
-    "cursor": "workItemIndex",
-    "done": "end"
-  }
+  "generator": true
 }
 ```
 
-Any node whose loop consumes that generator must parse JSON and assign the declared output from the handoff JSON, for example `"parse": "json"` and `"assign": { "workItems": "$.workItems" }`. The derived loop iterator defaults to `state.<output>` unless `generates.items` supplies an explicit runtime state path.
+Any node whose loop consumes that generator must parse JSON and assign the canonical output from the handoff JSON, for example `"parse": "json"` and `"assign": { "workItems": "$.workItems" }`. The derived loop iterator defaults to `state.workItems`.
 
 A loadout declares the consumer region separately from the generator materia:
 
@@ -54,7 +47,7 @@ A loadout declares the consumer region separately from the generator materia:
 }
 ```
 
-`consumes.from` is the socket id of the generator node, not the materia definition name. `consumes.output` must match the generator's declared `generates.output`; omit it only when the default is unambiguous. Optional `as`, `cursor`, and `done` overrides belong on `consumes` only when that loop intentionally differs from the generator defaults.
+`consumes.from` is the socket id of the generator node, not the materia definition name. `consumes.output` defaults to the canonical Generator output `workItems`; include it only to be explicit or when migrating a legacy config. Optional `as`, `cursor`, and `done` overrides belong on `consumes` only when that loop intentionally differs from the generator defaults.
 
 In the bundled default loadouts, socket ids are sequential placement identifiers (`Socket-1`, `Socket-2`, ...). Keep materia identity in the node's `materia`, `utility`, labels, or palette metadata rather than encoding names such as `Build` or `planner` into socket ids. User-facing displays may combine both, for example `Socket-4 (Build)`, but routing, loop `nodes`, `consumes.from`, `exit.from`, and `advance` references should use the socket ids.
 
@@ -79,7 +72,7 @@ Generator materia are marked with a **Generator** badge. Sockets inside loop reg
 
 Older layouts may have loop regions with direct `iterator` metadata but no `consumes` generator declaration. pi-materia preserves explicit iterator-only loops for non-generator workflows. When a legacy iterator loop has exactly one inbound edge from a generator materia, `resolvePipeline` migrates the resolved loop by adding `consumes: { from, output }` from that generator while preserving the original iterator fields for runtime compatibility.
 
-If a legacy iterator loop has more than one inbound generator edge, pi-materia fails with a remediation error that names the candidate generator sockets. Fix the layout by adding an explicit `loops.<id>.consumes` entry and ensuring only one generator edge enters the selected cycle. If the intended generator is not detected, declare `generates` on that materia and make the generator socket parse JSON with `assign: { "<output>": "$.<output>" }`.
+If a legacy iterator loop has more than one inbound generator edge, pi-materia fails with a remediation error that names the candidate generator sockets. Fix the layout by adding an explicit `loops.<id>.consumes` entry and ensuring only one generator edge enters the selected cycle. If the intended generator is not detected, set `generator: true` on that materia and make the generator socket parse JSON with `assign: { "workItems": "$.workItems" }`. Existing authored `generates` metadata is supported only as migration compatibility for saved configs, not as the canonical schema.
 
 ## Example
 

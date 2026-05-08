@@ -37,7 +37,7 @@ describe("Materia role prompt generation service", () => {
   });
 
   test("generates prompt text with fallback active model settings", async () => {
-    const generates = { output: "tasks", listType: "array" as const, itemType: "task", as: "task", cursor: "taskIndex", done: "end" };
+    const generates = { output: "workItems", listType: "array" as const, itemType: "workItem", as: "workItem", cursor: "workItemIndex", done: "end" };
     const result = await generateMateriaRolePrompt(fakePi("high"), fakeCtx(), { brief: "review docs changes", generates }, {
       profile: { enabled: true },
       generator: async ({ brief, generates: generatorConfig, settings }) => {
@@ -68,33 +68,33 @@ describe("Materia role prompt generation service", () => {
     expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).toContain('"satisfied" is the canonical boolean control field');
     expect(prompt).toContain("Legacy names such as \"passed\" are not canonical handoff fields");
-    expect(prompt).toContain("Generated list output configuration: none configured.");
+    expect(prompt).toContain("Generator role: none configured.");
     expect(prompt).toContain("Additional operator instructions:\nKeep it terse.");
     expect(prompt).toContain("User brief:\ncreate an evaluator role");
   });
 
-  test("includes generated list output metadata in prompt context", () => {
+  test("includes Generator workItems metadata in prompt context", () => {
     const prompt = buildRoleGenerationPrompt("create a planner role", {}, {
-      output: "tasks",
-      items: "state.tasks",
+      output: "workItems",
+      items: "state.workItems",
       listType: "array",
-      itemType: "task",
-      as: "task",
-      cursor: "taskIndex",
+      itemType: "workItem",
+      as: "workItem",
+      cursor: "workItemIndex",
       done: "end",
     });
 
-    expect(prompt).toContain("Generated list output configuration:");
-    expect(prompt).toContain("- output key: tasks");
+    expect(prompt).toContain("Generator role: produce the canonical workItems list");
+    expect(prompt).toContain("- canonical output key: workItems");
     expect(prompt).toContain("- list type: array");
-    expect(prompt).toContain("- item type: task");
-    expect(prompt).toContain("- items path: state.tasks");
-    expect(prompt).toContain("- item alias: task");
-    expect(prompt).toContain("- cursor: taskIndex");
+    expect(prompt).toContain("- item type: workItem");
+    expect(prompt).toContain("- items path: state.workItems");
+    expect(prompt).toContain("- work item alias: workItem");
+    expect(prompt).toContain("- cursor: workItemIndex");
     expect(prompt).toContain("- done behavior: end");
     expect(prompt).toContain("adapter metadata for assignment and iteration");
-    expect(prompt).toContain("generated role prompt must still use the canonical handoff envelope");
-    expect(prompt).toContain("workItems, not in a placement-specific output key such as tasks");
+    expect(prompt).toContain("generated role prompt must use the canonical handoff envelope");
+    expect(prompt).toContain("legacy placement-specific outputs such as tasks");
   });
 
   test("applies roleGeneration model and thinking overrides", () => {

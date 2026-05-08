@@ -7,6 +7,7 @@ import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig, loopIteratorForNode } from "./pipeline.js";
 import { parseJson } from "./json.js";
+import { canonicalGeneratorConfigFor } from "./generator.js";
 import { canonicalOutgoingEdges } from "./graphValidation.js";
 import {
   HANDOFF_CONTRACT_DOC_TEXT,
@@ -367,7 +368,7 @@ function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, n
 
 function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, node?: ResolvedMateriaNode): boolean {
   if (!Array.isArray(state.data.workItems) || state.data.workItems.length === 0) return true;
-  return Boolean(node && isAgentResolvedNode(node) && node.materia.generates?.output === "workItems");
+  return Boolean(node && isAgentResolvedNode(node) && canonicalGeneratorConfigFor(node.materia)?.output === "workItems");
 }
 
 function applyAssignments(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): void {
