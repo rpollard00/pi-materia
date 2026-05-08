@@ -1496,8 +1496,12 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('materia-prompt'), { target: { value: 'Keep this existing prompt.' } });
-    fireEvent.change(screen.getByTestId('role-generation-brief'), { target: { value: 'A careful reviewer materia' } });
+    const generationBrief = await screen.findByTestId('role-generation-brief');
+    const promptField = screen.getByTestId('materia-prompt');
+    expect(generationBrief.compareDocumentPosition(promptField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.change(promptField, { target: { value: 'Keep this existing prompt.' } });
+    fireEvent.change(generationBrief, { target: { value: 'A careful reviewer materia' } });
     fireEvent.click(screen.getByTestId('generate-role-prompt'));
 
     expect((await screen.findByTestId('role-generation-preview')).textContent).toContain('Generated role prompt v1');

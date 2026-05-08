@@ -2160,8 +2160,32 @@ export function App() {
             </label>
           </div>
 
+          {materiaForm.behavior === 'prompt' && (
+            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generate role prompt instructions">
+              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+                <label className="graph-field">Generate role prompt from brief
+                  <textarea data-testid="role-generation-brief" className="min-h-24" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
+                </label>
+                <button type="button" className="materia-button" data-testid="generate-role-prompt" disabled={roleGenerating || !roleBrief.trim()} onClick={() => { void generateRolePrompt(); }}>
+                  {roleGenerating ? 'Generating…' : generatedRolePrompt ? 'Regenerate' : 'Generate'}
+                </button>
+              </div>
+              {roleGenerationError && <p className="mt-3 text-sm text-rose-200" role="alert" data-testid="role-generation-error">{roleGenerationError}</p>}
+              {generatedRolePrompt && (
+                <div className="mt-4 rounded-xl border border-cyan-200/20 bg-black/30 p-4" data-testid="role-generation-preview">
+                  <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Generated preview</p>
+                  <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm text-cyan-50">{generatedRolePrompt}</pre>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button type="button" className="materia-button" data-testid="apply-generated-role-prompt" onClick={applyGeneratedRolePrompt}>Apply to prompt field</button>
+                    <button type="button" className="materia-button-secondary" data-testid="discard-generated-role-prompt" onClick={discardGeneratedRolePrompt}>Discard</button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           {materiaForm.behavior === 'prompt' ? (
-            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_14rem_14rem_14rem_10rem]">
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_14rem_14rem_14rem_10rem]">
               <label className="graph-field">Prompt
                 <textarea data-testid="materia-prompt" className="min-h-32" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
               </label>
@@ -2197,30 +2221,6 @@ export function App() {
                 <input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" />
               </label>
             </div>
-          )}
-
-          {materiaForm.behavior === 'prompt' && (
-            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generate role prompt instructions">
-              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
-                <label className="graph-field">Generate role prompt from brief
-                  <textarea data-testid="role-generation-brief" className="min-h-24" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
-                </label>
-                <button type="button" className="materia-button" data-testid="generate-role-prompt" disabled={roleGenerating || !roleBrief.trim()} onClick={() => { void generateRolePrompt(); }}>
-                  {roleGenerating ? 'Generating…' : generatedRolePrompt ? 'Regenerate' : 'Generate'}
-                </button>
-              </div>
-              {roleGenerationError && <p className="mt-3 text-sm text-rose-200" role="alert" data-testid="role-generation-error">{roleGenerationError}</p>}
-              {generatedRolePrompt && (
-                <div className="mt-4 rounded-xl border border-cyan-200/20 bg-black/30 p-4" data-testid="role-generation-preview">
-                  <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Generated preview</p>
-                  <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm text-cyan-50">{generatedRolePrompt}</pre>
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <button type="button" className="materia-button" data-testid="apply-generated-role-prompt" onClick={applyGeneratedRolePrompt}>Apply to prompt field</button>
-                    <button type="button" className="materia-button-secondary" data-testid="discard-generated-role-prompt" onClick={discardGeneratedRolePrompt}>Discard</button>
-                  </div>
-                </div>
-              )}
-            </section>
           )}
 
           <div className="mt-5 flex flex-wrap gap-3">
