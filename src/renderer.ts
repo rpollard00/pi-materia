@@ -1,9 +1,11 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Box, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
+import { formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 
 interface MateriaMessageDetails {
   prefix?: string;
+  nodeId?: string;
   materiaName?: string;
   eventType?: string;
 }
@@ -12,10 +14,11 @@ export function registerMateriaRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer<MateriaMessageDetails>("pi-materia", (message, { expanded }, theme) => {
     const details = message.details as MateriaMessageDetails | undefined;
     const prefix = details?.prefix ?? "materia";
-    const materia = details?.materiaName ? ` ${details.materiaName}` : "";
+    const materia = formatMateriaNotificationDisplay(details?.materiaName, details?.nodeId).label;
     const event = details?.eventType ? ` ${details.eventType.replace(/_/g, " ")}` : "";
-    const label = theme.fg("customMessageLabel", `◆ Materia:${materia}`);
-    const sublabel = theme.fg("dim", ` ${prefix}${event}`);
+    const compactPrefix = prefix === details?.nodeId ? "materia" : prefix;
+    const label = theme.fg("customMessageLabel", `◆ Materia: ${materia}`);
+    const sublabel = theme.fg("dim", ` ${compactPrefix}${event}`);
 
     const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
     box.addChild(new Text(`${label}${sublabel}`, 0, 0));

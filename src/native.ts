@@ -11,6 +11,7 @@ import { canonicalOutgoingEdges } from "./graphValidation.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_SATISFIED_FIELD } from "./handoffContract.js";
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
+import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
 import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, PiMateriaConfig, ResolvedMateriaAgentNode, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
@@ -888,12 +889,12 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
   await appendManifest(state, { phase: state.phase, node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, kind: "context", materiaModel: state.currentMateriaModel });
 
-  const label = state.currentItemLabel ? `${state.phase}: ${state.currentItemLabel}` : state.phase;
+  const display = formatMateriaNotificationDisplay(state.currentMateria, state.currentNode);
   pi.sendMessage({
     customType: "pi-materia",
-    content: `Casting **${state.currentMateria ?? "materia"}**\n\n${label}`,
+    content: formatMateriaCastContent(state.currentMateria, state.currentNode, state.currentItemLabel),
     display: true,
-    details: { prefix: label, nodeId: state.currentNode, materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "materia_prompt", materiaModel: state.currentMateriaModel },
+    details: { prefix: "materia", nodeId: state.currentNode, materiaName: display.materiaName, socketOrdinal: display.socketOrdinal, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "materia_prompt", materiaModel: state.currentMateriaModel },
   });
 
   pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact, materiaModel: state.currentMateriaModel });
