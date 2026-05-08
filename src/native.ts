@@ -292,6 +292,7 @@ async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Mate
     await writeFile(path.join(state.runDir, "nodes", safePathSegment(node.id), `${nodeVisit(state, node.id)}.json`), JSON.stringify(parsed, null, 2));
   }
 
+  applyGenericHandoffEnvelope(state, parsed);
   applyAssignments(state, node, parsed);
   const advanceTarget = applyAdvance(state, node, parsed);
   const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
@@ -324,6 +325,29 @@ async function recordMultiTurnRefinement(state: MateriaCastState, node: Resolved
   await writeFile(path.join(state.runDir, artifact), text);
   await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
   return { artifact, turn };
+}
+
+function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown): void {
+  if (!isPlainObject(parsed)) return;
+
+  const envelope = isPlainObject(state.data.envelope)
+    ? { ...(state.data.envelope as Record<string, unknown>) }
+    : {};
+  for (const field of ["summary", "workItems", "guidance", "decisions", "risks", "satisfied", "feedback", "missing"] as const) {
+    if (Object.prototype.hasOwnProperty.call(parsed, field)) envelope[field] = parsed[field];
+  }
+  if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
+
+  if (Array.isArray(parsed.workItems) && parsed.workItems.length > 0) {
+    state.data.workItems = parsed.workItems;
+  }
+  if (isPlainObject(parsed.guidance)) {
+    const existing = isPlainObject(state.data.guidance) ? state.data.guidance : {};
+    state.data.guidance = { ...existing, ...parsed.guidance };
+  }
+  if (typeof parsed.summary === "string" && parsed.summary.trim()) state.data.summary = parsed.summary;
+  if (Array.isArray(parsed.decisions) && parsed.decisions.length > 0) state.data.decisions = parsed.decisions;
+  if (Array.isArray(parsed.risks) && parsed.risks.length > 0) state.data.risks = parsed.risks;
 }
 
 function applyAssignments(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): void {
@@ -825,7 +849,9 @@ function setCurrentItem(state: MateriaCastState, node: ResolvedMateriaNode): boo
   }
   const alias = loop.as ?? "item";
   setPath(state.data, "item", item);
-  setPath(state.data, alias, item);
+  setPath(state.data, "currentWorkItem", item);
+  if (alias !== "item") setPath(state.data, alias, item);
+  if (alias === "workItem" || loop.items.includes("workItems")) setPath(state.data, "workItem", item);
   const key = readObjectField(item, "id") ?? readObjectField(item, "key") ?? index;
   const label = readObjectField(item, "title") ?? readObjectField(item, "name") ?? key;
   state.currentItemKey = String(key);
@@ -940,13 +966,14 @@ function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
 
 function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
-  return materiaPrompt(node.materia, state, [multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)]);
+  return materiaPrompt(node.materia, state, [nodeAdapterContextInstruction(state, node), multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)]);
 }
 
 function buildMultiTurnFinalizationPrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
   return materiaPrompt(node.materia, state, [
     buildSyntheticCastContext(state),
+    nodeAdapterContextInstruction(state, node),
     "Command-triggered finalization: the user ran /materia continue for this multi-turn node. This is the only finalization mechanism and this is the finalization turn.",
     finalFormatInstruction(node),
   ]);
@@ -975,12 +1002,25 @@ function finalFormatInstruction(node: ResolvedMateriaNode): string {
       HANDOFF_CONTRACT_PROMPT_TEXT,
     ].join("\n\n");
   }
-  return "Final output format: return the final plain-text output for this node, with no extra refinement questions.";
+  return "Final output format: return the final plain-text implementation summary for this node. Do not emit routing JSON or evaluator control fields unless the local node prompt explicitly asks for them.";
+}
+
+function nodeAdapterContextInstruction(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
+  if (!isAgentResolvedNode(node)) return undefined;
+  if (node.node.parse === "json") return undefined;
+  const workItem = currentItem(state) ?? getPath(state.data, "currentWorkItem") ?? getPath(state.data, "workItem");
+  const guidance = getPath(state.data, "guidance") ?? {};
+  return [
+    "Node/socket adapter context: this placement supplies the current workItem and global guidance; the reusable materia should focus on its behavior, not graph placement, routing, assignment, or iteration.",
+    `Current workItem JSON: ${JSON.stringify(workItem ?? null, null, 2)}`,
+    `Global guidance JSON: ${JSON.stringify(guidance ?? {}, null, 2)}`,
+    "For text/build nodes, consume the current workItem plus global guidance and return a concise implementation summary. The node/socket adapter will handle downstream state and graph flow.",
+  ].join("\n");
 }
 
 export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaAgentConfig): string {
   const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
-  const suffixes = node && isAgentResolvedNode(node) ? [multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)] : [];
+  const suffixes = node && isAgentResolvedNode(node) ? [nodeAdapterContextInstruction(state, node), multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)] : [];
   return [renderTemplate(materia.prompt, state), ...suffixes].filter(Boolean).join("\n\n");
 }
 
@@ -1121,8 +1161,8 @@ function evaluateEdgeCondition(condition: string, state: MateriaCastState, parse
 function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
   const text = condition.trim();
   if (text === "always") return true;
-  if (text === "satisfied") return resolveValue("$.satisfied", state, parsed) === true;
-  if (text === "not_satisfied") return resolveValue("$.satisfied", state, parsed) === false;
+  if (text === "satisfied") return resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed) === true;
+  if (text === "not_satisfied") return resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed) === false;
   const exists = text.match(/^!?exists\((.+)\)$/);
   if (exists) {
     const value = resolveValue(exists[1].trim(), state, parsed);
@@ -1189,6 +1229,10 @@ function asArray(value: unknown): unknown[] {
 
 function readObjectField(value: unknown, field: string): unknown {
   return value && typeof value === "object" ? (value as Record<string, unknown>)[field] : undefined;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function stringifyTemplateValue(value: unknown): string {

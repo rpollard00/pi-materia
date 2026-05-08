@@ -23,6 +23,53 @@ function promptMessages(harness: FakePiHarness): string[] {
 }
 
 describe("native JSON prompt handoff contract guidance", () => {
+  test("injects current workItem and global guidance into plain-text agent node prompts", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "seed",
+          nodes: {
+            seed: {
+              type: "utility",
+              utility: "echo",
+              parse: "json",
+              params: {
+                output: {
+                  summary: "seeded plan",
+                  workItems: [{ id: "one", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "adapter owned", constraints: [], dependencies: [], risks: [] } }],
+                  guidance: { architecture: "reuse materia; sockets adapt placement" },
+                  decisions: [],
+                  risks: [],
+                  satisfied: true,
+                  feedback: "",
+                  missing: [],
+                },
+              },
+              edges: [{ when: "always", to: "build" }],
+            },
+            build: { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
+          },
+        },
+      },
+      materia: {
+        Build: { tools: "readOnly", prompt: "Build prompt body." },
+      },
+    });
+
+    await harness.runCommand("materia", "cast adapter context");
+
+    const prompt = promptMessages(harness).at(-1) ?? "";
+    expect(prompt).toContain("Build prompt body.");
+    expect(prompt).toContain("Node/socket adapter context");
+    expect(prompt).toContain("Current workItem JSON");
+    expect(prompt).toContain('"id": "one"');
+    expect(prompt).toContain("Global guidance JSON");
+    expect(prompt).toContain("reuse materia; sockets adapt placement");
+    expect(prompt).toContain("return a concise implementation summary");
+  });
+
   test("appends the central handoff contract to single-turn JSON agent nodes", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
