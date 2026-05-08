@@ -807,6 +807,13 @@
   gap: 0.75rem 1.5rem;
 }
 
+.materia-settings-toggle-row {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  align-self: end;
+  margin-top: 0.25rem;
+}
+
 .graph-field {
   display: flex;
   min-width: 0;
@@ -873,6 +880,10 @@
   .materia-toggle-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .materia-settings-toggle-row {
+    justify-content: flex-start;
   }
 
   .graph-field-inline {

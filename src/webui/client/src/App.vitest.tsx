@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './App.js';
 
 const testConfig = {
@@ -1649,6 +1649,24 @@ describe('Materia loadout grid editor', () => {
     expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config).not.toHaveProperty('pipeline');
     expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.' });
+  });
+
+  it('renders prompt-only toggle controls inside settings and hides them for tool materia', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const settings = await screen.findByRole('region', { name: 'Materia settings' });
+    expect(screen.queryByText('Toggles')).toBeNull();
+    expect(settings.contains(screen.getByTestId('materia-multiturn'))).toBe(true);
+    expect(settings.contains(screen.getByTestId('materia-generates-list'))).toBe(true);
+    expect(within(settings).getByLabelText('Multiturn')).toBe(screen.getByTestId('materia-multiturn'));
+    expect(within(settings).getByLabelText('Enable generated list')).toBe(screen.getByTestId('materia-generates-list'));
+
+    fireEvent.change(screen.getByTestId('materia-behavior'), { target: { value: 'tool' } });
+    expect(screen.queryByTestId('materia-multiturn')).toBeNull();
+    expect(screen.queryByTestId('materia-generates-list')).toBeNull();
   });
 
   it('creates reusable tool invocation materia as first-class utility definitions', async () => {

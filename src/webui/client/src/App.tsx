@@ -2251,6 +2251,14 @@ export function App() {
                   <label className="graph-field">Color
                     <input data-testid="materia-color" value={materiaForm.color} onChange={(event) => setMateriaForm({ ...materiaForm, color: event.target.value })} placeholder="from-sky-200 via-cyan-300 to-blue-600" />
                   </label>
+                  <div className="materia-toggle-row materia-settings-toggle-row" aria-label="Boolean materia controls">
+                    <label className="graph-field graph-field-inline text-sm">Multiturn
+                      <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
+                    </label>
+                    <label className="graph-field graph-field-inline text-sm">Enable generated list
+                      <input data-testid="materia-generates-list" type="checkbox" checked={materiaForm.generatesList} onChange={(event) => setMateriaForm(event.target.checked ? defaultGeneratedListFields(materiaForm) : clearGeneratedListFields(materiaForm))} />
+                    </label>
+                  </div>
                 </>
               ) : (
                 <>
@@ -2268,19 +2276,6 @@ export function App() {
             </div>
           </section>
 
-          {materiaForm.behavior === 'prompt' && (
-            <section className="materia-form-section mt-5" aria-label="Boolean materia controls">
-              <p className="materia-form-section-title mb-3">Toggles</p>
-              <div className="materia-toggle-row">
-                <label className="graph-field graph-field-inline text-sm">Multiturn
-                  <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
-                </label>
-                <label className="graph-field graph-field-inline text-sm">Enable generated list
-                  <input data-testid="materia-generates-list" type="checkbox" checked={materiaForm.generatesList} onChange={(event) => setMateriaForm(event.target.checked ? defaultGeneratedListFields(materiaForm) : clearGeneratedListFields(materiaForm))} />
-                </label>
-              </div>
-            </section>
-          )}
 
           {materiaForm.behavior === 'prompt' && (
             <section className="materia-form-section mt-5" aria-label="Generate role prompt instructions">
