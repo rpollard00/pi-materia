@@ -8,7 +8,16 @@ import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig, loopIteratorForNode } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { canonicalOutgoingEdges } from "./graphValidation.js";
-import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_SATISFIED_FIELD } from "./handoffContract.js";
+import {
+  HANDOFF_DECISIONS_FIELD,
+  formatHandoffJsonFinalInstruction,
+  HANDOFF_GUIDANCE_FIELD,
+  HANDOFF_RISKS_FIELD,
+  HANDOFF_SATISFIED_FIELD,
+  HANDOFF_SUMMARY_FIELD,
+  HANDOFF_WORK_ITEMS_FIELD,
+  pickHandoffEnvelopeFields,
+} from "./handoffContract.js";
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./notificationFormatting.js";
@@ -334,21 +343,24 @@ function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, n
   const envelope = isPlainObject(state.data.envelope)
     ? { ...(state.data.envelope as Record<string, unknown>) }
     : {};
-  for (const field of ["summary", "workItems", "guidance", "decisions", "risks", "satisfied", "feedback", "missing"] as const) {
-    if (Object.prototype.hasOwnProperty.call(parsed, field)) envelope[field] = parsed[field];
-  }
+  Object.assign(envelope, pickHandoffEnvelopeFields(parsed));
   if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
 
-  if (Array.isArray(parsed.workItems) && parsed.workItems.length > 0 && shouldAdoptEnvelopeWorkItems(state, node)) {
-    state.data.workItems = parsed.workItems;
+  const workItems = parsed[HANDOFF_WORK_ITEMS_FIELD];
+  if (Array.isArray(workItems) && workItems.length > 0 && shouldAdoptEnvelopeWorkItems(state, node)) {
+    state.data.workItems = workItems;
   }
-  if (isPlainObject(parsed.guidance)) {
+  const guidance = parsed[HANDOFF_GUIDANCE_FIELD];
+  if (isPlainObject(guidance)) {
     const existing = isPlainObject(state.data.guidance) ? state.data.guidance : {};
-    state.data.guidance = { ...existing, ...parsed.guidance };
+    state.data.guidance = { ...existing, ...guidance };
   }
-  if (typeof parsed.summary === "string" && parsed.summary.trim()) state.data.summary = parsed.summary;
-  if (Array.isArray(parsed.decisions) && parsed.decisions.length > 0) state.data.decisions = parsed.decisions;
-  if (Array.isArray(parsed.risks) && parsed.risks.length > 0) state.data.risks = parsed.risks;
+  const summary = parsed[HANDOFF_SUMMARY_FIELD];
+  if (typeof summary === "string" && summary.trim()) state.data.summary = summary;
+  const decisions = parsed[HANDOFF_DECISIONS_FIELD];
+  if (Array.isArray(decisions) && decisions.length > 0) state.data.decisions = decisions;
+  const risks = parsed[HANDOFF_RISKS_FIELD];
+  if (Array.isArray(risks) && risks.length > 0) state.data.risks = risks;
 }
 
 function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, node?: ResolvedMateriaNode): boolean {
@@ -1002,12 +1014,7 @@ function singleTurnJsonFormatInstruction(node: ResolvedMateriaNode): string | un
 
 function finalFormatInstruction(node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) return "";
-  if (node.node.parse === "json") {
-    return [
-      "Final output format: Return only JSON for this node, with no markdown fences, prose, or extra commentary. Follow the central handoff contract below; if local prompt wording or adapter metadata mentions legacy placement fields such as tasks, interpret that context and still emit generated work units as workItems. Preserve and augment useful existing envelope context from Generic cast data or Previous output when applicable.",
-      HANDOFF_CONTRACT_PROMPT_TEXT,
-    ].join("\n\n");
-  }
+  if (node.node.parse === "json") return formatHandoffJsonFinalInstruction();
   return "Final output format: return the final plain-text implementation summary for this node. Do not emit routing JSON or evaluator control fields unless the local node prompt explicitly asks for them.";
 }
 

@@ -35,19 +35,33 @@ describe("handoff contract drift regressions", () => {
     expect(checkedDocs).not.toMatch(/when["`:\s]+passed/);
   });
 
-  test("bundled default config keeps evaluator prompts and edges aligned with satisfied", async () => {
+  test("bundled default config references the central handoff contract instead of inline schema blocks", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const prompt = String(rawDefault.materia?.["Auto-Eval"]?.prompt ?? "");
 
-    expect(prompt).toContain('"satisfied": boolean');
-    expect(prompt).toContain('"workItems": []');
-    expect(prompt).toContain("generic envelope shape");
+    expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(prompt).toContain("Set satisfied, feedback, and missing");
     expect(prompt).toContain("do not emit tasks");
     expect(prompt).not.toContain('"passed": boolean');
 
     const plannerPrompt = String(rawDefault.materia?.planner?.prompt ?? "");
-    expect(plannerPrompt).toContain('"workItems"');
+    const interactivePrompt = String(rawDefault.materia?.interactivePlan?.prompt ?? "");
+    expect(plannerPrompt).toContain("runtime-provided canonical handoff JSON");
+    expect(plannerPrompt).toContain("workItems");
     expect(plannerPrompt).not.toContain('"tasks"');
+
+    const maintainPrompt = String(rawDefault.materia?.Maintain?.prompt ?? "");
+    const gitMaintainPrompt = String(rawDefault.materia?.GitMaintain?.prompt ?? "");
+    expect(maintainPrompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(gitMaintainPrompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(maintainPrompt).not.toContain("return JSON with shape");
+    expect(gitMaintainPrompt).not.toContain("return JSON with shape");
+
+    const bundledPromptText = [plannerPrompt, interactivePrompt, prompt, maintainPrompt, gitMaintainPrompt].join("\n");
+    expect(bundledPromptText).not.toContain('"summary": string');
+    expect(bundledPromptText).not.toContain('"workItems": []');
+    expect(bundledPromptText).not.toContain('"satisfied": boolean');
+    expect(bundledPromptText).not.toContain("generic envelope shape");
 
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
       for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {

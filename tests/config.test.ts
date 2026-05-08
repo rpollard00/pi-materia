@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config.js";
+import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoffContract.js";
 import { getEffectivePipelineConfig, resolvePipeline } from "../src/pipeline.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {
@@ -307,10 +308,12 @@ describe("config loadouts", () => {
     }
   });
 
-  test("bundled Auto-Eval prompt emits the field consumed by satisfied edges", async () => {
+  test("bundled Auto-Eval prompt references the shared satisfied contract", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const prompt = rawDefault.materia?.["Auto-Eval"]?.prompt;
-    expect(prompt).toContain('"satisfied": boolean');
+    expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"satisfied" is the canonical boolean control field');
+    expect(prompt).not.toContain('"satisfied": boolean');
     expect(prompt).not.toContain('"passed": boolean');
   });
 
@@ -473,9 +476,9 @@ describe("config loadouts", () => {
 
     const fullAutoPrompt = loaded.config.materia.planner.prompt;
     const planningConsultPrompt = loaded.config.materia.interactivePlan.prompt;
-    expect(fullAutoPrompt).toContain("Return only JSON with the generic envelope shape");
+    expect(fullAutoPrompt).toContain("runtime-provided canonical handoff JSON contract");
     expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
-    expect(fullAutoPrompt).toContain('"workItems"');
+    expect(fullAutoPrompt).toContain("workItems");
     expect(planningConsultPrompt).toContain("Collaboratively refine an implementation plan");
     expect(planningConsultPrompt).toContain("normal conversation");
     expect(planningConsultPrompt).toContain("Ask concise clarifying questions");
@@ -483,7 +486,7 @@ describe("config loadouts", () => {
     expect(planningConsultPrompt).toContain("Do not emit the structured workItems JSON during refinement");
     expect(planningConsultPrompt).toContain("Only after the user runs /materia continue");
     expect(planningConsultPrompt).toContain("Treat all normal user messages as refinement input");
-    expect(planningConsultPrompt).toContain('"workItems"');
+    expect(planningConsultPrompt).toContain("workItems");
     expect(planningConsultPrompt).not.toContain("Return only JSON");
 
     const fullAuto = resolvePipeline(loaded.config);

@@ -2,6 +2,8 @@ import {
   HANDOFF_FEEDBACK_FIELD,
   HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
   HANDOFF_MISSING_FIELD,
+  HANDOFF_NOT_SATISFIED_EDGE_CONDITION,
+  HANDOFF_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_FIELD,
 } from "./handoffContract.js";
 import type { MateriaPipelineNodeConfig } from "./types.js";
@@ -43,9 +45,9 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
 }
 
 export function requiresSatisfiedControl(node: MateriaPipelineNodeConfig): boolean {
-  if (node.edges?.some((edge) => edge.when === "satisfied" || edge.when === "not_satisfied")) return true;
+  if (node.edges?.some((edge) => edge.when === HANDOFF_SATISFIED_EDGE_CONDITION || edge.when === HANDOFF_NOT_SATISFIED_EDGE_CONDITION)) return true;
   const advanceWhen = node.advance?.when?.trim();
-  return advanceWhen === "satisfied" || advanceWhen === "not_satisfied";
+  return advanceWhen === HANDOFF_SATISFIED_EDGE_CONDITION || advanceWhen === HANDOFF_NOT_SATISFIED_EDGE_CONDITION;
 }
 
 function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
