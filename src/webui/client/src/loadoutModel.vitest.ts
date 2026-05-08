@@ -26,6 +26,11 @@ describe('loadout socket display model', () => {
     expect(formatSocketLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Socket-1 (Empty)');
   });
 
+  it('rejects semantic ids when creating a new empty entry socket', () => {
+    expect(() => makeEmptyEntryLoadout('Build')).toThrow(/Invalid socket id "Build" referenced by new loadout entry/);
+    expect(() => makeEmptyEntryLoadout('Socket-03')).toThrow(/Expected Socket-N/);
+  });
+
   it('labels newly added compatible empty sockets as Empty while preserving socket structure', () => {
     const loadout = makeEmptyEntryLoadout();
     loadout.nodes!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];

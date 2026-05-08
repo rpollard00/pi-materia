@@ -1,4 +1,4 @@
-import { parseCanonicalSocketId } from '../../../socketIds.js';
+import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socketIds.js';
 import type { MateriaEdgeCondition } from '../../../types.js';
 
 type NodeType = 'agent' | 'utility';
@@ -128,6 +128,7 @@ export function makeEmptySocket(structure: PipelineNode = {}): PipelineNode {
 }
 
 export function makeEmptyEntryLoadout(entry = 'Socket-1'): PipelineConfig {
+  assertCanonicalSocketId(entry, 'new loadout entry');
   return { entry, nodes: { [entry]: makeEmptySocket() } };
 }
 

@@ -1007,12 +1007,12 @@ export function App() {
         activeLoadout: 'Demo Loadout',
         loadouts: {
           'Demo Loadout': {
-            entry: 'planner',
+            entry: 'Socket-1',
             nodes: {
-              planner: { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Build' }] },
-              Build: { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Auto-Eval' }] },
-              'Auto-Eval': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Maintain' }] },
-              Maintain: { type: 'agent', materia: 'Maintain' },
+              'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+              'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
+              'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Socket-4' }] },
+              'Socket-4': { type: 'agent', materia: 'Maintain' },
             },
           },
         },
