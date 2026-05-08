@@ -411,7 +411,9 @@ export interface MateriaDefinitionMetadata {
   group?: string;
   /** Tailwind gradient classes used by the Loadout UI for this materia. */
   color?: string;
-  /** Declares that this materia generates a list output consumable by loop regions. */
+  /** Marks this materia as a generator; runtime resolves the canonical workItems contract. */
+  generator?: boolean;
+  /** Legacy migration-only generated list metadata. Prefer generator: true. */
   generates?: MateriaGeneratorConfig;
 }
 

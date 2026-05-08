@@ -335,6 +335,9 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
       throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
     }
+    if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
+      throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
+    }
     validateGeneratorDeclaration(name, materia.generates);
   }
 }

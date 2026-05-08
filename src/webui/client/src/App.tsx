@@ -34,13 +34,7 @@ interface MateriaFormState {
   color: string;
   outputFormat: 'text' | 'json';
   multiTurn: boolean;
-  generatesList: boolean;
-  generatedOutput: string;
-  generatedItems: string;
-  generatedItemType: string;
-  generatedAs: string;
-  generatedCursor: string;
-  generatedDone: string;
+  generator: boolean;
   utility: string;
   command: string;
   params: string;
@@ -241,13 +235,7 @@ const emptyMateriaForm = (): MateriaFormState => ({
   color: '',
   outputFormat: 'text',
   multiTurn: false,
-  generatesList: false,
-  generatedOutput: '',
-  generatedItems: '',
-  generatedItemType: '',
-  generatedAs: '',
-  generatedCursor: '',
-  generatedDone: '',
+  generator: false,
   utility: '',
   command: '',
   params: '{}',
@@ -296,21 +284,27 @@ function toggledEdgeCondition(when?: string): MateriaEdgeCondition {
   return 'always';
 }
 
+function materiaGeneratorOutput(definition?: NonNullable<MateriaConfig['materia']>[string]): string | undefined {
+  if (definition?.generator === true) return 'workItems';
+  return definition?.generates?.output;
+}
+
 function isGeneratorSocket(node?: PipelineNode, definitions?: MateriaConfig['materia']): boolean {
   const referenced = extractMateriaReference(node);
-  return Boolean(referenced && definitions?.[referenced.materia]?.generates);
+  return Boolean(referenced && materiaGeneratorOutput(definitions?.[referenced.materia]));
 }
 
 function hasIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia']): boolean {
   if (node?.foreach) return true;
   const referenced = extractMateriaReference(node);
-  return Boolean(referenced && (definitions?.[referenced.materia]?.foreach || definitions?.[referenced.materia]?.generates));
+  return Boolean(referenced && (definitions?.[referenced.materia]?.foreach || materiaGeneratorOutput(definitions?.[referenced.materia])));
 }
 
 function formatIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia']): string {
   const referenced = extractMateriaReference(node);
-  const generator = referenced ? definitions?.[referenced.materia]?.generates : undefined;
-  if (generator) return `Generated list output: ${generator.output}${generator.itemType ? ` (${generator.itemType} list)` : ''}`;
+  const definition = referenced ? definitions?.[referenced.materia] : undefined;
+  const generatorOutput = materiaGeneratorOutput(definition);
+  if (generatorOutput) return definition?.generator === true ? 'Generator: canonical workItems output' : `Generated list output: ${generatorOutput}${definition?.generates?.itemType ? ` (${definition.generates.itemType} list)` : ''}`;
   const foreach = node?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
   if (foreach) return `Iterator: ${foreach.items}${foreach.as ? ` as ${foreach.as}` : ''}${foreach.done ? ` until ${foreach.done}` : ''}`;
   return 'Iterator materia';
@@ -337,6 +331,7 @@ function generatorLoopEdgeLabel(edge: LoadoutEdge, loadout: PipelineConfig | und
 }
 
 function iteratorBadgeLabel(details?: string): string {
+  if (details?.startsWith('Generator:')) return 'Generator';
   if (details?.startsWith('Generated list output:')) {
     const output = details.slice('Generated list output:'.length).trim().split(/\s|\(/)[0];
     return output ? `List: ${output}` : 'Generated list';
@@ -840,53 +835,10 @@ function parseOptionalFiniteNumber(label: string, raw: string, errors: string[])
   return value;
 }
 
-function defaultGeneratedListFields(form: MateriaFormState): MateriaFormState {
-  return {
-    ...form,
-    generatesList: true,
-    generatedOutput: form.generatedOutput.trim() || 'tasks',
-    generatedItemType: form.generatedItemType.trim() || 'task',
-    generatedAs: form.generatedAs.trim() || 'task',
-    generatedCursor: form.generatedCursor.trim() || 'taskIndex',
-    generatedDone: form.generatedDone.trim() || 'end',
-  };
-}
-
-function clearGeneratedListFields(form: MateriaFormState): MateriaFormState {
-  return {
-    ...form,
-    generatesList: false,
-    generatedOutput: '',
-    generatedItems: '',
-    generatedItemType: '',
-    generatedAs: '',
-    generatedCursor: '',
-    generatedDone: '',
-  };
-}
-
-function optionalTrimmed(raw: string): string | undefined {
-  const trimmed = raw.trim();
-  return trimmed || undefined;
-}
-
 type GeneratedListOutputConfig = NonNullable<NonNullable<MateriaConfig['materia']>[string]['generates']>;
 
-function buildGeneratedListConfig(form: MateriaFormState): GeneratedListOutputConfig {
-  if (!form.generatesList) throw new Error('Generated list output is not enabled.');
-  const output = form.generatedOutput.trim();
-  const itemType = form.generatedItemType.trim();
-  if (!output) throw new Error('Generated list output key is required when enabled.');
-  if (!itemType) throw new Error('Generated list item type is required when enabled.');
-  return {
-    output,
-    items: optionalTrimmed(form.generatedItems),
-    listType: 'array',
-    itemType,
-    as: optionalTrimmed(form.generatedAs),
-    cursor: optionalTrimmed(form.generatedCursor),
-    done: optionalTrimmed(form.generatedDone),
-  };
+function canonicalWorkItemsGeneratorConfig(): GeneratedListOutputConfig {
+  return { output: 'workItems', listType: 'array', itemType: 'workItem', as: 'workItem', cursor: 'workItemIndex', done: 'end' };
 }
 
 function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
@@ -923,7 +875,7 @@ function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
     thinking: form.thinking.trim() || undefined,
     color: form.color.trim() || undefined,
     multiTurn: form.multiTurn || undefined,
-    ...(form.generatesList ? { generates: buildGeneratedListConfig(form) } : form.editingNodeId ? { generates: null } : {}),
+    ...(form.generator ? { generator: true, generates: null } : form.editingNodeId ? { generator: null, generates: null } : {}),
   };
   return {
     materia: {
@@ -1400,7 +1352,7 @@ export function App() {
     const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, mutator, {
       isGeneratorNode: (nodeId) => {
         const referenced = extractMateriaReference(activeLoadout.nodes?.[nodeId]);
-        return Boolean(referenced && materia[referenced.materia]?.generates);
+        return Boolean(referenced && materiaGeneratorOutput(materia[referenced.materia]));
       },
     });
     if (!result.ok) {
@@ -1429,8 +1381,8 @@ export function App() {
     const generatorInputs = loadoutGraph.edges.flatMap((edge) => {
       if (selected.has(edge.from) || !selected.has(edge.to)) return [];
       const referenced = extractMateriaReference(activeLoadout.nodes?.[edge.from]);
-      const generator = referenced ? materia[referenced.materia]?.generates : undefined;
-      return generator ? [{ from: edge.from, output: generator.output }] : [];
+      const output = referenced ? materiaGeneratorOutput(materia[referenced.materia]) : undefined;
+      return output ? [{ from: edge.from, output }] : [];
     });
     const uniqueGeneratorInputs = Array.from(new Map(generatorInputs.map((input) => [`${input.from}\u0000${input.output}`, input])).values());
     if (uniqueGeneratorInputs.length !== 1) {
@@ -1634,7 +1586,7 @@ export function App() {
     const definition = materia[id];
     if (!definition) return;
     const isUtility = definition.type === 'utility';
-    const generates = definition.generates;
+    const generator = definition.generator === true || Boolean(definition.generates);
     setMateriaForm({
       editingNodeId: id,
       name: id,
@@ -1646,13 +1598,7 @@ export function App() {
       color: String(definition.color ?? ''),
       outputFormat: definition.parse === 'json' ? 'json' : 'text',
       multiTurn: isUtility ? false : Boolean(definition.multiTurn),
-      generatesList: !isUtility && Boolean(generates),
-      generatedOutput: !isUtility && generates ? String(generates.output ?? '') : '',
-      generatedItems: !isUtility && generates ? String(generates.items ?? '') : '',
-      generatedItemType: !isUtility && generates ? String(generates.itemType ?? '') : '',
-      generatedAs: !isUtility && generates ? String(generates.as ?? '') : '',
-      generatedCursor: !isUtility && generates ? String(generates.cursor ?? '') : '',
-      generatedDone: !isUtility && generates ? String(generates.done ?? '') : '',
+      generator: !isUtility && generator,
       utility: isUtility ? String(definition.utility ?? '') : '',
       command: isUtility ? (definition.command ?? []).join(' ') : '',
       params: isUtility ? JSON.stringify(definition.params ?? {}, null, 2) : '{}',
@@ -1672,7 +1618,7 @@ export function App() {
     setRoleGenerationError('');
     setStatus('Generating Materia role prompt preview…');
     try {
-      const generates = materiaForm.generatesList ? buildGeneratedListConfig(materiaForm) : null;
+      const generates = materiaForm.generator ? canonicalWorkItemsGeneratorConfig() : null;
       const response = await fetch('/api/generate/materia-role', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -2255,8 +2201,8 @@ export function App() {
                     <label className="graph-field graph-field-inline text-sm">Multiturn
                       <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
                     </label>
-                    <label className="graph-field graph-field-inline text-sm">Enable generated list
-                      <input data-testid="materia-generates-list" type="checkbox" checked={materiaForm.generatesList} onChange={(event) => setMateriaForm(event.target.checked ? defaultGeneratedListFields(materiaForm) : clearGeneratedListFields(materiaForm))} />
+                    <label className="graph-field graph-field-inline text-sm" title="Generator materia produce the canonical workItems list for downstream loop regions; the generated list format is runtime-defined.">Generator
+                      <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
                     </label>
                   </div>
                 </>
@@ -2301,32 +2247,10 @@ export function App() {
             </section>
           )}
 
-          {materiaForm.behavior === 'prompt' && materiaForm.generatesList && (
-            <section className="materia-form-section mt-5" aria-label="Generated list output configuration">
-              <div>
-                <p className="materia-form-section-title">Generated list output</p>
-                <p className="mt-1 text-xs text-slate-400">Declare that this role emits a configurable array output that loop regions can consume.</p>
-              </div>
-              <div className="materia-generated-grid mt-4">
-                <label className="graph-field">Output key
-                  <input data-testid="materia-generated-output" value={materiaForm.generatedOutput} onChange={(event) => setMateriaForm({ ...materiaForm, generatedOutput: event.target.value })} placeholder="tasks" />
-                </label>
-                <label className="graph-field">Item type
-                  <input data-testid="materia-generated-item-type" value={materiaForm.generatedItemType} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItemType: event.target.value })} placeholder="task" />
-                </label>
-                <label className="graph-field">Items state path (optional)
-                  <input data-testid="materia-generated-items" value={materiaForm.generatedItems} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItems: event.target.value })} placeholder="state.tasks" />
-                </label>
-                <label className="graph-field">Item alias
-                  <input data-testid="materia-generated-as" value={materiaForm.generatedAs} onChange={(event) => setMateriaForm({ ...materiaForm, generatedAs: event.target.value })} placeholder="task" />
-                </label>
-                <label className="graph-field">Cursor name
-                  <input data-testid="materia-generated-cursor" value={materiaForm.generatedCursor} onChange={(event) => setMateriaForm({ ...materiaForm, generatedCursor: event.target.value })} placeholder="taskIndex" />
-                </label>
-                <label className="graph-field">Done target
-                  <input data-testid="materia-generated-done" value={materiaForm.generatedDone} onChange={(event) => setMateriaForm({ ...materiaForm, generatedDone: event.target.value })} placeholder="end" />
-                </label>
-              </div>
+          {materiaForm.behavior === 'prompt' && materiaForm.generator && (
+            <section className="materia-form-section mt-5" aria-label="Generator behavior help">
+              <p className="materia-form-section-title">Generator</p>
+              <p className="mt-1 text-xs text-slate-400">Generator materia produce the canonical <code>workItems</code> list for downstream loop regions. The generated list shape is runtime-defined and is not configurable in authored materia definitions.</p>
             </section>
           )}
 

@@ -1481,9 +1481,9 @@ describe('Materia loadout grid editor', () => {
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('views, edits, creates, and removes generic generated list output config', async () => {
+  it('views, creates, and removes semantic Generator config without legacy fields', async () => {
     const generatorConfig = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
-    (generatorConfig.materia.planner as any).generates = { output: 'ideas', items: 'state.ideas', listType: 'array', itemType: 'idea', as: 'idea', cursor: 'ideaIndex', done: 'archive' };
+    (generatorConfig.materia.planner as any).generator = true;
     (generatorConfig.materia.interactivePlan as any).generates = { output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
@@ -1495,52 +1495,39 @@ describe('Materia loadout grid editor', () => {
 
     await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
-    expect(screen.getByTestId('materia-generates-list')).toHaveProperty('checked', true);
-    expect(screen.getByTestId('materia-generated-output')).toHaveProperty('value', 'ideas');
-    expect(screen.getByTestId('materia-generated-items')).toHaveProperty('value', 'state.ideas');
-    expect(screen.getByTestId('materia-generated-item-type')).toHaveProperty('value', 'idea');
-    expect(screen.getByTestId('materia-generated-as')).toHaveProperty('value', 'idea');
-    expect(screen.getByTestId('materia-generated-cursor')).toHaveProperty('value', 'ideaIndex');
-    expect(screen.getByTestId('materia-generated-done')).toHaveProperty('value', 'archive');
+    expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
+    expect(screen.queryByTestId('materia-generated-output')).toBeNull();
+    expect(screen.getByText(/canonical/).textContent).toContain('workItems');
 
-    fireEvent.change(screen.getByTestId('materia-generated-output'), { target: { value: 'stories' } });
-    fireEvent.change(screen.getByTestId('materia-generated-item-type'), { target: { value: 'story' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     let body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
-    expect(body.config.materia.planner.generates).toEqual({ output: 'stories', items: 'state.ideas', listType: 'array', itemType: 'story', as: 'idea', cursor: 'ideaIndex', done: 'archive' });
+    expect(body.config.materia.planner.generator).toBe(true);
+    expect(body.config.materia.planner.generates).toBeNull();
 
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'interactivePlan' } });
-    expect(screen.getByTestId('materia-generates-list')).toHaveProperty('checked', true);
-    expect(screen.getByTestId('materia-generated-output')).toHaveProperty('value', 'tasks');
-    expect(screen.getByTestId('materia-generated-item-type')).toHaveProperty('value', 'task');
-    expect(screen.getByTestId('materia-generated-as')).toHaveProperty('value', 'task');
-    expect(screen.getByTestId('materia-generated-cursor')).toHaveProperty('value', 'taskIndex');
-    expect(screen.getByTestId('materia-generated-done')).toHaveProperty('value', 'end');
+    expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
     body = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
-    expect(body.config.materia.interactivePlan.generates).toEqual({ output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' });
+    expect(body.config.materia.interactivePlan.generator).toBe(true);
+    expect(body.config.materia.interactivePlan.generates).toBeNull();
 
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
-    expect(screen.getByTestId('materia-generates-list')).toHaveProperty('checked', false);
-    fireEvent.click(screen.getByTestId('materia-generates-list'));
-    expect(screen.getByTestId('materia-generated-output')).toHaveProperty('value', 'tasks');
-    expect(screen.getByTestId('materia-generated-item-type')).toHaveProperty('value', 'task');
-    expect(screen.getByTestId('materia-generated-as')).toHaveProperty('value', 'task');
-    expect(screen.getByTestId('materia-generated-cursor')).toHaveProperty('value', 'taskIndex');
-    expect(screen.getByTestId('materia-generated-done')).toHaveProperty('value', 'end');
+    expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', false);
+    fireEvent.click(screen.getByTestId('materia-generator'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
     body = JSON.parse(String(fetchMock.mock.calls[5][1]?.body));
-    expect(body.config.materia.Build.generates).toEqual({ output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' });
+    expect(body.config.materia.Build.generator).toBe(true);
+    expect(body.config.materia.Build.generates).toBeNull();
 
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
-    fireEvent.click(screen.getByTestId('materia-generates-list'));
-    expect(screen.queryByTestId('materia-generated-output')).toBeNull();
+    fireEvent.click(screen.getByTestId('materia-generator'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(9));
     body = JSON.parse(String(fetchMock.mock.calls[7][1]?.body));
+    expect(body.config.materia.planner.generator).toBeNull();
     expect(body.config.materia.planner.generates).toBeNull();
   });
 
@@ -1593,7 +1580,7 @@ describe('Materia loadout grid editor', () => {
         const body = JSON.parse(String(init?.body));
         expect(body).toEqual({
           brief: 'Planner prompt',
-          generates: { output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' },
+          generates: { output: 'workItems', listType: 'array', itemType: 'workItem', as: 'workItem', cursor: 'workItemIndex', done: 'end' },
         });
         return new Response(JSON.stringify({ ok: true, prompt: 'Generated planner prompt' }));
       }
@@ -1660,13 +1647,13 @@ describe('Materia loadout grid editor', () => {
     const settings = await screen.findByRole('region', { name: 'Materia settings' });
     expect(screen.queryByText('Toggles')).toBeNull();
     expect(settings.contains(screen.getByTestId('materia-multiturn'))).toBe(true);
-    expect(settings.contains(screen.getByTestId('materia-generates-list'))).toBe(true);
+    expect(settings.contains(screen.getByTestId('materia-generator'))).toBe(true);
     expect(within(settings).getByLabelText('Multiturn')).toBe(screen.getByTestId('materia-multiturn'));
-    expect(within(settings).getByLabelText('Enable generated list')).toBe(screen.getByTestId('materia-generates-list'));
+    expect(within(settings).getByLabelText('Generator')).toBe(screen.getByTestId('materia-generator'));
 
     fireEvent.change(screen.getByTestId('materia-behavior'), { target: { value: 'tool' } });
     expect(screen.queryByTestId('materia-multiturn')).toBeNull();
-    expect(screen.queryByTestId('materia-generates-list')).toBeNull();
+    expect(screen.queryByTestId('materia-generator')).toBeNull();
   });
 
   it('creates reusable tool invocation materia as first-class utility definitions', async () => {

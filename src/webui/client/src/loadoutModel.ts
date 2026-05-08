@@ -73,6 +73,7 @@ export interface MateriaBehaviorConfig {
   parse?: 'text' | 'json';
   assign?: Record<string, string>;
   foreach?: { items: string; as?: string; cursor?: string; done?: string };
+  generator?: boolean;
   generates?: { output: string; items?: string; listType: 'array'; itemType: string; as?: string; cursor?: string; done?: string };
   [key: string]: unknown;
 }
@@ -109,6 +110,7 @@ const materiaBehaviorKeys = new Set([
   'timeoutMs',
   'assign',
   'foreach',
+  'generator',
   'generates',
   'model',
   'modelSettings',
