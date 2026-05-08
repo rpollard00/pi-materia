@@ -3,7 +3,13 @@ import { mkdtemp, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
-import { stringifyDeterministicHandoffOutput } from "../src/handoffContract.js";
+import {
+  HANDOFF_RESERVED_EVALUATOR_FIELDS,
+  HANDOFF_SATISFIED_FIELD,
+  HANDOFF_WORK_ITEMS_FIELD,
+  createHandoffEnvelope,
+  stringifyDeterministicHandoffOutput,
+} from "../src/handoffContract.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
@@ -105,6 +111,29 @@ describe("native utility node execution", () => {
     const nativeSource = await readFile(path.resolve("src", "native.ts"), "utf8");
     expect(nativeSource).toContain("stringifyDeterministicHandoffOutput(value)");
     expect(nativeSource).not.toContain("JSON.stringify(value)");
+  });
+
+  test("deterministic utility handoff JSON preserves workItems and reserved evaluator fields", async () => {
+    const output = createHandoffEnvelope({
+      summary: "planned",
+      workItems: [{ id: "one", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "shared contract", constraints: [], dependencies: [], risks: [] } }],
+      satisfied: false,
+      feedback: "needs build",
+      missing: ["implementation"],
+    });
+    const harness = await makeHarness(utilityConfig({ utility: "echo", parse: "json", params: { output }, assign: { workItems: "$.workItems", feedback: "$.feedback" } }));
+
+    await harness.runCommand("materia", "cast deterministic envelope");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; lastJson?: Record<string, unknown>; runDir?: string };
+    expect(state.phase).toBe("complete");
+    expect(state.lastJson?.[HANDOFF_WORK_ITEMS_FIELD]).toEqual(output.workItems);
+    expect(state.lastJson?.[HANDOFF_SATISFIED_FIELD]).toBe(false);
+    for (const field of HANDOFF_RESERVED_EVALUATOR_FIELDS) expect(state.lastJson).toHaveProperty(field);
+    expect(state.lastJson).not.toHaveProperty("tasks");
+    expect(state.data?.workItems).toEqual(output.workItems);
+    expect(state.data?.feedback).toBe("needs build");
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.md"), "utf8")).resolves.toBe(stringifyDeterministicHandoffOutput(output));
   });
 
   test("parses JSON output, assigns state, and routes edges", async () => {

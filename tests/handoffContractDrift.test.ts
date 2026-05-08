@@ -4,7 +4,9 @@ import { describe, expect, test } from "bun:test";
 import {
   HANDOFF_CONTRACT_PROMPT_TEXT,
   HANDOFF_EDGE_CONDITIONS,
+  HANDOFF_ENVELOPE_FIELDS,
   HANDOFF_RESERVED_CONTROL_FIELDS,
+  HANDOFF_RESERVED_EVALUATOR_FIELDS,
   HANDOFF_SATISFIED_FIELD,
 } from "../src/handoffContract.js";
 import { buildRoleGenerationPrompt } from "../src/roleGeneration.js";
@@ -62,6 +64,17 @@ describe("handoff contract drift regressions", () => {
     expect(bundledPromptText).not.toContain('"workItems": []');
     expect(bundledPromptText).not.toContain('"satisfied": boolean');
     expect(bundledPromptText).not.toContain("generic envelope shape");
+
+    const inlineSchemaClues = [
+      ...HANDOFF_ENVELOPE_FIELDS.map((field) => new RegExp(`${JSON.stringify(field).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:\\s*(?:\\[\\]|\\{\\}|\"(?:string|boolean)\"|string|boolean)`)),
+      /return JSON with shape/i,
+    ];
+    for (const [index, clue] of inlineSchemaClues.entries()) {
+      expect(clue.test(bundledPromptText), `inline schema clue ${index} should stay centralized`).toBe(false);
+    }
+    for (const field of HANDOFF_RESERVED_EVALUATOR_FIELDS) {
+      expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain(JSON.stringify(field));
+    }
 
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
       for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {

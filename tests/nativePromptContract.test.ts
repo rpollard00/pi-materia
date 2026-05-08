@@ -15,6 +15,13 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
+async function makeDefaultHarness(): Promise<FakePiHarness> {
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-default-prompt-contract-"));
+  const harness = new FakePiHarness(cwd);
+  piMateria(harness.pi);
+  return harness;
+}
+
 function promptMessages(harness: FakePiHarness): string[] {
   return harness.sentMessages
     .map(({ message }) => message as { customType?: string; content?: unknown })
@@ -23,6 +30,19 @@ function promptMessages(harness: FakePiHarness): string[] {
 }
 
 describe("native JSON prompt handoff contract guidance", () => {
+  test("bundled default JSON materia receive the central handoff contract at prompt assembly time", async () => {
+    const harness = await makeDefaultHarness();
+
+    await harness.runCommand("materia", "cast verify bundled contract");
+
+    const [prompt] = promptMessages(harness);
+    expect(prompt).toContain("You are the pi-materia planning materia");
+    expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(prompt).toContain("Final output format: Return only JSON for this node");
+    expect(prompt).toContain("emit generated work units as workItems");
+  });
+
   test("injects current workItem and global guidance into plain-text agent node prompts", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
