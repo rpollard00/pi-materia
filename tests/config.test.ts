@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoffContract.js";
 import { getEffectivePipelineConfig, resolvePipeline } from "../src/pipeline.js";
+import { paletteColors } from "../src/webui/client/src/loadoutModel.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-config-"));
@@ -260,6 +261,20 @@ describe("config loadouts", () => {
       },
     });
     await expect(loadConfig(withSystemPrompt.dir, withSystemPrompt.file)).rejects.toThrow(/loadout "Custom" configures obsolete systemPrompt/);
+  });
+
+  test("bundled default materia use palette colors and canonical generator markers", async () => {
+    const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
+    const allowedColors = new Set(paletteColors);
+
+    for (const [materiaId, materia] of Object.entries(rawDefault.materia ?? {}) as Array<[string, { color?: unknown; generator?: unknown; generates?: unknown }]>) {
+      expect(typeof materia.color, `${materiaId}.color`).toBe("string");
+      expect(allowedColors.has(materia.color as string), `${materiaId}.color`).toBe(true);
+      expect(materia.generates, `${materiaId}.generates`).toBeUndefined();
+    }
+
+    expect(rawDefault.materia?.planner?.generator).toBe(true);
+    expect(rawDefault.materia?.interactivePlan?.generator).toBe(true);
   });
 
   test("bundled default loadout edges use explicit canonical conditions", async () => {
