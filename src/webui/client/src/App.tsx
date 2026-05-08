@@ -2216,18 +2216,20 @@ export function App() {
                 </select>
               </label>
               {materiaForm.behavior === 'prompt' ? (
-                <>
-                  <label className="graph-field">Model
-                    <input data-testid="materia-model" value={materiaForm.model} onChange={(event) => setMateriaForm({ ...materiaForm, model: event.target.value })} placeholder="provider/model" />
-                  </label>
-                  <label className="graph-field">Tools
-                    <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
-                      <option value="none">none</option>
-                      <option value="readOnly">read only</option>
-                      <option value="coding">coding</option>
-                    </select>
-                  </label>
-                  <fieldset ref={materiaColorDropdownRef} className="graph-field materia-color-picker" data-testid="materia-color" aria-label="Color">
+                <fieldset className="materia-settings-group materia-agent-options" aria-label="Prompt agent options">
+                  <legend>Prompt / agent options</legend>
+                  <div className="materia-compact-grid materia-settings-subgrid">
+                    <label className="graph-field">Model
+                      <input data-testid="materia-model" value={materiaForm.model} onChange={(event) => setMateriaForm({ ...materiaForm, model: event.target.value })} placeholder="provider/model" />
+                    </label>
+                    <label className="graph-field">Tools
+                      <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
+                        <option value="none">none</option>
+                        <option value="readOnly">read only</option>
+                        <option value="coding">coding</option>
+                      </select>
+                    </label>
+                    <fieldset ref={materiaColorDropdownRef} className="graph-field materia-color-picker" data-testid="materia-color" aria-label="Color">
                     <legend>Color</legend>
                     <div className="materia-color-dropdown">
                       <button
@@ -2270,28 +2272,32 @@ export function App() {
                       )}
                     </div>
                     {materiaForm.color && !materiaColorChoices.some((choice) => choice.value === materiaForm.color) && <p className="materia-color-legacy">Legacy custom color is selected; choose a palette color to replace it.</p>}
-                  </fieldset>
-                  <div className="materia-toggle-row materia-settings-toggle-row" aria-label="Boolean materia controls">
+                    </fieldset>
+                    <div className="materia-toggle-row materia-settings-toggle-row" aria-label="Boolean materia controls">
                     <label className="graph-field graph-field-inline text-sm">Multiturn
                       <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
                     </label>
                     <label className="graph-field graph-field-inline text-sm" title="Generator materia produce the canonical workItems list for downstream loop regions; the generated list format is runtime-defined.">Generator
                       <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
                     </label>
+                    </div>
                   </div>
-                </>
+                </fieldset>
               ) : (
-                <>
-                  <label className="graph-field">Utility
-                    <input data-testid="materia-utility" value={materiaForm.utility} onChange={(event) => setMateriaForm({ ...materiaForm, utility: event.target.value })} placeholder="shell" />
-                  </label>
-                  <label className="graph-field">Command
-                    <input data-testid="materia-command" value={materiaForm.command} onChange={(event) => setMateriaForm({ ...materiaForm, command: event.target.value })} placeholder="npm test" />
-                  </label>
-                  <label className="graph-field">Timeout ms
-                    <input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" />
-                  </label>
-                </>
+                <fieldset className="materia-settings-group materia-tool-options" aria-label="Tool invocation options">
+                  <legend>Tool invocation options</legend>
+                  <div className="materia-compact-grid materia-settings-subgrid">
+                    <label className="graph-field">Utility
+                      <input data-testid="materia-utility" value={materiaForm.utility} onChange={(event) => setMateriaForm({ ...materiaForm, utility: event.target.value })} placeholder="shell" />
+                    </label>
+                    <label className="graph-field">Command
+                      <input data-testid="materia-command" value={materiaForm.command} onChange={(event) => setMateriaForm({ ...materiaForm, command: event.target.value })} placeholder="npm test" />
+                    </label>
+                    <label className="graph-field">Timeout ms
+                      <input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" />
+                    </label>
+                  </div>
+                </fieldset>
               )}
             </div>
           </section>
