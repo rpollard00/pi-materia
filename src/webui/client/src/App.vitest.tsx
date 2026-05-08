@@ -1490,6 +1490,16 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.click(colorTrigger);
     expect(within(screen.getByRole('listbox', { name: 'Materia color choices' })).getByRole('option', { name: 'Purple materia color' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(colorTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(within(colorPicker).queryByRole('listbox', { name: 'Materia color choices' })).toBeNull();
+
+    fireEvent.click(colorTrigger);
+    expect(within(screen.getByRole('listbox', { name: 'Materia color choices' })).getByRole('option', { name: 'Purple materia color' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.pointerDown(document.body);
+    expect(colorTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(within(colorPicker).queryByRole('listbox', { name: 'Materia color choices' })).toBeNull();
+
     fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
