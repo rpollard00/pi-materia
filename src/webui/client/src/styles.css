@@ -880,45 +880,77 @@
   margin-bottom: 0.3rem;
 }
 
+.materia-color-dropdown {
+  position: relative;
+  width: max-content;
+}
+
+.materia-color-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 4.35rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(103 232 249 / 0.34);
+  background: linear-gradient(135deg, rgb(8 47 73 / 0.76), rgb(2 6 23 / 0.9));
+  padding: 0.45rem 0.7rem;
+  color: rgb(224 242 254);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: inset 0 0 20px rgb(34 211 238 / 0.09), 0 0 20px rgb(34 211 238 / 0.08);
+}
+
+.materia-color-trigger:hover,
+.materia-color-trigger:focus-visible {
+  border-color: rgb(103 232 249 / 0.78);
+  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.14), inset 0 0 22px rgb(34 211 238 / 0.16);
+  outline: none;
+}
+
+.materia-color-trigger-caret {
+  margin-left: auto;
+  color: rgb(165 243 252 / 0.82);
+}
+
 .materia-color-options {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.45rem);
+  left: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(2, 3.25rem);
+  grid-template-rows: repeat(4, 3.25rem);
+  gap: 0.55rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgb(103 232 249 / 0.34);
+  background: radial-gradient(circle at 30% 0%, rgb(8 145 178 / 0.24), transparent 42%), rgb(2 6 23 / 0.94);
+  padding: 0.7rem;
+  box-shadow: 0 18px 42px rgb(0 0 0 / 0.48), 0 0 34px rgb(34 211 238 / 0.16), inset 0 0 24px rgb(125 211 252 / 0.08);
 }
 
 .materia-color-option {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border-radius: 0.85rem;
-  border: 1px solid rgb(207 250 254 / 0.16);
-  background: rgb(2 6 23 / 0.72);
-  padding: 0.45rem 0.55rem;
-  color: rgb(224 242 254);
-  font-size: 0.76rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  border: 1px solid rgb(207 250 254 / 0.18);
+  background: rgb(8 47 73 / 0.36);
+  padding: 0;
 }
 
 .materia-color-option:hover,
 .materia-color-option:focus-visible,
 .materia-color-option-selected {
-  border-color: rgb(103 232 249 / 0.72);
-  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.12);
+  border-color: rgb(103 232 249 / 0.82);
+  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.16), 0 0 22px rgb(125 211 252 / 0.18);
   outline: none;
 }
 
 .materia-color-option-selected {
-  background: rgb(8 47 73 / 0.72);
-}
-
-.materia-color-swatch {
-  width: 1.45rem;
-  height: 1.45rem;
-  flex: 0 0 auto;
-  border-radius: 9999px;
-  box-shadow: inset -5px -6px 8px rgb(0 0 0 / 0.35), inset 4px 4px 6px rgb(255 255 255 / 0.42), 0 0 12px rgb(125 211 252 / 0.35);
+  background: rgb(8 145 178 / 0.24);
+  outline: 2px solid rgb(250 204 21 / 0.72);
+  outline-offset: 2px;
 }
 
 .materia-color-legacy {

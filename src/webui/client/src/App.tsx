@@ -951,6 +951,8 @@ export function App() {
   const suppressSocketClickRef = useRef(false);
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
+  const [materiaColorOpen, setMateriaColorOpen] = useState(false);
+  const materiaColorDropdownRef = useRef<HTMLFieldSetElement | null>(null);
   const [roleBrief, setRoleBrief] = useState('');
   const [generatedRolePrompt, setGeneratedRolePrompt] = useState('');
   const [roleGenerationError, setRoleGenerationError] = useState('');
@@ -961,6 +963,25 @@ export function App() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  useEffect(() => {
+    if (!materiaColorOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (materiaColorDropdownRef.current?.contains(event.target as Node)) return;
+      setMateriaColorOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMateriaColorOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [materiaColorOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2206,27 +2227,47 @@ export function App() {
                       <option value="coding">coding</option>
                     </select>
                   </label>
-                  <fieldset className="graph-field materia-color-picker" data-testid="materia-color" aria-label="Color">
+                  <fieldset ref={materiaColorDropdownRef} className="graph-field materia-color-picker" data-testid="materia-color" aria-label="Color">
                     <legend>Color</legend>
-                    <div className="materia-color-options" role="radiogroup" aria-label="Materia color">
-                      {materiaColorChoices.map((choice) => {
-                        const selected = materiaForm.color === choice.value;
-                        return (
-                          <button
-                            key={choice.id}
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            data-testid={`materia-color-${choice.id}`}
-                            className={`materia-color-option ${selected ? 'materia-color-option-selected' : ''}`}
-                            onClick={() => setMateriaForm({ ...materiaForm, color: choice.value })}
-                            title={`${choice.label} materia color`}
-                          >
-                            <span className={`materia-color-swatch ${choice.value}`} aria-hidden />
-                            <span>{choice.label}</span>
-                          </button>
-                        );
-                      })}
+                    <div className="materia-color-dropdown">
+                      <button
+                        type="button"
+                        className="materia-color-trigger"
+                        aria-haspopup="listbox"
+                        aria-expanded={materiaColorOpen}
+                        aria-controls="materia-color-options"
+                        aria-label="Select materia color"
+                        data-testid="materia-color-trigger"
+                        onClick={() => setMateriaColorOpen((open) => !open)}
+                      >
+                        <Orb small color={materiaForm.color} label="Selected materia color" />
+                        <span aria-hidden className="materia-color-trigger-caret">▾</span>
+                      </button>
+                      {materiaColorOpen && (
+                        <div id="materia-color-options" className="materia-color-options" role="listbox" aria-label="Materia color choices">
+                          {materiaColorChoices.map((choice) => {
+                            const selected = materiaForm.color === choice.value;
+                            return (
+                              <button
+                                key={choice.id}
+                                type="button"
+                                role="option"
+                                aria-selected={selected}
+                                aria-label={`${choice.label} materia color`}
+                                data-testid={`materia-color-${choice.id}`}
+                                className={`materia-color-option ${selected ? 'materia-color-option-selected' : ''}`}
+                                onClick={() => {
+                                  setMateriaForm({ ...materiaForm, color: choice.value });
+                                  setMateriaColorOpen(false);
+                                }}
+                                title={`${choice.label} materia color`}
+                              >
+                                <Orb small color={choice.value} label={`${choice.label} materia color`} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     {materiaForm.color && !materiaColorChoices.some((choice) => choice.value === materiaForm.color) && <p className="materia-color-legacy">Legacy custom color is selected; choose a palette color to replace it.</p>}
                   </fieldset>
