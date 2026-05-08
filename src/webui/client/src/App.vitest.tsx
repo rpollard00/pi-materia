@@ -1537,6 +1537,7 @@ describe('Materia loadout grid editor', () => {
       if (url === '/api/generate/materia-role') {
         const body = JSON.parse(String(init?.body));
         expect(body.brief).toBe('A careful reviewer materia');
+        expect(body.generates).toBeNull();
         return new Response(JSON.stringify({ ok: true, prompt: generatedPrompts.shift() }));
       }
       return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
@@ -1571,6 +1572,30 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('apply-generated-role-prompt'));
     expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', 'Generated role prompt v1');
     expect(screen.queryByTestId('role-generation-preview')).toBeNull();
+  });
+
+  it('sends generated list output config when generating role prompts for configured materia', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/generate/materia-role') {
+        const body = JSON.parse(String(init?.body));
+        expect(body).toEqual({
+          brief: 'Planner prompt',
+          generates: { output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' },
+        });
+        return new Response(JSON.stringify({ ok: true, prompt: 'Generated planner prompt' }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
+    fireEvent.change(screen.getByTestId('role-generation-brief'), { target: { value: 'Planner prompt' } });
+    fireEvent.click(screen.getByTestId('generate-role-prompt'));
+
+    expect((await screen.findByTestId('role-generation-preview')).textContent).toContain('Generated planner prompt');
   });
 
   it('shows role prompt generation errors without changing the prompt field', async () => {

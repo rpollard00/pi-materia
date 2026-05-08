@@ -48,7 +48,7 @@ async function startTestServer(generateMateriaRole: NonNullable<NonNullable<Para
 
 describe("POST /api/generate/materia-role", () => {
   test("returns generated Materia role prompt text in a stable JSON shape", async () => {
-    const calls: Array<{ brief: string }> = [];
+    const calls: Array<{ brief: string; generates?: unknown }> = [];
     const baseUrl = await startTestServer(async (request) => {
       calls.push(request);
       return { ok: true, prompt: "Review code carefully.", isolated: true, model: "test/model", provider: "test", api: "mock", thinking: "low" };
@@ -57,7 +57,7 @@ describe("POST /api/generate/materia-role", () => {
     const response = await fetch(`${baseUrl}/api/generate/materia-role`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ brief: "  reviewer role  " }),
+      body: JSON.stringify({ brief: "  reviewer role  ", generates: null }),
     });
 
     expect(response.status).toBe(200);
@@ -70,7 +70,27 @@ describe("POST /api/generate/materia-role", () => {
       api: "mock",
       thinking: "low",
     });
-    expect(calls).toEqual([{ brief: "reviewer role" }]);
+    expect(calls).toEqual([{ brief: "reviewer role", generates: null }]);
+  });
+
+  test("pipes generated list output configuration into generation requests", async () => {
+    const calls: Array<{ brief: string; generates?: unknown }> = [];
+    const baseUrl = await startTestServer(async (request) => {
+      calls.push(request);
+      return { ok: true, prompt: "Plan tasks carefully.", isolated: true };
+    });
+
+    const response = await fetch(`${baseUrl}/api/generate/materia-role`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        brief: "planner role",
+        generates: { output: " tasks ", items: " state.tasks ", listType: "array", itemType: " task ", as: " task ", cursor: " taskIndex ", done: " end " },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ brief: "planner role", generates: { output: "tasks", items: "state.tasks", listType: "array", itemType: "task", as: "task", cursor: "taskIndex", done: "end" } }]);
   });
 
   test("rejects bad request shapes before invoking generation", async () => {

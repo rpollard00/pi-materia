@@ -4,6 +4,8 @@ import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 type MateriaSaveTarget = 'user' | 'project' | 'explicit';
+type MateriaGeneratorConfig = { output: string; items?: string; listType: 'array'; itemType: string; as?: string; cursor?: string; done?: string };
+type MateriaRolePromptGenerationRequest = { brief: string; generates?: MateriaGeneratorConfig | null };
 type MateriaRolePromptGenerationResult =
   | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true }
   | { ok: false; error: string; code: 'invalid_brief' | 'disabled' | 'generation_failed' };
@@ -71,7 +73,7 @@ export interface MateriaWebUiServerOptions {
     getSnapshot: () => MateriaWebUiSessionSnapshot | Promise<MateriaWebUiSessionSnapshot>;
     getConfig?: () => Promise<unknown>;
     saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
-    generateMateriaRole?: (request: { brief: string }) => Promise<MateriaRolePromptGenerationResult>;
+    generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
   };
 }
 
@@ -137,6 +139,35 @@ function roleGenerationStatus(result: Extract<MateriaRolePromptGenerationResult,
   if (result.code === 'invalid_brief') return 400;
   if (result.code === 'disabled') return 403;
   return 500;
+}
+
+function validateMateriaGeneratorConfig(value: unknown): MateriaGeneratorConfig | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!isPlainObject(value)) throw new Error('Expected generates to be an object or null.');
+  const output = trimmedRequired(value.output, 'generates.output');
+  const itemType = trimmedRequired(value.itemType, 'generates.itemType');
+  if (value.listType !== 'array') throw new Error('Expected generates.listType to be "array".');
+  return {
+    output,
+    items: optionalTrimmed(value.items, 'generates.items'),
+    listType: 'array',
+    itemType,
+    as: optionalTrimmed(value.as, 'generates.as'),
+    cursor: optionalTrimmed(value.cursor, 'generates.cursor'),
+    done: optionalTrimmed(value.done, 'generates.done'),
+  };
+}
+
+function trimmedRequired(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`Expected ${field} to be a non-empty string.`);
+  return value.trim();
+}
+
+function optionalTrimmed(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`Expected ${field} to be a non-empty string when configured.`);
+  return value.trim();
 }
 
 function sendRoleGenerationError(res: ServerResponse, status: number, code: string, message: string) {
@@ -247,7 +278,14 @@ export function createMateriaWebUiServer(options: MateriaWebUiServerOptions = {}
           sendRoleGenerationError(res, 400, validation.code, validation.error);
           return;
         }
-        const result = await options.session.generateMateriaRole({ brief: validation.brief });
+        let generates: MateriaGeneratorConfig | null | undefined;
+        try {
+          generates = validateMateriaGeneratorConfig(body.generates);
+        } catch (error) {
+          sendRoleGenerationError(res, 400, 'invalid_request', error instanceof Error ? error.message : String(error));
+          return;
+        }
+        const result = await options.session.generateMateriaRole({ brief: validation.brief, generates });
         if (!result.ok) {
           sendRoleGenerationError(res, roleGenerationStatus(result), result.code, result.error);
           return;

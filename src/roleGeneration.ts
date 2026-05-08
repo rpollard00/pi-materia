@@ -5,10 +5,11 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import { loadProfileConfig } from "./config.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "./handoffContract.js";
 import { getActiveModelInfo } from "./modelSettings.js";
-import type { MateriaRoleGenerationProfileConfig } from "./types.js";
+import type { MateriaGeneratorConfig, MateriaRoleGenerationProfileConfig } from "./types.js";
 
 export interface MateriaRolePromptGenerationRequest {
   brief: string;
+  generates?: MateriaGeneratorConfig | null;
 }
 
 export type MateriaRolePromptGenerationResult =
@@ -25,6 +26,7 @@ export interface MateriaRolePromptGenerationSettings {
 
 export interface MateriaRolePromptGeneratorInput {
   brief: string;
+  generates?: MateriaGeneratorConfig | null;
   settings: MateriaRolePromptGenerationSettings;
   profile: MateriaRoleGenerationProfileConfig;
   cwd: string;
@@ -55,6 +57,7 @@ export async function generateMateriaRolePrompt(
     const settings = resolveRoleGenerationSettings(pi, ctx, profile);
     const prompt = (await (options.generator ?? defaultMateriaRolePromptGenerator)({
       brief: validation.brief,
+      generates: request.generates ?? null,
       settings,
       profile,
       cwd: ctx.cwd,
@@ -109,14 +112,18 @@ async function defaultMateriaRolePromptGenerator(input: MateriaRolePromptGenerat
     sessionStartEvent: { type: "session_start", reason: "startup" },
   });
 
-  const prompt = buildRoleGenerationPrompt(input.brief, input.profile);
+  const prompt = buildRoleGenerationPrompt(input.brief, input.profile, input.generates);
   await session.prompt(prompt, { expandPromptTemplates: false, source: "extension" });
   const text = lastAssistantText((session as unknown as { messages?: unknown[] }).messages);
   if (!text) throw new Error("No assistant response was produced for the role prompt brief.");
   return text;
 }
 
-export function buildRoleGenerationPrompt(brief: string, profile: MateriaRoleGenerationProfileConfig = {}): string {
+export function buildRoleGenerationPrompt(
+  brief: string,
+  profile: MateriaRoleGenerationProfileConfig = {},
+  generates?: MateriaGeneratorConfig | null,
+): string {
   return [
     "You generate concise pi-materia role prompt instructions.",
     "Return only the role prompt text to place in a Materia config `prompt` field.",
@@ -124,9 +131,25 @@ export function buildRoleGenerationPrompt(brief: string, profile: MateriaRoleGen
     "When the generated role prompt asks for JSON or handoff output, it must instruct the materia to follow this central contract instead of inventing a local JSON contract:",
     HANDOFF_CONTRACT_PROMPT_TEXT,
     "Do not include markdown fences, commentary about generation, or UI instructions.",
+    roleGenerationContext(generates),
     profile.extraInstructions ? `Additional operator instructions:\n${profile.extraInstructions}` : undefined,
     `User brief:\n${brief}`,
   ].filter(Boolean).join("\n\n");
+}
+
+function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefined): string {
+  if (!generates) return "Generated list output configuration: none configured.";
+  return [
+    "Generated list output configuration:",
+    `- output key: ${generates.output}`,
+    `- list type: ${generates.listType}`,
+    `- item type: ${generates.itemType}`,
+    generates.items ? `- items path: ${generates.items}` : undefined,
+    generates.as ? `- item alias: ${generates.as}` : undefined,
+    generates.cursor ? `- cursor: ${generates.cursor}` : undefined,
+    generates.done ? `- done behavior: ${generates.done}` : undefined,
+    "If this configuration is present, the generated role prompt should describe how to produce that list in the handoff JSON using the configured output key and item semantics.",
+  ].filter(Boolean).join("\n");
 }
 
 function resolveRoleGenerationModel(ctx: ExtensionContext, profile: MateriaRoleGenerationProfileConfig): Model<Api> | undefined {

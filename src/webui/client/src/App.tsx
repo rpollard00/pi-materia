@@ -65,7 +65,7 @@ interface ConfigResponse {
 interface RoleGenerationResponse {
   ok?: boolean;
   prompt?: string;
-  error?: string;
+  error?: string | { message?: string };
 }
 
 interface MateriaSavedEventDetail {
@@ -1669,13 +1669,15 @@ export function App() {
     setRoleGenerationError('');
     setStatus('Generating Materia role prompt preview…');
     try {
+      const generates = materiaForm.generatesList ? buildGeneratedListConfig(materiaForm) : null;
       const response = await fetch('/api/generate/materia-role', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ brief }),
+        body: JSON.stringify({ brief, generates }),
       });
       const body = await response.json() as RoleGenerationResponse;
-      if (!response.ok || body.ok === false || typeof body.prompt !== 'string') throw new Error(body.error ?? 'Materia role generation failed.');
+      const errorMessage = typeof body.error === 'string' ? body.error : body.error?.message;
+      if (!response.ok || body.ok === false || typeof body.prompt !== 'string') throw new Error(errorMessage ?? 'Materia role generation failed.');
       setGeneratedRolePrompt(body.prompt);
       setStatus('Generated role prompt preview. Review it before applying.');
     } catch (error) {
