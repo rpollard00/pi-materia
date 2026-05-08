@@ -526,42 +526,45 @@ describe("utility pipeline nodes", () => {
     const lines = renderGrid(config, pipeline, "default", "/tmp/project");
 
     const loadout = activeLoadout(config);
-    expect(loadout.entry).toBe("ensureArtifactsIgnored");
+    expect(loadout.entry).toBe("Socket-1");
+    expect(Object.keys(loadout.nodes)).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
     expect(pipeline.entry.node.type).toBe("utility");
-    expect(loadout.nodes.ensureArtifactsIgnored).toMatchObject({
+    expect(loadout.nodes["Socket-1"]).toMatchObject({
       type: "utility",
       utility: "project.ensureIgnored",
-      edges: [{ when: "always", to: "detectVcs" }],
+      edges: [{ when: "always", to: "Socket-2" }],
     });
-    expect(loadout.nodes.detectVcs).toMatchObject({
+    expect(loadout.nodes["Socket-2"]).toMatchObject({
       type: "utility",
       utility: "vcs.detect",
       assign: { vcs: "$" },
-      edges: [{ when: "always", to: "planner" }],
+      edges: [{ when: "always", to: "Socket-3" }],
     });
     expect(JSON.stringify(loadout.nodes)).not.toContain('"next"');
 
     const slotsIndex = lines.indexOf("Slots:");
-    const ensureLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- ensureArtifactsIgnored:"));
-    const detectLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- detectVcs:"));
-    const plannerLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- planner:"));
+    const ensureLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- Socket-1:"));
+    const detectLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- Socket-2:"));
+    const plannerLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- Socket-3:"));
     expect(ensureLineIndex).toBeGreaterThanOrEqual(0);
     expect(detectLineIndex).toBeGreaterThan(ensureLineIndex);
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
     expect(config.materia.planner?.generates).toMatchObject({ output: "workItems", listType: "array", itemType: "workItem" });
-    expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "planner", output: "workItems" });
+    expect(loadout.loops?.taskIteration.nodes).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
+    expect(loadout.loops?.taskIteration.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });
+    expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "Socket-3", output: "workItems" });
     expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
-    expect(loadout.nodes.Maintain).toMatchObject({
+    expect(loadout.nodes["Socket-6"]).toMatchObject({
       type: "agent",
       materia: "Maintain",
       parse: "json",
       assign: { lastMaintain: "$" },
       advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
       edges: [
-        { when: "not_satisfied", to: "Maintain", maxTraversals: 3 },
-        { when: "always", to: "Build" },
+        { when: "not_satisfied", to: "Socket-6", maxTraversals: 3 },
+        { when: "always", to: "Socket-4" },
       ],
     });
 

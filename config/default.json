@@ -13,9 +13,9 @@
   "activeLoadout": "Full-Auto",
   "loadouts": {
     "Full-Auto": {
-      "entry": "ensureArtifactsIgnored",
+      "entry": "Socket-1",
       "nodes": {
-        "ensureArtifactsIgnored": {
+        "Socket-1": {
           "type": "utility",
           "utility": "project.ensureIgnored",
           "parse": "json",
@@ -30,11 +30,11 @@
           "edges": [
             {
               "when": "always",
-              "to": "detectVcs"
+              "to": "Socket-2"
             }
           ]
         },
-        "detectVcs": {
+        "Socket-2": {
           "type": "utility",
           "utility": "vcs.detect",
           "parse": "json",
@@ -44,11 +44,11 @@
           "edges": [
             {
               "when": "always",
-              "to": "planner"
+              "to": "Socket-3"
             }
           ]
         },
-        "planner": {
+        "Socket-3": {
           "type": "agent",
           "parse": "json",
           "assign": {
@@ -58,22 +58,22 @@
           "edges": [
             {
               "when": "always",
-              "to": "Build"
+              "to": "Socket-4"
             }
           ]
         },
-        "Build": {
+        "Socket-4": {
           "type": "agent",
           "parse": "text",
           "materia": "Build",
           "edges": [
             {
               "when": "always",
-              "to": "Auto-Eval"
+              "to": "Socket-5"
             }
           ]
         },
-        "Auto-Eval": {
+        "Socket-5": {
           "type": "agent",
           "parse": "json",
           "assign": {
@@ -83,17 +83,17 @@
           "edges": [
             {
               "when": "satisfied",
-              "to": "Maintain"
+              "to": "Socket-6"
             },
             {
               "when": "not_satisfied",
-              "to": "Build",
+              "to": "Socket-4",
               "maxTraversals": 3
             }
           ],
           "materia": "Auto-Eval"
         },
-        "Maintain": {
+        "Socket-6": {
           "type": "agent",
           "parse": "json",
           "advance": {
@@ -108,12 +108,12 @@
           "edges": [
             {
               "when": "not_satisfied",
-              "to": "Maintain",
+              "to": "Socket-6",
               "maxTraversals": 3
             },
             {
               "when": "always",
-              "to": "Build"
+              "to": "Socket-4"
             }
           ],
           "materia": "Maintain"
@@ -123,26 +123,26 @@
         "taskIteration": {
           "label": "Build → Eval → Maintain until all work items complete",
           "nodes": [
-            "Build",
-            "Auto-Eval",
-            "Maintain"
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
           ],
           "exit": {
-            "from": "Maintain",
+            "from": "Socket-6",
             "when": "satisfied",
             "to": "end"
           },
           "consumes": {
-            "from": "planner",
+            "from": "Socket-3",
             "output": "workItems"
           }
         }
       }
     },
     "Planning-Consult": {
-      "entry": "ensureArtifactsIgnored",
+      "entry": "Socket-1",
       "nodes": {
-        "ensureArtifactsIgnored": {
+        "Socket-1": {
           "type": "utility",
           "utility": "project.ensureIgnored",
           "parse": "json",
@@ -157,11 +157,11 @@
           "edges": [
             {
               "when": "always",
-              "to": "detectVcs"
+              "to": "Socket-2"
             }
           ]
         },
-        "detectVcs": {
+        "Socket-2": {
           "type": "utility",
           "utility": "vcs.detect",
           "parse": "json",
@@ -171,11 +171,11 @@
           "edges": [
             {
               "when": "always",
-              "to": "planner"
+              "to": "Socket-3"
             }
           ]
         },
-        "planner": {
+        "Socket-3": {
           "type": "agent",
           "parse": "json",
           "assign": {
@@ -185,22 +185,22 @@
           "edges": [
             {
               "when": "always",
-              "to": "Build"
+              "to": "Socket-4"
             }
           ]
         },
-        "Build": {
+        "Socket-4": {
           "type": "agent",
           "parse": "text",
           "materia": "Build",
           "edges": [
             {
               "when": "always",
-              "to": "Auto-Eval"
+              "to": "Socket-5"
             }
           ]
         },
-        "Auto-Eval": {
+        "Socket-5": {
           "type": "agent",
           "parse": "json",
           "assign": {
@@ -210,17 +210,17 @@
           "edges": [
             {
               "when": "satisfied",
-              "to": "Maintain"
+              "to": "Socket-6"
             },
             {
               "when": "not_satisfied",
-              "to": "Build",
+              "to": "Socket-4",
               "maxTraversals": 3
             }
           ],
           "materia": "Auto-Eval"
         },
-        "Maintain": {
+        "Socket-6": {
           "type": "agent",
           "parse": "json",
           "advance": {
@@ -235,12 +235,12 @@
           "edges": [
             {
               "when": "not_satisfied",
-              "to": "Maintain",
+              "to": "Socket-6",
               "maxTraversals": 3
             },
             {
               "when": "always",
-              "to": "Build"
+              "to": "Socket-4"
             }
           ],
           "materia": "Maintain"
@@ -250,17 +250,17 @@
         "taskIteration": {
           "label": "Build → Eval → Maintain until all work items complete",
           "nodes": [
-            "Build",
-            "Auto-Eval",
-            "Maintain"
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
           ],
           "exit": {
-            "from": "Maintain",
+            "from": "Socket-6",
             "when": "satisfied",
             "to": "end"
           },
           "consumes": {
-            "from": "planner",
+            "from": "Socket-3",
             "output": "workItems"
           }
         }

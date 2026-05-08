@@ -127,7 +127,7 @@ describe("native multi-turn runtime", () => {
 
     await harness.runCommand("materia", "cast build the feature");
     const plannerStartedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(plannerStartedState.currentNode).toBe("planner");
+    expect(plannerStartedState.currentNode).toBe("Socket-3");
     expect(plannerStartedState.currentMateria).toBe("interactivePlan");
     expect(plannerStartedState.nodeState).toBe("awaiting_agent_response");
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
@@ -144,7 +144,7 @@ describe("native multi-turn runtime", () => {
 
     const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(pausedState.active).toBe(true);
-    expect(pausedState.currentNode).toBe("planner");
+    expect(pausedState.currentNode).toBe("Socket-3");
     expect(pausedState.currentMateria).toBe("interactivePlan");
     expect(pausedState.nodeState).toBe("awaiting_user_refinement");
     expect(pausedState.awaitingResponse).toBe(false);
@@ -159,7 +159,7 @@ describe("native multi-turn runtime", () => {
 
     const finalizedButPausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(finalizedButPausedState.active).toBe(true);
-    expect(finalizedButPausedState.currentNode).toBe("planner");
+    expect(finalizedButPausedState.currentNode).toBe("Socket-3");
     expect(finalizedButPausedState.nodeState).toBe("awaiting_user_refinement");
     expect(finalizedButPausedState.data.workItems).toBeUndefined();
     expect(finalizedButPausedState.lastAssistantText).toBe(finalPlan);
@@ -182,7 +182,7 @@ describe("native multi-turn runtime", () => {
 
     const buildState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(buildState.active).toBe(true);
-    expect(buildState.currentNode).toBe("Build");
+    expect(buildState.currentNode).toBe("Socket-4");
     expect(buildState.currentMateria).toBe("Build");
     expect(buildState.nodeState).toBe("awaiting_agent_response");
     expect(buildState.data.workItems).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
