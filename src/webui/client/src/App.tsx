@@ -2199,50 +2199,94 @@ export function App() {
 
         {selectedTab === 'materia-editor' && (
         <section className="fantasy-panel p-6" aria-label="Materia creation editor">
-          <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">materia forge</p>
-              <h2 className="mt-2 text-3xl font-black text-white">Create / edit materia</h2>
-              <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge reusable prompt materia or tool-invocation materia as staged definition edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
-            </div>
-            <label className="graph-field w-full max-w-xs">Edit existing
-              <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : setMateriaForm(emptyMateriaForm())}>
-                <option value="">new materia…</option>
-                {editableDefinitionIds.map((id) => <option key={id} value={id}>{id}</option>)}
-              </select>
-            </label>
+          <div className="mb-5">
+            <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">materia forge</p>
+            <h2 className="mt-2 text-3xl font-black text-white">Create / edit materia</h2>
+            <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge reusable prompt materia or tool-invocation materia as staged definition edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-            <label className="graph-field">Name
-              <input data-testid="materia-name" value={materiaForm.name} onChange={(event) => setMateriaForm({ ...materiaForm, name: event.target.value })} placeholder="Critique" />
-            </label>
-            <label className="graph-field">Behavior
-              <select data-testid="materia-behavior" value={materiaForm.behavior} onChange={(event) => setMateriaForm({ ...materiaForm, behavior: event.target.value as MateriaFormState['behavior'] })}>
-                <option value="prompt">Prompt / agent</option>
-                <option value="tool">Tool invocation</option>
-              </select>
-            </label>
-            <label className="graph-field">Output format
-              <select data-testid="materia-output-format" value={materiaForm.outputFormat} onChange={(event) => setMateriaForm({ ...materiaForm, outputFormat: event.target.value as MateriaFormState['outputFormat'] })}>
-                <option value="text">Text</option>
-                <option value="json">JSON</option>
-              </select>
-            </label>
-            <label className="graph-field">Save scope
-              <select data-testid="materia-persist-scope" value={materiaForm.persistScope} onChange={(event) => setMateriaForm({ ...materiaForm, persistScope: event.target.value as SaveTarget })}>
-                <option value="user">User profile (~/.config/pi/pi-materia)</option>
-                <option value="project">Project (.pi/pi-materia.json)</option>
-                <option value="explicit">Explicit config</option>
-              </select>
-            </label>
-          </div>
+          <section className="rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Materia settings">
+            <p className="mb-4 text-sm font-semibold text-cyan-100">Settings</p>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <label className="graph-field">Edit existing
+                <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : setMateriaForm(emptyMateriaForm())}>
+                  <option value="">new materia…</option>
+                  {editableDefinitionIds.map((id) => <option key={id} value={id}>{id}</option>)}
+                </select>
+              </label>
+              <label className="graph-field">Name
+                <input data-testid="materia-name" value={materiaForm.name} onChange={(event) => setMateriaForm({ ...materiaForm, name: event.target.value })} placeholder="Critique" />
+              </label>
+              <label className="graph-field">Behavior
+                <select data-testid="materia-behavior" value={materiaForm.behavior} onChange={(event) => setMateriaForm({ ...materiaForm, behavior: event.target.value as MateriaFormState['behavior'] })}>
+                  <option value="prompt">Prompt / agent</option>
+                  <option value="tool">Tool invocation</option>
+                </select>
+              </label>
+              <label className="graph-field">Output format
+                <select data-testid="materia-output-format" value={materiaForm.outputFormat} onChange={(event) => setMateriaForm({ ...materiaForm, outputFormat: event.target.value as MateriaFormState['outputFormat'] })}>
+                  <option value="text">Text</option>
+                  <option value="json">JSON</option>
+                </select>
+              </label>
+              <label className="graph-field">Save scope
+                <select data-testid="materia-persist-scope" value={materiaForm.persistScope} onChange={(event) => setMateriaForm({ ...materiaForm, persistScope: event.target.value as SaveTarget })}>
+                  <option value="user">User profile (~/.config/pi/pi-materia)</option>
+                  <option value="project">Project (.pi/pi-materia.json)</option>
+                  <option value="explicit">Explicit config</option>
+                </select>
+              </label>
+              {materiaForm.behavior === 'prompt' ? (
+                <>
+                  <label className="graph-field">Model
+                    <input data-testid="materia-model" value={materiaForm.model} onChange={(event) => setMateriaForm({ ...materiaForm, model: event.target.value })} placeholder="provider/model" />
+                  </label>
+                  <label className="graph-field">Tools
+                    <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
+                      <option value="none">none</option>
+                      <option value="readOnly">read only</option>
+                      <option value="coding">coding</option>
+                    </select>
+                  </label>
+                  <label className="graph-field">Color
+                    <input data-testid="materia-color" value={materiaForm.color} onChange={(event) => setMateriaForm({ ...materiaForm, color: event.target.value })} placeholder="from-sky-200 via-cyan-300 to-blue-600" />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="graph-field">Utility
+                    <input data-testid="materia-utility" value={materiaForm.utility} onChange={(event) => setMateriaForm({ ...materiaForm, utility: event.target.value })} placeholder="shell" />
+                  </label>
+                  <label className="graph-field">Command
+                    <input data-testid="materia-command" value={materiaForm.command} onChange={(event) => setMateriaForm({ ...materiaForm, command: event.target.value })} placeholder="npm test" />
+                  </label>
+                  <label className="graph-field">Timeout ms
+                    <input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" />
+                  </label>
+                </>
+              )}
+            </div>
+          </section>
+
+          {materiaForm.behavior === 'prompt' && (
+            <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Boolean materia controls">
+              <p className="mb-3 text-sm font-semibold text-cyan-100">Toggles</p>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <label className="graph-field graph-field-inline text-sm">Multiturn
+                  <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
+                </label>
+                <label className="graph-field graph-field-inline text-sm">Enable generated list
+                  <input data-testid="materia-generates-list" type="checkbox" checked={materiaForm.generatesList} onChange={(event) => setMateriaForm(event.target.checked ? defaultGeneratedListFields(materiaForm) : clearGeneratedListFields(materiaForm))} />
+                </label>
+              </div>
+            </section>
+          )}
 
           {materiaForm.behavior === 'prompt' && (
             <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generate role prompt instructions">
               <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
                 <label className="graph-field">Generate role prompt from brief
-                  <textarea data-testid="role-generation-brief" className="min-h-24" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
+                  <textarea data-testid="role-generation-brief" className="min-h-16" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
                 </label>
                 <button type="button" className="materia-button" data-testid="generate-role-prompt" disabled={roleGenerating || !roleBrief.trim()} onClick={() => { void generateRolePrompt(); }}>
                   {roleGenerating ? 'Generating…' : generatedRolePrompt ? 'Regenerate' : 'Generate'}
@@ -2262,79 +2306,43 @@ export function App() {
             </section>
           )}
 
-          {materiaForm.behavior === 'prompt' && (
+          {materiaForm.behavior === 'prompt' && materiaForm.generatesList && (
             <section className="mt-5 rounded-2xl border border-cyan-200/20 bg-slate-950/50 p-4" aria-label="Generated list output configuration">
-              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-cyan-100">Generated list output</p>
-                  <p className="mt-1 text-xs text-slate-400">Declare that this role emits a configurable array output that loop regions can consume.</p>
-                </div>
-                <label className="graph-field graph-field-inline text-sm">Enable generated list
-                  <input data-testid="materia-generates-list" type="checkbox" checked={materiaForm.generatesList} onChange={(event) => setMateriaForm(event.target.checked ? defaultGeneratedListFields(materiaForm) : clearGeneratedListFields(materiaForm))} />
+              <div>
+                <p className="text-sm font-semibold text-cyan-100">Generated list output</p>
+                <p className="mt-1 text-xs text-slate-400">Declare that this role emits a configurable array output that loop regions can consume.</p>
+              </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <label className="graph-field">Output key
+                  <input data-testid="materia-generated-output" value={materiaForm.generatedOutput} onChange={(event) => setMateriaForm({ ...materiaForm, generatedOutput: event.target.value })} placeholder="tasks" />
+                </label>
+                <label className="graph-field">Item type
+                  <input data-testid="materia-generated-item-type" value={materiaForm.generatedItemType} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItemType: event.target.value })} placeholder="task" />
+                </label>
+                <label className="graph-field">Items state path (optional)
+                  <input data-testid="materia-generated-items" value={materiaForm.generatedItems} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItems: event.target.value })} placeholder="state.tasks" />
+                </label>
+                <label className="graph-field">Item alias
+                  <input data-testid="materia-generated-as" value={materiaForm.generatedAs} onChange={(event) => setMateriaForm({ ...materiaForm, generatedAs: event.target.value })} placeholder="task" />
+                </label>
+                <label className="graph-field">Cursor name
+                  <input data-testid="materia-generated-cursor" value={materiaForm.generatedCursor} onChange={(event) => setMateriaForm({ ...materiaForm, generatedCursor: event.target.value })} placeholder="taskIndex" />
+                </label>
+                <label className="graph-field">Done target
+                  <input data-testid="materia-generated-done" value={materiaForm.generatedDone} onChange={(event) => setMateriaForm({ ...materiaForm, generatedDone: event.target.value })} placeholder="end" />
                 </label>
               </div>
-              {materiaForm.generatesList && (
-                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  <label className="graph-field">Output key
-                    <input data-testid="materia-generated-output" value={materiaForm.generatedOutput} onChange={(event) => setMateriaForm({ ...materiaForm, generatedOutput: event.target.value })} placeholder="tasks" />
-                  </label>
-                  <label className="graph-field">Item type
-                    <input data-testid="materia-generated-item-type" value={materiaForm.generatedItemType} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItemType: event.target.value })} placeholder="task" />
-                  </label>
-                  <label className="graph-field">Items state path (optional)
-                    <input data-testid="materia-generated-items" value={materiaForm.generatedItems} onChange={(event) => setMateriaForm({ ...materiaForm, generatedItems: event.target.value })} placeholder="state.tasks" />
-                  </label>
-                  <label className="graph-field">Item alias
-                    <input data-testid="materia-generated-as" value={materiaForm.generatedAs} onChange={(event) => setMateriaForm({ ...materiaForm, generatedAs: event.target.value })} placeholder="task" />
-                  </label>
-                  <label className="graph-field">Cursor name
-                    <input data-testid="materia-generated-cursor" value={materiaForm.generatedCursor} onChange={(event) => setMateriaForm({ ...materiaForm, generatedCursor: event.target.value })} placeholder="taskIndex" />
-                  </label>
-                  <label className="graph-field">Done target
-                    <input data-testid="materia-generated-done" value={materiaForm.generatedDone} onChange={(event) => setMateriaForm({ ...materiaForm, generatedDone: event.target.value })} placeholder="end" />
-                  </label>
-                </div>
-              )}
             </section>
           )}
 
           {materiaForm.behavior === 'prompt' ? (
-            <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_14rem_14rem_14rem_10rem]">
-              <label className="graph-field">Prompt
-                <textarea data-testid="materia-prompt" className="min-h-32" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
-              </label>
-              <label className="graph-field">Model
-                <input data-testid="materia-model" value={materiaForm.model} onChange={(event) => setMateriaForm({ ...materiaForm, model: event.target.value })} placeholder="provider/model" />
-              </label>
-              <label className="graph-field">Tools
-                <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
-                  <option value="none">none</option>
-                  <option value="readOnly">read only</option>
-                  <option value="coding">coding</option>
-                </select>
-              </label>
-              <label className="graph-field">Color
-                <input data-testid="materia-color" value={materiaForm.color} onChange={(event) => setMateriaForm({ ...materiaForm, color: event.target.value })} placeholder="from-sky-200 via-cyan-300 to-blue-600" />
-              </label>
-              <label className="graph-field">Multiturn
-                <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
-              </label>
-            </div>
+            <label className="graph-field mt-5">Prompt
+              <textarea data-testid="materia-prompt" className="min-h-64" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
+            </label>
           ) : (
-            <div className="mt-4 grid gap-4 lg:grid-cols-[14rem_1fr_1fr_10rem]">
-              <label className="graph-field">Utility
-                <input data-testid="materia-utility" value={materiaForm.utility} onChange={(event) => setMateriaForm({ ...materiaForm, utility: event.target.value })} placeholder="shell" />
-              </label>
-              <label className="graph-field">Command
-                <input data-testid="materia-command" value={materiaForm.command} onChange={(event) => setMateriaForm({ ...materiaForm, command: event.target.value })} placeholder="npm test" />
-              </label>
-              <label className="graph-field">Params JSON
-                <textarea data-testid="materia-params" value={materiaForm.params} onChange={(event) => setMateriaForm({ ...materiaForm, params: event.target.value })} />
-              </label>
-              <label className="graph-field">Timeout ms
-                <input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" />
-              </label>
-            </div>
+            <label className="graph-field mt-5">Params JSON
+              <textarea data-testid="materia-params" className="min-h-40" value={materiaForm.params} onChange={(event) => setMateriaForm({ ...materiaForm, params: event.target.value })} />
+            </label>
           )}
 
           <div className="mt-5 flex flex-wrap gap-3">
