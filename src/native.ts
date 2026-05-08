@@ -9,6 +9,7 @@ import { getEffectivePipelineConfig, loopIteratorForNode } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { canonicalOutgoingEdges } from "./graphValidation.js";
 import {
+  HANDOFF_CONTRACT_DOC_TEXT,
   HANDOFF_DECISIONS_FIELD,
   formatHandoffJsonFinalInstruction,
   HANDOFF_GUIDANCE_FIELD,
@@ -987,6 +988,9 @@ function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
 // - single-turn JSON agent nodes receive the canonical contract via singleTurnJsonFormatInstruction();
 // - multi-turn JSON agent nodes receive refinement guidance during normal turns and the
 //   same canonical contract only during /materia continue finalization;
+// - synthetic cast context may expose only concise, non-authoritative handoff-contract
+//   context for JSON nodes that are already in a final-output mode, and never during
+//   refinement; the authoritative final-output instruction remains finalFormatInstruction();
 // - plain-text agent nodes receive no JSON-only handoff contract unless their local prompt asks for one.
 function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
   if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
@@ -1124,6 +1128,7 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
     "Materia isolated context.",
     "Use only this cast context, the current materia prompt, and any tool results from this materia turn. Do not rely on unrelated earlier visible transcript messages.",
     multiTurnRefining ? multiTurnRefinementGuidance() : undefined,
+    syntheticHandoffContractContext(state),
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
@@ -1140,6 +1145,21 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
     "",
     latestOutput ? `Previous output:\n${latestOutput}` : undefined,
   ].filter(Boolean).join("\n");
+}
+
+function syntheticHandoffContractContext(state: MateriaCastState): string | undefined {
+  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
+  if (!node || !isAgentResolvedNode(node) || node.node.parse !== "json") return undefined;
+
+  const activeMultiTurn = isActiveMultiTurnNode(state);
+  if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
+
+  const exposureMode = activeMultiTurn ? "/materia continue finalization" : "single-turn JSON nodes";
+  return [
+    "Canonical handoff contract context:",
+    `Synthetic context exposure policy: include this concise contract summary only for ${exposureMode} that are already expected to produce final JSON. Do not expose it during multi-turn refinement; refinement turns must remain conversational until /materia continue. The authoritative final-output instructions are still injected separately by prompt assembly.`,
+    HANDOFF_CONTRACT_DOC_TEXT,
+  ].join("\n\n");
 }
 
 function findActiveMateriaPromptIndex(messages: unknown[]): number {

@@ -143,6 +143,7 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(refinementPrompt).toContain("Current multi-turn mode: refinement conversation");
     expect(refinementPrompt).toContain("do not emit final JSON");
     expect(refinementPrompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(refinementPrompt).not.toContain("Canonical handoff contract context:");
     expect(refinementPrompt).not.toContain("Final output format: Return only JSON");
 
     harness.appendAssistantMessage("Let's refine the plan before finalizing.");
@@ -151,6 +152,9 @@ describe("native JSON prompt handoff contract guidance", () => {
 
     const finalizationPrompt = promptMessages(harness).at(-1) ?? "";
     expect(finalizationPrompt).toContain("Command-triggered finalization");
+    expect(finalizationPrompt).toContain("Canonical handoff contract context:");
+    expect(finalizationPrompt).toContain("Synthetic context exposure policy");
+    expect(finalizationPrompt).toContain("Do not expose it during multi-turn refinement");
     expect(finalizationPrompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(finalizationPrompt).toContain("Final output format: Return only JSON for this node");
     expect(finalizationPrompt).toContain("Generated units of work belong in workItems, never tasks");
