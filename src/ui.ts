@@ -27,23 +27,24 @@ export function clearWidgetTicker(ctx: ExtensionContext): void {
 }
 
 export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
-  const materia = state.currentMateria ?? state.currentNode ?? "-";
+  const materia = displayMateriaName(state);
   const attempt = state.attempt ?? "-";
-  const task = state.currentTask ?? "-";
+  const task = displayMateriaStatusValue(state, state.currentTask ?? "-");
   const usage = state.usage.tokens;
   const lines = [
-    `Cast ${shortCastId(state.runId)} | ${truncateValue(materia, 24)} | attempt ${attempt}`,
-    `Task ${truncateValue(task, 24)} | ${formatElapsed(now - state.startedAt)} | tok ${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
-    `Last ${truncateValue(state.lastMessage ?? "-", 68)}`,
+    `✦ ${shortCastId(state.runId)} | ◉ ${truncateValue(materia, 24)} | ↻ ${attempt}`,
+    `◆ ${truncateValue(task, 24)} | ◷ ${formatElapsed(now - state.startedAt)} | Σ ${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
+    `› ${truncateValue(displayMateriaStatusValue(state, state.lastMessage ?? "-"), 68)}`,
   ];
   return lines.map((line) => truncateLine(line));
 }
 
 export function renderMateriaCastStatusWidget(state: MateriaCastState, now = Date.now()): string[] {
   const runLines = renderMateriaRunWidget(state.runState, now);
+  const displayState = { ...state.runState, currentNode: state.currentNode ?? state.runState.currentNode, currentMateria: state.currentMateria ?? state.runState.currentMateria };
   const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
-  const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${state.phase}${state.active ? " active" : ""}`;
-  return [...runLines.slice(0, 2), `Last ${truncateValue(status, 68)}`].map((line) => truncateLine(line));
+  const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${displayState.currentMateria ?? state.phase}${state.active ? " active" : ""}`;
+  return [...runLines.slice(0, 2), `› ${truncateValue(displayMateriaStatusValue(displayState, status), 68)}`].map((line) => truncateLine(line));
 }
 
 export function clearMateriaAuxiliaryWidgets(ctx: ExtensionContext): void {
@@ -102,6 +103,27 @@ export function usageCostNote(costKind: UsageCostKind = "actual"): string {
   if (costKind === "subscription") return "Cost display: estimated token value only; subscription usage is not billed per token.";
   if (costKind === "estimated") return "Cost display: estimated USD value, not confirmed billed charges.";
   return "Cost display: billed USD cost.";
+}
+
+function displayMateriaName(state: MateriaRunState): string {
+  return state.currentMateria ?? state.currentNode ?? "-";
+}
+
+function displayMateriaStatusValue(state: MateriaRunState, value: string): string {
+  const node = state.currentNode;
+  const materia = state.currentMateria;
+  if (!node || !materia || node === materia) return value;
+  const normalized = value.trim();
+  if (normalized === node) return materia;
+  const escapedNode = escapeRegExp(node);
+  return value
+    .replace(new RegExp(`node\\s+"${escapedNode}"`, "g"), materia)
+    .replace(new RegExp(`node\\s+${escapedNode}`, "g"), materia)
+    .replace(new RegExp(`\\b${escapedNode}\\b`, "g"), materia);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function shortCastId(runId: string): string {

@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget } from "./ui.js";
 
@@ -49,7 +49,7 @@ export default function piMateria(pi: ExtensionAPI) {
     activeContext = ctx;
     const state = loadActiveCastState(ctx);
     if (!state?.active) return;
-    ctx.ui.setStatus("materia", `${state.phase}${state.currentNode ? `:${state.currentNode}` : ""}`);
+    ctx.ui.setStatus("materia", materiaStatusLabel(state));
     ctx.ui.notify(`pi-materia cast ${state.castId} restored in ${state.phase}. Use /materia status for details.`, "info");
   });
 

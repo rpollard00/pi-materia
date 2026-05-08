@@ -233,7 +233,7 @@ describe("native multi-turn runtime", () => {
     expect(pausedState.lastJson).toBeUndefined();
 
     await harness.runCommand("materia", "status");
-    expect(harness.widgets.get("materia")?.content).toContain("Last waiting for refinement; /materia continue to finalize");
+    expect(harness.widgets.get("materia")?.content).toContain("› waiting for refinement; /materia continue to finalize");
 
     const inputResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
     expect(inputResults.at(-1)).toBeUndefined();

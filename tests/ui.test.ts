@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { formatCostLabel, formatUsage, renderCompactUsageWidget, renderMateriaRunWidget, renderUsageSummary } from "../src/ui.js";
-import type { MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
+import { formatCostLabel, formatUsage, renderCompactUsageWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary } from "../src/ui.js";
+import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 
 function totals(tokens: number, cost: number): UsageTotals {
   return {
@@ -13,6 +13,19 @@ function costFromLine(line: string): number {
   const match = line.match(/\$(\d+\.\d{4})/);
   if (!match) throw new Error(`missing cost in line: ${line}`);
   return Number(match[1]);
+}
+
+function runState(overrides: Partial<MateriaRunState> = {}): MateriaRunState {
+  return {
+    runId: "2026-05-07T14-53-49-729Z",
+    startedAt: 1_000,
+    runDir: "/tmp/cast",
+    eventsFile: "/tmp/cast/events.jsonl",
+    usageFile: "/tmp/cast/usage.json",
+    usage: totals(0, 0) as UsageReport,
+    budgetWarned: false,
+    ...overrides,
+  };
 }
 
 describe("persistent Materia widget formatting", () => {
@@ -35,14 +48,61 @@ describe("persistent Materia widget formatting", () => {
     const lines = renderMateriaRunWidget(state, 70_000);
     expect(lines.length).toBeLessThanOrEqual(4);
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("Cast 2026-05-07 14:53:49.729Z");
-    expect(lines[0]).toContain("Interactive Planning");
-    expect(lines[0]).toContain("attempt 2");
-    expect(lines[1]).toContain("Task task-123");
-    expect(lines[1]).toContain("1m09s");
-    expect(lines[1]).toContain("tok 23k/2.1k");
-    expect(lines[2]).toContain("Last Multi-turn node planner waiting");
+    expect(lines[0]).toContain("✦ 2026-05-07 14:53:49.729Z");
+    expect(lines[0]).toContain("◉ Interactive Planning");
+    expect(lines[0]).toContain("↻ 2");
+    expect(lines[1]).toContain("◆ task-123");
+    expect(lines[1]).toContain("◷ 1m09s");
+    expect(lines[1]).toContain("Σ 23k/2.1k");
+    expect(lines[2]).toContain("› Multi-turn Interactive Planning");
     expect(lines.every((line) => line.length <= 78)).toBe(true);
+  });
+
+  test("prefers Materia names over Socket IDs in user-facing status values", () => {
+    const state = runState({
+      currentNode: "Socket-3",
+      currentMateria: "Build",
+      currentTask: "Socket-3",
+      attempt: 1,
+      lastMessage: "Socket-3",
+    });
+
+    const lines = renderMateriaRunWidget(state, 2_000);
+    expect(lines[0]).toContain("◉ Build");
+    expect(lines[1]).toContain("◆ Build");
+    expect(lines[2]).toContain("› Build");
+    expect(lines.join("\n")).not.toContain("Socket-3");
+  });
+
+  test("falls back to Socket IDs when current Materia is unavailable", () => {
+    const state = runState({
+      currentNode: "Socket-3",
+      currentTask: "Socket-3",
+      attempt: 1,
+      lastMessage: "Socket-3",
+    });
+
+    const lines = renderMateriaRunWidget(state, 2_000);
+    expect(lines[0]).toContain("◉ Socket-3");
+    expect(lines[1]).toContain("◆ Socket-3");
+    expect(lines[2]).toContain("› Socket-3");
+  });
+
+  test("renders cast status third line with status icon and Materia wording", () => {
+    const run = runState({ currentNode: "Socket-4", currentMateria: "Build", lastMessage: "Socket-4" });
+    const state = {
+      active: true,
+      phase: "Socket-4",
+      currentNode: "Socket-4",
+      currentMateria: "Build",
+      awaitingResponse: true,
+      runState: run,
+    } as MateriaCastState;
+
+    const lines = renderMateriaCastStatusWidget(state, 2_000);
+    expect(lines[2]).toBe("› Build active");
+    expect(lines[2]).not.toContain("Last");
+    expect(lines[2]).not.toContain("Socket-4");
   });
 
   test("renders compact completion usage without billing disclaimers", () => {

@@ -6,21 +6,23 @@ import piMateria from "../src/index.js";
 import type { MateriaCastState } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
 
-async function makeHarness(): Promise<FakePiHarness> {
+async function makeHarness(options: { nodeId?: string; materia?: string } = {}): Promise<FakePiHarness> {
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-recast-"));
+  const nodeId = options.nodeId ?? "work";
+  const materia = options.materia ?? "Build";
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
     loadouts: {
       Test: {
-        entry: "work",
+        entry: nodeId,
         nodes: {
-          work: { type: "agent", materia: "Build" },
+          [nodeId]: { type: "agent", materia },
         },
       },
     },
-    materia: { Build: { tools: "coding", prompt: "Build materia" } },
+    materia: { [materia]: { tools: "coding", prompt: `${materia} materia` } },
   }, null, 2));
   const harness = new FakePiHarness(cwd);
   piMateria(harness.pi);
@@ -44,6 +46,22 @@ async function failCurrentCast(harness: FakePiHarness, message = "provider outag
 }
 
 describe("/materia recast", () => {
+  test("native TUI status prefers Materia names over Socket node ids on start, restore, and recast", async () => {
+    const harness = await makeHarness({ nodeId: "Socket-4", materia: "Build" });
+
+    await harness.runCommand("materia", "cast useful status labels");
+    expect(harness.statuses.get("materia")).toBe("Build");
+
+    await harness.emit("session_start");
+    expect(harness.statuses.get("materia")).toBe("Build");
+
+    await failCurrentCast(harness, "retry me");
+    expect(harness.statuses.get("materia")).toBe("failed");
+
+    await harness.runCommand("materia", "recast");
+    expect(harness.statuses.get("materia")).toBe("Build");
+  });
+
   test("without an explicit id resumes the newest failed or aborted cast", async () => {
     const harness = await makeHarness();
 

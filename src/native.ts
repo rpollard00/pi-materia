@@ -148,7 +148,7 @@ export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   await appendEvent(state.runState, "cast_recast", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, previousFailure, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id), reusedActivePrompt: isAgentResolvedNode(node) && Boolean(state.activeTurnPrompt) });
   await writeUsage(state.runState);
   saveCastState(pi, state);
-  ctx.ui.setStatus("materia", state.currentItemLabel ? `${node.id}:${state.currentItemLabel}` : node.id);
+  ctx.ui.setStatus("materia", materiaStatusLabel(state, node));
   updateWidget(ctx, state.runState);
 
   if (isAgentResolvedNode(node) && state.activeTurnPrompt) {
@@ -248,7 +248,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       await writeUsage(state.runState);
       await appendEvent(state.runState, "node_refinement", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
       saveCastState(pi, state);
-      ctx.ui.setStatus("materia", `${node.id}:refine`);
+      ctx.ui.setStatus("materia", materiaStatusLabel(state, node, { suffix: "refine", includeItem: false }));
       updateWidget(ctx, state.runState);
       ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
       return;
@@ -419,7 +419,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   await appendEvent(state.runState, "node_start", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
   saveCastState(pi, state);
   updateWidget(ctx, state.runState);
-  ctx.ui.setStatus("materia", state.currentItemLabel ? `${node.id}:${state.currentItemLabel}` : node.id);
+  ctx.ui.setStatus("materia", materiaStatusLabel(state, node));
 
   if (!isAgentResolvedNode(node)) {
     state.awaitingResponse = false;
@@ -1372,8 +1372,16 @@ export function currentMateria(state: MateriaCastState): MateriaAgentConfig {
   return node.materia;
 }
 
-function nodeMateriaName(node: ResolvedMateriaNode): string | undefined {
-  return isAgentResolvedNode(node) ? node.node.materia : undefined;
+export function materiaStatusLabel(state: MateriaCastState, node?: ResolvedMateriaNode, options: { suffix?: string; includeItem?: boolean } = {}): string {
+  const base = nodeMateriaName(node) ?? state.currentMateria ?? node?.id ?? state.currentNode ?? state.phase;
+  const parts = [base];
+  if (options.suffix) parts.push(options.suffix);
+  if (options.includeItem !== false && state.currentItemLabel) parts.push(state.currentItemLabel);
+  return parts.join(":");
+}
+
+function nodeMateriaName(node: ResolvedMateriaNode | undefined): string | undefined {
+  return node && isAgentResolvedNode(node) ? node.node.materia : undefined;
 }
 
 function isAgentResolvedNode(node: ResolvedMateriaNode): node is ResolvedMateriaAgentNode {
