@@ -2184,7 +2184,7 @@ export function App() {
             <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge reusable prompt materia or tool-invocation materia as staged definition edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
           </div>
 
-          <section className="materia-form-section" aria-label="Materia settings">
+          <section className="materia-form-section materia-settings-section" aria-label="Materia settings">
             <p className="materia-form-section-title">Settings</p>
             <div className="materia-compact-grid">
               <label className="graph-field">Edit existing

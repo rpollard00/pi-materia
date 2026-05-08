@@ -1480,7 +1480,9 @@ describe('Materia loadout grid editor', () => {
     expect(within(colorChoices).getByRole('option', { name: 'Purple materia color' }).getAttribute('aria-selected')).toBe('false');
 
     const css = readFileSync(`${process.cwd()}/src/webui/client/src/styles.css`, 'utf8');
-    expect(css).toMatch(/\.materia-color-options\s*{[^}]*display: grid;[^}]*grid-template-columns: repeat\(2, 3\.25rem\);[^}]*grid-template-rows: repeat\(4, 3\.25rem\);/s);
+    expect(css).toMatch(/\.materia-settings-section\s*{[^}]*overflow: visible;/s);
+    expect(css).toMatch(/\.materia-color-picker\s*{[^}]*position: relative;[^}]*z-index: 20;/s);
+    expect(css).toMatch(/\.materia-color-options\s*{[^}]*z-index: 1000;[^}]*display: grid;[^}]*grid-template-columns: repeat\(2, 3\.25rem\);[^}]*grid-template-rows: repeat\(4, 3\.25rem\);/s);
 
     fireEvent.click(within(colorChoices).getByRole('option', { name: 'Purple materia color' }));
     expect(colorTrigger.getAttribute('aria-expanded')).toBe('false');

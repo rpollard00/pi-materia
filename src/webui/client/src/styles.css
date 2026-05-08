@@ -793,6 +793,10 @@
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
 }
 
+.materia-settings-section {
+  overflow: visible;
+}
+
 .materia-form-section-title {
   margin-bottom: 1rem;
   color: rgb(207 250 254);
@@ -871,6 +875,8 @@
 }
 
 .materia-color-picker {
+  position: relative;
+  z-index: 20;
   grid-column: 1 / -1;
   border: 0;
   padding: 0;
@@ -916,7 +922,7 @@
 
 .materia-color-options {
   position: absolute;
-  z-index: 40;
+  z-index: 1000;
   top: calc(100% + 0.45rem);
   left: 0;
   display: grid;
