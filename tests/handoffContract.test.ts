@@ -3,6 +3,8 @@ import {
   HANDOFF_CONTRACT_DOC_TEXT,
   HANDOFF_CONTRACT_PROMPT_TEXT,
   HANDOFF_EDGE_CONDITIONS,
+  createDeterministicHandoffOutput,
+  createPartialHandoffEnvelope,
   HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
   HANDOFF_RESERVED_CONTROL_FIELDS,
   HANDOFF_RESERVED_EVALUATOR_FIELDS,
@@ -30,6 +32,11 @@ describe("canonical handoff contract", () => {
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("must not redefine or alias reserved evaluator/route semantics");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("legacy placement terminology");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context");
+  });
+
+  test("normalizes partial deterministic handoff outputs without dropping local extensions", () => {
+    expect(createPartialHandoffEnvelope({ satisfied: false, feedback: "retry", value: 7 })).toEqual({ satisfied: false, feedback: "retry" });
+    expect(createDeterministicHandoffOutput({ satisfied: true, value: 7 })).toEqual({ satisfied: true, value: 7 });
   });
 
   test("does not document legacy aliases as canonical routing fields", () => {

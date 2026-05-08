@@ -3,6 +3,7 @@ import { mkdtemp, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
+import { stringifyDeterministicHandoffOutput } from "../src/handoffContract.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
@@ -87,6 +88,23 @@ describe("native utility node execution", () => {
     const events = await readFile(path.join(state.runDir!, "events.jsonl"), "utf8");
     expect(events).toContain('"type":"node_complete"');
     expect(events).toContain('"artifact":"nodes/Socket-1/1.md"');
+  });
+
+  test("config-driven JSON params.output uses the shared deterministic handoff serializer", async () => {
+    const output = { satisfied: true, feedback: "ok", value: 7 };
+    const harness = await makeHarness(utilityConfig({ utility: "echo", parse: "json", params: { output }, assign: { answer: "$.value" } }));
+
+    await harness.runCommand("materia", "cast shared serializer");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; lastJson?: unknown; runDir?: string };
+    expect(state.phase).toBe("complete");
+    expect(state.data?.answer).toBe(7);
+    expect(state.lastJson).toEqual(JSON.parse(stringifyDeterministicHandoffOutput(output)));
+    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.md"), "utf8")).resolves.toBe(stringifyDeterministicHandoffOutput(output));
+
+    const nativeSource = await readFile(path.resolve("src", "native.ts"), "utf8");
+    expect(nativeSource).toContain("stringifyDeterministicHandoffOutput(value)");
+    expect(nativeSource).not.toContain("JSON.stringify(value)");
   });
 
   test("parses JSON output, assigns state, and routes edges", async () => {

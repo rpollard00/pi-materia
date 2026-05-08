@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { stringifyDeterministicHandoffOutput } from "./handoffContract.js";
 
 export type BuiltInUtilityInput = {
   cwd: string;
@@ -25,10 +26,10 @@ const registry: Record<string, BuiltInUtility> = {
   echo: async ({ params }) => {
     if (Object.prototype.hasOwnProperty.call(params, "output")) {
       const value = params.output;
-      return typeof value === "string" ? value : JSON.stringify(value);
+      return typeof value === "string" ? value : stringifyDeterministicHandoffOutput(value);
     }
     const value = params.text ?? params.message ?? "";
-    return typeof value === "string" ? value : JSON.stringify(value);
+    return typeof value === "string" ? value : stringifyDeterministicHandoffOutput(value);
   },
   "project.ensureIgnored": ensureIgnored,
   "vcs.detect": detectVcs,
@@ -68,7 +69,7 @@ async function ensureIgnored(input: BuiltInUtilityInput): Promise<string> {
     await writeFile(ignoreFile, `${existing}${prefix}${added.join("\n")}\n`);
   }
 
-  return JSON.stringify({ ok: true, root, file: ignoreFile, patterns, added, unchanged: patterns.filter((pattern) => !added.includes(pattern)) });
+  return stringifyDeterministicHandoffOutput({ ok: true, root, file: ignoreFile, patterns, added, unchanged: patterns.filter((pattern) => !added.includes(pattern)) });
 }
 
 async function detectVcs(input: BuiltInUtilityInput): Promise<string> {
@@ -81,7 +82,7 @@ async function detectVcs(input: BuiltInUtilityInput): Promise<string> {
   const gitRoot = markerGitRoot ?? commandGitRoot;
   const kind = jjRoot ? "jj" : gitRoot ? "git" : "none";
   const root = jjRoot ?? gitRoot ?? null;
-  return JSON.stringify({ kind, root, available: { jj, git } });
+  return stringifyDeterministicHandoffOutput({ kind, root, available: { jj, git } });
 }
 
 function findProjectRoot(cwd: string): string | null {

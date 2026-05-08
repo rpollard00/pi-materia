@@ -114,6 +114,8 @@ export const HANDOFF_WORK_ITEM_EXAMPLE: HandoffWorkItem = {
 };
 
 export type HandoffEnvelopeInit = Partial<HandoffEnvelope>;
+export type HandoffObject = Record<string, unknown>;
+export type PartialHandoffEnvelope = Partial<Record<HandoffEnvelopeField, unknown>>;
 
 export function createHandoffEnvelope(init: HandoffEnvelopeInit = {}): HandoffEnvelope {
   return {
@@ -127,12 +129,36 @@ export function createHandoffEnvelope(init: HandoffEnvelopeInit = {}): HandoffEn
   };
 }
 
-export function pickHandoffEnvelopeFields(value: Record<string, unknown>): Partial<Record<HandoffEnvelopeField, unknown>> {
-  const envelope: Partial<Record<HandoffEnvelopeField, unknown>> = {};
+export function pickHandoffEnvelopeFields(value: HandoffObject): PartialHandoffEnvelope {
+  const envelope: PartialHandoffEnvelope = {};
   for (const field of HANDOFF_ENVELOPE_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(value, field)) envelope[field] = value[field];
   }
   return envelope;
+}
+
+export function hasHandoffEnvelopeField(value: HandoffObject): boolean {
+  return HANDOFF_ENVELOPE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(value, field));
+}
+
+export function createPartialHandoffEnvelope(init: PartialHandoffEnvelope = {}): PartialHandoffEnvelope {
+  return pickHandoffEnvelopeFields(init);
+}
+
+export function createDeterministicHandoffOutput<T extends HandoffObject>(init: T): T {
+  // Deterministic utilities may emit local extension fields such as diagnostics or
+  // command-specific values. Preserve those fields, but normalize any canonical
+  // handoff fields through the shared contract so utilities do not define a
+  // separate envelope shape.
+  if (!hasHandoffEnvelopeField(init)) return init;
+  return { ...init, ...createPartialHandoffEnvelope(init) };
+}
+
+export function stringifyDeterministicHandoffOutput(value: unknown): string {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return JSON.stringify(createDeterministicHandoffOutput(value as HandoffObject));
+  }
+  return JSON.stringify(value);
 }
 
 export function formatHandoffEnvelopeShape(): string {

@@ -17,6 +17,7 @@ import {
   HANDOFF_SUMMARY_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
   pickHandoffEnvelopeFields,
+  stringifyDeterministicHandoffOutput,
 } from "./handoffContract.js";
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
@@ -483,7 +484,7 @@ async function executeUtilityNode(state: MateriaCastState, node: Extract<Resolve
     output = await executeCommandUtility(state, node, input);
   } else if (Object.prototype.hasOwnProperty.call(params, "output")) {
     const value = params.output;
-    output = typeof value === "string" ? value : JSON.stringify(value);
+    output = typeof value === "string" ? value : stringifyDeterministicHandoffOutput(value);
   } else if (hasBuiltInUtility(node.node.utility)) {
     output = await executeBuiltInUtility(node.node.utility, input as BuiltInUtilityInput);
   } else {
