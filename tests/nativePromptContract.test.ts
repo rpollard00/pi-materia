@@ -14,6 +14,7 @@ import {
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
+  process.env.PI_MATERIA_PROFILE_DIR = await mkdtemp(path.join(tmpdir(), "pi-materia-prompt-profile-"));
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-prompt-contract-"));
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(config, null, 2));
@@ -23,6 +24,7 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
 }
 
 async function makeDefaultHarness(): Promise<FakePiHarness> {
+  process.env.PI_MATERIA_PROFILE_DIR = await mkdtemp(path.join(tmpdir(), "pi-materia-prompt-profile-"));
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-default-prompt-contract-"));
   const harness = new FakePiHarness(cwd);
   piMateria(harness.pi);
