@@ -117,11 +117,14 @@ export function App() {
     loadoutNameInput,
     loadoutSources,
     loadouts,
+    persistedActiveLoadoutName,
+    persistedLoadouts,
     reloadConfig,
     revertDraft,
     saveDraft,
     saveTarget,
     setLoadoutNameInput,
+    setPersistedActiveLoadout,
     setSaveTarget,
     setStatus,
     source,
@@ -947,11 +950,14 @@ export function App() {
           <LoadoutListPanel
             loadouts={loadouts}
             activeLoadoutName={activeLoadoutName}
+            persistedActiveLoadoutName={persistedActiveLoadoutName}
+            persistedLoadouts={persistedLoadouts}
             loadoutSources={loadoutSources}
             canDeleteLoadout={canDeleteLoadout}
             onCreateLoadout={createLoadout}
             onSwitchLoadout={switchLoadout}
             onDeleteLoadout={deleteLoadout}
+            onSetActiveLoadout={setPersistedActiveLoadout}
           />
 
           <LoadoutGraphPanel

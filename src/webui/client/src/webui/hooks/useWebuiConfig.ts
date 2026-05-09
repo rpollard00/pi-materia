@@ -5,7 +5,7 @@ import {
 } from '../../loadoutModel.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
 import { cloneConfig } from '../utils/forms.js';
-import type { ConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
+import type { ActiveLoadoutResponse, ConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
 import {
   buildConfigToSave,
   createLoadoutDraft,
@@ -20,6 +20,12 @@ async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: st
   const response = await fetch('/api/config');
   const body = await response.json() as ConfigResponse;
   return { config: normalizeMateriaConfigEdges(body.config ?? (body as MateriaConfig)), source: body.source ?? 'unknown', loadoutSources: body.loadoutSources ?? {} };
+}
+
+function activeLoadoutMessage(body: ActiveLoadoutResponse): string {
+  if (typeof body.error === 'string') return body.error;
+  if (body.error?.message) return body.error.message;
+  return body.message ?? 'Active loadout change failed.';
 }
 
 function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
@@ -89,7 +95,11 @@ export function useWebuiConfig() {
   }, [draftConfig]);
 
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
+  const persistedLoadouts = useMemo(() => buildLoadouts(baselineConfig ?? draftConfig ?? {}), [baselineConfig, draftConfig]);
   const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
+  const persistedActiveLoadoutName = baselineConfig?.activeLoadout && persistedLoadouts[baselineConfig.activeLoadout]
+    ? baselineConfig.activeLoadout
+    : Object.keys(persistedLoadouts)[0];
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
   const isDirty = dirtyConfigKey(baselineConfig) !== dirtyConfigKey(draftConfig);
 
@@ -141,6 +151,29 @@ export function useWebuiConfig() {
     });
     setLoadoutNameInput(name);
     setStatus(`Viewing loadout: ${name}`);
+  }
+
+  async function setPersistedActiveLoadout(name: string) {
+    setStatus(`Changing active loadout to ${name}…`);
+    const response = await fetch('/api/loadout/active', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const body = await response.json() as ActiveLoadoutResponse;
+    if (!response.ok || body.ok === false) {
+      const message = activeLoadoutMessage(body);
+      setStatus(`Active loadout change failed: ${message}`);
+      throw new Error(message);
+    }
+    const readyStatus = body.message ?? `Active loadout changed to ${body.activeLoadout ?? name}.`;
+    if (body.config) {
+      setBaselineConfig(normalizeMateriaConfigEdges(body.config));
+      setStatus(readyStatus);
+    } else {
+      await reloadConfig({ preserveLoadoutEdits: true, readyStatus });
+    }
+    return body.activeLoadout ?? name;
   }
 
   function commitActiveLoadoutRename(rawName = loadoutNameInput) {
@@ -243,11 +276,14 @@ export function useWebuiConfig() {
     loadoutNameInput,
     loadoutSources,
     loadouts,
+    persistedActiveLoadoutName,
+    persistedLoadouts,
     reloadConfig,
     revertDraft,
     saveDraft,
     saveTarget,
     setLoadoutNameInput,
+    setPersistedActiveLoadout,
     setSaveTarget,
     setStatus,
     source,

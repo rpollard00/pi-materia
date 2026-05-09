@@ -39,6 +39,14 @@ export interface ConfigResponse {
   loadoutSources?: Record<string, LoadoutSourceScope>;
 }
 
+export interface ActiveLoadoutResponse {
+  ok?: boolean;
+  activeLoadout?: string;
+  config?: MateriaConfig;
+  message?: string;
+  error?: string | { code?: string; message?: string };
+}
+
 export interface RoleGenerationResponse {
   ok?: boolean;
   prompt?: string;
