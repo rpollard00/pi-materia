@@ -6,6 +6,8 @@ import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipeline
 import {
   buildMateriaPalette,
   clearSocketMateria,
+  canDeleteSocket,
+  deleteSocketFromLoadout,
   extractMateriaReference,
   formatSocketLabel,
   getNodeLabel,
@@ -1404,6 +1406,29 @@ export function App() {
     return true;
   }
 
+  function deleteSocket(socketId: string) {
+    const node = activeLoadout?.nodes?.[socketId];
+    if (!node || !activeLoadoutName) return false;
+    if (!canDeleteSocket(node)) {
+      setStatus(`Cannot delete ${socketId}: entry sockets are protected.`);
+      return false;
+    }
+    const deleted = commitGraphMutation(
+      `Deleted socket ${socketId}.`,
+      (loadout) => {
+        deleteSocketFromLoadout(loadout as PipelineConfig, socketId);
+      },
+      `Deleted socket ${socketId}; graph edges and loop metadata were cleaned up.`,
+      (message) => `Cannot delete socket ${socketId}: ${message}`,
+    );
+    if (deleted) {
+      setSocketActionId(undefined);
+      setSocketActionMode('actions');
+      setSelectedLoopSocketIds((current) => current.filter((id) => id !== socketId));
+    }
+    return deleted;
+  }
+
   function removeMateria(socketId: string) {
     if (!activeLoadoutName) return false;
     const currentNode = loadouts[activeLoadoutName]?.nodes?.[socketId];
@@ -2355,6 +2380,16 @@ export function App() {
                         <button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button>
                         <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
                         <button type="button" className="socket-action-button" onClick={() => openEdgeConnector(socketActionId)}>Connect Edge</button>
+                        <button
+                          type="button"
+                          className="socket-action-button socket-action-button-danger"
+                          data-testid={`delete-socket-${socketActionId}`}
+                          disabled={!canDeleteSocket(activeLoadout.nodes[socketActionId])}
+                          title={canDeleteSocket(activeLoadout.nodes[socketActionId]) ? 'Delete this socket and clean graph references' : 'Entry sockets cannot be deleted'}
+                          onClick={() => deleteSocket(socketActionId)}
+                        >
+                          Delete Socket
+                        </button>
                       </div>
                       <div className="edge-removal-list" data-testid="edge-removal-list">
                         <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>

@@ -523,6 +523,52 @@ describe('Materia loadout grid editor', () => {
     expect(saved.nodes['Socket-2'].edges.filter((edge: { to: string }) => edge.to === 'Socket-2')).toEqual([{ when: 'not_satisfied', to: 'Socket-2' }]);
   });
 
+  it('deletes a normal socket, cleans graph references, and persists the result', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'] as any).loops = {
+      loopSelection: {
+        label: 'Loop: Socket-2 → Socket-3 → Socket-4',
+        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        consumes: { from: 'Socket-1', output: 'workItems' },
+        exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
+      },
+    };
+    (config.loadouts['Full-Auto'].nodes['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-2'));
+    fireEvent.click(await screen.findByTestId('delete-socket-Socket-2'));
+
+    await waitFor(() => expect(screen.queryByTestId('socket-Socket-2')).toBeNull());
+    expect(screen.queryByTestId('edge-Socket-1-Socket-2-0')).toBeNull();
+    expect(screen.queryByTestId('loop-region-loopSelection')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
+    expect(saved.nodes['Socket-2']).toBeUndefined();
+    expect(saved.nodes['Socket-1'].edges).toBeUndefined();
+    expect(saved.nodes['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }]);
+    expect(saved.nodes['Socket-4'].edges).toBeUndefined();
+    expect(saved.loops).toBeUndefined();
+  });
+
+  it('protects entry sockets from deletion in the socket actions UI', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: structuredClone(testConfig) }))));
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-1'));
+    const deleteButton = await screen.findByTestId('delete-socket-Socket-1');
+    expect(deleteButton).toHaveProperty('disabled', true);
+  });
+
   it('creates a loop from selected sockets on a fresh non-Build layout', async () => {
     const config = {
       activeLoadout: 'Fresh Loop',

@@ -605,11 +605,28 @@
   font-size: 0.78rem;
 }
 
+.socket-action-button-danger {
+  border-color: rgb(248 113 113 / 0.36);
+  color: rgb(254 202 202);
+}
+
+.socket-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
 .socket-action-button:hover,
 .socket-action-button:focus {
   border-color: rgb(103 232 249 / 0.64);
   background: linear-gradient(135deg, rgb(8 47 73 / 0.92), rgb(88 28 135 / 0.62));
   box-shadow: 0 0 24px rgb(34 211 238 / 0.16);
+}
+
+.socket-action-button:disabled:hover,
+.socket-action-button:disabled:focus {
+  border-color: rgb(207 250 254 / 0.18);
+  background: rgb(15 23 42 / 0.78);
+  box-shadow: none;
 }
 
 .materia-replacement-list {

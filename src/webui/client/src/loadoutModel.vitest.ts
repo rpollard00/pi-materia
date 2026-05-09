@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMateriaPalette,
   canDeleteSocket,
+  deleteSocketFromLoadout,
   formatSocketLabel,
   getNodeLabel,
   makeEmptyEntryLoadout,
@@ -148,6 +149,78 @@ describe('loadout normalization model', () => {
     expect(config.loadouts?.Yolo.nodes?.['Socket-4'].parse).toBe('json');
     expect(config.loadouts?.Yolo.nodes?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
     expect(config.loadouts?.Yolo.nodes?.['Socket-4'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+  });
+});
+
+describe('loadout socket deletion model', () => {
+  it('blocks entry socket deletion while allowing normal sockets', () => {
+    const loadout = normalizeMateriaConfigEdges({ loadouts: { Active: makeEmptyEntryLoadout() } }).loadouts!.Active;
+    loadout.nodes!['Socket-2'] = makeEmptySocket();
+
+    expect(deleteSocketFromLoadout(loadout, 'Socket-1')).toBe(false);
+    expect(loadout.nodes!['Socket-1']).toBeTruthy();
+    expect(deleteSocketFromLoadout(loadout, 'Socket-2')).toBe(true);
+    expect(loadout.nodes!['Socket-2']).toBeUndefined();
+  });
+
+  it('removes incoming and outgoing socket references when deleting a normal socket', () => {
+    const loadout = normalizeMateriaConfigEdges({
+      loadouts: {
+        Active: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }], foreach: { items: 'state.items', done: 'Socket-2' } },
+            'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }], advance: { cursor: 'i', items: 'state.items', done: 'Socket-3' } },
+            'Socket-3': { socketKind: 'normal', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
+          },
+        },
+      },
+    }).loadouts!.Active;
+
+    expect(deleteSocketFromLoadout(loadout, 'Socket-2')).toBe(true);
+
+    expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1', 'Socket-3']);
+    expect(loadout.nodes!['Socket-1'].edges).toBeUndefined();
+    expect(loadout.nodes!['Socket-1'].foreach?.done).toBeUndefined();
+    expect(loadout.nodes!['Socket-3'].edges).toBeUndefined();
+  });
+
+  it('cleans loop metadata and control targets referencing a deleted socket', () => {
+    const loadout = normalizeMateriaConfigEdges({
+      loadouts: {
+        Active: {
+          entry: 'Socket-1',
+          loops: {
+            selected: {
+              nodes: ['Socket-2', 'Socket-3'],
+              consumes: { from: 'Socket-1', output: 'workItems' },
+              exit: { from: 'Socket-3', when: 'satisfied', to: 'Socket-4' },
+            },
+            targetOnly: {
+              nodes: ['Socket-3'],
+              consumes: { from: 'Socket-1', output: 'workItems', done: 'Socket-4' },
+              iterator: { items: 'state.workItems', done: 'Socket-4' },
+              exit: { from: 'Socket-3', when: 'always', to: 'Socket-4' },
+            },
+          },
+          nodes: {
+            'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-3': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-4': { socketKind: 'normal' },
+          },
+        },
+      },
+    }).loadouts!.Active;
+
+    expect(deleteSocketFromLoadout(loadout, 'Socket-2')).toBe(true);
+    expect(loadout.loops?.selected).toBeUndefined();
+    expect(loadout.loops?.targetOnly?.consumes?.done).toBe('Socket-4');
+
+    expect(deleteSocketFromLoadout(loadout, 'Socket-4')).toBe(true);
+    expect(loadout.loops?.targetOnly?.consumes?.done).toBeUndefined();
+    expect(loadout.loops?.targetOnly?.iterator?.done).toBeUndefined();
+    expect(loadout.loops?.targetOnly?.exit?.to).toBe('end');
   });
 });
 

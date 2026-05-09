@@ -182,6 +182,38 @@ export function canDeleteSocket(node?: PipelineNode): boolean {
   return node?.socketKind === 'normal';
 }
 
+function deleteOptionalTarget(container: { done?: string } | undefined, deletedSocketId: string): void {
+  if (container?.done === deletedSocketId) delete container.done;
+}
+
+export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: string): boolean {
+  const node = loadout.nodes?.[socketId];
+  if (!loadout.nodes || !canDeleteSocket(node)) return false;
+
+  delete loadout.nodes[socketId];
+  for (const current of Object.values(loadout.nodes) as LegacyPipelineNode[]) {
+    if (current.edges) {
+      current.edges = current.edges.filter((edge) => edge.to !== socketId);
+      if (current.edges.length === 0) delete current.edges;
+    }
+    if (current.next === socketId) delete current.next;
+    deleteOptionalTarget(current.foreach, socketId);
+    deleteOptionalTarget(current.advance as { done?: string } | undefined, socketId);
+  }
+
+  for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
+    if (loop.nodes.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId) {
+      delete loadout.loops?.[loopId];
+      continue;
+    }
+    deleteOptionalTarget(loop.consumes, socketId);
+    deleteOptionalTarget(loop.iterator, socketId);
+    if (loop.exit?.to === socketId) loop.exit.to = 'end';
+  }
+  if (loadout.loops && Object.keys(loadout.loops).length === 0) delete loadout.loops;
+  return true;
+}
+
 export function normalizeLoadoutSocketKinds(loadout: PipelineConfig): PipelineConfig {
   const nodes = loadout.nodes ?? {};
   const entryId = loadout.entry && nodes[loadout.entry] ? loadout.entry : Object.keys(nodes)[0];
