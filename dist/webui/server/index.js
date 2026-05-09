@@ -301,6 +301,18 @@ function optionalTrimmed(value, field) {
 function sendRoleGenerationError(res, status, code, message) {
     sendJson(res, status, { ok: false, error: { code, message } });
 }
+function activeLoadoutFailureStatus(code) {
+    if (code === 'invalid_name')
+        return 400;
+    if (code === 'unknown_loadout')
+        return 404;
+    if (code === 'active_cast_conflict')
+        return 409;
+    return 503;
+}
+function sendActiveLoadoutError(res, status, code, message, extras = {}) {
+    sendJson(res, status, { ok: false, error: { code, message }, ...extras });
+}
 function serveStatic(req, res, staticDir) {
     const filePath = safeStaticPath(staticDir, req.url);
     if (!filePath) {
@@ -385,6 +397,43 @@ export function createMateriaWebUiServer(options = {}) {
             }
             catch (error) {
                 sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+            }
+            return;
+        }
+        if (req.url?.startsWith('/api/loadout/active')) {
+            if (req.method !== 'POST') {
+                sendActiveLoadoutError(res, 405, 'method_not_allowed', 'Use POST to set the active loadout.');
+                return;
+            }
+            if (!options.session?.setActiveLoadout) {
+                sendActiveLoadoutError(res, 503, 'unavailable', 'Active loadout API is unavailable for this server.');
+                return;
+            }
+            try {
+                const body = await readJsonBody(req);
+                if (!isPlainObject(body) || typeof body.name !== 'string' || !body.name.trim()) {
+                    sendActiveLoadoutError(res, 400, 'invalid_name', 'Expected JSON body with non-empty string field "name".');
+                    return;
+                }
+                const result = await options.session.setActiveLoadout(body.name.trim());
+                if (!result.ok) {
+                    sendActiveLoadoutError(res, activeLoadoutFailureStatus(result.code), result.code, result.message, {
+                        ...(result.activeLoadout ? { activeLoadout: result.activeLoadout } : {}),
+                        ...(result.config !== undefined ? { config: result.config } : {}),
+                    });
+                    return;
+                }
+                sendJson(res, 200, {
+                    ok: true,
+                    activeLoadout: result.activeLoadout,
+                    ...(result.config !== undefined ? { config: result.config } : {}),
+                    message: result.message ?? `Active loadout changed to ${result.activeLoadout}.`,
+                });
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const invalidJson = message === 'Invalid JSON body' || message === 'Request body too large';
+                sendActiveLoadoutError(res, invalidJson ? 400 : 500, invalidJson ? 'invalid_request' : 'active_loadout_failed', message);
             }
             return;
         }
