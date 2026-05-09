@@ -9,6 +9,8 @@ export interface PipelineNode {
   utility?: string;
   command?: string[];
   label?: string;
+  parse?: 'text' | 'json';
+  assign?: Record<string, string>;
   edges?: { to: string; when: MateriaEdgeCondition; maxTraversals?: number }[];
   foreach?: { items: string; as?: string; cursor?: string; done?: string };
   empty?: boolean;
@@ -51,8 +53,40 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
       else delete node.edges;
       delete node.next;
     }
+    normalizeGeneratorPipelineSockets(loadout, normalized.materia ?? {});
   }
   return normalized;
+}
+
+function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
+  for (const id of generatorPipelineSocketIds(loadout, definitions)) {
+    const node = loadout.nodes?.[id];
+    if (node?.type !== 'agent' || typeof node.materia !== 'string') continue;
+    if (!canonicalMateriaGeneratorOutput(definitions[node.materia])) continue;
+    node.parse = 'json';
+    node.assign = { ...(node.assign as Record<string, string> | undefined ?? {}), workItems: '$.workItems' };
+  }
+}
+
+function generatorPipelineSocketIds(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): Set<string> {
+  const ids = new Set(Object.values(loadout.loops ?? {}).map((loop) => loop.consumes?.from).filter((id): id is string => typeof id === 'string'));
+  for (const [from, node] of Object.entries(loadout.nodes ?? {})) {
+    if (!isGeneratorSocket(node, definitions)) continue;
+    for (const edge of node.edges ?? []) {
+      if (!isGeneratorSocket(loadout.nodes?.[edge.to], definitions)) continue;
+      ids.add(from);
+      ids.add(edge.to);
+    }
+  }
+  return ids;
+}
+
+function isGeneratorSocket(node: PipelineNode | undefined, definitions: Record<string, MateriaBehaviorConfig>): boolean {
+  return node?.type === 'agent' && typeof node.materia === 'string' && Boolean(canonicalMateriaGeneratorOutput(definitions[node.materia]));
+}
+
+function canonicalMateriaGeneratorOutput(definition?: MateriaBehaviorConfig): string | undefined {
+  return definition?.generator === true ? 'workItems' : undefined;
 }
 
 export interface MateriaBehaviorConfig {

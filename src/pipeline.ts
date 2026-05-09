@@ -33,6 +33,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   validateMateriaEntries(config);
   const effective = getEffectivePipelineConfig(config);
   migrateLegacyLoopConsumers(config, effective.pipeline);
+  normalizeGeneratorPipelineSlots(config, effective.pipeline);
   validateLoadout(effective.loadoutName, effective.pipeline);
   assertValidPipelineGraph(effective.pipeline, { isGeneratorNode: (nodeId) => isGeneratorPipelineNode(config, effective.pipeline, nodeId) });
   const nodes = Object.fromEntries(
@@ -176,6 +177,17 @@ function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPi
     } else if (uniqueGeneratorIds.length > 1) {
       throw new Error(`Legacy loop "${loopId}" declares iterator metadata but no consumes generator. Add loops.${loopId}.consumes with exactly one generator source; found inbound generator sockets: ${uniqueGeneratorIds.join(", ")}.`);
     }
+  }
+}
+
+function normalizeGeneratorPipelineSlots(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
+  for (const id of generatorPipelineNodeIds(config, pipeline)) {
+    const node = pipeline.nodes[id];
+    if (!node || node.type !== "agent") continue;
+    const generator = canonicalGeneratorConfigFor(config.materia[node.materia]);
+    if (!generator) continue;
+    node.parse = "json";
+    node.assign = { ...(node.assign ?? {}), [generator.output]: `$.${generator.output}` };
   }
 }
 

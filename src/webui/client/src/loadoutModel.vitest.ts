@@ -6,6 +6,7 @@ import {
   makeEmptyEntryLoadout,
   makeEmptySocket,
   makeNewSocketId,
+  normalizeMateriaConfigEdges,
   placeMateriaInSocket,
   resolveMateriaColor,
   type MateriaBehaviorConfig,
@@ -44,6 +45,55 @@ describe('loadout socket display model', () => {
     expect(formatSocketLabel('Socket-2', { type: 'agent', materia: 'Consult' })).toBe('Socket-2 (Consult)');
     expect(formatSocketLabel('Socket-3', { type: 'utility', label: 'Detect VCS', utility: 'vcs.detect' })).toBe('Socket-3 (Detect VCS)');
     expect(formatSocketLabel('Socket-4', { type: 'utility', utility: 'vcs.detect' })).toBe('Socket-4 (vcs.detect)');
+  });
+});
+
+describe('loadout normalization model', () => {
+  it('normalizes generator-to-generator sockets to canonical JSON workItems assignment before save', () => {
+    const config = normalizeMateriaConfigEdges({
+      activeLoadout: 'Yolo',
+      loadouts: {
+        Yolo: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { type: 'agent', materia: 'refiner', assign: { tasks: '$.tasks' }, edges: [{ when: 'always', to: 'end' }] },
+          },
+        },
+      },
+      materia: {
+        planner: { prompt: 'Plan.', generator: true },
+        refiner: { prompt: 'Refine.', generator: true },
+      },
+    });
+
+    expect(config.loadouts?.Yolo.nodes?.['Socket-1'].parse).toBe('json');
+    expect(config.loadouts?.Yolo.nodes?.['Socket-1'].assign?.workItems).toBe('$.workItems');
+    expect(config.loadouts?.Yolo.nodes?.['Socket-2'].parse).toBe('json');
+    expect(config.loadouts?.Yolo.nodes?.['Socket-2'].assign?.workItems).toBe('$.workItems');
+  });
+
+  it('normalizes generator-to-loop source sockets to canonical JSON workItems assignment before save', () => {
+    const config = normalizeMateriaConfigEdges({
+      loadouts: {
+        Loop: {
+          entry: 'Socket-1',
+          loops: { taskIteration: { nodes: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'planner', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { type: 'agent', materia: 'Build' },
+          },
+        },
+      },
+      materia: {
+        planner: { prompt: 'Plan.', generator: true },
+        Build: { prompt: 'Build.' },
+      },
+    });
+
+    expect(config.loadouts?.Loop.nodes?.['Socket-1'].parse).toBe('json');
+    expect(config.loadouts?.Loop.nodes?.['Socket-1'].assign?.workItems).toBe('$.workItems');
+    expect(config.loadouts?.Loop.nodes?.['Socket-2'].parse).toBeUndefined();
   });
 });
 

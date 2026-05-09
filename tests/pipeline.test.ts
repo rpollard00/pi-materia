@@ -212,17 +212,50 @@ describe("loadout-aware pipeline resolution", () => {
     expect(lines.join("\n")).not.toContain("generator=tasks");
     expect(lines.join("\n")).not.toContain("generator=work:");
 
-    const invalidUpstream = structuredClone(config) as PiMateriaConfig;
-    delete invalidUpstream.loadouts!.Loop.nodes["Socket-1"].parse;
-    expect(() => resolvePipeline(invalidUpstream)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems" from the canonical handoff envelope/);
+    const missingUpstreamParse = structuredClone(config) as PiMateriaConfig;
+    delete missingUpstreamParse.loadouts!.Loop.nodes["Socket-1"].parse;
+    const normalizedMissingUpstreamParse = resolvePipeline(missingUpstreamParse);
+    expect(normalizedMissingUpstreamParse.nodes["Socket-1"].node.parse).toBe("json");
+    expect(normalizedMissingUpstreamParse.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
 
-    const invalidDownstream = structuredClone(config) as PiMateriaConfig;
-    delete invalidDownstream.loadouts!.Loop.nodes["Socket-4"].parse;
-    expect(() => resolvePipeline(invalidDownstream)).toThrow(/Generator pipeline slot "Socket-4" must parse JSON and expose generated output "workItems" from the canonical handoff envelope/);
+    const missingDownstreamParse = structuredClone(config) as PiMateriaConfig;
+    delete missingDownstreamParse.loadouts!.Loop.nodes["Socket-4"].parse;
+    const normalizedMissingDownstreamParse = resolvePipeline(missingDownstreamParse);
+    expect(normalizedMissingDownstreamParse.nodes["Socket-4"].node.parse).toBe("json");
+    expect(normalizedMissingDownstreamParse.nodes["Socket-4"].node.assign?.workItems).toBe("$.workItems");
 
-    const invalidDownstreamAssignment = structuredClone(config) as PiMateriaConfig;
-    invalidDownstreamAssignment.loadouts!.Loop.nodes["Socket-4"].assign = { tasks: "$.tasks" };
-    expect(() => resolvePipeline(invalidDownstreamAssignment)).toThrow(/Generator pipeline slot "Socket-4" must parse JSON and expose generated output "workItems" from the canonical handoff envelope/);
+    const incompleteDownstreamAssignment = structuredClone(config) as PiMateriaConfig;
+    incompleteDownstreamAssignment.loadouts!.Loop.nodes["Socket-4"].assign = { tasks: "$.tasks" };
+    const normalizedIncompleteDownstreamAssignment = resolvePipeline(incompleteDownstreamAssignment);
+    expect(normalizedIncompleteDownstreamAssignment.nodes["Socket-4"].node.parse).toBe("json");
+    expect(normalizedIncompleteDownstreamAssignment.nodes["Socket-4"].node.assign?.workItems).toBe("$.workItems");
+  });
+
+  test("resolvePipeline normalizes generator-to-generator pipeline sockets without a loop consumer", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Yolo",
+      loadouts: {
+        Yolo: {
+          entry: "Socket-1",
+          nodes: {
+            "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { type: "agent", materia: "refiner", edges: [{ when: "always", to: "end" }] },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        refiner: { tools: "readOnly", prompt: "Refine generated work.", generator: true },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+
+    expect(pipeline.nodes["Socket-1"].node.parse).toBe("json");
+    expect(pipeline.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
+    expect(pipeline.nodes["Socket-2"].node.parse).toBe("json");
+    expect(pipeline.nodes["Socket-2"].node.assign?.workItems).toBe("$.workItems");
   });
 
   test("resolvePipeline rejects authored legacy generates metadata with migration guidance", () => {
@@ -532,13 +565,18 @@ describe("utility pipeline nodes", () => {
       },
     };
 
-    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
+    const normalizedTextParse = resolvePipeline(config);
+    expect(normalizedTextParse.nodes["Socket-1"].node.parse).toBe("json");
+    expect(normalizedTextParse.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
 
     config.loadouts!.Test.nodes["Socket-1"].parse = "json";
-    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
+    const normalizedMissingAssignment = resolvePipeline(config);
+    expect(normalizedMissingAssignment.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
 
     config.loadouts!.Test.nodes["Socket-1"].assign = { tasks: "$.tasks" };
-    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
+    const normalizedLegacyAssignment = resolvePipeline(config);
+    expect(normalizedLegacyAssignment.nodes["Socket-1"].node.parse).toBe("json");
+    expect(normalizedLegacyAssignment.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
 
     config.loadouts!.Test.nodes["Socket-1"].assign = { workItems: "$.workItems" };
     expect(resolvePipeline(config).entry.materia.generator).toBe(true);
