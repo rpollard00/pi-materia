@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { MateriaConfig } from '../../../loadoutModel.js';
-import { buildConfigToSave, createLoadoutDraft, deletedLoadoutNamesAfterRename, deleteLoadoutDraft, renameLoadoutDraft } from './loadoutDraft.js';
+import {
+  buildConfigToSave,
+  createLoadoutDraft,
+  deletedLoadoutNamesAfterRename,
+  deleteLoadoutDraft,
+  makeNewLoadoutName,
+  renameLoadoutDraft,
+  saveTargetForSource,
+} from './loadoutDraft.js';
 
 const config = {
   activeLoadout: 'Alpha',
@@ -52,5 +60,16 @@ describe('loadout draft mutations', () => {
 
     expect(payload.loadouts?.Beta).toBeNull();
     expect(payload.loadouts?.Alpha).toMatchObject(config.loadouts.Alpha);
+  });
+
+  it('chooses the next unused loadout name without filling existing gaps unexpectedly', () => {
+    expect(makeNewLoadoutName({ ...config.loadouts, 'New Loadout 3': config.loadouts.Alpha })).toBe('New Loadout 4');
+  });
+
+  it('routes saves for project and explicit loadouts back to their source scope', () => {
+    expect(saveTargetForSource('user', 'project')).toBe('project');
+    expect(saveTargetForSource('user', 'explicit')).toBe('explicit');
+    expect(saveTargetForSource('project', 'default')).toBe('project');
+    expect(saveTargetForSource('explicit', undefined)).toBe('explicit');
   });
 });

@@ -1511,7 +1511,7 @@ describe('Materia loadout grid editor', () => {
 
   it('preserves socket graph structure and parse semantics when dragging a palette materia into a socket', async () => {
     const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
-    config.materia.Maintain = { ...config.materia.Maintain, parse: 'json', assign: { satisfied: '$.satisfied' } };
+    (config.materia as Record<string, any>).Maintain = { ...config.materia.Maintain, parse: 'json', assign: { satisfied: '$.satisfied' } };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -2318,7 +2318,7 @@ describe('Materia loadout grid editor', () => {
 
   it('edits existing prompt materia materia settings where supported', async () => {
     const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
-    config.materia.Build = { ...config.materia.Build, parse: 'json' };
+    (config.materia as Record<string, any>).Build = { ...config.materia.Build, parse: 'json' };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
