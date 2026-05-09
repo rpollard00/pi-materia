@@ -205,6 +205,92 @@ describe("native utility node execution", () => {
     expect(state.visits?.["Socket-2"]).toBeUndefined();
   });
 
+  test("Hojo-like Auto-Eval retry loop requires parse json; JSON-shaped text alone stops after evaluator", async () => {
+    const evalScript = `
+      let input = "";
+      process.stdin.on("data", (chunk) => input += chunk);
+      process.stdin.on("end", () => {
+        const ctx = JSON.parse(input);
+        const key = ctx.itemKey ?? "singleton";
+        const previous = ctx.state.evalAttempts ?? {};
+        const attempt = Number(previous[key] ?? 0) + 1;
+        const evalAttempts = { ...previous, [key]: attempt };
+        process.stdout.write(JSON.stringify({ satisfied: attempt >= 2, feedback: attempt >= 2 ? "ok" : "retry", evalAttempts }));
+      });
+    `;
+    const hojoLikeConfig = (autoEvalParse?: "json") => ({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Hojo-like",
+      loadouts: {
+        "Hojo-like": {
+          entry: "Socket-1",
+          nodes: {
+            "Socket-1": {
+              type: "utility",
+              utility: "echo",
+              parse: "json",
+              params: { output: { workItems: [{ id: "alpha", title: "Alpha" }] } },
+              assign: { workItems: "$.workItems" },
+              edges: [{ when: "always", to: "Socket-2" }],
+            },
+            "Socket-2": { type: "utility", utility: "echo", params: { text: "build" }, edges: [{ when: "always", to: "Socket-3" }], limits: { maxVisits: 5 } },
+            "Socket-3": {
+              type: "utility",
+              command: ["node", "-e", evalScript],
+              // This reproduces the UI-saved Hojo-Consult failure: Socket-3/Auto-Eval
+              // emitted a JSON-shaped string with canonical `satisfied`, but without
+              // parse:"json" the runtime treats it as text and satisfied/not_satisfied
+              // edges cannot inspect the control field.
+              ...(autoEvalParse ? { parse: autoEvalParse } : {}),
+              assign: { evalAttempts: "$.evalAttempts" },
+              edges: [
+                { when: "satisfied", to: "Socket-4" },
+                { when: "not_satisfied", to: "Socket-2", maxTraversals: 3 },
+              ],
+              limits: { maxVisits: 5 },
+            },
+            "Socket-4": {
+              type: "utility",
+              utility: "echo",
+              parse: "json",
+              params: { output: { satisfied: true, commitMessage: "maintain" } },
+              advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
+              edges: [{ when: "always", to: "Socket-2" }],
+            },
+          },
+          loops: {
+            loopSelection: {
+              label: "Hojo-like Build → Auto-Eval → Maintain",
+              nodes: ["Socket-2", "Socket-3", "Socket-4"],
+              iterator: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" },
+              exit: { from: "Socket-4", when: "satisfied", to: "end" },
+            },
+          },
+        },
+      },
+      materia: {},
+    });
+
+    const missingParseHarness = await makeHarness(hojoLikeConfig());
+    await missingParseHarness.runCommand("materia", "cast hojo missing parse");
+    const missingParseState = missingParseHarness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; visits?: Record<string, number>; edgeTraversals?: Record<string, number> };
+    expect(missingParseState.phase).toBe("complete");
+    expect(missingParseState.data?.evalAttempts).toBeUndefined();
+    expect(missingParseState.visits).toMatchObject({ "Socket-2": 1, "Socket-3": 1 });
+    expect(missingParseState.visits?.["Socket-4"]).toBeUndefined();
+    expect(missingParseState.edgeTraversals?.["Socket-3->Socket-2"]).toBeUndefined();
+    expect(missingParseState.edgeTraversals?.["Socket-3->Socket-4"]).toBeUndefined();
+
+    const jsonParseHarness = await makeHarness(hojoLikeConfig("json"));
+    await jsonParseHarness.runCommand("materia", "cast hojo parse json");
+    const jsonParseState = jsonParseHarness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; visits?: Record<string, number>; edgeTraversals?: Record<string, number>; cursors?: Record<string, number> };
+    expect(jsonParseState.phase).toBe("complete");
+    expect(jsonParseState.data?.evalAttempts).toEqual({ alpha: 2 });
+    expect(jsonParseState.visits).toMatchObject({ "Socket-2": 2, "Socket-3": 2, "Socket-4": 1 });
+    expect(jsonParseState.edgeTraversals).toMatchObject({ "Socket-3->Socket-2": 1, "Socket-3->Socket-4": 1 });
+    expect(jsonParseState.cursors?.workItemIndex).toBe(1);
+  });
+
   test("runtime traverses iterative Build/Eval/Maintain retry loops as ordered guarded transitions", async () => {
     const evalScript = `
       let input = "";
