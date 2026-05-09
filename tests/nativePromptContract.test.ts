@@ -170,6 +170,34 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(secondPrompt).not.toContain('"tasks":');
   });
 
+  test("Yolo-style generator-to-generator loadouts normalize at cast start without Socket-2 validation failures", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Yolo",
+      loadouts: {
+        Yolo: {
+          entry: "Socket-1",
+          nodes: {
+            "Socket-1": { type: "agent", materia: "Plan", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { type: "agent", materia: "Architect", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "end" }] },
+          },
+        },
+      },
+      materia: {
+        Plan: { tools: "readOnly", prompt: "Create initial work items.", generator: true },
+        Architect: { tools: "readOnly", prompt: "Consume and refine generated work items.", generator: true },
+      },
+    });
+
+    await expect(harness.runCommand("materia", "cast yolo generator chain")).resolves.toBeUndefined();
+
+    const firstPrompt = promptMessages(harness).at(-1) ?? "";
+    expect(firstPrompt).toContain("Generator node/socket adapter context");
+    expect(firstPrompt).toContain("expose generated output as workItems");
+    expect(firstPrompt).toContain("must come from $.workItems");
+    expect(firstPrompt).not.toContain("Generator pipeline slot \"Socket-2\"");
+  });
+
   test("appends the central handoff contract to single-turn JSON agent nodes", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
