@@ -64,6 +64,37 @@ interface RoleGenerationResponse {
   error?: string | { message?: string };
 }
 
+interface ModelCatalogModel {
+  value: string;
+  label: string;
+  provider?: string;
+  id?: string;
+  supportedThinkingLevels: string[];
+}
+
+interface ModelCatalogResponse {
+  ok?: boolean;
+  activeModel?: ModelCatalogModel | null;
+  activeModelValue?: string | null;
+  activeThinking?: string | null;
+  models: ModelCatalogModel[];
+  warnings?: string[];
+}
+
+type ModelCatalogLoadState = 'idle' | 'loading' | 'ready' | 'error';
+
+interface OriginalMateriaModelSettings {
+  editingNodeId: string;
+  model: string;
+  thinking: string;
+}
+
+interface SelectOption {
+  value: string;
+  label: string;
+  unavailable?: boolean;
+}
+
 interface MateriaSavedEventDetail {
   id: string;
   name: string;
@@ -73,6 +104,16 @@ interface MateriaSavedEventDetail {
 }
 
 const materiaSavedEventName = 'materia:saved';
+const activeModelOptionLabel = 'Active Pi Model';
+const activeThinkingOptionLabel = 'Active Pi Thinking';
+const thinkingLevelLabels: Record<string, string> = {
+  off: 'Off',
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'X-High',
+};
 
 interface MonitorSnapshot {
   ok?: boolean;
@@ -809,6 +850,134 @@ function commandParts(raw: string): string[] | undefined {
   return raw.split(/\s+/).map((part) => part.trim()).filter(Boolean);
 }
 
+function emptyModelCatalog(): ModelCatalogResponse {
+  return { ok: true, activeModel: null, activeModelValue: null, activeThinking: null, models: [] };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeThinkingLevels(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const levels: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const level = stringField(item);
+    if (!level || seen.has(level)) continue;
+    seen.add(level);
+    levels.push(level);
+  }
+  return levels;
+}
+
+function normalizeModelCatalogModel(value: unknown): ModelCatalogModel | undefined {
+  if (!isRecord(value)) return undefined;
+  const modelValue = stringField(value.value);
+  if (!modelValue) return undefined;
+  const label = stringField(value.label) ?? modelValue;
+  const provider = stringField(value.provider);
+  const id = stringField(value.id);
+  return {
+    value: modelValue,
+    label,
+    ...(provider ? { provider } : {}),
+    ...(id ? { id } : {}),
+    supportedThinkingLevels: normalizeThinkingLevels(value.supportedThinkingLevels),
+  };
+}
+
+function normalizeModelCatalog(value: unknown): ModelCatalogResponse {
+  if (!isRecord(value)) return emptyModelCatalog();
+  const models = Array.isArray(value.models) ? uniqueCatalogModels(value.models.map(normalizeModelCatalogModel).filter((model): model is ModelCatalogModel => Boolean(model))) : [];
+  const activeModel = normalizeModelCatalogModel(value.activeModel) ?? null;
+  const activeModelValue = stringField(value.activeModelValue) ?? activeModel?.value ?? null;
+  const activeThinking = stringField(value.activeThinking) ?? null;
+  const warnings = Array.isArray(value.warnings) ? value.warnings.map(stringField).filter((warning): warning is string => Boolean(warning)) : [];
+  return {
+    ok: value.ok !== false,
+    activeModel,
+    activeModelValue,
+    activeThinking,
+    models,
+    ...(warnings.length ? { warnings } : {}),
+  };
+}
+
+async function fetchModelCatalog(): Promise<ModelCatalogResponse> {
+  const response = await fetch('/api/models');
+  if (!response.ok) throw new Error(`Model catalog request failed with HTTP ${response.status}`);
+  return normalizeModelCatalog(await response.json());
+}
+
+function uniqueCatalogModels(models: ModelCatalogModel[]): ModelCatalogModel[] {
+  const seen = new Set<string>();
+  const unique: ModelCatalogModel[] = [];
+  for (const model of models) {
+    if (!model.value || seen.has(model.value)) continue;
+    seen.add(model.value);
+    unique.push(model);
+  }
+  return unique;
+}
+
+function findCatalogModel(catalog: ModelCatalogResponse, modelValue: string): ModelCatalogModel | undefined {
+  return catalog.models.find((model) => model.value === modelValue);
+}
+
+function selectedCatalogModel(catalog: ModelCatalogResponse, modelValue: string): ModelCatalogModel | undefined {
+  const selectedValue = modelValue.trim();
+  if (selectedValue) return findCatalogModel(catalog, selectedValue);
+  return catalog.activeModel ?? (catalog.activeModelValue ? findCatalogModel(catalog, catalog.activeModelValue) : undefined);
+}
+
+function supportedThinkingLevelsForSelection(catalog: ModelCatalogResponse, modelValue: string): string[] {
+  return selectedCatalogModel(catalog, modelValue)?.supportedThinkingLevels ?? [];
+}
+
+function thinkingLabel(level: string): string {
+  return thinkingLevelLabels[level] ?? level;
+}
+
+function isOriginalSavedThinking(form: Pick<MateriaFormState, 'editingNodeId'>, original: OriginalMateriaModelSettings | undefined, modelValue: string, thinkingValue: string): boolean {
+  return Boolean(original && form.editingNodeId === original.editingNodeId && modelValue.trim() === original.model && thinkingValue.trim() === original.thinking && original.thinking);
+}
+
+function canKeepThinkingForModel(catalog: ModelCatalogResponse, modelValue: string, thinkingValue: string, form: Pick<MateriaFormState, 'editingNodeId'>, original: OriginalMateriaModelSettings | undefined): boolean {
+  const normalizedThinking = thinkingValue.trim();
+  if (!normalizedThinking) return true;
+  const supported = supportedThinkingLevelsForSelection(catalog, modelValue);
+  if (supported.includes(normalizedThinking)) return true;
+  return isOriginalSavedThinking(form, original, modelValue, normalizedThinking);
+}
+
+function modelSelectOptions(catalog: ModelCatalogResponse, original: OriginalMateriaModelSettings | undefined): SelectOption[] {
+  const models = uniqueCatalogModels(catalog.models);
+  const options: SelectOption[] = [{ value: '', label: activeModelOptionLabel }, ...models.map((model) => ({ value: model.value, label: model.label }))];
+  const originalModel = original?.model.trim();
+  if (originalModel && !models.some((model) => model.value === originalModel)) {
+    options.push({ value: originalModel, label: `${originalModel} (unavailable)`, unavailable: true });
+  }
+  return options;
+}
+
+function thinkingSelectOptions(catalog: ModelCatalogResponse, form: Pick<MateriaFormState, 'editingNodeId' | 'model' | 'thinking'>, original: OriginalMateriaModelSettings | undefined): SelectOption[] {
+  const supported = supportedThinkingLevelsForSelection(catalog, form.model);
+  const options: SelectOption[] = [
+    { value: '', label: activeThinkingOptionLabel },
+    ...supported.map((level) => ({ value: level, label: thinkingLabel(level) })),
+  ];
+  const currentThinking = form.thinking.trim();
+  if (currentThinking && !supported.includes(currentThinking) && isOriginalSavedThinking(form, original, form.model, currentThinking)) {
+    options.push({ value: currentThinking, label: `${currentThinking} (unsupported saved value)`, unavailable: true });
+  }
+  return options;
+}
+
 function socketPropertyFormFromNode(node?: PipelineNode): SocketPropertyFormState {
   return {
     maxVisits: node?.limits?.maxVisits === undefined ? '' : String(node.limits.maxVisits),
@@ -951,6 +1120,11 @@ export function App() {
   const suppressSocketClickRef = useRef(false);
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
+  const [originalMateriaModelSettings, setOriginalMateriaModelSettings] = useState<OriginalMateriaModelSettings | undefined>();
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalogResponse>(() => emptyModelCatalog());
+  const [modelCatalogStatus, setModelCatalogStatus] = useState<ModelCatalogLoadState>('idle');
+  const [modelCatalogError, setModelCatalogError] = useState('');
+  const modelCatalogRequestedRef = useRef(false);
   const [materiaColorOpen, setMateriaColorOpen] = useState(false);
   const materiaColorDropdownRef = useRef<HTMLFieldSetElement | null>(null);
   const [roleBrief, setRoleBrief] = useState('');
@@ -1027,6 +1201,21 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (selectedTab !== 'materia-editor' || modelCatalogRequestedRef.current) return;
+    modelCatalogRequestedRef.current = true;
+    setModelCatalogStatus('loading');
+    setModelCatalogError('');
+    fetchModelCatalog().then((catalog) => {
+      setModelCatalog(catalog);
+      setModelCatalogStatus('ready');
+    }).catch((error) => {
+      setModelCatalog(emptyModelCatalog());
+      setModelCatalogStatus('error');
+      setModelCatalogError(error instanceof Error ? error.message : String(error));
+    });
+  }, [selectedTab]);
+
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
@@ -1051,6 +1240,11 @@ export function App() {
   const isDirty = JSON.stringify(baselineConfig) !== JSON.stringify(draftConfig);
   const currentMonitorNode = monitor?.activeCast?.currentNode;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
+  const modelOptions = useMemo(() => modelSelectOptions(modelCatalog, originalMateriaModelSettings), [modelCatalog, originalMateriaModelSettings]);
+  const thinkingOptions = useMemo(() => thinkingSelectOptions(modelCatalog, materiaForm, originalMateriaModelSettings), [modelCatalog, materiaForm.editingNodeId, materiaForm.model, materiaForm.thinking, originalMateriaModelSettings]);
+  const activeModelDescription = modelCatalog.activeModel?.label ?? modelCatalog.activeModelValue;
+  const selectedModel = selectedCatalogModel(modelCatalog, materiaForm.model);
+  const thinkingLevelsForSelection = selectedModel?.supportedThinkingLevels ?? [];
 
   function updateDraft(updater: (config: MateriaConfig) => void) {
     setDraftConfig((current) => {
@@ -1068,6 +1262,19 @@ export function App() {
     setDraftConfig((current) => mergeReloadedConfigIntoDraft(current, loaded.config, preserveLoadoutEdits));
     setSource(loaded.source);
     setStatus(readyStatus);
+  }
+
+  function resetMateriaEditorForm() {
+    setMateriaForm(emptyMateriaForm());
+    setOriginalMateriaModelSettings(undefined);
+  }
+
+  function handleMateriaModelChange(model: string) {
+    setMateriaForm((current) => ({
+      ...current,
+      model,
+      thinking: canKeepThinkingForModel(modelCatalog, model, current.thinking, current, originalMateriaModelSettings) ? current.thinking : '',
+    }));
   }
 
   useEffect(() => {
@@ -1620,14 +1827,17 @@ export function App() {
     if (!definition) return;
     const isUtility = definition.type === 'utility';
     const generator = isGeneratorMateria(definition);
+    const savedModel = isUtility ? '' : String(definition.model ?? '').trim();
+    const savedThinking = isUtility ? '' : String(definition.thinking ?? '').trim();
+    setOriginalMateriaModelSettings({ editingNodeId: id, model: savedModel, thinking: savedThinking });
     setMateriaForm({
       editingNodeId: id,
       name: id,
       behavior: isUtility ? 'tool' : 'prompt',
       prompt: isUtility ? '' : String(definition.prompt ?? ''),
       toolAccess: isUtility ? 'none' : (definition.tools ?? 'none'),
-      model: isUtility ? '' : String(definition.model ?? ''),
-      thinking: isUtility ? '' : String(definition.thinking ?? ''),
+      model: savedModel,
+      thinking: savedThinking,
       color: String(definition.color ?? ''),
       outputFormat: definition.parse === 'json' ? 'json' : 'text',
       multiTurn: isUtility ? false : Boolean(definition.multiTurn),
@@ -1701,7 +1911,7 @@ export function App() {
       if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Materia save failed');
       const scope = body.target ?? target;
       dispatchMateriaSavedEvent({ id: savedName, name: savedName, behavior: savedBehavior, requestedScope: target, scope });
-      setMateriaForm(emptyMateriaForm());
+      resetMateriaEditorForm();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -2188,7 +2398,7 @@ export function App() {
             <p className="materia-form-section-title">Settings</p>
             <div className="materia-compact-grid">
               <label className="graph-field">Edit existing
-                <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : setMateriaForm(emptyMateriaForm())}>
+                <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : resetMateriaEditorForm()}>
                   <option value="">new materia…</option>
                   {editableDefinitionIds.map((id) => <option key={id} value={id}>{id}</option>)}
                 </select>
@@ -2220,7 +2430,26 @@ export function App() {
                   <legend>Prompt / agent options</legend>
                   <div className="materia-compact-grid materia-settings-subgrid">
                     <label className="graph-field">Model
-                      <input data-testid="materia-model" value={materiaForm.model} onChange={(event) => setMateriaForm({ ...materiaForm, model: event.target.value })} placeholder="provider/model" />
+                      <select data-testid="materia-model" value={materiaForm.model} onChange={(event) => handleMateriaModelChange(event.target.value)}>
+                        {modelOptions.map((option) => <option key={option.value || 'active-pi-model'} value={option.value}>{option.label}</option>)}
+                      </select>
+                      <span className="materia-field-hint" data-testid="materia-model-catalog-status">
+                        {modelCatalogStatus === 'loading'
+                          ? 'Loading available Pi models…'
+                          : modelCatalogStatus === 'error'
+                            ? `Model list unavailable: ${modelCatalogError}`
+                            : `${modelCatalog.models.length} available Pi model${modelCatalog.models.length === 1 ? '' : 's'}${activeModelDescription ? `; active ${activeModelDescription}` : ''}.`}
+                      </span>
+                    </label>
+                    <label className="graph-field">Thinking
+                      <select data-testid="materia-thinking" value={materiaForm.thinking} onChange={(event) => setMateriaForm({ ...materiaForm, thinking: event.target.value })}>
+                        {thinkingOptions.map((option) => <option key={option.value || 'active-pi-thinking'} value={option.value}>{option.label}</option>)}
+                      </select>
+                      <span className="materia-field-hint" data-testid="materia-thinking-options-status">
+                        {materiaForm.model ? `Uses thinking levels for ${selectedModel?.label ?? materiaForm.model}.` : 'Uses thinking levels for the active Pi model.'}
+                        {thinkingLevelsForSelection.length > 0 ? ` Offered: ${thinkingLevelsForSelection.map(thinkingLabel).join(', ')}.` : ''}
+                        {modelCatalog.activeThinking ? ` Active Pi thinking: ${modelCatalog.activeThinking}.` : ''}
+                      </span>
                     </label>
                     <label className="graph-field">Tools
                       <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
@@ -2339,7 +2568,7 @@ export function App() {
 
           <div className="mt-5 flex flex-wrap gap-3">
             <button className="materia-button" data-testid="save-materia-form" onClick={() => { void saveMateriaForm(); }}>{materiaForm.editingNodeId ? 'Update materia' : 'Create materia'}</button>
-            <button className="materia-button-secondary" onClick={() => { setMateriaForm(emptyMateriaForm()); discardGeneratedRolePrompt(); }}>Clear form</button>
+            <button className="materia-button-secondary" onClick={() => { resetMateriaEditorForm(); discardGeneratedRolePrompt(); }}>Clear form</button>
           </div>
           <p className="mt-3 min-h-10 text-sm text-cyan-100" data-testid="materia-save-status">{status}</p>
         </section>

@@ -79,6 +79,22 @@ async function openTab(name: RegExp | string) {
   fireEvent.click(await screen.findByRole('button', { name }));
 }
 
+type FetchMock = ReturnType<typeof vi.fn>;
+
+function configPostCalls(fetchMock: FetchMock) {
+  return fetchMock.mock.calls.filter((call) => call[0] === '/api/config' && (call[1] as RequestInit | undefined)?.method === 'POST');
+}
+
+function configPostBody(fetchMock: FetchMock, index = 0) {
+  const call = configPostCalls(fetchMock)[index];
+  if (!call) throw new Error(`Missing config POST call ${index}`);
+  return JSON.parse(String((call[1] as RequestInit).body));
+}
+
+async function waitForConfigPostCount(fetchMock: FetchMock, count: number) {
+  await waitFor(() => expect(configPostCalls(fetchMock)).toHaveLength(count));
+}
+
 function paletteIds() {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="palette-"]')).map((element) => element.dataset.testid?.replace('palette-', ''));
 }
@@ -1445,6 +1461,15 @@ describe('Materia loadout grid editor', () => {
     const savedEvents: CustomEvent[] = [];
     window.addEventListener('materia:saved', (event) => savedEvents.push(event as CustomEvent), { once: true });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/models') {
+        return new Response(JSON.stringify({
+          ok: true,
+          activeModel: { value: 'openai/gpt-active', label: 'Active Test Model', supportedThinkingLevels: ['off', 'low', 'high'] },
+          activeModelValue: 'openai/gpt-active',
+          activeThinking: 'low',
+          models: [{ value: 'openai/gpt-review', label: 'GPT Review (openai/gpt-review)', supportedThinkingLevels: ['off', 'high'] }],
+        }));
+      }
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body));
         serverConfig = {
@@ -1461,9 +1486,17 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Planning-Consult/ }));
     await openTab('Materia Editor');
+    const modelSelect = await screen.findByTestId('materia-model') as HTMLSelectElement;
+    const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
+    expect(modelSelect.value).toBe('');
+    expect(modelSelect.options[0]?.textContent).toBe('Active Pi Model');
+    expect(thinkingSelect.value).toBe('');
+    expect(thinkingSelect.options[0]?.textContent).toBe('Active Pi Thinking');
+    await waitFor(() => expect(Array.from(modelSelect.options).map((option) => option.value)).toContain('openai/gpt-review'));
+    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'low', 'high']));
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
-    fireEvent.change(screen.getByTestId('materia-model'), { target: { value: 'openai/gpt-review' } });
+    fireEvent.change(modelSelect, { target: { value: 'openai/gpt-review' } });
     const colorPicker = screen.getByTestId('materia-color');
     expect(screen.queryByRole('radiogroup', { name: /materia color/i })).toBeNull();
     expect(screen.queryByRole('radio', { name: /purple/i })).toBeNull();
@@ -1504,18 +1537,95 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    await waitForConfigPostCount(fetchMock, 1);
+    const body = configPostBody(fetchMock);
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', color: 'materia-color-purple', multiTurn: true });
-    expect(fetchMock.mock.calls[2][0]).toBe('/api/config');
+    await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/config' && (call[1] as RequestInit | undefined)?.method !== 'POST').length).toBeGreaterThanOrEqual(2));
     expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
     expect(Array.from((screen.getByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value)).toContain('Critique');
     await openTab('Loadout');
     expect(await screen.findByTestId('palette-Critique')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('preserves an existing unavailable model and legacy thinking value when saved unchanged', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    (config.materia as Record<string, any>).Build = { ...config.materia.Build, model: 'legacy/missing-model', thinking: 'ultra' };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/models') {
+        return new Response(JSON.stringify({
+          ok: true,
+          activeModel: { value: 'openai/gpt-active', label: 'Active Test Model', supportedThinkingLevels: ['off', 'low'] },
+          activeModelValue: 'openai/gpt-active',
+          activeThinking: 'low',
+          models: [
+            { value: 'openai/gpt-review', label: 'GPT Review', supportedThinkingLevels: ['off', 'high'] },
+            { value: 'anthropic/haiku', label: 'Haiku', supportedThinkingLevels: ['off'] },
+          ],
+        }));
+      }
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    const modelSelect = screen.getByTestId('materia-model') as HTMLSelectElement;
+    await waitFor(() => expect(Array.from(modelSelect.options).map((option) => option.value)).toContain('legacy/missing-model'));
+    expect(Array.from(modelSelect.options).map((option) => option.value)).toEqual(['', 'openai/gpt-review', 'anthropic/haiku', 'legacy/missing-model']);
+    expect(Array.from(modelSelect.options).find((option) => option.value === 'legacy/missing-model')?.textContent).toContain('(unavailable)');
+    const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
+    expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'ultra']);
+    expect(Array.from(thinkingSelect.options).find((option) => option.value === 'ultra')?.textContent).toContain('unsupported saved value');
+
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+
+    await waitForConfigPostCount(fetchMock, 1);
+    const body = configPostBody(fetchMock);
+    expect(body.config.materia.Build).toMatchObject({ model: 'legacy/missing-model', thinking: 'ultra' });
+  });
+
+  it('updates thinking choices from model metadata and resets unsupported saved thinking after model changes', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    (config.materia as Record<string, any>).Build = { ...config.materia.Build, thinking: 'xhigh' };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/models') {
+        return new Response(JSON.stringify({
+          ok: true,
+          activeModel: { value: 'openai/gpt-active', label: 'Active Test Model', supportedThinkingLevels: ['low', 'medium'] },
+          activeModelValue: 'openai/gpt-active',
+          activeThinking: 'medium',
+          models: [
+            { value: 'openai/gpt-test', label: 'GPT Test', supportedThinkingLevels: ['off', 'high'] },
+            { value: 'anthropic/haiku', label: 'Haiku', supportedThinkingLevels: ['off'] },
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const modelSelect = await screen.findByTestId('materia-model') as HTMLSelectElement;
+    const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
+    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'low', 'medium']));
+    fireEvent.change(screen.getByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'high', 'xhigh']));
+    expect(thinkingSelect.value).toBe('xhigh');
+
+    fireEvent.change(modelSelect, { target: { value: 'anthropic/haiku' } });
+
+    expect(thinkingSelect.value).toBe('');
+    expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off']);
+    expect(Array.from(thinkingSelect.options).map((option) => option.value)).not.toContain('xhigh');
   });
 
   it('views, creates, and removes semantic Generator config without legacy fields', async () => {
@@ -1539,16 +1649,16 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByLabelText('Generator').closest('label')?.getAttribute('title')).toContain('canonical workItems');
 
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    let body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    await waitForConfigPostCount(fetchMock, 1);
+    let body = configPostBody(fetchMock, 0);
     expect(body.config.materia.planner.generator).toBe(true);
     expect(body.config.materia.planner.generates).toBeNull();
 
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'interactivePlan' } });
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
-    body = JSON.parse(String(fetchMock.mock.calls[3][1]?.body));
+    await waitForConfigPostCount(fetchMock, 2);
+    body = configPostBody(fetchMock, 1);
     expect(body.config.materia.interactivePlan.generator).toBe(true);
     expect(body.config.materia.interactivePlan.generates).toBeNull();
 
@@ -1558,16 +1668,16 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
     expect(screen.queryByRole('region', { name: 'Generator behavior help' })).toBeNull();
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
-    body = JSON.parse(String(fetchMock.mock.calls[5][1]?.body));
+    await waitForConfigPostCount(fetchMock, 3);
+    body = configPostBody(fetchMock, 2);
     expect(body.config.materia.Build.generator).toBe(true);
     expect(body.config.materia.Build.generates).toBeNull();
 
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
     fireEvent.click(screen.getByTestId('materia-generator'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(9));
-    body = JSON.parse(String(fetchMock.mock.calls[7][1]?.body));
+    await waitForConfigPostCount(fetchMock, 4);
+    body = configPostBody(fetchMock, 3);
     expect(body.config.materia.planner.generator).toBeNull();
     expect(body.config.materia.planner.generates).toBeNull();
   });
@@ -1672,8 +1782,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    await waitForConfigPostCount(fetchMock, 1);
+    const body = configPostBody(fetchMock);
     expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config).not.toHaveProperty('pipeline');
     expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.' });
@@ -1716,8 +1826,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-timeout'), { target: { value: '90000' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    await waitForConfigPostCount(fetchMock, 1);
+    const body = configPostBody(fetchMock);
     expect(body.target).toBe('project');
     expect(body.config.materia.RunTests).toMatchObject({
       type: 'utility',
@@ -1801,7 +1911,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('materia-command')).toHaveProperty('value', 'npm test');
     expect(screen.getByTestId('materia-params')).toHaveProperty('value', JSON.stringify({ ci: true }, null, 2));
     expect(screen.getByTestId('materia-timeout')).toHaveProperty('value', '90000');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/config', '/api/models']);
   });
 
   it('edits existing prompt materia materia settings where supported', async () => {
@@ -1819,8 +1930,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'readOnly' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const body = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    await waitForConfigPostCount(fetchMock, 1);
+    const body = configPostBody(fetchMock);
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
     expect(body.config.materia.Build).toMatchObject({ tools: 'readOnly', prompt: 'Build with extra care.', model: 'openai/gpt-test' });

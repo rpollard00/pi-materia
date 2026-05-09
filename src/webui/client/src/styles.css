@@ -916,6 +916,15 @@
   resize: vertical;
 }
 
+.materia-field-hint {
+  color: rgb(148 163 184 / 0.92);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.25;
+  text-transform: none;
+}
+
 .materia-color-picker {
   position: relative;
   z-index: 20;
