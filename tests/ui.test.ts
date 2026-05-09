@@ -66,6 +66,55 @@ describe("persistent Materia widget formatting", () => {
     expect(lines[0]).toContain("⌘ Yolo");
   });
 
+  test("renders legacy run state without loadout or endedAt metadata sensibly", () => {
+    const legacyState = runState({ currentMateria: "Build", currentTask: "legacy task" });
+    delete (legacyState as Partial<MateriaRunState>).loadoutName;
+    delete (legacyState as Partial<MateriaRunState>).endedAt;
+
+    const lines = renderMateriaRunWidget(legacyState, 2_000);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("⌘ -");
+    expect(lines[0]).toContain("◷ 1s");
+    expect(lines.join("\n")).toContain("legacy task");
+  });
+
+  test("keeps stable first-line field positions when work item and status text are long", () => {
+    const stableState = runState({
+      loadoutName: "BuildLoadout",
+      currentMateria: "Build",
+      currentTask: "short task",
+      lastMessage: "short status",
+      attempt: 3,
+    });
+    const dynamicState = runState({
+      ...stableState,
+      currentTask: "work item ".repeat(40),
+      lastMessage: "status update ".repeat(40),
+    });
+
+    const stableLines = renderMateriaRunWidget(stableState, 2_000);
+    const dynamicLines = renderMateriaRunWidget(dynamicState, 2_000);
+    for (const marker of ["✦", "⌘", "↻", "◷", "Σ"]) {
+      expect(dynamicLines[0].indexOf(marker)).toBe(stableLines[0].indexOf(marker));
+    }
+    expect(dynamicLines).toHaveLength(stableLines.length);
+    expect(dynamicLines.every((line) => line.length <= 78)).toBe(true);
+  });
+
+  test("keeps stable first-line field positions when cast status text is long", () => {
+    const run = runState({ loadoutName: "Review", currentMateria: "Build", currentTask: "task", attempt: 1 });
+    const shortStatus = { active: true, phase: "Build", currentMateria: "Build", awaitingResponse: true, runState: run } as MateriaCastState;
+    const longStatus = { ...shortStatus, failedReason: "very long terminal status ".repeat(30) } as MateriaCastState;
+
+    const shortLines = renderMateriaCastStatusWidget(shortStatus, 2_000);
+    const longLines = renderMateriaCastStatusWidget(longStatus, 2_000);
+    for (const marker of ["✦", "⌘", "↻", "◷", "Σ"]) {
+      expect(longLines[0].indexOf(marker)).toBe(shortLines[0].indexOf(marker));
+    }
+    expect(longLines).toHaveLength(3);
+    expect(longLines.every((line) => line.length <= 78)).toBe(true);
+  });
+
   test("freezes elapsed time when terminal endedAt metadata is present", () => {
     const state = runState({ endedAt: 11_000 });
 
@@ -150,6 +199,44 @@ describe("persistent Materia widget formatting", () => {
 });
 
 describe("persistent Materia widget ticker ownership", () => {
+  test("replaces prior terminal status when a new active cast becomes current", () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const intervals: Array<{ handle: { id: number; unref: () => void }; cleared: boolean }> = [];
+    let nextId = 1;
+    (globalThis as any).setInterval = () => {
+      const handle = { id: nextId++, unref: () => undefined };
+      intervals.push({ handle, cleared: false });
+      return handle;
+    };
+    (globalThis as any).clearInterval = (handle: { id: number }) => {
+      const interval = intervals.find((entry) => entry.handle.id === handle.id);
+      if (interval) interval.cleared = true;
+    };
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
+
+    try {
+      updateWidget(ctx, runState({ runId: "old-cast", endedAt: 11_000, currentMateria: "Build", lastMessage: "old terminal status" }), { replaceOwner: true });
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("old terminal status");
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(0);
+
+      updateWidget(ctx, runState({ runId: "new-cast", currentMateria: "Review", lastMessage: "new active status" }), { replaceOwner: true });
+      const activeWidget = widgets.at(-1)?.value?.join("\n") ?? "";
+      expect(activeWidget).toContain("new active status");
+      expect(activeWidget).not.toContain("old terminal status");
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(1);
+
+      updateWidget(ctx, runState({ runId: "old-cast", endedAt: 11_000, currentMateria: "Build", lastMessage: "late old terminal status" }));
+      expect(widgets.at(-1)?.value?.join("\n")).toBe(activeWidget);
+    } finally {
+      clearWidgetTicker(ctx);
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+  });
+
   test("uses one current-cast ticker, ignores stale updates, and stops on terminal render", () => {
     const originalSetInterval = globalThis.setInterval;
     const originalClearInterval = globalThis.clearInterval;
