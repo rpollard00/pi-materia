@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MateriaConfig } from '../../loadoutModel.js';
-import { useWebuiConfig } from './useWebuiConfig.js';
+import { dirtyConfigKey, useWebuiConfig } from './useWebuiConfig.js';
 
 const initialConfig = {
   activeLoadout: 'Alpha',
@@ -97,6 +97,75 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+
+describe('dirty config comparison', () => {
+  it('canonicalizes object key order and equivalent default representations', () => {
+    const baseline = {
+      activeLoadout: 'Full-Auto',
+      materia: {
+        Build: { outputFormat: 'json', prompt: 'Build the assigned work.', tools: 'coding' },
+      },
+      loadouts: {
+        'Full-Auto': {
+          nodes: {
+            'Socket-1': { next: 'Socket-2', materia: 'Build', type: 'agent' },
+            'Socket-2': { materia: 'Build', type: 'agent' },
+          },
+          entry: 'Socket-1',
+        },
+      },
+    } satisfies MateriaConfig;
+    const draft = {
+      loadouts: {
+        'Full-Auto': {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-2': { type: 'agent', materia: 'Build' },
+            'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+          },
+        },
+      },
+      materia: {
+        Build: { tools: 'coding', prompt: 'Build the assigned work.', parse: 'json' },
+      },
+      activeLoadout: 'Hojo-Consult',
+    } satisfies MateriaConfig;
+
+    expect(dirtyConfigKey(baseline)).toBe(dirtyConfigKey(draft));
+  });
+
+  it('detects real persisted config additions, deletions, renames, and socket/materia/profile/loadout edits', () => {
+    const baseline = reportedLayeredConfig;
+    const editedSocket = cloneConfigForTest(baseline);
+    editedSocket.loadouts!['Full-Auto']!.nodes!['Socket-1']!.materia = 'Auto-Eval';
+    expect(dirtyConfigKey(editedSocket)).not.toBe(dirtyConfigKey(baseline));
+
+    const editedMateria = cloneConfigForTest(baseline);
+    editedMateria.materia!.Build!.prompt = 'Changed prompt';
+    expect(dirtyConfigKey(editedMateria)).not.toBe(dirtyConfigKey(baseline));
+
+    const editedProfile = cloneConfigForTest(baseline);
+    editedProfile.profile = { ...(editedProfile.profile as Record<string, unknown>), note: 'real edit' };
+    expect(dirtyConfigKey(editedProfile)).not.toBe(dirtyConfigKey(baseline));
+
+    const addedLoadout = cloneConfigForTest(baseline);
+    addedLoadout.loadouts!.Added = { entry: 'Socket-1', nodes: { 'Socket-1': { type: 'agent', materia: 'Build' } } };
+    expect(dirtyConfigKey(addedLoadout)).not.toBe(dirtyConfigKey(baseline));
+
+    const deletedLoadout = cloneConfigForTest(baseline);
+    delete deletedLoadout.loadouts!['Hojo-Consult'];
+    expect(dirtyConfigKey(deletedLoadout)).not.toBe(dirtyConfigKey(baseline));
+
+    const renamedLoadout = cloneConfigForTest(baseline);
+    renamedLoadout.loadouts!['Hojo-Renamed'] = renamedLoadout.loadouts!['Hojo-Consult'];
+    delete renamedLoadout.loadouts!['Hojo-Consult'];
+    expect(dirtyConfigKey(renamedLoadout)).not.toBe(dirtyConfigKey(baseline));
+  });
+});
+
+function cloneConfigForTest(config: MateriaConfig): MateriaConfig {
+  return JSON.parse(JSON.stringify(config)) as MateriaConfig;
+}
 
 describe('useWebuiConfig', () => {
   it('reports clean on initial load when the active loadout falls back without mutating the draft', async () => {

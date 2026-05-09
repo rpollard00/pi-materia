@@ -30,14 +30,30 @@ function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reload
   });
 }
 
-function configForDirtyComparison(config: MateriaConfig | undefined): MateriaConfig | undefined {
+type JsonObject = { [key: string]: unknown };
+
+function sortObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortObjectKeys);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as JsonObject)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, sortObjectKeys(nested)]),
+  );
+}
+
+export function configForDirtyComparison(config: MateriaConfig | undefined): unknown {
   if (!config) return config;
-  const comparable = cloneConfig(config);
+  const comparable = normalizeMateriaConfigEdges(cloneConfig(config));
   // activeLoadout is the user's current UI/session selection. It remains in the
   // persisted config for compatibility, but selecting a loadout must not require
   // a save or make the header report staged edits by itself.
   delete comparable.activeLoadout;
-  return comparable;
+  return sortObjectKeys(comparable);
+}
+
+export function dirtyConfigKey(config: MateriaConfig | undefined): string {
+  return JSON.stringify(configForDirtyComparison(config));
 }
 
 function demoConfig(): MateriaConfig {
@@ -75,7 +91,7 @@ export function useWebuiConfig() {
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
-  const isDirty = JSON.stringify(configForDirtyComparison(baselineConfig)) !== JSON.stringify(configForDirtyComparison(draftConfig));
+  const isDirty = dirtyConfigKey(baselineConfig) !== dirtyConfigKey(draftConfig);
 
   function updateDraft(updater: (config: MateriaConfig) => void) {
     setDraftConfig((current) => {
