@@ -4,7 +4,6 @@ import type { MateriaEdgeCondition } from '../../../types.js';
 import { isGeneratorMateria } from '../../../generator.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
-  assertValidLoadoutSaveSemantics,
   buildMateriaPalette,
   clearSocketMateria,
   canDeleteSocket,
@@ -15,14 +14,11 @@ import {
   resolveSocketDisplayLabel,
   isEmptySocket,
   isEntrySocket,
-  makeEmptyEntryLoadout,
   makeEmptySocket,
   makeNewSocketId,
   materiaColorChoices,
   nodeColor,
-  normalizeMateriaConfigEdges,
   placeMateriaInSocket,
-  type MateriaConfig,
   type LegacyPipelineNode,
   type PipelineConfig,
   type PipelineNode,
@@ -38,20 +34,14 @@ import {
   socketStageHeight,
 } from './webui/constants.js';
 import type {
-  ConfigResponse,
   DragPayload,
   LoadoutEdge,
-  LoadoutSourceScope,
   MateriaFormState,
   MateriaSavedEventDetail,
   MateriaTabId,
-  ModelCatalogLoadState,
-  ModelCatalogResponse,
-  MonitorSnapshot,
   OriginalMateriaModelSettings,
   PositionedSocket,
   RoleGenerationResponse,
-  SaveTarget,
   SocketLayoutDragState,
   SocketPropertyFormState,
   SocketRegionSelectionDragState,
@@ -89,7 +79,6 @@ import {
 import {
   buildMateriaPatch,
   canonicalWorkItemsGeneratorConfig,
-  cloneConfig,
   emptyMateriaForm,
   emptySocketPropertyForm,
   parseDragPayload,
@@ -99,41 +88,15 @@ import {
 } from './webui/utils/forms.js';
 import {
   canKeepThinkingForModel,
-  emptyModelCatalog,
   modelSelectOptions,
-  normalizeModelCatalog,
   selectedCatalogModel,
   thinkingLabel,
   thinkingSelectOptions,
 } from './webui/utils/modelCatalog.js';
 import { tabFromLocation } from './webui/utils/tabs.js';
-
-function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
-  let index = Object.keys(loadouts).length + 1;
-  let name = `New Loadout ${index}`;
-  while (loadouts[name]) name = `New Loadout ${++index}`;
-  return name;
-}
-
-async function fetchModelCatalog(): Promise<ModelCatalogResponse> {
-  const response = await fetch('/api/models');
-  if (!response.ok) throw new Error(`Model catalog request failed with HTTP ${response.status}`);
-  return normalizeModelCatalog(await response.json());
-}
-
-async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope> }> {
-  const response = await fetch('/api/config');
-  const body = await response.json() as ConfigResponse;
-  return { config: normalizeMateriaConfigEdges(body.config ?? (body as MateriaConfig)), source: body.source ?? 'unknown', loadoutSources: body.loadoutSources ?? {} };
-}
-
-function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
-  if (!preserveLoadoutEdits || !current) return normalizeMateriaConfigEdges(reloaded);
-  return normalizeMateriaConfigEdges({
-    ...cloneConfig(current),
-    materia: reloaded.materia ? cloneConfig(reloaded.materia) : undefined,
-  });
-}
+import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
+import { useModelCatalog } from './webui/hooks/useModelCatalog.js';
+import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
 
 function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
   window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
@@ -141,16 +104,32 @@ function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
 
 export function App() {
   const [selectedTab, setSelectedTab] = useState<MateriaTabId>(() => tabFromLocation());
-  const [baselineConfig, setBaselineConfig] = useState<MateriaConfig | undefined>();
-  const [draftConfig, setDraftConfig] = useState<MateriaConfig | undefined>();
-  const draftConfigRef = useRef<MateriaConfig | undefined>(undefined);
-  const [source, setSource] = useState<string>('loading');
-  const [loadoutSources, setLoadoutSources] = useState<Record<string, LoadoutSourceScope>>({});
-  const [deletedLoadoutNames, setDeletedLoadoutNames] = useState<string[]>([]);
-  const [loadoutNameInput, setLoadoutNameInput] = useState('');
-  const [status, setStatus] = useState('Loading materia configuration…');
+  const {
+    activeLoadout,
+    activeLoadoutName,
+    canDeleteLoadout,
+    canRevert,
+    commitActiveLoadoutRename,
+    createLoadout,
+    deleteLoadout: deleteLoadoutDraft,
+    draftConfig,
+    isDirty,
+    loadoutNameInput,
+    loadoutSources,
+    loadouts,
+    reloadConfig,
+    revertDraft,
+    saveDraft,
+    saveTarget,
+    setLoadoutNameInput,
+    setSaveTarget,
+    setStatus,
+    source,
+    status,
+    switchLoadout: switchLoadoutDraft,
+    updateDraft,
+  } = useWebuiConfig();
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
-  const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
   const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace' | 'edit' | 'connect'>('actions');
@@ -163,13 +142,10 @@ export function App() {
   const [selectedLoopSocketIds, setSelectedLoopSocketIds] = useState<string[]>([]);
   const [socketRegionSelectionDrag, setSocketRegionSelectionDrag] = useState<SocketRegionSelectionDragState | undefined>();
   const suppressSocketClickRef = useRef(false);
-  const [monitor, setMonitor] = useState<MonitorSnapshot>();
+  const monitor = useMonitorSnapshot();
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
   const [originalMateriaModelSettings, setOriginalMateriaModelSettings] = useState<OriginalMateriaModelSettings | undefined>();
-  const [modelCatalog, setModelCatalog] = useState<ModelCatalogResponse>(() => emptyModelCatalog());
-  const [modelCatalogStatus, setModelCatalogStatus] = useState<ModelCatalogLoadState>('idle');
-  const [modelCatalogError, setModelCatalogError] = useState('');
-  const modelCatalogRequestedRef = useRef(false);
+  const { modelCatalog, modelCatalogStatus, modelCatalogError } = useModelCatalog(selectedTab);
   const [materiaColorOpen, setMateriaColorOpen] = useState(false);
   const materiaColorDropdownRef = useRef<HTMLFieldSetElement | null>(null);
   const [roleBrief, setRoleBrief] = useState('');
@@ -202,75 +178,6 @@ export function App() {
     };
   }, [materiaColorOpen]);
 
-  useEffect(() => {
-    draftConfigRef.current = draftConfig;
-  }, [draftConfig]);
-
-  useEffect(() => {
-    let cancelled = false;
-    reloadConfig({ cancelled: () => cancelled }).catch((error) => {
-      if (cancelled) return;
-      setStatus(`Using demo loadout data: ${error instanceof Error ? error.message : String(error)}`);
-      const fallback: MateriaConfig = {
-        activeLoadout: 'Demo Loadout',
-        loadouts: {
-          'Demo Loadout': {
-            entry: 'Socket-1',
-            nodes: {
-              'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
-              'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
-              'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Socket-4' }] },
-              'Socket-4': { type: 'agent', materia: 'Maintain' },
-            },
-          },
-        },
-      };
-      const normalizedFallback = normalizeMateriaConfigEdges(fallback);
-      setBaselineConfig(cloneConfig(normalizedFallback));
-      setDraftConfig(normalizedFallback);
-      setLoadoutNameInput(normalizedFallback.activeLoadout ?? '');
-      setSource('demo');
-      setLoadoutSources({ 'Demo Loadout': 'default' });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = () => fetch('/api/monitor').then((response) => response.json() as Promise<MonitorSnapshot>).then((body) => { if (!cancelled) setMonitor(body); }).catch(() => undefined);
-    const events = typeof EventSource !== 'undefined' ? new EventSource('/api/monitor/events') : undefined;
-    events?.addEventListener('monitor', (event) => {
-      if (!cancelled) setMonitor(JSON.parse((event as MessageEvent).data) as MonitorSnapshot);
-    });
-    events?.addEventListener('error', () => { void refresh(); });
-    const interval = events ? undefined : window.setInterval(refresh, 1500);
-    return () => {
-      cancelled = true;
-      events?.close();
-      if (interval) window.clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (selectedTab !== 'materia-editor' || modelCatalogRequestedRef.current) return;
-    modelCatalogRequestedRef.current = true;
-    setModelCatalogStatus('loading');
-    setModelCatalogError('');
-    fetchModelCatalog().then((catalog) => {
-      setModelCatalog(catalog);
-      setModelCatalogStatus('ready');
-    }).catch((error) => {
-      setModelCatalog(emptyModelCatalog());
-      setModelCatalogStatus('error');
-      setModelCatalogError(error instanceof Error ? error.message : String(error));
-    });
-  }, [selectedTab]);
-
-  const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
-  const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
-  const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
   const loadoutGraph = useMemo(() => layoutSockets(activeLoadout), [activeLoadout]);
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
   const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout, socketPositions]);
@@ -291,7 +198,6 @@ export function App() {
   const materia = draftConfig?.materia ?? {};
   const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
-  const isDirty = JSON.stringify(baselineConfig) !== JSON.stringify(draftConfig);
   const currentMonitorNode = monitor?.activeCast?.currentNode;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
   const modelOptions = useMemo(() => modelSelectOptions(modelCatalog, originalMateriaModelSettings), [modelCatalog, originalMateriaModelSettings]);
@@ -299,31 +205,6 @@ export function App() {
   const activeModelDescription = modelCatalog.activeModel?.label ?? modelCatalog.activeModelValue;
   const selectedModel = selectedCatalogModel(modelCatalog, materiaForm.model);
   const thinkingLevelsForSelection = selectedModel?.supportedThinkingLevels ?? [];
-
-  function updateDraft(updater: (config: MateriaConfig) => void) {
-    setDraftConfig((current) => {
-      const next = cloneConfig(current ?? {});
-      if (!next.loadouts) next.loadouts = buildLoadouts(next);
-      updater(next);
-      return normalizeMateriaConfigEdges(next);
-    });
-  }
-
-  async function reloadConfig({ preserveLoadoutEdits = false, readyStatus = 'Draft ready. Changes are staged until you save.', cancelled = () => false }: { preserveLoadoutEdits?: boolean; readyStatus?: string; cancelled?: () => boolean } = {}) {
-    const loaded = await fetchMateriaConfig();
-    if (cancelled()) return;
-    const normalizedLoaded = normalizeMateriaConfigEdges(loaded.config);
-    const nextDraft = mergeReloadedConfigIntoDraft(draftConfigRef.current, loaded.config, preserveLoadoutEdits);
-    const nextLoadouts = buildLoadouts(nextDraft);
-    const nextActive = nextDraft.activeLoadout && nextLoadouts[nextDraft.activeLoadout] ? nextDraft.activeLoadout : Object.keys(nextLoadouts)[0] ?? '';
-    setBaselineConfig(normalizedLoaded);
-    setDraftConfig(nextDraft);
-    setLoadoutNameInput(nextActive);
-    setSource(loaded.source);
-    setLoadoutSources(loaded.loadoutSources ?? {});
-    if (!preserveLoadoutEdits) setDeletedLoadoutNames([]);
-    setStatus(readyStatus);
-  }
 
   function resetMateriaEditorForm() {
     setMateriaForm(emptyMateriaForm());
@@ -358,104 +239,22 @@ export function App() {
     };
   }, []);
 
-  function switchLoadout(name: string) {
-    updateDraft((config) => {
-      config.activeLoadout = name;
-    });
-    setLoadoutNameInput(name);
+  function resetLoadoutSelectionChrome() {
     setSelectedMateriaId(undefined);
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setSelectedLoopSocketIds([]);
-    setStatus(`Active loadout staged: ${name}`);
   }
 
-  function commitActiveLoadoutRename(rawName = loadoutNameInput) {
-    if (!activeLoadoutName) return false;
-    const nextName = rawName.trim();
-    if (!nextName) {
-      setStatus('Cannot rename loadout: name cannot be empty.');
-      return false;
-    }
-    if (nextName === activeLoadoutName) {
-      setLoadoutNameInput(activeLoadoutName);
-      return true;
-    }
-    if (loadouts[nextName]) {
-      setStatus(`Cannot rename loadout: ${nextName} already exists.`);
-      return false;
-    }
-    const previousName = activeLoadoutName;
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      if (!draftLoadouts[previousName] || draftLoadouts[nextName]) return;
-      draftLoadouts[nextName] = draftLoadouts[previousName];
-      delete draftLoadouts[previousName];
-      config.loadouts = draftLoadouts;
-      config.activeLoadout = nextName;
-    });
-    setDeletedLoadoutNames((current) => {
-      const withoutRevertedTarget = current.filter((name) => name !== nextName);
-      if (!baselineConfig?.loadouts?.[previousName] || withoutRevertedTarget.includes(previousName)) return withoutRevertedTarget;
-      return [...withoutRevertedTarget, previousName];
-    });
-    if (baselineConfig?.loadouts?.[previousName]) {
-      const sourceScope = loadoutSources[previousName];
-      if (sourceScope === 'project' || sourceScope === 'explicit') setSaveTarget(sourceScope);
-    }
-    setLoadoutNameInput(nextName);
-    setStatus(`Renamed loadout to ${nextName}. Save to persist.`);
-    return true;
-  }
-
-  function createLoadout() {
-    let createdName = '';
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      const name = makeNewLoadoutName(draftLoadouts);
-      createdName = name;
-      draftLoadouts[name] = makeEmptyEntryLoadout();
-      config.loadouts = draftLoadouts;
-      config.activeLoadout = name;
-    });
-    setLoadoutNameInput(createdName);
-    setStatus('Created a new draft loadout with one empty entry socket. Rename and save when ready.');
-  }
-
-  function canDeleteLoadout(name: string) {
-    return Boolean(name && loadouts[name] && loadoutSources[name] !== 'default' && Object.keys(loadouts).length > 1);
+  function switchLoadout(name: string) {
+    switchLoadoutDraft(name);
+    resetLoadoutSelectionChrome();
   }
 
   function deleteLoadout(name: string) {
-    if (!loadouts[name]) return false;
-    if (loadoutSources[name] === 'default') {
-      setStatus(`Cannot delete ${name}: shipped default loadouts are protected.`);
-      return false;
-    }
-    const remainingNames = Object.keys(loadouts).filter((candidate) => candidate !== name);
-    if (remainingNames.length === 0) {
-      setStatus('Cannot delete the only loadout; create another loadout first.');
-      return false;
-    }
-    const fallbackName = activeLoadoutName === name ? remainingNames[0] : activeLoadoutName;
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      delete draftLoadouts[name];
-      config.loadouts = draftLoadouts;
-      config.activeLoadout = fallbackName;
-    });
-    setLoadoutNameInput(fallbackName ?? '');
-    if (baselineConfig?.loadouts?.[name]) {
-      setDeletedLoadoutNames((current) => current.includes(name) ? current : [...current, name]);
-      const sourceScope = loadoutSources[name];
-      if (sourceScope === 'project' || sourceScope === 'explicit') setSaveTarget(sourceScope);
-    }
-    setSelectedMateriaId(undefined);
-    setSocketActionId(undefined);
-    setSocketActionMode('actions');
-    setSelectedLoopSocketIds([]);
-    setStatus(`Deleted loadout ${name}. Active loadout is now ${fallbackName}. Save to persist.`);
-    return true;
+    const deleted = deleteLoadoutDraft(name);
+    if (deleted) resetLoadoutSelectionChrome();
+    return deleted;
   }
 
   function putMateria(socketId: string, materiaId: string, fromSocket?: string) {
@@ -1137,35 +936,6 @@ export function App() {
     window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
-  async function saveDraft() {
-    if (!draftConfig) return;
-    setStatus('Saving staged loadout edits…');
-    const normalizedDraft = normalizeMateriaConfigEdges(draftConfig);
-    assertValidLoadoutSaveSemantics(normalizedDraft);
-    const configToSave = cloneConfig(normalizedDraft) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
-    if (deletedLoadoutNames.length > 0) {
-      configToSave.loadouts = { ...(configToSave.loadouts ?? {}) };
-      for (const name of deletedLoadoutNames) configToSave.loadouts[name] = null;
-    }
-    const response = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ target: saveTarget, config: configToSave }),
-    });
-    const body = await response.json();
-    if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Save failed');
-    setBaselineConfig(normalizedDraft);
-    setDraftConfig(normalizedDraft);
-    setDeletedLoadoutNames([]);
-    setLoadoutSources((current) => {
-      const next = { ...current };
-      for (const name of deletedLoadoutNames) delete next[name];
-      for (const name of Object.keys(normalizedDraft.loadouts ?? {})) if (!next[name]) next[name] = body.target ?? saveTarget;
-      return next;
-    });
-    setStatus(`Saved staged loadout edits to ${body.target ?? saveTarget} scope.`);
-  }
-
   return (
     <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
       <section className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-6 px-6 py-8">
@@ -1261,7 +1031,7 @@ export function App() {
               saveTarget={saveTarget}
               dragOverTrash={dragOverTrash}
               isDirty={isDirty}
-              canRevert={Boolean(baselineConfig)}
+              canRevert={canRevert}
               status={status}
               onSaveTargetChange={setSaveTarget}
               onTrashDragOver={(event) => { event.preventDefault(); setDragOverTrash(true); }}
@@ -1279,7 +1049,7 @@ export function App() {
                 if (payload.kind === 'socket' && payload.fromSocket) removeMateria(payload.fromSocket);
               }}
               onSave={() => saveDraft().catch((error) => setStatus(error.message))}
-              onRevert={() => { setDraftConfig(cloneConfig(baselineConfig ?? {})); setStatus('Reverted staged edits.'); }}
+              onRevert={revertDraft}
             />
           </aside>
         </div>
