@@ -2,7 +2,6 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { supportsXhigh } from '@mariozechner/pi-ai';
 const defaultStaticDir = resolve(fileURLToPath(new URL('../../../dist/webui/client', import.meta.url)));
 const contentTypes = {
     '.css': 'text/css; charset=utf-8',
@@ -97,34 +96,39 @@ async function readCatalogModels(source, warnings) {
     const getAvailable = modelRegistry?.getAvailable;
     if (typeof getAvailable !== 'function')
         return [];
+    let available;
     try {
-        const available = await getAvailable.call(modelRegistry);
-        if (!Array.isArray(available)) {
-            warnings.push('Model registry getAvailable() did not return an array.');
-            return [];
-        }
-        const models = [];
-        const seen = new Set();
-        let skipped = 0;
-        for (const raw of available) {
-            const model = normalizeCatalogModel(raw);
-            if (!model) {
-                skipped += 1;
-                continue;
-            }
-            if (seen.has(model.value))
-                continue;
-            seen.add(model.value);
-            models.push(model);
-        }
-        if (skipped)
-            warnings.push(`Skipped ${skipped} invalid model entr${skipped === 1 ? 'y' : 'ies'} from the model registry.`);
-        return models;
+        available = await getAvailable.call(modelRegistry);
     }
     catch (error) {
         warnings.push(`Unable to read available models: ${errorMessage(error)}`);
         return [];
     }
+    if (!Array.isArray(available)) {
+        warnings.push('Model registry getAvailable() did not return an array.');
+        return [];
+    }
+    const models = [];
+    const seen = new Set();
+    for (const [index, raw] of available.entries()) {
+        let model;
+        try {
+            model = normalizeCatalogModel(raw);
+        }
+        catch (error) {
+            warnings.push(`Skipped invalid model registry entry at index ${index}${catalogEntryHint(raw)}: ${errorMessage(error)}`);
+            continue;
+        }
+        if (!model) {
+            warnings.push(`Skipped invalid model registry entry at index ${index}${catalogEntryHint(raw)}.`);
+            continue;
+        }
+        if (seen.has(model.value))
+            continue;
+        seen.add(model.value);
+        models.push(model);
+    }
+    return models;
 }
 function normalizeCatalogModel(raw) {
     if (!isPlainObject(raw))
@@ -161,7 +165,21 @@ function supportedThinkingLevelsFor(model, reasoning) {
     if (map) {
         return THINKING_LEVEL_ORDER.filter((level) => Object.prototype.hasOwnProperty.call(map, level) && map[level] !== null && map[level] !== undefined);
     }
-    return supportsXhigh(model) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];
+    return locallySupportsXhigh(model) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];
+}
+function locallySupportsXhigh(model) {
+    const id = stringField(model.id)?.toLowerCase();
+    if (!id)
+        return false;
+    return (id.includes('gpt-5.2') ||
+        id.includes('gpt-5.3') ||
+        id.includes('gpt-5.4') ||
+        id.includes('gpt-5.5') ||
+        id.includes('deepseek-v4-pro') ||
+        id.includes('opus-4-6') ||
+        id.includes('opus-4.6') ||
+        id.includes('opus-4-7') ||
+        id.includes('opus-4.7'));
 }
 function thinkingLevelMapFor(model) {
     if (isPlainObject(model.thinkingLevelMap))
@@ -181,6 +199,24 @@ function modelLabel(value, name, id) {
     if (!name || name === id || name === value)
         return value;
     return `${name} (${value})`;
+}
+function catalogEntryHint(raw) {
+    try {
+        if (!isPlainObject(raw))
+            return '';
+        const provider = stringField(raw.provider);
+        const id = stringField(raw.id);
+        if (provider && id)
+            return ` (${provider}/${id})`;
+        if (provider)
+            return ` (provider: ${provider})`;
+        if (id)
+            return ` (id: ${id})`;
+    }
+    catch {
+        return '';
+    }
+    return '';
 }
 function stringField(value) {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
