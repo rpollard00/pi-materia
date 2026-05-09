@@ -219,6 +219,75 @@ describe("graph validation foundation", () => {
     expect(result.errors).toContainEqual(expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exit.from" }));
   });
 
+  test("validates executable loop semantics before UI-created loops are accepted", () => {
+    const graph = validGraph();
+    graph.nodes["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.nodes["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.nodes["Socket-4"] = { type: "agent", materia: "Maintain", parse: "text", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.loops = {
+      loopSelection: {
+        nodes: ["Socket-3", "Socket-4"],
+        consumes: { from: "Socket-1", output: "workItems" },
+        exit: { from: "Socket-4", when: "satisfied", to: "end" },
+      },
+    };
+
+    const result = validatePipelineGraph(graph, { isGeneratorNode: (nodeId) => nodeId === "Socket-1" });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ source: "Socket-4.parse" }));
+    expect(formatGraphValidationErrors(result.errors)).toContain('field parse has current value "text", expected "json"');
+    expect(formatGraphValidationErrors(result.errors)).toContain("Suggested fix: set Socket-4.parse to \"json\"");
+  });
+
+  test("rejects consumed loops that cannot advance safely or continue non-final items", () => {
+    const graph = validGraph();
+    graph.nodes["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.nodes["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.nodes["Socket-4"] = { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "taskIndex", items: "state.tasks", done: "Socket-3", when: "not_satisfied" } };
+    graph.loops = {
+      loopSelection: {
+        nodes: ["Socket-3", "Socket-4"],
+        consumes: { from: "Socket-1", output: "workItems" },
+        exit: { from: "Socket-4", when: "satisfied", to: "end" },
+      },
+    };
+
+    const result = validatePipelineGraph(graph, { isGeneratorNode: (nodeId) => nodeId === "Socket-1" });
+    const message = formatGraphValidationErrors(result.errors);
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "Socket-4.advance.cursor" }),
+      expect.objectContaining({ source: "Socket-4.advance.items" }),
+      expect.objectContaining({ source: "Socket-4.advance.done" }),
+      expect.objectContaining({ source: "Socket-4.advance.when" }),
+      expect.objectContaining({ source: "Socket-4.edges" }),
+    ]));
+    expect(message).toContain('field advance.cursor has current value "taskIndex", expected "workItemIndex"');
+    expect(message).toContain("has no outgoing route back into loop members");
+  });
+
+  test("validates opposite-condition retry routes for conditional loop continuations", () => {
+    const graph = validGraph();
+    graph.nodes["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.nodes["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.nodes["Socket-4"] = { type: "agent", materia: "Maintain", parse: "json", edges: [{ when: "satisfied", to: "Socket-3" }] };
+    graph.loops = {
+      loopSelection: {
+        nodes: ["Socket-3", "Socket-4"],
+        consumes: { from: "Socket-1", output: "workItems" },
+        exit: { from: "Socket-4", when: "satisfied", to: "end" },
+      },
+    };
+
+    const result = validatePipelineGraph(graph, { isGeneratorNode: (nodeId) => nodeId === "Socket-1" });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ source: "Socket-4.edges" }));
+    expect(formatGraphValidationErrors(result.errors)).toContain("has no not_satisfied route back into the loop");
+  });
+
   test("normalizes legacy next and flow edges into canonical always edges", () => {
     const graph = validGraph();
     graph.nodes["Socket-1"].edges = [{ to: "Socket-4" } as never, { when: "Flow" as never, to: "Socket-2" }];

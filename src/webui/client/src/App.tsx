@@ -1677,7 +1677,7 @@ export function App() {
           },
         };
       },
-      `Staged loop around ${selectedLabels.join(', ')} consuming ${generator.from}.${generator.output}.`,
+      `Staged loop around ${selectedLabels.join(', ')} consuming ${generator.from}.${generator.output}; loop.exit will compile into parse/advance runtime control flow.`,
       (message) => `Cannot create loop: ${message}`,
     );
     if (created) {
@@ -1698,7 +1698,7 @@ export function App() {
         if (!draftLoop) return;
         draftLoop.exit = nextExit;
       },
-      `Staged loop ${loopId} exit as ${nextExit.from}.${edgeConditionLabel(nextExit.when)} → ${nextExit.to}.`,
+      `Staged loop ${loopId} exit as ${nextExit.from}.${edgeConditionLabel(nextExit.when)} → ${nextExit.to}; it will compile into runtime parse/advance control flow.`,
       (message) => `Cannot update loop ${loopId} exit: ${message}`,
     );
   }
@@ -2196,7 +2196,7 @@ export function App() {
             {Object.keys(activeLoadout?.loops ?? {}).length > 0 && (
               <div className="mt-4 rounded-2xl border border-cyan-200/15 bg-slate-950/55 p-4" data-testid="loop-editor-panel">
                 <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Loop exits</h3>
-                <p className="mt-1 text-xs text-slate-400">Loop exit conditions use the same canonical edge model as graph edges.</p>
+                <p className="mt-1 text-xs text-slate-400">Loop exits are compiled into runtime parse/advance control flow on the exit source; they are not decorative metadata. Validation will block conflicting socket parse, advance, or continuation routes before save/run.</p>
                 <div className="mt-3 grid gap-3">
                   {Object.entries(activeLoadout?.loops ?? {}).map(([loopId, loop]) => {
                     const exit = loop.exit ?? { from: loop.nodes[loop.nodes.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' };

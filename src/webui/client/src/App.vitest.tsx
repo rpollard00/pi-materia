@@ -389,6 +389,7 @@ describe('Materia loadout grid editor', () => {
   it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
+    (config.loadouts['Full-Auto'].nodes['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -454,6 +455,7 @@ describe('Materia loadout grid editor', () => {
   it('selects loop sockets by dragging a region box before creating a loop', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
+    (config.loadouts['Full-Auto'].nodes['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
 
     render(<App />);

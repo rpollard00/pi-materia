@@ -1,6 +1,6 @@
 import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
 import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "./socketIds.js";
-import type { LegacyMateriaPipelineNodeConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopExitConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
+import type { LegacyMateriaPipelineNodeConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
 export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
@@ -155,18 +155,95 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
     const consumesFromIsValid = !loop.consumes || validateSocketReference(errors, nodeIds, loop.consumes.from, `loops.${loopId}.consumes.from`, { from: loop.consumes.from });
     validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.done, `loops.${loopId}.consumes.done`);
     validateOptionalTarget(errors, nodeIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
-    validateLoopExit(errors, nodeIds, loopId, loop.nodes, loop.exit);
+    const exitIsValid = validateLoopExit(errors, nodeIds, loopId, loop.nodes, loop.exit);
     if (loop.consumes && consumesFromIsValid && loopNodesAreValid) validateLoopTopology(graph, errors, loopId, loop.nodes, loop.consumes.from, options);
+    if (loop.consumes && loopNodesAreValid && exitIsValid) validateExecutableLoopSemantics(graph, errors, loopId, loop.nodes, loop.consumes, loop.exit);
   }
 }
 
-function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<string>, loopId: string, loopNodes: string[], exit: MateriaLoopExitConfig | undefined): void {
-  if (!exit) return;
+function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopNodes: string[], consumes: NonNullable<MateriaLoopConfig["consumes"]>, exit: MateriaLoopExitConfig | undefined): void {
+  if (!exit) {
+    errors.push({
+      code: "invalid-loop",
+      source: `loops.${loopId}.exit`,
+      message: `Loop "${loopId}" has consumes metadata but no loops.${loopId}.exit, so the UI cannot compile it into executable advance control flow. Suggested fix: choose a loop exit source, condition, and target.`,
+    });
+    return;
+  }
+
+  const node = graph.nodes?.[exit.from];
+  if (!node) return;
+  const sourceLabel = `Loop "${loopId}" exit source "${exit.from}"`;
+  if ((exit.when === "satisfied" || exit.when === "not_satisfied") && node.parse !== undefined && node.parse !== "json") {
+    errors.push({
+      code: "invalid-loop",
+      source: `${exit.from}.parse`,
+      from: exit.from,
+      message: `${sourceLabel} field parse has current value ${JSON.stringify(node.parse)}, expected "json" because loops.${loopId}.exit.when is "${exit.when}" and runtime reads the canonical satisfied JSON field. Suggested fix: set ${exit.from}.parse to "json" or choose an unconditional exit condition.`,
+    });
+  }
+
+  const output = consumes.output ?? "workItems";
+  const expectedAdvance: MateriaAdvanceConfig = {
+    cursor: consumes.cursor ?? defaultLoopCursor(output),
+    items: `state.${output}`,
+    done: exit.to,
+    when: exit.when,
+  };
+  if (node.advance) {
+    for (const [field, expectedValue] of Object.entries(expectedAdvance)) {
+      const currentValue = node.advance[field as keyof MateriaAdvanceConfig];
+      if (currentValue !== expectedValue) {
+        errors.push({
+          code: "invalid-loop",
+          source: `${exit.from}.advance.${field}`,
+          from: exit.from,
+          message: `${sourceLabel} field advance.${field} has current value ${JSON.stringify(currentValue)}, expected ${JSON.stringify(expectedValue)} so loops.${loopId}.exit plus consumes can compile to canonical runtime control flow. Suggested fix: align ${exit.from}.advance.${field} with loops.${loopId}.consumes/exit or remove the advance block so it can be materialized.`,
+        });
+      }
+    }
+  }
+
+  const continuationEdges = canonicalOutgoingEdges(node).filter((edge) => loopNodes.includes(edge.to));
+  if (continuationEdges.length === 0) {
+    errors.push({
+      code: "invalid-loop",
+      source: `${exit.from}.edges`,
+      from: exit.from,
+      message: `${sourceLabel} has no outgoing route back into loop members (${loopNodes.join(", ")}) for non-final consumed items after advance runs. Suggested fix: add an always edge, or an opposite-condition retry edge, from ${exit.from} to a loop socket.`,
+    });
+  }
+
+  const hasConditionalContinuation = continuationEdges.some((edge) => edge.when !== "always");
+  const opposite = oppositeCondition(exit.when);
+  if (hasConditionalContinuation && opposite && !continuationEdges.some((edge) => edge.when === opposite)) {
+    errors.push({
+      code: "invalid-loop",
+      source: `${exit.from}.edges`,
+      from: exit.from,
+      message: `${sourceLabel} uses conditional continuation edges but has no ${opposite} route back into the loop for retry/opposite-condition execution. Current continuation conditions: ${continuationEdges.map((edge) => edge.when).join(", ")}. Expected an ${opposite} edge or an always edge. Suggested fix: add ${exit.from} --${opposite}--> <loop socket>, or use an unconditional back-edge when advance should control final completion.`,
+    });
+  }
+}
+
+function defaultLoopCursor(output: string): string {
+  return output === "workItems" ? "workItemIndex" : `${output}Index`;
+}
+
+function oppositeCondition(condition: MateriaEdgeCondition): MateriaEdgeCondition | undefined {
+  if (condition === "satisfied") return "not_satisfied";
+  if (condition === "not_satisfied") return "satisfied";
+  return undefined;
+}
+
+function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<string>, loopId: string, loopNodes: string[], exit: MateriaLoopExitConfig | undefined): boolean {
+  if (!exit) return true;
+  const errorCount = errors.length;
   validateOptionalTarget(errors, nodeIds, loopId, exit.to, `loops.${loopId}.exit.to`);
   if (!exit.from) {
     errors.push({ code: "missing-endpoint", source: `loops.${loopId}.exit.from`, message: `Missing graph endpoint referenced by loops.${loopId}.exit.from.` });
   } else if (!validateSocketId(errors, exit.from, `loops.${loopId}.exit.from`, { from: exit.from })) {
-    return;
+    return false;
   } else if (!nodeIds.has(exit.from)) {
     errors.push({ code: "unknown-endpoint", source: `loops.${loopId}.exit.from`, from: exit.from, message: `Unknown graph endpoint "${exit.from}" referenced by loops.${loopId}.exit.from.` });
   } else if (!loopNodes.includes(exit.from)) {
@@ -175,6 +252,7 @@ function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<st
   if (!isCanonicalEdgeCondition(exit.when)) {
     errors.push({ code: "invalid-edge-condition", source: `loops.${loopId}.exit.when`, from: exit.from, to: exit.to, message: `Loop "${loopId}" has invalid exit condition at loops.${loopId}.exit.when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
   }
+  return errors.length === errorCount;
 }
 
 function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopNodes: string[], consumesFrom: string, options: MateriaGraphValidationOptions): void {
