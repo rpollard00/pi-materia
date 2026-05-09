@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
 import { isGeneratorMateria } from '../../../generator.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
@@ -30,7 +30,6 @@ import {
 import {
   edgeConditionLabels,
   materiaSavedEventName,
-  materiaTabs,
   socketCardWidth,
   socketLayoutOffsetX,
   socketLayoutOffsetY,
@@ -57,7 +56,14 @@ import type {
   SocketPropertyFormState,
   SocketRegionSelectionDragState,
 } from './webui/types.js';
-import { formatElapsed, formatTime, materiaColorClass } from './webui/utils/display.js';
+import { AppHeader, TabNav } from './webui/components/AppChrome.js';
+import { LoadoutListPanel } from './webui/features/loadout/LoadoutListPanel.js';
+import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePanel.js';
+import { StageApplyPanel } from './webui/features/loadout/StageApplyPanel.js';
+import { LoadoutGraphPanel } from './webui/features/loadout/LoadoutGraphPanel.js';
+import { MateriaEditorPanel } from './webui/features/materia-editor/MateriaEditorPanel.js';
+import { MonitorPanel } from './webui/features/monitor/MonitorPanel.js';
+import { formatElapsed } from './webui/utils/display.js';
 import {
   buildLoadouts,
   buildSocketHoverDetails,
@@ -131,10 +137,6 @@ function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reload
 
 function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
   window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
-}
-
-function Orb({ color, label, small = false, empty = false, iterator = false }: { color: string; label: string; small?: boolean; empty?: boolean; iterator?: boolean }) {
-  return <div aria-hidden className={`${small ? 'materia-orb-small' : 'materia-orb'} ${empty ? 'materia-orb-empty' : materiaColorClass(color)} ${iterator && !empty ? 'materia-orb-iterator' : ''}`} title={label} />;
 }
 
 export function App() {
@@ -1167,687 +1169,155 @@ export function App() {
   return (
     <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
       <section className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-6 px-6 py-8">
-        <header className="rounded-3xl border border-cyan-200/30 bg-slate-950/75 p-7 shadow-[0_0_55px_rgba(34,211,238,0.16)] backdrop-blur">
-          <p className="text-sm uppercase tracking-[0.45em] text-cyan-200">pi-materia loadout editor</p>
-          <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="text-4xl font-black tracking-tight text-white md:text-6xl">Materia WebUI</h1>
-              <p className="mt-3 max-w-3xl text-slate-300">Stage loadout changes visually. Sockets and graph node ids are preserved so inserted materia, layout, and node-shift semantics stay intact until an explicit save.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-slate-300">
-              <div>Source: <span className="text-cyan-100">{source}</span></div>
-              <div>Status: <span className={isDirty ? 'text-amber-200' : 'text-emerald-200'}>{isDirty ? 'staged edits' : 'clean'}</span></div>
-            </div>
-          </div>
-        </header>
+        <AppHeader source={source} isDirty={isDirty} />
 
-        <nav className="materia-tab-bar" aria-label="Materia WebUI sections">
-          {materiaTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className={`materia-tab ${selectedTab === tab.id ? 'materia-tab-active' : ''}`}
-              aria-current={selectedTab === tab.id ? 'page' : undefined}
-              aria-selected={selectedTab === tab.id}
-              title={tab.description}
-              onClick={() => selectTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+        <TabNav selectedTab={selectedTab} onSelectTab={selectTab} />
 
         {selectedTab === 'loadout' && (
         <div className="loadout-workspace grid gap-6 xl:grid-cols-[16rem_minmax(0,1fr)_18rem]">
-          <aside className="fantasy-panel loadout-side-panel p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold">Loadouts</h2>
-              <button className="materia-button" onClick={createLoadout}>New</button>
-            </div>
-            <div className="space-y-2" role="list" aria-label="Available loadouts">
-              {Object.keys(loadouts).map((name) => {
-                const sourceScope = loadoutSources[name] ?? 'user';
-                const defaultLoadout = sourceScope === 'default';
-                const deleteDisabled = !canDeleteLoadout(name);
-                return (
-                  <div key={name} className={`loadout-card ${name === activeLoadoutName ? 'loadout-card-active' : ''}`}>
-                    <button type="button" onClick={() => switchLoadout(name)} className="loadout-card-select">
-                      <span>{name}</span>
-                      <small>{Object.keys(loadouts[name].nodes ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
-                    </button>
-                    <button
-                      type="button"
-                      className="loadout-delete-button"
-                      disabled={deleteDisabled}
-                      onClick={() => deleteLoadout(name)}
-                      title={defaultLoadout ? 'Shipped default loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
-                      aria-label={defaultLoadout ? 'Protected default loadout' : 'Delete loadout'}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </aside>
+          <LoadoutListPanel
+            loadouts={loadouts}
+            activeLoadoutName={activeLoadoutName}
+            loadoutSources={loadoutSources}
+            canDeleteLoadout={canDeleteLoadout}
+            onCreateLoadout={createLoadout}
+            onSwitchLoadout={switchLoadout}
+            onDeleteLoadout={deleteLoadout}
+          />
 
-          <section className="fantasy-panel loadout-graph-panel p-6">
-            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-2xl font-bold">Visual materia grid</h2>
-                <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
-                <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>
-              <label className="text-sm text-slate-300">Edit name
-                <input
-                  className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100"
-                  value={loadoutNameInput}
-                  onChange={(event) => setLoadoutNameInput(event.target.value)}
-                  onBlur={() => commitActiveLoadoutRename()}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') event.currentTarget.blur();
-                  }}
-                />
-              </label>
-              </div>
-            </div>
-
-            <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onDragOver={(event) => event.preventDefault()} onDrop={handleGraphDrop}>
-              <div
-                className="loadout-graph-canvas"
-                data-testid="socket-grid"
-                style={{ width: `${loadoutGraph.width}px`, height: `${loadoutGraph.height}px` }}
-                onPointerDown={beginSocketRegionSelection}
-                onPointerMove={moveSocketRegionSelection}
-                onPointerUp={finishSocketRegionSelection}
-                onPointerCancel={cancelSocketRegionSelection}
-              >
-              <svg className="loadout-edge-layer" width={loadoutGraph.width} height={loadoutGraph.height} aria-label="Loadout edges">
-                <defs>
-                  <marker id="materia-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-                    <path d="M2,2 L10,6 L2,10 Z" className="loadout-edge-arrow" />
-                  </marker>
-                  <marker id="materia-generator-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-                    <path d="M2,2 L10,6 L2,10 Z" className="loadout-generator-edge-arrow" />
-                  </marker>
-                  <marker id="materia-loop-cycle-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-                    <path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-cycle-arrow" />
-                  </marker>
-                </defs>
-                {loopRegions.map((loop) => (
-                  <g key={loop.id} className="loadout-loop-cycle-edge" data-testid={`loop-cycle-edge-${loop.id}`} aria-label={`${loop.label} cycle indicator`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
-                    <path d={loop.cyclePath} className="loadout-loop-cycle-edge-echo" />
-                    <path d={loop.cyclePath} markerEnd="url(#materia-loop-cycle-arrow)" />
-                  </g>
-                ))}
-                {routedEdges.map(({ edge, path, labelX, labelY, labelRotate, routeClass }) => {
-                  const isGeneratorInput = isGeneratorOutputEdge(edge, activeLoadout, materia);
-                  const edgeLabel = generatorEdgeLabel(edge, activeLoadout, materia);
-                  const markerEnd = isGeneratorInput ? 'url(#materia-generator-edge-arrow)' : 'url(#materia-edge-arrow)';
-                  return (
-                    <g
-                      key={edge.id}
-                      data-testid={`edge-${edge.from}-${edge.to}-${edge.edgeIndex ?? 'next'}`}
-                      role="button"
-                      tabIndex={0}
-                      className={`loadout-edge loadout-edge-${edgeConditionClass(edge.when)} loadout-edge-route-${routeClass} ${isGeneratorInput ? 'loadout-edge-generator-input' : ''} loadout-edge-clickable`}
-                      onClick={() => toggleEdgeCondition(edge)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          toggleEdgeCondition(edge);
-                        }
-                      }}
-                    >
-                      <path d={path} markerEnd={markerEnd} />
-                      <text x={labelX} y={labelY} transform={`rotate(${labelRotate} ${labelX} ${labelY})`}>{edgeLabel}</text>
-                    </g>
-                  );
-                })}
-              </svg>
-              {loopRegions.map((loop) => (
-                <div
-                  key={loop.id}
-                  className="loadout-loop-region"
-                  data-testid={`loop-region-${loop.id}`}
-                  style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px`, '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}
-                  title={loop.summary}
-                  aria-label={`${loop.label} loop: ${loop.summary}`}
-                >
-                  <span className="loadout-loop-badge">Loop</span>
-                  <span className="loadout-loop-title">{loop.label}</span>
-                  <span className="loadout-loop-summary">{loop.summary}</span>
-                </div>
-              ))}
-              {loopSelectionRectangle && (
-                <div
-                  className="loadout-loop-selection-rectangle"
-                  data-testid="loop-selection-rectangle"
-                  style={{ left: `${loopSelectionRectangle.x}px`, top: `${loopSelectionRectangle.y}px`, width: `${loopSelectionRectangle.width}px`, height: `${loopSelectionRectangle.height}px` }}
-                />
-              )}
-              {loadoutGraph.sockets.map((socket) => {
-                const { id, node, index, x, y } = socket;
-                const dragPreview = socketLayoutDrag?.socketId === id ? socketLayoutDrag : undefined;
-                const socketX = dragPreview?.currentX ?? x;
-                const socketY = dragPreview?.currentY ?? y;
-                const nodeLabel = getNodeLabel(id, node);
-                const socketHoverDetails = buildSocketHoverDetails(id, node, materia, activeLoadout);
-                const isIterator = hasIteratorBehavior(node, materia);
-                const isGenerator = isGeneratorSocket(node, materia);
-                const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia) : undefined;
-                const isLoopSelected = selectedLoopSocketSet.has(id);
-                const isEntry = isEntrySocket(node);
-                const loopMembership = loopMemberships.get(id);
-                const loopExitBadge = loopExitBadges.get(id);
-                const socketStyle = loopMembership ? {
-                  left: `${socketX}px`,
-                  top: `${socketY}px`,
-                  '--loop-accent': loopMembership.accent,
-                  '--loop-accent-soft': loopMembership.accentSoft,
-                } as CSSProperties : { left: `${socketX}px`, top: `${socketY}px` };
-                return (
-                <button
-                  key={id}
-                  data-testid={`socket-${id}`}
-                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${loopExitBadge ? 'materia-socket-loop-exit' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`}
-                  style={socketStyle}
-                  data-loop-ids={loopMembership?.loopIds.join(' ')}
-                  data-loop-exit-ids={loopExitBadge?.loopIds.join(' ')}
-                  aria-pressed={isLoopSelected}
-                  onClick={(event) => handleSocketClick(id, event)}
-                  onPointerDown={(event) => beginSocketLayoutDrag(socket, event)}
-                  onPointerMove={moveSocketLayoutDrag}
-                  onPointerUp={(event) => finishSocketLayoutDrag(id, event)}
-                  onPointerCancel={cancelSocketLayoutDrag}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => handleDrop(id, event)}
-                  title={socketHoverDetails}
-                  aria-label={`${nodeLabel} socket details`}
-                >
-                  <div className="materia-socket-orb-stage">
-                    <div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}>
-                      <Orb color={nodeColor(id, index, materia, node)} label={socketHoverDetails} empty={isEmptySocket(node)} iterator={isIterator} />
-                    </div>
-                    {isIterator && <span className={`materia-iterator-badge graph-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
-                  </div>
-                  {isEntry && <span className="entry-rune">Entry</span>}
-                  {loopExitBadge && <span className="loop-exit-rune" title={loopExitBadge.title} style={{ '--loop-accent': loopExitBadge.accent, '--loop-accent-soft': loopExitBadge.accentSoft } as CSSProperties}>Loop exit</span>}
-                  <span className="materia-socket-label">{nodeLabel}</span>
-                </button>
-                );
-              })}
-              </div>
-            </div>
-
-            {Object.keys(activeLoadout?.loops ?? {}).length > 0 && (
-              <div className="mt-4 rounded-2xl border border-cyan-200/15 bg-slate-950/55 p-4" data-testid="loop-editor-panel">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Loop exits</h3>
-                <p className="mt-1 text-xs text-slate-400">Loop exits are compiled into runtime parse/advance control flow on the exit source; they are not decorative metadata. Validation will block conflicting socket parse, advance, or continuation routes before save/run.</p>
-                <div className="mt-3 grid gap-3">
-                  {Object.entries(activeLoadout?.loops ?? {}).map(([loopId, loop]) => {
-                    const exit = loop.exit ?? { from: loop.nodes[loop.nodes.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
-                    return (
-                      <div key={loopId} className="flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200/10 bg-slate-900/60 p-3" data-testid={`loop-editor-${loopId}`}>
-                        <div className="min-w-48 flex-1">
-                          <div className="font-semibold text-cyan-100">{formatLoopDisplayLabel(activeLoadout, loopId, loop.nodes, loop.label)}</div>
-                          <div className="text-xs text-slate-400">Members: {loop.nodes.map(socketDisplayLabel).join(', ')}</div>
-                        </div>
-                        <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit source
-                          <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-source-${loopId}`} value={exit.from} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>
-                            {loop.nodes.map((nodeId) => <option key={nodeId} value={nodeId}>{socketDisplayLabel(nodeId)}</option>)}
-                          </select>
-                        </label>
-                        <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit condition
-                          <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-condition-${loopId}`} value={exit.when} onChange={(event) => updateLoopExit(loopId, { when: event.target.value as MateriaEdgeCondition })}>
-                            {Object.entries(edgeConditionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                          </select>
-                        </label>
-                        <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit target
-                          <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-target-${loopId}`} value={exit.to} onChange={(event) => updateLoopExit(loopId, { to: event.target.value })}>
-                            <option value="end">end</option>
-                            {Object.keys(activeLoadout?.nodes ?? {}).map((nodeId) => <option key={nodeId} value={nodeId}>{socketLabel(nodeId)}</option>)}
-                          </select>
-                        </label>
-                        {loop.exit && <button type="button" className="materia-button-secondary" data-testid={`loop-exit-clear-${loopId}`} onClick={() => clearLoopExit(loopId)}>Clear exit</button>}
-                        <button type="button" className="materia-button-secondary" data-testid={`loop-break-${loopId}`} onClick={() => breakLoop(loopId)}>Break loop</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {socketActionId && activeLoadout?.nodes?.[socketActionId] && (
-              <div className="socket-action-backdrop" role="presentation" onMouseDown={closeSocketActionModal}>
-                <section
-                  className="socket-action-modal"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-labelledby="socket-action-title"
-                  data-testid="socket-action-modal"
-                  onMouseDown={(event) => event.stopPropagation()}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : socketActionMode === 'connect' ? 'connect edge' : 'socket actions'}</p>
-                      <h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{formatSocketLabel(socketActionId, activeLoadout.nodes[socketActionId])}</h3>
-                      <p className="mt-1 text-sm text-slate-300">Socket id: {socketActionId}</p>
-                    </div>
-                    <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' || socketActionMode === 'connect' ? 'Cancel' : 'Close'}</button>
-                  </div>
-                  {socketActionMode === 'replace' ? (
-                    <div className="mt-5">
-                      <p className="text-sm text-slate-300">Choose reusable materia to assign to this socket. Socket id, edges, traversal settings, and layout metadata will be preserved.</p>
-                      <div className="materia-replacement-list mt-4" role="list" aria-label="Available replacement materia" data-testid="materia-replacement-list">
-                        {palette.map(([id, node], index) => (
-                          <button key={id} type="button" className="materia-replacement-row" data-testid={`replacement-materia-${id}`} onClick={() => replaceMateriaFromModal(socketActionId, id)}>
-                            <Orb small color={nodeColor(id, index, materia, node)} label={id} />
-                            <span className="flex min-w-0 flex-col text-left">
-                              <span className="truncate font-black text-cyan-50">{id}</span>
-                              <span className="truncate text-xs text-slate-300">{getNodeLabel(id, node)}</span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                      {palette.length === 0 && <p className="mt-4 text-sm text-amber-200">No available materia definitions found.</p>}
-                    </div>
-                  ) : socketActionMode === 'edit' ? (
-                    <div className="mt-5 space-y-4" data-testid="socket-property-editor">
-                      <p className="text-sm text-slate-300">Edit socket-level traversal limits and explicit layout coordinates. Empty fields clear that socket property.</p>
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <label className="graph-field">Max visits
-                          <input data-testid="socket-max-visits" inputMode="numeric" value={socketPropertyForm.maxVisits} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxVisits: event.target.value })} placeholder="default" />
-                        </label>
-                        <label className="graph-field">Retries / edge traversals
-                          <input data-testid="socket-max-edge-traversals" inputMode="numeric" value={socketPropertyForm.maxEdgeTraversals} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxEdgeTraversals: event.target.value })} placeholder="default" />
-                        </label>
-                        <label className="graph-field">Max output bytes
-                          <input data-testid="socket-max-output-bytes" inputMode="numeric" value={socketPropertyForm.maxOutputBytes} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxOutputBytes: event.target.value })} placeholder="default" />
-                        </label>
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="graph-field">Layout X
-                          <input data-testid="socket-layout-x" value={socketPropertyForm.layoutX} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutX: event.target.value })} placeholder="auto" />
-                        </label>
-                        <label className="graph-field">Layout Y
-                          <input data-testid="socket-layout-y" value={socketPropertyForm.layoutY} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutY: event.target.value })} placeholder="auto" />
-                        </label>
-                      </div>
-                      {socketPropertyError && <p className="socket-property-error" role="alert">{socketPropertyError}</p>}
-                      <div className="flex flex-wrap gap-3">
-                        <button type="button" className="materia-button" data-testid="save-socket-properties" onClick={() => saveSocketProperties(socketActionId)}>Save socket properties</button>
-                        <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : socketActionMode === 'connect' ? (
-                    <div className="mt-5 space-y-4" data-testid="edge-connector">
-                      <p className="text-sm text-slate-300">Create a validated canonical edge from this socket to an existing socket.</p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="graph-field">Target socket
-                          <select data-testid="edge-target" value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}>
-                            <option value="">choose socket…</option>
-                            {Object.keys(activeLoadout.nodes ?? {}).filter((id) => id !== socketActionId).map((id) => <option key={id} value={id}>{socketLabel(id)}</option>)}
-                          </select>
-                        </label>
-                        <label className="graph-field">Condition
-                          <select data-testid="edge-condition" value={edgeCondition} onChange={(event) => setEdgeCondition(event.target.value as MateriaEdgeCondition)}>
-                            <option value="always">Always</option>
-                            <option value="satisfied">Satisfied</option>
-                            <option value="not_satisfied">Not Satisfied</option>
-                          </select>
-                        </label>
-                      </div>
-                      {edgeMutationError && <p className="socket-property-error" role="alert">{edgeMutationError}</p>}
-                      <div className="flex flex-wrap gap-3">
-                        <button type="button" className="materia-button" data-testid="create-edge" onClick={() => createEdge(socketActionId)}>Create edge</button>
-                        <button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-5 space-y-4">
-                      <p className="text-sm text-slate-300">Tip: drag this socket's orb onto the graph background to clear it without opening this menu.</p>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <button type="button" className="socket-action-button socket-action-button-muted" onClick={() => removeMateria(socketActionId)}>Clear socket</button>
-                        <button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button>
-                        <button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button>
-                        <button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button>
-                        <button type="button" className="socket-action-button" onClick={() => openEdgeConnector(socketActionId)}>Connect Edge</button>
-                        <button
-                          type="button"
-                          className="socket-action-button socket-action-button-danger"
-                          data-testid={`delete-socket-${socketActionId}`}
-                          disabled={!canDeleteSocket(activeLoadout.nodes[socketActionId])}
-                          title={canDeleteSocket(activeLoadout.nodes[socketActionId]) ? 'Delete this socket and clean graph references' : 'Entry sockets cannot be deleted'}
-                          onClick={() => deleteSocket(socketActionId)}
-                        >
-                          Delete Socket
-                        </button>
-                      </div>
-                      <div className="edge-removal-list" data-testid="edge-removal-list">
-                        <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>
-                        {((activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next) && (
-                          <button type="button" className="edge-removal-row" data-testid={`remove-next-edge-${socketActionId}`} onClick={() => removeLegacyNextEdge(socketActionId)}>
-                            Remove legacy flow to {socketLabel((activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next as string)}
-                          </button>
-                        )}
-                        {(activeLoadout.nodes[socketActionId].edges ?? []).map((edge, index) => (
-                          <button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>
-                            Remove {edgeConditionLabel(edge.when)} edge to {socketLabel(edge.to)}
-                          </button>
-                        ))}
-                        {!(activeLoadout.nodes[socketActionId] as LegacyPipelineNode).next && (activeLoadout.nodes[socketActionId].edges ?? []).length === 0 && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}
-                      </div>
-                    </div>
-                  )}
-                </section>
-              </div>
-            )}
-          </section>
+          <LoadoutGraphPanel
+            activeLoadout={activeLoadout}
+            activeLoadoutName={activeLoadoutName}
+            currentMonitorNode={currentMonitorNode}
+            edgeCondition={edgeCondition}
+            edgeMutationError={edgeMutationError}
+            edgeTargetId={edgeTargetId}
+            loadoutGraph={loadoutGraph}
+            loadoutNameInput={loadoutNameInput}
+            loopExitBadges={loopExitBadges}
+            loopMemberships={loopMemberships}
+            loopRegions={loopRegions}
+            loopSelectionRectangle={loopSelectionRectangle}
+            materia={materia}
+            palette={palette}
+            routedEdges={routedEdges}
+            selectedLoopSocketIds={selectedLoopSocketIds}
+            selectedLoopSocketSet={selectedLoopSocketSet}
+            selectedMateriaId={selectedMateriaId}
+            socketActionId={socketActionId}
+            socketActionMode={socketActionMode}
+            socketLayoutDrag={socketLayoutDrag}
+            socketPropertyError={socketPropertyError}
+            socketPropertyForm={socketPropertyForm}
+            createLoopDisabled={createLoopDisabled}
+            beginSocketLayoutDrag={beginSocketLayoutDrag}
+            beginSocketRegionSelection={beginSocketRegionSelection}
+            breakLoop={breakLoop}
+            cancelSocketLayoutDrag={cancelSocketLayoutDrag}
+            cancelSocketRegionSelection={cancelSocketRegionSelection}
+            clearLoopExit={clearLoopExit}
+            closeSocketActionModal={closeSocketActionModal}
+            commitActiveLoadoutRename={commitActiveLoadoutRename}
+            createConnectedSocket={createConnectedSocket}
+            createEdge={createEdge}
+            createTaskIteratorLoop={createTaskIteratorLoop}
+            deleteSocket={deleteSocket}
+            dragMateria={dragMateria}
+            finishSocketLayoutDrag={finishSocketLayoutDrag}
+            finishSocketRegionSelection={finishSocketRegionSelection}
+            handleDrop={handleDrop}
+            handleGraphDrop={handleGraphDrop}
+            handleSocketClick={handleSocketClick}
+            moveSocketLayoutDrag={moveSocketLayoutDrag}
+            moveSocketRegionSelection={moveSocketRegionSelection}
+            openEdgeConnector={openEdgeConnector}
+            openSocketPropertyEditor={openSocketPropertyEditor}
+            removeEdge={removeEdge}
+            removeLegacyNextEdge={removeLegacyNextEdge}
+            removeMateria={removeMateria}
+            replaceMateriaFromModal={replaceMateriaFromModal}
+            saveSocketProperties={saveSocketProperties}
+            setEdgeCondition={setEdgeCondition}
+            setEdgeTargetId={setEdgeTargetId}
+            setLoadoutNameInput={setLoadoutNameInput}
+            setSocketActionMode={setSocketActionMode}
+            setSocketPropertyForm={setSocketPropertyForm}
+            socketDisplayLabel={socketDisplayLabel}
+            socketLabel={socketLabel}
+            toggleEdgeCondition={toggleEdgeCondition}
+            updateLoopExit={updateLoopExit}
+          />
 
           <aside className="loadout-side-panel flex flex-col gap-6">
-            <section className="fantasy-panel p-5">
-              <h2 className="text-xl font-bold">Materia palette</h2>
-              <p className="mt-1 text-sm text-slate-400">Click once to select for swap/insert, or drag into a socket.</p>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                {palette.map(([id, node], index) => {
-                  const definition = materia[id];
-                  const group = typeof definition?.group === 'string' ? definition.group : undefined;
-                  const description = typeof definition?.description === 'string' ? definition.description : undefined;
-                  const isIterator = hasIteratorBehavior(node, materia);
-                  const isGenerator = isGeneratorSocket(node, materia);
-                  const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia) : undefined;
-                  const title = [description, iteratorDetails].filter(Boolean).join('\n') || undefined;
-                  return (
-                    <button key={id} draggable title={title} data-testid={`palette-${id}`} onDragStart={(event) => dragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => setSelectedMateriaId(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''} ${isIterator ? 'palette-orb-iterator' : ''} ${isGenerator ? 'palette-orb-generator' : ''}`}>
-                      <Orb small color={nodeColor(id, index, materia, node)} label={id} iterator={isIterator} />
-                      <span className="flex flex-col items-start leading-tight">
-                        <span>{getNodeLabel(id, node)}</span>
-                        {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
-                        {isIterator && <span className={`materia-iterator-badge palette-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
+            <MateriaPalettePanel
+              palette={palette}
+              materia={materia}
+              selectedMateriaId={selectedMateriaId}
+              onDragMateria={dragMateria}
+              onSelectMateria={setSelectedMateriaId}
+            />
 
-            <section className="fantasy-panel p-5">
-              <h2 className="text-xl font-bold">Stage & apply</h2>
-              <p className="mt-2 text-sm text-slate-400">Nothing is persisted until Save is pressed. User scope is the safe default.</p>
-              <label className="mt-4 block text-sm text-slate-300">Save target
-                <select className="mt-2 w-full rounded-xl border border-cyan-200/20 bg-slate-950 px-3 py-2" value={saveTarget} onChange={(event) => setSaveTarget(event.target.value as SaveTarget)}>
-                  <option value="user">User profile</option>
-                  <option value="project">Project</option>
-                  <option value="explicit">Explicit config</option>
-                </select>
-              </label>
-              <div
-                data-testid="trash-socket"
-                className={`trash-socket ${dragOverTrash ? 'trash-socket-hot' : ''}`}
-                onDragOver={(event) => { event.preventDefault(); setDragOverTrash(true); }}
-                onDragLeave={() => setDragOverTrash(false)}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragOverTrash(false);
-                  const raw = event.dataTransfer.getData('application/json');
-                  if (!raw) return;
-                  const payload = parseDragPayload(raw);
-                  if (!payload) {
-                    setStatus('Ignored drop: unsupported drag payload.');
-                    return;
-                  }
-                  if (payload.kind === 'socket' && payload.fromSocket) removeMateria(payload.fromSocket);
-                }}
-              >
-                Drag socket here or onto the graph background to unsocket materia
-              </div>
-              <div className="mt-4 flex gap-3">
-                <button className="materia-button flex-1" disabled={!isDirty} onClick={() => saveDraft().catch((error) => setStatus(error.message))}>Save</button>
-                <button className="materia-button-secondary" disabled={!isDirty || !baselineConfig} onClick={() => { setDraftConfig(cloneConfig(baselineConfig ?? {})); setStatus('Reverted staged edits.'); }}>Revert</button>
-              </div>
-              <p className="mt-3 min-h-10 text-sm text-cyan-100">{status}</p>
-            </section>
+            <StageApplyPanel
+              saveTarget={saveTarget}
+              dragOverTrash={dragOverTrash}
+              isDirty={isDirty}
+              canRevert={Boolean(baselineConfig)}
+              status={status}
+              onSaveTargetChange={setSaveTarget}
+              onTrashDragOver={(event) => { event.preventDefault(); setDragOverTrash(true); }}
+              onTrashDragLeave={() => setDragOverTrash(false)}
+              onTrashDrop={(event) => {
+                event.preventDefault();
+                setDragOverTrash(false);
+                const raw = event.dataTransfer.getData('application/json');
+                if (!raw) return;
+                const payload = parseDragPayload(raw);
+                if (!payload) {
+                  setStatus('Ignored drop: unsupported drag payload.');
+                  return;
+                }
+                if (payload.kind === 'socket' && payload.fromSocket) removeMateria(payload.fromSocket);
+              }}
+              onSave={() => saveDraft().catch((error) => setStatus(error.message))}
+              onRevert={() => { setDraftConfig(cloneConfig(baselineConfig ?? {})); setStatus('Reverted staged edits.'); }}
+            />
           </aside>
         </div>
         )}
 
         {selectedTab === 'materia-editor' && (
-        <section className="fantasy-panel p-4 sm:p-6" aria-label="Materia creation editor">
-          <div className="mb-5">
-            <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">materia forge</p>
-            <h2 className="mt-2 text-3xl font-black text-white">Create / edit materia</h2>
-            <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge reusable prompt materia or tool-invocation materia as staged definition edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
-          </div>
-
-          <section className="materia-form-section materia-settings-section" aria-label="Materia settings">
-            <p className="materia-form-section-title">Settings</p>
-            <div className="materia-compact-grid">
-              <label className="graph-field">Edit existing
-                <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : resetMateriaEditorForm()}>
-                  <option value="">new materia…</option>
-                  {editableDefinitionIds.map((id) => <option key={id} value={id}>{id}</option>)}
-                </select>
-              </label>
-              <label className="graph-field">Name
-                <input data-testid="materia-name" value={materiaForm.name} onChange={(event) => setMateriaForm({ ...materiaForm, name: event.target.value })} placeholder="Critique" />
-              </label>
-              <label className="graph-field">Behavior
-                <select data-testid="materia-behavior" value={materiaForm.behavior} onChange={(event) => setMateriaForm({ ...materiaForm, behavior: event.target.value as MateriaFormState['behavior'] })}>
-                  <option value="prompt">Prompt / agent</option>
-                  <option value="tool">Tool invocation</option>
-                </select>
-              </label>
-              <label className="graph-field">Output format
-                <select data-testid="materia-output-format" value={materiaForm.outputFormat} onChange={(event) => setMateriaForm({ ...materiaForm, outputFormat: event.target.value as MateriaFormState['outputFormat'] })}>
-                  <option value="text">Text</option>
-                  <option value="json">JSON</option>
-                </select>
-              </label>
-              <label className="graph-field">Save scope
-                <select data-testid="materia-persist-scope" value={materiaForm.persistScope} onChange={(event) => setMateriaForm({ ...materiaForm, persistScope: event.target.value as SaveTarget })}>
-                  <option value="user">User profile (~/.config/pi/pi-materia)</option>
-                  <option value="project">Project (.pi/pi-materia.json)</option>
-                  <option value="explicit">Explicit config</option>
-                </select>
-              </label>
-              {materiaForm.behavior === 'prompt' ? (
-                <fieldset className="materia-settings-group materia-agent-options" aria-label="Prompt agent options">
-                  <legend>Prompt / agent options</legend>
-                  <div className="materia-compact-grid materia-settings-subgrid">
-                    <label className="graph-field">Model
-                      <select data-testid="materia-model" value={materiaForm.model} onChange={(event) => handleMateriaModelChange(event.target.value)}>
-                        {modelOptions.map((option) => <option key={option.value || 'active-pi-model'} value={option.value}>{option.label}</option>)}
-                      </select>
-                      <span className="materia-field-hint" data-testid="materia-model-catalog-status">
-                        {modelCatalogStatus === 'loading'
-                          ? 'Loading available Pi models…'
-                          : modelCatalogStatus === 'error'
-                            ? `Model list unavailable: ${modelCatalogError}`
-                            : `${modelCatalog.models.length} available Pi model${modelCatalog.models.length === 1 ? '' : 's'}${activeModelDescription ? `; active ${activeModelDescription}` : ''}.`}
-                      </span>
-                    </label>
-                    <label className="graph-field">Thinking
-                      <select data-testid="materia-thinking" value={materiaForm.thinking} onChange={(event) => setMateriaForm({ ...materiaForm, thinking: event.target.value })}>
-                        {thinkingOptions.map((option) => <option key={option.value || 'active-pi-thinking'} value={option.value}>{option.label}</option>)}
-                      </select>
-                      <span className="materia-field-hint" data-testid="materia-thinking-options-status">
-                        {materiaForm.model ? `Uses thinking levels for ${selectedModel?.label ?? materiaForm.model}.` : 'Uses thinking levels for the active Pi model.'}
-                        {thinkingLevelsForSelection.length > 0 ? ` Offered: ${thinkingLevelsForSelection.map(thinkingLabel).join(', ')}.` : ''}
-                        {modelCatalog.activeThinking ? ` Active Pi thinking: ${modelCatalog.activeThinking}.` : ''}
-                      </span>
-                    </label>
-                    <label className="graph-field">Tools
-                      <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
-                        <option value="none">none</option>
-                        <option value="readOnly">read only</option>
-                        <option value="coding">coding</option>
-                      </select>
-                    </label>
-                    <fieldset ref={materiaColorDropdownRef} className="graph-field materia-color-picker" data-testid="materia-color" aria-label="Color">
-                    <legend>Color</legend>
-                    <div className="materia-color-dropdown">
-                      <button
-                        type="button"
-                        className="materia-color-trigger"
-                        aria-haspopup="listbox"
-                        aria-expanded={materiaColorOpen}
-                        aria-controls="materia-color-options"
-                        aria-label="Select materia color"
-                        data-testid="materia-color-trigger"
-                        onClick={() => setMateriaColorOpen((open) => !open)}
-                      >
-                        <Orb small color={materiaForm.color} label="Selected materia color" />
-                        <span aria-hidden className="materia-color-trigger-caret">▾</span>
-                      </button>
-                      {materiaColorOpen && (
-                        <div id="materia-color-options" className="materia-color-options" role="listbox" aria-label="Materia color choices">
-                          {materiaColorChoices.map((choice) => {
-                            const selected = materiaForm.color === choice.value;
-                            return (
-                              <button
-                                key={choice.id}
-                                type="button"
-                                role="option"
-                                aria-selected={selected}
-                                aria-label={`${choice.label} materia color`}
-                                data-testid={`materia-color-${choice.id}`}
-                                className={`materia-color-option ${selected ? 'materia-color-option-selected' : ''}`}
-                                onClick={() => {
-                                  setMateriaForm({ ...materiaForm, color: choice.value });
-                                  setMateriaColorOpen(false);
-                                }}
-                                title={`${choice.label} materia color`}
-                              >
-                                <Orb small color={choice.value} label={`${choice.label} materia color`} />
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                    {materiaForm.color && !materiaColorChoices.some((choice) => choice.value === materiaForm.color) && <p className="materia-color-legacy">Legacy custom color is selected; choose a palette color to replace it.</p>}
-                    </fieldset>
-                    <div className="materia-toggle-row materia-settings-toggle-row" aria-label="Boolean materia controls">
-                    <label className="graph-field graph-field-inline text-sm">Multiturn
-                      <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
-                    </label>
-                    <label className="graph-field graph-field-inline text-sm" title="Generator materia parse JSON and produce the canonical workItems envelope for downstream loops or generator pipeline stages.">Generator
-                      <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
-                    </label>
-                    </div>
-                  </div>
-                </fieldset>
-              ) : (
-                <fieldset className="materia-settings-group materia-tool-options" aria-label="Tool invocation options">
-                  <legend>Tool invocation options</legend>
-                  <div className="materia-compact-grid materia-settings-subgrid">
-                    <label className="graph-field">Utility
-                      <input data-testid="materia-utility" value={materiaForm.utility} onChange={(event) => setMateriaForm({ ...materiaForm, utility: event.target.value })} placeholder="shell" />
-                    </label>
-                    <label className="graph-field">Command
-                      <input data-testid="materia-command" value={materiaForm.command} onChange={(event) => setMateriaForm({ ...materiaForm, command: event.target.value })} placeholder="npm test" />
-                    </label>
-                    <label className="graph-field">Timeout ms
-                      <input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" />
-                    </label>
-                  </div>
-                </fieldset>
-              )}
-            </div>
-          </section>
-
-
-          {materiaForm.behavior === 'prompt' && (
-            <section className="materia-form-section mt-5" aria-label="Generate role prompt instructions">
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-                <label className="graph-field">Generate role prompt from brief
-                  <textarea data-testid="role-generation-brief" className="min-h-16" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
-                </label>
-                <button type="button" className="materia-button" data-testid="generate-role-prompt" disabled={roleGenerating || !roleBrief.trim()} onClick={() => { void generateRolePrompt(); }}>
-                  {roleGenerating ? 'Generating…' : generatedRolePrompt ? 'Regenerate' : 'Generate'}
-                </button>
-              </div>
-              {roleGenerationError && <p className="mt-3 text-sm text-rose-200" role="alert" data-testid="role-generation-error">{roleGenerationError}</p>}
-              {generatedRolePrompt && (
-                <div className="mt-4 rounded-xl border border-cyan-200/20 bg-black/30 p-4" data-testid="role-generation-preview">
-                  <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Generated preview</p>
-                  <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm text-cyan-50">{generatedRolePrompt}</pre>
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <button type="button" className="materia-button" data-testid="apply-generated-role-prompt" onClick={applyGeneratedRolePrompt}>Apply to prompt field</button>
-                    <button type="button" className="materia-button-secondary" data-testid="discard-generated-role-prompt" onClick={discardGeneratedRolePrompt}>Discard</button>
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-
-          {materiaForm.behavior === 'prompt' ? (
-            <label className="graph-field materia-prompt-field mt-5">Prompt
-              <textarea data-testid="materia-prompt" className="min-h-72" value={materiaForm.prompt} onChange={(event) => setMateriaForm({ ...materiaForm, prompt: event.target.value })} placeholder="You are a focused review materia…" />
-            </label>
-          ) : (
-            <label className="graph-field materia-prompt-field mt-5">Params JSON
-              <textarea data-testid="materia-params" className="min-h-44" value={materiaForm.params} onChange={(event) => setMateriaForm({ ...materiaForm, params: event.target.value })} />
-            </label>
-          )}
-
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button className="materia-button" data-testid="save-materia-form" onClick={() => { void saveMateriaForm(); }}>{materiaForm.editingNodeId ? 'Update materia' : 'Create materia'}</button>
-            <button className="materia-button-secondary" onClick={() => { resetMateriaEditorForm(); discardGeneratedRolePrompt(); }}>Clear form</button>
-          </div>
-          <p className="mt-3 min-h-10 text-sm text-cyan-100" data-testid="materia-save-status">{status}</p>
-        </section>
+        <MateriaEditorPanel
+          activeModelDescription={activeModelDescription}
+          editableDefinitionIds={editableDefinitionIds}
+          generatedRolePrompt={generatedRolePrompt}
+          materiaColorDropdownRef={materiaColorDropdownRef}
+          materiaColorOpen={materiaColorOpen}
+          materiaForm={materiaForm}
+          modelCatalog={modelCatalog}
+          modelCatalogError={modelCatalogError}
+          modelCatalogStatus={modelCatalogStatus}
+          modelOptions={modelOptions}
+          roleBrief={roleBrief}
+          roleGenerating={roleGenerating}
+          roleGenerationError={roleGenerationError}
+          selectedModel={selectedModel}
+          status={status}
+          thinkingLevelsForSelection={thinkingLevelsForSelection}
+          thinkingOptions={thinkingOptions}
+          applyGeneratedRolePrompt={applyGeneratedRolePrompt}
+          discardGeneratedRolePrompt={discardGeneratedRolePrompt}
+          editMateria={editMateria}
+          generateRolePrompt={generateRolePrompt}
+          handleMateriaModelChange={handleMateriaModelChange}
+          resetMateriaEditorForm={resetMateriaEditorForm}
+          saveMateriaForm={saveMateriaForm}
+          setMateriaColorOpen={setMateriaColorOpen}
+          setMateriaForm={setMateriaForm}
+          setRoleBrief={setRoleBrief}
+        />
         )}
 
-        {selectedTab === 'monitor' && (
-        <section className="fantasy-panel p-6" aria-label="Live session monitor">
-          <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">session monitor</p>
-              <h2 className="mt-2 text-3xl font-black text-white">Live cast telemetry</h2>
-              <p className="mt-2 max-w-4xl text-sm text-slate-400">Scoped to the Pi session that launched <code>/materia ui</code>. Native materia session entries and run artifacts are streamed from this session only.</p>
-            </div>
-            <div className="monitor-stat-grid">
-              <div><span>node</span><b>{currentMonitorNode ?? 'idle'}</b></div>
-              <div><span>state</span><b>{monitor?.activeCast?.nodeState ?? 'no active cast'}</b></div>
-              <div><span>elapsed</span><b>{elapsed}</b></div>
-            </div>
-          </div>
-          <div className="grid gap-4 xl:grid-cols-3">
-            <article className="monitor-card xl:col-span-1">
-              <h3>Emitted outputs</h3>
-              <div className="monitor-scroll">
-                {(monitor?.emittedOutputs ?? []).length === 0 ? <p className="text-sm text-slate-500">Waiting for session output…</p> : monitor?.emittedOutputs?.slice(-10).reverse().map((output) => (
-                  <div key={output.id} className="monitor-output">
-                    <div><b>{output.type}</b><span>{formatTime(output.timestamp)}</span></div>
-                    <p>{output.text}</p>
-                  </div>
-                ))}
-              </div>
-            </article>
-            <article className="monitor-card xl:col-span-1">
-              <h3>Artifact summary</h3>
-              <pre className="monitor-summary">{monitor?.artifactSummary?.summary ?? 'No pi-materia artifacts found for this launched session yet.'}</pre>
-              {monitor?.artifactSummary?.runDir && <p className="mt-3 break-all text-xs text-cyan-100/70">{monitor.artifactSummary.runDir}</p>}
-            </article>
-            <article className="monitor-card xl:col-span-1">
-              <h3>Recent artifacts</h3>
-              <div className="monitor-scroll">
-                {(monitor?.artifactSummary?.outputs ?? []).length === 0 ? <p className="text-sm text-slate-500">Artifacts will appear as nodes emit context and output files.</p> : monitor?.artifactSummary?.outputs?.slice(-8).reverse().map((entry, index) => (
-                  <details key={`${entry.artifact}-${index}`} className="monitor-artifact">
-                    <summary>{entry.node ?? entry.phase ?? 'cast'} · {entry.kind ?? 'artifact'}</summary>
-                    <p className="break-all text-xs text-cyan-100/70">{entry.artifact}</p>
-                    {entry.content && <pre>{entry.content}</pre>}
-                  </details>
-                ))}
-              </div>
-            </article>
-          </div>
-        </section>
-        )}
+        {selectedTab === 'monitor' && <MonitorPanel monitor={monitor} currentMonitorNode={currentMonitorNode} elapsed={elapsed} />}
       </section>
     </main>
   );
