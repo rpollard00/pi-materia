@@ -27,6 +27,16 @@ function agentConfig(overrides: Record<string, unknown> = {}, node: Record<strin
   };
 }
 
+async function readCastFile(harness: FakePiHarness, relativePath: string): Promise<string> {
+  const castRoot = path.join(harness.cwd, ".pi", "pi-materia");
+  const castDir = path.join(castRoot, (await readdir(castRoot))[0]);
+  return readFile(path.join(castDir, relativePath), "utf8");
+}
+
+async function readUsage(harness: FakePiHarness): Promise<any> {
+  return JSON.parse(await readCastFile(harness, "usage.json"));
+}
+
 function twoAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
@@ -166,6 +176,71 @@ describe("native per-materia model settings", () => {
     expect(context).toContain("model source: active Pi model fallback");
     const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(events.some((event) => event.type === "materia_model_settings" && event.data.materiaModel.source === "active" && event.data.materiaModel.label === "openai/gpt-test")).toBe(true);
+  });
+
+  test("blank model override uses the active Pi model without warning or switching", async () => {
+    const harness = await makeHarness(agentConfig({ model: "   " }));
+    harness.activeModel = { provider: "openai", id: "gpt-test", name: "GPT Test", api: "openai" };
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    await harness.runCommand("materia", "cast blank model override");
+
+    expect(harness.setModelCalls).toHaveLength(0);
+    expect(harness.notifications.some((notification) => notification.type === "warning")).toBe(false);
+    const usage = await readUsage(harness);
+    expect(usage.modelSelections[0]).toMatchObject({ model: "gpt-test", provider: "openai", source: "active" });
+    expect(usage.modelSelections[0].requestedModel).toBeUndefined();
+  });
+
+  test("unknown configured model warns and falls back to the active Pi model", async () => {
+    const harness = await makeHarness(agentConfig({ model: "unknown/nope" }));
+    harness.activeModel = { provider: "openai", id: "gpt-test", name: "GPT Test", api: "openai" };
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    await harness.runCommand("materia", "cast unknown model fallback");
+
+    expect(harness.setModelCalls).toHaveLength(0);
+    expect(harness.sentMessages.some(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toBe(true);
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes('configured model "unknown/nope"') && notification.message.includes("using the active Pi session model (openai/gpt-test)"))).toBe(true);
+    const usage = await readUsage(harness);
+    expect(usage.modelSelections[0]).toMatchObject({ requestedModel: "unknown/nope", model: "gpt-test", provider: "openai", effectiveModel: "openai/gpt-test", modelFallbackReason: "unknown_model", fallbackReason: "unknown_model", source: "active" });
+    const context = await readCastFile(harness, "contexts/Socket-1-1.md");
+    expect(context).toContain('model source: active Pi model fallback (configured model "unknown/nope" unavailable: unknown_model)');
+  });
+
+  test("credential-missing configured model warns and falls back without failing the cast", async () => {
+    const harness = await makeHarness(agentConfig({ model: "anthropic/claude-test" }));
+    harness.activeModel = { provider: "openai", id: "gpt-test", name: "GPT Test", api: "openai" };
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+    (harness.pi as unknown as { setModel: (model: unknown) => Promise<boolean> }).setModel = async (model: unknown) => {
+      harness.operationLog.push("setModel");
+      harness.setModelCalls.push(model);
+      return false;
+    };
+
+    await harness.runCommand("materia", "cast credential fallback");
+
+    expect(harness.setModelCalls).toEqual([{ provider: "anthropic", id: "claude-test", name: "Claude Test", api: "anthropic" }]);
+    expect(harness.sentMessages.some(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toBe(true);
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes('configured model "anthropic/claude-test"') && notification.message.includes("no configured API key or credentials"))).toBe(true);
+    const usage = await readUsage(harness);
+    expect(usage.modelSelections[0]).toMatchObject({ requestedModel: "anthropic/claude-test", model: "gpt-test", provider: "openai", modelFallbackReason: "credentials_missing", fallbackReason: "credentials_missing", source: "active" });
+  });
+
+  test("unsupported configured thinking falls back to a supported thinking level", async () => {
+    const harness = await makeHarness(agentConfig({ model: "local/no-think", thinking: "high" }));
+    harness.models = [{ provider: "local", id: "no-think", name: "No Think", api: "openai", reasoning: false }];
+    harness.thinkingLevel = "high";
+
+    await harness.runCommand("materia", "cast unsupported thinking fallback");
+
+    expect(harness.setModelCalls).toEqual([{ provider: "local", id: "no-think", name: "No Think", api: "openai", reasoning: false }]);
+    expect(harness.setThinkingLevelCalls).toEqual(["off"]);
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes('configured thinking "high"') && notification.message.includes("using off instead"))).toBe(true);
+    const usage = await readUsage(harness);
+    expect(usage.modelSelections[0]).toMatchObject({ requestedThinking: "high", thinking: "off", thinkingFallbackReason: "unsupported_thinking", fallbackReason: "unsupported_thinking" });
+    const context = await readCastFile(harness, "contexts/Socket-1-1.md");
+    expect(context).toContain('thinking source: safe thinking fallback (configured thinking "high" unsupported: unsupported_thinking)');
   });
 
   test("utility nodes do not apply materia model settings", async () => {

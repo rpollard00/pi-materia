@@ -929,7 +929,8 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
   const materiaModel = state.currentMateriaModel;
   const model = materiaModel?.label ?? "active Pi model";
   const thinking = materiaModel?.thinking ?? (materiaModel?.thinkingExplicit ? materiaModel.requestedThinking : undefined) ?? "active Pi thinking";
-  const modelSource = materiaModel?.modelExplicit ? "configured materia setting" : "active Pi model fallback";
+  const modelSource = formatModelSource(materiaModel);
+  const thinkingSource = formatThinkingSource(materiaModel);
   const content = [
     "# Materia Isolated Context",
     "",
@@ -941,7 +942,7 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
     `model: ${model}`,
     `model source: ${modelSource}`,
     `thinking: ${thinking}`,
-    `thinking source: ${materiaModel?.thinkingExplicit ? "configured materia setting" : "active Pi thinking fallback"}`,
+    `thinking source: ${thinkingSource}`,
     `active tools: ${activeTools.length ? activeTools.join(", ") : "none"}`,
     `timestamp: ${new Date().toISOString()}`,
     "",
@@ -962,7 +963,7 @@ function materiaModelSelection(applied: AppliedMateriaModelSettings): MateriaMod
   const provider = applied.provider;
   const label = [provider, model].filter(Boolean).join("/") || model || "active Pi model";
   const thinking = applied.thinking ? String(applied.thinking) : undefined;
-  const source = applied.modelExplicit || applied.thinkingExplicit ? "configured" : "active";
+  const source = applied.modelFallbackReason ? "active" : applied.modelExplicit || applied.thinkingExplicit ? "configured" : "active";
   return {
     model,
     provider,
@@ -970,11 +971,30 @@ function materiaModelSelection(applied: AppliedMateriaModelSettings): MateriaMod
     thinking,
     requestedModel: applied.requestedModel,
     requestedThinking: applied.requestedThinking,
+    effectiveModel: label === "active Pi model" ? undefined : label,
+    effectiveThinking: thinking,
+    modelFallbackReason: applied.modelFallbackReason,
+    thinkingFallbackReason: applied.thinkingFallbackReason,
+    fallbackReason: applied.fallbackReason,
     modelExplicit: applied.modelExplicit,
     thinkingExplicit: applied.thinkingExplicit,
     source,
     label,
   };
+}
+
+function formatModelSource(materiaModel: MateriaModelSelection | undefined): string {
+  if (!materiaModel?.modelExplicit) return "active Pi model fallback";
+  if (!materiaModel.modelFallbackReason) return "configured materia setting";
+  const requested = materiaModel.requestedModel ? ` \"${materiaModel.requestedModel}\"` : "";
+  return `active Pi model fallback (configured model${requested} unavailable: ${materiaModel.modelFallbackReason})`;
+}
+
+function formatThinkingSource(materiaModel: MateriaModelSelection | undefined): string {
+  if (!materiaModel?.thinkingExplicit) return "active Pi thinking fallback";
+  if (!materiaModel.thinkingFallbackReason) return "configured materia setting";
+  const requested = materiaModel.requestedThinking ? ` \"${materiaModel.requestedThinking}\"` : "";
+  return `safe thinking fallback (configured thinking${requested} unsupported: ${materiaModel.thinkingFallbackReason})`;
 }
 
 function contextArtifactPath(state: MateriaCastState, suffix?: string): string {

@@ -112,6 +112,11 @@ export interface MateriaModelSelection {
   thinking?: string;
   requestedModel?: string;
   requestedThinking?: string;
+  effectiveModel?: string;
+  effectiveThinking?: string;
+  modelFallbackReason?: string;
+  thinkingFallbackReason?: string;
+  fallbackReason?: string;
   modelExplicit: boolean;
   thinkingExplicit: boolean;
   source: "configured" | "active";
@@ -136,6 +141,11 @@ export interface UsageTurn extends UsageTotals {
   thinking?: string;
   requestedModel?: string;
   requestedThinking?: string;
+  effectiveModel?: string;
+  effectiveThinking?: string;
+  modelFallbackReason?: string;
+  thinkingFallbackReason?: string;
+  fallbackReason?: string;
   modelExplicit?: boolean;
   thinkingExplicit?: boolean;
   source?: "configured" | "active";
