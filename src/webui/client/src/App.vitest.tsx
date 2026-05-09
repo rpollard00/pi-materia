@@ -227,7 +227,7 @@ describe('Materia loadout grid editor', () => {
 
     const generatorEdge = screen.getByTestId('edge-Socket-1-Socket-2-0');
     expect(generatorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
-    expect(generatorEdge.textContent).toContain('Generates output: workItems');
+    expect(generatorEdge.textContent).toContain('Generator output: workItems');
     expect(generatorEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-generator-edge-arrow)');
 
     const build = screen.getByTestId('socket-Socket-2');
@@ -1728,7 +1728,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('role-generation-preview')).toBeNull();
   });
 
-  it('sends generated list output config when generating role prompts for configured materia', async () => {
+  it('sends canonical workItems generator config when generating role prompts for configured materia', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/generate/materia-role') {
         const body = JSON.parse(String(init?.body));

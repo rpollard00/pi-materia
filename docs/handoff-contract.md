@@ -38,6 +38,12 @@ Generated units of work use `workItems`, not `tasks`. pi-materia intentionally d
 
 JSON nodes should preserve useful existing `summary`, `workItems`, `guidance`, `decisions`, and `risks` context, augmenting it when possible. The output should be the object only: no markdown fences, prose, or extra commentary. Plain text nodes (`"parse": "text"`) do not use this JSON handoff contract.
 
+## Generator pipeline contract
+
+Materia marked `generator: true` produce generated work through the same handoff envelope. Their canonical output is always the top-level `workItems` array. A generator socket, including a generator upstream of another generator, must use JSON parsing and expose `workItems` (for example, `"assign": { "workItems": "$.workItems" }`).
+
+Generator-to-generator pipelines behave like iterator transforms: the upstream generator emits `workItems`; the downstream generator consumes that context, transforms or filters it, and emits a new handoff JSON object with its own `workItems`. Legacy `generates`, `tasks`, `task`, `work`, or custom output names are not canonical generator payloads and should appear only in migration notes or negative tests.
+
 ## Reserved evaluator/route fields
 
 `satisfied` is the canonical routing field.

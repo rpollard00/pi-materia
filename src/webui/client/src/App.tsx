@@ -358,7 +358,7 @@ function formatIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig
 }
 
 function loopConsumerSummary(loop: NonNullable<PipelineConfig['loops']>[string]): string {
-  if (loop.consumes) return `Loop consumes: ${loop.consumes.from}.${loop.consumes.output ?? 'generated list'}`;
+  if (loop.consumes) return `Loop consumes: ${loop.consumes.from}.${loop.consumes.output ?? 'workItems'}`;
   if (loop.iterator) return `Loop consumes: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}`;
   return 'Loop region';
 }
@@ -374,7 +374,7 @@ function isGeneratorLoopInputEdge(edge: LoadoutEdge, loadout: PipelineConfig | u
 
 function generatorLoopEdgeLabel(edge: LoadoutEdge, loadout: PipelineConfig | undefined): string {
   const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.consumes?.from === edge.from && candidate.nodes.includes(edge.to));
-  return loop?.consumes ? `Generates output: ${loop.consumes.output ?? 'list'}` : edgeConditionLabel(edge.when);
+  return loop?.consumes ? `Generator output: ${loop.consumes.output ?? 'workItems'}` : edgeConditionLabel(edge.when);
 }
 
 function iteratorBadgeLabel(details?: string): string {
@@ -2506,7 +2506,7 @@ export function App() {
                     <label className="graph-field graph-field-inline text-sm">Multiturn
                       <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
                     </label>
-                    <label className="graph-field graph-field-inline text-sm" title="Generator materia produce the canonical workItems list for downstream loop regions; the generated list format is runtime-defined.">Generator
+                    <label className="graph-field graph-field-inline text-sm" title="Generator materia parse JSON and produce the canonical workItems envelope for downstream loops or generator pipeline stages.">Generator
                       <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
                     </label>
                     </div>

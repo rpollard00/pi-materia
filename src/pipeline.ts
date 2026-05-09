@@ -188,10 +188,10 @@ function validateGeneratorNodeContracts(config: PiMateriaConfig, effective: Effe
     if (!generator) continue;
     if (generator.listType !== "array") throw new Error(`Generator materia "${node.materia}" must resolve listType="array" for generator pipeline output "${generator.output}".`);
     if (!generator.itemType) throw new Error(`Generator materia "${node.materia}" must resolve an itemType for generator pipeline output "${generator.output}".`);
-    if (node.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope.`);
+    if (node.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
     const assignedPath = node.assign?.[generator.output];
     if (assignedPath !== `$.${generator.output}`) {
-      throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope.`);
+      throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
     }
   }
 }
