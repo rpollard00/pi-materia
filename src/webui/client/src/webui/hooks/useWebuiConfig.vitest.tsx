@@ -25,16 +25,44 @@ const reloadedConfig = {
   },
 } satisfies MateriaConfig;
 
+const reportedLayeredConfig = {
+  activeLoadout: 'Full-Auto',
+  materia: {
+    Build: { tools: 'coding', prompt: 'Build the assigned work.' },
+    'Auto-Eval': { tools: 'readOnly', prompt: 'Evaluate the work.' },
+  },
+  loadouts: {
+    'Full-Auto': {
+      entry: 'Socket-1',
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
+      },
+    },
+    'Hojo-Consult': {
+      entry: 'Socket-1',
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'Build', label: 'Hojo profile consult' },
+      },
+    },
+  },
+  profile: { roleGeneration: { model: 'profile-hojo-model' } },
+} satisfies MateriaConfig;
+
 function ConfigProbe() {
   const config = useWebuiConfig();
   return (
     <>
       <output aria-label="status">{config.status}</output>
+      <output aria-label="dirty">{String(config.isDirty)}</output>
+      <output aria-label="active-loadout">{config.activeLoadoutName}</output>
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
+      <button type="button" onClick={() => config.switchLoadout('Full-Auto')}>view Full-Auto</button>
+      <button type="button" onClick={() => config.switchLoadout('Hojo-Consult')}>view Hojo-Consult</button>
       <button
         type="button"
         onClick={() => config.updateDraft((draft) => {
-          const node = draft.loadouts?.Alpha?.nodes?.['Socket-1'];
+          const node = draft.loadouts?.Alpha?.nodes?.['Socket-1'] ?? draft.loadouts?.['Full-Auto']?.nodes?.['Socket-1'];
           if (node) node.materia = 'LocalEdit';
         })}
       >
@@ -42,9 +70,24 @@ function ConfigProbe() {
       </button>
       <button
         type="button"
+        onClick={() => config.updateDraft((draft) => {
+          draft.profile = { ...(draft.profile as Record<string, unknown> | undefined ?? {}), note: 'real profile edit' };
+        })}
+      >
+        edit profile locally
+      </button>
+      <button type="button" onClick={() => void config.saveDraft()}>save draft</button>
+      <button
+        type="button"
         onClick={() => void config.reloadConfig({ preserveLoadoutEdits: true, readyStatus: 'reloaded with preserved loadout edits' })}
       >
         reload preserving loadout edits
+      </button>
+      <button
+        type="button"
+        onClick={() => void config.reloadConfig({ readyStatus: 'reloaded cleanly' })}
+      >
+        reload cleanly
       </button>
     </>
   );
@@ -56,6 +99,68 @@ afterEach(() => {
 });
 
 describe('useWebuiConfig', () => {
+  it('reports clean on initial load when the active loadout falls back without mutating the draft', async () => {
+    const config = { ...reportedLayeredConfig, activeLoadout: 'Missing-Loadout' } satisfies MateriaConfig;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'default < user < project', config }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto'));
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+  });
+
+  it('keeps Full-Auto and Hojo-Consult loadout selection clean while real persisted edits are dirty', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      source: 'default < user < project',
+      config: reportedLayeredConfig,
+      loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+    }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'view Hojo-Consult' }));
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult'));
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'view Full-Auto' }));
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto'));
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+  });
+
+  it('keeps a saved loadout clean after a reload and still flags profile edits as dirty', async () => {
+    let responseConfig: MateriaConfig = reportedLayeredConfig;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        responseConfig = JSON.parse(String(init.body)).config as MateriaConfig;
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'default < user < project', config: responseConfig, loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Saved staged loadout edits to user scope.'));
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'reload cleanly' }));
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('reloaded cleanly'));
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit profile locally' }));
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+  });
+
   it('can reload reusable materia definitions while preserving staged loadout edits', async () => {
     let responseConfig: MateriaConfig = initialConfig;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: responseConfig, loadoutSources: { Alpha: 'user' } })));
