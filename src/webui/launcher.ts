@@ -374,6 +374,7 @@ export const webUiLauncherTestInternals = {
   assertMateriaWebUiArtifactAvailable,
   ensureMateriaWebUiBuilt,
   resetMateriaWebUiBuildPromise,
+  createActiveLoadoutSetter,
   loadMateriaWebUiProfileConfig: loadProfileConfig,
   webUiSessionKey,
 };

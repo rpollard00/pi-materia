@@ -122,7 +122,64 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('socket-Socket-1')).toBeTruthy();
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
     expect(screen.queryByTestId('trash-socket')).toBeNull();
-    expect(screen.queryByText(/drag socket here/i)).toBeNull();
+    expect(screen.queryByText(/Drag socket here or onto the graph background to unsocket materia/i)).toBeNull();
+  });
+
+  it('shows a persisted active-loadout selector with configured loadout options', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    expect(activeSelect.value).toBe('Full-Auto');
+    expect(within(activeSelect).getByRole('option', { name: 'Full-Auto' })).toBeTruthy();
+    expect(within(activeSelect).getByRole('option', { name: 'Planning-Consult' })).toBeTruthy();
+  });
+
+  it('posts active-loadout selector changes and refreshes from returned config without changing the viewed loadout', async () => {
+    const updatedConfig = { ...structuredClone(testConfig), activeLoadout: 'Planning-Consult' };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/loadout/active' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: true, activeLoadout: 'Planning-Consult', config: updatedConfig, message: 'Active loadout changed to Planning-Consult.' }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    fireEvent.change(activeSelect, { target: { value: 'Planning-Consult' } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/loadout/active', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ name: 'Planning-Consult' }),
+    })));
+    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    expect(screen.getByText(/Active loadout is now Planning-Consult/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
+  });
+
+  it('restores active-loadout selector state and surfaces backend conflicts on failure', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/loadout/active' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: false, error: { code: 'active_cast_conflict', message: 'Cannot change active loadout during active cast cast-123.' } }), { status: 409 });
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    fireEvent.change(activeSelect, { target: { value: 'Planning-Consult' } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/loadout/active', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ name: 'Planning-Consult' }),
+    })));
+    await waitFor(() => expect(screen.getAllByText(/Cannot change active loadout during active cast cast-123/i).length).toBeGreaterThan(0));
+    expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Full-Auto');
   });
 
   it('keeps the reported layered config clean through selection, save, and refresh', async () => {
