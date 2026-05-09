@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
 import { materializeConfigLoadoutLoopSemantics } from "./loopSemantics.js";
-import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
+import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
@@ -37,10 +37,12 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
     partials.push(await readConfigPartial(explicitPath));
   }
 
+  const loadedLayers = layers.filter((layer) => layer.loaded);
   return {
     config: await mergeConfigLayers(partials),
-    source: layers.filter((layer) => layer.loaded).map((layer) => layer.path).join(" < "),
+    source: loadedLayers.map((layer) => layer.path).join(" < "),
     layers,
+    loadoutSources: buildLoadoutSources(partials, loadedLayers),
   };
 }
 
@@ -72,12 +74,14 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   rejectObsoleteConfigFields(patch as Record<string, unknown>, "patch");
   const target = options.target ?? "user";
   const file = getWritableConfigPath(cwd, options.configuredPath, target);
+  rejectDefaultLoadoutDeletes(patch);
   const existing = existsSync(file) ? await readConfigPartial(file) : {};
   const next = mergeConfigPatch(existing, patch);
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
-  next.loadouts = normalizeLoadouts(next.loadouts);
-  if (next.materia && next.loadouts) materializeConfigLoadoutLoopSemantics(next as PiMateriaConfig);
-  validateLoadoutGraphs(next.loadouts);
+  next.loadouts = normalizeLoadoutsForSave(next.loadouts);
+  const materialized = withoutDeletedLoadoutMarkers(next);
+  if (materialized.materia && materialized.loadouts) materializeConfigLoadoutLoopSemantics(materialized as PiMateriaConfig);
+  validateLoadoutGraphs(materialized.loadouts);
   await writeJsonAtomic(file, next);
   return file;
 }
@@ -230,8 +234,9 @@ async function writeMinimalActiveLoadout(file: string, loadoutName: string): Pro
 
 async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<PiMateriaConfig> {
   const [base, ...overrides] = layers;
+  const defaultLoadoutNames = new Set(Object.keys(base.loadouts ?? {}));
   let config = { ...base } as PiMateriaConfig;
-  for (const parsed of overrides) config = mergeConfig(config, parsed);
+  for (const parsed of overrides) config = mergeConfig(config, parsed, defaultLoadoutNames);
   if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
@@ -248,31 +253,55 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMater
     budget: patch.budget ? { ...(base.budget ?? {}), ...patch.budget } : base.budget,
     limits: patch.limits ? { ...(base.limits ?? {}), ...patch.limits } : base.limits,
     compaction: patch.compaction ? { ...(base.compaction ?? {}), ...patch.compaction } : base.compaction,
-    loadouts: mergeLoadouts(base.loadouts, patch.loadouts),
+    loadouts: mergeLoadouts(base.loadouts, patch.loadouts, new Set<string>(), true),
     activeLoadout: patch.activeLoadout ?? base.activeLoadout,
     materia: patch.materia ? mergeMateria(base.materia ?? {}, patch.materia) : base.materia,
   };
 }
 
-function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>): PiMateriaConfig {
+function buildLoadoutSources(partials: Partial<PiMateriaConfig>[], layers: MateriaConfigLayer[]): Record<string, MateriaConfigLayerScope> {
+  const sources: Record<string, MateriaConfigLayerScope> = {};
+  const defaultLoadoutNames = new Set(Object.keys(partials[0]?.loadouts ?? {}));
+  partials.forEach((partial, index) => {
+    const scope = layers[index]?.scope;
+    if (!scope || !isPlainObject(partial.loadouts)) return;
+    for (const [name, loadout] of Object.entries(partial.loadouts as Record<string, unknown>)) {
+      if (defaultLoadoutNames.has(name)) {
+        sources[name] = "default";
+        continue;
+      }
+      if (loadout === null) delete sources[name];
+      else if (isPlainObject(loadout)) sources[name] = scope;
+    }
+  });
+  return sources;
+}
+
+function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>, protectedLoadoutNames = new Set<string>()): PiMateriaConfig {
   return {
     ...base,
     ...parsed,
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
     limits: { ...base.limits, ...(parsed.limits ?? {}) },
     compaction: { ...base.compaction, ...(parsed.compaction ?? {}) },
-    loadouts: mergeLoadouts(base.loadouts, parsed.loadouts),
+    loadouts: mergeLoadouts(base.loadouts, parsed.loadouts, protectedLoadoutNames),
     activeLoadout: parsed.activeLoadout ?? base.activeLoadout,
     materia: mergeMateria(base.materia, parsed.materia),
   } as PiMateriaConfig;
 }
 
-function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts: Partial<PiMateriaConfig>["loadouts"]): PiMateriaConfig["loadouts"] {
+function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts: Partial<PiMateriaConfig>["loadouts"], protectedLoadoutNames = new Set<string>(), preserveDeletedMarkers = false): PiMateriaConfig["loadouts"] {
   if (!parsedLoadouts) return baseLoadouts;
-  const merged: NonNullable<PiMateriaConfig["loadouts"]> = { ...(baseLoadouts ?? {}) };
-  for (const [name, loadout] of Object.entries(parsedLoadouts)) {
+  const merged: Record<string, unknown> = { ...(baseLoadouts ?? {}) };
+  for (const [name, loadout] of Object.entries(parsedLoadouts as Record<string, unknown>)) {
+    if (loadout === null) {
+      if (protectedLoadoutNames.has(name)) continue;
+      if (preserveDeletedMarkers) merged[name] = null;
+      else delete merged[name];
+      continue;
+    }
     if (!isPlainObject(loadout)) throw new Error(`Materia loadout "${name}" is invalid. Expected a pipeline object.`);
-    const baseLoadout = baseLoadouts?.[name];
+    const baseLoadout = isPlainObject(baseLoadouts?.[name]) ? baseLoadouts[name] as MateriaPipelineConfig : undefined;
     merged[name] = normalizePipelineGraph({
       ...(baseLoadout ?? {}),
       ...loadout,
@@ -280,7 +309,7 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
       loops: loadout.loops ?? (loadout.nodes ? undefined : baseLoadout?.loops),
     } as MateriaPipelineConfig);
   }
-  return merged;
+  return merged as PiMateriaConfig["loadouts"];
 }
 
 function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria: Partial<PiMateriaConfig>["materia"]): Record<string, MateriaConfig> {
@@ -302,6 +331,29 @@ function normalizeLoadouts(loadouts: PiMateriaConfig["loadouts"] | undefined): P
   return Object.fromEntries(
     Object.entries(loadouts).map(([name, loadout]) => [name, normalizePipelineGraph(loadout as MateriaPipelineConfig)]),
   );
+}
+
+function normalizeLoadoutsForSave(loadouts: Partial<PiMateriaConfig>["loadouts"] | undefined): PiMateriaConfig["loadouts"] {
+  if (!loadouts) return loadouts as PiMateriaConfig["loadouts"];
+  return Object.fromEntries(
+    Object.entries(loadouts as Record<string, unknown>).map(([name, loadout]) => [name, loadout === null ? null : normalizePipelineGraph(loadout as MateriaPipelineConfig)]),
+  ) as PiMateriaConfig["loadouts"];
+}
+
+function withoutDeletedLoadoutMarkers(config: Partial<PiMateriaConfig>): Partial<PiMateriaConfig> {
+  if (!config.loadouts) return config;
+  return {
+    ...config,
+    loadouts: Object.fromEntries(Object.entries(config.loadouts as Record<string, unknown>).filter(([, loadout]) => loadout !== null)) as PiMateriaConfig["loadouts"],
+  };
+}
+
+function rejectDefaultLoadoutDeletes(patch: Partial<PiMateriaConfig>): void {
+  if (!patch.loadouts) return;
+  const defaultLoadoutNames = new Set(Object.keys(JSON.parse(readFileSync(getBundledDefaultConfigPath(), "utf8")).loadouts ?? {}));
+  for (const [name, loadout] of Object.entries(patch.loadouts as Record<string, unknown>)) {
+    if (loadout === null && defaultLoadoutNames.has(name)) throw new Error(`Cannot delete shipped default Materia loadout "${name}".`);
+  }
 }
 
 function validateLoadoutGraphs(loadouts: PiMateriaConfig["loadouts"] | undefined): void {

@@ -15,6 +15,7 @@ export interface LoadedConfig {
   config: PiMateriaConfig;
   source: string;
   layers?: MateriaConfigLayer[];
+  loadoutSources?: Record<string, MateriaConfigLayerScope>;
 }
 
 export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";

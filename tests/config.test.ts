@@ -156,6 +156,59 @@ describe("layered config loading and persistence", () => {
     }
   });
 
+  test("persists loadout deletion markers for non-default loadouts in the writable layer", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-delete-loadout-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const projectFile = path.join(cwd, ".pi", "pi-materia.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(projectFile, JSON.stringify({
+        activeLoadout: "ProjectOnly",
+        loadouts: { ProjectOnly: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } },
+      }), "utf8");
+
+      await saveMateriaConfigPatch(cwd, { activeLoadout: "Full-Auto", loadouts: { ProjectOnly: null } } as never, { target: "project" });
+
+      expect(JSON.parse(await readFile(projectFile, "utf8")).loadouts.ProjectOnly).toBeNull();
+      const reloaded = await loadConfig(cwd);
+      expect(reloaded.config.loadouts?.ProjectOnly).toBeUndefined();
+      expect(reloaded.config.loadouts?.["Full-Auto"]).toBeDefined();
+      expect(reloaded.loadoutSources?.ProjectOnly).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("protects shipped default loadouts even when a higher layer overrides the same name", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-default-protect-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await mkdir(profile, { recursive: true });
+      await writeFile(getUserMateriaAssetPath(), JSON.stringify({
+        loadouts: { "Full-Auto": { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } },
+      }), "utf8");
+
+      const loaded = await loadConfig(cwd);
+      expect(loaded.loadoutSources?.["Full-Auto"]).toBe("default");
+      expect(loaded.config.loadouts?.["Full-Auto"]).toBeDefined();
+
+      await expect(saveMateriaConfigPatch(cwd, { loadouts: { "Full-Auto": null } } as never)).rejects.toThrow("Cannot delete shipped default");
+
+      await writeFile(getUserMateriaAssetPath(), JSON.stringify({ loadouts: { "Full-Auto": null } }), "utf8");
+      const reloaded = await loadConfig(cwd);
+      expect(reloaded.config.loadouts?.["Full-Auto"]).toBeDefined();
+      expect(reloaded.loadoutSources?.["Full-Auto"]).toBe("default");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("WebUI-style saves default to user profile and only touch project when explicitly targeted", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));

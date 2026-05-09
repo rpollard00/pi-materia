@@ -56,10 +56,13 @@ interface SocketPropertyFormState {
   layoutY: string;
 }
 
+type LoadoutSourceScope = 'default' | 'user' | 'project' | 'explicit';
+
 interface ConfigResponse {
   ok?: boolean;
   config?: MateriaConfig;
   source?: string;
+  loadoutSources?: Record<string, LoadoutSourceScope>;
 }
 
 interface RoleGenerationResponse {
@@ -1126,10 +1129,10 @@ function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
   };
 }
 
-async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string }> {
+async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope> }> {
   const response = await fetch('/api/config');
   const body = await response.json() as ConfigResponse;
-  return { config: normalizeMateriaConfigEdges(body.config ?? (body as MateriaConfig)), source: body.source ?? 'unknown' };
+  return { config: normalizeMateriaConfigEdges(body.config ?? (body as MateriaConfig)), source: body.source ?? 'unknown', loadoutSources: body.loadoutSources ?? {} };
 }
 
 function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
@@ -1170,6 +1173,8 @@ export function App() {
   const [baselineConfig, setBaselineConfig] = useState<MateriaConfig | undefined>();
   const [draftConfig, setDraftConfig] = useState<MateriaConfig | undefined>();
   const [source, setSource] = useState<string>('loading');
+  const [loadoutSources, setLoadoutSources] = useState<Record<string, LoadoutSourceScope>>({});
+  const [deletedLoadoutNames, setDeletedLoadoutNames] = useState<string[]>([]);
   const [status, setStatus] = useState('Loading materia configuration…');
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
@@ -1247,6 +1252,7 @@ export function App() {
       setBaselineConfig(cloneConfig(normalizedFallback));
       setDraftConfig(normalizedFallback);
       setSource('demo');
+      setLoadoutSources({ 'Demo Loadout': 'default' });
     });
     return () => {
       cancelled = true;
@@ -1331,6 +1337,8 @@ export function App() {
     setBaselineConfig(normalizeMateriaConfigEdges(loaded.config));
     setDraftConfig((current) => mergeReloadedConfigIntoDraft(current, loaded.config, preserveLoadoutEdits));
     setSource(loaded.source);
+    setLoadoutSources(loaded.loadoutSources ?? {});
+    if (!preserveLoadoutEdits) setDeletedLoadoutNames([]);
     setStatus(readyStatus);
   }
 
@@ -1400,6 +1408,41 @@ export function App() {
       config.activeLoadout = name;
     });
     setStatus('Created a new draft loadout with one empty entry socket. Rename and save when ready.');
+  }
+
+  function canDeleteLoadout(name: string) {
+    return Boolean(name && loadouts[name] && loadoutSources[name] !== 'default' && Object.keys(loadouts).length > 1);
+  }
+
+  function deleteLoadout(name: string) {
+    if (!loadouts[name]) return false;
+    if (loadoutSources[name] === 'default') {
+      setStatus(`Cannot delete ${name}: shipped default loadouts are protected.`);
+      return false;
+    }
+    const remainingNames = Object.keys(loadouts).filter((candidate) => candidate !== name);
+    if (remainingNames.length === 0) {
+      setStatus('Cannot delete the only loadout; create another loadout first.');
+      return false;
+    }
+    const fallbackName = activeLoadoutName === name ? remainingNames[0] : activeLoadoutName;
+    updateDraft((config) => {
+      const draftLoadouts = buildLoadouts(config);
+      delete draftLoadouts[name];
+      config.loadouts = draftLoadouts;
+      config.activeLoadout = fallbackName;
+    });
+    if (baselineConfig?.loadouts?.[name]) {
+      setDeletedLoadoutNames((current) => current.includes(name) ? current : [...current, name]);
+      const sourceScope = loadoutSources[name];
+      if (sourceScope === 'project' || sourceScope === 'explicit') setSaveTarget(sourceScope);
+    }
+    setSelectedMateriaId(undefined);
+    setSocketActionId(undefined);
+    setSocketActionMode('actions');
+    setSelectedLoopSocketIds([]);
+    setStatus(`Deleted loadout ${name}. Active loadout is now ${fallbackName}. Save to persist.`);
+    return true;
   }
 
   function putMateria(socketId: string, materiaId: string, fromSocket?: string) {
@@ -2084,15 +2127,28 @@ export function App() {
   async function saveDraft() {
     if (!draftConfig) return;
     setStatus('Saving staged loadout edits…');
+    const normalizedDraft = normalizeMateriaConfigEdges(draftConfig);
+    const configToSave = cloneConfig(normalizedDraft) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
+    if (deletedLoadoutNames.length > 0) {
+      configToSave.loadouts = { ...(configToSave.loadouts ?? {}) };
+      for (const name of deletedLoadoutNames) configToSave.loadouts[name] = null;
+    }
     const response = await fetch('/api/config', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ target: saveTarget, config: normalizeMateriaConfigEdges(draftConfig) }),
+      body: JSON.stringify({ target: saveTarget, config: configToSave }),
     });
     const body = await response.json();
     if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Save failed');
-    setBaselineConfig(normalizeMateriaConfigEdges(draftConfig));
-    setDraftConfig(normalizeMateriaConfigEdges(draftConfig));
+    setBaselineConfig(normalizedDraft);
+    setDraftConfig(normalizedDraft);
+    setDeletedLoadoutNames([]);
+    setLoadoutSources((current) => {
+      const next = { ...current };
+      for (const name of deletedLoadoutNames) delete next[name];
+      for (const name of Object.keys(normalizedDraft.loadouts ?? {})) if (!next[name]) next[name] = body.target ?? saveTarget;
+      return next;
+    });
     setStatus(`Saved staged loadout edits to ${body.target ?? saveTarget} scope.`);
   }
 
@@ -2137,12 +2193,29 @@ export function App() {
               <button className="materia-button" onClick={createLoadout}>New</button>
             </div>
             <div className="space-y-2" role="list" aria-label="Available loadouts">
-              {Object.keys(loadouts).map((name) => (
-                <button key={name} onClick={() => switchLoadout(name)} className={`loadout-card ${name === activeLoadoutName ? 'loadout-card-active' : ''}`}>
-                  <span>{name}</span>
-                  <small>{Object.keys(loadouts[name].nodes ?? {}).length} sockets</small>
-                </button>
-              ))}
+              {Object.keys(loadouts).map((name) => {
+                const sourceScope = loadoutSources[name] ?? 'user';
+                const defaultLoadout = sourceScope === 'default';
+                const deleteDisabled = !canDeleteLoadout(name);
+                return (
+                  <div key={name} className={`loadout-card ${name === activeLoadoutName ? 'loadout-card-active' : ''}`}>
+                    <button type="button" onClick={() => switchLoadout(name)} className="loadout-card-select">
+                      <span>{name}</span>
+                      <small>{Object.keys(loadouts[name].nodes ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
+                    </button>
+                    <button
+                      type="button"
+                      className="loadout-delete-button"
+                      disabled={deleteDisabled}
+                      onClick={() => deleteLoadout(name)}
+                      title={defaultLoadout ? 'Shipped default loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
+                      aria-label={defaultLoadout ? 'Protected default loadout' : 'Delete loadout'}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </aside>
 

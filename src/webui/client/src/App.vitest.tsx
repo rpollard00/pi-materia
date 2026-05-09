@@ -112,6 +112,49 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
   });
 
+  it('visibly protects shipped default loadouts from deletion', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      source: 'test',
+      config: testConfig,
+      loadoutSources: { 'Full-Auto': 'default', 'Planning-Consult': 'user' },
+    }))));
+
+    render(<App />);
+
+    const protectedDelete = await screen.findByTitle('Shipped default loadouts cannot be deleted.');
+    expect(protectedDelete.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/shipped default/i)).toBeTruthy();
+  });
+
+  it('deletes a user loadout, falls back when it was active, and persists a deletion marker', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/config' && init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({
+        ok: true,
+        source: 'test',
+        config: { ...testConfig, activeLoadout: 'Planning-Consult' },
+        loadoutSources: { 'Full-Auto': 'default', 'Planning-Consult': 'user' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByTestId('socket-Socket-1')).toBeTruthy();
+    fireEvent.click(screen.getByTitle('Delete Planning-Consult'));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Planning-Consult/ })).toBeNull());
+    expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
+    expect(screen.getByText(/Deleted loadout Planning-Consult/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock);
+    expect(saved.config.activeLoadout).toBe('Full-Auto');
+    expect(saved.config.loadouts['Planning-Consult']).toBeNull();
+  });
+
   it('renders socket supplemental details as hover titles', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
