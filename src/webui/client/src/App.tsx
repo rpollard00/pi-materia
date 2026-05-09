@@ -4,6 +4,7 @@ import type { MateriaEdgeCondition } from '../../../types.js';
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG, canonicalGeneratorConfigFor, isGeneratorMateria } from '../../../generator.js';
 import { edgeConditionState, formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
 import {
+  assertValidLoadoutSaveSemantics,
   buildMateriaPalette,
   clearSocketMateria,
   canDeleteSocket,
@@ -2171,6 +2172,7 @@ export function App() {
     if (!draftConfig) return;
     setStatus('Saving staged loadout edits…');
     const normalizedDraft = normalizeMateriaConfigEdges(draftConfig);
+    assertValidLoadoutSaveSemantics(normalizedDraft);
     const configToSave = cloneConfig(normalizedDraft) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
     if (deletedLoadoutNames.length > 0) {
       configToSave.loadouts = { ...(configToSave.loadouts ?? {}) };

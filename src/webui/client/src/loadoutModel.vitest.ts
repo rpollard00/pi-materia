@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertValidLoadoutSaveSemantics,
   buildMateriaPalette,
   canDeleteSocket,
   deleteSocketFromLoadout,
@@ -139,6 +140,55 @@ describe('loadout normalization model', () => {
     expect(config.materia?.Critique).not.toHaveProperty('outputFormat');
     expect(config.loadouts?.Draft.nodes?.['Socket-1'].parse).toBe('json');
     expect(config.loadouts?.Draft.nodes?.['Socket-1']).not.toHaveProperty('outputFormat');
+  });
+
+  it('rejects text-output sockets with satisfied/not_satisfied routes before save', () => {
+    const config = normalizeMateriaConfigEdges({
+      loadouts: {
+        HojoLike: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Build', parse: 'text', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
+            'Socket-2': { type: 'agent', materia: 'Maintain' },
+          },
+        },
+      },
+    });
+
+    expect(() => assertValidLoadoutSaveSemantics(config)).toThrow(/HojoLike.*Socket-1 \(Build\).*satisfied\/not_satisfied routing requires JSON output parsing/s);
+  });
+
+  it('allows text-output sockets with only always routes before save', () => {
+    const config = normalizeMateriaConfigEdges({
+      loadouts: {
+        TextFlow: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Build', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { type: 'agent', materia: 'Maintain' },
+          },
+        },
+      },
+    });
+
+    expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
+  });
+
+  it('allows JSON-output sockets with satisfied/not_satisfied routes before save', () => {
+    const config = normalizeMateriaConfigEdges({
+      loadouts: {
+        JsonControl: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Auto-Eval', parse: 'json', edges: [{ when: 'satisfied', to: 'Socket-2' }, { when: 'not_satisfied', to: 'Socket-3' }] },
+            'Socket-2': { type: 'agent', materia: 'Maintain' },
+            'Socket-3': { type: 'agent', materia: 'Build' },
+          },
+        },
+      },
+    });
+
+    expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
   });
 
   it('materializes loop exit control fields before save without deleting back-edges', () => {

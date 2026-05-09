@@ -16,6 +16,7 @@ export interface PipelineNode {
   assign?: Record<string, string>;
   edges?: { to: string; when: MateriaEdgeCondition; maxTraversals?: number }[];
   foreach?: { items: string; as?: string; cursor?: string; done?: string };
+  advance?: { items?: string; cursor?: string; done?: string; when?: MateriaEdgeCondition };
   empty?: boolean;
   layout?: { x?: number; y?: number };
   limits?: { maxVisits?: number; maxEdgeTraversals?: number; maxOutputBytes?: number };
@@ -332,6 +333,40 @@ export function getNodeLabel(id: string, node?: PipelineNode): string {
 
 export function formatSocketLabel(id: string, node?: PipelineNode): string {
   return `${id} (${getNodeLabel(id, node)})`;
+}
+
+const jsonControlConditions = new Set<MateriaEdgeCondition>(['satisfied', 'not_satisfied']);
+
+function isJsonControlCondition(when: unknown): when is MateriaEdgeCondition {
+  return when === 'satisfied' || when === 'not_satisfied';
+}
+
+function controlParseError(loadoutName: string, socketId: string, node: PipelineNode, source: string, condition: MateriaEdgeCondition): string {
+  const label = formatSocketLabel(socketId, node);
+  const parseMode = node.parse ?? 'text';
+  return `Loadout "${loadoutName}" socket ${label} uses ${condition} control routing at ${source}, but its output format is ${JSON.stringify(parseMode)}. Set the socket Output format to JSON (parse: "json") or change the route to always; satisfied/not_satisfied routing requires JSON output parsing.`;
+}
+
+export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
+  const errors: string[] = [];
+  for (const [loadoutName, loadout] of Object.entries(config.loadouts ?? {})) {
+    for (const [socketId, node] of Object.entries(loadout.nodes ?? {})) {
+      for (const [index, edge] of (node.edges ?? []).entries()) {
+        if (!jsonControlConditions.has(edge.when)) continue;
+        if (node.parse !== 'json') errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.edges[${index}]`, edge.when));
+      }
+      const advanceWhen = node.advance?.when;
+      if (isJsonControlCondition(advanceWhen) && node.parse !== 'json') {
+        errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.advance.when`, advanceWhen));
+      }
+    }
+  }
+  return errors;
+}
+
+export function assertValidLoadoutSaveSemantics(config: MateriaConfig): void {
+  const errors = validateLoadoutSaveSemantics(config);
+  if (errors.length > 0) throw new Error(errors.join('\n'));
 }
 
 export function resolveSocketDisplayLabel(loadout: PipelineConfig | undefined, socketId: string): string {

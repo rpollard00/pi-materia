@@ -18,7 +18,7 @@ const testConfig = {
       nodes: {
         'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
         'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
-        'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }], layout: { x: 2, y: 0 } },
+        'Socket-3': { type: 'agent', materia: 'Auto-Eval', parse: 'json', edges: [{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }], layout: { x: 2, y: 0 } },
         'Socket-4': { type: 'agent', materia: 'Maintain', layout: { x: 3, y: 0 } },
       },
     },
@@ -38,7 +38,7 @@ const edgeEditorConfig = {
     Edges: {
       entry: 'Socket-1',
       nodes: {
-        'Socket-1': { type: 'agent', materia: 'Start', layout: { x: 0, y: 0 }, edges: [] as Array<{ to: string; when?: string }> },
+        'Socket-1': { type: 'agent', materia: 'Start', parse: 'json', layout: { x: 0, y: 0 }, edges: [] as Array<{ to: string; when?: string }> },
         'Socket-2': { type: 'agent', materia: 'Review', layout: { x: 1, y: 0 } },
         'Socket-3': { type: 'agent', materia: 'Ship', layout: { x: 2, y: 0 } },
       },
@@ -54,7 +54,7 @@ const legacyPipelineConfig = {
     entry: 'Socket-1',
     nodes: {
       'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
-      'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }, { when: 'not_satisfied', to: 'Socket-1' }], layout: { x: 1, y: 0 } },
+      'Socket-2': { type: 'agent', materia: 'Build', parse: 'json', edges: [{ when: 'always', to: 'Socket-3' }, { when: 'not_satisfied', to: 'Socket-1' }], layout: { x: 1, y: 0 } },
       'Socket-3': { type: 'utility', utility: 'finish', command: ['echo', 'done'], layout: { x: 2, y: 0 } },
     },
   },
@@ -153,6 +153,26 @@ describe('Materia loadout grid editor', () => {
     const saved = configPostBody(fetchMock);
     expect(saved.config.activeLoadout).toBe('Full-Auto');
     expect(saved.config.loadouts['Planning-Consult']).toBeNull();
+  });
+
+  it('blocks invalid control-route saves before posting config', async () => {
+    const invalidConfig = JSON.parse(JSON.stringify(testConfig));
+    delete invalidConfig.loadouts['Full-Auto'].nodes['Socket-3'].parse;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/config' && init?.method === 'POST') throw new Error('invalid config was posted');
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: invalidConfig, loadoutSources: { 'Full-Auto': 'user', 'Planning-Consult': 'user' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const input = await screen.findByLabelText(/Edit name/i);
+    fireEvent.change(input, { target: { value: 'Renamed Invalid Full Auto' } });
+    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(screen.getByText(/Socket-3 \(Auto-Eval\).*satisfied\/not_satisfied routing requires JSON output parsing/i)).toBeTruthy());
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('keeps loadout name edits local until commit and rejects empty names', async () => {
@@ -659,6 +679,7 @@ describe('Materia loadout grid editor', () => {
   it('does not duplicate an existing self-edge when creating a single-socket loop', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
+    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).parse = 'json';
     (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).edges = [{ when: 'not_satisfied', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
@@ -1327,18 +1348,18 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    await screen.findByTestId('socket-Socket-3');
+    await screen.findByTestId('socket-Socket-4');
     const dataTransfer = createDataTransfer();
-    fireEvent.dragStart(screen.getByTestId('socket-Socket-3').querySelector('[draggable="true"]') as HTMLElement, { dataTransfer });
+    fireEvent.dragStart(screen.getByTestId('socket-Socket-4').querySelector('[draggable="true"]') as HTMLElement, { dataTransfer });
     fireEvent.drop(screen.getByTestId('socket-grid-viewport'), { dataTransfer });
-    expect(await screen.findByText(/Cleared materia from Socket-3/)).toBeTruthy();
+    expect(await screen.findByText(/Cleared materia from Socket-4/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
-    expect(saved['Socket-3']).toMatchObject({ empty: true, layout: { x: 2, y: 0 }, edges: [{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }] });
-    expect(Object.keys(saved)).toContain('Socket-3');
-    expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+    expect(saved['Socket-4']).toMatchObject({ empty: true, layout: { x: 3, y: 0 } });
+    expect(Object.keys(saved)).toContain('Socket-4');
+    expect(saved['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }]);
   });
 
   it('opens a socket action modal and unsockets materia while preserving graph metadata', async () => {
