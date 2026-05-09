@@ -96,6 +96,19 @@ describe("native per-materia model settings", () => {
     expect(harness.operationLog.indexOf("setModel")).toBeLessThan(harness.operationLog.indexOf("setActiveTools"));
     expect(harness.operationLog.indexOf("setThinkingLevel")).toBeLessThan(harness.operationLog.indexOf("setActiveTools"));
     expect(harness.operationLog.indexOf("setActiveTools")).toBeLessThan(harness.operationLog.indexOf("triggerTurn"));
+    expect(harness.notifications.some((notification) => notification.type === "warning")).toBe(false);
+    const usage = await readUsage(harness);
+    expect(usage.modelSelections[0]).toMatchObject({
+      requestedModel: "anthropic/claude-test",
+      requestedThinking: "high",
+      effectiveModel: "anthropic/claude-test",
+      effectiveThinking: "high",
+      model: "claude-test",
+      provider: "anthropic",
+      thinking: "high",
+      source: "configured",
+    });
+    expect(usage.modelSelections[0].fallbackReason).toBeUndefined();
   });
 
   test("different materia apply different model settings across one cast", async () => {

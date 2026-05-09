@@ -1497,6 +1497,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.change(modelSelect, { target: { value: 'openai/gpt-review' } });
+    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'high']));
+    fireEvent.change(thinkingSelect, { target: { value: 'high' } });
     const colorPicker = screen.getByTestId('materia-color');
     expect(screen.queryByRole('radiogroup', { name: /materia color/i })).toBeNull();
     expect(screen.queryByRole('radio', { name: /purple/i })).toBeNull();
@@ -1541,7 +1543,7 @@ describe('Materia loadout grid editor', () => {
     const body = configPostBody(fetchMock);
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', color: 'materia-color-purple', multiTurn: true });
+    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', thinking: 'high', color: 'materia-color-purple', multiTurn: true });
     await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/config' && (call[1] as RequestInit | undefined)?.method !== 'POST').length).toBeGreaterThanOrEqual(2));
     expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
