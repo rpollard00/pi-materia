@@ -28,6 +28,36 @@ function runState(overrides: Partial<MateriaRunState> = {}): MateriaRunState {
   };
 }
 
+function loopCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
+  const run = runState({ loadoutName: "Hojo-Consult", currentNode: "Socket-2", currentMateria: "Auto-Eval", currentTask: "Implement status layout" });
+  return {
+    active: true,
+    phase: "Socket-2",
+    currentNode: "Socket-2",
+    currentMateria: "Auto-Eval",
+    currentItemLabel: "Implement status layout",
+    awaitingResponse: true,
+    startedAt: 1_000,
+    updatedAt: 2_000,
+    data: { workItems: [{ title: "one" }, { title: "two" }, { title: "three" }] },
+    cursors: { workItemsIndex: 1 },
+    visits: {},
+    taskAttempts: {},
+    edgeTraversals: {},
+    runState: run,
+    pipeline: {
+      entry: {} as never,
+      nodes: {
+        "Socket-1": { id: "Socket-1", node: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "", label: "Build" } },
+        "Socket-2": { id: "Socket-2", node: { type: "agent", materia: "Auto-Eval" }, materia: { tools: "readOnly", prompt: "", label: "Auto-Eval" } },
+        "Socket-3": { id: "Socket-3", node: { type: "agent", materia: "Maintain" }, materia: { tools: "coding", prompt: "", label: "Maintain" } },
+      },
+      loops: { itemLoop: { nodes: ["Socket-1", "Socket-2", "Socket-3"], iterator: { items: "state.workItems", cursor: "workItemsIndex" } } },
+    },
+    ...overrides,
+  } as MateriaCastState;
+}
+
 describe("persistent Materia widget formatting", () => {
   test("renders compact active cast details in at most four lines", () => {
     const state: MateriaRunState = {
@@ -48,13 +78,14 @@ describe("persistent Materia widget formatting", () => {
     const lines = renderMateriaRunWidget(state, 70_000);
     expect(lines.length).toBeLessThanOrEqual(4);
     expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("✦ 2026-05-07 14:53:49.729Z");
-    expect(lines[0]).toContain("⌘ -");
+    expect(lines[0]).toContain("✦ active");
+    expect(lines[0]).not.toContain("2026-05-07");
+    expect(lines[0]).toContain("⌘ - ◉ Interactive Planning");
     expect(lines[0]).toContain("↻ 2");
     expect(lines[0]).toContain("◷ 1m09s");
     expect(lines[0]).toContain("Σ 23k/2.1k");
     expect(lines[1]).toContain("◆ task-123");
-    expect(lines[1]).toContain("◉ Interactive Planning");
+    expect(lines[1]).toContain("⟲ -");
     expect(lines[2]).toContain("› Multi-turn Interactive Planning");
     expect(lines.every((line) => line.length <= 78)).toBe(true);
   });
@@ -141,7 +172,7 @@ describe("persistent Materia widget formatting", () => {
     });
 
     const lines = renderMateriaRunWidget(state, 2_000);
-    expect(lines[1]).toContain("◉ Build");
+    expect(lines[0]).toContain("◉ Build");
     expect(lines[1]).toContain("◆ Build");
     expect(lines[2]).toContain("› Build");
     expect(lines.join("\n")).not.toContain("Socket-3");
@@ -156,7 +187,7 @@ describe("persistent Materia widget formatting", () => {
     });
 
     const lines = renderMateriaRunWidget(state, 2_000);
-    expect(lines[1]).toContain("◉ Socket-3");
+    expect(lines[0]).toContain("◉ Socket-3");
     expect(lines[1]).toContain("◆ Socket-3");
     expect(lines[2]).toContain("› Socket-3");
   });
@@ -173,9 +204,26 @@ describe("persistent Materia widget formatting", () => {
     } as MateriaCastState;
 
     const lines = renderMateriaCastStatusWidget(state, 2_000);
+    expect(lines[0]).toContain("⌘ - ◉ Build");
     expect(lines[2]).toBe("› Build active");
     expect(lines[2]).not.toContain("Last");
     expect(lines[2]).not.toContain("Socket-4");
+  });
+
+  test("renders loop turn and active loop path when loop metadata is available", () => {
+    const lines = renderMateriaCastStatusWidget(loopCastState(), 2_000);
+    expect(lines[0]).toContain("⌘ Hojo-Consult ◉ Auto-Eval");
+    expect(lines[0]).toContain("↻ 2/3");
+    expect(lines[1]).toContain("◆ Implement status layout");
+    expect(lines[1]).toContain("⟲ Build -> [Auto-Eval] -> Maintain");
+    expect(lines.join("\n")).not.toContain("2026-05-07");
+  });
+
+  test("renders loop turn with unknown total when loop items cannot be resolved", () => {
+    const state = loopCastState({ data: {}, cursors: { workItemsIndex: 0 } });
+    const lines = renderMateriaCastStatusWidget(state, 2_000);
+    expect(lines[0]).toContain("↻ 1/?");
+    expect(lines[1]).toContain("⟲ Build -> [Auto-Eval] -> Maintain");
   });
 
   test("renders rich cast status with partial metadata through the shared widget shape", () => {
@@ -192,7 +240,7 @@ describe("persistent Materia widget formatting", () => {
     expect(lines).toHaveLength(3);
     expect(lines[0]).toContain("⌘ Review");
     expect(lines[1]).toContain("◆ -");
-    expect(lines[1]).toContain("◉ -");
+    expect(lines[1]).toContain("⟲ -");
     expect(lines[2]).toBe("› complete");
     expect(lines.every((line) => line.length <= 78)).toBe(true);
   });
@@ -263,6 +311,19 @@ describe("persistent Materia widget ticker ownership", () => {
       globalThis.setInterval = originalSetInterval;
       globalThis.clearInterval = originalClearInterval;
     }
+  });
+
+  test("renders rich loop-aware cast state through the normal widget update path", () => {
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
+
+    updateWidget(ctx, loopCastState(), { replaceOwner: true });
+    const text = widgets.at(-1)?.value?.join("\n") ?? "";
+    expect(text).toContain("⌘ Hojo-Consult ◉ Auto-Eval");
+    expect(text).toContain("↻ 2/3");
+    expect(text).toContain("⟲ Build -> [Auto-Eval] -> Maintain");
+
+    clearWidgetTicker(ctx);
   });
 
   test("uses one current-cast ticker, ignores stale updates, and stops on terminal render", () => {

@@ -2,28 +2,30 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { MateriaCastState, MateriaRunState, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
 
 const WIDGET_MAX_LINE_LENGTH = 78;
-type WidgetOwner = { runId: string; state: MateriaRunState };
+type MateriaWidgetState = MateriaRunState | MateriaCastState;
+type WidgetOwner = { runId: string; state: MateriaWidgetState };
 const widgetOwners = new WeakMap<ExtensionContext, WidgetOwner>();
 const widgetTickers = new WeakMap<ExtensionContext, ReturnType<typeof setInterval>>();
 
-export function updateWidget(ctx: ExtensionContext, state: MateriaRunState, options: { replaceOwner?: boolean } = {}): void {
+export function updateWidget(ctx: ExtensionContext, state: MateriaWidgetState, options: { replaceOwner?: boolean } = {}): void {
+  const runState = widgetRunState(state);
   const owner = widgetOwners.get(ctx);
-  if (owner && owner.runId !== state.runId && !options.replaceOwner) return;
+  if (owner && owner.runId !== runState.runId && !options.replaceOwner) return;
 
-  if (!owner || owner.runId !== state.runId) {
+  if (!owner || owner.runId !== runState.runId) {
     stopWidgetTicker(ctx);
     clearMateriaAuxiliaryWidgets(ctx);
   }
 
-  widgetOwners.set(ctx, { runId: state.runId, state });
-  ctx.ui.setWidget("materia", renderMateriaRunWidget(state), { placement: "belowEditor" });
+  widgetOwners.set(ctx, { runId: runState.runId, state });
+  ctx.ui.setWidget("materia", renderMateriaWidgetState(state), { placement: "belowEditor" });
 
-  if (state.endedAt !== undefined) {
-    stopWidgetTicker(ctx, state.runId);
+  if (runState.endedAt !== undefined) {
+    stopWidgetTicker(ctx, runState.runId);
     return;
   }
 
-  startWidgetTicker(ctx, state.runId);
+  startWidgetTicker(ctx, runState.runId);
 }
 
 export function clearWidgetTicker(ctx: ExtensionContext): void {
@@ -33,11 +35,11 @@ export function clearWidgetTicker(ctx: ExtensionContext): void {
 
 export function syncConfiguredLoadoutWidget(ctx: ExtensionContext, loadoutName: string): boolean {
   const owner = widgetOwners.get(ctx);
-  if (owner && owner.state.endedAt === undefined) return false;
+  if (owner && widgetRunState(owner.state).endedAt === undefined) return false;
 
   if (owner) {
-    owner.state = { ...owner.state, loadoutName };
-    ctx.ui.setWidget("materia", renderMateriaRunWidget(owner.state), { placement: "belowEditor" });
+    owner.state = withWidgetLoadout(owner.state, loadoutName);
+    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), { placement: "belowEditor" });
     return true;
   }
 
@@ -53,11 +55,11 @@ function startWidgetTicker(ctx: ExtensionContext, runId: string): void {
       stopWidgetTicker(ctx, runId);
       return;
     }
-    if (owner.state.endedAt !== undefined) {
+    if (widgetRunState(owner.state).endedAt !== undefined) {
       stopWidgetTicker(ctx, runId);
       return;
     }
-    ctx.ui.setWidget("materia", renderMateriaRunWidget(owner.state), { placement: "belowEditor" });
+    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), { placement: "belowEditor" });
   }, 5000);
   ticker.unref?.();
   widgetTickers.set(ctx, ticker);
@@ -68,6 +70,23 @@ function stopWidgetTicker(ctx: ExtensionContext, runId?: string): void {
   const ticker = widgetTickers.get(ctx);
   if (ticker) clearInterval(ticker);
   widgetTickers.delete(ctx);
+}
+
+function isMateriaCastWidgetState(state: MateriaWidgetState): state is MateriaCastState {
+  return "runState" in state;
+}
+
+function widgetRunState(state: MateriaWidgetState): MateriaRunState {
+  return isMateriaCastWidgetState(state) ? state.runState : state;
+}
+
+function renderMateriaWidgetState(state: MateriaWidgetState, now = Date.now()): string[] {
+  return isMateriaCastWidgetState(state) ? renderMateriaCastStatusWidget(state, now) : renderMateriaRunWidget(state, now);
+}
+
+function withWidgetLoadout(state: MateriaWidgetState, loadoutName: string): MateriaWidgetState {
+  if (!isMateriaCastWidgetState(state)) return { ...state, loadoutName };
+  return { ...state, runState: { ...state.runState, loadoutName } };
 }
 
 export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
@@ -82,7 +101,7 @@ export function renderMateriaCastStatusWidget(state: MateriaCastState, now = Dat
   return renderMateriaStatusWidget(createMateriaCastStatusModel(state, now));
 }
 
-export type MateriaStatusSegmentKind = "cast" | "loadout" | "attempt" | "elapsed" | "usage" | "task" | "materia" | "message";
+export type MateriaStatusSegmentKind = "cast" | "loadout" | "attempt" | "elapsed" | "usage" | "task" | "path" | "message";
 
 export type MateriaStatusSegment = {
   kind: MateriaStatusSegmentKind;
@@ -98,42 +117,42 @@ export type MateriaStatusRenderModel = {
 };
 
 const FIRST_LINE_SEGMENTS: Array<{ kind: MateriaStatusSegmentKind; label: string; width: number; priority: number }> = [
-  { kind: "cast", label: "✦", width: 31, priority: 80 },
-  { kind: "loadout", label: "⌘", width: 14, priority: 100 },
-  { kind: "attempt", label: "↻", width: 4, priority: 70 },
+  { kind: "cast", label: "✦", width: 10, priority: 80 },
+  { kind: "loadout", label: "⌘", width: 30, priority: 100 },
+  { kind: "attempt", label: "↻", width: 7, priority: 70 },
   { kind: "elapsed", label: "◷", width: 8, priority: 75 },
   { kind: "usage", label: "Σ", width: 12, priority: 60 },
 ];
 
 const SECOND_LINE_SEGMENTS: Array<{ kind: MateriaStatusSegmentKind; label: string; width: number; priority: number }> = [
-  { kind: "task", label: "◆", width: 36, priority: 50 },
-  { kind: "materia", label: "◉", width: 37, priority: 95 },
+  { kind: "task", label: "◆", width: 34, priority: 50 },
+  { kind: "path", label: "⟲", width: 41, priority: 35 },
 ];
 
 function createMateriaRunStatusModel(state: MateriaRunState, now: number): MateriaStatusRenderModel {
   const usage = state.usage.tokens;
   const elapsedUntil = state.endedAt ?? now;
   return createMateriaStatusRenderModel({
-    cast: shortCastId(state.runId),
-    loadout: state.loadoutName ?? "-",
+    cast: state.endedAt === undefined ? "active" : "done",
+    loadout: formatLoadoutMateria(state.loadoutName, displayMateriaName(state)),
     attempt: String(state.attempt ?? "-"),
     elapsed: formatElapsed(elapsedUntil - state.startedAt),
     usage: `${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
     task: displayMateriaStatusValue(state, state.currentTask ?? "-"),
-    materia: displayMateriaName(state),
+    path: "-",
     message: displayMateriaStatusValue(state, state.lastMessage ?? "-"),
   });
 }
 
 function createConfiguredLoadoutStatusModel(loadoutName: string): MateriaStatusRenderModel {
   return createMateriaStatusRenderModel({
-    cast: "configured",
-    loadout: loadoutName || "-",
+    cast: "ready",
+    loadout: formatLoadoutMateria(loadoutName || "-", "no active cast"),
     attempt: "-",
     elapsed: "-",
     usage: "-",
     task: "active loadout",
-    materia: "no active cast",
+    path: "-",
     message: "Ready for the next pi-materia cast.",
   });
 }
@@ -142,8 +161,17 @@ function createMateriaCastStatusModel(state: MateriaCastState, now: number): Mat
   const displayState = { ...state.runState, currentNode: state.currentNode ?? state.runState.currentNode, currentMateria: state.currentMateria ?? state.runState.currentMateria };
   const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
   const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${displayState.currentMateria ?? state.phase}${state.active ? " active" : ""}`;
-  const model = createMateriaRunStatusModel(displayState, now);
-  return replaceStatusSegment(model, "message", displayMateriaStatusValue(displayState, status));
+  const loop = activeLoopDisplay(state);
+  return createMateriaStatusRenderModel({
+    cast: state.active ? "active" : state.phase || "done",
+    loadout: formatLoadoutMateria(displayState.loadoutName, displayMateriaName(displayState)),
+    attempt: loop?.turn ?? String(displayState.attempt ?? "-"),
+    elapsed: formatElapsed((displayState.endedAt ?? now) - displayState.startedAt),
+    usage: `${formatCompactNumber(displayState.usage.tokens.input + displayState.usage.tokens.cacheRead)}/${formatCompactNumber(displayState.usage.tokens.output + displayState.usage.tokens.cacheWrite)}`,
+    task: displayMateriaStatusValue(displayState, state.currentItemLabel ?? displayState.currentTask ?? state.request ?? "-"),
+    path: loop?.path ?? "-",
+    message: displayMateriaStatusValue(displayState, status),
+  });
 }
 
 function createMateriaStatusRenderModel(values: Record<MateriaStatusSegmentKind, string>): MateriaStatusRenderModel {
@@ -151,11 +179,6 @@ function createMateriaStatusRenderModel(values: Record<MateriaStatusSegmentKind,
   const secondLine = SECOND_LINE_SEGMENTS.map((definition) => ({ ...definition, value: values[definition.kind] }));
   const message: MateriaStatusSegment = { kind: "message", label: "›", value: values.message, priority: 40 };
   return { segments: [...firstLine, ...secondLine, message], panelLines: [firstLine, secondLine, [message]] };
-}
-
-function replaceStatusSegment(model: MateriaStatusRenderModel, kind: MateriaStatusSegmentKind, value: string): MateriaStatusRenderModel {
-  const replace = (segment: MateriaStatusSegment): MateriaStatusSegment => (segment.kind === kind ? { ...segment, value } : segment);
-  return { segments: model.segments.map(replace), panelLines: model.panelLines.map((line) => line.map(replace)) };
 }
 
 function renderMateriaStatusWidget(model: MateriaStatusRenderModel): string[] {
@@ -235,6 +258,51 @@ function displayMateriaName(state: MateriaRunState): string {
   return state.currentMateria ?? state.currentNode ?? "-";
 }
 
+function formatLoadoutMateria(loadoutName: string | undefined, materiaName: string): string {
+  return `${loadoutName || "-"} ◉ ${materiaName || "-"}`;
+}
+
+function activeLoopDisplay(state: MateriaCastState): { turn: string; path: string } | undefined {
+  const currentNode = state.currentNode ?? state.runState.currentNode;
+  if (!currentNode || !state.pipeline) return undefined;
+  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => candidate.nodes.includes(currentNode));
+  if (!loop) return undefined;
+
+  const cursor = loop.iterator?.cursor ?? loop.consumes?.cursor ?? `${currentNode}Index`;
+  const currentIndex = Math.max(0, state.cursors[cursor] ?? 0);
+  const total = loop.iterator ? resolveLoopTotal(state, loop.iterator.items) : undefined;
+  return {
+    turn: total === undefined ? `${currentIndex + 1}/?` : `${Math.min(currentIndex + 1, total)}/${total}`,
+    path: loop.nodes.map((nodeId) => (nodeId === currentNode ? `[${displayPipelineNodeName(state, nodeId)}]` : displayPipelineNodeName(state, nodeId))).join(" -> "),
+  };
+}
+
+function displayPipelineNodeName(state: MateriaCastState, nodeId: string): string {
+  const node = state.pipeline.nodes[nodeId];
+  if (!node) return nodeId;
+  if ("materia" in node) return node.materia.label ?? node.node.materia ?? nodeId;
+  return node.node.utility ?? node.node.command?.[0] ?? nodeId;
+}
+
+function resolveLoopTotal(state: MateriaCastState, itemsPath: string): number | undefined {
+  const items = resolveDisplayPath(state, itemsPath);
+  return Array.isArray(items) ? items.length : undefined;
+}
+
+function resolveDisplayPath(state: MateriaCastState, expression: string): unknown {
+  const trimmed = expression.trim();
+  if (trimmed.startsWith("state.")) return getDisplayPath(state.data, trimmed.slice("state.".length));
+  if (trimmed.startsWith("cursor.")) return state.cursors[trimmed.slice("cursor.".length)];
+  return undefined;
+}
+
+function getDisplayPath(value: unknown, path: string): unknown {
+  return path.split(".").filter(Boolean).reduce<unknown>((current, part) => {
+    if (current && typeof current === "object" && part in current) return (current as Record<string, unknown>)[part];
+    return undefined;
+  }, value);
+}
+
 function displayMateriaStatusValue(state: MateriaRunState, value: string): string {
   const node = state.currentNode;
   const materia = state.currentMateria;
@@ -250,10 +318,6 @@ function displayMateriaStatusValue(state: MateriaRunState, value: string): strin
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function shortCastId(runId: string): string {
-  return truncateValue(runId.replace(/T(\d{2})-(\d{2})-(\d{2})-/, " $1:$2:$3."), 30);
 }
 
 function formatElapsed(milliseconds: number): string {

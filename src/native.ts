@@ -90,7 +90,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
 
   pi.setSessionName(`materia: ${request.slice(0, 60)}`);
   saveCastState(pi, state);
-  updateWidget(ctx, state.runState, { replaceOwner: true });
+  updateWidget(ctx, state, { replaceOwner: true });
   ctx.ui.notify(`pi-materia cast started. Artifacts: ${runDir}`, "info");
   await startNode(pi, ctx, state, pipeline.entry);
 }
@@ -165,7 +165,7 @@ export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   await writeUsage(state.runState);
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", materiaStatusLabel(state, node));
-  updateWidget(ctx, state.runState, { replaceOwner: true });
+  updateWidget(ctx, state, { replaceOwner: true });
 
   if (isAgentResolvedNode(node) && state.activeTurnPrompt) {
     updateToolScope(pi, node.materia);
@@ -265,7 +265,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       await appendEvent(state.runState, "node_refinement", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
       saveCastState(pi, state);
       ctx.ui.setStatus("materia", materiaStatusLabel(state, node, { suffix: "refine", includeItem: false }));
-      updateWidget(ctx, state.runState);
+      updateWidget(ctx, state);
       ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
       return;
     }
@@ -282,7 +282,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     await appendManifest(state, { phase: "failed", entryId: latest.entry.id });
     saveCastState(pi, state);
     ctx.ui.setStatus("materia", "failed");
-    updateWidget(ctx, state.runState);
+    updateWidget(ctx, state);
     ctx.ui.notify(`pi-materia cast failed: ${state.failedReason}`, "error");
   }
 }
@@ -443,7 +443,7 @@ async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: Materia
   await writeUsage(state.runState);
   await appendEvent(state.runState, "node_start", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
   saveCastState(pi, state);
-  updateWidget(ctx, state.runState);
+  updateWidget(ctx, state);
   ctx.ui.setStatus("materia", materiaStatusLabel(state, node));
 
   if (!isAgentResolvedNode(node)) {
@@ -643,7 +643,7 @@ async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, 
   await appendEvent(state.runState, "transient_transport_turn_failure", { warning: true, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), mode: recoveryTurnMode(state) });
   await writeUsage(state.runState);
   saveCastState(pi, state);
-  updateWidget(ctx, state.runState);
+  updateWidget(ctx, state);
   ctx.ui.notify(`pi-materia warning: ${state.runState.lastMessage}`, "warning");
 }
 
@@ -680,7 +680,7 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
     await sendMateriaTurn(pi, ctx, state, buildSameNodeRecoveryPrompt(state), { skipProactiveCompaction: true });
     await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, maxAttempts, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     saveCastState(pi, state);
-    updateWidget(ctx, state.runState);
+    updateWidget(ctx, state);
     ctx.ui.notify(`pi-materia retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`, "warning");
     return true;
   } catch (retryError) {
@@ -846,7 +846,7 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   await appendManifest(state, { phase: "failed", node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", "failed");
-  updateWidget(ctx, state.runState);
+  updateWidget(ctx, state);
   ctx.ui.notify(`pi-materia cast failed: ${state.failedReason}`, "error");
 }
 
@@ -911,7 +911,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   await appendManifest(state, { phase: "complete", entryId });
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", "done");
-  updateWidget(ctx, state.runState);
+  updateWidget(ctx, state);
   showUsageSummary(ctx, state.runState);
   ctx.ui.notify(`pi-materia cast complete. ${formatUsage(state.runState.usage, state.runState.usage.costKind)}`, "info");
 }
