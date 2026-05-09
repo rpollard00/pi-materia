@@ -35,10 +35,11 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 
 ## Materia creation/editing
 
-1. Create a prompt materia with name, prompt text, model, JSON output format, and multiturn enabled.
-2. Save with the default `user` target and confirm it appears in `$PI_MATERIA_PROFILE_DIR/materia.json`.
-3. Create a tool/utility materia and explicitly choose `project`; confirm it is written to `.pi/pi-materia.json`.
-4. Edit an existing prompt materia and confirm graph links, layout, and inserted metadata on the socket are preserved.
+1. Create a prompt materia with name, prompt text, JSON output format, and multiturn enabled.
+2. Confirm the **Model** dropdown defaults to **Active Pi Model** and the **Thinking** dropdown defaults to **Active Pi Thinking**; select an available model from Pi's configured/credentialed model list and verify the thinking options update for that model.
+3. Save with the default `user` target and confirm it appears in `$PI_MATERIA_PROFILE_DIR/materia.json`.
+4. Create a tool/utility materia and explicitly choose `project`; confirm it is written to `.pi/pi-materia.json`.
+5. Edit an existing prompt materia and confirm graph links, layout, and inserted metadata on the socket are preserved. If it has a saved model that is not currently available in Pi, confirm only that saved value appears with an unavailable label so saving unchanged preserves it.
 
 ## Role prompt generator
 

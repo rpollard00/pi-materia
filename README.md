@@ -75,6 +75,8 @@ In the WebUI loadout editor, create generator-driven loops by selecting the sock
 
 In the WebUI materia editor, the **Generate role prompt from brief** panel can draft prompt instructions for a prompt materia. Enter a short description of the role, click **Generate**, review the generated preview, then either **Regenerate**, **Discard**, or explicitly **Apply to prompt field**. Generation calls `POST /api/generate/materia-role` from the session-scoped WebUI server and uses an isolated in-memory context, so it does not append to or mutate the active Pi chat. Existing prompt text is not overwritten until you choose Apply.
 
+The same editor uses dropdowns for agent materia **Model** and **Thinking**. **Active Pi Model** saves no `model` override and uses the current Pi session model; **Active Pi Thinking** saves no `thinking` override and uses the current Pi thinking setting. Other model choices come from Pi's configured and credentialed model registry for the launching session. Thinking choices are derived from the selected model, or from the active Pi model when **Active Pi Model** is selected. When editing an existing materia whose saved model is no longer available, the dropdown includes only that saved value with an unavailable label so it can be preserved by saving unchanged; unavailable models are not offered as general choices for new selections. Existing legacy thinking values that are not supported by the selected model can likewise be preserved only while editing that unchanged saved value.
+
 Use `/materia loadout` to list configured graph loadouts and mark the active one. Use `/materia loadout <name>` to switch the active graph for future casts, for example `/materia loadout Planning-Consult`. Loadout names may contain hyphens.
 
 ### Metrics semantics
@@ -203,9 +205,9 @@ If `proactiveThresholdPercent` is present, it takes precedence even if tiered th
 
 ### Per-materia model and thinking settings
 
-Materia configs may optionally set `model` and `thinking` alongside `tools` and `prompt`. If a materia omits `model`, pi-materia does not switch models for that turn; it preserves Pi's currently active model as the default behavior. If a materia omits `thinking`, pi-materia likewise preserves Pi's active thinking level.
+Materia configs may optionally set `model` and `thinking` alongside `tools` and `prompt`. If a materia omits `model`, pi-materia does not switch models for that turn; it preserves Pi's currently active model as the default behavior. If a materia omits `thinking`, pi-materia likewise preserves Pi's active thinking level. In the WebUI editor these defaults are the **Active Pi Model** and **Active Pi Thinking** dropdown entries, and selecting them leaves the corresponding config field unset rather than saving the display label.
 
-Use `provider/model-id` (or an unambiguous model id from Pi's model registry) for `model`. Supported `thinking` strings are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh` when the active Pi runtime/provider supports thinking controls.
+Use `provider/model-id` (or an unambiguous model id from Pi's configured and credentialed model registry) for `model`. Supported `thinking` strings are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh` when the active Pi runtime/provider and selected model support thinking controls.
 
 Example loadout excerpt where planner and evaluator materia use a cheaper model, while Build uses a stronger coding model:
 
@@ -242,7 +244,7 @@ In this example, `Maintain` intentionally has no `model` or `thinking`, so it fa
 
 Run `/materia grid` to verify the resolved materia settings before casting. Agent slots show `model=<configured value>` and `thinking=<configured value>` for explicit settings, or labels such as `model=active Pi model` and `thinking=active Pi thinking` for fallback materia.
 
-Provider/runtime limitations: explicit model switching requires Pi's runtime to expose model switching and the requested model must exist in Pi's registry with usable credentials. Explicit thinking requires Pi's runtime to expose thinking-level controls, and individual providers/models may ignore or map levels differently. pi-materia raises a clear materia-specific error when an explicit `model` or `thinking` setting is unsupported; fallback materia continue to use Pi's active settings without attempting a switch.
+Provider/runtime limitations: explicit model switching requires Pi's runtime to expose model switching and the requested model must exist in Pi's registry with usable credentials. Explicit thinking requires Pi's runtime to expose thinking-level controls, and individual providers/models may ignore or map levels differently. If a configured model is unknown, unavailable, or cannot be used because credentials are missing or unauthorized, pi-materia shows a warning naming that configured model and continues the cast with the active Pi session model. If configured thinking is unsupported by the effective model, pi-materia falls back to the active or nearest safe supported thinking setting and warns or records the fallback where possible. Runtime usage/events may record the requested model/thinking, effective model/thinking, and fallback reason when Pi exposes enough metadata.
 
 Generic node mechanics:
 
