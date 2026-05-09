@@ -57,16 +57,17 @@ function stopWidgetTicker(ctx: ExtensionContext, runId?: string): void {
 }
 
 export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
-  const materia = displayMateriaName(state);
-  const loadout = state.loadoutName ?? "-";
-  const attempt = state.attempt ?? "-";
-  const task = displayMateriaStatusValue(state, state.currentTask ?? "-");
-  const usage = state.usage.tokens;
-  const elapsedUntil = state.endedAt ?? now;
+  const model = materiaRunWidgetModel(state, now);
   const lines = [
-    `✦ ${shortCastId(state.runId)} | ⌘ ${truncateValue(loadout, 16)} | ◉ ${truncateValue(materia, 24)} | ↻ ${attempt}`,
-    `◆ ${truncateValue(task, 24)} | ◷ ${formatElapsed(elapsedUntil - state.startedAt)} | Σ ${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
-    `› ${truncateValue(displayMateriaStatusValue(state, state.lastMessage ?? "-"), 68)}`,
+    joinCells([
+      fixedCell(`✦ ${model.castId}`, 31),
+      fixedCell(`⌘ ${model.loadout}`, 14),
+      fixedCell(`↻ ${model.attempt}`, 4),
+      fixedCell(`◷ ${model.elapsed}`, 8),
+      fixedCell(`Σ ${model.usage}`, 12),
+    ]),
+    joinCells([fixedCell(`◆ ${model.task}`, 36), fixedCell(`◉ ${model.materia}`, 37)]),
+    `› ${truncateValue(model.message, WIDGET_MAX_LINE_LENGTH - 2)}`,
   ];
   return lines.map((line) => truncateLine(line));
 }
@@ -76,7 +77,33 @@ export function renderMateriaCastStatusWidget(state: MateriaCastState, now = Dat
   const displayState = { ...state.runState, currentNode: state.currentNode ?? state.runState.currentNode, currentMateria: state.currentMateria ?? state.runState.currentMateria };
   const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
   const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${displayState.currentMateria ?? state.phase}${state.active ? " active" : ""}`;
-  return [...runLines.slice(0, 2), `› ${truncateValue(displayMateriaStatusValue(displayState, status), 68)}`].map((line) => truncateLine(line));
+  return [...runLines.slice(0, 2), `› ${truncateValue(displayMateriaStatusValue(displayState, status), WIDGET_MAX_LINE_LENGTH - 2)}`].map((line) => truncateLine(line));
+}
+
+type MateriaRunWidgetModel = {
+  castId: string;
+  loadout: string;
+  attempt: string;
+  elapsed: string;
+  usage: string;
+  task: string;
+  materia: string;
+  message: string;
+};
+
+function materiaRunWidgetModel(state: MateriaRunState, now: number): MateriaRunWidgetModel {
+  const usage = state.usage.tokens;
+  const elapsedUntil = state.endedAt ?? now;
+  return {
+    castId: shortCastId(state.runId),
+    loadout: state.loadoutName ?? "-",
+    attempt: String(state.attempt ?? "-"),
+    elapsed: formatElapsed(elapsedUntil - state.startedAt),
+    usage: `${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
+    task: displayMateriaStatusValue(state, state.currentTask ?? "-"),
+    materia: displayMateriaName(state),
+    message: displayMateriaStatusValue(state, state.lastMessage ?? "-"),
+  };
 }
 
 export function clearMateriaAuxiliaryWidgets(ctx: ExtensionContext): void {
@@ -184,6 +211,15 @@ function trimFixed(value: number): string {
 
 function truncateLine(line: string): string {
   return truncateValue(line, WIDGET_MAX_LINE_LENGTH);
+}
+
+function joinCells(cells: string[]): string {
+  return cells.join(" ").trimEnd();
+}
+
+function fixedCell(value: string, width: number): string {
+  const truncated = truncateValue(value, width);
+  return truncated.padEnd(width, " ");
 }
 
 function truncateValue(value: string, maxLength: number): string {

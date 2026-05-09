@@ -49,11 +49,12 @@ describe("persistent Materia widget formatting", () => {
     expect(lines.length).toBeLessThanOrEqual(4);
     expect(lines).toHaveLength(3);
     expect(lines[0]).toContain("✦ 2026-05-07 14:53:49.729Z");
-    expect(lines[0]).toContain("◉ Interactive Planning");
+    expect(lines[0]).toContain("⌘ -");
     expect(lines[0]).toContain("↻ 2");
+    expect(lines[0]).toContain("◷ 1m09s");
+    expect(lines[0]).toContain("Σ 23k/2.1k");
     expect(lines[1]).toContain("◆ task-123");
-    expect(lines[1]).toContain("◷ 1m09s");
-    expect(lines[1]).toContain("Σ 23k/2.1k");
+    expect(lines[1]).toContain("◉ Interactive Planning");
     expect(lines[2]).toContain("› Multi-turn Interactive Planning");
     expect(lines.every((line) => line.length <= 78)).toBe(true);
   });
@@ -69,7 +70,7 @@ describe("persistent Materia widget formatting", () => {
     const state = runState({ endedAt: 11_000 });
 
     const lines = renderMateriaRunWidget(state, 999_000);
-    expect(lines[1]).toContain("◷ 10s");
+    expect(lines[0]).toContain("◷ 10s");
   });
 
   test("prefers Materia names over Socket IDs in user-facing status values", () => {
@@ -82,7 +83,7 @@ describe("persistent Materia widget formatting", () => {
     });
 
     const lines = renderMateriaRunWidget(state, 2_000);
-    expect(lines[0]).toContain("◉ Build");
+    expect(lines[1]).toContain("◉ Build");
     expect(lines[1]).toContain("◆ Build");
     expect(lines[2]).toContain("› Build");
     expect(lines.join("\n")).not.toContain("Socket-3");
@@ -97,7 +98,7 @@ describe("persistent Materia widget formatting", () => {
     });
 
     const lines = renderMateriaRunWidget(state, 2_000);
-    expect(lines[0]).toContain("◉ Socket-3");
+    expect(lines[1]).toContain("◉ Socket-3");
     expect(lines[1]).toContain("◆ Socket-3");
     expect(lines[2]).toContain("› Socket-3");
   });
