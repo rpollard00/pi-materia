@@ -90,7 +90,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
 
   pi.setSessionName(`materia: ${request.slice(0, 60)}`);
   saveCastState(pi, state);
-  updateWidget(ctx, state.runState);
+  updateWidget(ctx, state.runState, { replaceOwner: true });
   ctx.ui.notify(`pi-materia cast started. Artifacts: ${runDir}`, "info");
   await startNode(pi, ctx, state, pipeline.entry);
 }
@@ -165,7 +165,7 @@ export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   await writeUsage(state.runState);
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", materiaStatusLabel(state, node));
-  updateWidget(ctx, state.runState);
+  updateWidget(ctx, state.runState, { replaceOwner: true });
 
   if (isAgentResolvedNode(node) && state.activeTurnPrompt) {
     updateToolScope(pi, node.materia);

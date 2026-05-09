@@ -7,7 +7,7 @@ import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
-import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget } from "./ui.js";
+import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./ui.js";
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -147,6 +147,7 @@ export default function piMateria(pi: ExtensionAPI) {
           return;
         }
         clearCastState(pi, state, "aborted by user");
+        updateWidget(ctx, state.runState);
         ctx.ui.setStatus("materia", undefined);
         ctx.ui.notify(`pi-materia cast ${state.castId} aborted.`, "warning");
         return;

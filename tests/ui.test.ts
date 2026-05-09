@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatCostLabel, formatUsage, renderCompactUsageWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary } from "../src/ui.js";
+import { clearWidgetTicker, formatCostLabel, formatUsage, renderCompactUsageWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, updateWidget } from "../src/ui.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 
 function totals(tokens: number, cost: number): UsageTotals {
@@ -145,6 +145,56 @@ describe("persistent Materia widget formatting", () => {
     expect(lines).toHaveLength(3);
     expect(lines.every((line) => line.length <= 78)).toBe(true);
     expect(lines.join("\n")).not.toContain("estimated token value");
+  });
+});
+
+describe("persistent Materia widget ticker ownership", () => {
+  test("uses one current-cast ticker, ignores stale updates, and stops on terminal render", () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const intervals: Array<{ handle: { id: number; unref: () => void }; cleared: boolean; fn: () => void }> = [];
+    let nextId = 1;
+    (globalThis as any).setInterval = (fn: () => void) => {
+      const handle = { id: nextId++, unref: () => undefined };
+      intervals.push({ handle, cleared: false, fn });
+      return handle;
+    };
+    (globalThis as any).clearInterval = (handle: { id: number }) => {
+      const interval = intervals.find((entry) => entry.handle.id === handle.id);
+      if (interval) interval.cleared = true;
+    };
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
+
+    try {
+      const first = runState({ runId: "cast-a", currentMateria: "Build", lastMessage: "running a" });
+      updateWidget(ctx, first, { replaceOwner: true });
+      updateWidget(ctx, { ...first, lastMessage: "still running a" });
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(1);
+
+      updateWidget(ctx, runState({ runId: "cast-b", currentMateria: "Build", lastMessage: "stale b" }));
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("still running a");
+
+      const second = runState({ runId: "cast-b", currentMateria: "Review", lastMessage: "running b" });
+      updateWidget(ctx, second, { replaceOwner: true });
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(1);
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("running b");
+
+      const terminal = { ...second, endedAt: 11_000, lastMessage: "done b" };
+      updateWidget(ctx, terminal);
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(0);
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("◷ 10s");
+
+      updateWidget(ctx, { ...first, lastMessage: "late a" });
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("done b");
+      updateWidget(ctx, terminal);
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(0);
+    } finally {
+      clearWidgetTicker(ctx);
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
   });
 });
 

@@ -2,28 +2,58 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { MateriaCastState, MateriaRunState, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
 
 const WIDGET_MAX_LINE_LENGTH = 78;
-const widgetTickerState = new WeakMap<ExtensionContext, MateriaRunState>();
+type WidgetOwner = { runId: string; state: MateriaRunState };
+const widgetOwners = new WeakMap<ExtensionContext, WidgetOwner>();
 const widgetTickers = new WeakMap<ExtensionContext, ReturnType<typeof setInterval>>();
 
-export function updateWidget(ctx: ExtensionContext, state: MateriaRunState): void {
-  widgetTickerState.set(ctx, state);
-  clearMateriaAuxiliaryWidgets(ctx);
-  ctx.ui.setWidget("materia", renderMateriaRunWidget(state), { placement: "belowEditor" });
-  if (!widgetTickers.has(ctx)) {
-    const ticker = setInterval(() => {
-      const latest = widgetTickerState.get(ctx);
-      if (latest) ctx.ui.setWidget("materia", renderMateriaRunWidget(latest), { placement: "belowEditor" });
-    }, 5000);
-    ticker.unref?.();
-    widgetTickers.set(ctx, ticker);
+export function updateWidget(ctx: ExtensionContext, state: MateriaRunState, options: { replaceOwner?: boolean } = {}): void {
+  const owner = widgetOwners.get(ctx);
+  if (owner && owner.runId !== state.runId && !options.replaceOwner) return;
+
+  if (!owner || owner.runId !== state.runId) {
+    stopWidgetTicker(ctx);
+    clearMateriaAuxiliaryWidgets(ctx);
   }
+
+  widgetOwners.set(ctx, { runId: state.runId, state });
+  ctx.ui.setWidget("materia", renderMateriaRunWidget(state), { placement: "belowEditor" });
+
+  if (state.endedAt !== undefined) {
+    stopWidgetTicker(ctx, state.runId);
+    return;
+  }
+
+  startWidgetTicker(ctx, state.runId);
 }
 
 export function clearWidgetTicker(ctx: ExtensionContext): void {
+  stopWidgetTicker(ctx);
+  widgetOwners.delete(ctx);
+}
+
+function startWidgetTicker(ctx: ExtensionContext, runId: string): void {
+  if (widgetTickers.has(ctx)) return;
+  const ticker = setInterval(() => {
+    const owner = widgetOwners.get(ctx);
+    if (!owner || owner.runId !== runId) {
+      stopWidgetTicker(ctx, runId);
+      return;
+    }
+    if (owner.state.endedAt !== undefined) {
+      stopWidgetTicker(ctx, runId);
+      return;
+    }
+    ctx.ui.setWidget("materia", renderMateriaRunWidget(owner.state), { placement: "belowEditor" });
+  }, 5000);
+  ticker.unref?.();
+  widgetTickers.set(ctx, ticker);
+}
+
+function stopWidgetTicker(ctx: ExtensionContext, runId?: string): void {
+  if (runId !== undefined && widgetOwners.get(ctx)?.runId !== runId) return;
   const ticker = widgetTickers.get(ctx);
   if (ticker) clearInterval(ticker);
   widgetTickers.delete(ctx);
-  widgetTickerState.delete(ctx);
 }
 
 export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
