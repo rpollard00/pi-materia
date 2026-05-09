@@ -12,6 +12,7 @@ import { canonicalOutgoingEdges } from "./graphValidation.js";
 import {
   HANDOFF_CONTRACT_DOC_TEXT,
   HANDOFF_DECISIONS_FIELD,
+  HANDOFF_RESERVED_EVALUATOR_FIELDS,
   formatHandoffJsonFinalInstruction,
   HANDOFF_GUIDANCE_FIELD,
   HANDOFF_RISKS_FIELD,
@@ -1055,7 +1056,7 @@ function finalFormatInstruction(node: ResolvedMateriaNode): string {
 
 function nodeAdapterContextInstruction(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
   if (!isAgentResolvedNode(node)) return undefined;
-  if (node.node.parse === "json") return undefined;
+  if (node.node.parse === "json") return generatorJsonAdapterContextInstruction(state, node);
   const workItem = currentItem(state) ?? getPath(state.data, "currentWorkItem") ?? getPath(state.data, "workItem");
   const guidance = getPath(state.data, "guidance") ?? {};
   return [
@@ -1064,6 +1065,22 @@ function nodeAdapterContextInstruction(state: MateriaCastState, node: ResolvedMa
     `Global guidance JSON: ${JSON.stringify(guidance ?? {}, null, 2)}`,
     "For text/build nodes, consume the current workItem plus global guidance and return a concise implementation summary. The node/socket adapter will handle downstream state and graph flow.",
   ].join("\n");
+}
+
+function generatorJsonAdapterContextInstruction(state: MateriaCastState, node: ResolvedMateriaAgentNode): string | undefined {
+  const generator = canonicalGeneratorConfigFor(node.materia);
+  if (!generator) return undefined;
+  if (isMultiTurnResolvedAgentNode(node) && state.multiTurnFinalizing !== true) return undefined;
+  const upstreamWorkItems = getPath(state.data, HANDOFF_WORK_ITEMS_FIELD);
+  return [
+    "Generator node/socket adapter context: this placement is a generated-output stage. Return only the canonical handoff JSON envelope and expose generated output as workItems.",
+    `Canonical generated output assignment: ${JSON.stringify(generator.output)} must come from $.${HANDOFF_WORK_ITEMS_FIELD}.`,
+    `Emit ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not emit generated units under tasks, work, custom generates.output names, or any other alias.`,
+    `Reserved evaluator/route fields ${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")} must not carry generator payload data.`,
+    Array.isArray(upstreamWorkItems) ? `Upstream generated workItems JSON for this generator stage:\n${JSON.stringify(upstreamWorkItems, null, 2)}` : undefined,
+    "If upstream workItems are present, consume them as input context and transform/refine them into a new canonical workItems array; this stage must still output another JSON-parsed canonical handoff envelope with workItems.",
+    "Compatibility note: any legacy generates metadata is migration-only adapter metadata and is not an active runtime output contract.",
+  ].filter(Boolean).join("\n");
 }
 
 export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaAgentConfig): string {

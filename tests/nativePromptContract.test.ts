@@ -118,6 +118,58 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(prompt).toContain("return a concise implementation summary");
   });
 
+  test("generator-to-generator JSON prompts include canonical output requirements and upstream workItems", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          nodes: {
+            "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { type: "agent", materia: "Architect", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "end" }] },
+          },
+        },
+      },
+      materia: {
+        Plan: { tools: "readOnly", prompt: "Create initial work items.", generator: true },
+        Architect: { tools: "readOnly", prompt: "Refine upstream work items.", generator: true },
+      },
+    });
+
+    await harness.runCommand("materia", "cast chain generators");
+
+    const firstPrompt = promptMessages(harness).at(-1) ?? "";
+    expect(firstPrompt).toContain("Generator node/socket adapter context");
+    expect(firstPrompt).toContain("generated-output stage");
+    expect(firstPrompt).toContain("Return only the canonical handoff JSON envelope");
+    expect(firstPrompt).toContain("expose generated output as workItems");
+    expect(firstPrompt).toContain("must come from $.workItems");
+    expect(firstPrompt).toContain("Reserved evaluator/route fields");
+    expect(firstPrompt).toContain("Compatibility note: any legacy generates metadata is migration-only");
+    expectPromptIncludesCentralHandoffContract(firstPrompt);
+
+    harness.appendAssistantMessage(JSON.stringify({
+      summary: "planned",
+      workItems: [{ id: "api", title: "API", description: "Design API", acceptance: ["schema agreed"], context: { architecture: "upstream", constraints: [], dependencies: [], risks: [] } }],
+      guidance: {},
+      decisions: [],
+      risks: [],
+      satisfied: true,
+      feedback: "",
+      missing: [],
+    }));
+    await harness.emit("agent_end", { messages: [] });
+
+    const secondPrompt = promptMessages(harness).at(-1) ?? "";
+    expect(secondPrompt).toContain("Refine upstream work items.");
+    expect(secondPrompt).toContain("Upstream generated workItems JSON for this generator stage");
+    expect(secondPrompt).toContain('"id": "api"');
+    expect(secondPrompt).toContain("transform/refine them into a new canonical workItems array");
+    expect(secondPrompt).toContain("must still output another JSON-parsed canonical handoff envelope with workItems");
+    expect(secondPrompt).not.toContain('"tasks":');
+  });
+
   test("appends the central handoff contract to single-turn JSON agent nodes", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
