@@ -269,7 +269,12 @@ function supportedThinkingLevelsFor(model: Model<Api> | undefined): ThinkingLeve
 
   const map = thinkingLevelMapFor(model as unknown as Record<string, unknown>);
   if (map) {
-    return THINKING_LEVEL_ORDER.filter((level) => Object.prototype.hasOwnProperty.call(map, level) && map[level] !== null && map[level] !== undefined);
+    return THINKING_LEVEL_ORDER.filter((level) => {
+      const mapped = map[level];
+      if (mapped === null) return false;
+      if (level === "xhigh") return mapped !== undefined;
+      return true;
+    });
   }
 
   return safelySupportsXhigh(model) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];

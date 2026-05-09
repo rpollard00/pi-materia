@@ -279,7 +279,12 @@ function supportedThinkingLevelsFor(model: Record<string, unknown>, reasoning: b
 
   const map = thinkingLevelMapFor(model);
   if (map) {
-    return THINKING_LEVEL_ORDER.filter((level) => Object.prototype.hasOwnProperty.call(map, level) && map[level] !== null && map[level] !== undefined);
+    return THINKING_LEVEL_ORDER.filter((level) => {
+      const mapped = map[level];
+      if (mapped === null) return false;
+      if (level === 'xhigh') return mapped !== undefined;
+      return true;
+    });
   }
 
   return locallySupportsXhigh(model) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];
