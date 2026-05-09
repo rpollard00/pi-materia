@@ -163,14 +163,46 @@ describe('Materia loadout grid editor', () => {
       body: JSON.stringify({ name: 'Planning-Consult' }),
     })));
     await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    expect(screen.getByLabelText('Active loadout')).not.toHaveProperty('disabled', true);
     expect(within(screen.getByLabelText('Active loadout')).getByRole('option', { name: 'Full-Auto' })).toBeTruthy();
     expect(within(screen.getByLabelText('Active loadout')).getByRole('option', { name: 'Planning-Consult' })).toBeTruthy();
     expect(screen.getByText(/Active loadout is now Planning-Consult/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
 
     fireEvent.change(screen.getByLabelText('Active loadout'), { target: { value: 'Full-Auto' } });
+    await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(2));
     await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Full-Auto'));
+    expect(screen.getByLabelText('Active loadout')).not.toHaveProperty('disabled', true);
     expect(screen.getByText(/Active loadout is now Full-Auto/i)).toBeTruthy();
+  });
+
+  it('keeps known active-loadout options when a change response carries only partial stale config data', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/loadout/active' && init?.method === 'POST') {
+        const activeLoadout = JSON.parse(String(init.body)).name;
+        return new Response(JSON.stringify({
+          ok: true,
+          activeLoadout,
+          config: { config: { activeLoadout }, source: 'monitor-stale-partial' },
+          message: `Active loadout changed to ${activeLoadout}.`,
+        }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig, loadoutSources: { 'Full-Auto': 'default', 'Planning-Consult': 'user' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    expect(within(activeSelect).getAllByRole('option').map((option) => option.textContent)).toEqual(['Full-Auto', 'Planning-Consult']);
+    fireEvent.change(activeSelect, { target: { value: 'Planning-Consult' } });
+
+    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    const changedSelect = screen.getByLabelText('Active loadout') as HTMLSelectElement;
+    expect(changedSelect).not.toHaveProperty('disabled', true);
+    expect(within(changedSelect).getAllByRole('option').map((option) => option.textContent)).toEqual(['Full-Auto', 'Planning-Consult']);
+    expect(screen.getByRole('button', { name: /Full-Auto/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Planning-Consult/ })).toBeTruthy();
   });
 
   it('restores active-loadout selector state and surfaces backend conflicts on failure', async () => {

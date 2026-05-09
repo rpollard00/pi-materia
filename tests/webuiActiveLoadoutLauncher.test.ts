@@ -61,6 +61,9 @@ describe("WebUI active loadout launcher callback", () => {
     const widget = harness.widgets.get("materia-loadouts");
     expect(widget?.options).toEqual({ placement: "belowEditor" });
     expect(widget?.content?.join("\n")).toContain("Web-Test-B");
+    const statusWidget = harness.widgets.get("materia");
+    expect(statusWidget?.content?.[0]).toContain("⌘ Web-Test-B");
+    expect(statusWidget?.content?.join("\n")).toContain("no active cast");
     expect(harness.notifications.at(-1)).toEqual({
       message: expect.stringContaining("pi-materia active loadout changed from WebUI to Web-Test-B"),
       type: "info",
@@ -75,7 +78,22 @@ describe("WebUI active loadout launcher callback", () => {
       prefix: "loadout",
       source: "webui",
       name: "Web-Test-B",
+      loadoutEvent: {
+        eventType: "active-loadout-changed",
+        source: "webui",
+        activeLoadout: "Web-Test-B",
+      },
     });
+    expect((sent.details?.loadoutEvent as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Web-Test-A", "Web-Test-B"]));
+    expect(harness.appendedEntries.at(-1)).toMatchObject({
+      customType: "pi-materia-active-loadout-changed",
+      data: {
+        eventType: "active-loadout-changed",
+        source: "webui",
+        activeLoadout: "Web-Test-B",
+      },
+    });
+    expect((harness.appendedEntries.at(-1)?.data as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Web-Test-A", "Web-Test-B"]));
   });
 
   test("returns undefined without a Pi API so the HTTP layer can report unavailable", () => {

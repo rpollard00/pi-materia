@@ -64,6 +64,29 @@ describe("FakePiHarness", () => {
     expect(raw.activeLoadout).toBe("Planning-Consult");
     expect(switched.content).toContain("Loadout: Planning-Consult");
     expect(switched.content).toContain("Planning-Consult*");
+    const switchedDetails = (harness.sentMessages.at(-1)?.message as { details?: Record<string, unknown> }).details;
+    expect(switchedDetails).toMatchObject({
+      eventType: "loadout",
+      source: "command",
+      name: "Planning-Consult",
+      loadoutEvent: {
+        eventType: "active-loadout-changed",
+        source: "command",
+        activeLoadout: "Planning-Consult",
+      },
+    });
+    expect((switchedDetails?.loadoutEvent as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult"]));
+    expect(harness.appendedEntries.at(-1)).toMatchObject({
+      customType: "pi-materia-active-loadout-changed",
+      data: {
+        eventType: "active-loadout-changed",
+        source: "command",
+        activeLoadout: "Planning-Consult",
+      },
+    });
+    expect((harness.appendedEntries.at(-1)?.data as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult"]));
+    expect(harness.widgets.get("materia-loadouts")?.content?.join("\n")).toContain("Planning-Consult*");
+    expect(harness.widgets.get("materia")?.content?.[0]).toContain("⌘ Planning-Co");
     expect(harness.operationLog).not.toContain("triggerTurn");
     expect(harness.userMessages).toHaveLength(0);
   });
