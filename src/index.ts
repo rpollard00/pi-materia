@@ -1,8 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { MateriaCastState, PiMateriaConfig } from "./types.js";
+import type { MateriaCastState } from "./types.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
+import { renderLoadoutList } from "./loadouts.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
@@ -208,21 +209,6 @@ export default function piMateria(pi: ExtensionAPI) {
       }
     },
   });
-}
-
-function renderLoadoutList(config: PiMateriaConfig, _source: string): string[] {
-  const loadoutNames = Object.keys(config.loadouts ?? {});
-  const active = config.activeLoadout ?? "-";
-  if (loadoutNames.length === 0) {
-    return ["Loadouts: none configured", "Active: -"];
-  }
-
-  const visible = loadoutNames.slice(0, 4).map((name) => `${name}${name === config.activeLoadout ? "*" : ""}`);
-  const suffix = loadoutNames.length > visible.length ? ` +${loadoutNames.length - visible.length}` : "";
-  return [
-    `Loadout: ${truncateLine(active, 96)}`,
-    `Available: ${truncateLine(visible.join(", ") + suffix, 108)}`,
-  ];
 }
 
 export async function renderCastList(artifactRoot: string, sessionStates: MateriaCastState[] = []): Promise<string[]> {

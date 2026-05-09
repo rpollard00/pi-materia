@@ -5,9 +5,10 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../native.js";
-import { loadConfig, loadProfileConfig, saveMateriaConfigPatch } from "../config.js";
+import { loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../config.js";
+import { renderLoadoutList } from "../loadouts.js";
 import { generateMateriaRolePrompt } from "../roleGeneration.js";
 
 export interface MateriaWebUiLaunchResult {
@@ -130,6 +131,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt),
       getConfig: () => loadConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
+      setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
       generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
       modelCatalog: createPiModelCatalogSource(ctx, pi),
     },
@@ -145,6 +147,62 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
 
   if (autoOpenBrowser) openBrowser(url);
   return { url, reused: false, autoOpenBrowser, sessionKey };
+}
+
+function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): MateriaSetActiveLoadoutCallback | undefined {
+  if (!pi) return undefined;
+
+  return async (rawName: string): Promise<MateriaSetActiveLoadoutResult> => {
+    const name = rawName.trim();
+    if (!name) {
+      return { ok: false, code: "invalid_name", message: "Active loadout name is required." };
+    }
+
+    const activeCast = loadActiveCastState(ctx);
+    if (activeCast?.active) {
+      return {
+        ok: false,
+        code: "active_cast_conflict",
+        message: `Cannot change active loadout during active cast ${activeCast.castId}.`,
+      };
+    }
+
+    try {
+      let loaded = await loadConfig(ctx.cwd, configuredPath);
+      const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
+      if (!loaded.config.loadouts?.[name]) {
+        return {
+          ok: false,
+          code: "unknown_loadout",
+          message: loadoutNames.length
+            ? `Unknown Materia loadout "${name}". Available loadouts: ${loadoutNames.join(", ")}.`
+            : "Cannot change Materia loadout because this config does not define any loadouts.",
+          activeLoadout: loaded.config.activeLoadout,
+          config: loaded,
+        };
+      }
+
+      const written = await saveActiveLoadout(ctx.cwd, name, configuredPath);
+      loaded = await loadConfig(ctx.cwd, configuredPath);
+      const activeLoadout = loaded.config.activeLoadout ?? name;
+      const lines = renderLoadoutList(loaded.config, loaded.source);
+      ctx.ui.setWidget("materia-loadouts", lines, { placement: "belowEditor" });
+      ctx.ui.notify(`pi-materia active loadout changed from WebUI to ${activeLoadout} (${written})`, "info");
+      pi.sendMessage({
+        customType: "pi-materia",
+        content: lines.join("\n"),
+        display: true,
+        details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "webui", name: activeLoadout },
+      });
+      return { ok: true, activeLoadout, config: loaded, message: `Active loadout changed to ${activeLoadout}.` };
+    } catch (error) {
+      return {
+        ok: false,
+        code: "unavailable",
+        message: `Could not change active loadout: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  };
 }
 
 function createPiModelCatalogSource(ctx: ExtensionContext, pi?: ExtensionAPI): MateriaModelCatalogSource {
