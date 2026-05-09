@@ -100,6 +100,16 @@ function paletteIds() {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="palette-"]')).map((element) => element.dataset.testid?.replace('palette-', ''));
 }
 
+function normalizedBodyText() {
+  return document.body.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function expectHeaderStatus(source: string, status: 'clean' | 'staged edits') {
+  const bodyText = normalizedBodyText();
+  expect(bodyText).toContain(`Source: ${source}`);
+  expect(bodyText).toContain(`Status: ${status}`);
+}
+
 describe('Materia loadout grid editor', () => {
   it('renders active and available loadouts with staged save controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
@@ -111,6 +121,57 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByRole('button', { name: /Planning-Consult/ })).toBeTruthy();
     expect(screen.getByTestId('socket-Socket-1')).toBeTruthy();
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
+  });
+
+  it('keeps the reported layered config clean through selection, save, and refresh', async () => {
+    const source = '/home/reese/.pi/agent/git/github.com/rpollard00/pi-materia/config/default.json < /home/reese/.config/pi/pi-materia/materia.json < /home/reese/projects/pi-materia/.pi/pi-materia.json';
+    let responseConfig = {
+      ...structuredClone(testConfig),
+      loadouts: {
+        'Full-Auto': structuredClone(testConfig.loadouts['Full-Auto']),
+        'Hojo-Consult': structuredClone(testConfig.loadouts['Planning-Consult']),
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/config' && init?.method === 'POST') {
+        responseConfig = JSON.parse(String(init.body)).config;
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        source,
+        config: responseConfig,
+        loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByRole('button', { name: /Full-Auto/ });
+    expectHeaderStatus(source, 'clean');
+
+    fireEvent.click(screen.getByRole('button', { name: /Hojo-Consult/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Hojo-Consult/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true));
+    expectHeaderStatus(source, 'clean');
+
+    fireEvent.click(screen.getByRole('button', { name: /Full-Auto/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true));
+    expectHeaderStatus(source, 'clean');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    await screen.findByRole('button', { name: /New Loadout/ });
+    expectHeaderStatus(source, 'staged edits');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitForConfigPostCount(fetchMock, 1);
+    await waitFor(() => expectHeaderStatus(source, 'clean'));
+
+    cleanup();
+    render(<App />);
+
+    await screen.findByRole('button', { name: /New Loadout/ });
+    expectHeaderStatus(source, 'clean');
   });
 
   it('visibly protects shipped default loadouts from deletion', async () => {
@@ -1836,7 +1897,7 @@ describe('Materia loadout grid editor', () => {
     expect([d.style.left, d.style.top]).toEqual(['240px', '204px']);
   });
 
-  it('switches the active loadout as a staged client-side edit', async () => {
+  it('switches the active loadout as a clean client-side selection', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
     render(<App />);
@@ -1845,7 +1906,7 @@ describe('Materia loadout grid editor', () => {
 
     expect(screen.getByTestId('socket-Socket-2')).toBeTruthy();
     expect(screen.queryByTestId('socket-Socket-3')).toBeNull();
-    expect(screen.getByText('staged edits')).toBeTruthy();
+    expectHeaderStatus('test', 'clean');
   });
 
 
@@ -1880,6 +1941,8 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Planning-Consult/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    await screen.findByRole('button', { name: /New Loadout/ });
     await openTab('Materia Editor');
     const modelSelect = await screen.findByTestId('materia-model') as HTMLSelectElement;
     const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
