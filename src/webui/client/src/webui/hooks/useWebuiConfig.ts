@@ -30,6 +30,16 @@ function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reload
   });
 }
 
+function configForDirtyComparison(config: MateriaConfig | undefined): MateriaConfig | undefined {
+  if (!config) return config;
+  const comparable = cloneConfig(config);
+  // activeLoadout is the user's current UI/session selection. It remains in the
+  // persisted config for compatibility, but selecting a loadout must not require
+  // a save or make the header report staged edits by itself.
+  delete comparable.activeLoadout;
+  return comparable;
+}
+
 function demoConfig(): MateriaConfig {
   return normalizeMateriaConfigEdges({
     activeLoadout: 'Demo Loadout',
@@ -65,7 +75,7 @@ export function useWebuiConfig() {
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
-  const isDirty = JSON.stringify(baselineConfig) !== JSON.stringify(draftConfig);
+  const isDirty = JSON.stringify(configForDirtyComparison(baselineConfig)) !== JSON.stringify(configForDirtyComparison(draftConfig));
 
   function updateDraft(updater: (config: MateriaConfig) => void) {
     setDraftConfig((current) => {
@@ -114,7 +124,7 @@ export function useWebuiConfig() {
       config.activeLoadout = name;
     });
     setLoadoutNameInput(name);
-    setStatus(`Active loadout staged: ${name}`);
+    setStatus(`Viewing loadout: ${name}`);
   }
 
   function commitActiveLoadoutRename(rawName = loadoutNameInput) {
