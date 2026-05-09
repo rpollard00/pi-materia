@@ -58,6 +58,20 @@ describe("persistent Materia widget formatting", () => {
     expect(lines.every((line) => line.length <= 78)).toBe(true);
   });
 
+  test("renders persisted loadout metadata when available", () => {
+    const state = runState({ loadoutName: "Yolo", currentMateria: "Build" });
+
+    const lines = renderMateriaRunWidget(state, 2_000);
+    expect(lines[0]).toContain("⌘ Yolo");
+  });
+
+  test("freezes elapsed time when terminal endedAt metadata is present", () => {
+    const state = runState({ endedAt: 11_000 });
+
+    const lines = renderMateriaRunWidget(state, 999_000);
+    expect(lines[1]).toContain("◷ 10s");
+  });
+
   test("prefers Materia names over Socket IDs in user-facing status values", () => {
     const state = runState({
       currentNode: "Socket-3",

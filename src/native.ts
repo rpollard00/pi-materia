@@ -52,12 +52,12 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   await mkdir(path.join(runDir, "contexts"), { recursive: true });
   await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
 
-  const runState = createRunState(castId, runDir, ctx.model);
+  const effectivePipeline = getEffectivePipelineConfig(config);
+  const runState = createRunState(castId, runDir, ctx.model, effectivePipeline.loadoutName);
   runState.currentNode = pipeline.entry.id;
   runState.currentMateria = nodeMateriaName(pipeline.entry);
   runState.lastMessage = pipeline.entry.id;
   await writeUsage(runState);
-  const effectivePipeline = getEffectivePipelineConfig(config);
   await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedMateriaContext: true });
   await writeManifest(runDir, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
 
@@ -156,6 +156,8 @@ export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   state.awaitingResponse = isAgentResolvedNode(node);
   state.nodeState = isAgentResolvedNode(node) ? "awaiting_agent_response" : "running_utility";
   state.failedReason = undefined;
+  state.runState.endedAt = undefined;
+  state.runState.loadoutName ||= await resolvePersistedCastLoadoutName(state);
   state.runState.currentNode = node.id;
   state.runState.currentMateria = nodeMateriaName(node);
   state.runState.lastMessage = `Recasting from node ${node.id}.`;
@@ -274,6 +276,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     state.nodeState = "failed";
     state.failedReason = error instanceof Error ? error.message : String(error);
     state.runState.lastMessage = state.failedReason;
+    markRunEnded(state);
     await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason });
     await writeUsage(state.runState);
     await appendManifest(state, { phase: "failed", entryId: latest.entry.id });
@@ -837,6 +840,7 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   state.phase = "failed";
   state.failedReason = error instanceof Error ? error.message : String(error);
   state.runState.lastMessage = state.failedReason;
+  markRunEnded(state);
   await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, node: state.currentNode });
   await writeUsage(state.runState);
   await appendManifest(state, { phase: "failed", node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
@@ -844,6 +848,19 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   ctx.ui.setStatus("materia", "failed");
   updateWidget(ctx, state.runState);
   ctx.ui.notify(`pi-materia cast failed: ${state.failedReason}`, "error");
+}
+
+function markRunEnded(state: MateriaCastState): void {
+  state.runState.endedAt ??= Date.now();
+}
+
+async function resolvePersistedCastLoadoutName(state: MateriaCastState): Promise<string | undefined> {
+  try {
+    const config = parseJson<PiMateriaConfig>(await readFile(path.join(state.runDir, "config.resolved.json"), "utf8"));
+    return getEffectivePipelineConfig(config).loadoutName;
+  } catch {
+    return undefined;
+  }
 }
 
 function enforceNodeLimit(state: MateriaCastState, node: ResolvedMateriaNode, config: PiMateriaConfig): void {
@@ -888,6 +905,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.nodeState = "complete";
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
+  markRunEnded(state);
   await writeUsage(state.runState);
   await appendEvent(state.runState, "cast_end", { ok: true, usage: state.runState.usage, entryId });
   await appendManifest(state, { phase: "complete", entryId });
@@ -1399,6 +1417,7 @@ export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason
   state.phase = reason === "aborted" ? "failed" : state.phase;
   state.failedReason = reason;
   state.updatedAt = Date.now();
+  markRunEnded(state);
   saveCastState(pi, state);
   return state;
 }

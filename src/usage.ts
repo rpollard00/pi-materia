@@ -4,11 +4,12 @@ import path from "node:path";
 import { appendEvent } from "./artifacts.js";
 import type { MateriaRunState, PiMateriaConfig, MateriaModelSelection, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
 
-export function createRunState(runId: string, runDir: string, model: unknown): MateriaRunState {
+export function createRunState(runId: string, runDir: string, model: unknown, loadoutName?: string): MateriaRunState {
   const modelInfo = getModelInfo(model);
   return {
     runId,
     startedAt: Date.now(),
+    ...(loadoutName ? { loadoutName } : {}),
     runDir,
     eventsFile: path.join(runDir, "events.jsonl"),
     usageFile: path.join(runDir, "usage.json"),

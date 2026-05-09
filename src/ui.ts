@@ -28,12 +28,14 @@ export function clearWidgetTicker(ctx: ExtensionContext): void {
 
 export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
   const materia = displayMateriaName(state);
+  const loadout = state.loadoutName ?? "-";
   const attempt = state.attempt ?? "-";
   const task = displayMateriaStatusValue(state, state.currentTask ?? "-");
   const usage = state.usage.tokens;
+  const elapsedUntil = state.endedAt ?? now;
   const lines = [
-    `✦ ${shortCastId(state.runId)} | ◉ ${truncateValue(materia, 24)} | ↻ ${attempt}`,
-    `◆ ${truncateValue(task, 24)} | ◷ ${formatElapsed(now - state.startedAt)} | Σ ${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
+    `✦ ${shortCastId(state.runId)} | ⌘ ${truncateValue(loadout, 16)} | ◉ ${truncateValue(materia, 24)} | ↻ ${attempt}`,
+    `◆ ${truncateValue(task, 24)} | ◷ ${formatElapsed(elapsedUntil - state.startedAt)} | Σ ${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
     `› ${truncateValue(displayMateriaStatusValue(state, state.lastMessage ?? "-"), 68)}`,
   ];
   return lines.map((line) => truncateLine(line));

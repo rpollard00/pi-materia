@@ -113,6 +113,22 @@ describe("/materia recast", () => {
     expect(resumed.runState.lastMessage).toBe("Recasting from node Socket-1.");
   });
 
+  test("recast backfills missing legacy loadout metadata from persisted cast config", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast legacy loadout task");
+    const failed = await failCurrentCast(harness);
+    const legacy = cloneState(failed, { runState: { ...failed.runState, endedAt: undefined } });
+    delete legacy.runState.loadoutName;
+    harness.pi.appendEntry("pi-materia-cast-state", legacy);
+
+    await harness.runCommand("materia", `recast ${legacy.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.runState.loadoutName).toBe("Test");
+    expect(harness.widgets.get("materia")?.content.join("\n")).toContain("⌘ Test");
+  });
+
   test("reports clear errors for complete, running, missing, and non-resumable casts", async () => {
     const harness = await makeHarness();
 

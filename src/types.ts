@@ -249,6 +249,10 @@ export interface MateriaManifest {
 export interface MateriaRunState {
   runId: string;
   startedAt: number;
+  /** Canonical terminal timestamp. Optional for legacy persisted run state. */
+  endedAt?: number;
+  /** Active loadout name used to execute this cast. Optional for legacy persisted run state. */
+  loadoutName?: string;
   runDir: string;
   eventsFile: string;
   usageFile: string;
