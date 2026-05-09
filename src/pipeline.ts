@@ -127,6 +127,7 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
   if (rawMateria.multiTurn !== undefined && typeof rawMateria.multiTurn !== "boolean") {
     throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
   }
+  validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
   validateLegacyGeneratorDeclaration(name, rawMateria.generates);
 }
@@ -138,6 +139,7 @@ function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, un
   if (rawMateria.timeoutMs !== undefined && (!Number.isFinite(rawMateria.timeoutMs) || Number(rawMateria.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
+  validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
   validateLegacyGeneratorDeclaration(name, rawMateria.generates);
 }
@@ -146,6 +148,11 @@ function validateGeneratorMarker(name: string, generator: unknown): void {
   if (generator !== undefined && typeof generator !== "boolean") {
     throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
   }
+}
+
+function validateMateriaParseMode(name: string, parse: unknown): void {
+  if (parse === undefined) return;
+  if (parse !== "text" && parse !== "json") throw new Error(`Materia "${name}" has unsupported parse mode "${String(parse)}". Expected "text" or "json".`);
 }
 
 // Migration-only cleanup marker: saved editors may write `generates: null` to
@@ -307,6 +314,7 @@ function formatMateriaDetails(materia: MateriaConfig): string {
   }
   return [
     `tools=${materia.tools}`,
+    materia.parse ? `parse=${materia.parse}` : undefined,
     materia.multiTurn ? "multiTurn=true" : undefined,
     formatMateriaModelSettings(materia),
     generator,

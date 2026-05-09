@@ -390,6 +390,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
       throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
     }
+    validateMateriaParseMode(name, materia.parse);
     if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
       throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
     }
@@ -405,6 +406,7 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
   if (materia.timeoutMs !== undefined && (!Number.isFinite(materia.timeoutMs) || Number(materia.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
+  validateMateriaParseMode(name, materia.parse);
   validateLegacyGeneratorDeclaration(name, materia.generates);
 }
 
@@ -414,6 +416,11 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
 function validateLegacyGeneratorDeclaration(name: string, generates: unknown): void {
   if (generates === undefined || generates === null) return;
   throw new Error(`Materia "${name}" configures obsolete generates metadata. Use generator: true and emit canonical JSON with workItems; custom generates.output aliases are not active runtime generator outputs.`);
+}
+
+function validateMateriaParseMode(name: string, parse: unknown): void {
+  if (parse === undefined) return;
+  if (parse !== "text" && parse !== "json") throw new Error(`Materia "${name}" has unsupported parse mode "${String(parse)}". Expected "text" or "json".`);
 }
 
 function validateUtilityCommandMateria(name: string, command: unknown): void {

@@ -426,6 +426,8 @@ export interface MateriaDefinitionMetadata {
   group?: string;
   /** Tailwind gradient classes used by the Loadout UI for this materia. */
   color?: string;
+  /** Canonical parse mode used when palette UIs materialize this reusable materia into a socket. */
+  parse?: MateriaParseMode;
   /** Marks this materia as a generator; runtime resolves the canonical workItems contract. */
   generator?: boolean;
   /** Legacy migration-only generated list metadata. Prefer generator: true. */
@@ -448,6 +450,5 @@ export interface MateriaUtilityConfig extends MateriaDefinitionMetadata {
   command?: string[];
   params?: Record<string, unknown>;
   timeoutMs?: number;
-  parse?: MateriaParseMode;
   assign?: Record<string, string>;
 }

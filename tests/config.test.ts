@@ -388,13 +388,24 @@ describe("config loadouts", () => {
     await expect(loadConfig(withSystemPrompt.dir, withSystemPrompt.file)).rejects.toThrow(/loadout "Custom" configures obsolete systemPrompt/);
   });
 
-  test("bundled default materia use palette colors and canonical generator markers", async () => {
+  test("bundled default materia use palette colors, explicit parse modes, and canonical generator markers", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const allowedColors = new Set(paletteColors);
+    const expectedParse = new Map([
+      ["ensureArtifactsIgnored", "json"],
+      ["detectVcs", "json"],
+      ["planner", "json"],
+      ["interactivePlan", "json"],
+      ["Build", "text"],
+      ["Auto-Eval", "json"],
+      ["Maintain", "json"],
+      ["GitMaintain", "json"],
+    ]);
 
-    for (const [materiaId, materia] of Object.entries(rawDefault.materia ?? {}) as Array<[string, { color?: unknown; generator?: unknown; generates?: unknown }]>) {
+    for (const [materiaId, materia] of Object.entries(rawDefault.materia ?? {}) as Array<[string, { color?: unknown; generator?: unknown; generates?: unknown; parse?: unknown }]>) {
       expect(typeof materia.color, `${materiaId}.color`).toBe("string");
       expect(allowedColors.has(materia.color as string), `${materiaId}.color`).toBe(true);
+      expect(materia.parse, `${materiaId}.parse`).toBe(expectedParse.get(materiaId));
       expect(materia.generates, `${materiaId}.generates`).toBeUndefined();
     }
 
@@ -406,12 +417,16 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const canonical = new Set(["always", "satisfied", "not_satisfied"]);
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { next?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { next?: unknown; parse?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
       for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {
         expect(node.next, `${loadoutName}.${nodeName}.next`).toBeUndefined();
+        expect(["text", "json"].includes(String(node.parse)), `${loadoutName}.${nodeName}.parse`).toBe(true);
         for (const [index, edge] of (node.edges ?? []).entries()) {
           expect(edge.when, `${loadoutName}.${nodeName}.edges[${index}].when`).toBeDefined();
           expect(canonical.has(edge.when as string), `${loadoutName}.${nodeName}.edges[${index}].when`).toBe(true);
+          if (edge.when === "satisfied" || edge.when === "not_satisfied") {
+            expect(node.parse, `${loadoutName}.${nodeName}.parse for ${edge.when}`).toBe("json");
+          }
           expect(edge.to === "end" || Boolean(loadout.nodes?.[edge.to ?? ""]), `${loadoutName}.${nodeName}.edges[${index}].to`).toBe(true);
         }
       }
