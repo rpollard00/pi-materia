@@ -198,6 +198,13 @@ interface LoopMembership {
   accentSoft: string;
 }
 
+interface LoopExitBadge {
+  loopIds: string[];
+  title: string;
+  accent: string;
+  accentSoft: string;
+}
+
 type SocketAnchorSide = 'top' | 'right' | 'bottom' | 'left';
 
 interface SocketAnchorPoint {
@@ -372,6 +379,21 @@ function loopConsumerForSocket(loadout: PipelineConfig | undefined, socketId: st
   return loop ? loopConsumerSummary(loop) : undefined;
 }
 
+function formatLoopExitSummary(loadout: PipelineConfig | undefined, loopId: string, loop: NonNullable<PipelineConfig['loops']>[string]): string | undefined {
+  if (!loop.exit) return undefined;
+  const label = formatLoopDisplayLabel(loadout, loopId, loop.nodes, loop.label);
+  const target = loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to]);
+  return `Loop exit for ${label}: ${edgeConditionLabel(loop.exit.when)} → ${target}`;
+}
+
+function loopExitSummariesForSocket(loadout: PipelineConfig | undefined, socketId: string): string[] {
+  return Object.entries(loadout?.loops ?? {}).flatMap(([loopId, loop]) => {
+    if (loop.exit?.from !== socketId) return [];
+    const summary = formatLoopExitSummary(loadout, loopId, loop);
+    return summary ? [summary] : [];
+  });
+}
+
 function generatorLoopOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined): string | undefined {
   const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.consumes?.from === edge.from && candidate.nodes.includes(edge.to));
   return loop?.consumes ? loop.consumes.output ?? 'workItems' : undefined;
@@ -420,6 +442,7 @@ function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: 
   if (hasIteratorBehavior(node, definitions)) lines.push(formatIteratorBehavior(node, definitions));
   const loopConsumer = loopConsumerForSocket(loadout, id);
   if (loopConsumer) lines.push(loopConsumer);
+  lines.push(...loopExitSummariesForSocket(loadout, id));
   if (node?.type) lines.push(`Type: ${node.type}`);
   if (node?.type === 'agent' && node.materia) {
     lines.push(`Materia: ${node.materia}`);
@@ -805,6 +828,21 @@ export function getLoopMemberships(loadout: PipelineConfig | undefined): Map<str
     }
   });
   return memberships;
+}
+
+export function getLoopExitBadges(loadout: PipelineConfig | undefined): Map<string, LoopExitBadge> {
+  const badges = new Map<string, LoopExitBadge>();
+  Object.entries(loadout?.loops ?? {}).forEach(([loopId, loop], index) => {
+    if (!loop.exit?.from) return;
+    const socketId = loop.exit.from;
+    const accent = loopAccent(index);
+    const summary = formatLoopExitSummary(loadout, loopId, loop) ?? `Loop exit for ${loopId}`;
+    const existing = badges.get(socketId);
+    badges.set(socketId, existing
+      ? { ...existing, loopIds: [...existing.loopIds, loopId], title: `${existing.title}\n${summary}` }
+      : { loopIds: [loopId], title: summary, ...accent });
+  });
+  return badges;
 }
 
 function layoutSockets(loadout?: PipelineConfig): { sockets: PositionedSocket[]; edges: LoadoutEdge[]; width: number; height: number } {
@@ -1253,6 +1291,7 @@ export function App() {
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
   const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout, socketPositions]);
   const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout]);
+  const loopExitBadges = useMemo(() => getLoopExitBadges(activeLoadout), [activeLoadout]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
   const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
@@ -2209,6 +2248,7 @@ export function App() {
                 const isLoopSelected = selectedLoopSocketSet.has(id);
                 const isEntry = isEntrySocket(node);
                 const loopMembership = loopMemberships.get(id);
+                const loopExitBadge = loopExitBadges.get(id);
                 const socketStyle = loopMembership ? {
                   left: `${socketX}px`,
                   top: `${socketY}px`,
@@ -2219,9 +2259,10 @@ export function App() {
                 <button
                   key={id}
                   data-testid={`socket-${id}`}
-                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`}
+                  className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${loopExitBadge ? 'materia-socket-loop-exit' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`}
                   style={socketStyle}
                   data-loop-ids={loopMembership?.loopIds.join(' ')}
+                  data-loop-exit-ids={loopExitBadge?.loopIds.join(' ')}
                   aria-pressed={isLoopSelected}
                   onClick={(event) => handleSocketClick(id, event)}
                   onPointerDown={(event) => beginSocketLayoutDrag(socket, event)}
@@ -2240,6 +2281,7 @@ export function App() {
                     {isIterator && <span className={`materia-iterator-badge graph-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
                   </div>
                   {isEntry && <span className="entry-rune">Entry</span>}
+                  {loopExitBadge && <span className="loop-exit-rune" title={loopExitBadge.title} style={{ '--loop-accent': loopExitBadge.accent, '--loop-accent-soft': loopExitBadge.accentSoft } as CSSProperties}>Loop exit</span>}
                   <span className="materia-socket-label">{nodeLabel}</span>
                 </button>
                 );

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { App, formatLoopDisplayLabel, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './App.js';
+import { App, formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './App.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
@@ -301,6 +301,22 @@ describe('Materia loadout grid editor', () => {
     expect(memberships.has('Socket-1')).toBe(false);
   });
 
+  it('derives loop exit badges from loop exit metadata only', () => {
+    const badges = getLoopExitBadges({
+      nodes: {
+        'Socket-2': { type: 'agent', materia: 'Build' },
+        'Socket-3': { type: 'agent', materia: 'Auto-Eval' },
+      },
+      loops: {
+        review: { label: 'Review loop', nodes: ['Socket-2', 'Socket-3'], exit: { from: 'Socket-3', when: 'satisfied', to: 'end' } },
+      },
+    } as never);
+
+    expect(badges.has('Socket-2')).toBe(false);
+    expect(badges.get('Socket-3')?.loopIds).toEqual(['review']);
+    expect(badges.get('Socket-3')?.title).toBe('Loop exit for Review loop: Satisfied → end');
+  });
+
   it('renders explicit loop regions and can create the build-eval-maintain task loop', async () => {
     const config = structuredClone(testConfig);
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
@@ -317,6 +333,7 @@ describe('Materia loadout grid editor', () => {
 
     const region = await screen.findByTestId('loop-region-taskIteration');
     const buildSocket = screen.getByTestId('socket-Socket-2');
+    const exitSocket = screen.getByTestId('socket-Socket-4');
     const summary = 'Loop consumes: state.tasks as task until end • Exit: Socket-4 (Maintain).Satisfied → end';
     expect(region.querySelector('.loadout-loop-badge')?.textContent).toBe('Loop');
     expect(region.querySelector('.loadout-loop-title')?.textContent).toBe('Build → Eval → Maintain until all tasks complete');
@@ -339,6 +356,17 @@ describe('Materia loadout grid editor', () => {
     expect(sourceOptionLabels).toEqual(['Build', 'Auto-Eval', 'Maintain']);
     expect(screen.getByTestId('loop-exit-condition-taskIteration')).toBeTruthy();
     expect(screen.getByTestId('loop-exit-target-taskIteration')).toBeTruthy();
+    expect(buildSocket.querySelector('.loop-exit-rune')).toBeNull();
+    expect(exitSocket.classList.contains('materia-socket-loop-exit')).toBe(true);
+    expect(exitSocket.dataset.loopExitIds).toBe('taskIteration');
+    expect(exitSocket.querySelector('.loop-exit-rune')?.textContent).toBe('Loop exit');
+    expect(exitSocket.querySelector('.loop-exit-rune')?.getAttribute('title')).toBe('Loop exit for Build → Eval → Maintain until all tasks complete: Satisfied → end');
+    expect(exitSocket.getAttribute('title')).toContain('Loop exit for Build → Eval → Maintain until all tasks complete: Satisfied → end');
+
+    fireEvent.click(screen.getByTestId('loop-break-taskIteration'));
+    await waitFor(() => expect(screen.queryByTestId('loop-region-taskIteration')).toBeNull());
+    expect(screen.getByTestId('socket-Socket-4').querySelector('.loop-exit-rune')).toBeNull();
+    expect(screen.getByTestId('socket-Socket-4').classList.contains('materia-socket-loop-exit')).toBe(false);
   });
 
   it('formats loop labels from member materia without changing socket-id storage', () => {
