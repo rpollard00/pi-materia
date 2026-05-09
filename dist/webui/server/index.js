@@ -2,6 +2,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+const CANONICAL_WORK_ITEMS_GENERATOR_CONFIG = { output: 'workItems', items: 'state.workItems', listType: 'array', itemType: 'workItem', as: 'workItem', cursor: 'workItemIndex', done: 'end' };
 const defaultStaticDir = resolve(fileURLToPath(new URL('../../../dist/webui/client', import.meta.url)));
 const contentTypes = {
     '.css': 'text/css; charset=utf-8',
@@ -265,19 +266,25 @@ function validateMateriaGeneratorConfig(value) {
         return null;
     if (!isPlainObject(value))
         throw new Error('Expected generates to be an object or null.');
+    const canonical = CANONICAL_WORK_ITEMS_GENERATOR_CONFIG;
     const output = trimmedRequired(value.output, 'generates.output');
     const itemType = trimmedRequired(value.itemType, 'generates.itemType');
-    if (value.listType !== 'array')
+    const items = optionalTrimmed(value.items, 'generates.items');
+    const as = optionalTrimmed(value.as, 'generates.as');
+    const cursor = optionalTrimmed(value.cursor, 'generates.cursor');
+    const done = optionalTrimmed(value.done, 'generates.done');
+    if (value.listType !== canonical.listType)
         throw new Error('Expected generates.listType to be "array".');
-    return {
-        output,
-        items: optionalTrimmed(value.items, 'generates.items'),
-        listType: 'array',
-        itemType,
-        as: optionalTrimmed(value.as, 'generates.as'),
-        cursor: optionalTrimmed(value.cursor, 'generates.cursor'),
-        done: optionalTrimmed(value.done, 'generates.done'),
-    };
+    const isCanonical = output === canonical.output
+        && itemType === canonical.itemType
+        && (items === undefined || items === `state.${canonical.output}`)
+        && (as === undefined || as === canonical.as)
+        && (cursor === undefined || cursor === canonical.cursor)
+        && (done === undefined || done === canonical.done);
+    if (!isCanonical) {
+        throw new Error('Obsolete generates metadata may only describe the canonical workItems contract. Use generator: true and canonical workItems; custom generates.output aliases such as tasks or work are not active runtime generator outputs.');
+    }
+    return { ...canonical, items: items ?? `state.${canonical.output}` };
 }
 function trimmedRequired(value, field) {
     if (typeof value !== 'string' || !value.trim())
