@@ -121,6 +121,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByRole('button', { name: /Planning-Consult/ })).toBeTruthy();
     expect(screen.getByTestId('socket-Socket-1')).toBeTruthy();
     expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
+    expect(screen.queryByTestId('trash-socket')).toBeNull();
+    expect(screen.queryByText(/drag socket here/i)).toBeNull();
   });
 
   it('keeps the reported layered config clean through selection, save, and refresh', async () => {
@@ -1447,6 +1449,29 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedBuild = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes['Socket-2'];
+    expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
+    expect(savedBuild.materia).toBeUndefined();
+  });
+
+  it('unsockets materia from a socket payload dropped onto the graph background', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByTestId('socket-Socket-2');
+    const dataTransfer = createDataTransfer();
+    dataTransfer.setData('application/json', JSON.stringify({ kind: 'socket', materiaId: 'Socket-2', fromLoadout: 'Full-Auto', fromSocket: 'Socket-2' }));
+    fireEvent.drop(screen.getByTestId('socket-grid-viewport'), { dataTransfer });
+
+    expect(await screen.findByText('Cleared materia from Socket-2; socket graph links and layout were preserved.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedBuild = configPostBody(fetchMock).config.loadouts['Full-Auto'].nodes['Socket-2'];
     expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' });
     expect(savedBuild.materia).toBeUndefined();
   });

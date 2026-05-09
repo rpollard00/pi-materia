@@ -130,7 +130,6 @@ export function App() {
     updateDraft,
   } = useWebuiConfig();
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
-  const [dragOverTrash, setDragOverTrash] = useState(false);
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
   const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace' | 'edit' | 'connect'>('actions');
   const [socketPropertyForm, setSocketPropertyForm] = useState<SocketPropertyFormState>(() => emptySocketPropertyForm());
@@ -1029,25 +1028,10 @@ export function App() {
 
             <StageApplyPanel
               saveTarget={saveTarget}
-              dragOverTrash={dragOverTrash}
               isDirty={isDirty}
               canRevert={canRevert}
               status={status}
               onSaveTargetChange={setSaveTarget}
-              onTrashDragOver={(event) => { event.preventDefault(); setDragOverTrash(true); }}
-              onTrashDragLeave={() => setDragOverTrash(false)}
-              onTrashDrop={(event) => {
-                event.preventDefault();
-                setDragOverTrash(false);
-                const raw = event.dataTransfer.getData('application/json');
-                if (!raw) return;
-                const payload = parseDragPayload(raw);
-                if (!payload) {
-                  setStatus('Ignored drop: unsupported drag payload.');
-                  return;
-                }
-                if (payload.kind === 'socket' && payload.fromSocket) removeMateria(payload.fromSocket);
-              }}
               onSave={() => saveDraft().catch((error) => setStatus(error.message))}
               onRevert={revertDraft}
             />

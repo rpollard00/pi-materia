@@ -834,23 +834,6 @@
   opacity: 0.45;
 }
 
-.trash-socket {
-  margin-top: 1rem;
-  border-radius: 1.25rem;
-  border: 1px dashed rgb(248 113 113 / 0.42);
-  background: rgb(69 10 10 / 0.26);
-  padding: 1rem;
-  text-align: center;
-  color: rgb(254 202 202);
-  transition: 160ms ease;
-}
-
-.trash-socket-hot {
-  border-color: rgb(252 165 165 / 0.95);
-  background: rgb(127 29 29 / 0.55);
-  box-shadow: 0 0 24px rgb(248 113 113 / 0.2);
-}
-
 .materia-form-section {
   overflow: hidden;
   border-radius: 1rem;

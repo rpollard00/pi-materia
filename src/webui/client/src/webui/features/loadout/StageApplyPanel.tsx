@@ -1,21 +1,16 @@
-import type { DragEvent } from 'react';
 import type { SaveTarget } from '../../types.js';
 
 export interface StageApplyPanelProps {
   saveTarget: SaveTarget;
-  dragOverTrash: boolean;
   isDirty: boolean;
   canRevert: boolean;
   status: string;
   onSaveTargetChange: (target: SaveTarget) => void;
-  onTrashDragOver: (event: DragEvent<HTMLDivElement>) => void;
-  onTrashDragLeave: () => void;
-  onTrashDrop: (event: DragEvent<HTMLDivElement>) => void;
   onSave: () => void;
   onRevert: () => void;
 }
 
-export function StageApplyPanel({ saveTarget, dragOverTrash, isDirty, canRevert, status, onSaveTargetChange, onTrashDragOver, onTrashDragLeave, onTrashDrop, onSave, onRevert }: StageApplyPanelProps) {
+export function StageApplyPanel({ saveTarget, isDirty, canRevert, status, onSaveTargetChange, onSave, onRevert }: StageApplyPanelProps) {
   return (
     <section className="fantasy-panel p-5">
       <h2 className="text-xl font-bold">Stage & apply</h2>
@@ -27,15 +22,6 @@ export function StageApplyPanel({ saveTarget, dragOverTrash, isDirty, canRevert,
           <option value="explicit">Explicit config</option>
         </select>
       </label>
-      <div
-        data-testid="trash-socket"
-        className={`trash-socket ${dragOverTrash ? 'trash-socket-hot' : ''}`}
-        onDragOver={onTrashDragOver}
-        onDragLeave={onTrashDragLeave}
-        onDrop={onTrashDrop}
-      >
-        Drag socket here or onto the graph background to unsocket materia
-      </div>
       <div className="mt-4 flex gap-3">
         <button className="materia-button flex-1" disabled={!isDirty} onClick={onSave}>Save</button>
         <button className="materia-button-secondary" disabled={!isDirty || !canRevert} onClick={onRevert}>Revert</button>
