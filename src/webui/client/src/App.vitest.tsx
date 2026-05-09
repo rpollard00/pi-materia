@@ -640,6 +640,31 @@ describe('Materia loadout grid editor', () => {
     expect(deleteButton).toHaveProperty('disabled', true);
   });
 
+  it('creates connected sockets with normalized socketKind metadata before persisting', async () => {
+    const config = structuredClone(testConfig);
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-2'));
+    fireEvent.click(screen.getByRole('button', { name: 'New Socket' }));
+
+    expect(await screen.findByTestId('socket-Socket-5')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
+    expect(saved.nodes['Socket-1'].socketKind).toBe('entry');
+    expect(saved.nodes['Socket-2'].socketKind).toBe('normal');
+    expect(saved.nodes['Socket-5'].socketKind).toBe('normal');
+    expect(saved.nodes['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-5' }]);
+    expect(saved.nodes['Socket-5'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+  });
+
   it('creates a loop from selected sockets on a fresh non-Build layout', async () => {
     const config = {
       activeLoadout: 'Fresh Loop',
