@@ -1172,9 +1172,11 @@ export function App() {
   const [selectedTab, setSelectedTab] = useState<MateriaTabId>(() => tabFromLocation());
   const [baselineConfig, setBaselineConfig] = useState<MateriaConfig | undefined>();
   const [draftConfig, setDraftConfig] = useState<MateriaConfig | undefined>();
+  const draftConfigRef = useRef<MateriaConfig | undefined>(undefined);
   const [source, setSource] = useState<string>('loading');
   const [loadoutSources, setLoadoutSources] = useState<Record<string, LoadoutSourceScope>>({});
   const [deletedLoadoutNames, setDeletedLoadoutNames] = useState<string[]>([]);
+  const [loadoutNameInput, setLoadoutNameInput] = useState('');
   const [status, setStatus] = useState('Loading materia configuration…');
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
@@ -1230,6 +1232,10 @@ export function App() {
   }, [materiaColorOpen]);
 
   useEffect(() => {
+    draftConfigRef.current = draftConfig;
+  }, [draftConfig]);
+
+  useEffect(() => {
     let cancelled = false;
     reloadConfig({ cancelled: () => cancelled }).catch((error) => {
       if (cancelled) return;
@@ -1251,6 +1257,7 @@ export function App() {
       const normalizedFallback = normalizeMateriaConfigEdges(fallback);
       setBaselineConfig(cloneConfig(normalizedFallback));
       setDraftConfig(normalizedFallback);
+      setLoadoutNameInput(normalizedFallback.activeLoadout ?? '');
       setSource('demo');
       setLoadoutSources({ 'Demo Loadout': 'default' });
     });
@@ -1334,8 +1341,13 @@ export function App() {
   async function reloadConfig({ preserveLoadoutEdits = false, readyStatus = 'Draft ready. Changes are staged until you save.', cancelled = () => false }: { preserveLoadoutEdits?: boolean; readyStatus?: string; cancelled?: () => boolean } = {}) {
     const loaded = await fetchMateriaConfig();
     if (cancelled()) return;
-    setBaselineConfig(normalizeMateriaConfigEdges(loaded.config));
-    setDraftConfig((current) => mergeReloadedConfigIntoDraft(current, loaded.config, preserveLoadoutEdits));
+    const normalizedLoaded = normalizeMateriaConfigEdges(loaded.config);
+    const nextDraft = mergeReloadedConfigIntoDraft(draftConfigRef.current, loaded.config, preserveLoadoutEdits);
+    const nextLoadouts = buildLoadouts(nextDraft);
+    const nextActive = nextDraft.activeLoadout && nextLoadouts[nextDraft.activeLoadout] ? nextDraft.activeLoadout : Object.keys(nextLoadouts)[0] ?? '';
+    setBaselineConfig(normalizedLoaded);
+    setDraftConfig(nextDraft);
+    setLoadoutNameInput(nextActive);
     setSource(loaded.source);
     setLoadoutSources(loaded.loadoutSources ?? {});
     if (!preserveLoadoutEdits) setDeletedLoadoutNames([]);
@@ -1379,6 +1391,7 @@ export function App() {
     updateDraft((config) => {
       config.activeLoadout = name;
     });
+    setLoadoutNameInput(name);
     setSelectedMateriaId(undefined);
     setSocketActionId(undefined);
     setSocketActionMode('actions');
@@ -1386,27 +1399,55 @@ export function App() {
     setStatus(`Active loadout staged: ${name}`);
   }
 
-  function renameActiveLoadout(name: string) {
-    if (!activeLoadoutName || !name.trim() || name === activeLoadoutName) return;
+  function commitActiveLoadoutRename(rawName = loadoutNameInput) {
+    if (!activeLoadoutName) return false;
+    const nextName = rawName.trim();
+    if (!nextName) {
+      setStatus('Cannot rename loadout: name cannot be empty.');
+      return false;
+    }
+    if (nextName === activeLoadoutName) {
+      setLoadoutNameInput(activeLoadoutName);
+      return true;
+    }
+    if (loadouts[nextName]) {
+      setStatus(`Cannot rename loadout: ${nextName} already exists.`);
+      return false;
+    }
+    const previousName = activeLoadoutName;
     updateDraft((config) => {
       const draftLoadouts = buildLoadouts(config);
-      if (draftLoadouts[name]) return;
-      draftLoadouts[name] = draftLoadouts[activeLoadoutName];
-      delete draftLoadouts[activeLoadoutName];
+      if (!draftLoadouts[previousName] || draftLoadouts[nextName]) return;
+      draftLoadouts[nextName] = draftLoadouts[previousName];
+      delete draftLoadouts[previousName];
       config.loadouts = draftLoadouts;
-      config.activeLoadout = name;
+      config.activeLoadout = nextName;
     });
-    setStatus(`Renamed loadout to ${name}. Save to persist.`);
+    setDeletedLoadoutNames((current) => {
+      const withoutRevertedTarget = current.filter((name) => name !== nextName);
+      if (!baselineConfig?.loadouts?.[previousName] || withoutRevertedTarget.includes(previousName)) return withoutRevertedTarget;
+      return [...withoutRevertedTarget, previousName];
+    });
+    if (baselineConfig?.loadouts?.[previousName]) {
+      const sourceScope = loadoutSources[previousName];
+      if (sourceScope === 'project' || sourceScope === 'explicit') setSaveTarget(sourceScope);
+    }
+    setLoadoutNameInput(nextName);
+    setStatus(`Renamed loadout to ${nextName}. Save to persist.`);
+    return true;
   }
 
   function createLoadout() {
+    let createdName = '';
     updateDraft((config) => {
       const draftLoadouts = buildLoadouts(config);
       const name = makeNewLoadoutName(draftLoadouts);
+      createdName = name;
       draftLoadouts[name] = makeEmptyEntryLoadout();
       config.loadouts = draftLoadouts;
       config.activeLoadout = name;
     });
+    setLoadoutNameInput(createdName);
     setStatus('Created a new draft loadout with one empty entry socket. Rename and save when ready.');
   }
 
@@ -1432,6 +1473,7 @@ export function App() {
       config.loadouts = draftLoadouts;
       config.activeLoadout = fallbackName;
     });
+    setLoadoutNameInput(fallbackName ?? '');
     if (baselineConfig?.loadouts?.[name]) {
       setDeletedLoadoutNames((current) => current.includes(name) ? current : [...current, name]);
       const sourceScope = loadoutSources[name];
@@ -2229,7 +2271,15 @@ export function App() {
               <div className="flex flex-wrap items-center gap-3">
                 <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>
               <label className="text-sm text-slate-300">Edit name
-                <input className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" value={activeLoadoutName ?? ''} onChange={(event) => renameActiveLoadout(event.target.value)} />
+                <input
+                  className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100"
+                  value={loadoutNameInput}
+                  onChange={(event) => setLoadoutNameInput(event.target.value)}
+                  onBlur={() => commitActiveLoadoutRename()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                />
               </label>
               </div>
             </div>

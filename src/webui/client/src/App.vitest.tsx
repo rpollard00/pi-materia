@@ -155,6 +155,89 @@ describe('Materia loadout grid editor', () => {
     expect(saved.config.loadouts['Planning-Consult']).toBeNull();
   });
 
+  it('keeps loadout name edits local until commit and rejects empty names', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    const input = await screen.findByLabelText(/Edit name/i);
+    fireEvent.change(input, { target: { value: '' } });
+
+    expect(input).toHaveProperty('value', '');
+    expect(screen.getByRole('button', { name: /Full-Auto/ })).toBeTruthy();
+
+    fireEvent.blur(input);
+
+    expect(await screen.findByText(/name cannot be empty/i)).toBeTruthy();
+    expect(input).toHaveProperty('value', '');
+    expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
+  });
+
+  it('rejects duplicate loadout names without switching the active loadout', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+
+    const input = await screen.findByLabelText(/Edit name/i);
+    fireEvent.change(input, { target: { value: 'Planning-Consult' } });
+    fireEvent.blur(input);
+
+    expect(await screen.findByText(/Planning-Consult already exists/i)).toBeTruthy();
+    expect(input).toHaveProperty('value', 'Planning-Consult');
+    expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
+  });
+
+  it('renames a persisted loadout on commit and saves a deletion marker for the old name', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/config' && init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig, loadoutSources: { 'Full-Auto': 'user', 'Planning-Consult': 'user' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const input = await screen.findByLabelText(/Edit name/i);
+    fireEvent.change(input, { target: { value: 'Renamed Full Auto' } });
+    fireEvent.blur(input);
+
+    expect(await screen.findByRole('button', { name: /Renamed Full Auto/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Full-Auto/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Renamed Full Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock);
+    expect(saved.config.activeLoadout).toBe('Renamed Full Auto');
+    expect(saved.config.loadouts['Full-Auto']).toBeNull();
+    expect(saved.config.loadouts['Renamed Full Auto']).toMatchObject(testConfig.loadouts['Full-Auto']);
+    expect(saved.config.loadouts['Planning-Consult']).toMatchObject(testConfig.loadouts['Planning-Consult']);
+  });
+
+  it('renames a new unsaved loadout without staging a deletion marker', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/config' && init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig, loadoutSources: { 'Full-Auto': 'user', 'Planning-Consult': 'user' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByTestId('socket-Socket-1');
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    const input = screen.getByLabelText(/Edit name/i);
+    fireEvent.change(input, { target: { value: 'Unsaved Custom' } });
+    fireEvent.blur(input);
+
+    expect(await screen.findByRole('button', { name: /Unsaved Custom/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock);
+    expect(saved.config.activeLoadout).toBe('Unsaved Custom');
+    expect(saved.config.loadouts['New Loadout']).toBeUndefined();
+    expect(saved.config.loadouts['Unsaved Custom']).toBeTruthy();
+  });
+
   it('renders socket supplemental details as hover titles', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
