@@ -162,14 +162,7 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
 }
 
 function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopNodes: string[], consumes: NonNullable<MateriaLoopConfig["consumes"]>, exit: MateriaLoopExitConfig | undefined): void {
-  if (!exit) {
-    errors.push({
-      code: "invalid-loop",
-      source: `loops.${loopId}.exit`,
-      message: `Loop "${loopId}" has consumes metadata but no loops.${loopId}.exit, so the UI cannot compile it into executable advance control flow. Suggested fix: choose a loop exit source, condition, and target.`,
-    });
-    return;
-  }
+  if (!exit) return;
 
   const node = graph.nodes?.[exit.from];
   if (!node) return;
