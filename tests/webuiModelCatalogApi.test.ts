@@ -141,6 +141,34 @@ describe("GET /api/models", () => {
     expect(body.models[0]?.supportedThinkingLevels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
   });
 
+  test("skips malformed registry entries without dropping valid models", async () => {
+    const validModel = {
+      provider: "openai-codex",
+      id: "gpt-5.5",
+      name: "GPT 5.5 Codex",
+      reasoning: true,
+    };
+    const throwingModel = {
+      provider: "anthropic",
+      id: "broken-thinking-map",
+      reasoning: true,
+      get thinkingLevelMap() {
+        throw new Error("bad thinking map");
+      },
+    };
+    const baseUrl = await startTestServer({
+      modelRegistry: { getAvailable: () => [validModel, throwingModel, { provider: "missing-id" }] },
+    });
+
+    const response = await fetch(`${baseUrl}/api/models`);
+    const body = await response.json() as { models: Array<{ value: string }>; warnings?: string[] };
+
+    expect(response.status).toBe(200);
+    expect(body.models).toEqual([expect.objectContaining({ value: "openai-codex/gpt-5.5" })]);
+    expect(body.warnings?.join("\n")).toContain("Skipped invalid model registry entry at index 1 (anthropic/broken-thinking-map): bad thinking map");
+    expect(body.warnings?.join("\n")).toContain("Skipped invalid model registry entry at index 2 (provider: missing-id).");
+  });
+
   test("handles missing or failing model registry data gracefully", async () => {
     const missingBaseUrl = await startTestServer();
     const missingResponse = await fetch(`${missingBaseUrl}/api/models`);

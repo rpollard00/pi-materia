@@ -211,31 +211,38 @@ async function readCatalogModels(source: MateriaModelCatalogSource | undefined, 
   const getAvailable = modelRegistry?.getAvailable;
   if (typeof getAvailable !== 'function') return [];
 
+  let available: unknown;
   try {
-    const available = await getAvailable.call(modelRegistry);
-    if (!Array.isArray(available)) {
-      warnings.push('Model registry getAvailable() did not return an array.');
-      return [];
-    }
-    const models: MateriaModelCatalogModel[] = [];
-    const seen = new Set<string>();
-    let skipped = 0;
-    for (const raw of available) {
-      const model = normalizeCatalogModel(raw);
-      if (!model) {
-        skipped += 1;
-        continue;
-      }
-      if (seen.has(model.value)) continue;
-      seen.add(model.value);
-      models.push(model);
-    }
-    if (skipped) warnings.push(`Skipped ${skipped} invalid model entr${skipped === 1 ? 'y' : 'ies'} from the model registry.`);
-    return models;
+    available = await getAvailable.call(modelRegistry);
   } catch (error) {
     warnings.push(`Unable to read available models: ${errorMessage(error)}`);
     return [];
   }
+
+  if (!Array.isArray(available)) {
+    warnings.push('Model registry getAvailable() did not return an array.');
+    return [];
+  }
+
+  const models: MateriaModelCatalogModel[] = [];
+  const seen = new Set<string>();
+  for (const [index, raw] of available.entries()) {
+    let model: MateriaModelCatalogModel | undefined;
+    try {
+      model = normalizeCatalogModel(raw);
+    } catch (error) {
+      warnings.push(`Skipped invalid model registry entry at index ${index}${catalogEntryHint(raw)}: ${errorMessage(error)}`);
+      continue;
+    }
+    if (!model) {
+      warnings.push(`Skipped invalid model registry entry at index ${index}${catalogEntryHint(raw)}.`);
+      continue;
+    }
+    if (seen.has(model.value)) continue;
+    seen.add(model.value);
+    models.push(model);
+  }
+  return models;
 }
 
 function normalizeCatalogModel(raw: unknown): MateriaModelCatalogModel | undefined {
@@ -308,6 +315,20 @@ function thinkingLevelMapFor(model: Record<string, unknown>): Record<string, unk
 function modelLabel(value: string, name: string | undefined, id: string): string {
   if (!name || name === id || name === value) return value;
   return `${name} (${value})`;
+}
+
+function catalogEntryHint(raw: unknown): string {
+  try {
+    if (!isPlainObject(raw)) return '';
+    const provider = stringField(raw.provider);
+    const id = stringField(raw.id);
+    if (provider && id) return ` (${provider}/${id})`;
+    if (provider) return ` (provider: ${provider})`;
+    if (id) return ` (id: ${id})`;
+  } catch {
+    return '';
+  }
+  return '';
 }
 
 function stringField(value: unknown): string | undefined {
