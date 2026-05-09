@@ -3,9 +3,11 @@ import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socket
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 
 type NodeType = 'agent' | 'utility';
+export type SocketKind = 'entry' | 'normal';
 
 export interface PipelineNode {
   type?: NodeType;
+  socketKind?: SocketKind;
   materia?: string;
   utility?: string;
   command?: string[];
@@ -47,6 +49,7 @@ function normalizeEdgeConditionForClient(when: unknown): MateriaEdgeCondition {
 export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfig {
   const normalized = cloneValue(config);
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
+    normalizeLoadoutSocketKinds(loadout);
     for (const node of Object.values(loadout.nodes ?? {}) as LegacyPipelineNode[]) {
       const edges = (node.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
       if (typeof node.next === 'string' && node.next) edges.push({ when: 'always', to: node.next });
@@ -167,17 +170,39 @@ const materiaBehaviorKeys = new Set([
 
 const cloneValue = <T,>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value)) as T;
 
+export function isSocketKind(value: unknown): value is SocketKind {
+  return value === 'entry' || value === 'normal';
+}
+
+export function isEntrySocket(node?: PipelineNode): boolean {
+  return node?.socketKind === 'entry';
+}
+
+export function canDeleteSocket(node?: PipelineNode): boolean {
+  return node?.socketKind === 'normal';
+}
+
+export function normalizeLoadoutSocketKinds(loadout: PipelineConfig): PipelineConfig {
+  const nodes = loadout.nodes ?? {};
+  const entryId = loadout.entry && nodes[loadout.entry] ? loadout.entry : Object.keys(nodes)[0];
+  if (entryId && !loadout.entry) loadout.entry = entryId;
+  for (const [id, node] of Object.entries(nodes)) {
+    node.socketKind = id === entryId ? 'entry' : 'normal';
+  }
+  return loadout;
+}
+
 export function isEmptySocket(node?: PipelineNode): boolean {
   return !node || node.empty === true || Object.keys(extractMateriaBehavior(node)).length === 0;
 }
 
 export function makeEmptySocket(structure: PipelineNode = {}): PipelineNode {
-  return { ...extractSocketStructure(structure), empty: true };
+  return { socketKind: 'normal', ...extractSocketStructure(structure), empty: true };
 }
 
 export function makeEmptyEntryLoadout(entry = 'Socket-1'): PipelineConfig {
   assertCanonicalSocketId(entry, 'new loadout entry');
-  return { entry, nodes: { [entry]: makeEmptySocket() } };
+  return { entry, nodes: { [entry]: makeEmptySocket({ socketKind: 'entry' }) } };
 }
 
 export function makeNewSocketId(nodes: Record<string, PipelineNode>): string {
@@ -233,6 +258,10 @@ export function extractMateriaBehavior(node?: PipelineNode): PipelineNode {
 export function extractSocketStructure(node?: PipelineNode): PipelineNode {
   const structure: PipelineNode = {};
   for (const [key, value] of Object.entries(node ?? {})) {
+    if (key === 'socketKind') {
+      if (isSocketKind(value)) structure.socketKind = value;
+      continue;
+    }
     if (!materiaBehaviorKeys.has(key) && key !== 'empty' && key !== 'next') structure[key] = cloneValue(value);
   }
   return structure;

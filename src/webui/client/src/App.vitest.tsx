@@ -901,7 +901,7 @@ describe('Materia loadout grid editor', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('creates new loadouts with exactly one empty untyped entry socket', async () => {
+  it('creates new loadouts with exactly one empty typed entry socket', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
@@ -918,7 +918,7 @@ describe('Materia loadout grid editor', () => {
     expect(entry.getAttribute('title')).toBe('Socket: Socket-1\nDisplay: Socket-1 (Empty)\nEmpty socket');
     expect(screen.getByText('Empty')).toBeTruthy();
     expect(screen.queryByText('Empty socket')).toBeNull();
-    expect(screen.queryByText('entry')).toBeNull();
+    expect(screen.getByText('Entry')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -926,7 +926,7 @@ describe('Materia loadout grid editor', () => {
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
     expect(Object.keys(created.nodes)).toEqual(['Socket-1']);
     expect(created.entry).toBe('Socket-1');
-    expect(created.nodes['Socket-1']).toEqual({ empty: true });
+    expect(created.nodes['Socket-1']).toEqual({ empty: true, socketKind: 'entry' });
     expect(created.nodes['Socket-1'].type).toBeUndefined();
   });
 
@@ -953,8 +953,8 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(created.nodes['Socket-1']).toEqual({ empty: true, edges: [{ when: 'always', to: 'Socket-2' }] });
-    expect(created.nodes['Socket-2']).toEqual({ empty: true });
+    expect(created.nodes['Socket-1']).toEqual({ empty: true, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created.nodes['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
   });
 
   it('keeps palette definitions and save payload materia stable during new loadout grid edits', async () => {
@@ -989,8 +989,8 @@ describe('Materia loadout grid editor', () => {
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
     expect(savedConfig.materia).toEqual(initialMateria);
-    expect(created.nodes['Socket-1']).toEqual({ type: 'agent', materia: 'Build', empty: false, edges: [{ when: 'always', to: 'Socket-2' }] });
-    expect(created.nodes['Socket-2']).toEqual({ empty: true });
+    expect(created.nodes['Socket-1']).toEqual({ type: 'agent', materia: 'Build', empty: false, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created.nodes['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
   });
 
   it('opens a valid tab from the URL query parameter', async () => {
@@ -1161,7 +1161,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Planning-Consult'].nodes;
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
-    expect(saved['Socket-3']).toEqual({ empty: true });
+    expect(saved['Socket-3']).toEqual({ empty: true, socketKind: 'normal' });
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Planning-Consult');
   });
 

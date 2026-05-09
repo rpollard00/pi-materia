@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMateriaPalette,
+  canDeleteSocket,
   formatSocketLabel,
   getNodeLabel,
   makeEmptyEntryLoadout,
@@ -23,6 +24,7 @@ describe('loadout socket display model', () => {
 
     expect(loadout.entry).toBe('Socket-1');
     expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1']);
+    expect(loadout.nodes!['Socket-1'].socketKind).toBe('entry');
     expect(getNodeLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Empty');
     expect(formatSocketLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Socket-1 (Empty)');
   });
@@ -38,7 +40,7 @@ describe('loadout socket display model', () => {
     loadout.nodes!['Socket-2'] = makeEmptySocket({ edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
 
     expect(getNodeLabel('Socket-2', loadout.nodes!['Socket-2'])).toBe('Empty');
-    expect(loadout.nodes!['Socket-2']).toEqual({ empty: true, edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+    expect(loadout.nodes!['Socket-2']).toEqual({ empty: true, socketKind: 'normal', edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
   });
 
   it('formats contextual socket labels without renaming the socket id', () => {
@@ -49,6 +51,27 @@ describe('loadout socket display model', () => {
 });
 
 describe('loadout normalization model', () => {
+  it('normalizes legacy loadout socket kinds before save', () => {
+    const config = normalizeMateriaConfigEdges({
+      loadouts: {
+        Legacy: {
+          entry: 'Socket-2',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Build', socketKind: 'entry' as never },
+            'Socket-2': { type: 'agent', materia: 'Plan' },
+            'Socket-3': { type: 'agent', materia: 'Check', socketKind: 'invalid' as never },
+          },
+        },
+      },
+    });
+
+    expect(config.loadouts?.Legacy.nodes?.['Socket-1'].socketKind).toBe('normal');
+    expect(config.loadouts?.Legacy.nodes?.['Socket-2'].socketKind).toBe('entry');
+    expect(config.loadouts?.Legacy.nodes?.['Socket-3'].socketKind).toBe('normal');
+    expect(canDeleteSocket(config.loadouts?.Legacy.nodes?.['Socket-2'])).toBe(false);
+    expect(canDeleteSocket(config.loadouts?.Legacy.nodes?.['Socket-3'])).toBe(true);
+  });
+
   it('normalizes generator-to-generator sockets to canonical JSON workItems assignment before save', () => {
     const config = normalizeMateriaConfigEdges({
       activeLoadout: 'Yolo',
@@ -214,7 +237,7 @@ describe('loadout materia palette model', () => {
 
     loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], utilityMateria);
 
-    expect(loadout.nodes!['Socket-1']).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false });
+    expect(loadout.nodes!['Socket-1']).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false, socketKind: 'entry' });
     expect(getNodeLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('vcs.detect');
   });
 
@@ -254,7 +277,7 @@ describe('loadout materia palette model', () => {
       edges: [{ to: 'SourceEdge', when: 'satisfied' }, { to: 'AfterSource', when: 'always' }],
       layout: { x: 1, y: 2 },
       limits: { maxVisits: 3 },
-      socketKind: 'source-metadata',
+      socketKind: 'entry',
     };
     const target: PipelineNode = {
       type: 'agent',
@@ -262,15 +285,15 @@ describe('loadout materia palette model', () => {
       edges: [{ to: 'TargetEdge', when: 'not_satisfied' }, { to: 'AfterTarget', when: 'always' }],
       layout: { x: 5, y: 6 },
       limits: { maxOutputBytes: 1024 },
-      socketKind: 'target-metadata',
+      socketKind: 'normal',
     };
 
     const newTarget = placeMateriaInSocket(target, source);
     const newSource = placeMateriaInSocket(source, target);
 
-    expect(newTarget).toMatchObject({ type: 'agent', materia: 'Build', layout: { x: 5, y: 6 }, limits: { maxOutputBytes: 1024 }, socketKind: 'target-metadata' });
+    expect(newTarget).toMatchObject({ type: 'agent', materia: 'Build', layout: { x: 5, y: 6 }, limits: { maxOutputBytes: 1024 }, socketKind: 'normal' });
     expect(newTarget.edges).toEqual([{ to: 'TargetEdge', when: 'not_satisfied' }, { to: 'AfterTarget', when: 'always' }]);
-    expect(newSource).toMatchObject({ type: 'agent', materia: 'Check', layout: { x: 1, y: 2 }, limits: { maxVisits: 3 }, socketKind: 'source-metadata' });
+    expect(newSource).toMatchObject({ type: 'agent', materia: 'Check', layout: { x: 1, y: 2 }, limits: { maxVisits: 3 }, socketKind: 'entry' });
     expect(newSource.edges).toEqual([{ to: 'SourceEdge', when: 'satisfied' }, { to: 'AfterSource', when: 'always' }]);
   });
 

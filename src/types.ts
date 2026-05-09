@@ -288,16 +288,20 @@ export interface MateriaPipelineConfig {
 
 export type MateriaParseMode = "text" | "json";
 
+export type MateriaSocketKind = "entry" | "normal";
 export type MateriaPipelineNodeConfig = MateriaAgentNodeConfig | MateriaUtilityNodeConfig;
 export type LegacyMateriaPipelineNodeConfig = MateriaPipelineNodeConfig & { next?: string };
 
 export interface MateriaPipelineNodeCommonConfig {
+  socketKind?: MateriaSocketKind;
   parse?: MateriaParseMode;
   assign?: Record<string, string>;
   edges?: MateriaEdgeConfig[];
   foreach?: MateriaForeachConfig;
   advance?: MateriaAdvanceConfig;
   limits?: MateriaNodeLimitsConfig;
+  layout?: { x?: number; y?: number };
+  empty?: boolean;
 }
 
 export interface MateriaAgentNodeConfig extends MateriaPipelineNodeCommonConfig {

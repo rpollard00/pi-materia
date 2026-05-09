@@ -11,6 +11,7 @@ import {
   getNodeLabel,
   resolveSocketDisplayLabel,
   isEmptySocket,
+  isEntrySocket,
   makeEmptyEntryLoadout,
   makeEmptySocket,
   makeNewSocketId,
@@ -1202,8 +1203,9 @@ export function App() {
           },
         },
       };
-      setBaselineConfig(cloneConfig(fallback));
-      setDraftConfig(fallback);
+      const normalizedFallback = normalizeMateriaConfigEdges(fallback);
+      setBaselineConfig(cloneConfig(normalizedFallback));
+      setDraftConfig(normalizedFallback);
       setSource('demo');
     });
     return () => {
@@ -2180,6 +2182,7 @@ export function App() {
                 const isGenerator = isGeneratorSocket(node, materia);
                 const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia) : undefined;
                 const isLoopSelected = selectedLoopSocketSet.has(id);
+                const isEntry = isEntrySocket(node);
                 const loopMembership = loopMemberships.get(id);
                 const socketStyle = loopMembership ? {
                   left: `${socketX}px`,
@@ -2211,6 +2214,7 @@ export function App() {
                     </div>
                     {isIterator && <span className={`materia-iterator-badge graph-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
                   </div>
+                  {isEntry && <span className="entry-rune">Entry</span>}
                   <span className="materia-socket-label">{nodeLabel}</span>
                 </button>
                 );
