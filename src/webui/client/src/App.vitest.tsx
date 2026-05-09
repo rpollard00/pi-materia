@@ -238,6 +238,29 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Loop consumes: Socket-1.workItems');
   });
 
+  it('renders generator-to-generator edges with generated-output semantics', async () => {
+    const config = structuredClone(testConfig);
+    (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };
+    (config.materia.Build as any) = { tools: 'coding', prompt: 'Build generated work', generator: true };
+    (config.loadouts['Full-Auto'].nodes['Socket-1'] as any).assign = { workItems: '$.workItems' };
+    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).parse = 'json';
+    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).assign = { workItems: '$.workItems' };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const generatorEdge = await screen.findByTestId('edge-Socket-1-Socket-2-0');
+    expect(generatorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
+    expect(generatorEdge.textContent).toContain('Generator output: workItems');
+    expect(generatorEdge.textContent).not.toContain('Always');
+    expect(generatorEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-generator-edge-arrow)');
+    expect(screen.getByTestId('socket-Socket-1').getAttribute('title')).toContain('Edges: Generator output: workItems → Socket-2 (Build)');
+
+    const buildToEvalEdge = screen.getByTestId('edge-Socket-2-Socket-3-0');
+    expect(buildToEvalEdge.textContent).toContain('Always');
+    expect(buildToEvalEdge.classList.contains('loadout-edge-generator-input')).toBe(false);
+  });
+
   it('highlights only loop-member sockets with coordinated per-loop accents', async () => {
     const config = structuredClone(testConfig);
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {

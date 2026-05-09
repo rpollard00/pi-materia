@@ -368,13 +368,28 @@ function loopConsumerForSocket(loadout: PipelineConfig | undefined, socketId: st
   return loop ? loopConsumerSummary(loop) : undefined;
 }
 
-function isGeneratorLoopInputEdge(edge: LoadoutEdge, loadout: PipelineConfig | undefined): boolean {
-  return Object.values(loadout?.loops ?? {}).some((loop) => loop.consumes?.from === edge.from && loop.nodes.includes(edge.to));
+function generatorLoopOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined): string | undefined {
+  const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.consumes?.from === edge.from && candidate.nodes.includes(edge.to));
+  return loop?.consumes ? loop.consumes.output ?? 'workItems' : undefined;
 }
 
-function generatorLoopEdgeLabel(edge: LoadoutEdge, loadout: PipelineConfig | undefined): string {
-  const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.consumes?.from === edge.from && candidate.nodes.includes(edge.to));
-  return loop?.consumes ? `Generator output: ${loop.consumes.output ?? 'workItems'}` : edgeConditionLabel(edge.when);
+function generatorToGeneratorOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
+  const fromNode = loadout?.nodes?.[edge.from];
+  const toNode = loadout?.nodes?.[edge.to];
+  return isGeneratorSocket(fromNode, definitions) && isGeneratorSocket(toNode, definitions) ? 'workItems' : undefined;
+}
+
+function generatorEdgeOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
+  return generatorLoopOutput(edge, loadout) ?? generatorToGeneratorOutput(edge, loadout, definitions);
+}
+
+function isGeneratorOutputEdge(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): boolean {
+  return Boolean(generatorEdgeOutput(edge, loadout, definitions));
+}
+
+function generatorEdgeLabel(edge: Pick<LoadoutEdge, 'from' | 'to' | 'when'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string {
+  const output = generatorEdgeOutput(edge, loadout, definitions);
+  return output ? `Generator output: ${output}` : edgeConditionLabel(edge.when);
 }
 
 function iteratorBadgeLabel(details?: string): string {
@@ -417,7 +432,7 @@ function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: 
     if (node.command?.length) lines.push(`Command: ${node.command.join(' ')}`);
   }
   if (node?.edges?.length) {
-    lines.push(`Edges: ${node.edges.map((edge) => `${edgeConditionLabel(edge.when)} → ${formatSocketLabel(edge.to, loadout?.nodes?.[edge.to])}`).join(', ')}`);
+    lines.push(`Edges: ${node.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.nodes?.[edge.to])}`).join(', ')}`);
   }
   const legacyNext = (node as LegacyPipelineNode | undefined)?.next;
   if (legacyNext) lines.push(`Legacy flow: Always → ${legacyNext}`);
@@ -2071,8 +2086,8 @@ export function App() {
                   </g>
                 ))}
                 {routedEdges.map(({ edge, path, labelX, labelY, labelRotate, routeClass }) => {
-                  const isGeneratorInput = isGeneratorLoopInputEdge(edge, activeLoadout);
-                  const edgeLabel = isGeneratorInput ? generatorLoopEdgeLabel(edge, activeLoadout) : edgeConditionLabel(edge.when);
+                  const isGeneratorInput = isGeneratorOutputEdge(edge, activeLoadout, materia);
+                  const edgeLabel = generatorEdgeLabel(edge, activeLoadout, materia);
                   const markerEnd = isGeneratorInput ? 'url(#materia-generator-edge-arrow)' : 'url(#materia-edge-arrow)';
                   return (
                     <g
