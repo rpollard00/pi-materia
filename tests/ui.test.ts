@@ -71,6 +71,8 @@ describe("persistent Materia widget formatting", () => {
     expect(lines).toHaveLength(3);
     expect(lines[0]).toContain("⌘ Review");
     expect(lines.join("\n")).toContain("no active cast");
+    expect(lines.join("\n")).not.toContain("Loadout:");
+    expect(lines.join("\n")).not.toContain("Available:");
   });
 
   test("renders legacy run state without loadout or endedAt metadata sensibly", () => {
@@ -174,6 +176,25 @@ describe("persistent Materia widget formatting", () => {
     expect(lines[2]).toBe("› Build active");
     expect(lines[2]).not.toContain("Last");
     expect(lines[2]).not.toContain("Socket-4");
+  });
+
+  test("renders rich cast status with partial metadata through the shared widget shape", () => {
+    const run = runState({ loadoutName: "Review", currentTask: undefined, currentMateria: undefined, lastMessage: undefined });
+    const state = {
+      active: false,
+      phase: "complete",
+      awaitingResponse: false,
+      nodeState: "complete",
+      runState: run,
+    } as MateriaCastState;
+
+    const lines = renderMateriaCastStatusWidget(state, 2_000);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("⌘ Review");
+    expect(lines[1]).toContain("◆ -");
+    expect(lines[1]).toContain("◉ -");
+    expect(lines[2]).toBe("› complete");
+    expect(lines.every((line) => line.length <= 78)).toBe(true);
   });
 
   test("renders compact completion usage without billing disclaimers", () => {

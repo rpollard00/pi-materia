@@ -71,59 +71,50 @@ function stopWidgetTicker(ctx: ExtensionContext, runId?: string): void {
 }
 
 export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
-  const model = materiaRunWidgetModel(state, now);
-  const lines = [
-    joinCells([
-      fixedCell(`✦ ${model.castId}`, 31),
-      fixedCell(`⌘ ${model.loadout}`, 14),
-      fixedCell(`↻ ${model.attempt}`, 4),
-      fixedCell(`◷ ${model.elapsed}`, 8),
-      fixedCell(`Σ ${model.usage}`, 12),
-    ]),
-    joinCells([fixedCell(`◆ ${model.task}`, 36), fixedCell(`◉ ${model.materia}`, 37)]),
-    `› ${truncateValue(model.message, WIDGET_MAX_LINE_LENGTH - 2)}`,
-  ];
-  return lines.map((line) => truncateLine(line));
+  return renderMateriaStatusWidget(createMateriaRunStatusModel(state, now));
 }
 
 export function renderConfiguredLoadoutWidget(loadoutName: string): string[] {
-  return [
-    joinCells([
-      fixedCell("✦ configured", 31),
-      fixedCell(`⌘ ${loadoutName || "-"}`, 14),
-      fixedCell("↻ -", 4),
-      fixedCell("◷ -", 8),
-      fixedCell("Σ -", 12),
-    ]),
-    joinCells([fixedCell("◆ active loadout", 36), fixedCell("◉ no active cast", 37)]),
-    "› Ready for the next pi-materia cast.",
-  ].map((line) => truncateLine(line));
+  return renderMateriaStatusWidget(createConfiguredLoadoutStatusModel(loadoutName));
 }
 
 export function renderMateriaCastStatusWidget(state: MateriaCastState, now = Date.now()): string[] {
-  const runLines = renderMateriaRunWidget(state.runState, now);
-  const displayState = { ...state.runState, currentNode: state.currentNode ?? state.runState.currentNode, currentMateria: state.currentMateria ?? state.runState.currentMateria };
-  const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
-  const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${displayState.currentMateria ?? state.phase}${state.active ? " active" : ""}`;
-  return [...runLines.slice(0, 2), `› ${truncateValue(displayMateriaStatusValue(displayState, status), WIDGET_MAX_LINE_LENGTH - 2)}`].map((line) => truncateLine(line));
+  return renderMateriaStatusWidget(createMateriaCastStatusModel(state, now));
 }
 
-type MateriaRunWidgetModel = {
-  castId: string;
-  loadout: string;
-  attempt: string;
-  elapsed: string;
-  usage: string;
-  task: string;
-  materia: string;
-  message: string;
+export type MateriaStatusSegmentKind = "cast" | "loadout" | "attempt" | "elapsed" | "usage" | "task" | "materia" | "message";
+
+export type MateriaStatusSegment = {
+  kind: MateriaStatusSegmentKind;
+  label: string;
+  value: string;
+  width?: number;
+  priority: number;
 };
 
-function materiaRunWidgetModel(state: MateriaRunState, now: number): MateriaRunWidgetModel {
+export type MateriaStatusRenderModel = {
+  segments: MateriaStatusSegment[];
+  panelLines: Array<MateriaStatusSegment[]>;
+};
+
+const FIRST_LINE_SEGMENTS: Array<{ kind: MateriaStatusSegmentKind; label: string; width: number; priority: number }> = [
+  { kind: "cast", label: "✦", width: 31, priority: 80 },
+  { kind: "loadout", label: "⌘", width: 14, priority: 100 },
+  { kind: "attempt", label: "↻", width: 4, priority: 70 },
+  { kind: "elapsed", label: "◷", width: 8, priority: 75 },
+  { kind: "usage", label: "Σ", width: 12, priority: 60 },
+];
+
+const SECOND_LINE_SEGMENTS: Array<{ kind: MateriaStatusSegmentKind; label: string; width: number; priority: number }> = [
+  { kind: "task", label: "◆", width: 36, priority: 50 },
+  { kind: "materia", label: "◉", width: 37, priority: 95 },
+];
+
+function createMateriaRunStatusModel(state: MateriaRunState, now: number): MateriaStatusRenderModel {
   const usage = state.usage.tokens;
   const elapsedUntil = state.endedAt ?? now;
-  return {
-    castId: shortCastId(state.runId),
+  return createMateriaStatusRenderModel({
+    cast: shortCastId(state.runId),
     loadout: state.loadoutName ?? "-",
     attempt: String(state.attempt ?? "-"),
     elapsed: formatElapsed(elapsedUntil - state.startedAt),
@@ -131,7 +122,55 @@ function materiaRunWidgetModel(state: MateriaRunState, now: number): MateriaRunW
     task: displayMateriaStatusValue(state, state.currentTask ?? "-"),
     materia: displayMateriaName(state),
     message: displayMateriaStatusValue(state, state.lastMessage ?? "-"),
-  };
+  });
+}
+
+function createConfiguredLoadoutStatusModel(loadoutName: string): MateriaStatusRenderModel {
+  return createMateriaStatusRenderModel({
+    cast: "configured",
+    loadout: loadoutName || "-",
+    attempt: "-",
+    elapsed: "-",
+    usage: "-",
+    task: "active loadout",
+    materia: "no active cast",
+    message: "Ready for the next pi-materia cast.",
+  });
+}
+
+function createMateriaCastStatusModel(state: MateriaCastState, now: number): MateriaStatusRenderModel {
+  const displayState = { ...state.runState, currentNode: state.currentNode ?? state.runState.currentNode, currentMateria: state.currentMateria ?? state.runState.currentMateria };
+  const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
+  const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${displayState.currentMateria ?? state.phase}${state.active ? " active" : ""}`;
+  const model = createMateriaRunStatusModel(displayState, now);
+  return replaceStatusSegment(model, "message", displayMateriaStatusValue(displayState, status));
+}
+
+function createMateriaStatusRenderModel(values: Record<MateriaStatusSegmentKind, string>): MateriaStatusRenderModel {
+  const firstLine = FIRST_LINE_SEGMENTS.map((definition) => ({ ...definition, value: values[definition.kind] }));
+  const secondLine = SECOND_LINE_SEGMENTS.map((definition) => ({ ...definition, value: values[definition.kind] }));
+  const message: MateriaStatusSegment = { kind: "message", label: "›", value: values.message, priority: 40 };
+  return { segments: [...firstLine, ...secondLine, message], panelLines: [firstLine, secondLine, [message]] };
+}
+
+function replaceStatusSegment(model: MateriaStatusRenderModel, kind: MateriaStatusSegmentKind, value: string): MateriaStatusRenderModel {
+  const replace = (segment: MateriaStatusSegment): MateriaStatusSegment => (segment.kind === kind ? { ...segment, value } : segment);
+  return { segments: model.segments.map(replace), panelLines: model.panelLines.map((line) => line.map(replace)) };
+}
+
+function renderMateriaStatusWidget(model: MateriaStatusRenderModel): string[] {
+  return model.panelLines.map((segments) => renderMateriaStatusLine(segments));
+}
+
+function renderMateriaStatusLine(segments: MateriaStatusSegment[]): string {
+  if (segments.length === 1 && segments[0].kind === "message") {
+    return truncateLine(`${segments[0].label} ${truncateValue(segments[0].value, WIDGET_MAX_LINE_LENGTH - 2)}`);
+  }
+  const cells = segments.map((segment) => {
+    const value = `${segment.label} ${segment.value}`;
+    return segment.width === undefined ? value : fixedCell(value, segment.width);
+  });
+  return truncateLine(joinCells(cells));
 }
 
 export function clearMateriaAuxiliaryWidgets(ctx: ExtensionContext): void {

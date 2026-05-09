@@ -4,15 +4,13 @@ export function renderLoadoutList(config: PiMateriaConfig, _source: string): str
   const loadoutNames = Object.keys(config.loadouts ?? {});
   const active = config.activeLoadout ?? "-";
   if (loadoutNames.length === 0) {
-    return ["Loadouts: none configured", "Active: -"];
+    return ["No materia loadouts configured."];
   }
 
   const visible = loadoutNames.slice(0, 4).map((name) => `${name}${name === config.activeLoadout ? "*" : ""}`);
   const suffix = loadoutNames.length > visible.length ? ` +${loadoutNames.length - visible.length}` : "";
-  return [
-    `Loadout: ${truncateLine(active, 96)}`,
-    `Available: ${truncateLine(visible.join(", ") + suffix, 108)}`,
-  ];
+  // Keep this command/event output concise: the permanent status widget already owns the active loadout.
+  return [`⌘ ${truncateLine(active, 96)} (${truncateLine(visible.join(", ") + suffix, 108)})`];
 }
 
 function truncateLine(value: string, max: number): string {

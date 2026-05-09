@@ -53,17 +53,21 @@ describe("FakePiHarness", () => {
 
     await harness.runCommand("materia", "loadout");
     const listed = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(listed.content).toContain("Loadout: Full-Auto");
+    expect(listed.content).toContain("⌘ Full-Auto");
     expect(listed.content).toContain("Full-Auto*");
     expect(listed.content).toContain("Planning-Consult");
+    expect(listed.content).not.toContain("Loadout:");
+    expect(listed.content).not.toContain("Available:");
     expect(harness.widgets.get("materia-loadouts")?.content).toBeUndefined();
 
     await harness.runCommand("materia", "loadout Planning-Consult");
     const switched = harness.sentMessages.at(-1)?.message as { content?: string };
     const raw = JSON.parse(await readFile(configFile, "utf8"));
     expect(raw.activeLoadout).toBe("Planning-Consult");
-    expect(switched.content).toContain("Loadout: Planning-Consult");
+    expect(switched.content).toContain("⌘ Planning-Consult");
     expect(switched.content).toContain("Planning-Consult*");
+    expect(switched.content).not.toContain("Loadout:");
+    expect(switched.content).not.toContain("Available:");
     const switchedDetails = (harness.sentMessages.at(-1)?.message as { details?: Record<string, unknown> }).details;
     expect(switchedDetails).toMatchObject({
       eventType: "loadout",
@@ -105,9 +109,11 @@ describe("FakePiHarness", () => {
     const switched = harness.sentMessages.at(-1)?.message as { content?: string };
     expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
-    expect(switched.content).toContain("Loadout: Planning-Consult");
+    expect(switched.content).toContain("⌘ Planning-Consult");
     expect(switched.content).toContain("Planning-Consult*");
     expect(switched.content).toContain("Full-Auto");
+    expect(switched.content).not.toContain("Loadout:");
+    expect(switched.content).not.toContain("Available:");
     expect(harness.operationLog).not.toContain("triggerTurn");
   });
 
