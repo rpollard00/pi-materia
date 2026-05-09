@@ -955,7 +955,7 @@ function canKeepThinkingForModel(catalog: ModelCatalogResponse, modelValue: stri
   return isOriginalSavedThinking(form, original, modelValue, normalizedThinking);
 }
 
-function modelSelectOptions(catalog: ModelCatalogResponse, original: OriginalMateriaModelSettings | undefined): SelectOption[] {
+export function modelSelectOptions(catalog: ModelCatalogResponse, original: OriginalMateriaModelSettings | undefined): SelectOption[] {
   const models = uniqueCatalogModels(catalog.models);
   const options: SelectOption[] = [{ value: '', label: activeModelOptionLabel }, ...models.map((model) => ({ value: model.value, label: model.label }))];
   const originalModel = original?.model.trim();
