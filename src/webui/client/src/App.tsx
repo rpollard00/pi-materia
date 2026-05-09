@@ -1664,16 +1664,25 @@ export function App() {
     while (existingLoops[loopId]) loopId = `${baseId}${suffix++}`;
     const selectedLabels = selectedIds.map((id) => resolveSocketDisplayLabel(activeLoadout, id));
     const label = `Loop: ${selectedIds.join(' → ')}`;
+    const isSingleSocketLoop = selectedIds.length === 1;
+    const exitCondition: MateriaEdgeCondition = isSingleSocketLoop ? 'always' : 'satisfied';
     const created = commitGraphMutation(
       `Staged loop around ${selectedLabels.join(', ')}.`,
       (loadout) => {
+        if (isSingleSocketLoop) {
+          const socketId = selectedIds[0];
+          const node = loadout.nodes?.[socketId] as PipelineNode | undefined;
+          if (node && !(node.edges ?? []).some((edge) => edge.to === socketId)) {
+            node.edges = [{ when: 'always', to: socketId }];
+          }
+        }
         loadout.loops = {
           ...(loadout.loops ?? {}),
           [loopId]: {
             label,
             nodes: selectedIds,
             consumes: { from: generator.from, output: generator.output },
-            exit: { from: selectedIds[selectedIds.length - 1], when: 'satisfied', to: 'end' },
+            exit: { from: selectedIds[selectedIds.length - 1], when: exitCondition, to: 'end' },
           },
         };
       },

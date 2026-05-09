@@ -462,6 +462,67 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('loop-region-loopSelection').querySelector('.loadout-loop-title')?.textContent).toBe('Loop: Build → Auto-Eval → Maintain');
   });
 
+  it('creates, saves, and reloads a single-socket loop with one canonical self-edge', async () => {
+    const config = structuredClone(testConfig);
+    delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const createLoop = await screen.findByTestId('create-task-loop');
+    fireEvent.click(await screen.findByTestId('socket-Socket-2'), { shiftKey: true });
+    expect(createLoop).toHaveProperty('disabled', false);
+    fireEvent.click(createLoop);
+
+    const region = await screen.findByTestId('loop-region-loopSelection');
+    expect(region.querySelector('.loadout-loop-title')?.textContent).toBe('Loop: Build');
+    expect(screen.getByTestId('socket-Socket-2').classList.contains('materia-socket-loop-member')).toBe(true);
+    expect(await screen.findByTestId('edge-Socket-2-Socket-2-0')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
+    expect(saved.loops.loopSelection).toEqual({
+      label: 'Loop: Socket-2',
+      nodes: ['Socket-2'],
+      consumes: { from: 'Socket-1', output: 'workItems' },
+      exit: { from: 'Socket-2', when: 'always', to: 'end' },
+    });
+    expect(saved.nodes['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+
+    cleanup();
+    fetchMock.mockClear();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: { ...config, loadouts: { ...config.loadouts, 'Full-Auto': saved } } }))));
+    render(<App />);
+    expect(await screen.findByTestId('loop-region-loopSelection')).toBeTruthy();
+    expect(await screen.findByTestId('edge-Socket-2-Socket-2-0')).toBeTruthy();
+  });
+
+  it('does not duplicate an existing self-edge when creating a single-socket loop', async () => {
+    const config = structuredClone(testConfig);
+    delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
+    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).edges = [{ when: 'not_satisfied', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('socket-Socket-2'), { shiftKey: true });
+    fireEvent.click(await screen.findByTestId('create-task-loop'));
+    expect(await screen.findByTestId('loop-region-loopSelection')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
+    expect(saved.nodes['Socket-2'].edges.filter((edge: { to: string }) => edge.to === 'Socket-2')).toEqual([{ when: 'not_satisfied', to: 'Socket-2' }]);
+  });
+
   it('creates a loop from selected sockets on a fresh non-Build layout', async () => {
     const config = {
       activeLoadout: 'Fresh Loop',
