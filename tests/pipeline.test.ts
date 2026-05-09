@@ -172,7 +172,50 @@ describe("loadout-aware pipeline resolution", () => {
     expect(lines).toContain("loop taskIteration (Generated workItems loop): [Socket-2] consumes=Socket-1.workItems iterator=state.workItems as workItem done end exit=Socket-2.satisfied->end");
   });
 
-  test("resolvePipeline migrates legacy iterator loops when one inbound generator edge identifies the consumer", () => {
+  test("resolvePipeline validates chained generators as canonical workItems pipeline stages", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Socket-1",
+          loops: {
+            taskIteration: {
+              label: "Architected-Consult-style generated workItems loop",
+              nodes: ["Socket-2", "Socket-3"],
+              consumes: { from: "Socket-4", output: "workItems" },
+              exit: { from: "Socket-3", when: "satisfied", to: "end" },
+            },
+          },
+          nodes: {
+            "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-4" }] },
+            "Socket-4": { type: "agent", materia: "architect", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-3": { type: "agent", materia: "Check", edges: [{ when: "always", to: "Socket-2" }] },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        architect: { tools: "readOnly", prompt: "Refine plan.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+        Check: { tools: "none", prompt: "Check." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+
+    const invalidUpstream = structuredClone(config) as PiMateriaConfig;
+    delete invalidUpstream.loadouts!.Loop.nodes["Socket-1"].parse;
+    expect(() => resolvePipeline(invalidUpstream)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
+
+    const invalidDownstream = structuredClone(config) as PiMateriaConfig;
+    delete invalidDownstream.loadouts!.Loop.nodes["Socket-4"].parse;
+    expect(() => resolvePipeline(invalidDownstream)).toThrow(/Generator pipeline slot "Socket-4" must parse JSON and expose generated output "workItems"/);
+  });
+
+  test("resolvePipeline does not treat legacy generates metadata as active generator semantics", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Loop",
@@ -203,35 +246,39 @@ describe("loadout-aware pipeline resolution", () => {
 
     const pipeline = resolvePipeline(config);
 
-    expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-1", output: "tasks" });
+    expect(pipeline.loops?.taskIteration.consumes).toBeUndefined();
     expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
+    expect(renderGrid(config, pipeline, "test", "/tmp/project")).not.toContain("generator=tasks:array<task>");
   });
 
-  test("resolvePipeline gives clear guidance when a legacy iterator loop has multiple inbound generators", () => {
+  test("resolvePipeline infers legacy iterator loop consumers only from canonical generator markers", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Loop",
       loadouts: {
         Loop: {
           entry: "Socket-1",
-          loops: { taskIteration: { nodes: ["Socket-2", "Socket-3"], iterator: { items: "state.tasks" } } },
+          loops: { taskIteration: { nodes: ["Socket-2", "Socket-3"], iterator: { items: "state.workItems" } } },
           nodes: {
-            "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "Socket-2" }] },
-            "Socket-4": { type: "agent", materia: "otherPlanner", parse: "json", assign: { work: "$.work" }, edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-4": { type: "agent", materia: "otherPlanner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-3": { type: "agent", materia: "Check", edges: [{ when: "always", to: "Socket-2" }] },
           },
         },
       },
       materia: {
-        planner: { tools: "readOnly", prompt: "Plan.", generates: { output: "tasks", listType: "array", itemType: "task" } },
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
         otherPlanner: { tools: "readOnly", prompt: "Plan more.", generates: { output: "work", listType: "array", itemType: "task" } },
         Build: { tools: "coding", prompt: "Build." },
         Check: { tools: "none", prompt: "Check." },
       },
     };
 
-    expect(() => resolvePipeline(config)).toThrow(/Legacy loop "taskIteration" declares iterator metadata but no consumes generator.*Socket-1, Socket-4/);
+    const pipeline = resolvePipeline(config);
+
+    expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-1", output: "workItems" });
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems" });
   });
 
   test("resolvePipeline preserves explicit loop iterator metadata for runtime lookup and grid rendering", () => {
@@ -420,7 +467,7 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
 
-  test("loop generator consumers require a selected cycle and exactly one inbound generator edge", () => {
+  test("loop generator consumers require a selected cycle and exactly one inbound canonical generator edge", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Loop",
@@ -428,22 +475,22 @@ describe("utility pipeline nodes", () => {
         Loop: {
           entry: "Socket-1",
           nodes: {
-            "Socket-1": { type: "agent", materia: "customGenerator", parse: "json", assign: { work: "$.work" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-1": { type: "agent", materia: "customGenerator", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-3": { type: "agent", materia: "Check", edges: [{ when: "always", to: "Socket-2" }] },
           },
-          loops: { workLoop: { nodes: ["Socket-2", "Socket-3"], consumes: { from: "Socket-1", output: "work" } } },
+          loops: { workLoop: { nodes: ["Socket-2", "Socket-3"], consumes: { from: "Socket-1", output: "workItems" } } },
         },
       },
       materia: {
-        customGenerator: { tools: "readOnly", prompt: "Make work.", generates: { output: "work", listType: "array", itemType: "work-item", as: "workItem" } },
+        customGenerator: { tools: "readOnly", prompt: "Make work.", generator: true },
         Build: { tools: "coding", prompt: "Build." },
         Check: { tools: "none", prompt: "Check." },
       },
     };
 
     const resolved = resolvePipeline(config);
-    expect(resolved.loops?.workLoop.iterator).toMatchObject({ items: "state.work", as: "workItem" });
+    expect(resolved.loops?.workLoop.iterator).toMatchObject({ items: "state.workItems", as: "workItem" });
 
     const noCycle = structuredClone(config) as PiMateriaConfig;
     noCycle.loadouts!.Loop.nodes["Socket-3"].edges = [{ when: "always", to: "end" }];
@@ -454,12 +501,12 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(missingGeneratorInput)).toThrow(/exactly one inbound edge from a generator socket.*found none/s);
 
     const multipleGeneratorInputs = structuredClone(config) as PiMateriaConfig;
-    multipleGeneratorInputs.loadouts!.Loop.nodes["Socket-4"] = { type: "agent", materia: "otherGenerator", parse: "json", assign: { moreWork: "$.moreWork" }, edges: [{ when: "always", to: "Socket-3" }] };
-    multipleGeneratorInputs.materia.otherGenerator = { tools: "readOnly", prompt: "Make more work.", generates: { output: "moreWork", listType: "array", itemType: "work-item" } };
+    multipleGeneratorInputs.loadouts!.Loop.nodes["Socket-4"] = { type: "agent", materia: "otherGenerator", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-3" }] };
+    multipleGeneratorInputs.materia.otherGenerator = { tools: "readOnly", prompt: "Make more work.", generator: true };
     expect(() => resolvePipeline(multipleGeneratorInputs)).toThrow(/exactly one inbound edge from a generator socket.*found 2/s);
   });
 
-  test("generator declarations must map to JSON-assigned list outputs", () => {
+  test("canonical generator declarations must map to JSON-assigned workItems output", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
@@ -470,21 +517,24 @@ describe("utility pipeline nodes", () => {
             "Socket-1": { type: "agent", materia: "planner", parse: "text", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
           },
-          loops: { taskIteration: { nodes: ["Socket-2"], consumes: { from: "Socket-1", output: "tasks" } } },
+          loops: { taskIteration: { nodes: ["Socket-2"], consumes: { from: "Socket-1", output: "workItems" } } },
         },
       },
       materia: {
-        planner: { tools: "readOnly", prompt: "Plan.", generates: { output: "tasks", listType: "array", itemType: "task" } },
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true, generates: { output: "tasks", listType: "array", itemType: "task" } },
         Build: { tools: "coding", prompt: "Build." },
       },
     };
 
-    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON/);
+    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
 
     config.loadouts!.Test.nodes["Socket-1"].parse = "json";
-    expect(() => resolvePipeline(config)).toThrow(/must assign generated output "tasks"/);
+    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
 
     config.loadouts!.Test.nodes["Socket-1"].assign = { tasks: "$.tasks" };
+    expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
+
+    config.loadouts!.Test.nodes["Socket-1"].assign = { workItems: "$.workItems" };
     expect(resolvePipeline(config).entry.materia.generates?.output).toBe("tasks");
 
     config.materia.planner!.generates = { output: "tasks", itemType: "task" } as never;

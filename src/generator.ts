@@ -15,18 +15,19 @@ export const CANONICAL_WORK_ITEMS_GENERATOR_CONFIG: MateriaGeneratorConfig = {
 };
 
 /**
- * Canonical authored generator marker. Legacy `generates` metadata is accepted
- * only as migration compatibility for existing saved configs.
+ * Canonical authored generator marker. Legacy `generates` metadata is
+ * migration-only and must not activate runtime generator semantics.
  */
 export function isGeneratorMateria(definition: GeneratorMateriaLike | undefined): boolean {
-  return definition?.generator === true || Boolean(definition?.generates);
+  return definition?.generator === true;
 }
 
 /**
  * Resolve authored generator marker into the runtime loop-consumable workItems
- * contract. Existing `generates` declarations are migration-only fallbacks.
+ * contract. Runtime generator output is always the canonical handoff envelope's
+ * workItems list; legacy `generates.output` aliases are intentionally ignored.
  */
 export function canonicalGeneratorConfigFor(definition: GeneratorMateriaLike | undefined): MateriaGeneratorConfig | undefined {
   if (definition?.generator === true) return { ...CANONICAL_WORK_ITEMS_GENERATOR_CONFIG };
-  return definition?.generates;
+  return undefined;
 }

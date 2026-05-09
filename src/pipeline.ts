@@ -184,20 +184,33 @@ function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPi
 }
 
 function validateGeneratorNodeContracts(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): void {
-  const consumedGeneratorIds = new Set(Object.values(effective.pipeline.loops ?? {}).map((loop) => loop.consumes?.from).filter((id): id is string => typeof id === "string"));
-  for (const id of consumedGeneratorIds) {
+  const generatorPipelineIds = generatorPipelineNodeIds(config, effective.pipeline);
+  for (const id of generatorPipelineIds) {
     const node = effective.pipeline.nodes[id];
     if (!node || node.type !== "agent") continue;
     const generator = canonicalGeneratorConfigFor(config.materia[node.materia]);
     if (!generator) continue;
-    if (generator.listType !== "array") throw new Error(`Generator materia "${node.materia}" must resolve listType="array" for loop-consumable output "${generator.output}".`);
-    if (!generator.itemType) throw new Error(`Generator materia "${node.materia}" must resolve an itemType for loop-consumable output "${generator.output}".`);
-    if (node.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON to expose generated output "${generator.output}".`);
+    if (generator.listType !== "array") throw new Error(`Generator materia "${node.materia}" must resolve listType="array" for generator pipeline output "${generator.output}".`);
+    if (!generator.itemType) throw new Error(`Generator materia "${node.materia}" must resolve an itemType for generator pipeline output "${generator.output}".`);
+    if (node.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope.`);
     const assignedPath = node.assign?.[generator.output];
     if (assignedPath !== `$.${generator.output}`) {
-      throw new Error(`Generator pipeline slot "${id}" must assign generated output "${generator.output}" from the handoff JSON.`);
+      throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope.`);
     }
   }
+}
+
+function generatorPipelineNodeIds(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): Set<string> {
+  const ids = new Set(Object.values(pipeline.loops ?? {}).map((loop) => loop.consumes?.from).filter((id): id is string => typeof id === "string"));
+  for (const [from, node] of Object.entries(pipeline.nodes)) {
+    if (!isGeneratorPipelineNode(config, pipeline, from)) continue;
+    for (const edge of node.edges ?? []) {
+      if (!isGeneratorPipelineNode(config, pipeline, edge.to)) continue;
+      ids.add(from);
+      ids.add(edge.to);
+    }
+  }
+  return ids;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
