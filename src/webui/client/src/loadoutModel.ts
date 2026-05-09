@@ -257,6 +257,11 @@ export function formatSocketLabel(id: string, node?: PipelineNode): string {
   return `${id} (${getNodeLabel(id, node)})`;
 }
 
+export function resolveSocketDisplayLabel(loadout: PipelineConfig | undefined, socketId: string): string {
+  if (loadout?.nodes && !loadout.nodes[socketId]) return socketId;
+  return getNodeLabel(socketId, loadout?.nodes?.[socketId]);
+}
+
 function fallbackColorIndex(materiaId: string): number {
   let hash = 0;
   for (const char of materiaId) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;

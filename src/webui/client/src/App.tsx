@@ -9,6 +9,7 @@ import {
   extractMateriaReference,
   formatSocketLabel,
   getNodeLabel,
+  resolveSocketDisplayLabel,
   isEmptySocket,
   makeEmptyEntryLoadout,
   makeEmptySocket,
@@ -760,6 +761,16 @@ function estimateLoopHeaderWidth(label: string, summary: string) {
   return Math.max(loopHeaderMinWidth, Math.min(loopHeaderMaxWidth, Math.max(titleWidth, summaryWidth)));
 }
 
+function loopMemberLabels(loadout: PipelineConfig | undefined, socketIds: string[]): string[] {
+  return socketIds.map((socketId) => resolveSocketDisplayLabel(loadout, socketId));
+}
+
+export function formatLoopDisplayLabel(loadout: PipelineConfig | undefined, loopId: string, socketIds: string[], label?: string): string {
+  const memberSequence = loopMemberLabels(loadout, socketIds).join(' → ');
+  if (!label) return memberSequence || loopId;
+  return label.replace(/Socket-\d+(?=\b)/g, (socketId) => resolveSocketDisplayLabel(loadout, socketId));
+}
+
 export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>): LoopRegion[] {
   return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop], index) => {
     const sockets = loop.nodes.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
@@ -770,7 +781,7 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const consumer = loopConsumerSummary(loop);
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.nodes?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to])}` : undefined;
     const summary = [consumer, exit].filter(Boolean).join(' • ');
-    const label = loop.label ?? id;
+    const label = formatLoopDisplayLabel(loadout, id, loop.nodes, loop.label);
     const socketSpanWidth = maxX - minX;
     const headerWidth = Math.min(loopHeaderMaxWidth, Math.max(estimateLoopHeaderWidth(label, summary), socketSpanWidth + 48));
     const headerX = rounded(minX + socketSpanWidth / 2 - headerWidth / 2);
@@ -1242,6 +1253,7 @@ export function App() {
   const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
   const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
   const socketLabel = (id: string) => formatSocketLabel(id, activeLoadout?.nodes?.[id]);
+  const socketDisplayLabel = (id: string) => resolveSocketDisplayLabel(activeLoadout, id);
   const loopSelectionRectangle = socketRegionSelectionDrag ? {
     x: Math.min(socketRegionSelectionDrag.startX, socketRegionSelectionDrag.currentX),
     y: Math.min(socketRegionSelectionDrag.startY, socketRegionSelectionDrag.currentY),
@@ -1650,9 +1662,10 @@ export function App() {
     let loopId = baseId;
     let suffix = 2;
     while (existingLoops[loopId]) loopId = `${baseId}${suffix++}`;
+    const selectedLabels = selectedIds.map((id) => resolveSocketDisplayLabel(activeLoadout, id));
     const label = `Loop: ${selectedIds.join(' → ')}`;
     const created = commitGraphMutation(
-      `Staged loop around ${selectedIds.join(', ')}.`,
+      `Staged loop around ${selectedLabels.join(', ')}.`,
       (loadout) => {
         loadout.loops = {
           ...(loadout.loops ?? {}),
@@ -1664,7 +1677,7 @@ export function App() {
           },
         };
       },
-      `Staged loop around ${selectedIds.join(', ')} consuming ${generator.from}.${generator.output}.`,
+      `Staged loop around ${selectedLabels.join(', ')} consuming ${generator.from}.${generator.output}.`,
       (message) => `Cannot create loop: ${message}`,
     );
     if (created) {
@@ -2190,12 +2203,12 @@ export function App() {
                     return (
                       <div key={loopId} className="flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200/10 bg-slate-900/60 p-3" data-testid={`loop-editor-${loopId}`}>
                         <div className="min-w-48 flex-1">
-                          <div className="font-semibold text-cyan-100">{loop.label ?? loopId}</div>
-                          <div className="text-xs text-slate-400">Members: {loop.nodes.map(socketLabel).join(', ')}</div>
+                          <div className="font-semibold text-cyan-100">{formatLoopDisplayLabel(activeLoadout, loopId, loop.nodes, loop.label)}</div>
+                          <div className="text-xs text-slate-400">Members: {loop.nodes.map(socketDisplayLabel).join(', ')}</div>
                         </div>
                         <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit source
                           <select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-source-${loopId}`} value={exit.from} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>
-                            {loop.nodes.map((nodeId) => <option key={nodeId} value={nodeId}>{socketLabel(nodeId)}</option>)}
+                            {loop.nodes.map((nodeId) => <option key={nodeId} value={nodeId}>{socketDisplayLabel(nodeId)}</option>)}
                           </select>
                         </label>
                         <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit condition

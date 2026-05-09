@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { App, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './App.js';
+import { App, formatLoopDisplayLabel, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './App.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
@@ -331,12 +331,28 @@ describe('Materia loadout grid editor', () => {
     expect(region.textContent).toContain(summary);
     expect(region.getAttribute('title')).toBe(summary);
     expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
+    expect(screen.getByTestId('loop-editor-taskIteration').textContent).toContain('Members: Build, Auto-Eval, Maintain');
+    expect(screen.getByTestId('loop-editor-taskIteration').textContent).not.toContain('Members: Socket-2');
     const sourceOptions = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.getAttribute('value'));
     expect(sourceOptions).toEqual(['Socket-2', 'Socket-3', 'Socket-4']);
     const sourceOptionLabels = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.textContent);
-    expect(sourceOptionLabels).toEqual(['Socket-2 (Build)', 'Socket-3 (Auto-Eval)', 'Socket-4 (Maintain)']);
+    expect(sourceOptionLabels).toEqual(['Build', 'Auto-Eval', 'Maintain']);
     expect(screen.getByTestId('loop-exit-condition-taskIteration')).toBeTruthy();
     expect(screen.getByTestId('loop-exit-target-taskIteration')).toBeTruthy();
+  });
+
+  it('formats loop labels from member materia without changing socket-id storage', () => {
+    const loadout = {
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'Build' },
+        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
+        'Socket-3': { empty: true },
+      },
+    } as never;
+
+    expect(formatLoopDisplayLabel(loadout, 'taskLoop', ['Socket-1', 'Socket-2'], 'Loop: Socket-1 → Socket-2')).toBe('Loop: Build → Auto-Eval');
+    expect(formatLoopDisplayLabel(loadout, 'taskLoop', ['Socket-1', 'Socket-3'], undefined)).toBe('Build → Empty');
+    expect(formatLoopDisplayLabel(loadout, 'taskLoop', ['Socket-9'], undefined)).toBe('Socket-9');
   });
 
   it('edits loop exit conditions with the canonical edge model', async () => {
@@ -401,6 +417,7 @@ describe('Materia loadout grid editor', () => {
       consumes: { from: 'Socket-1', output: 'workItems' },
       exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
     });
+    expect(screen.getByTestId('loop-region-loopSelection').querySelector('.loadout-loop-title')?.textContent).toBe('Loop: Build → Auto-Eval → Maintain');
   });
 
   it('creates a loop from selected sockets on a fresh non-Build layout', async () => {
