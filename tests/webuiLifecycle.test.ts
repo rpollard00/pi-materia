@@ -143,6 +143,49 @@ describe("/materia ui lifecycle", () => {
     await expect(fetch(new URL('/api/health', first.url))).rejects.toThrow();
   });
 
+  test("launcher wires Pi model registry and active thinking into the model catalog endpoint", async () => {
+    const { harness } = await harnessWithProfile("pi-materia-webui-model-catalog-");
+    const activeModel = {
+      provider: "openai-codex",
+      id: "gpt-5.5",
+      name: "GPT 5.5 Codex",
+      api: "openai-codex-responses",
+      reasoning: true,
+      thinkingLevelMap: { off: null, minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "xhigh" },
+    };
+    const otherModel = { provider: "anthropic", id: "claude-haiku-test", name: "Claude Haiku Test", api: "anthropic-messages", reasoning: false };
+    harness.models = [activeModel, otherModel];
+    harness.activeModel = activeModel;
+    (harness.ctx as unknown as { model: unknown }).model = activeModel;
+    harness.thinkingLevel = "xhigh";
+
+    await harness.runCommand("materia", "ui");
+
+    try {
+      const launched = harness.appendedEntries.at(-1)?.data as { url: string };
+      const response = await fetch(new URL("/api/models", launched.url));
+      const body = await response.json() as { activeModelValue: string | null; activeThinking: string | null; models: Array<{ value: string; supportedThinkingLevels: string[] }> };
+
+      expect(response.status).toBe(200);
+      expect(body.activeModelValue).toBe("openai-codex/gpt-5.5");
+      expect(body.activeThinking).toBe("xhigh");
+      expect(body.models.map((model) => model.value)).toEqual(["openai-codex/gpt-5.5", "anthropic/claude-haiku-test"]);
+      expect(body.models[0]?.supportedThinkingLevels).toEqual(["minimal", "low", "medium", "high", "xhigh"]);
+      expect(body.models[1]?.supportedThinkingLevels).toEqual(["off"]);
+
+      harness.activeModel = otherModel;
+      (harness.ctx as unknown as { model: unknown }).model = otherModel;
+      harness.thinkingLevel = "low";
+
+      const updatedResponse = await fetch(new URL("/api/models", launched.url));
+      const updatedBody = await updatedResponse.json() as { activeModelValue: string | null; activeThinking: string | null };
+      expect(updatedBody.activeModelValue).toBe("anthropic/claude-haiku-test");
+      expect(updatedBody.activeThinking).toBe("low");
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
   test("launcher respects profile host and preferred port while reporting auto-open configuration", async () => {
     const { harness, profile } = await harnessWithProfile("pi-materia-webui-profile-");
     await writeFile(getUserProfileConfigPath(), JSON.stringify({ webui: { host: "127.0.0.1", preferredPort: 0, autoOpenBrowser: false } }), "utf8");

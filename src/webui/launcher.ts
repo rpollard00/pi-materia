@@ -5,7 +5,7 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../native.js";
 import { loadConfig, loadProfileConfig, saveMateriaConfigPatch } from "../config.js";
 import { generateMateriaRolePrompt } from "../roleGeneration.js";
@@ -131,6 +131,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       getConfig: () => loadConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
       generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
+      modelCatalog: createPiModelCatalogSource(ctx, pi),
     },
   });
 
@@ -144,6 +145,18 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
 
   if (autoOpenBrowser) openBrowser(url);
   return { url, reused: false, autoOpenBrowser, sessionKey };
+}
+
+function createPiModelCatalogSource(ctx: ExtensionContext, pi?: ExtensionAPI): MateriaModelCatalogSource {
+  return {
+    modelRegistry: ctx.modelRegistry,
+    getActiveModel: () => ctx.model,
+    getActiveThinking: () => maybeGetThinkingLevel(pi)?.call(pi),
+  };
+}
+
+function maybeGetThinkingLevel(pi?: ExtensionAPI): (() => unknown) | undefined {
+  return (pi as unknown as { getThinkingLevel?: () => unknown } | undefined)?.getThinkingLevel;
 }
 
 function listen(server: RunningWebUiServer["server"], host: string, port: number): Promise<number> {

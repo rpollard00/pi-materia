@@ -86,7 +86,7 @@ export class FakePiHarness {
   waitForIdleCalls = 0;
   activeTools: string[] = ["read", "grep", "find", "ls", "bash", "edit", "write"];
   allTools: Array<{ name: string }> = this.activeTools.map((name) => ({ name }));
-  models: Array<{ provider: string; id: string; name?: string; api?: string }> = [];
+  models: Array<{ provider: string; id: string; name?: string; api?: string; [key: string]: unknown }> = [];
   activeModel: unknown;
   thinkingLevel = "none";
   sessionName: string | undefined;
@@ -175,6 +175,7 @@ export class FakePiHarness {
       modelRegistry: {
         find: (provider: string, id: string) => this.models.find((model) => model.provider === provider && model.id === id),
         getAll: () => [...this.models],
+        getAvailable: () => [...this.models],
       } as never,
       model: this.activeModel,
       isIdle: () => this.idle,
