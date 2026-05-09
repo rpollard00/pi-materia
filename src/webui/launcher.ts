@@ -160,10 +160,14 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
 
     const activeCast = loadActiveCastState(ctx);
     if (activeCast?.active) {
+      const message = `Cannot change active loadout during active cast ${activeCast.castId}.`;
+      ctx.ui.notify(message, "error");
+      pi.sendMessage({ customType: "pi-materia", content: message, display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "webui", error: "active_cast_conflict", castId: activeCast.castId } });
+      pi.appendEntry("pi-materia-active-loadout-change-blocked", { eventType: "active-loadout-change-blocked", source: "webui", reason: "active_cast_conflict", castId: activeCast.castId, timestamp: Date.now() });
       return {
         ok: false,
         code: "active_cast_conflict",
-        message: `Cannot change active loadout during active cast ${activeCast.castId}.`,
+        message,
       };
     }
 

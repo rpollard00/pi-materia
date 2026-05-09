@@ -103,6 +103,12 @@ export default function piMateria(pi: ExtensionAPI) {
         try {
           const configuredPath = getConfiguredConfigPath(pi);
           if (requestedLoadout) {
+            const active = loadActiveCastState(ctx);
+            if (active?.active) {
+              ctx.ui.notify(`Cannot change active loadout during active cast ${active.castId}.`, "error");
+              pi.sendMessage({ customType: "pi-materia", content: `Cannot change active loadout during active cast ${active.castId}.`, display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "command", error: "active_cast_conflict", castId: active.castId } });
+              return;
+            }
             const written = await saveActiveLoadout(ctx.cwd, requestedLoadout, configuredPath);
             const loaded = await loadConfig(ctx.cwd, configuredPath);
             clearMateriaAuxiliaryWidgets(ctx);

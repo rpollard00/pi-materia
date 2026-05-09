@@ -43,8 +43,9 @@ describe("WebUI active loadout launcher callback", () => {
     expect(result).toEqual({ ok: false, code: "active_cast_conflict", message: "Cannot change active loadout during active cast cast-123." });
     await expect(readFile(configuredPath, "utf8")).rejects.toThrow();
     expect(harness.widgets.has("materia-loadouts")).toBe(false);
-    expect(harness.notifications).toHaveLength(0);
-    expect(harness.sentMessages).toHaveLength(0);
+    expect(harness.notifications).toEqual([{ message: "Cannot change active loadout during active cast cast-123.", type: "error" }]);
+    expect(harness.sentMessages).toHaveLength(1);
+    expect((harness.sentMessages[0]?.message as { details?: Record<string, unknown> }).details).toMatchObject({ eventType: "loadout", source: "webui", error: "active_cast_conflict", castId: "cast-123" });
   });
 
   test("persists, reloads the loadout widget, notifies the TUI, and emits a pi-materia WebUI loadout event", async () => {

@@ -31,6 +31,20 @@ export function clearWidgetTicker(ctx: ExtensionContext): void {
   widgetOwners.delete(ctx);
 }
 
+export function syncConfiguredLoadoutWidget(ctx: ExtensionContext, loadoutName: string): boolean {
+  const owner = widgetOwners.get(ctx);
+  if (owner && owner.state.endedAt === undefined) return false;
+
+  if (owner) {
+    owner.state = { ...owner.state, loadoutName };
+    ctx.ui.setWidget("materia", renderMateriaRunWidget(owner.state), { placement: "belowEditor" });
+    return true;
+  }
+
+  ctx.ui.setWidget("materia", renderConfiguredLoadoutWidget(loadoutName), { placement: "belowEditor" });
+  return true;
+}
+
 function startWidgetTicker(ctx: ExtensionContext, runId: string): void {
   if (widgetTickers.has(ctx)) return;
   const ticker = setInterval(() => {
@@ -70,6 +84,20 @@ export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now())
     `› ${truncateValue(model.message, WIDGET_MAX_LINE_LENGTH - 2)}`,
   ];
   return lines.map((line) => truncateLine(line));
+}
+
+export function renderConfiguredLoadoutWidget(loadoutName: string): string[] {
+  return [
+    joinCells([
+      fixedCell("✦ configured", 31),
+      fixedCell(`⌘ ${loadoutName || "-"}`, 14),
+      fixedCell("↻ -", 4),
+      fixedCell("◷ -", 8),
+      fixedCell("Σ -", 12),
+    ]),
+    joinCells([fixedCell("◆ active loadout", 36), fixedCell("◉ no active cast", 37)]),
+    "› Ready for the next pi-materia cast.",
+  ].map((line) => truncateLine(line));
 }
 
 export function renderMateriaCastStatusWidget(state: MateriaCastState, now = Date.now()): string[] {

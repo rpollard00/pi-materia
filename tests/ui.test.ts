@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clearWidgetTicker, formatCostLabel, formatUsage, renderCompactUsageWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, updateWidget } from "../src/ui.js";
+import { clearWidgetTicker, formatCostLabel, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/ui.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 
 function totals(tokens: number, cost: number): UsageTotals {
@@ -64,6 +64,13 @@ describe("persistent Materia widget formatting", () => {
 
     const lines = renderMateriaRunWidget(state, 2_000);
     expect(lines[0]).toContain("⌘ Yolo");
+  });
+
+  test("renders configured loadout when no cast widget is active", () => {
+    const lines = renderConfiguredLoadoutWidget("Review");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("⌘ Review");
+    expect(lines.join("\n")).toContain("no active cast");
   });
 
   test("renders legacy run state without loadout or endedAt metadata sensibly", () => {
@@ -283,6 +290,30 @@ describe("persistent Materia widget ticker ownership", () => {
       globalThis.setInterval = originalSetInterval;
       globalThis.clearInterval = originalClearInterval;
     }
+  });
+
+  test("syncs configured loadout into terminal widget but not an active cast widget", () => {
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
+
+    updateWidget(ctx, runState({ runId: "cast-a", loadoutName: "Build", endedAt: 11_000, currentMateria: "Build", lastMessage: "done" }), { replaceOwner: true });
+    expect(syncConfiguredLoadoutWidget(ctx, "Review")).toBe(true);
+    expect(widgets.at(-1)?.value?.[0]).toContain("⌘ Review");
+
+    updateWidget(ctx, runState({ runId: "cast-b", loadoutName: "Build", currentMateria: "Build", lastMessage: "running" }), { replaceOwner: true });
+    expect(syncConfiguredLoadoutWidget(ctx, "Review")).toBe(false);
+    expect(widgets.at(-1)?.value?.[0]).toContain("⌘ Build");
+
+    clearWidgetTicker(ctx);
+  });
+
+  test("syncs configured loadout into a fresh materia widget when no widget owner exists", () => {
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
+
+    expect(syncConfiguredLoadoutWidget(ctx, "Audit")).toBe(true);
+    expect(widgets.at(-1)).toMatchObject({ key: "materia" });
+    expect(widgets.at(-1)?.value?.[0]).toContain("⌘ Audit");
   });
 });
 
