@@ -3,8 +3,9 @@ import type { MateriaCastState } from "./types.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
-import { renderLoadoutList } from "./loadouts.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
+import { renderLoadoutList } from "./loadouts.js";
+import { publishActiveLoadoutChange } from "./activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
@@ -100,14 +101,23 @@ export default function piMateria(pi: ExtensionAPI) {
       if (subcommand === "loadout") {
         const requestedLoadout = rest.join(" ").trim();
         try {
+          const configuredPath = getConfiguredConfigPath(pi);
           if (requestedLoadout) {
-            const written = await saveActiveLoadout(ctx.cwd, requestedLoadout, getConfiguredConfigPath(pi));
-            ctx.ui.notify(`pi-materia active loadout set to ${requestedLoadout} (${written})`, "info");
+            const written = await saveActiveLoadout(ctx.cwd, requestedLoadout, configuredPath);
+            const loaded = await loadConfig(ctx.cwd, configuredPath);
+            clearMateriaAuxiliaryWidgets(ctx);
+            publishActiveLoadoutChange(pi, ctx, {
+              source: "command",
+              loaded,
+              writtenPath: written,
+              notifyMessage: `pi-materia active loadout set to ${loaded.config.activeLoadout ?? requestedLoadout} (${written})`,
+            });
+          } else {
+            const loaded = await loadConfig(ctx.cwd, configuredPath);
+            const lines = renderLoadoutList(loaded.config, loaded.source);
+            clearMateriaAuxiliaryWidgets(ctx);
+            pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout" } });
           }
-          const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
-          const lines = renderLoadoutList(loaded.config, loaded.source);
-          clearMateriaAuxiliaryWidgets(ctx);
-          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout" } });
         } catch (error) {
           ctx.ui.notify(`pi-materia loadout failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }

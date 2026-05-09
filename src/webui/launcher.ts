@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../native.js";
 import { loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../config.js";
-import { renderLoadoutList } from "../loadouts.js";
+import { publishActiveLoadoutChange } from "../activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../roleGeneration.js";
 
 export interface MateriaWebUiLaunchResult {
@@ -185,14 +185,11 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
       const written = await saveActiveLoadout(ctx.cwd, name, configuredPath);
       loaded = await loadConfig(ctx.cwd, configuredPath);
       const activeLoadout = loaded.config.activeLoadout ?? name;
-      const lines = renderLoadoutList(loaded.config, loaded.source);
-      ctx.ui.setWidget("materia-loadouts", lines, { placement: "belowEditor" });
-      ctx.ui.notify(`pi-materia active loadout changed from WebUI to ${activeLoadout} (${written})`, "info");
-      pi.sendMessage({
-        customType: "pi-materia",
-        content: lines.join("\n"),
-        display: true,
-        details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "webui", name: activeLoadout },
+      publishActiveLoadoutChange(pi, ctx, {
+        source: "webui",
+        loaded,
+        writtenPath: written,
+        notifyMessage: `pi-materia active loadout changed from WebUI to ${activeLoadout} (${written})`,
       });
       return { ok: true, activeLoadout, config: loaded, message: `Active loadout changed to ${activeLoadout}.` };
     } catch (error) {
