@@ -5,7 +5,7 @@ import {
 } from '../../loadoutModel.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
 import { cloneConfig } from '../utils/forms.js';
-import type { ActiveLoadoutResponse, ConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
+import type { ActiveLoadoutResponse, ConfigResponse, LoadedConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
 import {
   buildConfigToSave,
   createLoadoutDraft,
@@ -16,10 +16,39 @@ import {
   saveTargetForSource,
 } from '../features/loadout/loadoutDraft.js';
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isLoadedConfigResponse(value: unknown): value is LoadedConfigResponse {
+  return isObjectRecord(value) && isObjectRecord(value.config) && ('source' in value || 'loadoutSources' in value || !('loadouts' in value));
+}
+
+function normalizeConfigSnapshot(
+  payload: ConfigResponse | ActiveLoadoutResponse | MateriaConfig | LoadedConfigResponse | undefined,
+  fallback?: MateriaConfig,
+): { config: MateriaConfig; source?: string; loadoutSources?: Record<string, LoadoutSourceScope> } {
+  const wrapper = isLoadedConfigResponse(payload) ? payload : undefined;
+  const response = isObjectRecord(payload) ? payload as ConfigResponse : undefined;
+  const rawConfig = wrapper?.config ?? response?.config ?? payload ?? {};
+  const unwrappedConfig = isLoadedConfigResponse(rawConfig) ? rawConfig.config ?? {} : rawConfig;
+  const config = normalizeMateriaConfigEdges(unwrappedConfig as MateriaConfig);
+  if ((!config.loadouts || Object.keys(config.loadouts).length === 0) && fallback?.loadouts) {
+    config.loadouts = cloneConfig(fallback.loadouts);
+  }
+  if (!config.materia && fallback?.materia) config.materia = cloneConfig(fallback.materia);
+  return {
+    config,
+    source: wrapper?.source ?? response?.source,
+    loadoutSources: wrapper?.loadoutSources ?? response?.loadoutSources,
+  };
+}
+
 async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope> }> {
   const response = await fetch('/api/config');
   const body = await response.json() as ConfigResponse;
-  return { config: normalizeMateriaConfigEdges(body.config ?? (body as MateriaConfig)), source: body.source ?? 'unknown', loadoutSources: body.loadoutSources ?? {} };
+  const snapshot = normalizeConfigSnapshot(body);
+  return { config: snapshot.config, source: snapshot.source ?? 'unknown', loadoutSources: snapshot.loadoutSources ?? {} };
 }
 
 function activeLoadoutMessage(body: ActiveLoadoutResponse): string {
@@ -168,7 +197,11 @@ export function useWebuiConfig() {
     }
     const readyStatus = body.message ?? `Active loadout changed to ${body.activeLoadout ?? name}.`;
     if (body.config) {
-      setBaselineConfig(normalizeMateriaConfigEdges(body.config));
+      const snapshot = normalizeConfigSnapshot(body, baselineConfig ?? draftConfigRef.current);
+      const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: body.activeLoadout ?? snapshot.config.activeLoadout ?? name });
+      setBaselineConfig(nextConfig);
+      if (snapshot.source) setSource(snapshot.source);
+      if (snapshot.loadoutSources) setLoadoutSources(snapshot.loadoutSources);
       setStatus(readyStatus);
     } else {
       await reloadConfig({ preserveLoadoutEdits: true, readyStatus });

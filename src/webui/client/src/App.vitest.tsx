@@ -137,12 +137,19 @@ describe('Materia loadout grid editor', () => {
   });
 
   it('posts active-loadout selector changes and refreshes from returned config without changing the viewed loadout', async () => {
-    const updatedConfig = { ...structuredClone(testConfig), activeLoadout: 'Planning-Consult' };
+    let activeLoadout = 'Full-Auto';
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === '/api/loadout/active' && init?.method === 'POST') {
-        return new Response(JSON.stringify({ ok: true, activeLoadout: 'Planning-Consult', config: updatedConfig, message: 'Active loadout changed to Planning-Consult.' }));
+        activeLoadout = JSON.parse(String(init.body)).name;
+        const updatedConfig = { ...structuredClone(testConfig), activeLoadout };
+        return new Response(JSON.stringify({
+          ok: true,
+          activeLoadout,
+          config: { config: updatedConfig, source: 'test', loadoutSources: { 'Full-Auto': 'default', 'Planning-Consult': 'user' } },
+          message: `Active loadout changed to ${activeLoadout}.`,
+        }));
       }
-      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: { ...testConfig, activeLoadout } }));
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -156,8 +163,14 @@ describe('Materia loadout grid editor', () => {
       body: JSON.stringify({ name: 'Planning-Consult' }),
     })));
     await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    expect(within(screen.getByLabelText('Active loadout')).getByRole('option', { name: 'Full-Auto' })).toBeTruthy();
+    expect(within(screen.getByLabelText('Active loadout')).getByRole('option', { name: 'Planning-Consult' })).toBeTruthy();
     expect(screen.getByText(/Active loadout is now Planning-Consult/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Active loadout'), { target: { value: 'Full-Auto' } });
+    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Full-Auto'));
+    expect(screen.getByText(/Active loadout is now Full-Auto/i)).toBeTruthy();
   });
 
   it('restores active-loadout selector state and surfaces backend conflicts on failure', async () => {

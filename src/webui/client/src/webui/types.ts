@@ -32,9 +32,15 @@ export interface SocketPropertyFormState {
 
 export type LoadoutSourceScope = 'default' | 'user' | 'project' | 'explicit';
 
+export interface LoadedConfigResponse {
+  config?: MateriaConfig;
+  source?: string;
+  loadoutSources?: Record<string, LoadoutSourceScope>;
+}
+
 export interface ConfigResponse {
   ok?: boolean;
-  config?: MateriaConfig;
+  config?: MateriaConfig | LoadedConfigResponse;
   source?: string;
   loadoutSources?: Record<string, LoadoutSourceScope>;
 }
@@ -42,7 +48,7 @@ export interface ConfigResponse {
 export interface ActiveLoadoutResponse {
   ok?: boolean;
   activeLoadout?: string;
-  config?: MateriaConfig;
+  config?: MateriaConfig | LoadedConfigResponse;
   message?: string;
   error?: string | { code?: string; message?: string };
 }
