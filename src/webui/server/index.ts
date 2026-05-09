@@ -2,7 +2,6 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { supportsXhigh, type Api, type Model } from '@mariozechner/pi-ai';
 
 type MateriaSaveTarget = 'user' | 'project' | 'explicit';
 type MateriaGeneratorConfig = { output: string; items?: string; listType: 'array'; itemType: string; as?: string; cursor?: string; done?: string };
@@ -276,7 +275,24 @@ function supportedThinkingLevelsFor(model: Record<string, unknown>, reasoning: b
     return THINKING_LEVEL_ORDER.filter((level) => Object.prototype.hasOwnProperty.call(map, level) && map[level] !== null && map[level] !== undefined);
   }
 
-  return supportsXhigh(model as unknown as Model<Api>) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];
+  return locallySupportsXhigh(model) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];
+}
+
+function locallySupportsXhigh(model: Record<string, unknown>): boolean {
+  const id = stringField(model.id)?.toLowerCase();
+  if (!id) return false;
+
+  return (
+    id.includes('gpt-5.2') ||
+    id.includes('gpt-5.3') ||
+    id.includes('gpt-5.4') ||
+    id.includes('gpt-5.5') ||
+    id.includes('deepseek-v4-pro') ||
+    id.includes('opus-4-6') ||
+    id.includes('opus-4.6') ||
+    id.includes('opus-4-7') ||
+    id.includes('opus-4.7')
+  );
 }
 
 function thinkingLevelMapFor(model: Record<string, unknown>): Record<string, unknown> | undefined {
