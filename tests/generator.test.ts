@@ -18,10 +18,10 @@ describe("generator helpers", () => {
     });
   });
 
-  test("treats legacy generates as migration-only compatibility", () => {
+  test("does not activate legacy generates as runtime generator semantics", () => {
     const materia: MateriaConfig = { tools: "readOnly", prompt: "Plan", generates: { output: "oldItems", listType: "array", itemType: "oldItem" } };
 
-    expect(isGeneratorMateria(materia)).toBe(true);
-    expect(canonicalGeneratorConfigFor(materia)?.output).toBe("oldItems");
+    expect(isGeneratorMateria(materia)).toBe(false);
+    expect(canonicalGeneratorConfigFor(materia)).toBeUndefined();
   });
 });

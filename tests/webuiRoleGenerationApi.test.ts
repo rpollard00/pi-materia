@@ -73,11 +73,11 @@ describe("POST /api/generate/materia-role", () => {
     expect(calls).toEqual([{ brief: "reviewer role", generates: null }]);
   });
 
-  test("pipes generated list output configuration into generation requests", async () => {
+  test("pipes canonical workItems generator configuration into generation requests", async () => {
     const calls: Array<{ brief: string; generates?: unknown }> = [];
     const baseUrl = await startTestServer(async (request) => {
       calls.push(request);
-      return { ok: true, prompt: "Plan tasks carefully.", isolated: true };
+      return { ok: true, prompt: "Plan work items carefully.", isolated: true };
     });
 
     const response = await fetch(`${baseUrl}/api/generate/materia-role`, {
@@ -85,12 +85,33 @@ describe("POST /api/generate/materia-role", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         brief: "planner role",
-        generates: { output: " tasks ", items: " state.tasks ", listType: "array", itemType: " task ", as: " task ", cursor: " taskIndex ", done: " end " },
+        generates: { output: " workItems ", items: " state.workItems ", listType: "array", itemType: " workItem ", as: " workItem ", cursor: " workItemIndex ", done: " end " },
       }),
     });
 
     expect(response.status).toBe(200);
-    expect(calls).toEqual([{ brief: "planner role", generates: { output: "tasks", items: "state.tasks", listType: "array", itemType: "task", as: "task", cursor: "taskIndex", done: "end" } }]);
+    expect(calls).toEqual([{ brief: "planner role", generates: { output: "workItems", items: "state.workItems", listType: "array", itemType: "workItem", as: "workItem", cursor: "workItemIndex", done: "end" } }]);
+  });
+
+  test("rejects legacy generated output aliases in role generation requests", async () => {
+    let calls = 0;
+    const baseUrl = await startTestServer(async () => {
+      calls += 1;
+      return { ok: true, prompt: "should not run", isolated: true };
+    });
+
+    const response = await fetch(`${baseUrl}/api/generate/materia-role`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        brief: "planner role",
+        generates: { output: "tasks", items: "state.tasks", listType: "array", itemType: "task", as: "task", cursor: "taskIndex", done: "end" },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: { code: "invalid_request", message: "Obsolete generates metadata may only describe the canonical workItems contract. Use generator: true and canonical workItems; custom generates.output aliases such as tasks or work are not active runtime generator outputs." } });
+    expect(calls).toBe(0);
   });
 
   test("rejects bad request shapes before invoking generation", async () => {

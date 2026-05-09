@@ -225,7 +225,7 @@ describe("loadout-aware pipeline resolution", () => {
     expect(() => resolvePipeline(invalidDownstreamAssignment)).toThrow(/Generator pipeline slot "Socket-4" must parse JSON and expose generated output "workItems" from the canonical handoff envelope/);
   });
 
-  test("resolvePipeline does not treat legacy generates metadata as active generator semantics", () => {
+  test("resolvePipeline rejects authored legacy generates metadata with migration guidance", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Loop",
@@ -254,11 +254,7 @@ describe("loadout-aware pipeline resolution", () => {
       },
     };
 
-    const pipeline = resolvePipeline(config);
-
-    expect(pipeline.loops?.taskIteration.consumes).toBeUndefined();
-    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
-    expect(renderGrid(config, pipeline, "test", "/tmp/project")).not.toContain("generator=tasks:array<task>");
+    expect(() => resolvePipeline(config)).toThrow(/obsolete generates metadata.*generator: true.*workItems.*custom generates\.output aliases/s);
   });
 
   test("resolvePipeline infers legacy iterator loop consumers only from canonical generator markers", () => {
@@ -279,7 +275,7 @@ describe("loadout-aware pipeline resolution", () => {
       },
       materia: {
         planner: { tools: "readOnly", prompt: "Plan.", generator: true },
-        otherPlanner: { tools: "readOnly", prompt: "Plan more.", generates: { output: "work", listType: "array", itemType: "task" } },
+        otherPlanner: { tools: "readOnly", prompt: "Plan more." },
         Build: { tools: "coding", prompt: "Build." },
         Check: { tools: "none", prompt: "Check." },
       },
@@ -531,7 +527,7 @@ describe("utility pipeline nodes", () => {
         },
       },
       materia: {
-        planner: { tools: "readOnly", prompt: "Plan.", generator: true, generates: { output: "tasks", listType: "array", itemType: "task" } },
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
         Build: { tools: "coding", prompt: "Build." },
       },
     };
@@ -545,13 +541,10 @@ describe("utility pipeline nodes", () => {
     expect(() => resolvePipeline(config)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
 
     config.loadouts!.Test.nodes["Socket-1"].assign = { workItems: "$.workItems" };
-    expect(resolvePipeline(config).entry.materia.generates?.output).toBe("tasks");
+    expect(resolvePipeline(config).entry.materia.generator).toBe(true);
 
-    config.materia.planner!.generates = { output: "tasks", itemType: "task" } as never;
-    expect(() => resolvePipeline(config)).toThrow(/invalid generates\.listType/);
-
-    config.materia.planner!.generates = { output: "tasks", listType: "array", itemType: "" } as never;
-    expect(() => resolvePipeline(config)).toThrow(/invalid generates\.itemType/);
+    config.materia.planner!.generates = { output: "tasks", listType: "array", itemType: "task" } as never;
+    expect(() => resolvePipeline(config)).toThrow(/obsolete generates metadata.*generator: true.*workItems/s);
   });
 
   test("rejects malformed multiTurn values on materia", () => {

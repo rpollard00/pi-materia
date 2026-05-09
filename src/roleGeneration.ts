@@ -3,6 +3,7 @@ import { createAgentSession, SessionManager } from "@mariozechner/pi-coding-agen
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { loadProfileConfig } from "./config.js";
+import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "./generator.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "./handoffContract.js";
 import { getActiveModelInfo } from "./modelSettings.js";
 import type { MateriaGeneratorConfig, MateriaRoleGenerationProfileConfig } from "./types.js";
@@ -139,15 +140,20 @@ export function buildRoleGenerationPrompt(
 
 function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefined): string {
   if (!generates) return "Generator role: none configured.";
+  const canonical = CANONICAL_WORK_ITEMS_GENERATOR_CONFIG;
+  const legacyNote = generates.output !== canonical.output || generates.itemType !== canonical.itemType
+    ? "Legacy generator metadata from the request is migration-only and must not be copied into the generated prompt."
+    : undefined;
   return [
     "Generator role: produce the canonical workItems list for downstream loop regions.",
-    `- canonical output key: ${generates.output}`,
-    `- list type: ${generates.listType}`,
-    `- item type: ${generates.itemType}`,
-    generates.items ? `- items path: ${generates.items}` : undefined,
-    generates.as ? `- work item alias: ${generates.as}` : undefined,
-    generates.cursor ? `- cursor: ${generates.cursor}` : undefined,
-    generates.done ? `- done behavior: ${generates.done}` : undefined,
+    `- canonical output key: ${canonical.output}`,
+    `- list type: ${canonical.listType}`,
+    `- item type: ${canonical.itemType}`,
+    `- items path: state.${canonical.output}`,
+    `- work item alias: ${canonical.as}`,
+    `- cursor: ${canonical.cursor}`,
+    `- done behavior: ${canonical.done}`,
+    legacyNote,
     "Treat this as node/socket adapter metadata for assignment and iteration. The generated role prompt must use the canonical handoff envelope and put generated units of work in workItems, not in reserved evaluator/route fields or legacy placement-specific outputs such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
   ].filter(Boolean).join("\n");
 }

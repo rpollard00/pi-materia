@@ -6,7 +6,7 @@ import { App, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './Ap
 const testConfig = {
   activeLoadout: 'Full-Auto',
   materia: {
-    planner: { tools: 'none', prompt: 'Plan the work', generates: { output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' } },
+    planner: { tools: 'none', prompt: 'Plan the work', generator: true },
     Build: { tools: 'coding', prompt: 'Build the work', model: 'openai/gpt-test' },
     'Auto-Eval': { tools: 'readOnly', prompt: 'Evaluate the work' },
     Maintain: { tools: 'coding', prompt: 'Maintain the work' },
@@ -16,7 +16,7 @@ const testConfig = {
     'Full-Auto': {
       entry: 'Socket-1',
       nodes: {
-        'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { tasks: '$.tasks' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
+        'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
         'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
         'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }], layout: { x: 2, y: 0 } },
         'Socket-4': { type: 'agent', materia: 'Maintain', layout: { x: 3, y: 0 } },
@@ -242,9 +242,9 @@ describe('Materia loadout grid editor', () => {
     const config = structuredClone(testConfig);
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
-        label: 'Build → Eval → Maintain until all tasks complete',
+        label: 'Build → Eval → Maintain until all work items complete',
         nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
-        consumes: { from: 'Socket-1', output: 'tasks' },
+        consumes: { from: 'Socket-1', output: 'workItems' },
       },
     };
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
@@ -375,7 +375,7 @@ describe('Materia loadout grid editor', () => {
     expect(saved.loops.loopSelection).toEqual({
       label: 'Loop: Socket-2 → Socket-3 → Socket-4',
       nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
-      consumes: { from: 'Socket-1', output: 'tasks' },
+      consumes: { from: 'Socket-1', output: 'workItems' },
       exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
     });
   });
@@ -384,7 +384,7 @@ describe('Materia loadout grid editor', () => {
     const config = {
       activeLoadout: 'Fresh Loop',
       materia: {
-        planner: { tools: 'none', prompt: 'Plan', generates: { output: 'items', listType: 'array', itemType: 'task' } },
+        planner: { tools: 'none', prompt: 'Plan', generator: true },
         worker: { tools: 'coding', prompt: 'Work' },
         checker: { tools: 'readOnly', prompt: 'Check' },
       },
@@ -392,7 +392,7 @@ describe('Materia loadout grid editor', () => {
         'Fresh Loop': {
           entry: 'Socket-1',
           nodes: {
-            'Socket-1': { type: 'agent', materia: 'planner', assign: { items: '$.items' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
+            'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
             'Socket-2': { type: 'agent', materia: 'worker', edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 } },
             'Socket-3': { type: 'agent', materia: 'checker', edges: [{ when: 'not_satisfied', to: 'Socket-2' }], layout: { x: 2, y: 0 } },
           },
@@ -408,7 +408,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('create-task-loop'));
 
     const region = await screen.findByTestId('loop-region-loopSelection');
-    expect(region.getAttribute('title')).toContain('Loop consumes: Socket-1.items');
+    expect(region.getAttribute('title')).toContain('Loop consumes: Socket-1.workItems');
   });
 
   it('selects loop sockets by dragging a region box before creating a loop', async () => {
@@ -1633,6 +1633,7 @@ describe('Materia loadout grid editor', () => {
   it('views, creates, and removes semantic Generator config without legacy fields', async () => {
     const generatorConfig = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
     (generatorConfig.materia.planner as any).generator = true;
+    (generatorConfig.materia.interactivePlan as any).generator = true;
     (generatorConfig.materia.interactivePlan as any).generates = { output: 'tasks', listType: 'array', itemType: 'task', as: 'task', cursor: 'taskIndex', done: 'end' };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));

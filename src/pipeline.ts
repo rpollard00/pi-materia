@@ -145,16 +145,12 @@ function validateGeneratorMarker(name: string, generator: unknown): void {
   }
 }
 
-// Migration-only validation for existing saved configs that still author `generates`.
+// Migration-only cleanup marker: saved editors may write `generates: null` to
+// remove the obsolete declaration, but authored `generates` metadata must not
+// activate or describe runtime generator output.
 function validateLegacyGeneratorDeclaration(name: string, generates: unknown): void {
-  if (generates === undefined) return;
-  if (!isPlainObject(generates)) throw new Error(`Materia "${name}" has invalid generates. Expected an object.`);
-  if (typeof generates.output !== "string" || generates.output.length === 0) throw new Error(`Materia "${name}" has invalid generates.output. Expected a non-empty string.`);
-  if (generates.listType !== "array") throw new Error(`Materia "${name}" has invalid generates.listType. Expected "array" for loop-consumable list outputs.`);
-  if (typeof generates.itemType !== "string" || generates.itemType.length === 0) throw new Error(`Materia "${name}" has invalid generates.itemType. Expected a non-empty string.`);
-  for (const field of ["items", "as", "cursor", "done"] as const) {
-    if (generates[field] !== undefined && (typeof generates[field] !== "string" || generates[field].length === 0)) throw new Error(`Materia "${name}" has invalid generates.${field}. Expected a non-empty string when configured.`);
-  }
+  if (generates === undefined || generates === null) return;
+  throw new Error(`Materia "${name}" configures obsolete generates metadata. Use generator: true and emit canonical JSON with workItems; custom generates.output aliases are not active runtime generator outputs.`);
 }
 
 function isGeneratorPipelineNode(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, nodeId: string): boolean {
