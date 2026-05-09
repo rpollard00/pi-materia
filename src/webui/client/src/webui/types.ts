@@ -1,0 +1,212 @@
+import type { MateriaEdgeCondition } from '../../../../types.js';
+import type { MateriaConfig, PipelineConfig, PipelineNode } from '../loadoutModel.js';
+
+export type SaveTarget = 'user' | 'project' | 'explicit';
+
+export interface MateriaFormState {
+  editingNodeId: string;
+  name: string;
+  behavior: 'prompt' | 'tool';
+  prompt: string;
+  toolAccess: 'none' | 'readOnly' | 'coding';
+  model: string;
+  thinking: string;
+  color: string;
+  outputFormat: 'text' | 'json';
+  multiTurn: boolean;
+  generator: boolean;
+  utility: string;
+  command: string;
+  params: string;
+  timeoutMs: string;
+  persistScope: SaveTarget;
+}
+
+export interface SocketPropertyFormState {
+  maxVisits: string;
+  maxEdgeTraversals: string;
+  maxOutputBytes: string;
+  layoutX: string;
+  layoutY: string;
+}
+
+export type LoadoutSourceScope = 'default' | 'user' | 'project' | 'explicit';
+
+export interface ConfigResponse {
+  ok?: boolean;
+  config?: MateriaConfig;
+  source?: string;
+  loadoutSources?: Record<string, LoadoutSourceScope>;
+}
+
+export interface RoleGenerationResponse {
+  ok?: boolean;
+  prompt?: string;
+  error?: string | { message?: string };
+}
+
+export interface ModelCatalogModel {
+  value: string;
+  label: string;
+  provider?: string;
+  id?: string;
+  supportedThinkingLevels: string[];
+}
+
+export interface ModelCatalogResponse {
+  ok?: boolean;
+  activeModel?: ModelCatalogModel | null;
+  activeModelValue?: string | null;
+  activeThinking?: string | null;
+  models: ModelCatalogModel[];
+  warnings?: string[];
+}
+
+export type ModelCatalogLoadState = 'idle' | 'loading' | 'ready' | 'error';
+
+export interface OriginalMateriaModelSettings {
+  editingNodeId: string;
+  model: string;
+  thinking: string;
+}
+
+export interface SelectOption {
+  value: string;
+  label: string;
+  unavailable?: boolean;
+}
+
+export interface MateriaSavedEventDetail {
+  id: string;
+  name: string;
+  behavior: MateriaFormState['behavior'];
+  requestedScope: SaveTarget;
+  scope: SaveTarget | string;
+}
+
+export interface MonitorSnapshot {
+  ok?: boolean;
+  sessionKey?: string;
+  uiStartedAt?: number;
+  now?: number;
+  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }>;
+  artifactSummary?: {
+    runDir?: string;
+    request?: string;
+    summary?: string;
+    events?: Array<{ ts?: number; type?: string; data?: unknown }>;
+    outputs?: Array<{ node?: string; materia?: string; phase?: string; kind?: string; artifact?: string; timestamp?: number; content?: string }>;
+  };
+  activeCast?: {
+    castId: string;
+    active: boolean;
+    phase: string;
+    currentNode?: string;
+    currentMateria?: string;
+    nodeState?: string;
+    awaitingResponse: boolean;
+    runDir: string;
+    artifactRoot: string;
+    startedAt: number;
+    updatedAt: number;
+  };
+}
+
+export interface DragPayload {
+  kind: 'palette' | 'socket';
+  materiaId: string;
+  fromLoadout?: string;
+  fromSocket?: string;
+}
+
+export interface LoadoutEdge {
+  id: string;
+  from: string;
+  to: string;
+  when: MateriaEdgeCondition;
+  edgeIndex?: number;
+}
+
+export interface PositionedSocket {
+  id: string;
+  node: PipelineNode;
+  index: number;
+  x: number;
+  y: number;
+}
+
+export interface RoutedLoadoutEdge {
+  edge: LoadoutEdge;
+  path: string;
+  labelX: number;
+  labelY: number;
+  labelRotate: number;
+  routeClass: 'forward' | 'backward' | 'loop';
+}
+
+export interface LoopRegion {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  summary: string;
+  cyclePath: string;
+  accent: string;
+  accentSoft: string;
+}
+
+export interface LoopMembership {
+  loopIds: string[];
+  accent: string;
+  accentSoft: string;
+}
+
+export interface LoopExitBadge {
+  loopIds: string[];
+  title: string;
+  accent: string;
+  accentSoft: string;
+}
+
+export type SocketAnchorSide = 'top' | 'right' | 'bottom' | 'left';
+
+export interface SocketAnchorPoint {
+  x: number;
+  y: number;
+  side: SocketAnchorSide;
+}
+
+export interface SocketLayoutDragState {
+  socketId: string;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  originX: number;
+  originY: number;
+  currentX: number;
+  currentY: number;
+  moved: boolean;
+}
+
+export interface SocketRegionSelectionDragState {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+}
+
+export type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor';
+
+export type GeneratedListOutputConfig = NonNullable<NonNullable<MateriaConfig['materia']>[string]['generates']>;
+
+export interface LayoutSocketsResult {
+  sockets: PositionedSocket[];
+  edges: LoadoutEdge[];
+  width: number;
+  height: number;
+}
+
+export type { PipelineConfig };

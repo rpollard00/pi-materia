@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { App, formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './App.js';
+import { App } from './App.js';
+import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './webui/utils/graphLayout.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',

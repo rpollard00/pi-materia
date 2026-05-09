@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { modelSelectOptions } from './App.js';
+import { modelSelectOptions } from './webui/utils/modelCatalog.js';
 
 describe('modelSelectOptions', () => {
   test('keeps Active Pi Model first before catalog-provided models', () => {

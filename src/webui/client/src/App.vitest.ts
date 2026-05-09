@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatLoopDisplayLabel, getLoopRegions } from './App.js';
+import { formatLoopDisplayLabel, getLoopRegions } from './webui/utils/graphLayout.js';
 import { makeEmptySocket, type PipelineConfig } from './loadoutModel.js';
 
 const loopLoadout = {
