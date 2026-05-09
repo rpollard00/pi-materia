@@ -95,6 +95,37 @@ describe('loadout normalization model', () => {
     expect(config.loadouts?.Loop.nodes?.['Socket-1'].assign?.workItems).toBe('$.workItems');
     expect(config.loadouts?.Loop.nodes?.['Socket-2'].parse).toBeUndefined();
   });
+
+  it('materializes loop exit control fields before save without deleting back-edges', () => {
+    const config = normalizeMateriaConfigEdges({
+      loadouts: {
+        Yolo: {
+          entry: 'Socket-1',
+          loops: {
+            loopSelection: {
+              nodes: ['Socket-3', 'Socket-4'],
+              consumes: { from: 'Socket-1', output: 'workItems' },
+              exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
+            },
+          },
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-3': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
+            'Socket-4': { type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
+          },
+        },
+      },
+      materia: {
+        planner: { prompt: 'Plan.', generator: true },
+        Build: { prompt: 'Build.' },
+        Maintain: { prompt: 'Maintain.' },
+      },
+    });
+
+    expect(config.loadouts?.Yolo.nodes?.['Socket-4'].parse).toBe('json');
+    expect(config.loadouts?.Yolo.nodes?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
+    expect(config.loadouts?.Yolo.nodes?.['Socket-4'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+  });
 });
 
 describe('loadout materia color model', () => {

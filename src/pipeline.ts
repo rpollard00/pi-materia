@@ -1,6 +1,7 @@
 import { resolveArtifactRoot } from "./config.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
 import { canonicalGeneratorConfigFor, isGeneratorMateria } from "./generator.js";
+import { materializeLoadoutLoopSemantics } from "./loopSemantics.js";
 import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaNode, ResolvedMateriaPipeline } from "./types.js";
 
 export interface EffectiveMateriaPipelineConfig {
@@ -34,6 +35,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   const effective = getEffectivePipelineConfig(config);
   migrateLegacyLoopConsumers(config, effective.pipeline);
   normalizeGeneratorPipelineSlots(config, effective.pipeline);
+  materializeLoadoutLoopSemantics(config, effective.pipeline, { loadoutName: effective.loadoutName });
   validateLoadout(effective.loadoutName, effective.pipeline);
   assertValidPipelineGraph(effective.pipeline, { isGeneratorNode: (nodeId) => isGeneratorPipelineNode(config, effective.pipeline, nodeId) });
   const nodes = Object.fromEntries(

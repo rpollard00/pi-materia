@@ -136,6 +136,88 @@ describe("loadout-aware pipeline resolution", () => {
     expect(() => resolvePipeline(withMissingEdgeEndpoint)).toThrow(/Missing graph endpoint referenced by Socket-1\.edges\[0\]\.to/);
   });
 
+  test("resolvePipeline materializes executable loop exit semantics from generator consumer metadata", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Yolo",
+      loadouts: {
+        Yolo: {
+          entry: "Socket-1",
+          loops: {
+            loopSelection: {
+              nodes: ["Socket-3", "Socket-4"],
+              consumes: { from: "Socket-1", output: "workItems" },
+              exit: { from: "Socket-4", when: "satisfied", to: "Socket-2" },
+            },
+          },
+          nodes: {
+            "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-2": { type: "agent", materia: "Done" },
+            "Socket-3": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
+            "Socket-4": { type: "agent", materia: "Maintain", edges: [{ when: "always", to: "Socket-3" }] },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+        Maintain: { tools: "coding", prompt: "Maintain." },
+        Done: { tools: "none", prompt: "Done." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+
+    expect(pipeline.nodes["Socket-4"].node.parse).toBe("json");
+    expect(pipeline.nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "Socket-2", when: "satisfied" });
+    expect(pipeline.nodes["Socket-4"].node.edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    expect(pipeline.loops?.loopSelection.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+  });
+
+  test("resolvePipeline preserves compatible materialized loop semantics and rejects conflicts", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Socket-1",
+          loops: {
+            taskIteration: {
+              nodes: ["Socket-2"],
+              consumes: { from: "Socket-1", output: "workItems" },
+              exit: { from: "Socket-2", when: "satisfied", to: "end" },
+            },
+          },
+          nodes: {
+            "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": {
+              type: "agent",
+              materia: "Build",
+              parse: "json",
+              advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
+              edges: [{ when: "always", to: "Socket-2" }],
+            },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+    expect(pipeline.nodes["Socket-2"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+
+    const conflictingParse = structuredClone(config) as PiMateriaConfig;
+    conflictingParse.loadouts!.Loop.nodes["Socket-2"].parse = "text";
+    expect(() => resolvePipeline(conflictingParse)).toThrow(/requires parse: "json".*Current parse is "text"/);
+
+    const conflictingAdvance = structuredClone(config) as PiMateriaConfig;
+    conflictingAdvance.loadouts!.Loop.nodes["Socket-2"].advance = { cursor: "otherIndex", items: "state.workItems", done: "end", when: "satisfied" };
+    expect(() => resolvePipeline(conflictingAdvance)).toThrow(/existing advance block.*cursor: current "otherIndex", expected "workItemIndex"/);
+  });
+
   test("resolvePipeline derives loop iterator metadata from a declared generator consumer", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",

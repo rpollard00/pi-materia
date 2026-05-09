@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
+import { materializeConfigLoadoutLoopSemantics } from "./loopSemantics.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -75,6 +76,7 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   const next = mergeConfigPatch(existing, patch);
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
   next.loadouts = normalizeLoadouts(next.loadouts);
+  if (next.materia && next.loadouts) materializeConfigLoadoutLoopSemantics(next as PiMateriaConfig);
   validateLoadoutGraphs(next.loadouts);
   await writeJsonAtomic(file, next);
   return file;
@@ -234,6 +236,7 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
   config.loadouts = normalizeLoadouts(config.loadouts);
+  materializeConfigLoadoutLoopSemantics(config);
   validateLoadoutGraphs(config.loadouts);
   return config;
 }

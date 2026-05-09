@@ -1,5 +1,6 @@
+import { materializeLoadoutLoopSemantics } from '../../../loopSemantics.js';
 import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socketIds.js';
-import type { MateriaEdgeCondition } from '../../../types.js';
+import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 
 type NodeType = 'agent' | 'utility';
 
@@ -54,6 +55,7 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
       delete node.next;
     }
     normalizeGeneratorPipelineSockets(loadout, normalized.materia ?? {});
+    materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, loadout as MateriaPipelineConfig);
   }
   return normalized;
 }
