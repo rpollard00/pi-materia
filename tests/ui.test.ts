@@ -102,8 +102,44 @@ describe("persistent Materia widget formatting", () => {
     expect(lines).toHaveLength(3);
     expect(lines[0]).toContain("⌘ Review");
     expect(lines.join("\n")).toContain("no active cast");
+    // Intentional omissions: the permanent widget already communicates the configured
+    // loadout compactly, so do not re-add duplicate Loadout or Available lines here.
     expect(lines.join("\n")).not.toContain("Loadout:");
     expect(lines.join("\n")).not.toContain("Available:");
+  });
+
+  test("renders active single-materia cast details without permanent-panel duplication", () => {
+    const run = runState({
+      loadoutName: "Hojo-Consult",
+      currentNode: "Socket-5",
+      currentMateria: "Maintain",
+      currentTask: "Remove unused WebUI unsocket drop panel",
+      attempt: 2,
+      usage: { ...totals(0, 0), tokens: { input: 205_000, output: 9_700, cacheRead: 0, cacheWrite: 0, total: 214_700 } },
+    });
+    const state = {
+      active: true,
+      phase: "Socket-5",
+      currentNode: "Socket-5",
+      currentMateria: "Maintain",
+      currentItemLabel: "Remove unused WebUI unsocket drop panel",
+      awaitingResponse: true,
+      runState: run,
+    } as MateriaCastState;
+
+    const lines = renderMateriaCastStatusWidget(state, 9_638_000);
+    const text = lines.join("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("✦ active");
+    expect(lines[0]).toContain("⌘ Hojo-Consult ◉ Maintain");
+    expect(lines[0]).toContain("↻ 2");
+    expect(lines[0]).toContain("◷ 2h40m");
+    expect(lines[0]).toContain("Σ 205k/9.7k");
+    expect(lines[1]).toContain("◆ Remove unused WebUI");
+    expect(lines[1]).toContain("⟲ -");
+    expect(text).not.toContain("Loadout:");
+    expect(text).not.toContain("Available:");
+    expect(text.match(/Maintain/g)?.length ?? 0).toBeLessThanOrEqual(3);
   });
 
   test("renders legacy run state without loadout or endedAt metadata sensibly", () => {
@@ -243,6 +279,49 @@ describe("persistent Materia widget formatting", () => {
     expect(lines[1]).toContain("⟲ -");
     expect(lines[2]).toBe("› complete");
     expect(lines.every((line) => line.length <= 78)).toBe(true);
+  });
+
+  test("renders resumed cast state with the same compact ordering as basic run state", () => {
+    const run = runState({ loadoutName: "Review", currentNode: "Socket-7", currentMateria: "Build", currentTask: "Validate resumed cast", attempt: 4 });
+    const resumed = {
+      active: true,
+      phase: "Socket-7",
+      currentNode: "Socket-7",
+      currentMateria: "Build",
+      currentItemLabel: "Validate resumed cast",
+      awaitingResponse: false,
+      nodeState: "idle",
+      runState: run,
+    } as MateriaCastState;
+
+    const basicLines = renderMateriaRunWidget(run, 2_000);
+    const richLines = renderMateriaCastStatusWidget(resumed, 2_000);
+    for (const marker of ["✦", "⌘", "↻", "◷", "Σ"]) {
+      expect(richLines[0].indexOf(marker)).toBe(basicLines[0].indexOf(marker));
+    }
+    expect(richLines[0]).toContain("⌘ Review ◉ Build");
+    expect(richLines[1]).toContain("◆ Validate resumed cast");
+    expect(richLines[1]).toContain("⟲ -");
+    expect(richLines[2]).toBe("› Build active");
+  });
+
+  test("keeps missing current materia fallback understandable in rich cast status", () => {
+    const run = runState({ loadoutName: "Review", currentNode: "Socket-9", currentMateria: undefined, currentTask: undefined, lastMessage: undefined });
+    const state = {
+      active: true,
+      phase: "Socket-9",
+      currentNode: "Socket-9",
+      awaitingResponse: true,
+      runState: run,
+    } as MateriaCastState;
+
+    const lines = renderMateriaCastStatusWidget(state, 2_000);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("⌘ Review ◉ Socket-9");
+    expect(lines[1]).toContain("◆ -");
+    expect(lines[1]).toContain("⟲ -");
+    expect(lines[2]).toBe("› Socket-9 active");
+    expect(lines.join("\n")).not.toContain("undefined");
   });
 
   test("renders compact completion usage without billing disclaimers", () => {
