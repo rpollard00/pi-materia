@@ -18,6 +18,14 @@ The supported `when` values are:
 
 Edges are evaluated in order and the first matching edge wins. Put guarded edges before any `always` edge, because edges after an unconditional edge are unreachable.
 
+## Canonical output parsing and control fields
+
+`parse` is the canonical persisted output parsing field for loadout nodes and sockets. UI-authored loadouts and JSON-authored defaults must save the same semantics here: use `parse: "json"` for nodes whose output is structured JSON that feeds `assign`, `advance`, or guarded routing, and use `parse: "text"` or omit `parse` only for plain-text outputs.
+
+`satisfied` is the only canonical boolean satisfaction/control field. `satisfied` and `not_satisfied` edges, and `advance.when: "satisfied"`, read the parsed JSON handoff's boolean `satisfied` value. Because that value is only available after JSON parsing, any node with `satisfied` / `not_satisfied` routing must have `parse: "json"`; text-outputting nodes may only use `always` edges. Legacy aliases such as `passed` are migration-only compatibility if encountered in old configs or tests; do not author new defaults, reusable materia, UI saves, or prompts that depend on them.
+
+When adding reusable materia or defaults, make the socket/node `parse` value explicit whenever routing or state assignment depends on structured output. Palette/UI-created nodes should preserve this canonical `parse` setting so UI-authored and hand-written JSON loadouts remain equivalent.
+
 ## Generator and loop-consumer regions
 
 Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's canonical Generator config, and declares an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. For generator-consuming loops, `loops.exit` plus `loops.consumes` is materialized into the canonical runtime fields on the exit source: `parse: "json"` when `satisfied` / `not_satisfied` control is needed, and an `advance` block whose `cursor`/`items` come from the consumed generator output and whose `done`/`when` come from the loop exit. The normal ordered `edges` remain canonical routing; `advance` runs before edge selection, so unconditional back-edges continue non-final items while `advance.done` exits after the consumed items are complete. The `exit.from` socket must exist and be one of the loop members. See [Loop semantics](loop-semantics.md) for migration behavior, conflict handling, and full examples.
