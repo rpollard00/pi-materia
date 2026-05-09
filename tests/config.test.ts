@@ -239,6 +239,78 @@ describe("config loadouts", () => {
     }
   });
 
+  test("loadConfig materializes declarative loop exits for existing saved loadouts", async () => {
+    const saved = await writeConfig({
+      activeLoadout: "Yolo",
+      materia: {
+        yoloPlanner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        yoloBuild: { tools: "coding", prompt: "Build." },
+        yoloMaintain: { tools: "coding", prompt: "Maintain." },
+      },
+      loadouts: {
+        Yolo: {
+          entry: "Socket-1",
+          nodes: {
+            "Socket-1": { type: "agent", materia: "yoloPlanner", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-3": { type: "agent", materia: "yoloBuild", edges: [{ when: "always", to: "Socket-4" }] },
+            "Socket-4": { type: "agent", materia: "yoloMaintain", edges: [{ when: "always", to: "Socket-3" }] },
+          },
+          loops: {
+            loopSelection: {
+              nodes: ["Socket-3", "Socket-4"],
+              consumes: { from: "Socket-1", output: "workItems" },
+              exit: { from: "Socket-4", when: "satisfied", to: "end" },
+            },
+          },
+        },
+      },
+    });
+
+    const loaded = await loadConfig(saved.dir, saved.file);
+
+    expect(loaded.config.loadouts?.Yolo.nodes["Socket-4"].parse).toBe("json");
+    expect(loaded.config.loadouts?.Yolo.nodes["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(loaded.config.loadouts?.Yolo.nodes["Socket-4"].edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    const pipeline = resolvePipeline(loaded.config);
+    expect(pipeline.nodes["Socket-1"].node.parse).toBe("json");
+    expect(pipeline.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
+    expect(pipeline.nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+  });
+
+  test("loadConfig reports loop materialization conflicts instead of overwriting authored semantics", async () => {
+    const saved = await writeConfig({
+      activeLoadout: "ConflictingLoop",
+      materia: {
+        conflictPlanner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        conflictBuild: { tools: "coding", prompt: "Build." },
+      },
+      loadouts: {
+        ConflictingLoop: {
+          entry: "Socket-1",
+          nodes: {
+            "Socket-1": { type: "agent", materia: "conflictPlanner", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": {
+              type: "agent",
+              materia: "conflictBuild",
+              parse: "json",
+              advance: { cursor: "otherIndex", items: "state.workItems", done: "end", when: "satisfied" },
+              edges: [{ when: "always", to: "Socket-2" }],
+            },
+          },
+          loops: {
+            taskIteration: {
+              nodes: ["Socket-2"],
+              consumes: { from: "Socket-1", output: "workItems" },
+              exit: { from: "Socket-2", when: "satisfied", to: "end" },
+            },
+          },
+        },
+      },
+    });
+
+    await expect(loadConfig(saved.dir, saved.file)).rejects.toThrow(/existing advance block.*cursor: current "otherIndex", expected "workItemIndex"/);
+  });
+
   test("rejects loadout-level prompt fields so materia.prompt stays the only behavior prompt source", async () => {
     const withPrompt = await writeConfig({
       loadouts: {

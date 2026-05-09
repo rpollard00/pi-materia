@@ -20,7 +20,7 @@ Edges are evaluated in order and the first matching edge wins. Put guarded edges
 
 ## Generator and loop-consumer regions
 
-Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's canonical Generator config, and documents an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. The `exit.from` socket must exist and be one of the loop members.
+Loops are explicit regions under a loadout's `loops` object. A loop region groups node ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's canonical Generator config, and declares an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. For generator-consuming loops, `loops.exit` plus `loops.consumes` is materialized into the canonical runtime fields on the exit source: `parse: "json"` when `satisfied` / `not_satisfied` control is needed, and an `advance` block whose `cursor`/`items` come from the consumed generator output and whose `done`/`when` come from the loop exit. The normal ordered `edges` remain canonical routing; `advance` runs before edge selection, so unconditional back-edges continue non-final items while `advance.done` exits after the consumed items are complete. The `exit.from` socket must exist and be one of the loop members. See [Loop semantics](loop-semantics.md) for migration behavior, conflict handling, and full examples.
 
 A Generator materia uses the semantic authored marker `generator: true`. Runtime resolves that marker to the canonical work-items contract (`workItems`, `workItem`, `workItemIndex`, `end`). A generator socket must parse JSON and expose `workItems` from the canonical handoff envelope. For reusable work planning, use the generic handoff envelope and generate `workItems`; do not retain `tasks`, `work`, or custom `generates.output` aliases as compatibility outputs for newly generated units of work:
 
@@ -60,7 +60,7 @@ Socket-4 (Build) --always--> Socket-5 (Auto-Eval) --satisfied--> Socket-6 (Maint
                                                └--not_satisfied--> Socket-4 (Build)
 ```
 
-The loop consumes the planner generator's `workItems` output, which derives an iterator over `state.workItems`; each member node handles the current work item until `Maintain` advances the cursor. Build-style text nodes consume the current `workItem` plus global guidance supplied by the adapter context and summarize implementation; they do not decide parsing, assignment, routing, or iteration themselves. The documented exit summary renders source-aware, for example `exit=Socket-6.satisfied->end`, and the loop exits to `end` when the cursor reaches the generator-derived `done` target.
+The loop consumes the planner generator's `workItems` output, which derives an iterator over `state.workItems`; each member node handles the current work item until `Maintain` advances the cursor. Build-style text nodes consume the current `workItem` plus global guidance supplied by the adapter context and summarize implementation; they do not decide parsing, assignment, routing, or iteration themselves. The documented exit summary renders source-aware, for example `exit=Socket-6.satisfied->end`, and the loop exits to `end` when the materialized `advance` block reaches the generator-derived consumed-list boundary.
 
 Generator-to-generator chaining uses the same contract. An upstream generator emits a handoff envelope with `workItems`; a downstream generator may consume those items, refine or split them, and must itself return a JSON handoff envelope with a new canonical `workItems` array:
 
@@ -92,7 +92,11 @@ Built-in setup/discovery steps such as `ensureArtifactsIgnored` and `detectVcs` 
 
 Generator materia are marked with a **Generator** badge. Sockets inside loop regions are marked as **Loop consumer** instead of labeling arbitrary loop members as iterators. The badge is the accessible cue; the overlay preserves the materia's configured base color.
 
-## Legacy iterator migration
+## Migration and compatibility
+
+`satisfied` is the canonical boolean route/control field for `satisfied` / `not_satisfied` edges and `advance.when`. Legacy aliases are migration-only when they are mentioned by old notes or negative tests; do not author new loadouts that depend on aliases such as `passed`.
+
+Saved UI loadouts that already declare `loops.exit` and generator `consumes` but are missing executable node-level fields are normalized through the shared materializer in `loadConfig()`, `saveMateriaConfigPatch()`, WebUI save normalization, and `resolvePipeline()`. Compatible hand-authored fields are preserved. Conflicts, such as `parse: "text"` on a `satisfied` exit source or an existing `advance` whose cursor/items/done/when do not match the loop declaration, fail with remediation messages instead of being silently rewritten.
 
 Older layouts may have loop regions with direct `iterator` metadata but no `consumes` generator declaration. pi-materia preserves explicit iterator-only loops for non-generator workflows. When a legacy iterator loop has exactly one inbound edge from a generator materia, `resolvePipeline` migrates the resolved loop by adding `consumes: { from, output }` from that generator while preserving the original iterator fields for runtime compatibility.
 
