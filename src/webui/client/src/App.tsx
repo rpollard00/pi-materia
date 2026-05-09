@@ -1715,6 +1715,22 @@ export function App() {
     );
   }
 
+  function breakLoop(loopId: string) {
+    const loop = activeLoadout?.loops?.[loopId];
+    if (!loop) return;
+    const label = formatLoopDisplayLabel(activeLoadout, loopId, loop.nodes, loop.label);
+    commitGraphMutation(
+      `Broke loop ${loopId}.`,
+      (loadout) => {
+        if (!loadout.loops?.[loopId]) return;
+        delete loadout.loops[loopId];
+        if (Object.keys(loadout.loops).length === 0) delete loadout.loops;
+      },
+      `Broke loop ${label}; sockets and edges were preserved.`,
+      (message) => `Cannot break loop ${label}: ${message}`,
+    );
+  }
+
   function createEdge(from: string) {
     const to = edgeTargetId;
     if (!to) {
@@ -2223,6 +2239,7 @@ export function App() {
                           </select>
                         </label>
                         {loop.exit && <button type="button" className="materia-button-secondary" data-testid={`loop-exit-clear-${loopId}`} onClick={() => clearLoopExit(loopId)}>Clear exit</button>}
+                        <button type="button" className="materia-button-secondary" data-testid={`loop-break-${loopId}`} onClick={() => breakLoop(loopId)}>Break loop</button>
                       </div>
                     );
                   })}

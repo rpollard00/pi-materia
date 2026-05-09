@@ -386,6 +386,47 @@ describe('Materia loadout grid editor', () => {
     expect(saved.loops.taskIteration.exit).toEqual({ from: 'Socket-3', when: 'not_satisfied', to: 'Socket-4' });
   });
 
+  it('breaks loop metadata without removing sockets or graph edges', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
+      taskIteration: {
+        label: 'Build → Eval task loop',
+        nodes: ['Socket-2', 'Socket-3'],
+        consumes: { from: 'Socket-1', output: 'workItems' },
+        exit: { from: 'Socket-3', when: 'not_satisfied', to: 'Socket-4' },
+      },
+    } as never;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByTestId('loop-region-taskIteration')).toBeTruthy();
+    expect(await screen.findByTestId('edge-Socket-3-Socket-2-1')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('loop-break-taskIteration'));
+
+    await waitFor(() => expect(screen.queryByTestId('loop-region-taskIteration')).toBeNull());
+    expect(screen.queryByTestId('loop-editor-panel')).toBeNull();
+    expect(screen.getByTestId('socket-Socket-2').classList.contains('materia-socket-loop-member')).toBe(false);
+    expect(screen.getByTestId('socket-Socket-2')).toBeTruthy();
+    expect(screen.getByTestId('socket-Socket-3')).toBeTruthy();
+    expect(screen.getByTestId('edge-Socket-1-Socket-2-0')).toBeTruthy();
+    expect(screen.getByTestId('edge-Socket-2-Socket-3-0')).toBeTruthy();
+    expect(screen.getByTestId('edge-Socket-3-Socket-2-1')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
+    expect(saved.loops).toBeUndefined();
+    expect(saved.nodes['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(saved.nodes['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+    expect(saved.nodes['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }]);
+  });
+
   it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
