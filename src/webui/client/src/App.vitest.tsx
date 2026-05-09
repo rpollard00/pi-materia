@@ -1487,10 +1487,12 @@ describe('Materia loadout grid editor', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves socket graph structure when dragging a palette materia into a socket', async () => {
+  it('preserves socket graph structure and parse semantics when dragging a palette materia into a socket', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    config.materia.Maintain = { ...config.materia.Maintain, parse: 'json', assign: { satisfied: '$.satisfied' } };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
-      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -1504,6 +1506,8 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedBuild = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes['Socket-2'];
     expect(savedBuild.materia).toBe('Maintain');
+    expect(savedBuild.parse).toBe('json');
+    expect(savedBuild.assign).toEqual({ satisfied: '$.satisfied' });
     expect(savedBuild.edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(savedBuild.layout).toEqual({ x: 1, y: 0 });
     expect(savedBuild.insertedBy).toBe('node-shift');
@@ -1857,6 +1861,8 @@ describe('Materia loadout grid editor', () => {
     await openTab('Materia Editor');
     const modelSelect = await screen.findByTestId('materia-model') as HTMLSelectElement;
     const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
+    const outputFormatSelect = screen.getByTestId('materia-output-format') as HTMLSelectElement;
+    expect(outputFormatSelect.value).toBe('json');
     expect(modelSelect.value).toBe('');
     expect(modelSelect.options[0]?.textContent).toBe('Active Pi Model');
     expect(thinkingSelect.value).toBe('');
@@ -1904,7 +1910,8 @@ describe('Materia loadout grid editor', () => {
     expect(colorTrigger.getAttribute('aria-expanded')).toBe('false');
     expect(within(colorPicker).queryByRole('listbox', { name: 'Materia color choices' })).toBeNull();
 
-    fireEvent.change(screen.getByTestId('materia-output-format'), { target: { value: 'json' } });
+    fireEvent.change(outputFormatSelect, { target: { value: 'text' } });
+    fireEvent.change(outputFormatSelect, { target: { value: 'json' } });
     fireEvent.click(screen.getByTestId('materia-multiturn'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
@@ -1912,7 +1919,7 @@ describe('Materia loadout grid editor', () => {
     const body = configPostBody(fetchMock);
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', thinking: 'high', color: 'materia-color-purple', multiTurn: true });
+    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', thinking: 'high', color: 'materia-color-purple', parse: 'json', multiTurn: true });
     await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/config' && (call[1] as RequestInit | undefined)?.method !== 'POST').length).toBeGreaterThanOrEqual(2));
     expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
@@ -2288,9 +2295,11 @@ describe('Materia loadout grid editor', () => {
   });
 
   it('edits existing prompt materia materia settings where supported', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    config.materia.Build = { ...config.materia.Build, parse: 'json' };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
-      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -2298,6 +2307,7 @@ describe('Materia loadout grid editor', () => {
 
     await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    expect(screen.getByTestId('materia-output-format')).toHaveProperty('value', 'json');
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Build with extra care.' } });
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'readOnly' } });
     fireEvent.click(screen.getByTestId('save-materia-form'));
@@ -2306,7 +2316,7 @@ describe('Materia loadout grid editor', () => {
     const body = configPostBody(fetchMock);
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materia.Build).toMatchObject({ tools: 'readOnly', prompt: 'Build with extra care.', model: 'openai/gpt-test' });
+    expect(body.config.materia.Build).toMatchObject({ tools: 'readOnly', prompt: 'Build with extra care.', model: 'openai/gpt-test', parse: 'json' });
   });
 
 

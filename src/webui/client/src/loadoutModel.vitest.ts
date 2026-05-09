@@ -120,6 +120,27 @@ describe('loadout normalization model', () => {
     expect(config.loadouts?.Loop.nodes?.['Socket-2'].parse).toBeUndefined();
   });
 
+  it('canonicalizes legacy UI outputFormat fields to parse before save', () => {
+    const config = normalizeMateriaConfigEdges({
+      materia: {
+        Critique: { prompt: 'Review.', outputFormat: 'json' } as MateriaBehaviorConfig,
+      },
+      loadouts: {
+        Draft: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Critique', outputFormat: 'json' } as PipelineNode,
+          },
+        },
+      },
+    });
+
+    expect(config.materia?.Critique.parse).toBe('json');
+    expect(config.materia?.Critique).not.toHaveProperty('outputFormat');
+    expect(config.loadouts?.Draft.nodes?.['Socket-1'].parse).toBe('json');
+    expect(config.loadouts?.Draft.nodes?.['Socket-1']).not.toHaveProperty('outputFormat');
+  });
+
   it('materializes loop exit control fields before save without deleting back-edges', () => {
     const config = normalizeMateriaConfigEdges({
       loadouts: {
@@ -316,7 +337,7 @@ describe('loadout materia palette model', () => {
 
   it('keeps palette contents stable when palette materia is placed into a new loadout socket', () => {
     const materia = {
-      Build: { prompt: 'build' },
+      Build: { prompt: 'build', parse: 'json', assign: { satisfied: '$.satisfied' } },
       Plan: { prompt: 'plan' },
     } satisfies Record<string, MateriaBehaviorConfig>;
     const before = paletteSignature(materia);
@@ -325,7 +346,7 @@ describe('loadout materia palette model', () => {
 
     loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], buildMateria);
 
-    expect(loadout.nodes!['Socket-1']).toMatchObject({ type: 'agent', materia: 'Build', empty: false });
+    expect(loadout.nodes!['Socket-1']).toMatchObject({ type: 'agent', materia: 'Build', parse: 'json', assign: { satisfied: '$.satisfied' }, empty: false });
     expect(paletteSignature(materia)).toBe(before);
   });
 

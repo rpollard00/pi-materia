@@ -48,9 +48,11 @@ function normalizeEdgeConditionForClient(when: unknown): MateriaEdgeCondition {
 
 export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfig {
   const normalized = cloneValue(config);
+  normalizeCanonicalParseSemantics(normalized);
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
     normalizeLoadoutSocketKinds(loadout);
     for (const node of Object.values(loadout.nodes ?? {}) as LegacyPipelineNode[]) {
+      normalizeCanonicalParseSemantics(node);
       const edges = (node.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
       if (typeof node.next === 'string' && node.next) edges.push({ when: 'always', to: node.next });
       if (edges.length > 0) node.edges = edges;
@@ -61,6 +63,13 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
     materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, loadout as MateriaPipelineConfig);
   }
   return normalized;
+}
+
+function normalizeCanonicalParseSemantics(container: { parse?: unknown; outputFormat?: unknown; materia?: unknown }): void {
+  if (container.parse === undefined && (container.outputFormat === 'json' || container.outputFormat === 'text')) container.parse = container.outputFormat;
+  delete container.outputFormat;
+  const definitions = container.materia && typeof container.materia === 'object' && !Array.isArray(container.materia) ? container.materia as Record<string, MateriaBehaviorConfig> : {};
+  for (const definition of Object.values(definitions)) normalizeCanonicalParseSemantics(definition);
 }
 
 function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
@@ -266,7 +275,12 @@ export function materiaPaletteNode(id: string, definition?: MateriaBehaviorConfi
       label: definition.label,
     };
   }
-  return { ...createMateriaReference(id), foreach: cloneValue(definition?.foreach) };
+  return {
+    ...createMateriaReference(id),
+    parse: definition?.parse,
+    assign: cloneValue(definition?.assign),
+    foreach: cloneValue(definition?.foreach),
+  };
 }
 
 export function buildMateriaPalette(definitions: Record<string, MateriaBehaviorConfig> = {}): Array<[string, PipelineNode]> {

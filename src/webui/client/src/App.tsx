@@ -290,7 +290,7 @@ const emptyMateriaForm = (): MateriaFormState => ({
   model: '',
   thinking: '',
   color: materiaColorChoices[0]?.value ?? '',
-  outputFormat: 'text',
+  outputFormat: 'json',
   multiTurn: false,
   generator: false,
   utility: '',
@@ -1119,6 +1119,7 @@ function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
     model: form.model.trim() || undefined,
     thinking: form.thinking.trim() || undefined,
     color: form.color.trim() || undefined,
+    parse: form.outputFormat,
     multiTurn: form.multiTurn || undefined,
     ...(form.generator ? { generator: true, generates: null } : form.editingNodeId ? { generator: null, generates: null } : {}),
   };
