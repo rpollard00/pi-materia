@@ -396,6 +396,7 @@ describe("config loadouts", () => {
       ["detectVcs", "json"],
       ["planner", "json"],
       ["interactivePlan", "json"],
+      ["Auto-Architect", "json"],
       ["Build", "text"],
       ["Auto-Eval", "json"],
       ["Maintain", "json"],
@@ -411,6 +412,15 @@ describe("config loadouts", () => {
 
     expect(rawDefault.materia?.planner?.generator).toBe(true);
     expect(rawDefault.materia?.interactivePlan?.generator).toBe(true);
+    expect(rawDefault.materia?.["Auto-Architect"]).toMatchObject({
+      type: "agent",
+      tools: "readOnly",
+      parse: "json",
+      generator: true,
+      thinking: "medium",
+      color: "materia-color-cyan",
+    });
+    expect(rawDefault.materia?.["Auto-Architect"]?.prompt).toContain("software architect materia");
   });
 
   test("bundled default loadout edges use explicit canonical conditions", async () => {
@@ -443,6 +453,7 @@ describe("config loadouts", () => {
       expect(loadout.entry, `${loadoutName}.entry`).toBe("Socket-1");
       expect(nodeIds, `${loadoutName}.nodes`).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
       expect(loadout.nodes?.["Socket-4"]?.materia, `${loadoutName}.Socket-4`).toBe("Build");
+      expect(Object.values(loadout.nodes ?? {}).map((node) => node.materia), `${loadoutName}.materia`).not.toContain("Auto-Architect");
 
       for (const [socketId, node] of Object.entries(loadout.nodes ?? {})) {
         expect(socketId, `${loadoutName}.${socketId}`).toMatch(/^Socket-\d+$/);
@@ -724,7 +735,7 @@ describe("active loadout persistence", () => {
 });
 
 describe("config materia model settings", () => {
-  test("bundled default materia remain model-free", async () => {
+  test("bundled default materia remain model-free except explicit Auto-Architect thinking", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
@@ -737,9 +748,9 @@ describe("config materia model settings", () => {
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
     }
 
-    for (const materia of Object.values(loaded.config.materia)) {
+    for (const [materiaId, materia] of Object.entries(loaded.config.materia)) {
       expect(materia.model).toBeUndefined();
-      expect(materia.thinking).toBeUndefined();
+      expect(materia.thinking, materiaId).toBe(materiaId === "Auto-Architect" ? "medium" : undefined);
     }
   });
 
