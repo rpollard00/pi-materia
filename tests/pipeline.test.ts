@@ -204,15 +204,25 @@ describe("loadout-aware pipeline resolution", () => {
     };
 
     const pipeline = resolvePipeline(config);
+    const lines = renderGrid(config, pipeline, "architected-consult-like", "/tmp/project");
     expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+    expect(lines).toContain("loop taskIteration (Architected-Consult-style generated workItems loop): [Socket-2, Socket-3] consumes=Socket-4.workItems iterator=state.workItems as workItem done end exit=Socket-3.satisfied->end");
+    expect(lines).toContain("- planner: tools=readOnly, model=active Pi model, thinking=active Pi thinking, generator=workItems:array<workItem>");
+    expect(lines).toContain("- architect: tools=readOnly, model=active Pi model, thinking=active Pi thinking, generator=workItems:array<workItem>");
+    expect(lines.join("\n")).not.toContain("generator=tasks");
+    expect(lines.join("\n")).not.toContain("generator=work:");
 
     const invalidUpstream = structuredClone(config) as PiMateriaConfig;
     delete invalidUpstream.loadouts!.Loop.nodes["Socket-1"].parse;
-    expect(() => resolvePipeline(invalidUpstream)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems"/);
+    expect(() => resolvePipeline(invalidUpstream)).toThrow(/Generator pipeline slot "Socket-1" must parse JSON and expose generated output "workItems" from the canonical handoff envelope/);
 
     const invalidDownstream = structuredClone(config) as PiMateriaConfig;
     delete invalidDownstream.loadouts!.Loop.nodes["Socket-4"].parse;
-    expect(() => resolvePipeline(invalidDownstream)).toThrow(/Generator pipeline slot "Socket-4" must parse JSON and expose generated output "workItems"/);
+    expect(() => resolvePipeline(invalidDownstream)).toThrow(/Generator pipeline slot "Socket-4" must parse JSON and expose generated output "workItems" from the canonical handoff envelope/);
+
+    const invalidDownstreamAssignment = structuredClone(config) as PiMateriaConfig;
+    invalidDownstreamAssignment.loadouts!.Loop.nodes["Socket-4"].assign = { tasks: "$.tasks" };
+    expect(() => resolvePipeline(invalidDownstreamAssignment)).toThrow(/Generator pipeline slot "Socket-4" must parse JSON and expose generated output "workItems" from the canonical handoff envelope/);
   });
 
   test("resolvePipeline does not treat legacy generates metadata as active generator semantics", () => {
@@ -630,5 +640,21 @@ describe("utility pipeline nodes", () => {
     expect(gitMaintainPrompt).toContain("checkpointCreated=false");
     expect(gitMaintainPrompt).toContain("No-op work items must not create empty commits/checkpoints");
     expect(gitMaintainPrompt).toContain("do not run git add, git commit");
+  });
+
+  test("all bundled default loadouts validate with canonical workItems generator contracts", async () => {
+    const bundled = JSON.parse(await readFile("config/default.json", "utf8")) as PiMateriaConfig;
+
+    for (const loadoutName of Object.keys(bundled.loadouts ?? {})) {
+      const config = structuredClone(bundled) as PiMateriaConfig;
+      config.activeLoadout = loadoutName;
+
+      const pipeline = resolvePipeline(config);
+      const loadout = activeLoadout(config);
+      expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "Socket-3", output: "workItems" });
+      expect(loadout.nodes["Socket-3"]).toMatchObject({ parse: "json", assign: { workItems: "$.workItems" } });
+      expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+      expect(renderGrid(config, pipeline, "default", "/tmp/project").join("\n")).toContain("generator=workItems:array<workItem>");
+    }
   });
 });
