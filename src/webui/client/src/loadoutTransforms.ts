@@ -14,6 +14,7 @@ import {
   type PipelineConfig,
   type PipelineLoop,
   type PipelineNode,
+  type SocketLayout,
 } from './loadoutModel.js';
 
 export type LoadoutTransform = (loadout: PipelineConfig) => PipelineConfig;
@@ -67,6 +68,31 @@ function removeLoopRuntimeControls(loadout: PipelineConfig, nodes: Record<string
 
 export function applyLoadoutTransform(loadout: PipelineConfig, transform: LoadoutTransform): PipelineConfig {
   return transform(loadout);
+}
+
+export function setSocketLayouts(loadout: PipelineConfig, layouts: Record<string, SocketLayout | undefined>): PipelineConfig {
+  let next = loadout;
+  for (const [socketId, layout] of Object.entries(layouts)) {
+    next = setLoadoutSocketLayout(next, socketId, layout);
+  }
+  return next;
+}
+
+function socketLimitsEqual(left: PipelineNode['limits'] | undefined, right: PipelineNode['limits'] | undefined): boolean {
+  return (left?.maxVisits ?? undefined) === (right?.maxVisits ?? undefined)
+    && (left?.maxEdgeTraversals ?? undefined) === (right?.maxEdgeTraversals ?? undefined)
+    && (left?.maxOutputBytes ?? undefined) === (right?.maxOutputBytes ?? undefined);
+}
+
+export function setSocketLimits(loadout: PipelineConfig, socketId: string, limits: PipelineNode['limits'] | undefined): PipelineConfig {
+  const node = loadout.nodes?.[socketId];
+  if (!loadout.nodes || !node) return loadout;
+  const nextLimits = limits && Object.keys(limits).length > 0 ? limits : undefined;
+  if (socketLimitsEqual(node.limits, nextLimits)) return loadout;
+  const nextNode = { ...node };
+  if (nextLimits) nextNode.limits = { ...nextLimits };
+  else delete nextNode.limits;
+  return replaceNodes(loadout, { ...loadout.nodes, [socketId]: nextNode });
 }
 
 export function setSocketMateria(loadout: PipelineConfig, socketId: string, materia: PipelineNode): PipelineConfig {

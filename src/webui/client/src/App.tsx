@@ -31,6 +31,8 @@ import {
   removeEdgeFromLoadout,
   removeLegacyNextFromLoadout,
   removeLoopExitRouteFromLoadout,
+  setSocketLayouts,
+  setSocketLimits,
   setSocketMateria,
   swapSocketMateria,
   toggleEdgeConditionInLoadout,
@@ -78,6 +80,7 @@ import {
   formatIteratorBehavior,
   formatLoopDisplayLabel,
   generatorEdgeLabel,
+  getLoadoutEdges,
   getLoopExitBadges,
   getLoopMemberships,
   getLoopRegions,
@@ -149,6 +152,7 @@ export function App() {
     status,
     switchLoadout: switchLoadoutDraft,
     updateDraft,
+    updateLoadoutLayout,
   } = useWebuiConfig();
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
@@ -199,11 +203,15 @@ export function App() {
     };
   }, [materiaColorOpen]);
 
-  const loadoutGraph = useMemo(() => layoutSockets(activeLoadout), [activeLoadout]);
+  const semanticEdges = useMemo(() => getLoadoutEdges(activeLoadout), [activeLoadout?.nodes, activeLoadout?.loops]);
+  const loadoutGraph = useMemo(
+    () => layoutSockets(activeLoadout, semanticEdges),
+    [activeLoadout?.entry, activeLoadout?.nodes, activeLoadout?.loops, activeLoadout?.layout, semanticEdges],
+  );
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
-  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout, socketPositions]);
-  const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout]);
-  const loopExitBadges = useMemo(() => getLoopExitBadges(activeLoadout), [activeLoadout]);
+  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout?.loops, activeLoadout?.nodes, socketPositions]);
+  const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout?.loops]);
+  const loopExitBadges = useMemo(() => getLoopExitBadges(activeLoadout), [activeLoadout?.loops]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
   const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
@@ -458,19 +466,18 @@ export function App() {
     const finalY = Math.max(0, current.originY + deltaY);
     const layoutX = layoutValueForPosition(finalX, socketLayoutOffsetX, socketLayoutUnitX);
     const layoutY = layoutValueForPosition(finalY, socketLayoutOffsetY, socketLayoutUnitY);
-    updateDraft((config) => {
-      const loadout = buildLoadouts(config)[activeLoadoutName];
-      const nodes = loadout?.nodes;
-      if (!loadout || !nodes?.[socketId]) return;
-      loadout.layout = { ...(loadout.layout ?? {}), sockets: { ...(loadout.layout?.sockets ?? {}) } };
+    updateLoadoutLayout(activeLoadoutName, (loadout) => {
+      const nodes = loadout.nodes;
+      if (!nodes?.[socketId]) return loadout;
+      const layouts: Parameters<typeof setSocketLayouts>[1] = { [socketId]: { x: layoutX, y: layoutY } };
       for (const socket of loadoutGraph.sockets) {
         if (!nodes[socket.id] || socket.id === socketId || getSocketLayout(loadout, socket.id)) continue;
-        loadout.layout.sockets![socket.id] = {
+        layouts[socket.id] = {
           x: layoutValueForPosition(socket.x, socketLayoutOffsetX, socketLayoutUnitX),
           y: layoutValueForPosition(socket.y, socketLayoutOffsetY, socketLayoutUnitY),
         };
       }
-      loadout.layout.sockets![socketId] = { x: layoutX, y: layoutY };
+      return setSocketLayouts(loadout, layouts);
     });
     setStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);
   }
@@ -769,29 +776,34 @@ export function App() {
       return;
     }
 
-    updateDraft((config) => {
-      const loadout = buildLoadouts(config)[activeLoadoutName];
-      const node = loadout?.nodes?.[socketId];
-      if (!node) return;
-      const limits: PipelineNode['limits'] = {};
-      if (maxVisits !== undefined) limits.maxVisits = maxVisits;
-      if (maxEdgeTraversals !== undefined) limits.maxEdgeTraversals = maxEdgeTraversals;
-      if (maxOutputBytes !== undefined) limits.maxOutputBytes = maxOutputBytes;
-      if (Object.keys(limits).length > 0) node.limits = limits;
-      else delete node.limits;
-      const layout: PipelineNode['layout'] = {};
-      if (layoutX !== undefined) layout.x = layoutX;
-      if (layoutY !== undefined) layout.y = layoutY;
-      if (Object.keys(layout).length > 0) {
-        loadout.layout = { ...(loadout.layout ?? {}), sockets: { ...(loadout.layout?.sockets ?? {}), [socketId]: layout } };
-      } else if (loadout.layout?.sockets?.[socketId]) {
-        const sockets = { ...loadout.layout.sockets };
-        delete sockets[socketId];
-        loadout.layout = { ...loadout.layout, sockets };
-        if (Object.keys(sockets).length === 0) delete loadout.layout.sockets;
-        if (Object.keys(loadout.layout).length === 0) delete loadout.layout;
-      }
-    });
+    const limits: PipelineNode['limits'] = {};
+    if (maxVisits !== undefined) limits.maxVisits = maxVisits;
+    if (maxEdgeTraversals !== undefined) limits.maxEdgeTraversals = maxEdgeTraversals;
+    if (maxOutputBytes !== undefined) limits.maxOutputBytes = maxOutputBytes;
+    const nextLimits = Object.keys(limits).length > 0 ? limits : undefined;
+    const layout: Parameters<typeof setSocketLayouts>[1][string] = {};
+    if (layoutX !== undefined) layout.x = layoutX;
+    if (layoutY !== undefined) layout.y = layoutY;
+    const nextLayout = Object.keys(layout).length > 0 ? layout : undefined;
+    const currentNode = activeLoadout.nodes[socketId];
+    const limitsChanged = (currentNode.limits?.maxVisits ?? undefined) !== (nextLimits?.maxVisits ?? undefined)
+      || (currentNode.limits?.maxEdgeTraversals ?? undefined) !== (nextLimits?.maxEdgeTraversals ?? undefined)
+      || (currentNode.limits?.maxOutputBytes ?? undefined) !== (nextLimits?.maxOutputBytes ?? undefined);
+    const currentLayout = getSocketLayout(activeLoadout, socketId);
+    const layoutChanged = (currentLayout?.x ?? undefined) !== (nextLayout?.x ?? undefined) || (currentLayout?.y ?? undefined) !== (nextLayout?.y ?? undefined);
+
+    if (limitsChanged) {
+      updateDraft((config) => {
+        const draftLoadouts = buildLoadouts(config);
+        const loadout = draftLoadouts[activeLoadoutName];
+        if (!loadout?.nodes?.[socketId]) return;
+        const nextLoadout = setSocketLimits(loadout, socketId, nextLimits);
+        if (nextLoadout !== loadout) draftLoadouts[activeLoadoutName] = nextLoadout;
+      });
+    }
+    if (layoutChanged) {
+      updateLoadoutLayout(activeLoadoutName, (loadout) => setSocketLayouts(loadout, { [socketId]: nextLayout }));
+    }
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setSocketPropertyError('');

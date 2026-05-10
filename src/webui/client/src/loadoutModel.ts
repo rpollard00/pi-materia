@@ -68,8 +68,13 @@ function normalizeEdgeConditionForClient(when: unknown): MateriaEdgeCondition {
   return when as MateriaEdgeCondition;
 }
 
-export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfig {
+export interface NormalizeMateriaConfigOptions {
+  semantic?: boolean;
+}
+
+export function normalizeMateriaConfigEdges(config: MateriaConfig, options: NormalizeMateriaConfigOptions = {}): MateriaConfig {
   const normalized = cloneValue(config);
+  const semantic = options.semantic ?? true;
   normalizeCanonicalParseSemantics(normalized);
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
     normalizeLoadoutSocketKinds(loadout);
@@ -82,10 +87,12 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
       else delete node.edges;
       delete node.next;
     }
-    const reconciled = reconcileLoadoutLoopConsumersFromGraph(loadout, normalized.materia ?? {});
-    Object.assign(loadout, reconciled);
-    normalizeGeneratorPipelineSockets(loadout, normalized.materia ?? {});
-    materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, loadout as MateriaPipelineConfig);
+    if (semantic) {
+      const reconciled = reconcileLoadoutLoopConsumersFromGraph(loadout, normalized.materia ?? {});
+      Object.assign(loadout, reconciled);
+      normalizeGeneratorPipelineSockets(loadout, normalized.materia ?? {});
+      materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, loadout as MateriaPipelineConfig);
+    }
   }
   return normalized;
 }

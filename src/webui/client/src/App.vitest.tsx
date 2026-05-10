@@ -562,6 +562,30 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Loop consumes: Socket-1.workItems');
   });
 
+  it('derives generator-to-loop edge output from current graph edges when loop consumes metadata is stale', async () => {
+    const config = structuredClone(testConfig);
+    (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };
+    (config.materia.Build as any) = { tools: 'coding', prompt: 'Build generated work', generator: true };
+    config.loadouts['Full-Auto'].nodes['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
+    config.loadouts['Full-Auto'].nodes['Socket-2'].edges = [{ when: 'always', to: 'Socket-3' }];
+    (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
+      taskIteration: {
+        label: 'Build → Eval → Maintain until all work items complete',
+        nodes: ['Socket-3', 'Socket-4'],
+        consumes: { from: 'Socket-1', output: 'workItems' },
+        exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
+      },
+    } as never;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
+
+    render(<App />);
+
+    const insertedGeneratorEdge = await screen.findByTestId('edge-Socket-2-Socket-3-0');
+    expect(insertedGeneratorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
+    expect(insertedGeneratorEdge.textContent).toContain('Generator output: workItems');
+    expect(insertedGeneratorEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-generator-edge-arrow)');
+  });
+
   it('renders generator-to-generator edges with generated-output semantics', async () => {
     const config = structuredClone(testConfig);
     (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };

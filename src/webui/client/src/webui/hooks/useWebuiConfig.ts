@@ -3,6 +3,7 @@ import {
   normalizeMateriaConfigEdges,
   validateLoadoutSaveSemantics,
   type MateriaConfig,
+  type PipelineConfig,
 } from '../../loadoutModel.js';
 import { toast } from '../../toast/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
@@ -81,7 +82,7 @@ function sortObjectKeys(value: unknown): unknown {
 
 export function configForDirtyComparison(config: MateriaConfig | undefined): unknown {
   if (!config) return config;
-  const comparable = normalizeMateriaConfigEdges(cloneConfig(config));
+  const comparable = normalizeMateriaConfigEdges(cloneConfig(config), { semantic: false });
   // activeLoadout is the user's current UI/session selection. It remains in the
   // persisted config for compatibility, but selecting a loadout must not require
   // a save or make the header report staged edits by itself.
@@ -140,6 +141,21 @@ export function useWebuiConfig() {
       if (!next.loadouts) next.loadouts = buildLoadouts(next);
       updater(next);
       return normalizeMateriaConfigEdges(next);
+    });
+  }
+
+  function updateLoadoutLayout(loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) {
+    setDraftConfig((current) => {
+      const config = current ?? {};
+      const currentLoadouts = buildLoadouts(config);
+      const loadout = currentLoadouts[loadoutName];
+      if (!loadout) return current;
+      const nextLoadout = updater(loadout);
+      if (nextLoadout === loadout) return current;
+      return {
+        ...config,
+        loadouts: { ...currentLoadouts, [loadoutName]: nextLoadout },
+      };
     });
   }
 
@@ -396,5 +412,6 @@ export function useWebuiConfig() {
     status,
     switchLoadout,
     updateDraft,
+    updateLoadoutLayout,
   };
 }

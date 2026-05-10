@@ -130,19 +130,24 @@ function loopExitSummariesForSocket(loadout: PipelineConfig | undefined, socketI
   });
 }
 
-function generatorLoopOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined): string | undefined {
-  const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.consumes?.from === edge.from && candidate.nodes.includes(edge.to));
-  return loop?.consumes ? loop.consumes.output ?? 'workItems' : undefined;
+function generatorLoopOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
+  const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.nodes.includes(edge.to));
+  if (!loop) return undefined;
+  const fromNode = loadout?.nodes?.[edge.from];
+  const referenced = extractMateriaReference(fromNode);
+  const output = referenced ? materiaGeneratorOutput(definitions?.[referenced.materia]) : undefined;
+  if (output) return output;
+  return loop.consumes?.from === edge.from ? loop.consumes.output ?? 'workItems' : undefined;
+}
+
+function generatorEdgeOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
+  return generatorLoopOutput(edge, loadout, definitions) ?? generatorToGeneratorOutput(edge, loadout, definitions);
 }
 
 function generatorToGeneratorOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
   const fromNode = loadout?.nodes?.[edge.from];
   const toNode = loadout?.nodes?.[edge.to];
   return isGeneratorSocket(fromNode, definitions) && isGeneratorSocket(toNode, definitions) ? 'workItems' : undefined;
-}
-
-function generatorEdgeOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
-  return generatorLoopOutput(edge, loadout) ?? generatorToGeneratorOutput(edge, loadout, definitions);
 }
 
 export function isGeneratorOutputEdge(edge: Pick<LoadoutEdge, 'from' | 'to'> & { kind?: LoadoutEdge['kind'] }, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): boolean {
@@ -229,7 +234,7 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
   return lines.join('\n');
 }
 
-function getLoadoutEdges(loadout: PipelineConfig | undefined): LoadoutEdge[] {
+export function getLoadoutEdges(loadout: PipelineConfig | undefined): LoadoutEdge[] {
   const nodes = loadout?.nodes ?? {};
   const edges: LoadoutEdge[] = [];
   for (const [from, node] of Object.entries(nodes)) {
@@ -613,10 +618,10 @@ export function getLoopExitBadges(loadout: PipelineConfig | undefined): Map<stri
   return badges;
 }
 
-export function layoutSockets(loadout?: PipelineConfig): LayoutSocketsResult {
+export function layoutSockets(loadout?: PipelineConfig, semanticEdges?: LoadoutEdge[]): LayoutSocketsResult {
   const nodes = loadout?.nodes ?? {};
   const entries = Object.entries(nodes);
-  const edges = getLoadoutEdges(loadout);
+  const edges = semanticEdges ?? getLoadoutEdges(loadout);
   const entryId = loadout?.entry && nodes[loadout.entry] ? loadout.entry : entries[0]?.[0];
   const orderedAutoIds = getAutomaticSocketOrder(entries, edges, entryId).filter((id) => {
     const layout = getSocketLayout(loadout, id);
