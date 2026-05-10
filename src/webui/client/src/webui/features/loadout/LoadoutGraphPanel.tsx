@@ -106,6 +106,7 @@ interface LoadoutGraphPanelProps {
   socketDisplayLabel: (socketId: string) => string;
   socketLabel: (socketId: string) => string;
   toggleEdgeCondition: (edge: RoutedLoadoutEdge['edge']) => void;
+  toggleLoopExitCondition: (loopId: string, routeId: string) => void;
   updateLoopExit: (loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) => void;
 }
 
@@ -121,7 +122,7 @@ export function LoadoutGraphPanel(props: LoadoutGraphPanelProps) {
     handleDrop, handleGraphDrop, handleSocketClick, moveSocketLayoutDrag, moveSocketRegionSelection, openEdgeConnector,
     openSocketPropertyEditor, removeEdge, removeLegacyNextEdge, removeLoopExitConnection, removeMateria, replaceMateriaFromModal, saveSocketProperties,
     setEdgeCondition, setEdgeTargetId, setLoadoutNameInput, setSocketActionMode, setSocketPropertyForm,
-    socketDisplayLabel, socketLabel, toggleEdgeCondition, updateLoopExit,
+    socketDisplayLabel, socketLabel, toggleEdgeCondition, toggleLoopExitCondition, updateLoopExit,
   } = props;
 
   return (
@@ -178,7 +179,7 @@ export function LoadoutGraphPanel(props: LoadoutGraphPanelProps) {
             const markerEnd = isLoopExitEdge ? 'url(#materia-loop-exit-edge-arrow)' : isGeneratorInput ? 'url(#materia-generator-edge-arrow)' : 'url(#materia-edge-arrow)';
             const edgeTestId = isLoopExitEdge && edge.loopId && edge.loopExitRouteId ? `loop-exit-edge-${edge.loopId}-${edge.loopExitRouteId}` : `edge-${edge.from}-${edge.to}-${edge.edgeIndex ?? 'next'}`;
             const activateEdge = () => {
-              if (isLoopExitEdge && edge.loopId && edge.loopExitRouteId) removeLoopExitConnection(edge.loopId, edge.loopExitRouteId);
+              if (isLoopExitEdge && edge.loopId && edge.loopExitRouteId) toggleLoopExitCondition(edge.loopId, edge.loopExitRouteId);
               else toggleEdgeCondition(edge);
             };
             return (

@@ -759,6 +759,21 @@ export function App() {
     }
   }
 
+  function toggleLoopExitCondition(loopId: string, routeId: string) {
+    const route = activeLoadout?.loops?.[loopId]?.exits?.find((candidate) => candidate.id === routeId);
+    if (!route) return;
+    const nextCondition = toggledEdgeCondition(route.condition);
+    commitGraphMutation(
+      `Toggled loop-exit route ${loopId}:${routeId}.`,
+      (loadout) => {
+        const draftRoute = (loadout as PipelineConfig).loops?.[loopId]?.exits?.find((candidate) => candidate.id === routeId);
+        if (draftRoute) draftRoute.condition = nextCondition;
+      },
+      `Staged loop-exit route ${socketLabel(route.from)} → ${socketLabel(route.targetSocketId)} as ${edgeConditionLabel(nextCondition)}; no normal edges were created.`,
+      (message) => `Cannot toggle loop-exit route ${loopId}:${routeId}: ${message}`,
+    );
+  }
+
   function removeEdge(from: string, edgeIndex: number) {
     const edge = activeLoadout?.nodes?.[from]?.edges?.[edgeIndex];
     if (!edge) return;
@@ -1080,6 +1095,7 @@ export function App() {
             removeEdge={removeEdge}
             removeLegacyNextEdge={removeLegacyNextEdge}
             removeLoopExitConnection={removeLoopExitConnection}
+            toggleLoopExitCondition={toggleLoopExitCondition}
             removeMateria={removeMateria}
             replaceMateriaFromModal={replaceMateriaFromModal}
             saveSocketProperties={saveSocketProperties}
