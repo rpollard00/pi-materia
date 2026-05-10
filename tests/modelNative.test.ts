@@ -1,11 +1,19 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
 import { FakePiHarness } from "./fakePi.js";
 
+const previousProfileDir = process.env.PI_MATERIA_PROFILE_DIR;
+
+afterEach(() => {
+  if (previousProfileDir === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+  else process.env.PI_MATERIA_PROFILE_DIR = previousProfileDir;
+});
+
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
+  process.env.PI_MATERIA_PROFILE_DIR = await mkdtemp(path.join(tmpdir(), "pi-materia-model-profile-"));
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-model-"));
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(config, null, 2));
