@@ -100,6 +100,71 @@ describe("generic engine helper mechanics", () => {
     expect(nativeTestInternals.selectNextTarget(state, { ...node, node: { ...node.node, edges: undefined, next: "Legacy" } }, {}, config)).toBe("Legacy");
   });
 
+  test("advances loop completion through loop-owned exit routes without materialized edges", () => {
+    const node = {
+      id: "Socket-2",
+      node: {
+        type: "utility",
+        utility: "echo",
+        advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
+      },
+      materia: { type: "utility", utility: "echo" },
+    } satisfies ResolvedMateriaNode;
+    const state = makeState({
+      cursors: { itemCursor: 0 },
+      pipeline: {
+        entry: "Socket-1",
+        nodes: {},
+        loops: {
+          work: {
+            nodes: ["Socket-2"],
+            exit: { from: "Socket-2", when: "satisfied", to: "Socket-9" },
+            exits: [
+              { id: "always-summary", from: "Socket-2", condition: "always", targetSocketId: "Socket-5" },
+              { id: "done-summary", from: "Socket-2", condition: "satisfied", targetSocketId: "Socket-3" },
+              { id: "retry-summary", from: "Socket-2", condition: "not_satisfied", targetSocketId: "Socket-4" },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(nativeTestInternals.applyAdvance(state, node, { satisfied: true })).toBe("Socket-3");
+    state.cursors.itemCursor = 0;
+    expect(nativeTestInternals.applyAdvance(state, node, { satisfied: false })).toBe("Socket-4");
+    state.cursors.itemCursor = 0;
+    expect(nativeTestInternals.applyAdvance(state, node, {})).toBe("Socket-5");
+    expect(node.node).not.toHaveProperty("edges");
+  });
+
+  test("preserves existing loop completion behavior when no loop-exit route matches", () => {
+    const node = {
+      id: "Socket-2",
+      node: {
+        type: "utility",
+        utility: "echo",
+        advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
+      },
+      materia: { type: "utility", utility: "echo" },
+    } satisfies ResolvedMateriaNode;
+    const state = makeState({
+      cursors: { itemCursor: 0 },
+      pipeline: {
+        entry: "Socket-1",
+        nodes: {},
+        loops: {
+          work: {
+            nodes: ["Socket-2"],
+            exit: { from: "Socket-2", when: "satisfied", to: "Socket-9" },
+            exits: [{ id: "satisfied-only", from: "Socket-2", condition: "satisfied", targetSocketId: "Socket-3" }],
+          },
+        },
+      },
+    });
+
+    expect(nativeTestInternals.applyAdvance(state, node, { satisfied: false })).toBe("Socket-9");
+  });
+
   test("sets nested assignment paths", () => {
     const target: Record<string, unknown> = {};
     nativeTestInternals.setPath(target, "utility.result.value", 7);

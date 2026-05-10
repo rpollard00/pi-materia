@@ -70,6 +70,30 @@ Socket-4 (Build) --always--> Socket-5 (Auto-Eval) --satisfied--> Socket-6 (Maint
 
 The loop consumes the planner generator's `workItems` output, which derives an iterator over `state.workItems`; each member node handles the current work item until `Maintain` advances the cursor. Build-style text nodes consume the current `workItem` plus global guidance supplied by the adapter context and summarize implementation; they do not decide parsing, assignment, routing, or iteration themselves. The documented exit summary renders source-aware, for example `exit=Socket-6.satisfied->end`, and the loop exits to `end` when the materialized `advance` block reaches the generator-derived consumed-list boundary.
 
+## Loop-owned exit routes
+
+Loops may also declare explicit post-completion routes in `loops.<id>.exits`. These records are canonical graph semantics owned by the loop, not normal `nodes.<socket>.edges`, not generator edges, and not persisted derived render/runtime edges:
+
+```json
+"loops": {
+  "workItemIteration": {
+    "nodes": ["Socket-4", "Socket-5", "Socket-6"],
+    "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" },
+    "exits": [
+      { "id": "exit:Socket-6:always", "from": "Socket-6", "condition": "always", "targetSocketId": "Socket-7" },
+      { "id": "exit:Socket-6:satisfied", "from": "Socket-6", "condition": "satisfied", "targetSocketId": "Socket-8" },
+      { "id": "exit:Socket-6:not_satisfied", "from": "Socket-6", "condition": "not_satisfied", "targetSocketId": "Socket-9" }
+    ]
+  }
+}
+```
+
+Each route id is stable and unique within the owning loop. `from` is the loop member socket that acts as the loop exit, `targetSocketId` must be an existing socket (not `end`), and there may be at most one route for each `condition` per `from` socket. Breaking or deleting a loop removes its `exits` metadata; pi-materia must not convert those routes into normal outgoing edges or leave stale materialized `advance.done` routes behind.
+
+Route resolution is centralized and deterministic. When the loop finishes with canonical `{ "satisfied": true }`, a `satisfied` route wins, then `always`, then existing loop completion behavior such as `loops.exit.to` / `advance.done`. When it finishes with `{ "satisfied": false }`, a `not_satisfied` route wins, then `always`, then existing behavior. When the satisfaction outcome is unavailable, only `always` may be selected before falling back to existing behavior. The resolver reads only the canonical boolean `satisfied` field. `passed` is not a canonical loop-exit field; any compatibility handling for `passed` belongs only to explicit migrations or negative compatibility tests, not to authored loadouts or new prompts.
+
+The WebUI derives special visual edges for these routes with stable ids like `loop-exit:<loopId>:<routeId>` and labels such as **Upon Loop Exit**, **Upon Loop Exit: Satisfied**, and **Upon Loop Exit: Not Satisfied**. Editing or deleting those visual edges mutates `loops.<id>.exits`, not normal socket edges.
+
 Generator-to-generator chaining uses the same contract. An upstream generator emits a handoff envelope with `workItems`; a downstream generator may consume those items, refine or split them, and must itself return a JSON handoff envelope with a new canonical `workItems` array:
 
 ```json

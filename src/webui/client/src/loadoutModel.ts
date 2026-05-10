@@ -204,6 +204,22 @@ function deleteOptionalTarget(container: { done?: string } | undefined, deletedS
   if (container?.done === deletedSocketId) delete container.done;
 }
 
+function removeLoopOwnedRuntimeControls(loadout: PipelineConfig, loop: PipelineLoop): void {
+  const exitSource = loop.exit?.from;
+  const sourceNode = exitSource ? loadout.nodes?.[exitSource] : undefined;
+  if (!sourceNode) return;
+
+  const loopExitTargets = new Set((loop.exits ?? []).map((route) => route.targetSocketId));
+  const advanceDoneTarget = loop.exit?.to;
+  if (advanceDoneTarget && advanceDoneTarget !== 'end') loopExitTargets.add(advanceDoneTarget);
+
+  if (sourceNode.advance && sourceNode.advance.done === advanceDoneTarget) delete sourceNode.advance;
+  if (sourceNode.edges && loopExitTargets.size > 0) {
+    sourceNode.edges = sourceNode.edges.filter((edge) => !loopExitTargets.has(edge.to));
+    if (sourceNode.edges.length === 0) delete sourceNode.edges;
+  }
+}
+
 export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: string): boolean {
   const node = loadout.nodes?.[socketId];
   if (!loadout.nodes || !canDeleteSocket(node)) return false;
@@ -221,6 +237,7 @@ export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: strin
 
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
     if (loop.nodes.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId || loop.exits?.some((route) => route.from === socketId)) {
+      removeLoopOwnedRuntimeControls(loadout, loop);
       delete loadout.loops?.[loopId];
       continue;
     }

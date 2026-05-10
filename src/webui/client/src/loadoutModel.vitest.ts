@@ -302,6 +302,45 @@ describe('loadout socket deletion model', () => {
     expect(loadout.loops?.targetOnly?.exit?.to).toBe('end');
     expect(loadout.loops?.targetOnly?.exits).toEqual([{ id: 'target-socket-1', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-1' }]);
   });
+
+  it('removes loop-owned exits and stale materialized routes when deleting a loop member', () => {
+    const loadout = normalizeMateriaConfigEdges({
+      loadouts: {
+        Active: {
+          entry: 'Socket-1',
+          loops: {
+            selected: {
+              nodes: ['Socket-2', 'Socket-3'],
+              consumes: { from: 'Socket-1', output: 'workItems' },
+              exit: { from: 'Socket-3', when: 'satisfied', to: 'Socket-4' },
+              exits: [{ id: 'after-selected', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-5' }],
+            },
+          },
+          nodes: {
+            'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-3': {
+              socketKind: 'normal',
+              edges: [
+                { when: 'always', to: 'Socket-2' },
+                { when: 'always', to: 'Socket-5' },
+              ],
+              advance: { cursor: 'workItemIndex', items: 'state.workItems', done: 'Socket-4', when: 'satisfied' },
+            },
+            'Socket-4': { socketKind: 'normal' },
+            'Socket-5': { socketKind: 'normal' },
+          },
+        },
+      },
+    }).loadouts!.Active;
+
+    expect(deleteSocketFromLoadout(loadout, 'Socket-2')).toBe(true);
+
+    expect(loadout.loops?.selected).toBeUndefined();
+    expect(loadout.nodes!['Socket-3'].advance).toBeUndefined();
+    expect(loadout.nodes!['Socket-3'].edges).toBeUndefined();
+    expect(Object.values(loadout.nodes!).flatMap((node) => node.edges ?? [])).not.toContainEqual(expect.objectContaining({ to: 'Socket-5' }));
+  });
 });
 
 describe('loop-exit connection mutation model', () => {

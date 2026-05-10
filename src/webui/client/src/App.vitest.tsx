@@ -2014,6 +2014,37 @@ describe('Materia loadout grid editor', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('creates a new socket from a loop exit by recording loop metadata instead of a normal edge', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    (config.loadouts.Edges as any).loops = {
+      reviewLoop: {
+        nodes: ['Socket-1', 'Socket-2'],
+        exit: { from: 'Socket-1', when: 'always', to: 'end' },
+      },
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
+
+    expect(await screen.findByText(/Created a socket and loop-exit route from Socket-1\./)).toBeTruthy();
+    expect(await screen.findByTestId('socket-Socket-4')).toBeTruthy();
+    expect(screen.getByTestId('loop-exit-edge-reviewLoop-exit:Socket-1:always').dataset.edgeKind).toBe('loop-exit');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges;
+    expect(saved.loops.reviewLoop.exits).toEqual([{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-4' }]);
+    expect(saved.nodes['Socket-1'].edges).toBeUndefined();
+    expect(saved.nodes['Socket-4']).toMatchObject({ empty: true, socketKind: 'normal' });
+  });
+
   it('does not create a new socket when a loop exit already has an always route', async () => {
     const config = structuredClone(edgeEditorConfig);
     (config.loadouts.Edges as any).loops = {
