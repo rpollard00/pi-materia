@@ -63,8 +63,8 @@ function activeLoadoutMessage(body: ActiveLoadoutResponse): string {
 function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
   if (!preserveLoadoutEdits || !current) return normalizeMateriaConfigEdges(reloaded);
   return normalizeMateriaConfigEdges({
-    ...cloneConfig(current),
-    materia: reloaded.materia ? cloneConfig(reloaded.materia) : undefined,
+    ...current,
+    materia: reloaded.materia,
   });
 }
 
@@ -82,7 +82,7 @@ function sortObjectKeys(value: unknown): unknown {
 
 export function configForDirtyComparison(config: MateriaConfig | undefined): unknown {
   if (!config) return config;
-  const comparable = normalizeMateriaConfigEdges(cloneConfig(config), { semantic: false });
+  const comparable = normalizeMateriaConfigEdges(config, { semantic: false });
   // activeLoadout is the user's current UI/session selection. It remains in the
   // persisted config for compatibility, but selecting a loadout must not require
   // a save or make the header report staged edits by itself.
@@ -135,12 +135,32 @@ export function useWebuiConfig() {
   const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
   const isDirty = dirtyConfigKey(baselineConfig) !== dirtyConfigKey(draftConfig);
 
+  /**
+   * Compatibility builder boundary for non-loadout config edits and tests.
+   * Routine loadout graph/layout edits should use updateLoadoutDraft or
+   * updateLoadoutLayout so they structurally share untouched config branches.
+   */
   function updateDraft(updater: (config: MateriaConfig) => void) {
     setDraftConfig((current) => {
       const next = cloneConfig(current ?? {});
       if (!next.loadouts) next.loadouts = buildLoadouts(next);
       updater(next);
       return normalizeMateriaConfigEdges(next);
+    });
+  }
+
+  function updateLoadoutDraft(loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) {
+    setDraftConfig((current) => {
+      const config = current ?? {};
+      const currentLoadouts = buildLoadouts(config);
+      const loadout = currentLoadouts[loadoutName];
+      if (!loadout) return current;
+      const nextLoadout = updater(loadout);
+      if (nextLoadout === loadout) return current;
+      return normalizeMateriaConfigEdges({
+        ...config,
+        loadouts: { ...currentLoadouts, [loadoutName]: nextLoadout },
+      });
     });
   }
 
@@ -412,6 +432,7 @@ export function useWebuiConfig() {
     status,
     switchLoadout,
     updateDraft,
+    updateLoadoutDraft,
     updateLoadoutLayout,
   };
 }

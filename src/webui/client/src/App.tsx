@@ -151,7 +151,7 @@ export function App() {
     source,
     status,
     switchLoadout: switchLoadoutDraft,
-    updateDraft,
+    updateLoadoutDraft,
     updateLoadoutLayout,
   } = useWebuiConfig();
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
@@ -309,16 +309,11 @@ export function App() {
       }
     }
 
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      const loadout = draftLoadouts[activeLoadoutName];
-      if (!loadout?.nodes) return;
-      if (fromSocket && fromSocket !== socketId) draftLoadouts[activeLoadoutName] = swapSocketMateria(loadout, fromSocket, socketId);
-      else {
-        const sourceNode = palette.find(([id]) => id === materiaId)?.[1];
-        if (sourceNode) draftLoadouts[activeLoadoutName] = setSocketMateria(loadout, socketId, sourceNode);
-      }
-      config.loadouts = draftLoadouts;
+    updateLoadoutDraft(activeLoadoutName, (loadout) => {
+      if (!loadout.nodes) return loadout;
+      if (fromSocket && fromSocket !== socketId) return swapSocketMateria(loadout, fromSocket, socketId);
+      const sourceNode = palette.find(([id]) => id === materiaId)?.[1];
+      return sourceNode ? setSocketMateria(loadout, socketId, sourceNode) : loadout;
     });
     setSelectedMateriaId(undefined);
     setStatus(`Staged ${materiaId} in socket ${socketId}; socket graph links and layout were preserved.`);
@@ -357,13 +352,7 @@ export function App() {
       setStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
       return false;
     }
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      const loadout = draftLoadouts[activeLoadoutName];
-      if (!loadout?.nodes || !loadout.nodes[socketId]) return;
-      draftLoadouts[activeLoadoutName] = clearMateriaFromSocket(loadout, socketId);
-      config.loadouts = draftLoadouts;
-    });
+    updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.nodes?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout);
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
@@ -384,11 +373,7 @@ export function App() {
       setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${formatGraphValidationErrors(result.errors)}`);
       return;
     }
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
-      config.loadouts = draftLoadouts;
-    });
+    updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig);
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setStatus(loopExitContext ? `Created a socket and loop-exit route from ${afterSocketId}.` : `Created a connected empty socket after ${afterSocketId}.`);
@@ -567,11 +552,7 @@ export function App() {
       setStatus(onError(message));
       return false;
     }
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
-      config.loadouts = draftLoadouts;
-    });
+    updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig);
     setEdgeMutationError('');
     setStatus(onSuccess || description);
     return true;
@@ -793,13 +774,7 @@ export function App() {
     const layoutChanged = (currentLayout?.x ?? undefined) !== (nextLayout?.x ?? undefined) || (currentLayout?.y ?? undefined) !== (nextLayout?.y ?? undefined);
 
     if (limitsChanged) {
-      updateDraft((config) => {
-        const draftLoadouts = buildLoadouts(config);
-        const loadout = draftLoadouts[activeLoadoutName];
-        if (!loadout?.nodes?.[socketId]) return;
-        const nextLoadout = setSocketLimits(loadout, socketId, nextLimits);
-        if (nextLoadout !== loadout) draftLoadouts[activeLoadoutName] = nextLoadout;
-      });
+      updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.nodes?.[socketId] ? setSocketLimits(loadout, socketId, nextLimits) : loadout);
     }
     if (layoutChanged) {
       updateLoadoutLayout(activeLoadoutName, (loadout) => setSocketLayouts(loadout, { [socketId]: nextLayout }));
@@ -825,11 +800,7 @@ export function App() {
       setStatus(`Cannot toggle edge ${edge.from} → ${edge.to}: ${formatGraphValidationErrors(result.errors)}`);
       return;
     }
-    updateDraft((config) => {
-      const draftLoadouts = buildLoadouts(config);
-      draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
-      config.loadouts = draftLoadouts;
-    });
+    updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig);
     const updatedGraph = result.graph as PipelineConfig;
     const updatedEdge = edge.edgeIndex === undefined ? updatedGraph.nodes?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : updatedGraph.nodes?.[edge.from]?.edges?.[edge.edgeIndex];
     setStatus(`Staged edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)} as ${edgeConditionLabel(updatedEdge?.when)}.`);

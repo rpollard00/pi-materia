@@ -6,7 +6,6 @@ import {
   type PipelineConfig,
 } from '../../../loadoutModel.js';
 import { buildLoadouts } from '../../utils/graphLayout.js';
-import { cloneConfig } from '../../utils/forms.js';
 import type { LoadoutSourceScope, SaveTarget } from '../../types.js';
 
 export function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
@@ -25,23 +24,23 @@ export function renameLoadoutDraft({
   activeLoadoutName: string;
   nextName: string;
 }) {
-  const next = cloneConfig(config);
-  const draftLoadouts = buildLoadouts(next);
-  if (!draftLoadouts[activeLoadoutName] || draftLoadouts[nextName]) return normalizeMateriaConfigEdges(next);
-  draftLoadouts[nextName] = draftLoadouts[activeLoadoutName];
-  delete draftLoadouts[activeLoadoutName];
-  next.loadouts = draftLoadouts;
-  next.activeLoadout = nextName;
-  return normalizeMateriaConfigEdges(next);
+  const draftLoadouts = buildLoadouts(config);
+  if (!draftLoadouts[activeLoadoutName] || draftLoadouts[nextName]) return normalizeMateriaConfigEdges(config);
+  const { [activeLoadoutName]: renamedLoadout, ...remainingLoadouts } = draftLoadouts;
+  return normalizeMateriaConfigEdges({
+    ...config,
+    loadouts: { ...remainingLoadouts, [nextName]: renamedLoadout },
+    activeLoadout: nextName,
+  });
 }
 
 export function createLoadoutDraft(config: MateriaConfig, name: string) {
-  const next = cloneConfig(config);
-  const draftLoadouts = buildLoadouts(next);
-  draftLoadouts[name] = makeEmptyEntryLoadout();
-  next.loadouts = draftLoadouts;
-  next.activeLoadout = name;
-  return normalizeMateriaConfigEdges(next);
+  const draftLoadouts = buildLoadouts(config);
+  return normalizeMateriaConfigEdges({
+    ...config,
+    loadouts: { ...draftLoadouts, [name]: makeEmptyEntryLoadout() },
+    activeLoadout: name,
+  });
 }
 
 export function deleteLoadoutDraft({
@@ -53,14 +52,11 @@ export function deleteLoadoutDraft({
   name: string;
   activeLoadoutName: string | undefined;
 }) {
-  const next = cloneConfig(config);
-  const draftLoadouts = buildLoadouts(next);
+  const draftLoadouts = buildLoadouts(config);
   const remainingNames = Object.keys(draftLoadouts).filter((candidate) => candidate !== name);
   const fallbackName = activeLoadoutName === name ? remainingNames[0] : activeLoadoutName;
-  delete draftLoadouts[name];
-  next.loadouts = draftLoadouts;
-  next.activeLoadout = fallbackName;
-  return { config: normalizeMateriaConfigEdges(next), fallbackName };
+  const remainingLoadouts = Object.fromEntries(Object.entries(draftLoadouts).filter(([candidate]) => candidate !== name));
+  return { config: normalizeMateriaConfigEdges({ ...config, loadouts: remainingLoadouts, activeLoadout: fallbackName }), fallbackName };
 }
 
 export function deletedLoadoutNamesAfterRename({
@@ -82,12 +78,9 @@ export function deletedLoadoutNamesAfterRename({
 export function buildConfigToSave(normalizedDraft: MateriaConfig, deletedLoadoutNames: string[]) {
   const preparedDraft = normalizeMateriaConfigEdges(normalizedDraft);
   assertValidLoadoutSaveSemantics(preparedDraft);
-  const configToSave = cloneConfig(preparedDraft) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
-  if (deletedLoadoutNames.length > 0) {
-    configToSave.loadouts = { ...(configToSave.loadouts ?? {}) };
-    for (const name of deletedLoadoutNames) configToSave.loadouts[name] = null;
-  }
-  return configToSave;
+  const loadouts: Record<string, PipelineConfig | null> = { ...(preparedDraft.loadouts ?? {}) };
+  for (const name of deletedLoadoutNames) loadouts[name] = null;
+  return { ...preparedDraft, loadouts } as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
 }
 
 export function saveTargetForSource(current: SaveTarget, sourceScope: LoadoutSourceScope | undefined) {

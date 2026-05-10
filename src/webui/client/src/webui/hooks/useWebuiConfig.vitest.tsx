@@ -76,6 +76,15 @@ function ConfigProbe() {
       >
         edit profile locally
       </button>
+      <button
+        type="button"
+        onClick={() => config.updateLoadoutLayout(config.activeLoadoutName ?? '', (loadout) => ({
+          ...loadout,
+          layout: { ...(loadout.layout ?? {}), sockets: { ...(loadout.layout?.sockets ?? {}), 'Socket-1': { x: 7, y: 9 } } },
+        }))}
+      >
+        edit layout locally
+      </button>
       <button type="button" onClick={() => void config.saveDraft()}>save draft</button>
       <button
         type="button"
@@ -258,6 +267,30 @@ describe('useWebuiConfig', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'edit profile locally' }));
     await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+  });
+
+  it('keeps layout-only edits out of semantic normalization while still marking the draft dirty', async () => {
+    const generatorConfig = {
+      activeLoadout: 'Alpha',
+      materia: { Build: { type: 'agent', generator: true, prompt: 'Build.' } },
+      loadouts: {
+        Alpha: {
+          entry: 'Socket-1',
+          nodes: { 'Socket-1': { type: 'agent', materia: 'Build' } },
+        },
+      },
+    } satisfies MateriaConfig;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: generatorConfig, loadoutSources: { Alpha: 'user' } }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'edit layout locally' }));
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+    const draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
+    expect(draft.loadouts?.Alpha?.layout?.sockets?.['Socket-1']).toEqual({ x: 7, y: 9 });
+    expect(draft.loadouts?.Alpha?.nodes?.['Socket-1']?.parse).toBeUndefined();
+    expect(draft.loadouts?.Alpha?.nodes?.['Socket-1']?.assign).toBeUndefined();
   });
 
   it('can reload reusable materia definitions while preserving staged loadout edits', async () => {

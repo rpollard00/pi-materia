@@ -18,9 +18,17 @@ const config = {
   },
 } satisfies MateriaConfig;
 
+function deepFreeze<T>(value: T): T {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  for (const child of Object.values(value)) deepFreeze(child);
+  return value;
+}
+
 describe('loadout draft mutations', () => {
   it('renames the active loadout without mutating the source config', () => {
-    const renamed = renameLoadoutDraft({ config, activeLoadoutName: 'Alpha', nextName: 'Gamma' });
+    const frozen = deepFreeze(config);
+    const renamed = renameLoadoutDraft({ config: frozen, activeLoadoutName: 'Alpha', nextName: 'Gamma' });
 
     expect(renamed.activeLoadout).toBe('Gamma');
     expect(renamed.loadouts?.Gamma).toMatchObject(config.loadouts.Alpha);
@@ -29,19 +37,23 @@ describe('loadout draft mutations', () => {
   });
 
   it('creates an empty entry loadout and makes it active', () => {
-    const created = createLoadoutDraft(config, 'New Loadout 3');
+    const frozen = deepFreeze(config);
+    const created = createLoadoutDraft(frozen, 'New Loadout 3');
 
     expect(created.activeLoadout).toBe('New Loadout 3');
     expect(created.loadouts?.['New Loadout 3']?.entry).toBeTruthy();
     expect(Object.keys(created.loadouts?.['New Loadout 3']?.nodes ?? {})).toHaveLength(1);
+    expect((config.loadouts as Record<string, unknown>)['New Loadout 3']).toBeUndefined();
   });
 
   it('deletes an active loadout and returns the fallback active name', () => {
-    const deleted = deleteLoadoutDraft({ config, name: 'Alpha', activeLoadoutName: 'Alpha' });
+    const frozen = deepFreeze(config);
+    const deleted = deleteLoadoutDraft({ config: frozen, name: 'Alpha', activeLoadoutName: 'Alpha' });
 
     expect(deleted.fallbackName).toBe('Beta');
     expect(deleted.config.activeLoadout).toBe('Beta');
     expect(deleted.config.loadouts?.Alpha).toBeUndefined();
+    expect(config.loadouts.Alpha).toBeTruthy();
   });
 
   it('tracks persisted rename deletion markers while removing reverted target markers', () => {
@@ -55,11 +67,13 @@ describe('loadout draft mutations', () => {
     expect(next).toEqual(['Alpha']);
   });
 
-  it('adds null deletion markers to saved config payloads', () => {
-    const payload = buildConfigToSave(config, ['Beta']);
+  it('adds null deletion markers to saved config payloads without mutating the draft', () => {
+    const frozen = deepFreeze(config);
+    const payload = buildConfigToSave(frozen, ['Beta']);
 
     expect(payload.loadouts?.Beta).toBeNull();
     expect(payload.loadouts?.Alpha).toMatchObject(config.loadouts.Alpha);
+    expect(config.loadouts.Beta).toMatchObject({ entry: 'Socket-1' });
   });
 
   it('migrates legacy node layout into loadout layout before save', () => {
