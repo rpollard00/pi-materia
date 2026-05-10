@@ -26,7 +26,7 @@ import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, PiMateriaConfig, ResolvedMateriaAgentNode, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
+import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentNode, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
@@ -149,6 +149,7 @@ export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   const node = currentNodeOrThrow(state);
   const previousFailure = state.failedReason;
 
+  state.recoveryExhaustion = undefined;
   state.active = true;
   state.phase = node.id;
   state.currentNode = node.id;
@@ -655,12 +656,27 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
 
   const key = recoveryIdentityKey(state);
   state.recoveryAttempts ??= {};
+  const allowance = ensureRecoveryAllowance(state, key);
   const previousAttempts = state.recoveryAttempts[key] ?? 0;
-  const maxAttempts = DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS;
+  const maxAttempts = allowance.effectiveMaxAttempts;
   if (previousAttempts >= maxAttempts) {
     const exhausted = `Same-node recovery exhausted for ${recoveryDiagnosticLabel(state)} after ${previousAttempts}/${maxAttempts} attempt(s): ${errorMessage(error)}`;
-    await appendEvent(state.runState, "same_node_recovery_exhausted", { reason, key, attempts: previousAttempts, maxAttempts, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
-    await failCast(pi, ctx, state, new Error(exhausted), options.entryId);
+    state.recoveryExhaustion = {
+      kind: "same_node_recovery_exhausted",
+      reason,
+      key,
+      attempts: previousAttempts,
+      originalMaxAttempts: allowance.originalMaxAttempts,
+      effectiveMaxAttempts: allowance.effectiveMaxAttempts,
+      reviveCount: allowance.reviveCount,
+      failedReason: exhausted,
+      node: state.currentNode,
+      itemKey: state.currentItemKey,
+      mode: recoveryTurnMode(state),
+      exhaustedAt: Date.now(),
+    };
+    await appendEvent(state.runState, "same_node_recovery_exhausted", { reason, key, attempts: previousAttempts, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    await failCast(pi, ctx, state, new Error(exhausted), options.entryId, { preserveRecoveryExhaustion: true });
     return true;
   }
 
@@ -670,7 +686,7 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
   state.nodeState = "awaiting_agent_response";
   state.updatedAt = Date.now();
   state.runState.lastMessage = `Retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`;
-  await appendEvent(state.runState, "same_node_recovery_start", { reason, key, attempt, maxAttempts, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, mode: recoveryTurnMode(state) });
+  await appendEvent(state.runState, "same_node_recovery_start", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, mode: recoveryTurnMode(state) });
   await writeUsage(state.runState);
   saveCastState(pi, state);
 
@@ -678,7 +694,7 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
     if (reason === "context_window") await runSameNodeRecoveryAction(pi, ctx, state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
     updateToolScope(pi, currentMateria(state));
     await sendMateriaTurn(pi, ctx, state, buildSameNodeRecoveryPrompt(state), { skipProactiveCompaction: true });
-    await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, maxAttempts, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     saveCastState(pi, state);
     updateWidget(ctx, state);
     ctx.ui.notify(`pi-materia retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`, "warning");
@@ -820,6 +836,60 @@ function recoveryIdentityKey(state: MateriaCastState): string {
   return JSON.stringify([recoveryTurnMode(state), nodeId, state.currentItemKey ?? "__singleton__", visit, refinementTurn]);
 }
 
+function ensureRecoveryAllowance(state: MateriaCastState, key: string): MateriaRecoveryAllowance {
+  state.recoveryAllowances ??= {};
+  const existing = state.recoveryAllowances[key];
+  if (isValidRecoveryAllowance(existing)) return existing;
+  const originalMaxAttempts = DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS;
+  const allowance: MateriaRecoveryAllowance = { originalMaxAttempts, effectiveMaxAttempts: originalMaxAttempts, reviveCount: 0 };
+  state.recoveryAllowances[key] = allowance;
+  return allowance;
+}
+
+function isValidRecoveryAllowance(value: unknown): value is MateriaRecoveryAllowance {
+  const allowance = value as Partial<MateriaRecoveryAllowance> | undefined;
+  return Boolean(
+    allowance &&
+    Number.isSafeInteger(allowance.originalMaxAttempts) && allowance.originalMaxAttempts! > 0 &&
+    Number.isSafeInteger(allowance.effectiveMaxAttempts) && allowance.effectiveMaxAttempts! >= allowance.originalMaxAttempts! &&
+    Number.isSafeInteger(allowance.reviveCount) && allowance.reviveCount! >= 0
+  );
+}
+
+export interface MateriaReviveAllowanceResult {
+  key: string;
+  priorEffectiveMaxAttempts: number;
+  increment: number;
+  newEffectiveMaxAttempts: number;
+  reviveCount: number;
+}
+
+export function extendSameNodeRecoveryAllowanceForRevive(state: MateriaCastState): MateriaReviveAllowanceResult {
+  if (state.active) throw new Error(`pi-materia cast ${state.castId} is still active and cannot be revived.`);
+  if (state.phase !== "failed" && state.nodeState !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed and cannot be revived.`);
+  const exhaustion = state.recoveryExhaustion;
+  if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted") {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured same-node recovery exhaustion metadata. Use /materia recast for general failed casts.`);
+  }
+  if (!exhaustion.key) throw new Error(`pi-materia cast ${state.castId} is not revivable: exhausted recovery context is missing.`);
+  if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: same-node recovery exhaustion metadata does not match the current terminal failure. Use /materia recast for general failed casts.`);
+  }
+  const allowance = state.recoveryAllowances?.[exhaustion.key];
+  if (!isValidRecoveryAllowance(allowance)) {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: recovery allowance metadata is missing or invalid. Use /materia recast instead.`);
+  }
+  const priorEffectiveMaxAttempts = allowance.effectiveMaxAttempts;
+  const increment = allowance.originalMaxAttempts;
+  allowance.effectiveMaxAttempts = priorEffectiveMaxAttempts + increment;
+  allowance.reviveCount += 1;
+  exhaustion.effectiveMaxAttempts = allowance.effectiveMaxAttempts;
+  exhaustion.originalMaxAttempts = allowance.originalMaxAttempts;
+  exhaustion.reviveCount = allowance.reviveCount;
+  state.updatedAt = Date.now();
+  return { key: exhaustion.key, priorEffectiveMaxAttempts, increment, newEffectiveMaxAttempts: allowance.effectiveMaxAttempts, reviveCount: allowance.reviveCount };
+}
+
 function recoveryDiagnosticLabel(state: MateriaCastState): string {
   const item = state.currentItemKey ? ` item ${JSON.stringify(state.currentItemKey)}` : "";
   return `${recoveryTurnMode(state)} turn for node "${state.currentNode ?? state.phase}"${item}`;
@@ -833,7 +903,8 @@ function nonRecoverableTurnError(state: MateriaCastState, error: unknown): Error
   return new Error(`Non-recoverable turn failure for ${recoveryDiagnosticLabel(state)} (same-node recovery not attempted): ${errorMessage(error)}`);
 }
 
-async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string): Promise<void> {
+async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string, options: { preserveRecoveryExhaustion?: boolean } = {}): Promise<void> {
+  if (!options.preserveRecoveryExhaustion) state.recoveryExhaustion = undefined;
   state.active = false;
   state.awaitingResponse = false;
   state.nodeState = "failed";
@@ -903,6 +974,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.phase = "complete";
   state.awaitingResponse = false;
   state.nodeState = "complete";
+  state.recoveryExhaustion = undefined;
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
   markRunEnded(state);

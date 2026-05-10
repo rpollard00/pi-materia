@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
+import { extendSameNodeRecoveryAllowanceForRevive } from "../src/native.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
@@ -312,8 +313,60 @@ describe("native same-node recovery", () => {
     expect(latestState.active).toBe(false);
     expect(latestState.failedReason).toContain("Same-node recovery exhausted");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_node_recovery_exhausted", reason: "context_window", node: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    expect(latestState.recoveryAllowances[latestState.recoveryExhaustion.key]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_node_recovery_exhausted")).toBe(true);
+    expect(events.some((event) => event.type === "same_node_recovery_exhausted" && event.data.originalMaxAttempts === 1 && event.data.effectiveMaxAttempts === 1)).toBe(true);
+  });
+
+  test("revive allowance extension is scoped and grows linearly", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast revive math");
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded again" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    const exhaustedKey = state.recoveryExhaustion.key;
+    state.recoveryAllowances.other = { originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 };
+
+    expect(extendSameNodeRecoveryAllowanceForRevive(state)).toMatchObject({ key: exhaustedKey, priorEffectiveMaxAttempts: 1, increment: 1, newEffectiveMaxAttempts: 2, reviveCount: 1 });
+    expect(extendSameNodeRecoveryAllowanceForRevive(state)).toMatchObject({ key: exhaustedKey, priorEffectiveMaxAttempts: 2, increment: 1, newEffectiveMaxAttempts: 3, reviveCount: 2 });
+    expect(state.recoveryAllowances[exhaustedKey]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 3, reviveCount: 2 });
+    expect(state.recoveryAllowances.other).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
+  });
+
+  test("revive allowance extension rejects stale exhaustion metadata after a later non-exhaustion failure", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast revive stale guard");
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded again" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    const staleExhaustion = { ...state.recoveryExhaustion };
+    expect(extendSameNodeRecoveryAllowanceForRevive(state).newEffectiveMaxAttempts).toBe(2);
+
+    state.recoveryExhaustion = staleExhaustion;
+    state.failedReason = "Non-recoverable turn failure for normal turn for node \\\"Socket-1\\\": provider auth failed";
+    expect(() => extendSameNodeRecoveryAllowanceForRevive(state)).toThrow(/does not match the current terminal failure/);
+  });
+
+  test("revive allowance extension rejects legacy or non-exhaustion failures", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast non exhaustion revive reject");
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(() => extendSameNodeRecoveryAllowanceForRevive(state)).toThrow(/missing structured same-node recovery exhaustion metadata/);
+
+    const legacy = { ...state, failedReason: "Same-node recovery exhausted for node", recoveryExhaustion: undefined };
+    expect(() => extendSameNodeRecoveryAllowanceForRevive(legacy)).toThrow(/missing structured same-node recovery exhaustion metadata/);
   });
 
   test("multi-turn refinement context-window failures compact and regenerate a refinement retry prompt", async () => {

@@ -213,12 +213,38 @@ export interface MateriaCastState {
   multiTurnRefinements?: Record<string, number>;
   /** Bounded retry counters for same-node recovery of incomplete agent turns. */
   recoveryAttempts?: Record<string, number>;
+  /** Scoped per-context same-node recovery allowance metadata, keyed like recoveryAttempts. */
+  recoveryAllowances?: Record<string, MateriaRecoveryAllowance>;
+  /** Structured terminal metadata for casts failed by same-node recovery exhaustion. */
+  recoveryExhaustion?: MateriaRecoveryExhaustion;
   taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
   lastOutput?: string;
   lastJson?: unknown;
   runState: MateriaRunState;
   pipeline: ResolvedMateriaPipeline;
+}
+
+export interface MateriaRecoveryAllowance {
+  originalMaxAttempts: number;
+  effectiveMaxAttempts: number;
+  reviveCount: number;
+}
+
+export interface MateriaRecoveryExhaustion {
+  kind: "same_node_recovery_exhausted";
+  reason: "context_window";
+  key: string;
+  attempts: number;
+  originalMaxAttempts: number;
+  effectiveMaxAttempts: number;
+  reviveCount: number;
+  /** Exact terminal failedReason recorded for the exhaustion failure; guards against stale revive metadata. */
+  failedReason: string;
+  node?: string;
+  itemKey?: string;
+  mode: "normal" | "refinement" | "finalization";
+  exhaustedAt: number;
 }
 
 export interface MateriaManifestEntry {
