@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
-import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, routeLoadoutEdges } from './webui/utils/graphLayout.js';
+import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, layoutSockets, routeLoadoutEdges } from './webui/utils/graphLayout.js';
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
@@ -627,6 +627,116 @@ describe('Materia loadout grid editor', () => {
     expect(badges.has('Socket-2')).toBe(false);
     expect(badges.get('Socket-3')?.loopIds).toEqual(['review']);
     expect(badges.get('Socket-3')?.title).toBe('Loop exit for Review loop: Satisfied → end');
+  });
+
+  it('derives stable visual edges for loop-exit route metadata without normal edges', () => {
+    const graph = layoutSockets({
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-2': { type: 'agent', materia: 'Build', parse: 'json' },
+        'Socket-3': { type: 'agent', materia: 'Maintain' },
+        'Socket-4': { type: 'agent', materia: 'Auto-Eval' },
+      },
+      loops: {
+        work: {
+          nodes: ['Socket-2', 'Socket-3'],
+          exit: { from: 'Socket-3', when: 'satisfied', to: 'end' },
+          exits: [
+            { id: 'exit:Socket-3:always', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-4' },
+            { id: 'exit:Socket-3:satisfied', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-1' },
+            { id: 'exit:Socket-3:not_satisfied', from: 'Socket-3', condition: 'not_satisfied', targetSocketId: 'Missing' },
+          ],
+        },
+      },
+    } as never);
+
+    expect(graph.edges.filter((edge) => edge.kind !== 'loop-exit')).toHaveLength(1);
+    expect(graph.edges.filter((edge) => edge.kind === 'loop-exit')).toEqual([
+      expect.objectContaining({ id: 'loop-exit:work:exit:Socket-3:always', from: 'Socket-3', to: 'Socket-4', when: 'always', loopId: 'work', loopExitRouteId: 'exit:Socket-3:always' }),
+      expect.objectContaining({ id: 'loop-exit:work:exit:Socket-3:satisfied', from: 'Socket-3', to: 'Socket-1', when: 'satisfied', loopId: 'work', loopExitRouteId: 'exit:Socket-3:satisfied' }),
+    ]);
+  });
+
+  it('renders loop-exit route metadata without requiring legacy loop.exit metadata', () => {
+    const graph = layoutSockets({
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'Build' },
+        'Socket-2': { type: 'agent', materia: 'Maintain' },
+        'Socket-3': { type: 'agent', materia: 'Summarize' },
+      },
+      loops: {
+        work: {
+          nodes: ['Socket-1', 'Socket-2'],
+          exits: [{ id: 'exit:Socket-2:always', from: 'Socket-2', condition: 'always', targetSocketId: 'Socket-3' }],
+        },
+      },
+    } as never);
+
+    expect(graph.edges.filter((edge) => edge.kind === 'loop-exit')).toEqual([
+      expect.objectContaining({ id: 'loop-exit:work:exit:Socket-2:always', from: 'Socket-2', to: 'Socket-3', when: 'always', loopId: 'work', loopExitRouteId: 'exit:Socket-2:always' }),
+    ]);
+  });
+
+  it('renders canonical loop-exit routes from member sources even when legacy loop.exit points elsewhere', () => {
+    const graph = layoutSockets({
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'Build' },
+        'Socket-2': { type: 'agent', materia: 'Eval' },
+        'Socket-3': { type: 'agent', materia: 'Maintain' },
+        'Socket-4': { type: 'agent', materia: 'Summarize' },
+      },
+      loops: {
+        work: {
+          nodes: ['Socket-1', 'Socket-2', 'Socket-3'],
+          exit: { from: 'Socket-3', when: 'satisfied', to: 'end' },
+          exits: [{ id: 'exit:Socket-2:not_satisfied', from: 'Socket-2', condition: 'not_satisfied', targetSocketId: 'Socket-4' }],
+        },
+      },
+    } as never);
+
+    expect(graph.edges.filter((edge) => edge.kind === 'loop-exit')).toEqual([
+      expect.objectContaining({ id: 'loop-exit:work:exit:Socket-2:not_satisfied', from: 'Socket-2', to: 'Socket-4', when: 'not_satisfied', loopId: 'work', loopExitRouteId: 'exit:Socket-2:not_satisfied' }),
+    ]);
+  });
+
+  it('renders loop-exit route edges with condition labels and removes metadata from the edge hit target', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
+      taskIteration: {
+        label: 'Build → Eval → Maintain until all tasks complete',
+        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
+        exits: [
+          { id: 'exit:Socket-4:always', from: 'Socket-4', condition: 'always', targetSocketId: 'Socket-1' },
+          { id: 'exit:Socket-4:satisfied', from: 'Socket-4', condition: 'satisfied', targetSocketId: 'Socket-2' },
+          { id: 'exit:Socket-4:not_satisfied', from: 'Socket-4', condition: 'not_satisfied', targetSocketId: 'Socket-3' },
+        ],
+      },
+    } as never;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/config' && init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const always = await screen.findByTestId('loop-exit-edge-taskIteration-exit:Socket-4:always');
+    const satisfied = screen.getByTestId('loop-exit-edge-taskIteration-exit:Socket-4:satisfied');
+    const notSatisfied = screen.getByTestId('loop-exit-edge-taskIteration-exit:Socket-4:not_satisfied');
+    expect(always.dataset.edgeKind).toBe('loop-exit');
+    expect(always.classList.contains('loadout-edge-loop-exit')).toBe(true);
+    expect(always.textContent).toContain('Upon Loop Exit');
+    expect(satisfied.textContent).toContain('Upon Loop Exit: Satisfied');
+    expect(notSatisfied.textContent).toContain('Upon Loop Exit: Not Satisfied');
+    expect(always.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-loop-exit-edge-arrow)');
+    expect(screen.getByTestId('edge-Socket-1-Socket-2-0').classList.contains('loadout-edge-loop-exit')).toBe(false);
+
+    fireEvent.click(always);
+    await waitFor(() => expect(screen.queryByTestId('loop-exit-edge-taskIteration-exit:Socket-4:always')).toBeNull());
+    expect(screen.getByTestId('loop-exit-edge-taskIteration-exit:Socket-4:satisfied')).toBeTruthy();
+    expect(screen.getByTestId('loop-exit-edge-taskIteration-exit:Socket-4:not_satisfied')).toBeTruthy();
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('renders explicit loop regions and can create the build-eval-maintain task loop', async () => {

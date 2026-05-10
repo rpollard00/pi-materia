@@ -324,6 +324,23 @@
   fill: rgb(192 132 252 / 0.98);
 }
 
+.loadout-edge-loop-exit path {
+  stroke: rgb(45 212 191 / 0.98);
+  stroke-width: 4;
+  stroke-dasharray: 12 5 3 5;
+  filter: drop-shadow(0 0 10px rgb(45 212 191 / 0.42)) drop-shadow(0 0 18px rgb(56 189 248 / 0.18));
+}
+
+.loadout-edge-loop-exit text {
+  fill: rgb(153 246 228 / 0.98);
+  font-size: 0.62rem;
+  letter-spacing: 0.11em;
+}
+
+.loadout-loop-exit-edge-arrow {
+  fill: rgb(45 212 191 / 0.98);
+}
+
 .materia-socket {
   position: relative;
   display: flex;

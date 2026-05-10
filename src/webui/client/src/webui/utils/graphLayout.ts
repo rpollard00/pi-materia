@@ -144,13 +144,24 @@ function generatorEdgeOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: Pi
   return generatorLoopOutput(edge, loadout) ?? generatorToGeneratorOutput(edge, loadout, definitions);
 }
 
-export function isGeneratorOutputEdge(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): boolean {
+export function isGeneratorOutputEdge(edge: Pick<LoadoutEdge, 'from' | 'to'> & { kind?: LoadoutEdge['kind'] }, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): boolean {
+  if (edge.kind === 'loop-exit') return false;
   return Boolean(generatorEdgeOutput(edge, loadout, definitions));
 }
 
-export function generatorEdgeLabel(edge: Pick<LoadoutEdge, 'from' | 'to' | 'when'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string {
-  const output = generatorEdgeOutput(edge, loadout, definitions);
-  return output ? `Generator output: ${output}` : edgeConditionLabel(edge.when);
+export function generatorEdgeLabel(edge: Pick<LoadoutEdge, 'from' | 'to' | 'when' | 'kind'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string {
+  if (edge.kind !== 'loop-exit') {
+    const output = generatorEdgeOutput(edge, loadout, definitions);
+    if (output) return `Generator output: ${output}`;
+  }
+  return edge.kind === 'loop-exit' ? loopExitEdgeLabel(edge.when) : edgeConditionLabel(edge.when);
+}
+
+export function loopExitEdgeLabel(when?: string): string {
+  const condition = edgeConditionState({ when });
+  if (condition === 'satisfied') return 'Upon Loop Exit: Satisfied';
+  if (condition === 'not_satisfied') return 'Upon Loop Exit: Not Satisfied';
+  return 'Upon Loop Exit';
 }
 
 export function iteratorBadgeLabel(details?: string): string {
@@ -194,7 +205,11 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
     if (node.command?.length) lines.push(`Command: ${node.command.join(' ')}`);
   }
   if (node?.edges?.length) {
-    lines.push(`Edges: ${node.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.nodes?.[edge.to])}`).join(', ')}`);
+    lines.push(`Edges: ${node.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when, kind: 'normal' }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.nodes?.[edge.to])}`).join(', ')}`);
+  }
+  const loopExitRoutes = Object.entries(loadout?.loops ?? {}).flatMap(([, loop]) => (loop.exits ?? []).filter((route) => route.from === id && loadout?.nodes?.[route.targetSocketId]));
+  if (loopExitRoutes.length) {
+    lines.push(`Loop-exit routes: ${loopExitRoutes.map((route) => `${loopExitEdgeLabel(route.condition)} → ${formatSocketLabel(route.targetSocketId, loadout?.nodes?.[route.targetSocketId])}`).join(', ')}`);
   }
   const legacyNext = (node as LegacyPipelineNode | undefined)?.next;
   if (legacyNext) lines.push(`Legacy flow: Always → ${legacyNext}`);
@@ -212,15 +227,31 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
   return lines.join('\n');
 }
 
-function getLoadoutEdges(nodes: Record<string, PipelineNode>): LoadoutEdge[] {
+function getLoadoutEdges(loadout: PipelineConfig | undefined): LoadoutEdge[] {
+  const nodes = loadout?.nodes ?? {};
   const edges: LoadoutEdge[] = [];
   for (const [from, node] of Object.entries(nodes)) {
     for (const [index, edge] of (node.edges ?? []).entries()) {
-      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when}`, from, to: edge.to, when: edge.when, edgeIndex: index });
+      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when}`, from, to: edge.to, when: edge.when, kind: 'normal', edgeIndex: index });
     }
     const legacyNext = (node as LegacyPipelineNode).next;
     if (typeof legacyNext === 'string' && nodes[legacyNext]) {
-      edges.push({ id: `${from}:legacy-next:${legacyNext}`, from, to: legacyNext, when: 'always' });
+      edges.push({ id: `${from}:legacy-next:${legacyNext}`, from, to: legacyNext, when: 'always', kind: 'legacy-next' });
+    }
+  }
+  for (const [loopId, loop] of Object.entries(loadout?.loops ?? {})) {
+    for (const route of loop.exits ?? []) {
+      if (nodes[route.from] && nodes[route.targetSocketId]) {
+        edges.push({
+          id: `loop-exit:${loopId}:${route.id}`,
+          from: route.from,
+          to: route.targetSocketId,
+          when: route.condition,
+          kind: 'loop-exit',
+          loopId,
+          loopExitRouteId: route.id,
+        });
+      }
     }
   }
   return edges;
@@ -583,7 +614,7 @@ export function getLoopExitBadges(loadout: PipelineConfig | undefined): Map<stri
 export function layoutSockets(loadout?: PipelineConfig): LayoutSocketsResult {
   const nodes = loadout?.nodes ?? {};
   const entries = Object.entries(nodes);
-  const edges = getLoadoutEdges(nodes);
+  const edges = getLoadoutEdges(loadout);
   const entryId = loadout?.entry && nodes[loadout.entry] ? loadout.entry : entries[0]?.[0];
   const orderedAutoIds = getAutomaticSocketOrder(entries, edges, entryId).filter((id) => {
     const node = nodes[id];

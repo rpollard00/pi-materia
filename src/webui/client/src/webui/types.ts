@@ -133,12 +133,17 @@ export interface DragPayload {
   fromSocket?: string;
 }
 
+export type LoadoutEdgeKind = 'normal' | 'legacy-next' | 'loop-exit';
+
 export interface LoadoutEdge {
   id: string;
   from: string;
   to: string;
   when: MateriaEdgeCondition;
+  kind: LoadoutEdgeKind;
   edgeIndex?: number;
+  loopId?: string;
+  loopExitRouteId?: string;
 }
 
 export interface PositionedSocket {
