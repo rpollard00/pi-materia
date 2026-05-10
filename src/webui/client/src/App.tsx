@@ -1127,7 +1127,7 @@ export function App() {
               canRevert={canRevert}
               status={status}
               onSaveTargetChange={setSaveTarget}
-              onSave={() => saveDraft().catch((error) => setStatus(error.message))}
+              onSave={() => saveDraft().catch(() => undefined)}
               onRevert={revertDraft}
             />
           </aside>

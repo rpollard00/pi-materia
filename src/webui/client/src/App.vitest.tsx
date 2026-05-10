@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
+import { resetToastStoreForTests } from './toast/index.js';
 import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, layoutSockets, routeLoadoutEdges } from './webui/utils/graphLayout.js';
 
 const testConfig = {
@@ -72,6 +73,7 @@ function createDataTransfer() {
 
 afterEach(() => {
   cleanup();
+  resetToastStoreForTests();
   window.history.replaceState({}, '', '/');
   vi.restoreAllMocks();
 });
@@ -337,7 +339,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.blur(input);
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(screen.getByText(/Socket-3 \(Auto-Eval\).*satisfied\/not_satisfied routing requires JSON output parsing/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText(/Socket-3 \(Auto-Eval\).*satisfied\/not_satisfied routing requires JSON output parsing/i).length).toBeGreaterThan(0));
+    expect(screen.getByText('Cannot save loadout')).toBeTruthy();
     expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 

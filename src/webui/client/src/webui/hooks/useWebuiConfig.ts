@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   normalizeMateriaConfigEdges,
+  validateLoadoutSaveSemantics,
   type MateriaConfig,
 } from '../../loadoutModel.js';
+import { toast } from '../../toast/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
 import { cloneConfig } from '../utils/forms.js';
 import type { ActiveLoadoutResponse, ConfigResponse, LoadedConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
@@ -184,21 +186,42 @@ export function useWebuiConfig() {
 
   async function setPersistedActiveLoadout(name: string) {
     setStatus(`Changing active loadout to ${name}…`);
-    const response = await fetch('/api/loadout/active', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-    });
-    const body = await response.json() as ActiveLoadoutResponse;
+    let response: Response;
+    let body: ActiveLoadoutResponse;
+    try {
+      response = await fetch('/api/loadout/active', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      body = await response.json() as ActiveLoadoutResponse;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(`Active loadout change failed: ${message}`);
+      toast({
+        id: 'active-loadout-error',
+        title: 'Could not change active loadout',
+        description: `The active loadout was not changed. Try again or check the WebUI server: ${message}`,
+        variant: 'error',
+      });
+      throw error;
+    }
     if (!response.ok || body.ok === false) {
       const message = activeLoadoutMessage(body);
       setStatus(`Active loadout change failed: ${message}`);
+      toast({
+        id: 'active-loadout-error',
+        title: 'Could not change active loadout',
+        description: `The active loadout was not changed. ${message}`,
+        variant: 'error',
+      });
       throw new Error(message);
     }
-    const readyStatus = body.message ?? `Active loadout changed to ${body.activeLoadout ?? name}.`;
+    const activeName = body.activeLoadout ?? name;
+    const readyStatus = body.message ?? `Active loadout changed to ${activeName}.`;
     if (body.config) {
       const snapshot = normalizeConfigSnapshot(body, baselineConfig ?? draftConfigRef.current);
-      const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: body.activeLoadout ?? snapshot.config.activeLoadout ?? name });
+      const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: activeName ?? snapshot.config.activeLoadout ?? name });
       setBaselineConfig(nextConfig);
       if (snapshot.source) setSource(snapshot.source);
       if (snapshot.loadoutSources) setLoadoutSources(snapshot.loadoutSources);
@@ -206,7 +229,13 @@ export function useWebuiConfig() {
     } else {
       await reloadConfig({ preserveLoadoutEdits: true, readyStatus });
     }
-    return body.activeLoadout ?? name;
+    toast({
+      id: `active-loadout-success:${activeName}`,
+      title: 'Active loadout changed',
+      description: readyStatus,
+      variant: 'success',
+    });
+    return activeName;
   }
 
   function commitActiveLoadoutRename(rawName = loadoutNameInput) {
@@ -275,14 +304,51 @@ export function useWebuiConfig() {
     if (!draftConfig) return;
     setStatus('Saving staged loadout edits…');
     const normalizedDraft = normalizeMateriaConfigEdges(draftConfig);
+    const validationErrors = validateLoadoutSaveSemantics(normalizedDraft);
+    if (validationErrors.length > 0) {
+      const description = validationErrors.join('\n');
+      setStatus(`Cannot save staged loadout edits: ${description}`);
+      toast({
+        id: 'loadout-validation',
+        title: 'Cannot save loadout',
+        description,
+        variant: 'validation',
+      });
+      throw new Error(description);
+    }
+
     const configToSave = buildConfigToSave(normalizedDraft, deletedLoadoutNames);
-    const response = await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ target: saveTarget, config: configToSave }),
-    });
-    const body = await response.json();
-    if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Save failed');
+    let response: Response;
+    let body: { ok?: boolean; error?: string; target?: SaveTarget };
+    try {
+      response = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ target: saveTarget, config: configToSave }),
+      });
+      body = await response.json() as { ok?: boolean; error?: string; target?: SaveTarget };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(`Save failed: ${message}`);
+      toast({
+        id: `loadout-save-error:${saveTarget}`,
+        title: 'Could not save loadout edits',
+        description: `Your staged loadout edits were not saved. Try again or check the WebUI server: ${message}`,
+        variant: 'error',
+      });
+      throw error;
+    }
+    if (!response.ok || body.ok === false) {
+      const message = body.error ?? 'Save failed';
+      setStatus(`Save failed: ${message}`);
+      toast({
+        id: `loadout-save-error:${saveTarget}`,
+        title: 'Could not save loadout edits',
+        description: `Your staged loadout edits were not saved. ${message}`,
+        variant: 'error',
+      });
+      throw new Error(message);
+    }
     setBaselineConfig(normalizedDraft);
     setDraftConfig(normalizedDraft);
     setDeletedLoadoutNames([]);
@@ -292,7 +358,14 @@ export function useWebuiConfig() {
       for (const name of Object.keys(normalizedDraft.loadouts ?? {})) if (!next[name]) next[name] = body.target ?? saveTarget;
       return next;
     });
-    setStatus(`Saved staged loadout edits to ${body.target ?? saveTarget} scope.`);
+    const readyStatus = `Saved staged loadout edits to ${body.target ?? saveTarget} scope.`;
+    setStatus(readyStatus);
+    toast({
+      id: 'loadout-save-success',
+      title: 'Loadout edits saved',
+      description: readyStatus,
+      variant: 'success',
+    });
   }
 
   return {
