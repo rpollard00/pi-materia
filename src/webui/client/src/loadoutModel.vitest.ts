@@ -6,12 +6,15 @@ import {
   deleteSocketFromLoadout,
   formatSocketLabel,
   getNodeLabel,
+  findLoopExitConnectionContext,
   makeEmptyEntryLoadout,
   makeEmptySocket,
   makeNewSocketId,
   normalizeMateriaConfigEdges,
   placeMateriaInSocket,
+  removeLoopExitRoute,
   resolveMateriaColor,
+  upsertLoopExitRoute,
   type MateriaBehaviorConfig,
   type MateriaConfig,
   type PipelineConfig,
@@ -298,6 +301,81 @@ describe('loadout socket deletion model', () => {
     expect(loadout.loops?.targetOnly?.iterator?.done).toBeUndefined();
     expect(loadout.loops?.targetOnly?.exit?.to).toBe('end');
     expect(loadout.loops?.targetOnly?.exits).toEqual([{ id: 'target-socket-1', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-1' }]);
+  });
+});
+
+describe('loop-exit connection mutation model', () => {
+  it('finds loop-exit sockets and upserts routes without creating normal edges', () => {
+    const loadout: PipelineConfig = {
+      entry: 'Socket-1',
+      nodes: {
+        'Socket-1': { socketKind: 'entry' },
+        'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-3': { socketKind: 'normal' },
+      },
+      loops: {
+        work: { nodes: ['Socket-2'], exit: { from: 'Socket-2', when: 'always', to: 'end' } },
+      },
+    };
+
+    expect(findLoopExitConnectionContext(loadout, 'Socket-2')?.loopId).toBe('work');
+    expect(upsertLoopExitRoute(loadout, 'work', 'Socket-2', 'always', 'Socket-3')).toEqual({
+      id: 'exit:Socket-2:always',
+      from: 'Socket-2',
+      condition: 'always',
+      targetSocketId: 'Socket-3',
+    });
+
+    expect(loadout.nodes!['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(loadout.loops?.work.exits).toEqual([{ id: 'exit:Socket-2:always', from: 'Socket-2', condition: 'always', targetSocketId: 'Socket-3' }]);
+  });
+
+  it('replaces duplicate condition routes and removes loop-exit route metadata', () => {
+    const loadout: PipelineConfig = {
+      entry: 'Socket-1',
+      nodes: {
+        'Socket-1': { socketKind: 'entry' },
+        'Socket-2': { socketKind: 'normal' },
+        'Socket-3': { socketKind: 'normal' },
+        'Socket-4': { socketKind: 'normal' },
+      },
+      loops: {
+        work: { nodes: ['Socket-2'], exit: { from: 'Socket-2', when: 'always', to: 'end' } },
+      },
+    };
+
+    upsertLoopExitRoute(loadout, 'work', 'Socket-2', 'satisfied', 'Socket-3');
+    upsertLoopExitRoute(loadout, 'work', 'Socket-2', 'satisfied', 'Socket-4');
+
+    expect(loadout.loops?.work.exits).toEqual([{ id: 'exit:Socket-2:satisfied', from: 'Socket-2', condition: 'satisfied', targetSocketId: 'Socket-4' }]);
+    expect(removeLoopExitRoute(loadout, 'work', 'exit:Socket-2:satisfied')).toBe(true);
+    expect(loadout.loops?.work.exits).toBeUndefined();
+  });
+
+  it('validates conditional loop-exit routes against JSON parse semantics before save', () => {
+    const config: MateriaConfig = {
+      loadouts: {
+        Active: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { socketKind: 'entry' },
+            'Socket-2': { socketKind: 'normal', type: 'agent', materia: 'Maintain', parse: 'text' },
+            'Socket-3': { socketKind: 'normal' },
+          },
+          loops: {
+            work: {
+              nodes: ['Socket-2'],
+              exit: { from: 'Socket-2', when: 'always', to: 'end' },
+              exits: [{ id: 'exit:Socket-2:satisfied', from: 'Socket-2', condition: 'satisfied', targetSocketId: 'Socket-3' }],
+            },
+          },
+        },
+      },
+    };
+
+    expect(() => assertValidLoadoutSaveSemantics(config)).toThrow(/loops\.work\.exits\[0\]\.condition/);
+    config.loadouts!.Active.nodes!['Socket-2'].parse = 'json';
+    expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
   });
 });
 

@@ -9,6 +9,7 @@ import {
   canDeleteSocket,
   deleteSocketFromLoadout,
   extractMateriaReference,
+  findLoopExitConnectionContext,
   formatSocketLabel,
   getNodeLabel,
   resolveSocketDisplayLabel,
@@ -19,6 +20,8 @@ import {
   materiaColorChoices,
   nodeColor,
   placeMateriaInSocket,
+  removeLoopExitRoute,
+  upsertLoopExitRoute,
   type LegacyPipelineNode,
   type PipelineConfig,
   type PipelineNode,
@@ -349,16 +352,27 @@ export function App() {
 
   function createConnectedSocket(afterSocketId: string) {
     if (!activeLoadoutName || !activeLoadout) return;
+    const loopExitContext = findLoopExitConnectionContext(activeLoadout, afterSocketId);
+    if (loopExitContext?.loop.exits?.some((route) => route.from === afterSocketId && route.condition === 'always')) {
+      const message = `Loop exit ${socketLabel(afterSocketId)} already has an ${edgeConditionLabel('always')} route. Remove or edit the existing route before creating a new loop-exit socket.`;
+      setEdgeMutationError(message);
+      setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${message}`);
+      return;
+    }
     const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, (loadout) => {
       if (!loadout.nodes?.[afterSocketId]) return;
       const source = loadout.nodes[afterSocketId] as PipelineNode;
       const newId = makeNewSocketId(loadout.nodes as Record<string, PipelineNode>);
-      const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
       const sourceLayout = source.layout;
       loadout.nodes[newId] = makeEmptySocket({
-        edges: priorAlways ? [{ when: 'always', to: priorAlways }] : undefined,
         layout: sourceLayout ? { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 } : undefined,
       }) as unknown as import('../../../types.js').MateriaPipelineNodeConfig;
+      if (loopExitContext) {
+        upsertLoopExitRoute(loadout as PipelineConfig, loopExitContext.loopId, afterSocketId, 'always', newId);
+        return;
+      }
+      const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
+      if (priorAlways) (loadout.nodes[newId] as PipelineNode).edges = [{ when: 'always', to: priorAlways }];
       source.edges = [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }];
     });
     if (!result.ok) {
@@ -372,7 +386,7 @@ export function App() {
     });
     setSocketActionId(undefined);
     setSocketActionMode('actions');
-    setStatus(`Created a connected empty socket after ${afterSocketId}.`);
+    setStatus(loopExitContext ? `Created a socket and loop-exit route from ${afterSocketId}.` : `Created a connected empty socket after ${afterSocketId}.`);
   }
 
   function toggleLoopSocketSelection(socketId: string) {
@@ -532,7 +546,7 @@ export function App() {
   function openEdgeConnector(socketId: string) {
     const firstOtherSocket = Object.keys(activeLoadout?.nodes ?? {}).find((id) => id !== socketId) ?? '';
     setEdgeTargetId(firstOtherSocket);
-    setEdgeCondition('satisfied');
+    setEdgeCondition(findLoopExitConnectionContext(activeLoadout, socketId) ? 'always' : 'satisfied');
     setEdgeMutationError('');
     setSocketActionMode('connect');
   }
@@ -628,6 +642,7 @@ export function App() {
       (loadout) => {
         const draftLoop = loadout.loops?.[loopId];
         if (!draftLoop) return;
+        if (draftLoop.exit?.from && draftLoop.exit.from !== nextExit.from) delete draftLoop.exits;
         draftLoop.exit = nextExit;
       },
       `Staged loop ${loopId} exit as ${nextExit.from}.${edgeConditionLabel(nextExit.when)} → ${nextExit.to}; it will compile into runtime parse/advance control flow.`,
@@ -640,7 +655,10 @@ export function App() {
       `Cleared loop ${loopId} exit.`,
       (loadout) => {
         const draftLoop = loadout.loops?.[loopId];
-        if (draftLoop) delete draftLoop.exit;
+        if (draftLoop) {
+          delete draftLoop.exit;
+          delete draftLoop.exits;
+        }
       },
       `Cleared loop ${loopId} exit condition.`,
       (message) => `Cannot clear loop ${loopId} exit: ${message}`,
@@ -663,6 +681,18 @@ export function App() {
     );
   }
 
+  function validateLoopExitRouteRequest(from: string, to: string, condition: MateriaEdgeCondition, loopExitContext: ReturnType<typeof findLoopExitConnectionContext>): string | undefined {
+    if (!loopExitContext) return undefined;
+    if (!activeLoadout?.nodes?.[from]) return `Loop-exit source ${from} is no longer available.`;
+    if (!activeLoadout.nodes?.[to]) return `Choose an existing target socket for the loop-exit route.`;
+    if (loopExitContext.loop.exit?.from !== from) return `Socket ${socketLabel(from)} is no longer the configured exit source for loop ${loopExitContext.loopId}.`;
+    const parseMode = activeLoadout.nodes[from]?.parse;
+    if ((condition === 'satisfied' || condition === 'not_satisfied') && parseMode !== 'json') {
+      return `Loop-exit ${edgeConditionLabel(condition)} routes require ${socketLabel(from)} to parse JSON so runtime can read the canonical satisfied field. Set parse to "json" or choose Always.`;
+    }
+    return undefined;
+  }
+
   function createEdge(from: string) {
     const to = edgeTargetId;
     if (!to) {
@@ -671,19 +701,59 @@ export function App() {
       setStatus(`Cannot create edge from ${from}: ${message}`);
       return;
     }
+    const loopExitContext = findLoopExitConnectionContext(activeLoadout, from);
+    const loopExitValidationError = validateLoopExitRouteRequest(from, to, edgeCondition, loopExitContext);
+    if (loopExitValidationError) {
+      setEdgeMutationError(loopExitValidationError);
+      setStatus(`Cannot create loop-exit route ${socketLabel(from)} → ${to ? socketLabel(to) : 'target'}: ${loopExitValidationError}`);
+      return;
+    }
+    const existingRoute = loopExitContext?.loop.exits?.find((route) => route.from === from && route.condition === edgeCondition);
+    if (existingRoute && existingRoute.targetSocketId !== to) {
+      const confirmed = window.confirm(`Replace the existing ${edgeConditionLabel(edgeCondition)} loop-exit route from ${socketLabel(from)} to ${socketLabel(existingRoute.targetSocketId)} with a route to ${socketLabel(to)}? Only one route per loop-exit condition is allowed.`);
+      if (!confirmed) {
+        const message = `Kept existing ${edgeConditionLabel(edgeCondition)} loop-exit route to ${socketLabel(existingRoute.targetSocketId)}.`;
+        setEdgeMutationError(message);
+        setStatus(message);
+        return;
+      }
+    }
     const created = commitGraphMutation(
-      `Staged edge ${from} → ${to}.`,
+      loopExitContext ? `Staged loop-exit route ${from} → ${to}.` : `Staged edge ${from} → ${to}.`,
       (loadout) => {
+        if (loopExitContext) {
+          upsertLoopExitRoute(loadout as PipelineConfig, loopExitContext.loopId, from, edgeCondition, to);
+          return;
+        }
         const node = loadout.nodes?.[from] as PipelineNode | undefined;
         if (!node || !loadout.nodes?.[to]) return;
         const edges = [...(node.edges ?? [])];
         edges.push({ to, when: edgeCondition });
         node.edges = edges;
       },
-      `Staged edge ${socketLabel(from)} → ${socketLabel(to)} as ${edgeConditionLabel(edgeCondition)}.`,
-      (message) => `Cannot create edge ${socketLabel(from)} → ${socketLabel(to)}: ${message}`,
+      loopExitContext
+        ? `${existingRoute ? 'Replaced' : 'Staged'} loop-exit route ${socketLabel(from)} → ${socketLabel(to)} as ${edgeConditionLabel(edgeCondition)}.`
+        : `Staged edge ${socketLabel(from)} → ${socketLabel(to)} as ${edgeConditionLabel(edgeCondition)}.`,
+      (message) => loopExitContext ? `Cannot create loop-exit route ${socketLabel(from)} → ${socketLabel(to)}: ${message}` : `Cannot create edge ${socketLabel(from)} → ${socketLabel(to)}: ${message}`,
     );
     if (created) {
+      setSocketActionId(undefined);
+      setSocketActionMode('actions');
+    }
+  }
+
+  function removeLoopExitConnection(loopId: string, routeId: string) {
+    const route = activeLoadout?.loops?.[loopId]?.exits?.find((candidate) => candidate.id === routeId);
+    if (!route) return;
+    const removed = commitGraphMutation(
+      `Removed loop-exit route ${loopId}:${routeId}.`,
+      (loadout) => {
+        removeLoopExitRoute(loadout as PipelineConfig, loopId, routeId);
+      },
+      `Removed loop-exit route from ${route.from} to ${route.targetSocketId}; no normal edges were created.`,
+      (message) => `Cannot remove loop-exit route ${loopId}:${routeId}: ${message}`,
+    );
+    if (removed) {
       setSocketActionId(undefined);
       setSocketActionMode('actions');
     }
@@ -1009,6 +1079,7 @@ export function App() {
             openSocketPropertyEditor={openSocketPropertyEditor}
             removeEdge={removeEdge}
             removeLegacyNextEdge={removeLegacyNextEdge}
+            removeLoopExitConnection={removeLoopExitConnection}
             removeMateria={removeMateria}
             replaceMateriaFromModal={replaceMateriaFromModal}
             saveSocketProperties={saveSocketProperties}

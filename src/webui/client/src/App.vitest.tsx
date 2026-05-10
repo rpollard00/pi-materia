@@ -1800,6 +1800,135 @@ describe('Materia loadout grid editor', () => {
     expect(saved['Socket-2']).toBeTruthy();
   });
 
+  it('creates loop-exit routes through loop metadata and confirms duplicate-condition replacement', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    (config.loadouts.Edges as any).loops = {
+      reviewLoop: {
+        nodes: ['Socket-1', 'Socket-2'],
+        exit: { from: 'Socket-1', when: 'always', to: 'end' },
+      },
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Edge' }));
+    expect((await screen.findByTestId('edge-connector')).textContent).toContain('loop-exit route');
+    fireEvent.change(screen.getByTestId('edge-target'), { target: { value: 'Socket-2' } });
+    fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'always' } });
+    fireEvent.click(screen.getByTestId('create-edge'));
+
+    expect(await screen.findByText(/Staged loop-exit route Socket-1 \(Start\) → Socket-2 \(Review\) as Always\./)).toBeTruthy();
+    fireEvent.click(screen.getByTestId('socket-Socket-1'));
+    expect(await screen.findByTestId('remove-loop-exit-route-reviewLoop-exit:Socket-1:always')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Edge' }));
+    fireEvent.change(screen.getByTestId('edge-target'), { target: { value: 'Socket-3' } });
+    fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'always' } });
+    fireEvent.click(screen.getByTestId('create-edge'));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Replace the existing Always loop-exit route'));
+    expect((await screen.findByRole('alert')).textContent).toContain('Kept existing Always loop-exit route to Socket-2 (Review).');
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByTestId('create-edge'));
+    expect(await screen.findByText(/Replaced loop-exit route Socket-1 \(Start\) → Socket-3 \(Ship\) as Always\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges;
+    expect(saved.loops.reviewLoop.exits).toEqual([{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-3' }]);
+    expect(saved.nodes['Socket-1'].edges).toBeUndefined();
+  });
+
+  it('prevents invalid conditional loop-exit routes with immediate feedback', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    (config.loadouts.Edges.nodes['Socket-1'] as any).parse = 'text';
+    (config.loadouts.Edges as any).loops = {
+      reviewLoop: {
+        nodes: ['Socket-1', 'Socket-2'],
+        exit: { from: 'Socket-1', when: 'always', to: 'end' },
+      },
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Edge' }));
+    fireEvent.change(screen.getByTestId('edge-target'), { target: { value: 'Socket-2' } });
+    fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'satisfied' } });
+    fireEvent.click(screen.getByTestId('create-edge'));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('require Socket-1 (Start) to parse JSON');
+    expect(screen.queryByText('staged edits')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('prevents conditional loop-exit routes from sockets with omitted parse mode', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    delete (config.loadouts.Edges.nodes['Socket-1'] as any).parse;
+    (config.loadouts.Edges as any).loops = {
+      reviewLoop: {
+        nodes: ['Socket-1', 'Socket-2'],
+        exit: { from: 'Socket-1', when: 'always', to: 'end' },
+      },
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Edge' }));
+    fireEvent.change(screen.getByTestId('edge-target'), { target: { value: 'Socket-2' } });
+    fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'not_satisfied' } });
+    fireEvent.click(screen.getByTestId('create-edge'));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('require Socket-1 (Start) to parse JSON');
+    expect(screen.queryByText('staged edits')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not create a new socket when a loop exit already has an always route', async () => {
+    const config = structuredClone(edgeEditorConfig);
+    (config.loadouts.Edges as any).loops = {
+      reviewLoop: {
+        nodes: ['Socket-1', 'Socket-2'],
+        exit: { from: 'Socket-1', when: 'always', to: 'end' },
+        exits: [{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-2' }],
+      },
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
+
+    expect(await screen.findByText(/already has an Always route/)).toBeTruthy();
+    expect(screen.queryByTestId('socket-Socket-4')).toBeNull();
+    expect(screen.queryByText('staged edits')).toBeNull();
+  });
+
   it('removes a conditional edge without deleting either socket', async () => {
     const config = structuredClone(edgeEditorConfig);
     config.loadouts.Edges.nodes['Socket-1'].edges = [{ to: 'Socket-2', when: 'satisfied' }];

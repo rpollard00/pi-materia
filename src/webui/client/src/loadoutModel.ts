@@ -23,13 +23,20 @@ export interface PipelineNode {
   [key: string]: unknown;
 }
 
+export interface PipelineLoopExitRoute {
+  id: string;
+  from: string;
+  condition: MateriaEdgeCondition;
+  targetSocketId: string;
+}
+
 export interface PipelineLoop {
   label?: string;
   nodes: string[];
   consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
   exit?: { from: string; when: MateriaEdgeCondition; to: string };
-  exits?: { id: string; from: string; condition: MateriaEdgeCondition; targetSocketId: string }[];
+  exits?: PipelineLoopExitRoute[];
   [key: string]: unknown;
 }
 
@@ -263,6 +270,41 @@ export function makeNewSocketId(nodes: Record<string, PipelineNode>): string {
   return `Socket-${index}`;
 }
 
+export interface LoopExitConnectionContext {
+  loopId: string;
+  loop: PipelineLoop;
+}
+
+export function findLoopExitConnectionContext(loadout: PipelineConfig | undefined, socketId: string): LoopExitConnectionContext | undefined {
+  const matches = Object.entries(loadout?.loops ?? {}).filter(([, loop]) => loop.exit?.from === socketId);
+  if (matches.length !== 1) return undefined;
+  const [loopId, loop] = matches[0];
+  return { loopId, loop };
+}
+
+export function loopExitRouteId(from: string, condition: MateriaEdgeCondition): string {
+  return `exit:${from}:${condition}`;
+}
+
+export function upsertLoopExitRoute(loadout: PipelineConfig, loopId: string, from: string, condition: MateriaEdgeCondition, targetSocketId: string): PipelineLoopExitRoute | undefined {
+  const loop = loadout.loops?.[loopId];
+  if (!loop || loop.exit?.from !== from || !loadout.nodes?.[targetSocketId]) return undefined;
+  const route = { id: loopExitRouteId(from, condition), from, condition, targetSocketId };
+  const routes = (loop.exits ?? []).filter((candidate) => !(candidate.from === from && candidate.condition === condition));
+  loop.exits = [...routes, route];
+  return route;
+}
+
+export function removeLoopExitRoute(loadout: PipelineConfig, loopId: string, routeId: string): boolean {
+  const loop = loadout.loops?.[loopId];
+  if (!loop?.exits) return false;
+  const next = loop.exits.filter((route) => route.id !== routeId);
+  if (next.length === loop.exits.length) return false;
+  if (next.length > 0) loop.exits = next;
+  else delete loop.exits;
+  return true;
+}
+
 export function createMateriaReference(materiaId: string): MateriaReference {
   return { type: 'agent', materia: materiaId };
 }
@@ -363,6 +405,14 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
       const advanceWhen = node.advance?.when;
       if (isJsonControlCondition(advanceWhen) && node.parse !== 'json') {
         errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.advance.when`, advanceWhen));
+      }
+    }
+    for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
+      for (const [index, route] of (loop.exits ?? []).entries()) {
+        const source = loadout.nodes?.[route.from];
+        if (source && isJsonControlCondition(route.condition) && source.parse !== 'json') {
+          errors.push(controlParseError(loadoutName, route.from, source, `loops.${loopId}.exits[${index}].condition`, route.condition));
+        }
       }
     }
   }
