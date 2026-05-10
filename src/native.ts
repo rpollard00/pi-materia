@@ -9,6 +9,7 @@ import { getEffectivePipelineConfig, loopIteratorForNode } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { canonicalGeneratorConfigFor } from "./generator.js";
 import { canonicalOutgoingEdges } from "./graphValidation.js";
+import { resolveLoopExitRoute } from "./loopExitRoutes.js";
 import {
   HANDOFF_CONTRACT_DOC_TEXT,
   HANDOFF_DECISIONS_FIELD,
@@ -430,7 +431,19 @@ function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode, parsed
   state.cursors[advance.cursor] = next;
   state.currentItemKey = undefined;
   state.currentItemLabel = undefined;
-  return next >= items.length ? advance.done : undefined;
+  if (next < items.length) return undefined;
+  return resolveRuntimeLoopExitTarget(state, node.id, parsed) ?? advance.done;
+}
+
+function resolveRuntimeLoopExitTarget(state: MateriaCastState, from: string, parsed: unknown): string | undefined {
+  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => candidate.nodes.includes(from) && candidate.exits?.some((route) => route.from === from));
+  if (!loop) return undefined;
+  return resolveLoopExitRoute(loop, { from, satisfied: canonicalSatisfiedOutcome(state, parsed) })?.targetSocketId;
+}
+
+function canonicalSatisfiedOutcome(state: MateriaCastState, parsed: unknown): boolean | undefined {
+  const satisfied = resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed);
+  return typeof satisfied === "boolean" ? satisfied : undefined;
 }
 
 function selectNextTarget(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown, config: PiMateriaConfig): string {

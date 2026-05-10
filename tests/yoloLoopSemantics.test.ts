@@ -145,6 +145,54 @@ describe("Yolo loop semantics regression", () => {
     expect(retryInput.cursor).toEqual({ name: "workItemIndex", index: 0 });
   });
 
+  test("satisfied loop-exit route overrides legacy loop exit target with always fallback", async () => {
+    const config = yoloConfig([{ id: "one", title: "One" }]);
+    config.loadouts!.Yolo.nodes["Socket-2"] = { type: "utility", utility: "echo", params: { output: { routed: true } }, parse: "json", assign: { routed: "$.routed" } };
+    config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-satisfied", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-2" }];
+
+    const { state } = await runYolo(config);
+
+    expect(state.phase).toBe("complete");
+    expect(state.data?.routed).toBe(true);
+    expect(state.visits).toMatchObject({ "Socket-4": 1, "Socket-2": 1 });
+    expect(state.edgeTraversals?.["Socket-4->Socket-3"]).toBeUndefined();
+  });
+
+  test("not_satisfied loop-exit route is selected when the loop exits on a false outcome", async () => {
+    const config = yoloConfig([{ id: "alpha", title: "Alpha" }], { retryOnce: ["alpha"], exitTo: "Socket-2" });
+    config.loadouts!.Yolo.loops!.loopSelection.exit = { from: "Socket-4", when: "not_satisfied", to: "end" };
+    config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-failed", from: "Socket-4", condition: "not_satisfied", targetSocketId: "Socket-2" }];
+
+    const { state } = await runYolo(config);
+
+    expect(state.phase).toBe("complete");
+    expect(state.data?.done).toBe(true);
+    expect(state.visits).toMatchObject({ "Socket-4": 1, "Socket-2": 1 });
+    expect(state.cursors?.workItemIndex).toBe(1);
+  });
+
+  test("loop-exit route can enter another loop and preserves no-match fallback behavior", async () => {
+    const config = yoloConfig([{ id: "one", title: "One" }], { exitTo: "Socket-2" });
+    config.loadouts!.Yolo.nodes["Socket-2"] = { type: "utility", utility: "echo", params: { output: { fallbackDone: true } }, parse: "json", assign: { fallbackDone: "$.fallbackDone" } };
+    config.loadouts!.Yolo.nodes["Socket-6"] = { type: "utility", utility: "echo", params: { text: "second build" }, foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
+    config.loadouts!.Yolo.nodes["Socket-7"] = { type: "utility", utility: "echo", params: { output: { satisfied: true, secondLoopDone: true } }, parse: "json", assign: { secondLoopDone: "$.secondLoopDone" }, advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
+    config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-first-loop", from: "Socket-4", condition: "always", targetSocketId: "Socket-6" }];
+
+    const { state } = await runYolo(config);
+
+    expect(state.phase).toBe("complete");
+    expect(state.data?.secondLoopDone).toBe(true);
+    expect(state.data?.fallbackDone).toBeUndefined();
+    expect(state.visits).toMatchObject({ "Socket-4": 1, "Socket-6": 1, "Socket-7": 1 });
+    expect(state.cursors).toMatchObject({ workItemIndex: 1, secondIndex: 1 });
+
+    const noMatch = yoloConfig([{ id: "one", title: "One" }], { exitTo: "Socket-2" });
+    noMatch.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "not-selected", from: "Socket-4", condition: "not_satisfied", targetSocketId: "Socket-3" }];
+    const { state: noMatchState } = await runYolo(noMatch);
+    expect(noMatchState.data?.done).toBe(true);
+    expect(noMatchState.visits).toMatchObject({ "Socket-2": 1 });
+  });
+
   test("UI-authored and default-style Yolo loadouts normalize to equivalent executable semantics", () => {
     const uiAuthored = yoloConfig([{ id: "one", title: "One" }]);
     const defaultStyle = structuredClone(uiAuthored) as PiMateriaConfig;
