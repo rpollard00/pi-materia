@@ -59,12 +59,15 @@ function makeRevivableState(state: MateriaCastState): MateriaCastState {
   });
 }
 
-async function readEventTypes(state: MateriaCastState): Promise<string[]> {
+async function readEvents(state: MateriaCastState): Promise<Array<{ type?: string; data?: Record<string, unknown> }>> {
   return (await readFile(path.join(state.runDir, "events.jsonl"), "utf8"))
     .split(/\r?\n/)
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { type?: string })
-    .map((event) => event.type ?? "");
+    .map((line) => JSON.parse(line) as { type?: string; data?: Record<string, unknown> });
+}
+
+async function readEventTypes(state: MateriaCastState): Promise<string[]> {
+  return (await readEvents(state)).map((event) => event.type ?? "");
 }
 
 async function failCurrentCast(harness: FakePiHarness, message = "provider outage"): Promise<MateriaCastState> {
@@ -221,9 +224,23 @@ describe("/materia recast", () => {
     expect(resumed.recoveryExhaustion).toBeUndefined();
     expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${revivable.castId} recast from node "Socket-1".`);
 
-    const eventTypes = await readEventTypes(resumed);
-    expect(eventTypes.indexOf("cast_revive")).toBeGreaterThan(-1);
-    expect(eventTypes.indexOf("cast_recast")).toBeGreaterThan(eventTypes.indexOf("cast_revive"));
+    const events = await readEvents(resumed);
+    const eventTypes = events.map((event) => event.type ?? "");
+    const reviveIndex = eventTypes.indexOf("cast_revive");
+    expect(reviveIndex).toBeGreaterThan(-1);
+    expect(eventTypes.indexOf("cast_recast")).toBeGreaterThan(reviveIndex);
+    expect(events[reviveIndex]?.data).toMatchObject({
+      castId: revivable.castId,
+      exhaustedRecoveryKey: recoveryKey,
+      priorEffectiveMaxAttempts: 1,
+      increment: 1,
+      newEffectiveMaxAttempts: 2,
+      reviveCount: 1,
+      recoveryContext: { key: recoveryKey, node: "Socket-1", mode: "normal" },
+    });
+    expect(events[reviveIndex]?.data).not.toHaveProperty("satisfied");
+    expect(events[reviveIndex]?.data).not.toHaveProperty("feedback");
+    expect(events[reviveIndex]?.data).not.toHaveProperty("missing");
   });
 
   test("revive rejects non-exhaustion failures with recast guidance", async () => {

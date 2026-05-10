@@ -145,13 +145,18 @@ export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   assertNoActiveNativeCast(ctx, state, "reviving");
   const result = extendSameNodeRecoveryAllowanceForRevive(state);
   await appendEvent(state.runState, "cast_revive", {
-    key: result.key,
+    castId: state.castId,
+    exhaustedRecoveryKey: result.key,
+    recoveryContext: {
+      key: result.key,
+      node: state.recoveryExhaustion?.node ?? state.currentNode,
+      mode: state.recoveryExhaustion?.mode,
+      itemKey: state.currentItemKey,
+    },
     priorEffectiveMaxAttempts: result.priorEffectiveMaxAttempts,
     increment: result.increment,
     newEffectiveMaxAttempts: result.newEffectiveMaxAttempts,
     reviveCount: result.reviveCount,
-    node: state.currentNode,
-    itemKey: state.currentItemKey,
   });
   saveCastState(pi, state);
   return resumeValidatedNativeCast(pi, ctx, state);
