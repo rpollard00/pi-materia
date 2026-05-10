@@ -1,0 +1,192 @@
+import { HANDOFF_EDGE_CONDITIONS, isHandoffEdgeCondition, type HandoffEdgeCondition } from "./handoff.js";
+import { err, ok, type DomainIssue, type DomainResult } from "./result.js";
+import { isCanonicalSocketId } from "./socket.js";
+
+export type MateriaParseMode = "text" | "json";
+export type MateriaSocketKind = "entry" | "normal";
+export type MateriaNodeType = "agent" | "utility";
+export type MateriaCastNodeState = "awaiting_agent_response" | "awaiting_user_refinement" | "running_utility" | "idle" | "complete" | "failed";
+export type MateriaRoutingOutcome = { kind: "next"; to: SocketId; condition: HandoffEdgeCondition } | { kind: "complete" } | { kind: "blocked"; reason: string };
+export type SocketId = string;
+export type MateriaId = string;
+export type LoadoutId = string;
+
+export interface ArtifactMetadata {
+  phase: string;
+  socketId?: SocketId;
+  materiaId?: MateriaId;
+  workItemId?: string;
+  kind?: string;
+  timestamp: number;
+}
+
+export interface PromptIntent {
+  socketId: SocketId;
+  materiaId: MateriaId;
+  parse: MateriaParseMode;
+  workItemId?: string;
+  includeHandoffContract: boolean;
+}
+
+export interface Loadout {
+  id?: LoadoutId;
+  entry: SocketId;
+  sockets: Record<SocketId, LoadoutSocket>;
+  loops?: Record<string, LoadoutLoop>;
+}
+
+export type LoadoutSocket = AgentSocket | UtilitySocket;
+
+export interface LoadoutSocketCommon {
+  type: MateriaNodeType;
+  socketKind?: MateriaSocketKind;
+  parse?: MateriaParseMode;
+  assign?: Record<string, string>;
+  edges?: LoadoutEdge[];
+  foreach?: ForeachConfig;
+  advance?: AdvanceConfig;
+  empty?: boolean;
+}
+
+export interface AgentSocket extends LoadoutSocketCommon {
+  type: "agent";
+  materia: MateriaId;
+}
+
+export interface UtilitySocket extends LoadoutSocketCommon {
+  type: "utility";
+  utility?: string;
+  command?: string[];
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
+}
+
+export interface LoadoutEdge {
+  when: HandoffEdgeCondition;
+  to: SocketId;
+  maxTraversals?: number;
+}
+
+export interface ForeachConfig {
+  items: string;
+  as?: string;
+  cursor?: string;
+  done?: SocketId;
+}
+
+export interface AdvanceConfig {
+  cursor: string;
+  items: string;
+  done?: SocketId;
+  when?: HandoffEdgeCondition;
+}
+
+export interface LoadoutLoop {
+  label?: string;
+  sockets: SocketId[];
+  consumes?: LoadoutLoopConsumer;
+  iterator?: ForeachConfig;
+  exits?: LoadoutLoopExitRoute[];
+}
+
+export interface LoadoutLoopConsumer {
+  from: SocketId;
+  output?: string;
+  as?: string;
+  cursor?: string;
+  done?: SocketId;
+}
+
+export interface LoadoutLoopExitRoute {
+  id: string;
+  from: SocketId;
+  condition: HandoffEdgeCondition;
+  targetSocketId: SocketId;
+}
+
+export interface CastStateCore {
+  active: boolean;
+  castId: string;
+  request: string;
+  phase: string;
+  currentSocketId?: SocketId;
+  currentMateriaId?: MateriaId;
+  currentWorkItemId?: string;
+  nodeState?: MateriaCastNodeState;
+  data: Record<string, unknown>;
+  cursors: Record<string, number>;
+  visits: Record<string, number>;
+  edgeTraversals: Record<string, number>;
+}
+
+export function createPromptIntent(init: PromptIntent): DomainResult<PromptIntent> {
+  const issues: DomainIssue[] = [];
+  if (!isCanonicalSocketId(init.socketId)) issues.push({ path: "promptIntent.socketId", message: "socketId must be a canonical Socket-N id" });
+  if (!isNonEmptyString(init.materiaId)) issues.push({ path: "promptIntent.materiaId", message: "materiaId is required" });
+  if (init.parse !== "text" && init.parse !== "json") issues.push({ path: "promptIntent.parse", message: "parse must be text or json" });
+  return issues.length > 0 ? { ok: false, issues } : ok({ ...init });
+}
+
+export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
+  const issues: DomainIssue[] = [];
+  if (!isCanonicalSocketId(loadout.entry)) issues.push({ path: "loadout.entry", message: "entry must be a canonical Socket-N id" });
+  const sockets = loadout.sockets ?? {};
+  if (!Object.prototype.hasOwnProperty.call(sockets, loadout.entry)) issues.push({ path: "loadout.entry", message: "entry must reference an existing socket" });
+  for (const [socketId, socket] of Object.entries(sockets)) {
+    const socketPath = `loadout.sockets.${socketId}`;
+    if (!isCanonicalSocketId(socketId)) issues.push({ path: socketPath, message: "socket key must be a canonical Socket-N id" });
+    if (socket.type !== "agent" && socket.type !== "utility") issues.push({ path: `${socketPath}.type`, message: "socket type must be agent or utility" });
+    if (socket.type === "agent" && !isNonEmptyString(socket.materia)) issues.push({ path: `${socketPath}.materia`, message: "agent socket requires materia" });
+    if (socket.parse !== undefined && socket.parse !== "text" && socket.parse !== "json") issues.push({ path: `${socketPath}.parse`, message: "parse must be text or json" });
+    for (const [index, edge] of (socket.edges ?? []).entries()) validateEdge(edge, sockets, `${socketPath}.edges.${index}`, issues);
+    if (socket.advance?.when !== undefined && !isHandoffEdgeCondition(socket.advance.when)) issues.push({ path: `${socketPath}.advance.when`, message: `advance condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
+    if (socket.foreach?.done !== undefined && !Object.prototype.hasOwnProperty.call(sockets, socket.foreach.done)) issues.push({ path: `${socketPath}.foreach.done`, message: "foreach done target must reference an existing socket" });
+    if (socket.advance?.done !== undefined && !Object.prototype.hasOwnProperty.call(sockets, socket.advance.done)) issues.push({ path: `${socketPath}.advance.done`, message: "advance done target must reference an existing socket" });
+  }
+  for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
+    const loopPath = `loadout.loops.${loopId}`;
+    if (!isNonEmptyString(loopId)) issues.push({ path: loopPath, message: "loop id is required" });
+    for (const [index, socketId] of loop.sockets.entries()) {
+      if (!Object.prototype.hasOwnProperty.call(sockets, socketId)) issues.push({ path: `${loopPath}.sockets.${index}`, message: "loop socket must reference an existing socket" });
+    }
+    if (loop.consumes && !Object.prototype.hasOwnProperty.call(sockets, loop.consumes.from)) issues.push({ path: `${loopPath}.consumes.from`, message: "loop consumer source must reference an existing socket" });
+    for (const [index, route] of (loop.exits ?? []).entries()) {
+      if (!isNonEmptyString(route.id)) issues.push({ path: `${loopPath}.exits.${index}.id`, message: "route id is required" });
+      if (!Object.prototype.hasOwnProperty.call(sockets, route.from)) issues.push({ path: `${loopPath}.exits.${index}.from`, message: "route source must reference an existing socket" });
+      if (!isHandoffEdgeCondition(route.condition)) issues.push({ path: `${loopPath}.exits.${index}.condition`, message: `route condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
+      if (!Object.prototype.hasOwnProperty.call(sockets, route.targetSocketId)) issues.push({ path: `${loopPath}.exits.${index}.targetSocketId`, message: "route target must reference an existing socket" });
+    }
+  }
+  return issues.length > 0 ? { ok: false, issues } : ok(copyLoadout(loadout));
+}
+
+export function chooseRoutingOutcome(socket: Pick<LoadoutSocket, "edges">, handoff: Record<string, unknown>): MateriaRoutingOutcome {
+  for (const edge of socket.edges ?? []) {
+    if (edge.when === "always") return { kind: "next", to: edge.to, condition: edge.when };
+    if (edge.when === "satisfied" && handoff.satisfied === true) return { kind: "next", to: edge.to, condition: edge.when };
+    if (edge.when === "not_satisfied" && handoff.satisfied === false) return { kind: "next", to: edge.to, condition: edge.when };
+  }
+  return { kind: "complete" };
+}
+
+export function recordSocketVisit<TState extends Pick<CastStateCore, "visits">>(state: TState, socketId: SocketId): TState {
+  return { ...state, visits: { ...state.visits, [socketId]: (state.visits[socketId] ?? 0) + 1 } };
+}
+
+function validateEdge(edge: LoadoutEdge, sockets: Record<SocketId, LoadoutSocket>, path: string, issues: DomainIssue[]): void {
+  if (!isHandoffEdgeCondition(edge.when)) issues.push({ path: `${path}.when`, message: `edge condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
+  if (!isCanonicalSocketId(edge.to)) issues.push({ path: `${path}.to`, message: "edge target must be a canonical Socket-N id" });
+  else if (!Object.prototype.hasOwnProperty.call(sockets, edge.to)) issues.push({ path: `${path}.to`, message: "edge target must reference an existing socket" });
+}
+
+function copyLoadout(loadout: Loadout): Loadout {
+  return {
+    ...loadout,
+    sockets: Object.fromEntries(Object.entries(loadout.sockets).map(([id, socket]) => [id, { ...socket, edges: socket.edges?.map((edge) => ({ ...edge })) }])),
+    ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, { ...loop, sockets: [...loop.sockets], exits: loop.exits?.map((exit) => ({ ...exit })) }])) } : {}),
+  };
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}

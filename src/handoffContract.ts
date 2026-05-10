@@ -1,165 +1,29 @@
-import type { MateriaEdgeCondition } from "./types.js";
-
-export const HANDOFF_SUMMARY_FIELD = "summary" as const;
-export const HANDOFF_WORK_ITEMS_FIELD = "workItems" as const;
-export const HANDOFF_GUIDANCE_FIELD = "guidance" as const;
-export const HANDOFF_DECISIONS_FIELD = "decisions" as const;
-export const HANDOFF_RISKS_FIELD = "risks" as const;
-export const HANDOFF_SATISFIED_FIELD = "satisfied" as const;
-export const HANDOFF_FEEDBACK_FIELD = "feedback" as const;
-export const HANDOFF_MISSING_FIELD = "missing" as const;
-
-export const HANDOFF_ENVELOPE_FIELDS = [
-  HANDOFF_SUMMARY_FIELD,
-  HANDOFF_WORK_ITEMS_FIELD,
-  HANDOFF_GUIDANCE_FIELD,
+import {
   HANDOFF_DECISIONS_FIELD,
+  HANDOFF_EDGE_CONDITIONS,
+  HANDOFF_ENVELOPE_FIELDS,
+  HANDOFF_FEEDBACK_FIELD,
+  HANDOFF_GUIDANCE_FIELD,
+  HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
+  HANDOFF_MISSING_FIELD,
+  HANDOFF_RESERVED_EVALUATOR_FIELDS,
   HANDOFF_RISKS_FIELD,
   HANDOFF_SATISFIED_FIELD,
-  HANDOFF_FEEDBACK_FIELD,
-  HANDOFF_MISSING_FIELD,
-] as const;
+  HANDOFF_SUMMARY_FIELD,
+  HANDOFF_WORK_ITEMS_FIELD,
+  createHandoffEnvelope,
+  createPartialHandoffEnvelope,
+  formatHandoffWorkItemShape as formatDomainHandoffWorkItemShape,
+  pickHandoffEnvelopeFields,
+  type HandoffEnvelope,
+  type HandoffObject,
+  type PartialHandoffEnvelope,
+} from "./domain/handoff.js";
 
-export const HANDOFF_RESERVED_CONTROL_FIELDS = [
-  HANDOFF_SATISFIED_FIELD,
-] as const;
+export * from "./domain/handoff.js";
 
-export const HANDOFF_RESERVED_EVALUATOR_FIELDS = [
-  HANDOFF_SATISFIED_FIELD,
-  HANDOFF_FEEDBACK_FIELD,
-  HANDOFF_MISSING_FIELD,
-] as const;
-
-export type HandoffEnvelopeField = typeof HANDOFF_ENVELOPE_FIELDS[number];
-export type HandoffReservedControlField = typeof HANDOFF_RESERVED_CONTROL_FIELDS[number];
-export type HandoffReservedEvaluatorField = typeof HANDOFF_RESERVED_EVALUATOR_FIELDS[number];
-
-export const HANDOFF_WORK_ITEM_FIELDS = [
-  "id",
-  "title",
-  "description",
-  "acceptance",
-  "context",
-] as const;
-
-export const HANDOFF_WORK_ITEM_CONTEXT_FIELDS = [
-  "architecture",
-  "constraints",
-  "dependencies",
-  "risks",
-] as const;
-
-export interface HandoffWorkItemContext {
-  architecture?: string;
-  constraints: string[];
-  dependencies: string[];
-  risks: string[];
-}
-
-export interface HandoffWorkItem {
-  id: string;
-  title: string;
-  description: string;
-  acceptance: string[];
-  context: HandoffWorkItemContext;
-}
-
-export interface HandoffEnvelope {
-  summary: string;
-  workItems: HandoffWorkItem[];
-  guidance: Record<string, unknown>;
-  decisions: unknown[];
-  risks: unknown[];
-  satisfied: boolean;
-  feedback: string;
-  missing: unknown[];
-}
-
-export const HANDOFF_ALWAYS_EDGE_CONDITION = "always" as const;
-export const HANDOFF_SATISFIED_EDGE_CONDITION = "satisfied" as const;
-export const HANDOFF_NOT_SATISFIED_EDGE_CONDITION = "not_satisfied" as const;
-
-export const HANDOFF_EDGE_CONDITIONS = [
-  HANDOFF_ALWAYS_EDGE_CONDITION,
-  HANDOFF_SATISFIED_EDGE_CONDITION,
-  HANDOFF_NOT_SATISFIED_EDGE_CONDITION,
-] as const satisfies readonly MateriaEdgeCondition[];
-
-export const HANDOFF_LEGACY_NON_CANONICAL_ALIASES = [
-  "passed",
-] as const;
-
-export const HANDOFF_ENVELOPE_EXAMPLE: HandoffEnvelope = {
-  [HANDOFF_SUMMARY_FIELD]: "",
-  [HANDOFF_WORK_ITEMS_FIELD]: [],
-  [HANDOFF_GUIDANCE_FIELD]: {},
-  [HANDOFF_DECISIONS_FIELD]: [],
-  [HANDOFF_RISKS_FIELD]: [],
-  [HANDOFF_SATISFIED_FIELD]: false,
-  [HANDOFF_FEEDBACK_FIELD]: "",
-  [HANDOFF_MISSING_FIELD]: [],
-};
-
-export const HANDOFF_WORK_ITEM_EXAMPLE: HandoffWorkItem = {
-  id: "",
-  title: "",
-  description: "",
-  acceptance: [],
-  context: {
-    architecture: "",
-    constraints: [],
-    dependencies: [],
-    risks: [],
-  },
-};
-
-export type HandoffEnvelopeInit = Partial<HandoffEnvelope>;
-export type HandoffObject = Record<string, unknown>;
-export type PartialHandoffEnvelope = Partial<Record<HandoffEnvelopeField, unknown>>;
-
-export function createHandoffEnvelope(init: HandoffEnvelopeInit = {}): HandoffEnvelope {
-  return {
-    ...HANDOFF_ENVELOPE_EXAMPLE,
-    ...init,
-    [HANDOFF_WORK_ITEMS_FIELD]: init[HANDOFF_WORK_ITEMS_FIELD] ?? [],
-    [HANDOFF_GUIDANCE_FIELD]: init[HANDOFF_GUIDANCE_FIELD] ?? {},
-    [HANDOFF_DECISIONS_FIELD]: init[HANDOFF_DECISIONS_FIELD] ?? [],
-    [HANDOFF_RISKS_FIELD]: init[HANDOFF_RISKS_FIELD] ?? [],
-    [HANDOFF_MISSING_FIELD]: init[HANDOFF_MISSING_FIELD] ?? [],
-  };
-}
-
-export function pickHandoffEnvelopeFields(value: HandoffObject): PartialHandoffEnvelope {
-  const envelope: PartialHandoffEnvelope = {};
-  for (const field of HANDOFF_ENVELOPE_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(value, field)) envelope[field] = value[field];
-  }
-  return envelope;
-}
-
-export function hasHandoffEnvelopeField(value: HandoffObject): boolean {
-  return HANDOFF_ENVELOPE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(value, field));
-}
-
-export function createPartialHandoffEnvelope(init: PartialHandoffEnvelope = {}): PartialHandoffEnvelope {
-  return pickHandoffEnvelopeFields(init);
-}
-
-export function createDeterministicHandoffOutput<T extends HandoffObject>(init: T): T {
-  // Deterministic utilities may emit local extension fields such as diagnostics or
-  // command-specific values. Preserve those fields, but normalize any canonical
-  // handoff fields through the shared contract so utilities do not define a
-  // separate envelope shape.
-  if (!hasHandoffEnvelopeField(init)) return init;
-  return { ...init, ...createPartialHandoffEnvelope(init) };
-}
-
-export function stringifyDeterministicHandoffOutput(value: unknown): string {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return JSON.stringify(createDeterministicHandoffOutput(value as HandoffObject));
-  }
-  return JSON.stringify(value);
-}
+export { createHandoffEnvelope, createPartialHandoffEnvelope, pickHandoffEnvelopeFields };
+export type { HandoffEnvelope, HandoffObject, PartialHandoffEnvelope };
 
 export function formatHandoffEnvelopeShape(): string {
   return JSON.stringify({
@@ -175,18 +39,7 @@ export function formatHandoffEnvelopeShape(): string {
 }
 
 export function formatHandoffWorkItemShape(): string {
-  return JSON.stringify({
-    id: "string",
-    title: "string",
-    description: "string",
-    acceptance: "string[]",
-    context: {
-      architecture: "string",
-      constraints: "string[]",
-      dependencies: "string[]",
-      risks: "string[]",
-    },
-  });
+  return formatDomainHandoffWorkItemShape();
 }
 
 export const HANDOFF_CONTRACT_PROMPT_TEXT = [
@@ -217,3 +70,5 @@ export const HANDOFF_CONTRACT_DOC_TEXT = [
   `The reserved control field ${JSON.stringify(HANDOFF_SATISFIED_FIELD)} is the only canonical satisfaction field. It is required by nodes whose graph control flow depends on satisfied/not_satisfied semantics and must be a boolean when present.`,
   `Legacy aliases (${HANDOFF_LEGACY_NON_CANONICAL_ALIASES.map((field) => JSON.stringify(field)).join(", ")}) are not canonical handoff fields. Any compatibility behavior for them must be explicitly documented as migration-only outside the canonical field list.`,
 ].join("\n\n");
+
+void HANDOFF_EDGE_CONDITIONS;
