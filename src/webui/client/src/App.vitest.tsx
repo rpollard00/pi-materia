@@ -562,7 +562,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Loop consumes: Socket-1.workItems');
   });
 
-  it('derives generator-to-loop edge output from current graph edges when loop consumes metadata is stale', async () => {
+  it('derives generator-to-loop display from current graph edges when loop consumes metadata is stale', async () => {
     const config = structuredClone(testConfig);
     (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };
     (config.materia.Build as any) = { tools: 'coding', prompt: 'Build generated work', generator: true };
@@ -584,6 +584,9 @@ describe('Materia loadout grid editor', () => {
     expect(insertedGeneratorEdge.classList.contains('loadout-edge-generator-input')).toBe(true);
     expect(insertedGeneratorEdge.textContent).toContain('Generator output: workItems');
     expect(insertedGeneratorEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-generator-edge-arrow)');
+    const region = screen.getByTestId('loop-region-taskIteration');
+    expect(region.getAttribute('title')).toContain('Loop consumes: Socket-2.workItems');
+    expect(region.getAttribute('title')).not.toContain('Loop consumes: Socket-1.workItems');
   });
 
   it('renders generator-to-generator edges with generated-output semantics', async () => {
@@ -811,7 +814,7 @@ describe('Materia loadout grid editor', () => {
     const region = await screen.findByTestId('loop-region-taskIteration');
     const buildSocket = screen.getByTestId('socket-Socket-2');
     const exitSocket = screen.getByTestId('socket-Socket-4');
-    const summary = 'Loop consumes: state.tasks as task until end • Exit: Socket-4 (Maintain).Satisfied → end';
+    const summary = 'Loop consumes: Socket-1.workItems • Exit: Socket-4 (Maintain).Satisfied → end';
     expect(region.querySelector('.loadout-loop-badge')?.textContent).toBe('Loop');
     expect(region.querySelector('.loadout-loop-title')?.textContent).toBe('Build → Eval → Maintain until all tasks complete');
     expect(region.querySelector('.loadout-loop-summary')?.textContent).toBe(summary);

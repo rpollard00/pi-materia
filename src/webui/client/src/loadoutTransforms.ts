@@ -200,9 +200,10 @@ export function createTaskLoop(loadout: PipelineConfig, loopId: string, label: s
 export function updateLoopExitInLoadout(loadout: PipelineConfig, loopId: string, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
   const loop = loadout.loops?.[loopId];
   if (!loadout.loops || !loop) return loadout;
+  const nodes = loadout.nodes ? removeLoopRuntimeControls(loadout, loadout.nodes, loop) : loadout.nodes;
   const nextLoop: PipelineLoop = { ...loop, exit };
   if (loop.exit?.from && loop.exit.from !== exit.from) delete nextLoop.exits;
-  return { ...loadout, loops: { ...loadout.loops, [loopId]: nextLoop } };
+  return { ...loadout, ...(nodes && nodes !== loadout.nodes ? { nodes } : {}), loops: { ...loadout.loops, [loopId]: nextLoop } };
 }
 
 export function clearLoopExitInLoadout(loadout: PipelineConfig, loopId: string): PipelineConfig {

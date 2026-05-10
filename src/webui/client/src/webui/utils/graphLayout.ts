@@ -1,5 +1,6 @@
 import { canonicalGeneratorConfigFor } from '../../../../../generator.js';
 import { edgeConditionState } from '../../../../../graphValidation.js';
+import { analyzeLoadoutGraph } from '../../../../../loadoutGraphAnalysis.js';
 import type { MateriaEdgeCondition } from '../../../../../types.js';
 import {
   extractMateriaReference,
@@ -104,15 +105,22 @@ export function formatIteratorBehavior(node?: PipelineNode, definitions?: Materi
   return 'Iterator materia';
 }
 
-function loopConsumerSummary(loop: NonNullable<PipelineConfig['loops']>[string]): string {
+function graphDerivedLoopConsumer(loadout: PipelineConfig | undefined, loopId: string, definitions?: MateriaConfig['materia']): { from: string; output: string } | undefined {
+  if (!loadout || !definitions) return undefined;
+  return analyzeLoadoutGraph(loadout, definitions).loopConsumerSources.get(loopId);
+}
+
+function loopConsumerSummary(loadout: PipelineConfig | undefined, loopId: string, loop: NonNullable<PipelineConfig['loops']>[string], definitions?: MateriaConfig['materia']): string {
+  const derived = graphDerivedLoopConsumer(loadout, loopId, definitions);
+  if (derived) return `Loop consumes: ${derived.from}.${derived.output}`;
   if (loop.consumes) return `Loop consumes: ${loop.consumes.from}.${loop.consumes.output ?? 'workItems'}`;
   if (loop.iterator) return `Loop consumes: ${loop.iterator.items}${loop.iterator.as ? ` as ${loop.iterator.as}` : ''}${loop.iterator.done ? ` until ${loop.iterator.done}` : ''}`;
   return 'Loop region';
 }
 
-function loopConsumerForSocket(loadout: PipelineConfig | undefined, socketId: string): string | undefined {
-  const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.nodes.includes(socketId));
-  return loop ? loopConsumerSummary(loop) : undefined;
+function loopConsumerForSocket(loadout: PipelineConfig | undefined, socketId: string, definitions?: MateriaConfig['materia']): string | undefined {
+  const match = Object.entries(loadout?.loops ?? {}).find(([, candidate]) => candidate.nodes.includes(socketId));
+  return match ? loopConsumerSummary(loadout, match[0], match[1], definitions) : undefined;
 }
 
 function formatLoopExitSummary(loadout: PipelineConfig | undefined, loopId: string, loop: NonNullable<PipelineConfig['loops']>[string]): string | undefined {
@@ -192,7 +200,7 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
   const label = getNodeLabel(id, node);
   lines.push(`Label: ${label}`);
   if (hasIteratorBehavior(node, definitions)) lines.push(formatIteratorBehavior(node, definitions));
-  const loopConsumer = loopConsumerForSocket(loadout, id);
+  const loopConsumer = loopConsumerForSocket(loadout, id, definitions);
   if (loopConsumer) lines.push(loopConsumer);
   lines.push(...loopExitSummariesForSocket(loadout, id));
   if (node?.type) lines.push(`Type: ${node.type}`);
@@ -570,14 +578,14 @@ export function formatLoopDisplayLabel(loadout: PipelineConfig | undefined, loop
   return label.replace(/Socket-\d+(?=\b)/g, (socketId) => resolveSocketDisplayLabel(loadout, socketId));
 }
 
-export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>): LoopRegion[] {
+export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>, definitions?: MateriaConfig['materia']): LoopRegion[] {
   return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop], index) => {
     const sockets = loop.nodes.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
     if (sockets.length === 0) return [];
     const minX = Math.min(...sockets.map((socket) => socket.x));
     const minY = Math.min(...sockets.map((socket) => socket.y));
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
-    const consumer = loopConsumerSummary(loop);
+    const consumer = loopConsumerSummary(loadout, id, loop, definitions);
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.nodes?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to])}` : undefined;
     const summary = [consumer, exit].filter(Boolean).join(' • ');
     const label = formatLoopDisplayLabel(loadout, id, loop.nodes, loop.label);
@@ -618,7 +626,7 @@ export function getLoopExitBadges(loadout: PipelineConfig | undefined): Map<stri
   return badges;
 }
 
-export function layoutSockets(loadout?: PipelineConfig, semanticEdges?: LoadoutEdge[]): LayoutSocketsResult {
+export function layoutSockets(loadout?: PipelineConfig, semanticEdges?: LoadoutEdge[], definitions?: MateriaConfig['materia']): LayoutSocketsResult {
   const nodes = loadout?.nodes ?? {};
   const entries = Object.entries(nodes);
   const edges = semanticEdges ?? getLoadoutEdges(loadout);
@@ -649,14 +657,14 @@ export function layoutSockets(loadout?: PipelineConfig, semanticEdges?: LoadoutE
   });
 
   const positionMap = () => new Map(sockets.map((socket) => [socket.id, socket]));
-  let loopRegions = getLoopRegions(loadout, positionMap());
+  let loopRegions = getLoopRegions(loadout, positionMap(), definitions);
   const minRenderedX = Math.min(...sockets.map((socket) => socket.x), ...loopRegions.map((loop) => loop.x), loopCanvasPadding);
   const minRenderedY = Math.min(...sockets.map((socket) => socket.y), ...loopRegions.map((loop) => loop.y), loopCanvasPadding);
   const shiftX = Math.max(0, loopCanvasPadding - minRenderedX);
   const shiftY = Math.max(0, loopCanvasPadding - minRenderedY);
   if (shiftX > 0 || shiftY > 0) {
     sockets = sockets.map((socket) => ({ ...socket, x: socket.x + shiftX, y: socket.y + shiftY }));
-    loopRegions = getLoopRegions(loadout, positionMap());
+    loopRegions = getLoopRegions(loadout, positionMap(), definitions);
   }
 
   const width = Math.max(448, ...sockets.map((socket) => socket.x + socketGraphExtent), ...loopRegions.map((loop) => loop.x + loop.width + loopCanvasPadding));

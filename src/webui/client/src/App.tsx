@@ -203,13 +203,14 @@ export function App() {
     };
   }, [materiaColorOpen]);
 
+  const materia = draftConfig?.materia ?? {};
   const semanticEdges = useMemo(() => getLoadoutEdges(activeLoadout), [activeLoadout?.nodes, activeLoadout?.loops]);
   const loadoutGraph = useMemo(
-    () => layoutSockets(activeLoadout, semanticEdges),
-    [activeLoadout?.entry, activeLoadout?.nodes, activeLoadout?.loops, activeLoadout?.layout, semanticEdges],
+    () => layoutSockets(activeLoadout, semanticEdges, materia),
+    [activeLoadout?.entry, activeLoadout?.nodes, activeLoadout?.loops, activeLoadout?.layout, semanticEdges, materia],
   );
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
-  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions), [activeLoadout?.loops, activeLoadout?.nodes, socketPositions]);
+  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions, materia), [activeLoadout?.loops, activeLoadout?.nodes, socketPositions, materia]);
   const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout?.loops]);
   const loopExitBadges = useMemo(() => getLoopExitBadges(activeLoadout), [activeLoadout?.loops]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
@@ -224,7 +225,6 @@ export function App() {
     height: Math.abs(socketRegionSelectionDrag.currentY - socketRegionSelectionDrag.startY),
   } : undefined;
   const createLoopDisabled = selectedLoopSocketIds.length === 0;
-  const materia = draftConfig?.materia ?? {};
   const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
   const currentMonitorNode = monitor?.activeCast?.currentNode;
