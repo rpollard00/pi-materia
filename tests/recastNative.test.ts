@@ -124,6 +124,9 @@ describe("/materia recast", () => {
     expect(resumed.castId).toBe(failed.castId);
     expect(resumed.active).toBe(true);
     expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${failed.castId} recast from node "Socket-1".`);
+    const eventTypes = await readEventTypes(resumed);
+    expect(eventTypes).toContain("cast_recast");
+    expect(eventTypes).not.toContain("cast_revive");
   });
 
   test("explicit id resumes an aborted cast", async () => {

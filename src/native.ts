@@ -142,11 +142,7 @@ export function listRevivableCastStates(ctx: ExtensionContext): MateriaCastState
 export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, castId: string): Promise<MateriaCastState> {
   const state = loadCastStateById(ctx, castId);
   if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
-  const active = loadActiveCastState(ctx);
-  if (active?.active) {
-    if (active.castId === state.castId) throw new Error(`pi-materia cast ${state.castId} is already running.`);
-    throw new Error(`A pi-materia cast is already active (${active.castId}). Abort it before reviving ${state.castId}.`);
-  }
+  assertNoActiveNativeCast(ctx, state, "reviving");
   const result = extendSameNodeRecoveryAllowanceForRevive(state);
   await appendEvent(state.runState, "cast_revive", {
     key: result.key,
@@ -158,20 +154,32 @@ export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
     itemKey: state.currentItemKey,
   });
   saveCastState(pi, state);
-  return resumeNativeCast(pi, ctx, state.castId);
+  return resumeValidatedNativeCast(pi, ctx, state);
 }
 
 export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, castId: string): Promise<MateriaCastState> {
   const state = loadCastStateById(ctx, castId);
   if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
+  assertNoActiveNativeCast(ctx, state, "recasting");
+  assertRecastableNativeCast(state);
+  return resumeValidatedNativeCast(pi, ctx, state);
+}
+
+function assertNoActiveNativeCast(ctx: ExtensionContext, state: MateriaCastState, action: "recasting" | "reviving"): void {
   const active = loadActiveCastState(ctx);
   if (active?.active) {
     if (active.castId === state.castId) throw new Error(`pi-materia cast ${state.castId} is already running.`);
-    throw new Error(`A pi-materia cast is already active (${active.castId}). Abort it before recasting ${state.castId}.`);
+    throw new Error(`A pi-materia cast is already active (${active.castId}). Abort it before ${action} ${state.castId}.`);
   }
+}
+
+function assertRecastableNativeCast(state: MateriaCastState): void {
   if (state.active) throw new Error(`pi-materia cast ${state.castId} is already running.`);
   if (state.phase === "complete" || state.nodeState === "complete") throw new Error(`pi-materia cast ${state.castId} is complete and cannot be recast.`);
   if (state.phase !== "failed" && state.nodeState !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed or aborted (phase: ${state.phase}, node state: ${state.nodeState ?? "unknown"}).`);
+}
+
+async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<MateriaCastState> {
   const node = currentNodeOrThrow(state);
   const previousFailure = state.failedReason;
 
