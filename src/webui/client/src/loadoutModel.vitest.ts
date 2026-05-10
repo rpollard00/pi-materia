@@ -319,6 +319,30 @@ describe('loadout normalization model', () => {
     expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
   });
 
+  it('validates save semantics through shared normalization without mutating editor state', () => {
+    const config: MateriaConfig = {
+      materia: { Generate: { generator: true }, Build: {} },
+      loadouts: {
+        LegacyEditorState: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Generate', next: 'Socket-2' } as PipelineNode,
+            'Socket-2': { type: 'agent', materia: 'Build', layout: { x: 10, y: 20 } },
+          },
+          loops: {
+            work: { nodes: ['Socket-2'], consumes: { from: 'Stale', output: 'workItems' } },
+          },
+        },
+      },
+    };
+
+    expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
+    expect(config.loadouts?.LegacyEditorState.nodes?.['Socket-1']).not.toHaveProperty('edges');
+    expect(config.loadouts?.LegacyEditorState.nodes?.['Socket-1']).toHaveProperty('next', 'Socket-2');
+    expect(config.loadouts?.LegacyEditorState.nodes?.['Socket-2']).toHaveProperty('layout');
+    expect(config.loadouts?.LegacyEditorState.loops?.work.consumes?.from).toBe('Stale');
+  });
+
   it('materializes loop exit control fields before save without deleting back-edges', () => {
     const config = normalizeMateriaConfigEdges({
       loadouts: {

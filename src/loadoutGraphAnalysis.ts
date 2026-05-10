@@ -44,21 +44,52 @@ interface AnalyzeableLoadout {
 }
 
 export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record<string, GeneratorMateriaLike> = {}): LoadoutGraphAnalysis {
+  // Keep this analysis tied to semantic graph inputs: build loop membership
+  // indexes once, walk node edges once, then finalize each loop. Complexity is
+  // O(nodes + edges + loop memberships + edge-loop hits) instead of scanning
+  // every node/edge once per loop; nested loops only add proportional hits for
+  // edges that actually target sockets belonging to multiple loops.
   const nodes = loadout.nodes ?? {};
   const diagnostics: LoadoutGraphDiagnostic[] = [];
   const loopConsumerSources = new Map<string, DerivedLoopConsumerSource>();
   const workItemProducingSocketIds = new Set<string>();
   const workItemProducingNodeIds = new Set<string>();
+  const loopNodeSets = new Map<string, Set<string>>();
+  const loopConsumerFlags = new Map<string, boolean>();
+  const socketLoopIds = new Map<string, Set<string>>();
+  const inboundGeneratorSourcesByLoop = new Map<string, Set<string>>();
 
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
     if (!loop) continue;
     const loopSet = new Set(loop.nodes ?? []);
-    const inboundGeneratorSources = Object.entries(nodes).flatMap(([from, node]) => {
-      if (!node || loopSet.has(from) || !isWorkItemsGeneratorNode(node, materia)) return [];
-      return (node.edges ?? []).some((edge) => loopSet.has(edge.to)) ? [from] : [];
-    });
-    const uniqueSources = Array.from(new Set(inboundGeneratorSources)).sort();
-    const isConsumerLoop = Boolean(loop.consumes || loop.iterator);
+    loopNodeSets.set(loopId, loopSet);
+    loopConsumerFlags.set(loopId, Boolean(loop.consumes || loop.iterator));
+    inboundGeneratorSourcesByLoop.set(loopId, new Set());
+    for (const socketId of loopSet) {
+      const loopIds = socketLoopIds.get(socketId) ?? new Set<string>();
+      loopIds.add(loopId);
+      socketLoopIds.set(socketId, loopIds);
+    }
+  }
+
+  for (const [from, node] of Object.entries(nodes)) {
+    if (!node || !isWorkItemsGeneratorNode(node, materia)) continue;
+    for (const edge of node.edges ?? []) {
+      const targetLoopIds = socketLoopIds.get(edge.to);
+      if (!targetLoopIds) continue;
+      for (const loopId of targetLoopIds) {
+        const loopSet = loopNodeSets.get(loopId);
+        if (!loopSet || loopSet.has(from)) continue;
+        inboundGeneratorSourcesByLoop.get(loopId)?.add(from);
+      }
+    }
+  }
+
+  for (const [loopId, sources] of inboundGeneratorSourcesByLoop) {
+    const loop = loadout.loops?.[loopId];
+    if (!loop) continue;
+    const uniqueSources = Array.from(sources).sort();
+    const isConsumerLoop = loopConsumerFlags.get(loopId) === true;
 
     if (uniqueSources.length === 1) {
       const from = uniqueSources[0]!;

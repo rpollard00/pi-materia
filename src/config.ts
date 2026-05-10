@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
-import { materializeConfigLoadoutLoopSemantics } from "./loopSemantics.js";
+import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "./loadoutNormalization.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -78,9 +78,8 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   const existing = existsSync(file) ? await readConfigPartial(file) : {};
   const next = mergeConfigPatch(existing, patch);
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
-  next.loadouts = normalizeLoadoutsForSave(next.loadouts);
+  next.loadouts = normalizeLoadoutsForSave(next.loadouts, next.materia as Record<string, MateriaConfig> | undefined);
   const materialized = withoutDeletedLoadoutMarkers(next);
-  if (materialized.materia && materialized.loadouts) materializeConfigLoadoutLoopSemantics(materialized as PiMateriaConfig);
   validateLoadoutGraphs(materialized.loadouts);
   await writeJsonAtomic(file, next);
   return file;
@@ -240,8 +239,8 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
-  config.loadouts = normalizeLoadouts(config.loadouts);
-  materializeConfigLoadoutLoopSemantics(config);
+  config = normalizeConfigLoadoutsForLoad(config);
+  config = prepareConfigLoadoutsForSave(config);
   validateLoadoutGraphs(config.loadouts);
   return config;
 }
@@ -326,17 +325,10 @@ function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria:
   return merged;
 }
 
-function normalizeLoadouts(loadouts: PiMateriaConfig["loadouts"] | undefined): PiMateriaConfig["loadouts"] {
-  if (!loadouts) return loadouts;
-  return Object.fromEntries(
-    Object.entries(loadouts).map(([name, loadout]) => [name, normalizePipelineGraph(loadout as MateriaPipelineConfig)]),
-  );
-}
-
-function normalizeLoadoutsForSave(loadouts: Partial<PiMateriaConfig>["loadouts"] | undefined): PiMateriaConfig["loadouts"] {
+function normalizeLoadoutsForSave(loadouts: Partial<PiMateriaConfig>["loadouts"] | undefined, materia: Record<string, MateriaConfig> | undefined): PiMateriaConfig["loadouts"] {
   if (!loadouts) return loadouts as PiMateriaConfig["loadouts"];
   return Object.fromEntries(
-    Object.entries(loadouts as Record<string, unknown>).map(([name, loadout]) => [name, loadout === null ? null : normalizePipelineGraph(loadout as MateriaPipelineConfig)]),
+    Object.entries(loadouts as Record<string, unknown>).map(([name, loadout]) => [name, loadout === null ? null : prepareLoadoutForSave(loadout as MateriaPipelineConfig, materia ?? {}, { loadoutName: name }).loadout]),
   ) as PiMateriaConfig["loadouts"];
 }
 

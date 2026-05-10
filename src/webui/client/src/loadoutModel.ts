@@ -1,4 +1,5 @@
 import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../loadoutGraphAnalysis.js';
+import { normalizeLoadedLoadout } from '../../../loadoutNormalization.js';
 import { materializeLoadoutLoopSemantics } from '../../../loopSemantics.js';
 import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socketIds.js';
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
@@ -472,7 +473,13 @@ function controlParseError(loadoutName: string, socketId: string, node: Pipeline
 
 export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
   const errors: string[] = [];
-  for (const [loadoutName, loadout] of Object.entries(config.loadouts ?? {})) {
+  for (const [loadoutName, rawLoadout] of Object.entries(config.loadouts ?? {})) {
+    // Route WebUI validation through the shared normalization boundary so save
+    // checks use the same migrated layout, normalized edges, and graph-derived
+    // loop semantics as config load/save and runtime preparation. Clone first so
+    // validation remains a non-mutating read from editor state.
+    const { loadout: sharedLoadout, analysis } = normalizeLoadedLoadout(cloneValue(rawLoadout) as MateriaPipelineConfig, config.materia ?? {});
+    const loadout = sharedLoadout as PipelineConfig;
     for (const [socketId, node] of Object.entries(loadout.nodes ?? {})) {
       for (const [index, edge] of (node.edges ?? []).entries()) {
         if (!jsonControlConditions.has(edge.when)) continue;
@@ -483,7 +490,7 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
         errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.advance.when`, advanceWhen));
       }
     }
-    for (const diagnostic of analyzeLoadoutGraph(loadout, config.materia ?? {}).diagnostics) {
+    for (const diagnostic of analysis.diagnostics) {
       if (diagnostic.code === 'loop-consumer-missing' || diagnostic.code === 'loop-consumer-ambiguous') errors.push(`Loadout "${loadoutName}" ${diagnostic.message}`);
     }
     for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
