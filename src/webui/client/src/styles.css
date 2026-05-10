@@ -325,20 +325,47 @@
 }
 
 .loadout-edge-loop-exit path {
-  stroke: rgb(45 212 191 / 0.98);
+  stroke: rgb(37 99 235 / 0.98);
   stroke-width: 4;
   stroke-dasharray: 12 5 3 5;
-  filter: drop-shadow(0 0 10px rgb(45 212 191 / 0.42)) drop-shadow(0 0 18px rgb(56 189 248 / 0.18));
+  filter: drop-shadow(0 0 10px rgb(37 99 235 / 0.42)) drop-shadow(0 0 18px rgb(96 165 250 / 0.18));
+}
+
+.loadout-edge-loop-exit.loadout-edge-satisfied path {
+  stroke: rgb(16 185 129 / 0.98);
+  filter: drop-shadow(0 0 10px rgb(16 185 129 / 0.44)) drop-shadow(0 0 18px rgb(110 231 183 / 0.16));
+}
+
+.loadout-edge-loop-exit.loadout-edge-unsatisfied path {
+  stroke: rgb(234 179 8 / 0.98);
+  filter: drop-shadow(0 0 10px rgb(234 179 8 / 0.44)) drop-shadow(0 0 18px rgb(253 224 71 / 0.16));
 }
 
 .loadout-edge-loop-exit text {
-  fill: rgb(153 246 228 / 0.98);
+  fill: rgb(191 219 254 / 0.98);
   font-size: 0.62rem;
   letter-spacing: 0.11em;
 }
 
-.loadout-loop-exit-edge-arrow {
-  fill: rgb(45 212 191 / 0.98);
+.loadout-edge-loop-exit.loadout-edge-satisfied text {
+  fill: rgb(167 243 208 / 0.98);
+}
+
+.loadout-edge-loop-exit.loadout-edge-unsatisfied text {
+  fill: rgb(254 240 138 / 0.98);
+}
+
+.loadout-loop-exit-edge-arrow,
+.loadout-loop-exit-edge-arrow-default {
+  fill: rgb(37 99 235 / 0.98);
+}
+
+.loadout-loop-exit-edge-arrow-satisfied {
+  fill: rgb(16 185 129 / 0.98);
+}
+
+.loadout-loop-exit-edge-arrow-unsatisfied {
+  fill: rgb(234 179 8 / 0.98);
 }
 
 .materia-socket {

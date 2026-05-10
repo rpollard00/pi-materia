@@ -164,7 +164,9 @@ export function LoadoutGraphPanel(props: LoadoutGraphPanelProps) {
             <marker id="materia-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-edge-arrow" /></marker>
             <marker id="materia-generator-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-generator-edge-arrow" /></marker>
             <marker id="materia-loop-cycle-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-cycle-arrow" /></marker>
-            <marker id="materia-loop-exit-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow" /></marker>
+            <marker id="materia-loop-exit-edge-arrow-default" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-default" /></marker>
+            <marker id="materia-loop-exit-edge-arrow-satisfied" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-satisfied" /></marker>
+            <marker id="materia-loop-exit-edge-arrow-unsatisfied" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-unsatisfied" /></marker>
           </defs>
           {loopRegions.map((loop) => (
             <g key={loop.id} className="loadout-loop-cycle-edge" data-testid={`loop-cycle-edge-${loop.id}`} aria-label={`${loop.label} cycle indicator`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
@@ -176,14 +178,15 @@ export function LoadoutGraphPanel(props: LoadoutGraphPanelProps) {
             const isGeneratorInput = isGeneratorOutputEdge(edge, activeLoadout, materia);
             const isLoopExitEdge = edge.kind === 'loop-exit';
             const edgeLabel = generatorEdgeLabel(edge, activeLoadout, materia);
-            const markerEnd = isLoopExitEdge ? 'url(#materia-loop-exit-edge-arrow)' : isGeneratorInput ? 'url(#materia-generator-edge-arrow)' : 'url(#materia-edge-arrow)';
+            const conditionClass = edgeConditionClass(edge.when);
+            const markerEnd = isLoopExitEdge ? `url(#materia-loop-exit-edge-arrow-${conditionClass})` : isGeneratorInput ? 'url(#materia-generator-edge-arrow)' : 'url(#materia-edge-arrow)';
             const edgeTestId = isLoopExitEdge && edge.loopId && edge.loopExitRouteId ? `loop-exit-edge-${edge.loopId}-${edge.loopExitRouteId}` : `edge-${edge.from}-${edge.to}-${edge.edgeIndex ?? 'next'}`;
             const activateEdge = () => {
               if (isLoopExitEdge && edge.loopId && edge.loopExitRouteId) toggleLoopExitCondition(edge.loopId, edge.loopExitRouteId);
               else toggleEdgeCondition(edge);
             };
             return (
-              <g key={edge.id} data-testid={edgeTestId} data-edge-kind={edge.kind} role="button" tabIndex={0} aria-label={`${edgeLabel} from ${edge.from} to ${edge.to}`} className={`loadout-edge loadout-edge-${edgeConditionClass(edge.when)} loadout-edge-route-${routeClass} ${isGeneratorInput ? 'loadout-edge-generator-input' : ''} ${isLoopExitEdge ? 'loadout-edge-loop-exit' : ''} loadout-edge-clickable`} onClick={activateEdge} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateEdge(); } }}>
+              <g key={edge.id} data-testid={edgeTestId} data-edge-kind={edge.kind} role="button" tabIndex={0} aria-label={`${edgeLabel} from ${edge.from} to ${edge.to}`} className={`loadout-edge loadout-edge-${conditionClass} loadout-edge-route-${routeClass} ${isGeneratorInput ? 'loadout-edge-generator-input' : ''} ${isLoopExitEdge ? 'loadout-edge-loop-exit' : ''} loadout-edge-clickable`} onClick={activateEdge} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activateEdge(); } }}>
                 <path d={path} markerEnd={markerEnd} />
                 <text x={labelX} y={labelY} transform={`rotate(${labelRotate} ${labelX} ${labelY})`}>{edgeLabel}</text>
               </g>

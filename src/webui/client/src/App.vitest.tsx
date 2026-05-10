@@ -723,12 +723,17 @@ describe('Materia loadout grid editor', () => {
     const loopExitEdge = await screen.findByTestId('loop-exit-edge-taskIteration-exit:Socket-4:always');
     expect(loopExitEdge.dataset.edgeKind).toBe('loop-exit');
     expect(loopExitEdge.classList.contains('loadout-edge-loop-exit')).toBe(true);
+    expect(loopExitEdge.classList.contains('loadout-edge-default')).toBe(true);
     expect(loopExitEdge.textContent).toContain('Upon Loop Exit');
-    expect(loopExitEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-loop-exit-edge-arrow)');
+    expect(loopExitEdge.textContent).not.toContain('Satisfied');
+    expect(loopExitEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-loop-exit-edge-arrow-default)');
     expect(screen.getByTestId('edge-Socket-1-Socket-2-0').classList.contains('loadout-edge-loop-exit')).toBe(false);
 
     fireEvent.click(loopExitEdge);
     await waitFor(() => expect(loopExitEdge.textContent).toContain('Upon Loop Exit: Satisfied'));
+    expect(loopExitEdge.classList.contains('loadout-edge-loop-exit')).toBe(true);
+    expect(loopExitEdge.classList.contains('loadout-edge-satisfied')).toBe(true);
+    expect(loopExitEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-loop-exit-edge-arrow-satisfied)');
     expect(screen.getByTestId('loop-exit-edge-taskIteration-exit:Socket-4:always')).toBe(loopExitEdge);
     expect(screen.queryByTestId('loop-exit-edge-taskIteration-exit:Socket-4:satisfied')).toBeNull();
     expect(configPostCalls(fetchMock)).toHaveLength(0);
@@ -741,9 +746,15 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.keyDown(loopExitEdge, { key: 'Enter' });
     await waitFor(() => expect(loopExitEdge.textContent).toContain('Upon Loop Exit: Not Satisfied'));
+    expect(loopExitEdge.classList.contains('loadout-edge-loop-exit')).toBe(true);
+    expect(loopExitEdge.classList.contains('loadout-edge-unsatisfied')).toBe(true);
+    expect(loopExitEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-loop-exit-edge-arrow-unsatisfied)');
     fireEvent.keyDown(loopExitEdge, { key: ' ' });
     await waitFor(() => expect(loopExitEdge.textContent).toContain('Upon Loop Exit'));
     expect(loopExitEdge.textContent).not.toContain('Satisfied');
+    expect(loopExitEdge.classList.contains('loadout-edge-loop-exit')).toBe(true);
+    expect(loopExitEdge.classList.contains('loadout-edge-default')).toBe(true);
+    expect(loopExitEdge.querySelector('path')?.getAttribute('marker-end')).toBe('url(#materia-loop-exit-edge-arrow-default)');
     expect(screen.getByTestId('loop-exit-edge-taskIteration-exit:Socket-4:always')).toBe(loopExitEdge);
   });
 
