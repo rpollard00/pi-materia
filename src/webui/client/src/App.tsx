@@ -2,12 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
 import { isGeneratorMateria } from '../../../generator.js';
-import { formatGraphValidationErrors, stageValidatedPipelineGraphChange } from '../../../graphValidation.js';
+import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../graphValidation.js';
 import {
   buildMateriaPalette,
-  clearSocketMateria,
   canDeleteSocket,
-  deleteSocketFromLoadout,
   extractMateriaReference,
   findLoopExitConnectionContext,
   formatSocketLabel,
@@ -15,17 +13,32 @@ import {
   resolveSocketDisplayLabel,
   isEmptySocket,
   isEntrySocket,
-  makeEmptySocket,
-  makeNewSocketId,
+
   materiaColorChoices,
   nodeColor,
-  placeMateriaInSocket,
-  removeLoopExitRoute,
-  upsertLoopExitRoute,
   type LegacyPipelineNode,
   type PipelineConfig,
   type PipelineNode,
 } from './loadoutModel.js';
+import {
+  addEdgeToLoadout,
+  clearLoopExitInLoadout,
+  clearMateriaFromSocket,
+  createConnectedEmptySocket,
+  createTaskLoop,
+  deleteLoopFromLoadout,
+  deleteSocketImmutable,
+  removeEdgeFromLoadout,
+  removeLegacyNextFromLoadout,
+  removeLoopExitRouteFromLoadout,
+  setSocketMateria,
+  swapSocketMateria,
+  toggleEdgeConditionInLoadout,
+  toggleLoopExitRouteCondition,
+  updateLoopExitInLoadout,
+  upsertLoopExitRouteInLoadout,
+  type LoadoutTransform,
+} from './loadoutTransforms.js';
 import {
   edgeConditionLabels,
   materiaSavedEventName,
@@ -289,19 +302,15 @@ export function App() {
     }
 
     updateDraft((config) => {
-      const loadout = buildLoadouts(config)[activeLoadoutName];
+      const draftLoadouts = buildLoadouts(config);
+      const loadout = draftLoadouts[activeLoadoutName];
       if (!loadout?.nodes) return;
-      if (fromSocket && fromSocket !== socketId) {
-        const target = loadout.nodes[socketId];
-        const source = loadout.nodes[fromSocket];
-        if (isEmptySocket(source) || !target) return;
-        loadout.nodes[socketId] = placeMateriaInSocket(target, source);
-        loadout.nodes[fromSocket] = placeMateriaInSocket(source, target);
-      } else {
+      if (fromSocket && fromSocket !== socketId) draftLoadouts[activeLoadoutName] = swapSocketMateria(loadout, fromSocket, socketId);
+      else {
         const sourceNode = palette.find(([id]) => id === materiaId)?.[1];
-        const target = loadout.nodes[socketId];
-        if (sourceNode && !isEmptySocket(sourceNode) && target) loadout.nodes[socketId] = placeMateriaInSocket(target, sourceNode);
+        if (sourceNode) draftLoadouts[activeLoadoutName] = setSocketMateria(loadout, socketId, sourceNode);
       }
+      config.loadouts = draftLoadouts;
     });
     setSelectedMateriaId(undefined);
     setStatus(`Staged ${materiaId} in socket ${socketId}; socket graph links and layout were preserved.`);
@@ -317,9 +326,7 @@ export function App() {
     }
     const deleted = commitGraphMutation(
       `Deleted socket ${socketId}.`,
-      (loadout) => {
-        deleteSocketFromLoadout(loadout as PipelineConfig, socketId);
-      },
+      (loadout) => deleteSocketImmutable(loadout, socketId),
       `Deleted socket ${socketId}; graph edges and loop metadata were cleaned up.`,
       (message) => `Cannot delete socket ${socketId}: ${message}`,
     );
@@ -343,9 +350,11 @@ export function App() {
       return false;
     }
     updateDraft((config) => {
-      const loadout = buildLoadouts(config)[activeLoadoutName];
+      const draftLoadouts = buildLoadouts(config);
+      const loadout = draftLoadouts[activeLoadoutName];
       if (!loadout?.nodes || !loadout.nodes[socketId]) return;
-      loadout.nodes[socketId] = clearSocketMateria(loadout.nodes[socketId]);
+      draftLoadouts[activeLoadoutName] = clearMateriaFromSocket(loadout, socketId);
+      config.loadouts = draftLoadouts;
     });
     setSocketActionId(undefined);
     setSocketActionMode('actions');
@@ -362,22 +371,7 @@ export function App() {
       setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${message}`);
       return;
     }
-    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, (loadout) => {
-      if (!loadout.nodes?.[afterSocketId]) return;
-      const source = loadout.nodes[afterSocketId] as PipelineNode;
-      const newId = makeNewSocketId(loadout.nodes as Record<string, PipelineNode>);
-      const sourceLayout = source.layout;
-      loadout.nodes[newId] = makeEmptySocket({
-        layout: sourceLayout ? { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 } : undefined,
-      }) as unknown as import('../../../types.js').MateriaPipelineNodeConfig;
-      if (loopExitContext) {
-        upsertLoopExitRoute(loadout as PipelineConfig, loopExitContext.loopId, afterSocketId, 'always', newId);
-        return;
-      }
-      const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
-      if (priorAlways) (loadout.nodes[newId] as PipelineNode).edges = [{ when: 'always', to: priorAlways }];
-      source.edges = [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }];
-    });
+    const result = stageValidatedPipelineGraphTransform(activeLoadout as never, (loadout: PipelineConfig) => createConnectedEmptySocket(loadout, afterSocketId) as never);
     if (!result.ok) {
       setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${formatGraphValidationErrors(result.errors)}`);
       return;
@@ -554,9 +548,9 @@ export function App() {
     setSocketActionMode('connect');
   }
 
-  function commitGraphMutation(description: string, mutator: (loadout: import('../../../types.js').MateriaPipelineConfig) => void, onSuccess: string, onError: (message: string) => string) {
+  function commitGraphMutation(description: string, transform: LoadoutTransform, onSuccess: string, onError: (message: string) => string) {
     if (!activeLoadoutName || !activeLoadout) return false;
-    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, mutator, {
+    const result = stageValidatedPipelineGraphTransform(activeLoadout as never, (loadout: PipelineConfig) => transform(loadout) as never, {
       isGeneratorNode: (nodeId) => {
         const referenced = extractMateriaReference(activeLoadout.nodes?.[nodeId]);
         return Boolean(referenced && materiaGeneratorOutput(materia[referenced.materia]));
@@ -608,24 +602,7 @@ export function App() {
     const exitCondition: MateriaEdgeCondition = isSingleSocketLoop ? 'always' : 'satisfied';
     const created = commitGraphMutation(
       `Staged loop around ${selectedLabels.join(', ')}.`,
-      (loadout) => {
-        if (isSingleSocketLoop) {
-          const socketId = selectedIds[0];
-          const node = loadout.nodes?.[socketId] as PipelineNode | undefined;
-          if (node && !(node.edges ?? []).some((edge) => edge.to === socketId)) {
-            node.edges = [{ when: 'always', to: socketId }];
-          }
-        }
-        loadout.loops = {
-          ...(loadout.loops ?? {}),
-          [loopId]: {
-            label,
-            nodes: selectedIds,
-            consumes: { from: generator.from, output: generator.output },
-            exit: { from: selectedIds[selectedIds.length - 1], when: exitCondition, to: 'end' },
-          },
-        };
-      },
+      (loadout) => createTaskLoop(loadout, loopId, label, selectedIds, { from: generator.from, output: generator.output }, { from: selectedIds[selectedIds.length - 1], when: exitCondition, to: 'end' }),
       `Staged loop around ${selectedLabels.join(', ')} consuming ${generator.from}.${generator.output}; loop.exit will compile into parse/advance runtime control flow.`,
       (message) => `Cannot create loop: ${message}`,
     );
@@ -642,12 +619,7 @@ export function App() {
     const nextExit = { ...currentExit, ...patch };
     commitGraphMutation(
       `Updated loop ${loopId} exit.`,
-      (loadout) => {
-        const draftLoop = loadout.loops?.[loopId];
-        if (!draftLoop) return;
-        if (draftLoop.exit?.from && draftLoop.exit.from !== nextExit.from) delete draftLoop.exits;
-        draftLoop.exit = nextExit;
-      },
+      (loadout) => updateLoopExitInLoadout(loadout, loopId, nextExit),
       `Staged loop ${loopId} exit as ${nextExit.from}.${edgeConditionLabel(nextExit.when)} → ${nextExit.to}; it will compile into runtime parse/advance control flow.`,
       (message) => `Cannot update loop ${loopId} exit: ${message}`,
     );
@@ -656,13 +628,7 @@ export function App() {
   function clearLoopExit(loopId: string) {
     commitGraphMutation(
       `Cleared loop ${loopId} exit.`,
-      (loadout) => {
-        const draftLoop = loadout.loops?.[loopId];
-        if (draftLoop) {
-          delete draftLoop.exit;
-          delete draftLoop.exits;
-        }
-      },
+      (loadout) => clearLoopExitInLoadout(loadout, loopId),
       `Cleared loop ${loopId} exit condition.`,
       (message) => `Cannot clear loop ${loopId} exit: ${message}`,
     );
@@ -674,11 +640,7 @@ export function App() {
     const label = formatLoopDisplayLabel(activeLoadout, loopId, loop.nodes, loop.label);
     commitGraphMutation(
       `Broke loop ${loopId}.`,
-      (loadout) => {
-        if (!loadout.loops?.[loopId]) return;
-        delete loadout.loops[loopId];
-        if (Object.keys(loadout.loops).length === 0) delete loadout.loops;
-      },
+      (loadout) => deleteLoopFromLoadout(loadout, loopId),
       `Broke loop ${label}; sockets and edges were preserved.`,
       (message) => `Cannot break loop ${label}: ${message}`,
     );
@@ -723,17 +685,9 @@ export function App() {
     }
     const created = commitGraphMutation(
       loopExitContext ? `Staged loop-exit route ${from} → ${to}.` : `Staged edge ${from} → ${to}.`,
-      (loadout) => {
-        if (loopExitContext) {
-          upsertLoopExitRoute(loadout as PipelineConfig, loopExitContext.loopId, from, edgeCondition, to);
-          return;
-        }
-        const node = loadout.nodes?.[from] as PipelineNode | undefined;
-        if (!node || !loadout.nodes?.[to]) return;
-        const edges = [...(node.edges ?? [])];
-        edges.push({ to, when: edgeCondition });
-        node.edges = edges;
-      },
+      (loadout) => loopExitContext
+        ? upsertLoopExitRouteInLoadout(loadout, loopExitContext.loopId, from, edgeCondition, to)
+        : addEdgeToLoadout(loadout, from, to, edgeCondition),
       loopExitContext
         ? `${existingRoute ? 'Replaced' : 'Staged'} loop-exit route ${socketLabel(from)} → ${socketLabel(to)} as ${edgeConditionLabel(edgeCondition)}.`
         : `Staged edge ${socketLabel(from)} → ${socketLabel(to)} as ${edgeConditionLabel(edgeCondition)}.`,
@@ -750,9 +704,7 @@ export function App() {
     if (!route) return;
     const removed = commitGraphMutation(
       `Removed loop-exit route ${loopId}:${routeId}.`,
-      (loadout) => {
-        removeLoopExitRoute(loadout as PipelineConfig, loopId, routeId);
-      },
+      (loadout) => removeLoopExitRouteFromLoadout(loadout, loopId, routeId),
       `Removed loop-exit route from ${route.from} to ${route.targetSocketId}; no normal edges were created.`,
       (message) => `Cannot remove loop-exit route ${loopId}:${routeId}: ${message}`,
     );
@@ -768,10 +720,7 @@ export function App() {
     const nextCondition = toggledEdgeCondition(route.condition);
     commitGraphMutation(
       `Toggled loop-exit route ${loopId}:${routeId}.`,
-      (loadout) => {
-        const draftRoute = (loadout as PipelineConfig).loops?.[loopId]?.exits?.find((candidate) => candidate.id === routeId);
-        if (draftRoute) draftRoute.condition = nextCondition;
-      },
+      (loadout) => toggleLoopExitRouteCondition(loadout, loopId, routeId, nextCondition),
       `Staged loop-exit route ${socketLabel(route.from)} → ${socketLabel(route.targetSocketId)} as ${edgeConditionLabel(nextCondition)}; no normal edges were created.`,
       (message) => `Cannot toggle loop-exit route ${loopId}:${routeId}: ${message}`,
     );
@@ -782,12 +731,7 @@ export function App() {
     if (!edge) return;
     const removed = commitGraphMutation(
       `Removed edge ${from} → ${edge.to}.`,
-      (loadout) => {
-        const node = loadout.nodes?.[from] as PipelineNode | undefined;
-        if (!node?.edges) return;
-        node.edges = node.edges.filter((_, index) => index !== edgeIndex);
-        if (node.edges.length === 0) delete node.edges;
-      },
+      (loadout) => removeEdgeFromLoadout(loadout, from, edgeIndex),
       `Removed edge ${from} → ${edge.to}; sockets were preserved.`,
       (message) => `Cannot remove edge ${from} → ${edge.to}: ${message}`,
     );
@@ -802,10 +746,7 @@ export function App() {
     if (!to) return;
     const removed = commitGraphMutation(
       `Removed legacy flow ${from} → ${to}.`,
-      (loadout) => {
-        const node = loadout.nodes?.[from] as LegacyPipelineNode | undefined;
-        if (node) delete node.next;
-      },
+      (loadout) => removeLegacyNextFromLoadout(loadout, from),
       `Removed legacy flow ${from} → ${to}; conditional edges and sockets were preserved.`,
       (message) => `Cannot remove legacy flow ${from} → ${to}: ${message}`,
     );
@@ -862,17 +803,7 @@ export function App() {
   function toggleEdgeCondition(edge: LoadoutEdge) {
     if (!activeLoadoutName || !activeLoadout) return;
     const edgeIndex = edge.edgeIndex;
-    const result = stageValidatedPipelineGraphChange(activeLoadout as import('../../../types.js').MateriaPipelineConfig, (loadout) => {
-      const node = loadout.nodes?.[edge.from] as PipelineNode | undefined;
-      if (!node) return;
-      if (edgeIndex === undefined) {
-        node.edges = [...(node.edges ?? []), { to: edge.to, when: toggledEdgeCondition(edge.when) }];
-        delete (node as LegacyPipelineNode).next;
-        return;
-      }
-      const candidate = node.edges?.[edgeIndex];
-      if (candidate) candidate.when = toggledEdgeCondition(candidate.when);
-    });
+    const result = stageValidatedPipelineGraphTransform(activeLoadout as never, (loadout: PipelineConfig) => toggleEdgeConditionInLoadout(loadout, edge.from, edge.to, edge.when, toggledEdgeCondition(edge.when), edgeIndex) as never);
     if (!result.ok) {
       setStatus(`Cannot toggle edge ${edge.from} → ${edge.to}: ${formatGraphValidationErrors(result.errors)}`);
       return;
@@ -882,7 +813,8 @@ export function App() {
       draftLoadouts[activeLoadoutName] = result.graph as PipelineConfig;
       config.loadouts = draftLoadouts;
     });
-    const updatedEdge = edge.edgeIndex === undefined ? result.graph.nodes?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : result.graph.nodes?.[edge.from]?.edges?.[edge.edgeIndex];
+    const updatedGraph = result.graph as PipelineConfig;
+    const updatedEdge = edge.edgeIndex === undefined ? updatedGraph.nodes?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : updatedGraph.nodes?.[edge.from]?.edges?.[edge.edgeIndex];
     setStatus(`Staged edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)} as ${edgeConditionLabel(updatedEdge?.when)}.`);
   }
 

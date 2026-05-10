@@ -81,7 +81,12 @@ export function assertValidPipelineGraph(graph: MateriaPipelineConfig, options: 
 export function stageValidatedPipelineGraphChange<TGraph extends MateriaPipelineConfig>(graph: TGraph, mutator: (draft: TGraph) => void, options: MateriaGraphValidationOptions = {}): ValidatedGraphChangeResult<TGraph> {
   const draft = cloneGraph(graph);
   mutator(draft);
-  const normalized = normalizePipelineGraph(draft);
+  return stageValidatedPipelineGraphTransform(graph, () => draft, options);
+}
+
+export function stageValidatedPipelineGraphTransform<TGraph extends MateriaPipelineConfig>(graph: TGraph, transform: (current: TGraph) => TGraph, options: MateriaGraphValidationOptions = {}): ValidatedGraphChangeResult<TGraph> {
+  const changed = transform(graph);
+  const normalized = normalizePipelineGraph(changed);
   const result = validatePipelineGraph(normalized, options);
   return { graph: result.ok ? normalized : graph, ok: result.ok, errors: result.errors };
 }
