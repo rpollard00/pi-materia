@@ -219,6 +219,59 @@ describe("graph validation foundation", () => {
     expect(result.errors).toContainEqual(expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exit.from" }));
   });
 
+  test("accepts canonical loop-owned exit routes without normal outgoing edges", () => {
+    const graph = validGraph();
+    graph.nodes["Socket-3"] = { type: "agent", materia: "Socket-3" };
+    graph.nodes["Socket-4"] = { type: "agent", materia: "Socket-4" };
+    graph.loops = {
+      taskIteration: {
+        nodes: ["Socket-2", "Socket-3"],
+        exits: [
+          { id: "route-summary", from: "Socket-3", condition: "always", targetSocketId: "Socket-4" },
+          { id: "route-satisfied", from: "Socket-3", condition: "satisfied", targetSocketId: "Socket-4" },
+          { id: "route-not-satisfied", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-1" },
+        ],
+      },
+    };
+
+    const result = validatePipelineGraph(graph);
+
+    expect(result).toEqual({ ok: true, errors: [] });
+    expect(normalizePipelineGraph(graph).nodes["Socket-3"].edges).toBeUndefined();
+    expect(normalizePipelineGraph(graph).loops?.taskIteration.exits?.[0]).toEqual({ id: "route-summary", from: "Socket-3", condition: "always", targetSocketId: "Socket-4" });
+  });
+
+  test("rejects malformed loop-owned exit routes", () => {
+    const graph = validGraph();
+    graph.loops = {
+      bad: {
+        nodes: ["Socket-3"],
+        exits: [
+          { id: "", from: "Socket-3", condition: "always", targetSocketId: "Socket-4" },
+          { id: "dup", from: "Socket-3", condition: "done" as never, targetSocketId: "Socket-4" },
+          { id: "dup", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-4" },
+          { id: "unknown-target", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-9" },
+          { id: "duplicate-condition", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-4" },
+          { id: "terminal", from: "Socket-3", condition: "always", targetSocketId: "end" },
+        ],
+      },
+    };
+
+    const result = validatePipelineGraph(graph);
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exits[0].id" }),
+      expect.objectContaining({ code: "invalid-edge-condition", source: "loops.bad.exits[1].condition" }),
+      expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exits[2].id" }),
+      expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exits[2].from" }),
+      expect.objectContaining({ code: "unknown-endpoint", source: "loops.bad.exits[3].targetSocketId" }),
+      expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exits[4].condition" }),
+      expect.objectContaining({ code: "invalid-socket-id", source: "loops.bad.exits[5].targetSocketId" }),
+    ]));
+    expect(formatGraphValidationErrors(result.errors)).toContain("Only one route per condition per loop exit source is allowed");
+  });
+
   test("validates executable loop semantics before UI-created loops are accepted", () => {
     const graph = validGraph();
     graph.nodes["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };

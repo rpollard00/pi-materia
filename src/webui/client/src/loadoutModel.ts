@@ -29,6 +29,7 @@ export interface PipelineLoop {
   consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
   exit?: { from: string; when: MateriaEdgeCondition; to: string };
+  exits?: { id: string; from: string; condition: MateriaEdgeCondition; targetSocketId: string }[];
   [key: string]: unknown;
 }
 
@@ -212,13 +213,17 @@ export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: strin
   }
 
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
-    if (loop.nodes.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId) {
+    if (loop.nodes.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId || loop.exits?.some((route) => route.from === socketId)) {
       delete loadout.loops?.[loopId];
       continue;
     }
     deleteOptionalTarget(loop.consumes, socketId);
     deleteOptionalTarget(loop.iterator, socketId);
     if (loop.exit?.to === socketId) loop.exit.to = 'end';
+    if (loop.exits) {
+      loop.exits = loop.exits.filter((route) => route.targetSocketId !== socketId);
+      if (loop.exits.length === 0) delete loop.exits;
+    }
   }
   if (loadout.loops && Object.keys(loadout.loops).length === 0) delete loadout.loops;
   return true;

@@ -1,6 +1,6 @@
 import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
 import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "./socketIds.js";
-import type { LegacyMateriaPipelineNodeConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
+import type { LegacyMateriaPipelineNodeConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
 export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
@@ -156,6 +156,7 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
     validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.done, `loops.${loopId}.consumes.done`);
     validateOptionalTarget(errors, nodeIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
     const exitIsValid = validateLoopExit(errors, nodeIds, loopId, loop.nodes, loop.exit);
+    validateLoopExitRoutes(errors, nodeIds, loopId, loop.nodes, loop.exits);
     if (loop.consumes && consumesFromIsValid && loopNodesAreValid) validateLoopTopology(graph, errors, loopId, loop.nodes, loop.consumes.from, options);
     if (loop.consumes && loopNodesAreValid && exitIsValid) validateExecutableLoopSemantics(graph, errors, loopId, loop.nodes, loop.consumes, loop.exit);
   }
@@ -246,6 +247,55 @@ function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<st
     errors.push({ code: "invalid-edge-condition", source: `loops.${loopId}.exit.when`, from: exit.from, to: exit.to, message: `Loop "${loopId}" has invalid exit condition at loops.${loopId}.exit.when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
   }
   return errors.length === errorCount;
+}
+
+function validateLoopExitRoutes(errors: MateriaGraphValidationError[], nodeIds: Set<string>, loopId: string, loopNodes: string[], exits: MateriaLoopExitRouteConfig[] | undefined): void {
+  if (exits === undefined) return;
+  if (!Array.isArray(exits)) {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.exits`, message: `Loop "${loopId}" exits must be an array of loop-owned exit route records.` });
+    return;
+  }
+
+  const seenRouteIds = new Set<string>();
+  const seenConditionsBySource = new Set<string>();
+  for (const [index, route] of exits.entries()) {
+    const routeSource = `loops.${loopId}.exits[${index}]`;
+    if (!route || typeof route !== "object") {
+      errors.push({ code: "invalid-loop", source: routeSource, message: `Loop "${loopId}" has a malformed loop-exit route at ${routeSource}.` });
+      continue;
+    }
+
+    if (typeof route.id !== "string" || route.id.trim() === "") {
+      errors.push({ code: "invalid-loop", source: `${routeSource}.id`, message: `Loop "${loopId}" loop-exit route at ${routeSource} must include a stable non-empty id.` });
+    } else if (seenRouteIds.has(route.id)) {
+      errors.push({ code: "invalid-loop", source: `${routeSource}.id`, message: `Loop "${loopId}" has duplicate loop-exit route id "${route.id}". Route ids must be stable and unique within the owning loop.` });
+    } else {
+      seenRouteIds.add(route.id);
+    }
+
+    if (!route.from) {
+      errors.push({ code: "missing-endpoint", source: `${routeSource}.from`, message: `Missing graph endpoint referenced by ${routeSource}.from.` });
+    } else if (validateSocketId(errors, route.from, `${routeSource}.from`, { from: route.from })) {
+      if (!nodeIds.has(route.from)) {
+        errors.push({ code: "unknown-endpoint", source: `${routeSource}.from`, from: route.from, message: `Unknown graph endpoint "${route.from}" referenced by ${routeSource}.from.` });
+      } else if (!loopNodes.includes(route.from)) {
+        errors.push({ code: "invalid-loop", source: `${routeSource}.from`, from: route.from, message: `Loop "${loopId}" loop-exit route source "${route.from}" must be one of its member sockets: ${loopNodes.join(", ")}.` });
+      }
+    }
+
+    if (!isCanonicalEdgeCondition(route.condition)) {
+      errors.push({ code: "invalid-edge-condition", source: `${routeSource}.condition`, from: route.from, to: route.targetSocketId, message: `Loop "${loopId}" has invalid loop-exit route condition at ${routeSource}.condition. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
+    } else if (route.from) {
+      const conditionKey = `${route.from}\u0000${route.condition}`;
+      if (seenConditionsBySource.has(conditionKey)) {
+        errors.push({ code: "invalid-loop", source: `${routeSource}.condition`, from: route.from, to: route.targetSocketId, message: `Loop "${loopId}" has more than one ${route.condition} loop-exit route from "${route.from}". Only one route per condition per loop exit source is allowed.` });
+      } else {
+        seenConditionsBySource.add(conditionKey);
+      }
+    }
+
+    validateSocketReference(errors, nodeIds, route.targetSocketId, `${routeSource}.targetSocketId`, { from: route.from, to: route.targetSocketId });
+  }
 }
 
 function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopNodes: string[], consumesFrom: string, options: MateriaGraphValidationOptions): void {

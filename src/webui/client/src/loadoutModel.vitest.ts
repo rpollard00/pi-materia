@@ -266,12 +266,17 @@ describe('loadout socket deletion model', () => {
               nodes: ['Socket-2', 'Socket-3'],
               consumes: { from: 'Socket-1', output: 'workItems' },
               exit: { from: 'Socket-3', when: 'satisfied', to: 'Socket-4' },
+              exits: [{ id: 'selected-exit', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-4' }],
             },
             targetOnly: {
               nodes: ['Socket-3'],
               consumes: { from: 'Socket-1', output: 'workItems', done: 'Socket-4' },
               iterator: { items: 'state.workItems', done: 'Socket-4' },
               exit: { from: 'Socket-3', when: 'always', to: 'Socket-4' },
+              exits: [
+                { id: 'target-socket-4', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-4' },
+                { id: 'target-socket-1', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-1' },
+              ],
             },
           },
           nodes: {
@@ -292,6 +297,7 @@ describe('loadout socket deletion model', () => {
     expect(loadout.loops?.targetOnly?.consumes?.done).toBeUndefined();
     expect(loadout.loops?.targetOnly?.iterator?.done).toBeUndefined();
     expect(loadout.loops?.targetOnly?.exit?.to).toBe('end');
+    expect(loadout.loops?.targetOnly?.exits).toEqual([{ id: 'target-socket-1', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-1' }]);
   });
 });
 

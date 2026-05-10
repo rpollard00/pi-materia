@@ -396,8 +396,14 @@ export interface MateriaLoopConfig {
   consumes?: MateriaLoopConsumerConfig;
   /** Legacy/shared iterator metadata. Prefer consumes so this is derived from generator metadata. */
   iterator?: MateriaForeachConfig;
-  /** Optional documented exit edge/condition for UI and validation. Runtime routing remains canonical edges. */
+  /** Optional documented exit edge/condition for legacy loop materialization. */
   exit?: MateriaLoopExitConfig;
+  /**
+   * Canonical loop-owned routes followed after the loop exits.
+   * These are graph semantics metadata, not normal node.edges, generator edges,
+   * or derived runtime/render edges.
+   */
+  exits?: MateriaLoopExitRouteConfig[];
 }
 
 export interface MateriaLoopConsumerConfig {
@@ -418,6 +424,19 @@ export interface MateriaLoopExitConfig {
   from: string;
   when: MateriaEdgeCondition;
   to: string;
+}
+
+export type MateriaLoopExitRouteCondition = MateriaEdgeCondition;
+
+export interface MateriaLoopExitRouteConfig {
+  /** Stable route identifier scoped to the owning loop. */
+  id: string;
+  /** Socket id within the owning loop that acts as the loop exit source. */
+  from: string;
+  /** Route condition evaluated from the canonical satisfied boolean at loop completion. */
+  condition: MateriaLoopExitRouteCondition;
+  /** Target socket id reached after loop completion. Loop-exit routes do not target the terminal "end" sentinel. */
+  targetSocketId: string;
 }
 
 export interface MateriaNodeLimitsConfig {
