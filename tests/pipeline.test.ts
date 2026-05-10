@@ -313,6 +313,44 @@ describe("loadout-aware pipeline resolution", () => {
     expect(normalizedIncompleteDownstreamAssignment.nodes["Socket-4"].node.assign?.workItems).toBe("$.workItems");
   });
 
+  test("resolvePipeline reconciles stale loop consumer source from current graph edges", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Socket-1",
+          loops: {
+            taskIteration: {
+              nodes: ["Socket-3", "Socket-4"],
+              consumes: { from: "Socket-1", output: "workItems" },
+              exit: { from: "Socket-4", when: "satisfied", to: "end" },
+            },
+          },
+          nodes: {
+            "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { type: "agent", materia: "refiner", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-3": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
+            "Socket-4": { type: "agent", materia: "Check", edges: [{ when: "always", to: "Socket-3" }] },
+          },
+        },
+      },
+      materia: {
+        planner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        refiner: { tools: "readOnly", prompt: "Refine.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+        Check: { tools: "none", prompt: "Check." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+
+    expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-2", output: "workItems" });
+    expect(pipeline.nodes["Socket-2"].node.parse).toBe("json");
+    expect(pipeline.nodes["Socket-2"].node.assign?.workItems).toBe("$.workItems");
+    expect(pipeline.nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+  });
+
   test("resolvePipeline normalizes generator-to-generator pipeline sockets without a loop consumer", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",

@@ -1,3 +1,4 @@
+import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../loadoutGraphAnalysis.js';
 import { materializeLoadoutLoopSemantics } from '../../../loopSemantics.js';
 import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socketIds.js';
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
@@ -68,7 +69,8 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
       else delete node.edges;
       delete node.next;
     }
-    reconcileLoopConsumersFromTopology(loadout, normalized.materia ?? {});
+    const reconciled = reconcileLoadoutLoopConsumersFromGraph(loadout, normalized.materia ?? {});
+    Object.assign(loadout, reconciled);
     normalizeGeneratorPipelineSockets(loadout, normalized.materia ?? {});
     materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, loadout as MateriaPipelineConfig);
   }
@@ -82,20 +84,6 @@ function normalizeCanonicalParseSemantics(container: { parse?: unknown; outputFo
   for (const definition of Object.values(definitions)) normalizeCanonicalParseSemantics(definition);
 }
 
-function reconcileLoopConsumersFromTopology(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
-  const nodes = loadout.nodes ?? {};
-  for (const loop of Object.values(loadout.loops ?? {})) {
-    if (!loop.consumes) continue;
-    const loopNodes = new Set(loop.nodes);
-    const inboundGeneratorSources = Object.entries(nodes).flatMap(([from, node]) => {
-      if (loopNodes.has(from) || !isGeneratorSocket(node, definitions)) return [];
-      return (node.edges ?? []).some((edge) => loopNodes.has(edge.to)) ? [from] : [];
-    });
-    const uniqueSources = Array.from(new Set(inboundGeneratorSources));
-    if (uniqueSources.length === 1 && loop.consumes.from !== uniqueSources[0]) loop.consumes = { ...loop.consumes, from: uniqueSources[0] };
-  }
-}
-
 function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
   for (const id of generatorPipelineSocketIds(loadout, definitions)) {
     const node = loadout.nodes?.[id];
@@ -107,20 +95,7 @@ function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions:
 }
 
 function generatorPipelineSocketIds(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): Set<string> {
-  const ids = new Set(Object.values(loadout.loops ?? {}).map((loop) => loop.consumes?.from).filter((id): id is string => typeof id === 'string'));
-  for (const [from, node] of Object.entries(loadout.nodes ?? {})) {
-    if (!isGeneratorSocket(node, definitions)) continue;
-    for (const edge of node.edges ?? []) {
-      if (!isGeneratorSocket(loadout.nodes?.[edge.to], definitions)) continue;
-      ids.add(from);
-      ids.add(edge.to);
-    }
-  }
-  return ids;
-}
-
-function isGeneratorSocket(node: PipelineNode | undefined, definitions: Record<string, MateriaBehaviorConfig>): boolean {
-  return node?.type === 'agent' && typeof node.materia === 'string' && Boolean(canonicalMateriaGeneratorOutput(definitions[node.materia]));
+  return analyzeLoadoutGraph(loadout, definitions).workItemProducingSocketIds;
 }
 
 function canonicalMateriaGeneratorOutput(definition?: MateriaBehaviorConfig): string | undefined {
@@ -438,6 +413,9 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
       if (isJsonControlCondition(advanceWhen) && node.parse !== 'json') {
         errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.advance.when`, advanceWhen));
       }
+    }
+    for (const diagnostic of analyzeLoadoutGraph(loadout, config.materia ?? {}).diagnostics) {
+      if (diagnostic.code === 'loop-consumer-missing' || diagnostic.code === 'loop-consumer-ambiguous') errors.push(`Loadout "${loadoutName}" ${diagnostic.message}`);
     }
     for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
       for (const [index, route] of (loop.exits ?? []).entries()) {

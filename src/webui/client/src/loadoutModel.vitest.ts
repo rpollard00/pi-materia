@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../loadoutGraphAnalysis.js';
 import {
   assertValidLoadoutSaveSemantics,
   buildMateriaPalette,
@@ -157,6 +158,66 @@ describe('loadout normalization model', () => {
     expect(loadout?.nodes?.['Socket-2'].parse).toBe('json');
     expect(loadout?.nodes?.['Socket-2'].assign?.workItems).toBe('$.workItems');
     expect(loadout?.nodes?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
+  });
+
+  it('analyzes loop consumer sources from graph topology without mutating input', () => {
+    const loadout: PipelineConfig = {
+      entry: 'Socket-1',
+      loops: {
+        taskIteration: {
+          nodes: ['Socket-3'],
+          consumes: { from: 'Socket-1', output: 'workItems' },
+        },
+      },
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-3': { type: 'agent', materia: 'Build' },
+      },
+    };
+    const before = JSON.stringify(loadout);
+
+    const analysis = analyzeLoadoutGraph(loadout, {
+      planner: { generator: true },
+      refiner: { generator: true },
+      Build: {},
+    });
+    const reconciled = reconcileLoadoutLoopConsumersFromGraph(loadout, {
+      planner: { generator: true },
+      refiner: { generator: true },
+      Build: {},
+    });
+
+    expect(JSON.stringify(loadout)).toBe(before);
+    expect(analysis.loopConsumerSources.get('taskIteration')).toEqual({ from: 'Socket-2', output: 'workItems' });
+    expect(analysis.workItemProducingSocketIds).toEqual(new Set(['Socket-2', 'Socket-1']));
+    expect(analysis.diagnostics).toEqual([
+      expect.objectContaining({ code: 'loop-consumer-stale', loopId: 'taskIteration', from: 'Socket-1' }),
+    ]);
+    expect(reconciled.loops?.taskIteration.consumes?.from).toBe('Socket-2');
+    expect(JSON.stringify(reconcileLoadoutLoopConsumersFromGraph(reconciled, { planner: { generator: true }, refiner: { generator: true } }))).toBe(JSON.stringify(reconciled));
+  });
+
+  it('diagnoses missing and ambiguous graph-derived loop consumer sources', () => {
+    const missing = analyzeLoadoutGraph({
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'planner' },
+        'Socket-2': { type: 'agent', materia: 'Build' },
+      },
+      loops: { work: { nodes: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+    }, { planner: { generator: true }, Build: {} });
+
+    const ambiguous = analyzeLoadoutGraph({
+      nodes: {
+        'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-3': { type: 'agent', materia: 'Build' },
+      },
+      loops: { work: { nodes: ['Socket-3'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+    }, { planner: { generator: true }, refiner: { generator: true }, Build: {} });
+
+    expect(missing.diagnostics).toEqual([expect.objectContaining({ code: 'loop-consumer-missing', loopId: 'work' })]);
+    expect(ambiguous.diagnostics).toEqual([expect.objectContaining({ code: 'loop-consumer-ambiguous', loopId: 'work' })]);
   });
 
   it('canonicalizes legacy UI outputFormat fields to parse before save', () => {

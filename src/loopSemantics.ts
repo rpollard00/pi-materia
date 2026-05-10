@@ -1,4 +1,5 @@
 import { canonicalGeneratorConfigFor } from "./generator.js";
+import { reconcileLoadoutLoopConsumersFromGraphInPlace } from "./loadoutGraphAnalysis.js";
 import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, PiMateriaConfig } from "./types.js";
 
 const JSON_CONTROL_CONDITIONS = new Set<MateriaEdgeCondition>(["satisfied", "not_satisfied"]);
@@ -17,6 +18,7 @@ export interface LoopSemanticMaterializationOptions {
  * consumed items while advance.done controls final completion.
  */
 export function materializeLoadoutLoopSemantics(config: Pick<PiMateriaConfig, "materia">, pipeline: MateriaPipelineConfig, options: LoopSemanticMaterializationOptions = {}): void {
+  reconcileLoadoutLoopConsumersFromGraphInPlace(pipeline, config.materia ?? {});
   for (const [loopId, loop] of Object.entries(pipeline.loops ?? {})) {
     materializeLoopExit(config.materia ?? {}, pipeline, loopId, loop, options);
   }
