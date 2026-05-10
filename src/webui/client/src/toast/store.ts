@@ -123,8 +123,14 @@ export function clearToasts() {
 
 /**
  * Dispatch a WebUI toast from anywhere that can access the browser window.
- * Contract: window.dispatchEvent(new CustomEvent('materia:toast', { detail: { id?, title, description?, variant?, durationMs?, persistent? } })).
- * Reusing an id replaces the existing toast; error and validation variants persist unless durationMs is supplied.
+ *
+ * materia:toast detail contract:
+ * - fields: { id?, title, description?, variant?, durationMs?, persistent? }
+ * - variants: info, success, warning, error, validation
+ * - default lifecycle: info/success/warning auto-dismiss; error/validation persist unless durationMs is supplied
+ * - id behavior: reusing an id replaces the existing toast instead of appending a duplicate
+ *
+ * Example: window.dispatchEvent(new CustomEvent('materia:toast', { detail: { id: 'save', title: 'Saved', variant: 'success' } })).
  */
 export function dispatchMateriaToast(input: MateriaToastInput) {
   window.dispatchEvent(new CustomEvent<MateriaToastInput>(materiaToastEventName, { detail: input }));

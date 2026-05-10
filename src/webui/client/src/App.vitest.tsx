@@ -341,6 +341,10 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(screen.getAllByText(/Socket-3 \(Auto-Eval\).*satisfied\/not_satisfied routing requires JSON output parsing/i).length).toBeGreaterThan(0));
     expect(screen.getByText('Cannot save loadout')).toBeTruthy();
+    const validationToast = screen.getByRole('alert');
+    expect(validationToast.getAttribute('data-toast-variant')).toBe('validation');
+    expect(validationToast.textContent).toContain('Cannot save loadout');
+    expect(validationToast.textContent).toContain('satisfied/not_satisfied routing requires JSON output parsing');
     expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
