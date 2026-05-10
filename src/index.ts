@@ -7,7 +7,7 @@ import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { renderLoadoutList } from "./loadouts.js";
 import { publishActiveLoadoutChange } from "./activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./renderer.js";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, startNativeCast } from "./native.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, reviveNativeCast, startNativeCast } from "./native.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./ui.js";
 
@@ -61,7 +61,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, recast, casts, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: cast, recast, revive, casts, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext),
     handler: async (args, ctx) => {
       activeContext = ctx;
@@ -196,8 +196,23 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
+      if (subcommand === "revive") {
+        try {
+          const requestedCastId = rest.join(" ").trim();
+          const castId = requestedCastId || listRevivableCastStates(ctx)[0]?.castId;
+          if (!castId) {
+            ctx.ui.notify("No failed pi-materia casts exhausted by same-node recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
+            return;
+          }
+          await reviveNativeCast(pi, ctx, castId);
+        } catch (error) {
+          ctx.ui.notify(`pi-materia revive failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
+
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia recast [cast-id], /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia recast [cast-id], /materia revive [cast-id] (only after same-node recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -397,26 +412,32 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
   const endsWithWhitespace = /\s$/.test(prefix);
 
   if (tokens.length === 0 && !endsWithWhitespace) {
-    const subcommands = ["cast", "recast", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
+    const subcommands = materiaSubcommands();
     return subcommands.map((value) => ({ value, label: value }));
   }
 
   if (tokens.length === 1 && !endsWithWhitespace) {
-    const subcommands = ["cast", "recast", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
+    const subcommands = materiaSubcommands();
     const matching = subcommands.filter((value) => value.startsWith(tokens[0]));
     return matching.length ? matching.map((value) => ({ value, label: value })) : null;
   }
 
-  if (tokens[0] !== "recast" || !ctx) return null;
+  if ((tokens[0] !== "recast" && tokens[0] !== "revive") || !ctx) return null;
+  const command = tokens[0];
   const castIdPrefix = endsWithWhitespace ? "" : (tokens[1] ?? "");
-  const completions = listResumableCastStates(ctx)
+  const states = command === "revive" ? listRevivableCastStates(ctx) : listResumableCastStates(ctx);
+  const completions = states
     .filter((state) => state.castId.startsWith(castIdPrefix))
     .map((state) => ({
-      value: `recast ${state.castId}`,
-      label: `${state.castId}  ${recastStatusLabel(state)}  node:${state.currentNode ?? "-"}`,
+      value: `${command} ${state.castId}`,
+      label: `${state.castId}  ${command === "revive" ? "revivable" : recastStatusLabel(state)}  node:${state.currentNode ?? "-"}`,
       description: truncateLine(state.request ?? state.failedReason ?? state.runState?.lastMessage ?? "", 72),
     }));
   return completions.length ? completions : null;
+}
+
+function materiaSubcommands(): string[] {
+  return ["cast", "recast", "revive", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
 }
 
 function recastStatusLabel(state: MateriaCastState): string {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
@@ -37,6 +37,34 @@ function latestState(harness: FakePiHarness): MateriaCastState {
 
 function cloneState(state: MateriaCastState, overrides: Partial<MateriaCastState>): MateriaCastState {
   return { ...(structuredClone(state) as MateriaCastState), ...overrides, updatedAt: Date.now() };
+}
+
+function makeRevivableState(state: MateriaCastState): MateriaCastState {
+  const key = JSON.stringify(["normal", state.currentNode ?? state.phase, "__singleton__", state.currentNode ? state.visits[state.currentNode] ?? 0 : 0, 0]);
+  return cloneState(state, {
+    recoveryAllowances: { [key]: { originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 } },
+    recoveryExhaustion: {
+      kind: "same_node_recovery_exhausted",
+      reason: "context_window",
+      key,
+      attempts: 1,
+      originalMaxAttempts: 1,
+      effectiveMaxAttempts: 1,
+      reviveCount: 0,
+      failedReason: state.failedReason ?? "provider outage",
+      node: state.currentNode,
+      mode: "normal",
+      exhaustedAt: Date.now(),
+    },
+  });
+}
+
+async function readEventTypes(state: MateriaCastState): Promise<string[]> {
+  return (await readFile(path.join(state.runDir, "events.jsonl"), "utf8"))
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type?: string })
+    .map((event) => event.type ?? "");
 }
 
 async function failCurrentCast(harness: FakePiHarness, message = "provider outage"): Promise<MateriaCastState> {
@@ -168,6 +196,61 @@ describe("/materia recast", () => {
       message: "No failed or aborted pi-materia casts are available to recast.",
       type: "info",
     });
+  });
+
+  test("revive extends an exhausted same-node recovery allowance then follows recast", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast exhausted task");
+    const failed = await failCurrentCast(harness, "Same-node recovery exhausted for normal turn");
+    const revivable = makeRevivableState(failed);
+    const recoveryKey = revivable.recoveryExhaustion!.key;
+    harness.pi.appendEntry("pi-materia-cast-state", revivable);
+
+    await harness.runCommand("materia", `revive ${revivable.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(revivable.castId);
+    expect(resumed.active).toBe(true);
+    expect(resumed.nodeState).toBe("awaiting_agent_response");
+    const allowance = resumed.recoveryAllowances?.[recoveryKey];
+    expect(allowance).toMatchObject({ originalMaxAttempts: 1, effectiveMaxAttempts: 2, reviveCount: 1 });
+    expect(resumed.recoveryExhaustion).toBeUndefined();
+    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${revivable.castId} recast from node "Socket-1".`);
+
+    const eventTypes = await readEventTypes(resumed);
+    expect(eventTypes.indexOf("cast_revive")).toBeGreaterThan(-1);
+    expect(eventTypes.indexOf("cast_recast")).toBeGreaterThan(eventTypes.indexOf("cast_revive"));
+  });
+
+  test("revive rejects non-exhaustion failures with recast guidance", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast ordinary failure");
+    const failed = await failCurrentCast(harness, "ordinary failure");
+
+    await harness.runCommand("materia", `revive ${failed.castId}`);
+
+    const notification = harness.notifications.at(-1);
+    expect(notification?.type).toBe("error");
+    expect(notification?.message).toContain("not revivable");
+    expect(notification?.message).toContain("Use /materia recast");
+  });
+
+  test("revive reports when no eligible casts exist and completes only revivable casts", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast ordinary failure");
+    await failCurrentCast(harness, "ordinary failure");
+
+    await harness.runCommand("materia", "revive");
+    expect(harness.notifications.at(-1)).toEqual({
+      message: "No failed pi-materia casts exhausted by same-node recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.",
+      type: "info",
+    });
+
+    const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    expect(completions).toEqual([]);
   });
 
   test("completions include only matching resumable casts newest first", async () => {

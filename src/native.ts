@@ -135,6 +135,32 @@ export function listResumableCastStates(ctx: ExtensionContext): MateriaCastState
   return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && state.nodeState !== "complete" && (state.phase === "failed" || state.nodeState === "failed"));
 }
 
+export function listRevivableCastStates(ctx: ExtensionContext): MateriaCastState[] {
+  return listResumableCastStates(ctx).filter(isRevivableCastState);
+}
+
+export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, castId: string): Promise<MateriaCastState> {
+  const state = loadCastStateById(ctx, castId);
+  if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
+  const active = loadActiveCastState(ctx);
+  if (active?.active) {
+    if (active.castId === state.castId) throw new Error(`pi-materia cast ${state.castId} is already running.`);
+    throw new Error(`A pi-materia cast is already active (${active.castId}). Abort it before reviving ${state.castId}.`);
+  }
+  const result = extendSameNodeRecoveryAllowanceForRevive(state);
+  await appendEvent(state.runState, "cast_revive", {
+    key: result.key,
+    priorEffectiveMaxAttempts: result.priorEffectiveMaxAttempts,
+    increment: result.increment,
+    newEffectiveMaxAttempts: result.newEffectiveMaxAttempts,
+    reviveCount: result.reviveCount,
+    node: state.currentNode,
+    itemKey: state.currentItemKey,
+  });
+  saveCastState(pi, state);
+  return resumeNativeCast(pi, ctx, state.castId);
+}
+
 export async function resumeNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, castId: string): Promise<MateriaCastState> {
   const state = loadCastStateById(ctx, castId);
   if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
@@ -854,6 +880,14 @@ function isValidRecoveryAllowance(value: unknown): value is MateriaRecoveryAllow
     Number.isSafeInteger(allowance.effectiveMaxAttempts) && allowance.effectiveMaxAttempts! >= allowance.originalMaxAttempts! &&
     Number.isSafeInteger(allowance.reviveCount) && allowance.reviveCount! >= 0
   );
+}
+
+function isRevivableCastState(state: MateriaCastState): boolean {
+  if (state.active || (state.phase !== "failed" && state.nodeState !== "failed")) return false;
+  const exhaustion = state.recoveryExhaustion;
+  if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted" || !exhaustion.key) return false;
+  if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
+  return isValidRecoveryAllowance(state.recoveryAllowances?.[exhaustion.key]);
 }
 
 export interface MateriaReviveAllowanceResult {
