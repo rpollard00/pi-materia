@@ -2851,4 +2851,51 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByText('awaiting_agent_response')).toBeTruthy();
     expect(screen.getByText('Completed nodes: planner')).toBeTruthy();
   });
+
+  it('raises one deduped toast when an observed active cast completes', async () => {
+    const listeners = new Map<string, (event: MessageEvent) => void>();
+    class MockEventSource {
+      url: string;
+      constructor(url: string) { this.url = url; }
+      addEventListener(type: string, listener: (event: MessageEvent) => void) { listeners.set(type, listener); }
+      close() {}
+    }
+    vi.stubGlobal('EventSource', MockEventSource);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+
+    render(<App />);
+    await screen.findByTestId('socket-Socket-2');
+    await openTab('Monitoring');
+
+    listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({
+      ok: true,
+      now: 61_000,
+      uiStartedAt: 1_000,
+      activeCast: { castId: 'stale-cast', active: false, phase: 'complete', currentNode: 'Socket-2', currentMateria: 'Build', nodeState: 'complete', awaitingResponse: false, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
+    }) }));
+    expect(await screen.findByText('complete')).toBeTruthy();
+    expect(screen.queryByText('Cast completed')).toBeNull();
+
+    listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({
+      ok: true,
+      now: 62_000,
+      uiStartedAt: 1_000,
+      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentNode: 'Socket-2', currentMateria: 'Build', nodeState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 62_000 },
+    }) }));
+    await screen.findByText('awaiting_agent_response');
+
+    const completedSnapshot = {
+      ok: true,
+      now: 63_000,
+      uiStartedAt: 1_000,
+      activeCast: { castId: 'cast-1', active: false, phase: 'complete', currentNode: 'Socket-2', currentMateria: 'Build', nodeState: 'complete', awaitingResponse: false, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 63_000 },
+    };
+    listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify(completedSnapshot) }));
+    listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify(completedSnapshot) }));
+
+    expect(await screen.findByText('Cast completed')).toBeTruthy();
+    expect(screen.getByText('Cast cast-1 finished after Build.')).toBeTruthy();
+    expect(screen.getAllByText('Cast completed')).toHaveLength(1);
+    expect(screen.getByRole('status').getAttribute('data-toast-variant')).toBe('success');
+  });
 });

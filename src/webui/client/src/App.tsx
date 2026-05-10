@@ -97,6 +97,7 @@ import {
   thinkingSelectOptions,
 } from './webui/utils/modelCatalog.js';
 import { tabFromLocation } from './webui/utils/tabs.js';
+import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
 import { useModelCatalog } from './webui/hooks/useModelCatalog.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
@@ -149,6 +150,7 @@ export function App() {
   const [socketRegionSelectionDrag, setSocketRegionSelectionDrag] = useState<SocketRegionSelectionDragState | undefined>();
   const suppressSocketClickRef = useRef(false);
   const monitor = useMonitorSnapshot();
+  useCastCompletionToasts(monitor);
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
   const [originalMateriaModelSettings, setOriginalMateriaModelSettings] = useState<OriginalMateriaModelSettings | undefined>();
   const { modelCatalog, modelCatalogStatus, modelCatalogError } = useModelCatalog(selectedTab);
