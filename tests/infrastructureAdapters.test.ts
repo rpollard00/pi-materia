@@ -1,0 +1,40 @@
+import { describe, expect, test } from "bun:test";
+import { createArtifactCatalog, createConfigRepository, createConsoleLogger, createMateriaPluginAdapters, createPipelinePresenter, createProcessEnvironmentLookup } from "../src/infrastructure/index.js";
+
+// These tests keep plugin composition honest without invoking the expensive native Pi runtime.
+describe("infrastructure adapters", () => {
+  test("compose the workflow ports consumed by application services", () => {
+    const adapters = createMateriaPluginAdapters({ MATERIA_CONFIG: "custom.json" });
+    expect(adapters.configs).toEqual(createConfigRepository());
+    expect(Object.keys(adapters.pipeline).sort()).toEqual(["renderGrid", "renderLoadoutList", "resolve"]);
+    expect(Object.keys(adapters.states).sort()).toEqual(["listLatest", "listResumable", "listRevivable", "loadActive"]);
+    expect(Object.keys(adapters.artifacts)).toEqual(["renderCastList"]);
+    expect(Object.keys(adapters.runtime).sort()).toEqual(["activeSystemPrompt", "buildIsolatedContext", "clear", "continue", "currentMateria", "handleAgentEnd", "prepareMultiTurnRefinementTurn", "resume", "revive", "start", "statusLabel"]);
+    expect(adapters.environment.get("MATERIA_CONFIG")).toBe("custom.json");
+    expect(adapters.logger.info).toBeFunction();
+  });
+
+  test("exposes focused standalone adapters", () => {
+    expect(createPipelinePresenter().resolve).toBeFunction();
+    expect(createArtifactCatalog().renderCastList).toBeFunction();
+    expect(createProcessEnvironmentLookup({ FOO: "bar" }).get("FOO")).toBe("bar");
+    expect(createProcessEnvironmentLookup({}).get("FOO")).toBeUndefined();
+  });
+
+  test("adapts application logging to a concrete console-like sink", () => {
+    const entries: Array<{ level: string; args: unknown[] }> = [];
+    const logger = createConsoleLogger({
+      info: (...args: unknown[]) => entries.push({ level: "info", args }),
+      warn: (...args: unknown[]) => entries.push({ level: "warn", args }),
+      error: (...args: unknown[]) => entries.push({ level: "error", args }),
+    });
+
+    logger.info?.("selected", { loadout: "default" });
+    logger.warn?.("fallback");
+
+    expect(entries).toEqual([
+      { level: "info", args: ["[pi-materia] selected", { loadout: "default" }] },
+      { level: "warn", args: ["[pi-materia] fallback"] },
+    ]);
+  });
+});

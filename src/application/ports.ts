@@ -23,7 +23,9 @@ export interface ArtifactCatalog {
   renderCastList(artifactRoot: string, sessionStates?: MateriaCastState[]): Promise<string[]>;
 }
 
-export interface CastRuntime<TSession = unknown, TPi = unknown, TAgentEvent = unknown, TContextEvent = unknown> {
+// Temporary workflow facade around the existing native/plugin runtime. Keep this
+// constrained to cast-execution operations until the native runtime is split.
+export interface CastRuntime<TSession = unknown, TPi = unknown, TAgentEvent = unknown> {
   buildIsolatedContext(eventMessages: unknown, state: MateriaCastState): unknown;
   activeSystemPrompt(state: MateriaCastState, materia: unknown): string;
   currentMateria(state: MateriaCastState): unknown;
@@ -43,18 +45,6 @@ export interface Logger {
   error?(message: string, details?: Record<string, unknown>): void;
 }
 
-export interface Clock {
-  now(): number;
-}
-
-export interface IdGenerator {
-  nextId(prefix?: string): string;
-}
-
 export interface EnvironmentLookup {
   get(name: string): string | undefined;
-}
-
-export interface VcsLookup {
-  describe(cwd: string): Promise<string | undefined>;
 }
