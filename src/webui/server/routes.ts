@@ -10,8 +10,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { MateriaSetActiveLoadoutCallback } from './activeLoadout.js';
 import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
-import type { MateriaWebUiSessionSnapshot } from './index.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
+import type { MateriaWebUiSessionSnapshot } from './session.js';
 
 export interface MateriaWebUiRouteDeps {
   staticDir: string;
@@ -26,6 +26,9 @@ export interface MateriaWebUiRouteDeps {
   };
 }
 
+// Ordered dispatcher for the WebUI HTTP surface. Keep startsWith checks and
+// route order stable for compatibility; individual modules own validation,
+// response envelopes, and route-specific dependencies.
 export async function handleMateriaWebUiRequest(req: IncomingMessage, res: ServerResponse, deps: MateriaWebUiRouteDeps) {
   if (req.url?.startsWith('/api/health')) {
     handleHealthRoute(res, { sessionKey: deps.session?.key });

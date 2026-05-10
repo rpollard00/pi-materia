@@ -6,6 +6,9 @@ import { buildMateriaModelCatalog } from './modelCatalog.js';
 import { handleMonitorEventsRoute, handleMonitorSnapshotRoute } from './monitor.js';
 import { handleRoleGenerationRoute } from './roleGeneration.js';
 import { serveStatic } from './static.js';
+// Ordered dispatcher for the WebUI HTTP surface. Keep startsWith checks and
+// route order stable for compatibility; individual modules own validation,
+// response envelopes, and route-specific dependencies.
 export async function handleMateriaWebUiRequest(req, res, deps) {
     if (req.url?.startsWith('/api/health')) {
         handleHealthRoute(res, { sessionKey: deps.session?.key });

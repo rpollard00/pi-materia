@@ -14,6 +14,8 @@ import { useMateriaEditorController } from './webui/features/materia-editor/useM
 import { useLoadoutSocketInteractionController } from './webui/features/loadout/useLoadoutSocketInteractionController.js';
 import { useLoadoutGraphMutationController } from './webui/features/loadout/useLoadoutGraphMutationController.js';
 
+// Compatibility entry point for the browser bundle and tests. Keep feature
+// logic in hooks/controllers; App composes those boundaries into the shell.
 export function App() {
   const { selectedTab, selectTab } = useAppNavigation();
   const {

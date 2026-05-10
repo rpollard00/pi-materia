@@ -2,6 +2,9 @@ import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleMateriaWebUiRequest } from './routes.js';
+// Compatibility facade: consumers and tests import public WebUI server helpers
+// from this entry point while route/service implementations live in focused
+// backend modules next to it.
 export { buildMateriaModelCatalog } from './modelCatalog.js';
 const defaultStaticDir = resolve(fileURLToPath(new URL('../../../dist/webui/client', import.meta.url)));
 export function createMateriaWebUiServer(options = {}) {

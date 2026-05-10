@@ -24,20 +24,20 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <>
-    <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
-      <section className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-6 px-6 py-8">
-        <AppHeader source={source} isDirty={isDirty} />
+      <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
+        <section className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-6 px-6 py-8">
+          <AppHeader source={source} isDirty={isDirty} />
 
-        <TabNav selectedTab={selectedTab} onSelectTab={onSelectTab} />
+          <TabNav selectedTab={selectedTab} onSelectTab={onSelectTab} />
 
-        {selectedTab === 'loadout' && loadoutWorkspace}
+          {selectedTab === 'loadout' && loadoutWorkspace}
 
-        {selectedTab === 'materia-editor' && materiaEditorWorkspace}
+          {selectedTab === 'materia-editor' && materiaEditorWorkspace}
 
-        {selectedTab === 'monitor' && monitorWorkspace}
-      </section>
-    </main>
-    <Toaster />
+          {selectedTab === 'monitor' && monitorWorkspace}
+        </section>
+      </main>
+      <Toaster />
     </>
   );
 }

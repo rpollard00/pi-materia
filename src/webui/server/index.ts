@@ -6,61 +6,17 @@ import type { MateriaSetActiveLoadoutCallback } from './activeLoadout.js';
 import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
+import type { MateriaWebUiSessionSnapshot } from './session.js';
 
+// Compatibility facade: consumers and tests import public WebUI server helpers
+// from this entry point while route/service implementations live in focused
+// backend modules next to it.
 export { buildMateriaModelCatalog } from './modelCatalog.js';
 export type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 export type { MateriaModelCatalogModel, MateriaModelCatalogResponse, MateriaModelCatalogSource } from './modelCatalog.js';
 export type { MateriaGeneratorConfig, MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 export type { MateriaSetActiveLoadoutCallback, MateriaSetActiveLoadoutFailureCode, MateriaSetActiveLoadoutResult } from './activeLoadout.js';
-
-export interface MateriaMonitorArtifactEntry {
-  node?: string;
-  materia?: string;
-  phase?: string;
-  kind?: string;
-  artifact?: string;
-  timestamp?: number;
-  content?: string;
-}
-
-export interface MateriaMonitorEventEntry {
-  ts?: number;
-  type?: string;
-  data?: unknown;
-}
-
-export interface MateriaWebUiSessionSnapshot {
-  ok: true;
-  scope: 'session';
-  service: 'pi-materia-webui';
-  sessionKey: string;
-  cwd: string;
-  sessionFile: string;
-  sessionId: string;
-  uiStartedAt: number;
-  now: number;
-  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }>;
-  artifactSummary?: {
-    runDir?: string;
-    request?: string;
-    events: MateriaMonitorEventEntry[];
-    outputs: MateriaMonitorArtifactEntry[];
-    summary: string;
-  };
-  activeCast?: {
-    castId: string;
-    active: boolean;
-    phase: string;
-    currentNode?: string;
-    currentMateria?: string;
-    nodeState?: string;
-    awaitingResponse: boolean;
-    runDir: string;
-    artifactRoot: string;
-    startedAt: number;
-    updatedAt: number;
-  };
-}
+export type { MateriaMonitorArtifactEntry, MateriaMonitorEventEntry, MateriaWebUiSessionSnapshot } from './session.js';
 
 export interface MateriaWebUiServerOptions {
   host?: string;

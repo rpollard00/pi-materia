@@ -1,6 +1,6 @@
 import { sendJson } from './http.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { MateriaWebUiSessionSnapshot } from './index.js';
+import type { MateriaWebUiSessionSnapshot } from './session.js';
 
 export interface MateriaMonitorRouteDeps {
   getSnapshot?: () => MateriaWebUiSessionSnapshot | Promise<MateriaWebUiSessionSnapshot>;
