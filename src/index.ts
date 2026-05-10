@@ -5,6 +5,7 @@ import path from "node:path";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "./config.js";
 import { renderGrid, resolvePipeline } from "./pipeline.js";
 import { renderLoadoutList } from "./loadouts.js";
+import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type ArtifactCatalog, type CastRuntime, type CastStateRepository, type ConfigRepository, type PipelinePresenter } from "./application/index.js";
 import { publishActiveLoadoutChange } from "./activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, reviveNativeCast, startNativeCast } from "./native.js";
@@ -14,6 +15,31 @@ import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatu
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
   let activeContext: ExtensionContext | undefined;
+  const configRepository: ConfigRepository = { load: loadConfig, saveActiveLoadout, resolveArtifactRoot };
+  const pipelinePresenter: PipelinePresenter = { resolve: resolvePipeline, renderGrid, renderLoadoutList };
+  const castStates: CastStateRepository<ExtensionContext> = {
+    loadActive: loadActiveCastState,
+    listLatest: listLatestCastStates,
+    listResumable: listResumableCastStates,
+    listRevivable: listRevivableCastStates,
+  };
+  const artifacts: ArtifactCatalog = { renderCastList };
+  const castRuntime: CastRuntime<ExtensionContext, ExtensionAPI, unknown> = {
+    buildIsolatedContext: buildIsolatedMateriaContext,
+    activeSystemPrompt: (state, materia) => activeMateriaSystemPrompt(state, materia as Parameters<typeof activeMateriaSystemPrompt>[1]),
+    currentMateria,
+    prepareMultiTurnRefinementTurn,
+    handleAgentEnd: (api, event, ctx) => handleAgentEnd(api, event as Parameters<typeof handleAgentEnd>[1], ctx),
+    start: startNativeCast,
+    continue: continueNativeCast,
+    resume: async (api, ctx, castId) => { await resumeNativeCast(api, ctx, castId); },
+    revive: async (api, ctx, castId) => { await reviveNativeCast(api, ctx, castId); },
+    clear: clearCastState,
+    statusLabel: materiaStatusLabel,
+  };
+  const loadoutUseCases = new LoadoutUseCases({ configs: configRepository, pipeline: pipelinePresenter });
+  const castCatalogUseCases = new CastCatalogUseCases({ configs: configRepository, states: castStates, artifacts });
+  const castExecutionUseCases = new CastExecutionUseCases({ states: castStates, runtime: castRuntime, loadouts: loadoutUseCases });
 
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
@@ -22,29 +48,21 @@ export default function piMateria(pi: ExtensionAPI) {
 
   pi.on("context", (event, ctx) => {
     activeContext = ctx;
-    const state = loadActiveCastState(ctx);
-    if (!state?.active) return;
-    return {
-      messages: buildIsolatedMateriaContext(event.messages, state) as typeof event.messages,
-    };
+    const messages = castExecutionUseCases.buildIsolatedContext(event.messages, ctx);
+    if (!messages) return;
+    return { messages: messages as typeof event.messages };
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     activeContext = ctx;
-    const state = loadActiveCastState(ctx);
-    if (!state?.active) return;
-    if (state.nodeState === "awaiting_user_refinement") await prepareMultiTurnRefinementTurn(pi, ctx, state);
-    if (!state.awaitingResponse) return;
-    const materia = currentMateria(state);
-    if (!materia) return;
-    return {
-      systemPrompt: `${event.systemPrompt}\n\nMateria active materia (${state.currentNode ?? state.phase}):\n${activeMateriaSystemPrompt(state, materia)}`,
-    };
+    const systemPrompt = await castExecutionUseCases.prepareAgentStart({ pi, session: ctx, systemPrompt: event.systemPrompt });
+    if (!systemPrompt) return;
+    return { systemPrompt };
   });
 
   pi.on("agent_end", async (event, ctx) => {
     activeContext = ctx;
-    await handleAgentEnd(pi, event, ctx);
+    await castExecutionUseCases.handleAgentEnd(pi, event, ctx);
   });
 
   pi.on("session_start", (_event, ctx) => {
@@ -85,9 +103,7 @@ export default function piMateria(pi: ExtensionAPI) {
 
       if (subcommand === "grid") {
         try {
-          const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
-          const pipeline = resolvePipeline(loaded.config);
-          const lines = renderGrid(loaded.config, pipeline, loaded.source, ctx.cwd);
+          const { loaded, lines } = await loadoutUseCases.prepareGrid(ctx.cwd, getConfiguredConfigPath(pi));
           clearMateriaAuxiliaryWidgets(ctx);
           ctx.ui.notify(`pi-materia grid loaded from ${loaded.source}`, "info");
           pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "grid", materiaName: "orchestrator", eventType: "grid" } });
@@ -103,14 +119,7 @@ export default function piMateria(pi: ExtensionAPI) {
         try {
           const configuredPath = getConfiguredConfigPath(pi);
           if (requestedLoadout) {
-            const active = loadActiveCastState(ctx);
-            if (active?.active) {
-              ctx.ui.notify(`Cannot change active loadout during active cast ${active.castId}.`, "error");
-              pi.sendMessage({ customType: "pi-materia", content: `Cannot change active loadout during active cast ${active.castId}.`, display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "command", error: "active_cast_conflict", castId: active.castId } });
-              return;
-            }
-            const written = await saveActiveLoadout(ctx.cwd, requestedLoadout, configuredPath);
-            const loaded = await loadConfig(ctx.cwd, configuredPath);
+            const { loaded, writtenPath: written } = await loadoutUseCases.selectActiveLoadout({ cwd: ctx.cwd, requestedLoadout, configuredPath, activeCast: castStates.loadActive(ctx) });
             clearMateriaAuxiliaryWidgets(ctx);
             publishActiveLoadoutChange(pi, ctx, {
               source: "command",
@@ -119,13 +128,17 @@ export default function piMateria(pi: ExtensionAPI) {
               notifyMessage: `pi-materia active loadout set to ${loaded.config.activeLoadout ?? requestedLoadout} (${written})`,
             });
           } else {
-            const loaded = await loadConfig(ctx.cwd, configuredPath);
-            const lines = renderLoadoutList(loaded.config, loaded.source);
+            const { lines } = await loadoutUseCases.listLoadouts(ctx.cwd, configuredPath);
             clearMateriaAuxiliaryWidgets(ctx);
             pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout" } });
           }
         } catch (error) {
-          ctx.ui.notify(`pi-materia loadout failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+          if (error instanceof ActiveCastConflictError) {
+            ctx.ui.notify(error.message, "error");
+            pi.sendMessage({ customType: "pi-materia", content: error.message, display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "command", error: error.code, castId: error.castId } });
+          } else {
+            ctx.ui.notify(`pi-materia loadout failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+          }
         }
         return;
       }
@@ -133,9 +146,7 @@ export default function piMateria(pi: ExtensionAPI) {
 
       if (subcommand === "casts") {
         try {
-          const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
-          const artifactRoot = resolveArtifactRoot(ctx.cwd, loaded.config.artifactDir);
-          const lines = await renderCastList(artifactRoot, listLatestCastStates(ctx));
+          const { lines } = await castCatalogUseCases.listCasts({ cwd: ctx.cwd, session: ctx, configuredPath: getConfiguredConfigPath(pi) });
           clearMateriaAuxiliaryWidgets(ctx);
           pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "casts", materiaName: "orchestrator", eventType: "casts" } });
         } catch (error) {
@@ -145,7 +156,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand === "status") {
-        const state = loadActiveCastState(ctx);
+        const state = castExecutionUseCases.status(ctx);
         if (!state) {
           ctx.ui.notify("No pi-materia cast state in this session.", "info");
           return;
@@ -158,12 +169,11 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand === "abort") {
-        const state = loadActiveCastState(ctx);
-        if (!state?.active) {
+        const state = castExecutionUseCases.abortActive(pi, ctx);
+        if (!state) {
           ctx.ui.notify("No active pi-materia cast to abort.", "info");
           return;
         }
-        clearCastState(pi, state, "aborted by user");
         updateWidget(ctx, state.runState);
         ctx.ui.setStatus("materia", undefined);
         ctx.ui.notify(`pi-materia cast ${state.castId} aborted.`, "warning");
@@ -172,9 +182,7 @@ export default function piMateria(pi: ExtensionAPI) {
 
       if (subcommand === "continue") {
         try {
-          const state = loadActiveCastState(ctx);
-          if (!state) throw new Error("No pi-materia cast state in this session.");
-          await continueNativeCast(pi, ctx, state);
+          await castExecutionUseCases.continueCast(pi, ctx);
         } catch (error) {
           ctx.ui.notify(`pi-materia continue failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
@@ -184,12 +192,11 @@ export default function piMateria(pi: ExtensionAPI) {
       if (subcommand === "recast") {
         try {
           const requestedCastId = rest.join(" ").trim();
-          const castId = requestedCastId || listResumableCastStates(ctx)[0]?.castId;
+          const castId = await castExecutionUseCases.resumeLatestOrRequested(pi, ctx, requestedCastId);
           if (!castId) {
             ctx.ui.notify("No failed or aborted pi-materia casts are available to recast.", "info");
             return;
           }
-          await resumeNativeCast(pi, ctx, castId);
         } catch (error) {
           ctx.ui.notify(`pi-materia recast failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
@@ -199,12 +206,11 @@ export default function piMateria(pi: ExtensionAPI) {
       if (subcommand === "revive") {
         try {
           const requestedCastId = rest.join(" ").trim();
-          const castId = requestedCastId || listRevivableCastStates(ctx)[0]?.castId;
+          const castId = await castExecutionUseCases.reviveLatestOrRequested(pi, ctx, requestedCastId);
           if (!castId) {
             ctx.ui.notify("No failed pi-materia casts exhausted by same-node recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
             return;
           }
-          await reviveNativeCast(pi, ctx, castId);
         } catch (error) {
           ctx.ui.notify(`pi-materia revive failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
@@ -222,19 +228,15 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
-      const active = loadActiveCastState(ctx);
-      if (active?.active) {
-        ctx.ui.notify(`A pi-materia cast is already active (${active.castId}). Use /materia status or /materia abort.`, "error");
-        return;
-      }
-
       try {
-        const loaded = await loadConfig(ctx.cwd, getConfiguredConfigPath(pi));
-        const pipeline = resolvePipeline(loaded.config);
+        const { loaded, pipeline } = await castExecutionUseCases.startCast({ pi, session: ctx, cwd: ctx.cwd, request, configuredPath: getConfiguredConfigPath(pi) });
         ctx.ui.notify(`pi-materia config: ${loaded.source}`, "info");
         ctx.ui.notify(`pi-materia grid entry: ${pipeline.entry.id}`, "info");
-        await startNativeCast(pi, ctx, loaded, pipeline, request);
       } catch (error) {
+        if (error instanceof ActiveCastConflictError) {
+          ctx.ui.notify(`A pi-materia cast is already active (${error.castId}). Use /materia status or /materia abort.`, "error");
+          return;
+        }
         ctx.ui.setStatus("materia", "failed");
         ctx.ui.notify(`pi-materia cast failed to start: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
@@ -450,8 +452,5 @@ function truncateLine(value: string, max: number): string {
 }
 
 function getConfiguredConfigPath(pi: ExtensionAPI): string | undefined {
-  const flagValue = pi.getFlag("materia-config");
-  if (typeof flagValue === "string" && flagValue.trim()) return flagValue.trim();
-  if (process.env.MATERIA_CONFIG?.trim()) return process.env.MATERIA_CONFIG.trim();
-  return undefined;
+  return configuredConfigPath(pi, { get: (name) => process.env[name] });
 }
