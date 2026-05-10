@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
-import { isGeneratorMateria } from '../../../generator.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../graphValidation.js';
 import {
   buildMateriaPalette,
@@ -14,7 +13,6 @@ import {
   resolveSocketDisplayLabel,
   isEmptySocket,
   isEntrySocket,
-  materiaColorChoices,
   nodeColor,
   type LegacyPipelineNode,
   type PipelineConfig,
@@ -43,7 +41,6 @@ import {
 } from './loadoutTransforms.js';
 import {
   edgeConditionLabels,
-  materiaSavedEventName,
   socketCardWidth,
   socketLayoutOffsetX,
   socketLayoutOffsetY,
@@ -54,15 +51,11 @@ import {
 import type {
   DragPayload,
   LoadoutEdge,
-  MateriaFormState,
-  MateriaSavedEventDetail,
-  OriginalMateriaModelSettings,
   PositionedSocket,
   SocketLayoutDragState,
   SocketPropertyFormState,
   SocketRegionSelectionDragState,
 } from './webui/types.js';
-import { generateMateriaRole, saveConfig } from './webui/api/index.js';
 import { AppShell } from './webui/components/AppShell.js';
 import { LoadoutListPanel } from './webui/features/loadout/LoadoutListPanel.js';
 import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePanel.js';
@@ -95,31 +88,17 @@ import {
   toggledEdgeCondition,
 } from './webui/utils/graphLayout.js';
 import {
-  buildMateriaPatch,
-  canonicalWorkItemsGeneratorConfig,
-  emptyMateriaForm,
   emptySocketPropertyForm,
   parseDragPayload,
   parseOptionalFiniteNumber,
   parseOptionalPositiveInteger,
   socketPropertyFormFromNode,
 } from './webui/utils/forms.js';
-import {
-  canKeepThinkingForModel,
-  modelSelectOptions,
-  selectedCatalogModel,
-  thinkingLabel,
-  thinkingSelectOptions,
-} from './webui/utils/modelCatalog.js';
 import { useAppNavigation } from './webui/hooks/useAppNavigation.js';
 import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
-import { useModelCatalog } from './webui/hooks/useModelCatalog.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
-
-function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
-  window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
-}
+import { useMateriaEditorController } from './webui/features/materia-editor/useMateriaEditorController.js';
 
 export function App() {
   const { selectedTab, selectTab } = useAppNavigation();
@@ -166,34 +145,6 @@ export function App() {
   const suppressSocketClickRef = useRef(false);
   const monitor = useMonitorSnapshot();
   useCastCompletionToasts(monitor);
-  const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
-  const [originalMateriaModelSettings, setOriginalMateriaModelSettings] = useState<OriginalMateriaModelSettings | undefined>();
-  const { modelCatalog, modelCatalogStatus, modelCatalogError } = useModelCatalog(selectedTab);
-  const [materiaColorOpen, setMateriaColorOpen] = useState(false);
-  const materiaColorDropdownRef = useRef<HTMLFieldSetElement | null>(null);
-  const [roleBrief, setRoleBrief] = useState('');
-  const [generatedRolePrompt, setGeneratedRolePrompt] = useState('');
-  const [roleGenerationError, setRoleGenerationError] = useState('');
-  const [roleGenerating, setRoleGenerating] = useState(false);
-
-  useEffect(() => {
-    if (!materiaColorOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (materiaColorDropdownRef.current?.contains(event.target as Node)) return;
-      setMateriaColorOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMateriaColorOpen(false);
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [materiaColorOpen]);
 
   const materia = draftConfig?.materia ?? {};
   const semanticEdges = useMemo(() => getLoadoutEdges(activeLoadout), [activeLoadout?.nodes, activeLoadout?.loops]);
@@ -217,48 +168,10 @@ export function App() {
     height: Math.abs(socketRegionSelectionDrag.currentY - socketRegionSelectionDrag.startY),
   } : undefined;
   const createLoopDisabled = selectedLoopSocketIds.length === 0;
-  const editableDefinitionIds = useMemo(() => Object.keys(materia).sort((a, b) => a.localeCompare(b)), [materia]);
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
   const currentMonitorNode = monitor?.activeCast?.currentNode;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
-  const modelOptions = useMemo(() => modelSelectOptions(modelCatalog, originalMateriaModelSettings), [modelCatalog, originalMateriaModelSettings]);
-  const thinkingOptions = useMemo(() => thinkingSelectOptions(modelCatalog, materiaForm, originalMateriaModelSettings), [modelCatalog, materiaForm.editingNodeId, materiaForm.model, materiaForm.thinking, originalMateriaModelSettings]);
-  const activeModelDescription = modelCatalog.activeModel?.label ?? modelCatalog.activeModelValue;
-  const selectedModel = selectedCatalogModel(modelCatalog, materiaForm.model);
-  const thinkingLevelsForSelection = selectedModel?.supportedThinkingLevels ?? [];
-
-  function resetMateriaEditorForm() {
-    setMateriaForm(emptyMateriaForm());
-    setOriginalMateriaModelSettings(undefined);
-  }
-
-  function handleMateriaModelChange(model: string) {
-    setMateriaForm((current) => ({
-      ...current,
-      model,
-      thinking: canKeepThinkingForModel(modelCatalog, model, current.thinking, current, originalMateriaModelSettings) ? current.thinking : '',
-    }));
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    const handleMateriaSaved = (event: Event) => {
-      const detail = (event as CustomEvent<MateriaSavedEventDetail>).detail;
-      const name = detail?.name ?? detail?.id ?? 'materia';
-      const behavior = detail?.behavior ?? 'prompt';
-      const scope = detail?.scope ?? 'configured';
-      void reloadConfig({
-        preserveLoadoutEdits: true,
-        readyStatus: `Saved reusable ${behavior} materia ${name} to ${scope} scope. Loadout draft edits were left unchanged.`,
-        cancelled: () => cancelled,
-      });
-    };
-    window.addEventListener(materiaSavedEventName, handleMateriaSaved);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(materiaSavedEventName, handleMateriaSaved);
-    };
-  }, []);
+  const materiaEditorController = useMateriaEditorController({ materia, selectedTab, status, setStatus, reloadConfig });
 
   function resetLoadoutSelectionChrome() {
     setSelectedMateriaId(undefined);
@@ -798,91 +711,6 @@ export function App() {
     setStatus(`Staged edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)} as ${edgeConditionLabel(updatedEdge?.when)}.`);
   }
 
-  function editMateria(id: string) {
-    const definition = materia[id];
-    if (!definition) return;
-    const isUtility = definition.type === 'utility';
-    const generator = isGeneratorMateria(definition);
-    const savedModel = isUtility ? '' : String(definition.model ?? '').trim();
-    const savedThinking = isUtility ? '' : String(definition.thinking ?? '').trim();
-    setOriginalMateriaModelSettings({ editingNodeId: id, model: savedModel, thinking: savedThinking });
-    setMateriaForm({
-      editingNodeId: id,
-      name: id,
-      behavior: isUtility ? 'tool' : 'prompt',
-      prompt: isUtility ? '' : String(definition.prompt ?? ''),
-      toolAccess: isUtility ? 'none' : (definition.tools ?? 'none'),
-      model: savedModel,
-      thinking: savedThinking,
-      color: String(definition.color ?? ''),
-      outputFormat: definition.parse === 'json' ? 'json' : 'text',
-      multiTurn: isUtility ? false : Boolean(definition.multiTurn),
-      generator: !isUtility && generator,
-      utility: isUtility ? String(definition.utility ?? '') : '',
-      command: isUtility ? (definition.command ?? []).join(' ') : '',
-      params: isUtility ? JSON.stringify(definition.params ?? {}, null, 2) : '{}',
-      timeoutMs: isUtility && definition.timeoutMs !== undefined ? String(definition.timeoutMs) : '',
-      persistScope: 'user',
-    });
-    setStatus(`Editing reusable materia definition ${id}. Save the staged form to update definitions only.`);
-  }
-
-  async function generateRolePrompt() {
-    const brief = roleBrief.trim();
-    if (!brief) {
-      setRoleGenerationError('Describe the desired role before generating a prompt.');
-      return;
-    }
-    setRoleGenerating(true);
-    setRoleGenerationError('');
-    setStatus('Generating Materia role prompt preview…');
-    try {
-      const generates = materiaForm.generator ? canonicalWorkItemsGeneratorConfig() : null;
-      const { response, body } = await generateMateriaRole(brief, generates);
-      const errorMessage = typeof body.error === 'string' ? body.error : body.error?.message;
-      if (!response.ok || body.ok === false || typeof body.prompt !== 'string') throw new Error(errorMessage ?? 'Materia role generation failed.');
-      setGeneratedRolePrompt(body.prompt);
-      setStatus('Generated role prompt preview. Review it before applying.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setRoleGenerationError(message);
-      setStatus(`Materia role generation failed: ${message}`);
-    } finally {
-      setRoleGenerating(false);
-    }
-  }
-
-  function discardGeneratedRolePrompt() {
-    setGeneratedRolePrompt('');
-    setRoleGenerationError('');
-    setStatus('Discarded generated role prompt preview.');
-  }
-
-  function applyGeneratedRolePrompt() {
-    if (!generatedRolePrompt) return;
-    setMateriaForm((current) => ({ ...current, prompt: generatedRolePrompt }));
-    setGeneratedRolePrompt('');
-    setRoleGenerationError('');
-    setStatus('Applied generated role prompt to the form. Save when ready.');
-  }
-
-  async function saveMateriaForm() {
-    try {
-      const patch = buildMateriaPatch(materiaForm);
-      const savedName = materiaForm.name.trim();
-      const savedBehavior = materiaForm.behavior;
-      const target = materiaForm.persistScope;
-      setStatus(`Saving reusable ${savedBehavior} materia to ${target} scope…`);
-      const { response, body } = await saveConfig(target, patch);
-      if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Materia save failed');
-      const scope = body.target ?? target;
-      dispatchMateriaSavedEvent({ id: savedName, name: savedName, behavior: savedBehavior, requestedScope: target, scope });
-      resetMateriaEditorForm();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
-
   function handleDrop(socketId: string, event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
@@ -1028,37 +856,7 @@ export function App() {
           </aside>
         </div>
       )}
-      materiaEditorWorkspace={(
-        <MateriaEditorPanel
-          activeModelDescription={activeModelDescription}
-          editableDefinitionIds={editableDefinitionIds}
-          generatedRolePrompt={generatedRolePrompt}
-          materiaColorDropdownRef={materiaColorDropdownRef}
-          materiaColorOpen={materiaColorOpen}
-          materiaForm={materiaForm}
-          modelCatalog={modelCatalog}
-          modelCatalogError={modelCatalogError}
-          modelCatalogStatus={modelCatalogStatus}
-          modelOptions={modelOptions}
-          roleBrief={roleBrief}
-          roleGenerating={roleGenerating}
-          roleGenerationError={roleGenerationError}
-          selectedModel={selectedModel}
-          status={status}
-          thinkingLevelsForSelection={thinkingLevelsForSelection}
-          thinkingOptions={thinkingOptions}
-          applyGeneratedRolePrompt={applyGeneratedRolePrompt}
-          discardGeneratedRolePrompt={discardGeneratedRolePrompt}
-          editMateria={editMateria}
-          generateRolePrompt={generateRolePrompt}
-          handleMateriaModelChange={handleMateriaModelChange}
-          resetMateriaEditorForm={resetMateriaEditorForm}
-          saveMateriaForm={saveMateriaForm}
-          setMateriaColorOpen={setMateriaColorOpen}
-          setMateriaForm={setMateriaForm}
-          setRoleBrief={setRoleBrief}
-        />
-      )}
+      materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} />}
       monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorNode={currentMonitorNode} elapsed={elapsed} />}
     />
   );

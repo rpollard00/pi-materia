@@ -1,47 +1,28 @@
-import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { materiaColorChoices } from '../../../loadoutModel.js';
-import type { MateriaFormState, ModelCatalogLoadState, ModelCatalogResponse, ModelCatalogModel, SaveTarget, SelectOption } from '../../types.js';
+import type { MateriaFormState, SaveTarget } from '../../types.js';
 import { Orb } from '../../components/Orb.js';
 import { thinkingLabel } from '../../utils/modelCatalog.js';
+import type { MateriaEditorController } from './useMateriaEditorController.js';
 
 interface MateriaEditorPanelProps {
-  activeModelDescription?: string | null;
-  editableDefinitionIds: string[];
-  generatedRolePrompt: string;
-  materiaColorDropdownRef: RefObject<HTMLFieldSetElement | null>;
-  materiaColorOpen: boolean;
-  materiaForm: MateriaFormState;
-  modelCatalog: ModelCatalogResponse;
-  modelCatalogError: string;
-  modelCatalogStatus: ModelCatalogLoadState;
-  modelOptions: SelectOption[];
-  roleBrief: string;
-  roleGenerating: boolean;
-  roleGenerationError: string;
-  selectedModel?: ModelCatalogModel;
-  status: string;
-  thinkingLevelsForSelection: string[];
-  thinkingOptions: SelectOption[];
-  applyGeneratedRolePrompt: () => void;
-  discardGeneratedRolePrompt: () => void;
-  editMateria: (id: string) => void;
-  generateRolePrompt: () => Promise<void>;
-  handleMateriaModelChange: (model: string) => void;
-  resetMateriaEditorForm: () => void;
-  saveMateriaForm: () => Promise<void>;
-  setMateriaColorOpen: Dispatch<SetStateAction<boolean>>;
-  setMateriaForm: Dispatch<SetStateAction<MateriaFormState>>;
-  setRoleBrief: Dispatch<SetStateAction<string>>;
+  controller: MateriaEditorController;
 }
 
-export function MateriaEditorPanel(props: MateriaEditorPanelProps) {
+export function MateriaEditorPanel({ controller }: MateriaEditorPanelProps) {
+  const { form, modelOptions: modelSection, colorPicker, roleGeneration, persistence } = controller;
   const {
-    activeModelDescription, editableDefinitionIds, generatedRolePrompt, materiaColorDropdownRef, materiaColorOpen,
-    materiaForm, modelCatalog, modelCatalogError, modelCatalogStatus, modelOptions, roleBrief, roleGenerating,
-    roleGenerationError, selectedModel, status, thinkingLevelsForSelection, thinkingOptions, applyGeneratedRolePrompt,
-    discardGeneratedRolePrompt, editMateria, generateRolePrompt, handleMateriaModelChange, resetMateriaEditorForm,
-    saveMateriaForm, setMateriaColorOpen, setMateriaForm, setRoleBrief,
-  } = props;
+    editableDefinitionIds, materiaForm, setMateriaForm, editMateria, handleMateriaModelChange, resetMateriaEditorForm,
+  } = form;
+  const {
+    activeModelDescription, modelCatalog, modelCatalogError, modelCatalogStatus, modelOptions, selectedModel,
+    thinkingLevelsForSelection, thinkingOptions,
+  } = modelSection;
+  const { materiaColorDropdownRef, materiaColorOpen, setMateriaColorOpen } = colorPicker;
+  const {
+    generatedRolePrompt, roleBrief, roleGenerating, roleGenerationError, applyGeneratedRolePrompt,
+    discardGeneratedRolePrompt, generateRolePrompt, setRoleBrief,
+  } = roleGeneration;
+  const { saveMateriaForm, status } = persistence;
 
   return (
     <section className="fantasy-panel p-4 sm:p-6" aria-label="Materia creation editor">
