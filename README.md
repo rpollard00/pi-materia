@@ -62,12 +62,16 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 /materia loadout Planning-Consult
 /materia ui
 /materia cast implement the next small feature
+/materia recast [cast-id]
+/materia revive [cast-id]
 /materia casts
 /materia status
 /materia abort
 ```
 
 pi-materia reports the config source, artifact directory, active loadout, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full materia prompts are hidden behind compact Materia cast messages, and each materia turn receives a curated Materia context instead of the full previous conversation.
+
+Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current node. Use `/materia revive [cast-id]` only when a cast failed because same-node recovery exhausted its structured attempt allowance (for example, repeated context-window recovery failures). Revive first increases the exhausted recovery context's effective allowance by the original max-attempt value, then delegates to the normal recast path; repeated revives are additive (`original + original` each time), not exponential, and the bump is scoped to that one exhausted node/item context. Other terminal failures are not revivable; use `/materia recast` for general failed or aborted casts.
 
 Use `/materia ui` to start or reuse a background WebUI server scoped to the current Pi session. It prints a clickable local URL. Browser auto-open is disabled by default and can be enabled in `~/.config/pi/pi-materia/config.json` with `{ "webui": { "autoOpenBrowser": true } }`; `preferredPort` and `host` are also supported.
 

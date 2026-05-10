@@ -39,18 +39,21 @@ function cloneState(state: MateriaCastState, overrides: Partial<MateriaCastState
   return { ...(structuredClone(state) as MateriaCastState), ...overrides, updatedAt: Date.now() };
 }
 
-function makeRevivableState(state: MateriaCastState): MateriaCastState {
-  const key = JSON.stringify(["normal", state.currentNode ?? state.phase, "__singleton__", state.currentNode ? state.visits[state.currentNode] ?? 0 : 0, 0]);
+function makeRevivableState(state: MateriaCastState, options: { key?: string; originalMaxAttempts?: number; effectiveMaxAttempts?: number; reviveCount?: number; extraAllowances?: MateriaCastState["recoveryAllowances"] } = {}): MateriaCastState {
+  const key = options.key ?? JSON.stringify(["normal", state.currentNode ?? state.phase, "__singleton__", state.currentNode ? state.visits[state.currentNode] ?? 0 : 0, 0]);
+  const originalMaxAttempts = options.originalMaxAttempts ?? 1;
+  const effectiveMaxAttempts = options.effectiveMaxAttempts ?? originalMaxAttempts;
+  const reviveCount = options.reviveCount ?? 0;
   return cloneState(state, {
-    recoveryAllowances: { [key]: { originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 } },
+    recoveryAllowances: { ...options.extraAllowances, [key]: { originalMaxAttempts, effectiveMaxAttempts, reviveCount } },
     recoveryExhaustion: {
       kind: "same_node_recovery_exhausted",
       reason: "context_window",
       key,
-      attempts: 1,
-      originalMaxAttempts: 1,
-      effectiveMaxAttempts: 1,
-      reviveCount: 0,
+      attempts: effectiveMaxAttempts,
+      originalMaxAttempts,
+      effectiveMaxAttempts,
+      reviveCount,
       failedReason: state.failedReason ?? "provider outage",
       node: state.currentNode,
       mode: "normal",
@@ -241,6 +244,91 @@ describe("/materia recast", () => {
     expect(events[reviveIndex]?.data).not.toHaveProperty("satisfied");
     expect(events[reviveIndex]?.data).not.toHaveProperty("feedback");
     expect(events[reviveIndex]?.data).not.toHaveProperty("missing");
+  });
+
+  test("repeated revives grow allowance linearly and only for the exhausted recovery context", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast repeated revive task");
+    const failed = await failCurrentCast(harness, "Same-node recovery exhausted first time");
+    const recoveryKey = JSON.stringify(["normal", failed.currentNode ?? failed.phase, "__singleton__", failed.currentNode ? failed.visits[failed.currentNode] ?? 0 : 0, 0]);
+    const otherKey = JSON.stringify(["normal", "Other-Socket", "__singleton__", 1, 0]);
+    const revivable = makeRevivableState(failed, {
+      key: recoveryKey,
+      originalMaxAttempts: 2,
+      effectiveMaxAttempts: 2,
+      extraAllowances: { [otherKey]: { originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 } },
+    });
+    harness.pi.appendEntry("pi-materia-cast-state", revivable);
+
+    await harness.runCommand("materia", `revive ${revivable.castId}`);
+    const firstResume = latestState(harness);
+    expect(firstResume.recoveryAllowances?.[recoveryKey]).toMatchObject({ originalMaxAttempts: 2, effectiveMaxAttempts: 4, reviveCount: 1 });
+    expect(firstResume.recoveryAllowances?.[otherKey]).toMatchObject({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
+
+    const secondFailureReason = "Same-node recovery exhausted second time";
+    const exhaustedAgain = makeRevivableState(cloneState(firstResume, {
+      active: false,
+      awaitingResponse: false,
+      phase: "failed",
+      nodeState: "failed",
+      failedReason: secondFailureReason,
+      runState: { ...firstResume.runState, lastMessage: secondFailureReason, endedAt: Date.now() },
+    }), {
+      key: recoveryKey,
+      originalMaxAttempts: 2,
+      effectiveMaxAttempts: 4,
+      reviveCount: 1,
+      extraAllowances: { [otherKey]: { originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 } },
+    });
+    harness.pi.appendEntry("pi-materia-cast-state", exhaustedAgain);
+
+    await harness.runCommand("materia", `revive ${exhaustedAgain.castId}`);
+
+    const secondResume = latestState(harness);
+    expect(secondResume.recoveryAllowances?.[recoveryKey]).toMatchObject({ originalMaxAttempts: 2, effectiveMaxAttempts: 6, reviveCount: 2 });
+    expect(secondResume.recoveryAllowances?.[recoveryKey]?.effectiveMaxAttempts).not.toBe(8);
+    expect(secondResume.recoveryAllowances?.[otherKey]).toMatchObject({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
+  });
+
+  test("revive rejects active, missing, and legacy non-revivable cast references", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast active task");
+    const running = latestState(harness);
+    await harness.runCommand("materia", `revive ${running.castId}`);
+    expect(harness.notifications.at(-1)?.message).toContain("is already running");
+    await harness.runCommand("materia", "abort");
+
+    await harness.runCommand("materia", "revive missing-cast-id");
+    expect(harness.notifications.at(-1)?.message).toContain('Unknown pi-materia cast id "missing-cast-id"');
+
+    const aborted = latestState(harness);
+    const legacy = cloneState(aborted, {
+      castId: "legacy-exhausted-without-allowance",
+      active: false,
+      phase: "failed",
+      nodeState: "failed",
+      failedReason: "Same-node recovery exhausted before structured allowances existed",
+      recoveryAllowances: undefined,
+      recoveryExhaustion: {
+        kind: "same_node_recovery_exhausted",
+        reason: "context_window",
+        key: "legacy-key",
+        attempts: 1,
+        originalMaxAttempts: 1,
+        effectiveMaxAttempts: 1,
+        reviveCount: 0,
+        failedReason: "Same-node recovery exhausted before structured allowances existed",
+        node: aborted.currentNode,
+        mode: "normal",
+        exhaustedAt: Date.now(),
+      },
+    });
+    harness.pi.appendEntry("pi-materia-cast-state", legacy);
+    await harness.runCommand("materia", `revive ${legacy.castId}`);
+    expect(harness.notifications.at(-1)?.message).toContain("recovery allowance metadata is missing or invalid");
+    expect(harness.notifications.at(-1)?.message).toContain("Use /materia recast");
   });
 
   test("revive rejects non-exhaustion failures with recast guidance", async () => {
