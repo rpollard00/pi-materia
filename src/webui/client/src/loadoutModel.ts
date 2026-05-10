@@ -68,6 +68,7 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
       else delete node.edges;
       delete node.next;
     }
+    reconcileLoopConsumersFromTopology(loadout, normalized.materia ?? {});
     normalizeGeneratorPipelineSockets(loadout, normalized.materia ?? {});
     materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, loadout as MateriaPipelineConfig);
   }
@@ -79,6 +80,20 @@ function normalizeCanonicalParseSemantics(container: { parse?: unknown; outputFo
   delete container.outputFormat;
   const definitions = container.materia && typeof container.materia === 'object' && !Array.isArray(container.materia) ? container.materia as Record<string, MateriaBehaviorConfig> : {};
   for (const definition of Object.values(definitions)) normalizeCanonicalParseSemantics(definition);
+}
+
+function reconcileLoopConsumersFromTopology(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
+  const nodes = loadout.nodes ?? {};
+  for (const loop of Object.values(loadout.loops ?? {})) {
+    if (!loop.consumes) continue;
+    const loopNodes = new Set(loop.nodes);
+    const inboundGeneratorSources = Object.entries(nodes).flatMap(([from, node]) => {
+      if (loopNodes.has(from) || !isGeneratorSocket(node, definitions)) return [];
+      return (node.edges ?? []).some((edge) => loopNodes.has(edge.to)) ? [from] : [];
+    });
+    const uniqueSources = Array.from(new Set(inboundGeneratorSources));
+    if (uniqueSources.length === 1 && loop.consumes.from !== uniqueSources[0]) loop.consumes = { ...loop.consumes, from: uniqueSources[0] };
+  }
 }
 
 function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {

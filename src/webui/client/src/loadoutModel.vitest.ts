@@ -124,6 +124,41 @@ describe('loadout normalization model', () => {
     expect(config.loadouts?.Loop.nodes?.['Socket-2'].parse).toBeUndefined();
   });
 
+  it('reconciles stale loop consumer metadata when a generator is inserted before an existing loop', () => {
+    const config = normalizeMateriaConfigEdges({
+      loadouts: {
+        Loop: {
+          entry: 'Socket-1',
+          loops: {
+            taskIteration: {
+              nodes: ['Socket-3', 'Socket-4'],
+              consumes: { from: 'Socket-1', output: 'workItems' },
+              exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
+            },
+          },
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-3': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
+            'Socket-4': { type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
+          },
+        },
+      },
+      materia: {
+        planner: { prompt: 'Plan.', generator: true },
+        refiner: { prompt: 'Refine.', generator: true },
+        Build: { prompt: 'Build.' },
+        Maintain: { prompt: 'Maintain.' },
+      },
+    });
+
+    const loadout = config.loadouts?.Loop;
+    expect(loadout?.loops?.taskIteration.consumes?.from).toBe('Socket-2');
+    expect(loadout?.nodes?.['Socket-2'].parse).toBe('json');
+    expect(loadout?.nodes?.['Socket-2'].assign?.workItems).toBe('$.workItems');
+    expect(loadout?.nodes?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
+  });
+
   it('canonicalizes legacy UI outputFormat fields to parse before save', () => {
     const config = normalizeMateriaConfigEdges({
       materia: {
