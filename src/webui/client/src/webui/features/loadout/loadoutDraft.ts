@@ -80,8 +80,9 @@ export function deletedLoadoutNamesAfterRename({
 }
 
 export function buildConfigToSave(normalizedDraft: MateriaConfig, deletedLoadoutNames: string[]) {
-  assertValidLoadoutSaveSemantics(normalizedDraft);
-  const configToSave = cloneConfig(normalizedDraft) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
+  const preparedDraft = normalizeMateriaConfigEdges(normalizedDraft);
+  assertValidLoadoutSaveSemantics(preparedDraft);
+  const configToSave = cloneConfig(preparedDraft) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
   if (deletedLoadoutNames.length > 0) {
     configToSave.loadouts = { ...(configToSave.loadouts ?? {}) };
     for (const name of deletedLoadoutNames) configToSave.loadouts[name] = null;

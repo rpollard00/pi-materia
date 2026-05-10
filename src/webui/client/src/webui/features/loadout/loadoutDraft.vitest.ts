@@ -62,6 +62,25 @@ describe('loadout draft mutations', () => {
     expect(payload.loadouts?.Alpha).toMatchObject(config.loadouts.Alpha);
   });
 
+  it('migrates legacy node layout into loadout layout before save', () => {
+    const payload = buildConfigToSave({
+      loadouts: {
+        Alpha: {
+          entry: 'Socket-1',
+          layout: { sockets: { 'Socket-2': { x: 9, y: 9 }, Missing: { x: 99, y: 99 } } },
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Build', layout: { x: 1, y: 2 } },
+            'Socket-2': { type: 'agent', materia: 'Test', layout: { x: 3, y: 4 } },
+          },
+        },
+      },
+    }, []);
+
+    expect(payload.loadouts?.Alpha?.layout?.sockets).toEqual({ 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 9, y: 9 } });
+    expect(payload.loadouts?.Alpha?.nodes?.['Socket-1'].layout).toBeUndefined();
+    expect(payload.loadouts?.Alpha?.nodes?.['Socket-2'].layout).toBeUndefined();
+  });
+
   it('chooses the next unused loadout name without filling existing gaps unexpectedly', () => {
     expect(makeNewLoadoutName({ ...config.loadouts, 'New Loadout 3': config.loadouts.Alpha })).toBe('New Loadout 4');
   });

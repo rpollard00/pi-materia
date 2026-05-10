@@ -5,6 +5,7 @@ import {
   extractMateriaReference,
   formatSocketLabel,
   getNodeLabel,
+  getSocketLayout,
   isEmptySocket,
   resolveSocketDisplayLabel,
   type LegacyPipelineNode,
@@ -221,8 +222,9 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
     ].filter(Boolean);
     if (limits.length) lines.push(`Limits: ${limits.join(', ')}`);
   }
-  if (node?.layout && (node.layout.x !== undefined || node.layout.y !== undefined)) {
-    lines.push(`Layout: ${node.layout.x ?? 0}, ${node.layout.y ?? 0}`);
+  const layout = getSocketLayout(loadout, id);
+  if (layout && (layout.x !== undefined || layout.y !== undefined)) {
+    lines.push(`Layout: ${layout.x ?? 0}, ${layout.y ?? 0}`);
   }
   return lines.join('\n');
 }
@@ -617,17 +619,21 @@ export function layoutSockets(loadout?: PipelineConfig): LayoutSocketsResult {
   const edges = getLoadoutEdges(loadout);
   const entryId = loadout?.entry && nodes[loadout.entry] ? loadout.entry : entries[0]?.[0];
   const orderedAutoIds = getAutomaticSocketOrder(entries, edges, entryId).filter((id) => {
-    const node = nodes[id];
-    return typeof node.layout?.x !== 'number' || typeof node.layout?.y !== 'number';
+    const layout = getSocketLayout(loadout, id);
+    return typeof layout?.x !== 'number' || typeof layout?.y !== 'number';
   });
   const autoIndexById = new Map(orderedAutoIds.map((id, index) => [id, index]));
 
-  const hasExplicitLayout = entries.some(([, node]) => typeof node.layout?.x === 'number' || typeof node.layout?.y === 'number');
+  const hasExplicitLayout = entries.some(([id]) => {
+    const layout = getSocketLayout(loadout, id);
+    return typeof layout?.x === 'number' || typeof layout?.y === 'number';
+  });
   const autoRowGap = hasExplicitLayout ? socketLayoutUnitY + 8 : socketLayoutRowGap;
   let sockets = entries.map(([id, node], index) => {
     const autoPosition = serpentineAutoPosition(autoIndexById.get(id) ?? index, autoRowGap);
-    const explicitX = typeof node.layout?.x === 'number' ? layoutUnit(node.layout.x, socketLayoutUnitX) : undefined;
-    const explicitY = typeof node.layout?.y === 'number' ? layoutUnit(node.layout.y, socketLayoutUnitY) : undefined;
+    const layout = getSocketLayout(loadout, id);
+    const explicitX = typeof layout?.x === 'number' ? layoutUnit(layout.x, socketLayoutUnitX) : undefined;
+    const explicitY = typeof layout?.y === 'number' ? layoutUnit(layout.y, socketLayoutUnitY) : undefined;
     return {
       id,
       node,

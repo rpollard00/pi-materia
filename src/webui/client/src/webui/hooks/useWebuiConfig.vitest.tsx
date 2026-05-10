@@ -134,6 +134,36 @@ describe('dirty config comparison', () => {
     expect(dirtyConfigKey(baseline)).toBe(dirtyConfigKey(draft));
   });
 
+  it('does not mark migrated legacy node layout dirty after normalization', () => {
+    const legacy = {
+      loadouts: {
+        Layout: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Build', layout: { x: 1, y: 2 } },
+            'Socket-2': { type: 'agent', materia: 'Build', layout: { x: 3, y: 4 } },
+          },
+        },
+      },
+      materia: { Build: { tools: 'coding', prompt: 'Build.' } },
+    } satisfies MateriaConfig;
+    const migrated = {
+      loadouts: {
+        Layout: {
+          entry: 'Socket-1',
+          layout: { sockets: { 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 3, y: 4 } } },
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'Build' },
+            'Socket-2': { type: 'agent', materia: 'Build' },
+          },
+        },
+      },
+      materia: { Build: { tools: 'coding', prompt: 'Build.' } },
+    } satisfies MateriaConfig;
+
+    expect(dirtyConfigKey(legacy)).toBe(dirtyConfigKey(migrated));
+  });
+
   it('detects real persisted config additions, deletions, renames, and socket/materia/profile/loadout edits', () => {
     const baseline = reportedLayeredConfig;
     const editedSocket = cloneConfigForTest(baseline);

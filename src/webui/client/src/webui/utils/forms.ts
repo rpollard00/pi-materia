@@ -1,5 +1,5 @@
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from '../../../../../generator.js';
-import { materiaColorChoices, type MateriaConfig, type PipelineNode } from '../../loadoutModel.js';
+import { materiaColorChoices, type MateriaConfig, type PipelineNode, type SocketLayout } from '../../loadoutModel.js';
 import type { DragPayload, GeneratedListOutputConfig, MateriaFormState, SocketPropertyFormState } from '../types.js';
 
 export const emptyMateriaForm = (): MateriaFormState => ({
@@ -54,13 +54,13 @@ export function commandParts(raw: string): string[] | undefined {
   return raw.split(/\s+/).map((part) => part.trim()).filter(Boolean);
 }
 
-export function socketPropertyFormFromNode(node?: PipelineNode): SocketPropertyFormState {
+export function socketPropertyFormFromNode(node?: PipelineNode, layout?: SocketLayout): SocketPropertyFormState {
   return {
     maxVisits: node?.limits?.maxVisits === undefined ? '' : String(node.limits.maxVisits),
     maxEdgeTraversals: node?.limits?.maxEdgeTraversals === undefined ? '' : String(node.limits.maxEdgeTraversals),
     maxOutputBytes: node?.limits?.maxOutputBytes === undefined ? '' : String(node.limits.maxOutputBytes),
-    layoutX: node?.layout?.x === undefined ? '' : String(node.layout.x),
-    layoutY: node?.layout?.y === undefined ? '' : String(node.layout.y),
+    layoutX: layout?.x === undefined ? '' : String(layout.x),
+    layoutY: layout?.y === undefined ? '' : String(layout.y),
   };
 }
 

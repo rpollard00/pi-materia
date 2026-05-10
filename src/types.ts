@@ -313,8 +313,20 @@ export interface MateriaRunContext {
 export interface MateriaPipelineConfig {
   entry: string;
   nodes: Record<string, MateriaPipelineNodeConfig>;
+  /** Persisted visual metadata for this loadout. Semantic validation must ignore it. */
+  layout?: MateriaPipelineLayoutConfig;
   /** Explicit loop consumer regions that group sockets and can consume a generator-provided list. */
   loops?: Record<string, MateriaLoopConfig>;
+}
+
+export interface MateriaPipelineLayoutConfig {
+  /** Socket positions keyed by socket id. */
+  sockets?: Record<string, MateriaSocketLayoutConfig>;
+}
+
+export interface MateriaSocketLayoutConfig {
+  x?: number;
+  y?: number;
 }
 
 export type MateriaParseMode = "text" | "json";
@@ -331,7 +343,8 @@ export interface MateriaPipelineNodeCommonConfig {
   foreach?: MateriaForeachConfig;
   advance?: MateriaAdvanceConfig;
   limits?: MateriaNodeLimitsConfig;
-  layout?: { x?: number; y?: number };
+  /** @deprecated Use loadout.layout.sockets[socketId]. Kept for legacy config loading only. */
+  layout?: MateriaSocketLayoutConfig;
   empty?: boolean;
 }
 

@@ -3,10 +3,12 @@ import {
   canDeleteSocket,
   clearSocketMateria,
   findLoopExitConnectionContext,
+  getSocketLayout,
   isEmptySocket,
   makeEmptySocket,
   makeNewSocketId,
   placeMateriaInSocket,
+  setLoadoutSocketLayout,
   loopExitRouteId,
   type LegacyPipelineNode,
   type PipelineConfig,
@@ -97,19 +99,18 @@ export function createConnectedEmptySocket(loadout: PipelineConfig, afterSocketI
   const source = loadout.nodes?.[afterSocketId];
   if (!loadout.nodes || !source) return loadout;
   const newId = makeNewSocketId(loadout.nodes);
-  const sourceLayout = source.layout;
-  const newNode = makeEmptySocket({
-    layout: sourceLayout ? { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 } : undefined,
-  });
+  const sourceLayout = getSocketLayout(loadout, afterSocketId);
+  const newNode = makeEmptySocket();
   const loopExitContext = findLoopExitConnectionContext(loadout, afterSocketId);
   const nodes = { ...loadout.nodes, [newId]: newNode };
-  if (loopExitContext) return upsertLoopExitRouteInLoadout({ ...loadout, nodes }, loopExitContext.loopId, afterSocketId, 'always', newId);
+  const withLayout = (next: PipelineConfig) => sourceLayout ? setLoadoutSocketLayout(next, newId, { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 }) : next;
+  if (loopExitContext) return withLayout(upsertLoopExitRouteInLoadout({ ...loadout, nodes }, loopExitContext.loopId, afterSocketId, 'always', newId));
 
   const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
   const inserted = priorAlways ? { ...newNode, edges: [{ when: 'always' as const, to: priorAlways }] } : newNode;
   nodes[newId] = inserted;
   nodes[afterSocketId] = { ...source, edges: [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }] };
-  return replaceNodes(loadout, nodes);
+  return withLayout(replaceNodes(loadout, nodes));
 }
 
 export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string): PipelineConfig {
@@ -154,7 +155,7 @@ export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string)
     if (nextLoop !== loop && loops) loops[loopId] = nextLoop;
   }
 
-  return replaceLoops(replaceNodes(loadout, nodes), loops);
+  return setLoadoutSocketLayout(replaceLoops(replaceNodes(loadout, nodes), loops), socketId, undefined);
 }
 
 export function createTaskLoop(loadout: PipelineConfig, loopId: string, label: string, nodes: string[], consumes: { from: string; output: string }, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {

@@ -31,11 +31,12 @@ function baseLoadout(): PipelineConfig {
   return {
     entry: 'Socket-1',
     nodes: {
-      'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
-      'Socket-2': { socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 } },
+      'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+      'Socket-2': { socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }] },
       'Socket-3': { socketKind: 'normal', type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
       'Socket-4': { socketKind: 'normal', type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
     },
+    layout: { sockets: { 'Socket-1': { x: 0, y: 0 }, 'Socket-2': { x: 1, y: 0 } } },
     loops: {
       work: {
         label: 'Work loop',
@@ -58,7 +59,8 @@ describe('immutable loadout transforms', () => {
     expect(next.nodes).not.toBe(previous.nodes);
     expect(next.nodes?.['Socket-2']).toBe(previous.nodes?.['Socket-2']);
     expect(next.nodes?.['Socket-1']).not.toBe(previous.nodes?.['Socket-1']);
-    expect(next.nodes?.['Socket-5']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 1, y: 0 } });
+    expect(next.nodes?.['Socket-5']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(next.layout?.sockets?.['Socket-5']).toEqual({ x: 1, y: 0 });
     expect(previous.nodes?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
   });
 
@@ -67,7 +69,8 @@ describe('immutable loadout transforms', () => {
     const placed = setSocketMateria(previous, 'Socket-2', { type: 'agent', materia: 'Review', parse: 'json' });
     expect(placed.nodes?.['Socket-2']).toMatchObject({ type: 'agent', materia: 'Review', parse: 'json', empty: false });
     expect(placed.nodes?.['Socket-1']).toBe(previous.nodes?.['Socket-1']);
-    expect(previous.nodes?.['Socket-2']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 } });
+    expect(previous.nodes?.['Socket-2']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }] });
+    expect(previous.layout?.sockets?.['Socket-2']).toEqual({ x: 1, y: 0 });
 
     const swapped = swapSocketMateria(placed, 'Socket-1', 'Socket-2');
     expect(swapped.nodes?.['Socket-1']).toMatchObject({ materia: 'Review', socketKind: 'entry' });

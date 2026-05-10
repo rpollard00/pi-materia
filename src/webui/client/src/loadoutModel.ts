@@ -6,6 +6,11 @@ import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } fro
 type NodeType = 'agent' | 'utility';
 export type SocketKind = 'entry' | 'normal';
 
+export interface SocketLayout {
+  x?: number;
+  y?: number;
+}
+
 export interface PipelineNode {
   type?: NodeType;
   socketKind?: SocketKind;
@@ -19,7 +24,8 @@ export interface PipelineNode {
   foreach?: { items: string; as?: string; cursor?: string; done?: string };
   advance?: { items?: string; cursor?: string; done?: string; when?: MateriaEdgeCondition };
   empty?: boolean;
-  layout?: { x?: number; y?: number };
+  /** @deprecated Use loadout.layout.sockets[socketId]. */
+  layout?: SocketLayout;
   limits?: { maxVisits?: number; maxEdgeTraversals?: number; maxOutputBytes?: number };
   [key: string]: unknown;
 }
@@ -41,10 +47,16 @@ export interface PipelineLoop {
   [key: string]: unknown;
 }
 
+export interface PipelineLayout {
+  sockets?: Record<string, SocketLayout>;
+  [key: string]: unknown;
+}
+
 export interface PipelineConfig {
   entry?: string;
   nodes?: Record<string, PipelineNode>;
   loops?: Record<string, PipelineLoop>;
+  layout?: PipelineLayout;
   [key: string]: unknown;
 }
 
@@ -61,6 +73,7 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig): MateriaConfi
   normalizeCanonicalParseSemantics(normalized);
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
     normalizeLoadoutSocketKinds(loadout);
+    normalizeLoadoutLayout(loadout);
     for (const node of Object.values(loadout.nodes ?? {}) as LegacyPipelineNode[]) {
       normalizeCanonicalParseSemantics(node);
       const edges = (node.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
@@ -253,6 +266,55 @@ export function normalizeLoadoutSocketKinds(loadout: PipelineConfig): PipelineCo
   return loadout;
 }
 
+function isSocketLayout(value: unknown): value is SocketLayout {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const layout = value as SocketLayout;
+  return typeof layout.x === 'number' || typeof layout.y === 'number';
+}
+
+export function getSocketLayout(loadout: PipelineConfig | undefined, socketId: string): SocketLayout | undefined {
+  const explicit = loadout?.layout?.sockets?.[socketId];
+  if (isSocketLayout(explicit)) return explicit;
+  const legacy = loadout?.nodes?.[socketId]?.layout;
+  return isSocketLayout(legacy) ? legacy : undefined;
+}
+
+export function setLoadoutSocketLayout(loadout: PipelineConfig, socketId: string, layout: SocketLayout | undefined): PipelineConfig {
+  if (!layout || (layout.x === undefined && layout.y === undefined)) {
+    const sockets: Record<string, SocketLayout> = { ...(loadout.layout?.sockets ?? {}) };
+    if (!(socketId in sockets)) return loadout;
+    delete sockets[socketId];
+    const nextLayout: PipelineLayout = { ...(loadout.layout ?? {}), sockets };
+    if (Object.keys(sockets).length === 0) delete nextLayout.sockets;
+    const next: PipelineConfig = { ...loadout, layout: nextLayout };
+    if (Object.keys(nextLayout).length === 0) delete next.layout;
+    return next;
+  }
+  return { ...loadout, layout: { ...(loadout.layout ?? {}), sockets: { ...(loadout.layout?.sockets ?? {}), [socketId]: { ...layout } } } };
+}
+
+export function normalizeLoadoutLayout(loadout: PipelineConfig): PipelineConfig {
+  const nodes = loadout.nodes ?? {};
+  const existing = loadout.layout && typeof loadout.layout === 'object' && !Array.isArray(loadout.layout) ? loadout.layout : {};
+  const existingSockets = existing.sockets && typeof existing.sockets === 'object' && !Array.isArray(existing.sockets) ? existing.sockets : {};
+  const socketLayouts: Record<string, SocketLayout> = {};
+
+  for (const id of Object.keys(nodes).sort((a, b) => a.localeCompare(b))) {
+    const authoritative = existingSockets[id];
+    const fallback = nodes[id]?.layout;
+    const source = isSocketLayout(authoritative) ? authoritative : isSocketLayout(fallback) ? fallback : undefined;
+    if (source) socketLayouts[id] = { ...(typeof source.x === 'number' ? { x: source.x } : {}), ...(typeof source.y === 'number' ? { y: source.y } : {}) };
+    if (nodes[id] && 'layout' in nodes[id]) delete nodes[id].layout;
+  }
+
+  const nextLayout: PipelineLayout = { ...existing };
+  if (Object.keys(socketLayouts).length > 0) nextLayout.sockets = socketLayouts;
+  else delete nextLayout.sockets;
+  if (Object.keys(nextLayout).length > 0) loadout.layout = nextLayout;
+  else delete loadout.layout;
+  return loadout;
+}
+
 export function isEmptySocket(node?: PipelineNode): boolean {
   return !node || node.empty === true || Object.keys(extractMateriaBehavior(node)).length === 0;
 }
@@ -363,7 +425,7 @@ export function extractSocketStructure(node?: PipelineNode): PipelineNode {
       if (isSocketKind(value)) structure.socketKind = value;
       continue;
     }
-    if (!materiaBehaviorKeys.has(key) && key !== 'empty' && key !== 'next') structure[key] = cloneValue(value);
+    if (!materiaBehaviorKeys.has(key) && key !== 'empty' && key !== 'next' && key !== 'layout') structure[key] = cloneValue(value);
   }
   return structure;
 }

@@ -10,10 +10,10 @@ import {
   findLoopExitConnectionContext,
   formatSocketLabel,
   getNodeLabel,
+  getSocketLayout,
   resolveSocketDisplayLabel,
   isEmptySocket,
   isEntrySocket,
-
   materiaColorChoices,
   nodeColor,
   type LegacyPipelineNode,
@@ -461,18 +461,16 @@ export function App() {
     updateDraft((config) => {
       const loadout = buildLoadouts(config)[activeLoadoutName];
       const nodes = loadout?.nodes;
-      const node = nodes?.[socketId];
-      if (!node || !nodes) return;
+      if (!loadout || !nodes?.[socketId]) return;
+      loadout.layout = { ...(loadout.layout ?? {}), sockets: { ...(loadout.layout?.sockets ?? {}) } };
       for (const socket of loadoutGraph.sockets) {
-        const socketNode = nodes[socket.id];
-        if (!socketNode || socket.id === socketId || (typeof socketNode.layout?.x === 'number' && typeof socketNode.layout?.y === 'number')) continue;
-        socketNode.layout = {
-          ...(socketNode.layout ?? {}),
+        if (!nodes[socket.id] || socket.id === socketId || getSocketLayout(loadout, socket.id)) continue;
+        loadout.layout.sockets![socket.id] = {
           x: layoutValueForPosition(socket.x, socketLayoutOffsetX, socketLayoutUnitX),
           y: layoutValueForPosition(socket.y, socketLayoutOffsetY, socketLayoutUnitY),
         };
       }
-      node.layout = { ...(node.layout ?? {}), x: layoutX, y: layoutY };
+      loadout.layout.sockets![socketId] = { x: layoutX, y: layoutY };
     });
     setStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);
   }
@@ -534,7 +532,7 @@ export function App() {
   }
 
   function openSocketPropertyEditor(socketId: string) {
-    setSocketPropertyForm(socketPropertyFormFromNode(activeLoadout?.nodes?.[socketId]));
+    setSocketPropertyForm(socketPropertyFormFromNode(activeLoadout?.nodes?.[socketId], getSocketLayout(activeLoadout, socketId)));
     setSocketPropertyError('');
     setEdgeMutationError('');
     setSocketActionMode('edit');
@@ -784,8 +782,15 @@ export function App() {
       const layout: PipelineNode['layout'] = {};
       if (layoutX !== undefined) layout.x = layoutX;
       if (layoutY !== undefined) layout.y = layoutY;
-      if (Object.keys(layout).length > 0) node.layout = layout;
-      else delete node.layout;
+      if (Object.keys(layout).length > 0) {
+        loadout.layout = { ...(loadout.layout ?? {}), sockets: { ...(loadout.layout?.sockets ?? {}), [socketId]: layout } };
+      } else if (loadout.layout?.sockets?.[socketId]) {
+        const sockets = { ...loadout.layout.sockets };
+        delete sockets[socketId];
+        loadout.layout = { ...loadout.layout, sockets };
+        if (Object.keys(sockets).length === 0) delete loadout.layout.sockets;
+        if (Object.keys(loadout.layout).length === 0) delete loadout.layout;
+      }
     });
     setSocketActionId(undefined);
     setSocketActionMode('actions');
