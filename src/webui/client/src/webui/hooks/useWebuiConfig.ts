@@ -6,6 +6,7 @@ import {
   type PipelineConfig,
 } from '../../loadoutModel.js';
 import { toast } from '../../toast/index.js';
+import { getConfig, saveConfig, setActiveLoadout } from '../api/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
 import { cloneConfig } from '../utils/forms.js';
 import type { ActiveLoadoutResponse, ConfigResponse, LoadedConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
@@ -48,8 +49,7 @@ function normalizeConfigSnapshot(
 }
 
 async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope> }> {
-  const response = await fetch('/api/config');
-  const body = await response.json() as ConfigResponse;
+  const body = await getConfig();
   const snapshot = normalizeConfigSnapshot(body);
   return { config: snapshot.config, source: snapshot.source ?? 'unknown', loadoutSources: snapshot.loadoutSources ?? {} };
 }
@@ -222,15 +222,9 @@ export function useWebuiConfig() {
 
   async function setPersistedActiveLoadout(name: string) {
     setStatus(`Changing active loadout to ${name}…`);
-    let response: Response;
-    let body: ActiveLoadoutResponse;
+    let result: Awaited<ReturnType<typeof setActiveLoadout>>;
     try {
-      response = await fetch('/api/loadout/active', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      body = await response.json() as ActiveLoadoutResponse;
+      result = await setActiveLoadout(name);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(`Active loadout change failed: ${message}`);
@@ -242,6 +236,7 @@ export function useWebuiConfig() {
       });
       throw error;
     }
+    const { response, body } = result;
     if (!response.ok || body.ok === false) {
       const message = activeLoadoutMessage(body);
       setStatus(`Active loadout change failed: ${message}`);
@@ -354,15 +349,9 @@ export function useWebuiConfig() {
     }
 
     const configToSave = buildConfigToSave(normalizedDraft, deletedLoadoutNames);
-    let response: Response;
-    let body: { ok?: boolean; error?: string; target?: SaveTarget };
+    let result: Awaited<ReturnType<typeof saveConfig>>;
     try {
-      response = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ target: saveTarget, config: configToSave }),
-      });
-      body = await response.json() as { ok?: boolean; error?: string; target?: SaveTarget };
+      result = await saveConfig(saveTarget, configToSave);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(`Save failed: ${message}`);
@@ -374,6 +363,7 @@ export function useWebuiConfig() {
       });
       throw error;
     }
+    const { response, body } = result;
     if (!response.ok || body.ok === false) {
       const message = body.error ?? 'Save failed';
       setStatus(`Save failed: ${message}`);

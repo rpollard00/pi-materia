@@ -59,11 +59,11 @@ import type {
   MateriaTabId,
   OriginalMateriaModelSettings,
   PositionedSocket,
-  RoleGenerationResponse,
   SocketLayoutDragState,
   SocketPropertyFormState,
   SocketRegionSelectionDragState,
 } from './webui/types.js';
+import { generateMateriaRole, saveConfig } from './webui/api/index.js';
 import { AppHeader, TabNav } from './webui/components/AppChrome.js';
 import { LoadoutListPanel } from './webui/features/loadout/LoadoutListPanel.js';
 import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePanel.js';
@@ -846,12 +846,7 @@ export function App() {
     setStatus('Generating Materia role prompt preview…');
     try {
       const generates = materiaForm.generator ? canonicalWorkItemsGeneratorConfig() : null;
-      const response = await fetch('/api/generate/materia-role', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ brief, generates }),
-      });
-      const body = await response.json() as RoleGenerationResponse;
+      const { response, body } = await generateMateriaRole(brief, generates);
       const errorMessage = typeof body.error === 'string' ? body.error : body.error?.message;
       if (!response.ok || body.ok === false || typeof body.prompt !== 'string') throw new Error(errorMessage ?? 'Materia role generation failed.');
       setGeneratedRolePrompt(body.prompt);
@@ -886,12 +881,7 @@ export function App() {
       const savedBehavior = materiaForm.behavior;
       const target = materiaForm.persistScope;
       setStatus(`Saving reusable ${savedBehavior} materia to ${target} scope…`);
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ target, config: patch }),
-      });
-      const body = await response.json();
+      const { response, body } = await saveConfig(target, patch);
       if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Materia save failed');
       const scope = body.target ?? target;
       dispatchMateriaSavedEvent({ id: savedName, name: savedName, behavior: savedBehavior, requestedScope: target, scope });

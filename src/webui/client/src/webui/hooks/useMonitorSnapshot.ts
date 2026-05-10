@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getMonitorSnapshot } from '../api/index.js';
 import type { MonitorSnapshot } from '../types.js';
 
 export function useMonitorSnapshot() {
@@ -6,8 +7,7 @@ export function useMonitorSnapshot() {
 
   useEffect(() => {
     let cancelled = false;
-    const refresh = () => fetch('/api/monitor')
-      .then((response) => response.json() as Promise<MonitorSnapshot>)
+    const refresh = () => getMonitorSnapshot()
       .then((body) => {
         if (!cancelled) setMonitor(body);
       })

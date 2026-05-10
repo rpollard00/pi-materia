@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { getModels } from '../api/index.js';
 import type { MateriaTabId, ModelCatalogLoadState, ModelCatalogResponse } from '../types.js';
-import { emptyModelCatalog, normalizeModelCatalog } from '../utils/modelCatalog.js';
-
-async function fetchModelCatalog(): Promise<ModelCatalogResponse> {
-  const response = await fetch('/api/models');
-  if (!response.ok) throw new Error(`Model catalog request failed with HTTP ${response.status}`);
-  return normalizeModelCatalog(await response.json());
-}
+import { emptyModelCatalog } from '../utils/modelCatalog.js';
 
 export function useModelCatalog(selectedTab: MateriaTabId) {
   const [modelCatalog, setModelCatalog] = useState<ModelCatalogResponse>(() => emptyModelCatalog());
@@ -19,7 +14,7 @@ export function useModelCatalog(selectedTab: MateriaTabId) {
     modelCatalogRequestedRef.current = true;
     setModelCatalogStatus('loading');
     setModelCatalogError('');
-    fetchModelCatalog().then((catalog) => {
+    getModels().then((catalog) => {
       setModelCatalog(catalog);
       setModelCatalogStatus('ready');
     }).catch((error) => {
