@@ -56,7 +56,6 @@ import type {
   LoadoutEdge,
   MateriaFormState,
   MateriaSavedEventDetail,
-  MateriaTabId,
   OriginalMateriaModelSettings,
   PositionedSocket,
   SocketLayoutDragState,
@@ -64,7 +63,7 @@ import type {
   SocketRegionSelectionDragState,
 } from './webui/types.js';
 import { generateMateriaRole, saveConfig } from './webui/api/index.js';
-import { AppHeader, TabNav } from './webui/components/AppChrome.js';
+import { AppShell } from './webui/components/AppShell.js';
 import { LoadoutListPanel } from './webui/features/loadout/LoadoutListPanel.js';
 import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePanel.js';
 import { StageApplyPanel } from './webui/features/loadout/StageApplyPanel.js';
@@ -112,19 +111,18 @@ import {
   thinkingLabel,
   thinkingSelectOptions,
 } from './webui/utils/modelCatalog.js';
-import { tabFromLocation } from './webui/utils/tabs.js';
+import { useAppNavigation } from './webui/hooks/useAppNavigation.js';
 import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
 import { useModelCatalog } from './webui/hooks/useModelCatalog.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
-import { Toaster } from './toast/index.js';
 
 function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
   window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
 }
 
 export function App() {
-  const [selectedTab, setSelectedTab] = useState<MateriaTabId>(() => tabFromLocation());
+  const { selectedTab, selectTab } = useAppNavigation();
   const {
     activeLoadout,
     activeLoadoutName,
@@ -177,12 +175,6 @@ export function App() {
   const [generatedRolePrompt, setGeneratedRolePrompt] = useState('');
   const [roleGenerationError, setRoleGenerationError] = useState('');
   const [roleGenerating, setRoleGenerating] = useState(false);
-
-  useEffect(() => {
-    const handlePopState = () => setSelectedTab(tabFromLocation());
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
 
   useEffect(() => {
     if (!materiaColorOpen) return;
@@ -929,22 +921,13 @@ export function App() {
     event.dataTransfer.setData('application/json', JSON.stringify(payload));
   }
 
-  function selectTab(tabId: MateriaTabId) {
-    setSelectedTab(tabId);
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', tabId);
-    window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
-  }
-
   return (
-    <>
-    <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
-      <section className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-6 px-6 py-8">
-        <AppHeader source={source} isDirty={isDirty} />
-
-        <TabNav selectedTab={selectedTab} onSelectTab={selectTab} />
-
-        {selectedTab === 'loadout' && (
+    <AppShell
+      source={source}
+      isDirty={isDirty}
+      selectedTab={selectedTab}
+      onSelectTab={selectTab}
+      loadoutWorkspace={(
         <div className="loadout-workspace grid gap-6 xl:grid-cols-[16rem_minmax(0,1fr)_18rem]">
           <LoadoutListPanel
             loadouts={loadouts}
@@ -1044,9 +1027,8 @@ export function App() {
             />
           </aside>
         </div>
-        )}
-
-        {selectedTab === 'materia-editor' && (
+      )}
+      materiaEditorWorkspace={(
         <MateriaEditorPanel
           activeModelDescription={activeModelDescription}
           editableDefinitionIds={editableDefinitionIds}
@@ -1076,12 +1058,8 @@ export function App() {
           setMateriaForm={setMateriaForm}
           setRoleBrief={setRoleBrief}
         />
-        )}
-
-        {selectedTab === 'monitor' && <MonitorPanel monitor={monitor} currentMonitorNode={currentMonitorNode} elapsed={elapsed} />}
-      </section>
-    </main>
-    <Toaster />
-    </>
+      )}
+      monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorNode={currentMonitorNode} elapsed={elapsed} />}
+    />
   );
 }
