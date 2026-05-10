@@ -1,16 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { MateriaEdgeCondition } from '../../../types.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../graphValidation.js';
 import {
-  buildMateriaPalette,
   canDeleteSocket,
   extractMateriaReference,
   findLoopExitConnectionContext,
-  formatSocketLabel,
-  getNodeLabel,
   getSocketLayout,
-  resolveSocketDisplayLabel,
   isEmptySocket,
   isEntrySocket,
   nodeColor,
@@ -63,28 +59,12 @@ import { StageApplyPanel } from './webui/features/loadout/StageApplyPanel.js';
 import { LoadoutGraphPanel } from './webui/features/loadout/LoadoutGraphPanel.js';
 import { MateriaEditorPanel } from './webui/features/materia-editor/MateriaEditorPanel.js';
 import { MonitorPanel } from './webui/features/monitor/MonitorPanel.js';
-import { formatElapsed } from './webui/utils/display.js';
 import {
-  buildLoadouts,
-  buildSocketHoverDetails,
-  edgeConditionClass,
   edgeConditionLabel,
-  formatIteratorBehavior,
   formatLoopDisplayLabel,
-  generatorEdgeLabel,
-  getLoadoutEdges,
-  getLoopExitBadges,
-  getLoopMemberships,
-  getLoopRegions,
-  hasIteratorBehavior,
-  isGeneratorOutputEdge,
-  isGeneratorSocket,
-  iteratorBadgeLabel,
-  layoutSockets,
   layoutValueForPosition,
   materiaGeneratorOutput,
   rectanglesIntersect,
-  routeLoadoutEdges,
   toggledEdgeCondition,
 } from './webui/utils/graphLayout.js';
 import {
@@ -99,6 +79,7 @@ import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.j
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
 import { useMateriaEditorController } from './webui/features/materia-editor/useMateriaEditorController.js';
+import { useLoadoutGraphViewModel } from './webui/features/loadout/useLoadoutGraphViewModel.js';
 
 export function App() {
   const { selectedTab, selectTab } = useAppNavigation();
@@ -146,31 +127,23 @@ export function App() {
   const monitor = useMonitorSnapshot();
   useCastCompletionToasts(monitor);
 
-  const materia = draftConfig?.materia ?? {};
-  const semanticEdges = useMemo(() => getLoadoutEdges(activeLoadout), [activeLoadout?.nodes, activeLoadout?.loops]);
-  const loadoutGraph = useMemo(
-    () => layoutSockets(activeLoadout, semanticEdges, materia),
-    [activeLoadout?.entry, activeLoadout?.nodes, activeLoadout?.loops, activeLoadout?.layout, semanticEdges, materia],
-  );
-  const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
-  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions, materia), [activeLoadout?.loops, activeLoadout?.nodes, socketPositions, materia]);
-  const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout?.loops]);
-  const loopExitBadges = useMemo(() => getLoopExitBadges(activeLoadout), [activeLoadout?.loops]);
-  const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
-  const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
-  const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
-  const socketLabel = (id: string) => formatSocketLabel(id, activeLoadout?.nodes?.[id]);
-  const socketDisplayLabel = (id: string) => resolveSocketDisplayLabel(activeLoadout, id);
-  const loopSelectionRectangle = socketRegionSelectionDrag ? {
-    x: Math.min(socketRegionSelectionDrag.startX, socketRegionSelectionDrag.currentX),
-    y: Math.min(socketRegionSelectionDrag.startY, socketRegionSelectionDrag.currentY),
-    width: Math.abs(socketRegionSelectionDrag.currentX - socketRegionSelectionDrag.startX),
-    height: Math.abs(socketRegionSelectionDrag.currentY - socketRegionSelectionDrag.startY),
-  } : undefined;
-  const createLoopDisabled = selectedLoopSocketIds.length === 0;
-  const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
-  const currentMonitorNode = monitor?.activeCast?.currentNode;
-  const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
+  const {
+    materia,
+    palette,
+    loadoutGraph,
+    loopRegions,
+    loopMemberships,
+    loopExitBadges,
+    routedEdges,
+    selectedLoopSocketSet,
+    selectedLoopSockets,
+    loopSelectionRectangle,
+    createLoopDisabled,
+    socketLabel,
+    socketDisplayLabel,
+    currentMonitorNode,
+    elapsed,
+  } = useLoadoutGraphViewModel({ activeLoadout, draftConfig, selectedLoopSocketIds, socketRegionSelectionDrag, monitor });
   const materiaEditorController = useMateriaEditorController({ materia, selectedTab, status, setStatus, reloadConfig });
 
   function resetLoadoutSelectionChrome() {
@@ -487,7 +460,7 @@ export function App() {
     let loopId = baseId;
     let suffix = 2;
     while (existingLoops[loopId]) loopId = `${baseId}${suffix++}`;
-    const selectedLabels = selectedIds.map((id) => resolveSocketDisplayLabel(activeLoadout, id));
+    const selectedLabels = selectedIds.map((id) => socketDisplayLabel(id));
     const label = `Loop: ${selectedIds.join(' → ')}`;
     const isSingleSocketLoop = selectedIds.length === 1;
     const exitCondition: MateriaEdgeCondition = isSingleSocketLoop ? 'always' : 'satisfied';
