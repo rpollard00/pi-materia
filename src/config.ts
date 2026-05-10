@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "./loadoutNormalization.js";
+import { normalizePersistedConfigForApplication } from "./schema/persistence.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -103,8 +104,9 @@ export async function saveActiveLoadout(cwd: string, loadoutName: string, config
 async function readConfigPartial(file: string): Promise<Partial<PiMateriaConfig>> {
   const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<PiMateriaConfig>;
   if (!isPlainObject(parsed)) throw new Error(`Materia config file ${file} is invalid. Expected a JSON object.`);
-  rejectObsoleteConfigFields(parsed, file);
-  return parsed;
+  const normalized = normalizePersistedConfigForApplication(parsed);
+  rejectObsoleteConfigFields(normalized, file);
+  return normalized;
 }
 
 function getBundledDefaultConfigPath(): string {
