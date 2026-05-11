@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeLoadoutGraph } from '../../../loadoutGraphAnalysis.js';
+import { fromWebUiLoadoutDto } from '../../loadoutDto.js';
 import type { PipelineConfig } from './loadoutModel.js';
 import {
   addEdgeToLoadout,
@@ -157,7 +158,7 @@ describe('immutable loadout transforms', () => {
 
     expect(inserted).not.toBe(previous);
     expect(inserted.nodes).not.toBe(previous.nodes);
-    const analysis = analyzeLoadoutGraph(inserted, definitions);
+    const analysis = analyzeLoadoutGraph(fromWebUiLoadoutDto(inserted as never), definitions);
     expect(analysis.workItemProducingSocketIds.has('Socket-5')).toBe(true);
     expect(analysis.loopConsumerSources.get('work')?.from).toBe('Socket-5');
     expect(previous.nodes?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);

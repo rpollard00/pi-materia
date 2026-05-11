@@ -213,20 +213,20 @@ describe('loadout normalization model', () => {
   });
 
   it('analyzes loop consumer sources from graph topology without mutating input', () => {
-    const loadout: PipelineConfig = {
+    const loadout = {
       entry: 'Socket-1',
       loops: {
         taskIteration: {
-          nodes: ['Socket-3'],
+          sockets: ['Socket-3'],
           consumes: { from: 'Socket-1', output: 'workItems' },
         },
       },
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
         'Socket-3': { type: 'agent', materia: 'Build' },
       },
-    };
+    } as any;
     const before = JSON.stringify(loadout);
 
     const analysis = analyzeLoadoutGraph(loadout, {
@@ -252,20 +252,20 @@ describe('loadout normalization model', () => {
 
   it('diagnoses missing and ambiguous graph-derived loop consumer sources', () => {
     const missing = analyzeLoadoutGraph({
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'planner' },
         'Socket-2': { type: 'agent', materia: 'Build' },
       },
-      loops: { work: { nodes: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+      loops: { work: { sockets: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
     }, { planner: { generator: true }, Build: {} });
 
     const ambiguous = analyzeLoadoutGraph({
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
         'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
         'Socket-3': { type: 'agent', materia: 'Build' },
       },
-      loops: { work: { nodes: ['Socket-3'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+      loops: { work: { sockets: ['Socket-3'], consumes: { from: 'Socket-1', output: 'workItems' } } },
     }, { planner: { generator: true }, refiner: { generator: true }, Build: {} });
 
     expect(missing.diagnostics).toEqual([expect.objectContaining({ code: 'loop-consumer-missing', loopId: 'work' })]);

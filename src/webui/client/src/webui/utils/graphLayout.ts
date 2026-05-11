@@ -1,6 +1,7 @@
 import { canonicalGeneratorConfigFor } from '../../../../../generator.js';
 import { edgeConditionState } from '../../../../../graphValidation.js';
 import { analyzeLoadoutGraph } from '../../../../../loadoutGraphAnalysis.js';
+import { fromWebUiLoadoutDto } from '../../../../loadoutDto.js';
 import type { MateriaEdgeCondition } from '../../../../../types.js';
 import {
   extractMateriaReference,
@@ -107,7 +108,7 @@ export function formatIteratorBehavior(node?: PipelineNode, definitions?: Materi
 
 function graphDerivedLoopConsumer(loadout: PipelineConfig | undefined, loopId: string, definitions?: MateriaConfig['materia']): { from: string; output: string } | undefined {
   if (!loadout || !definitions) return undefined;
-  return analyzeLoadoutGraph(loadout, definitions).loopConsumerSources.get(loopId);
+  return analyzeLoadoutGraph(fromWebUiLoadoutDto(loadout as never), definitions).loopConsumerSources.get(loopId);
 }
 
 function loopConsumerSummary(loadout: PipelineConfig | undefined, loopId: string, loop: NonNullable<PipelineConfig['loops']>[string], definitions?: MateriaConfig['materia']): string {

@@ -2,7 +2,7 @@ import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../
 import { normalizeLoadedLoadout } from '../../../loadoutNormalization.js';
 import { materializeLoadoutLoopSemantics } from '../../../loopSemantics.js';
 import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socketIds.js';
-import { toWebUiConfigDto, toWebUiLoadoutDto } from '../../loadoutDto.js';
+import { fromWebUiLoadoutDto, toWebUiConfigDto, toWebUiLoadoutDto } from '../../loadoutDto.js';
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 
 type NodeType = 'agent' | 'utility';
@@ -94,10 +94,13 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig, options: Norm
       delete node.next;
     }
     if (semantic) {
-      const reconciled = reconcileLoadoutLoopConsumersFromGraph(loadout, normalized.materia ?? {});
-      Object.assign(loadout, reconciled);
+      let semanticLoadout = fromWebUiLoadoutDto(loadout as never);
+      Object.assign(semanticLoadout, reconcileLoadoutLoopConsumersFromGraph(semanticLoadout, normalized.materia ?? {}));
+      Object.assign(loadout, toWebUiLoadoutDto(semanticLoadout));
       normalizeGeneratorPipelineSockets(loadout, normalized.materia ?? {});
-      materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, loadout as MateriaPipelineConfig);
+      semanticLoadout = fromWebUiLoadoutDto(loadout as never);
+      materializeLoadoutLoopSemantics(normalized as PiMateriaConfig, semanticLoadout);
+      Object.assign(loadout, toWebUiLoadoutDto(semanticLoadout));
     }
   }
   return normalized;
@@ -121,7 +124,7 @@ function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions:
 }
 
 function generatorPipelineSocketIds(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): Set<string> {
-  return analyzeLoadoutGraph(loadout, definitions).workItemProducingSocketIds;
+  return analyzeLoadoutGraph(fromWebUiLoadoutDto(loadout as never), definitions).workItemProducingSocketIds;
 }
 
 function canonicalMateriaGeneratorOutput(definition?: MateriaBehaviorConfig): string | undefined {
@@ -483,7 +486,7 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
     // checks use the same migrated layout, normalized edges, and graph-derived
     // loop semantics as config load/save and runtime preparation. Clone first so
     // validation remains a non-mutating read from editor state.
-    const { loadout: sharedLoadout, analysis } = normalizeLoadedLoadout(cloneValue(rawLoadout) as MateriaPipelineConfig, config.materia ?? {});
+    const { loadout: sharedLoadout, analysis } = normalizeLoadedLoadout(fromWebUiLoadoutDto(cloneValue(rawLoadout) as never), config.materia ?? {});
     const loadout = toWebUiLoadoutDto(sharedLoadout) as PipelineConfig;
     for (const [socketId, node] of Object.entries(loadout.nodes ?? {})) {
       for (const [index, edge] of (node.edges ?? []).entries()) {

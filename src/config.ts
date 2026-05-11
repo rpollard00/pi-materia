@@ -7,7 +7,7 @@ import { validateCompactionConfig } from "./compaction.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "./loadoutNormalization.js";
 import { loadoutSockets } from "./loadoutAccessors.js";
-import { normalizePersistedConfigForApplication } from "./schema/persistence.js";
+import { normalizePersistedConfigForApplication, validateSocketOnlyLoadoutTopology } from "./schema/persistence.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -304,7 +304,7 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
     }
     if (!isPlainObject(loadout)) throw new Error(`Materia loadout "${name}" is invalid. Expected a pipeline object.`);
     const baseLoadout = isPlainObject(baseLoadouts?.[name]) ? baseLoadouts[name] as MateriaPipelineConfig : undefined;
-    const rawSockets = loadoutSockets(loadout as unknown as MateriaPipelineConfig) ?? (baseLoadout ? loadoutSockets(baseLoadout) : {});
+    const rawSockets = loadout.sockets ?? (baseLoadout ? loadoutSockets(baseLoadout) : {});
     const mergedLoadout = {
       ...(baseLoadout ?? {}),
       ...loadout,
@@ -320,7 +320,7 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
 }
 
 function hasLoadoutSocketMap(loadout: Record<string, unknown>): boolean {
-  return loadout.sockets !== undefined || loadout.nodes !== undefined;
+  return loadout.sockets !== undefined;
 }
 
 function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria: Partial<PiMateriaConfig>["materia"]): Record<string, MateriaConfig> {
@@ -442,6 +442,8 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
   }
   for (const [loadoutName, loadout] of Object.entries((config.loadouts ?? {}) as Record<string, unknown>)) {
     if (!isPlainObject(loadout)) continue;
+    const topologyIssues = validateSocketOnlyLoadoutTopology(loadout, `Materia loadout "${loadoutName}"`);
+    if (topologyIssues.length > 0) throw new Error(topologyIssues.map((issue) => issue.message).join("\n"));
     if ("prompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete prompt. Define prompt on referenced materia instead.`);
     if ("systemPrompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete systemPrompt. Define prompt on referenced materia instead.`);
     for (const [socketName, socket] of Object.entries(loadoutSockets(loadout as unknown as MateriaPipelineConfig) as Record<string, unknown>)) {

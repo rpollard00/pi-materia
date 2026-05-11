@@ -244,7 +244,5 @@ export function currentSocketState(state: MateriaCastState): MateriaCastState["n
 }
 
 export function resolvedPipelineSockets(state: MateriaCastState): Record<string, ResolvedMateriaSocket> {
-  // Compatibility for persisted/fixture state snapshots that predate resolved
-  // pipeline socket materialization. Runtime-created pipelines use `sockets`.
-  return state.pipeline.sockets ?? (state.pipeline as unknown as { nodes?: Record<string, ResolvedMateriaSocket> }).nodes ?? {};
+  return state.pipeline.sockets ?? {};
 }

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { loadConfig, saveMateriaConfigPatch } from "../src/config.js";
@@ -14,7 +14,7 @@ import {
 const materia = { Build: { tools: "coding", prompt: "build" }, Check: { tools: "none", prompt: "check" } };
 
 describe("schema/persistence adapters", () => {
-  test("normalizes legacy nodes payloads into canonical domain sockets", () => {
+  test("rejects legacy nodes payloads with actionable sockets errors", () => {
     const parsed = parsePersistedLoadout({
       entry: "Socket-1",
       nodes: {
@@ -26,11 +26,10 @@ describe("schema/persistence adapters", () => {
       },
     });
 
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-    expect(parsed.value.sockets["Socket-1"].type).toBe("agent");
-    expect(parsed.value.loops?.review.sockets).toEqual(["Socket-2"]);
-    expect("nodes" in parsed.value).toBe(false);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["loadout.nodes", "loadout.loops.review.nodes", "loadout.sockets", "loadout.loops.review.sockets"]));
+    expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("sockets");
   });
 
   test("reads current sockets payloads and serializes new data with sockets, not nodes", () => {
@@ -121,32 +120,45 @@ describe("schema/persistence adapters", () => {
     expect(loaded.config.loadouts?.SocketConfig.loops?.only.sockets).toEqual(["Socket-1"]);
   });
 
-  test("application compatibility adapter prefers sockets when both sockets and legacy nodes are present", () => {
+  test("config loading rejects legacy nodes in loadouts and loops", async () => {
+    const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+    const file = path.join(dir, "materia.json");
+    await writeFile(file, JSON.stringify({
+      activeLoadout: "LegacyConfig",
+      materia,
+      loadouts: {
+        LegacyConfig: {
+          entry: "Socket-1",
+          nodes: { "Socket-1": { type: "agent", materia: "Build" } },
+          loops: { only: { nodes: ["Socket-1"] } },
+        },
+      },
+    }), "utf8");
+
+    await expect(loadConfig(dir, file)).rejects.toThrow(/nodes.*sockets|sockets.*nodes/);
+  });
+
+  test("application adapter preserves socket-shaped loadouts without reading legacy nodes", () => {
     const normalized = normalizePersistedLoadoutForApplication({
       entry: "Socket-1",
       sockets: { "Socket-1": { type: "agent", materia: "Build" } },
-      nodes: { "Socket-1": { type: "agent", materia: "Check" } },
     }) as { sockets: Record<string, { materia: string }>; nodes?: unknown };
 
     expect(normalized.sockets["Socket-1"].materia).toBe("Build");
     expect(normalized.nodes).toBeUndefined();
   });
 
-  test("round-trips saved legacy node patches through the compatibility loader", async () => {
+  test("rejects saved legacy node patches instead of migrating them", async () => {
     const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
     const cwd = await Bun.$`mktemp -d`.text().then((value) => value.trim());
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
     process.env.PI_MATERIA_PROFILE_DIR = profile;
     try {
-      const file = await saveMateriaConfigPatch(cwd, {
+      await expect(saveMateriaConfigPatch(cwd, {
         materia,
-        loadouts: { Custom: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { Custom: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } as never },
         activeLoadout: "Custom",
-      });
-      const raw = JSON.parse(await readFile(file, "utf8"));
-      expect(raw.loadouts.Custom.sockets["Socket-1"].materia).toBe("Build");
-      const loaded = await loadConfig(cwd);
-      expect(loaded.config.loadouts?.Custom.sockets["Socket-1"].materia).toBe("Build");
+      })).rejects.toThrow(/nodes.*sockets|sockets.*nodes/);
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

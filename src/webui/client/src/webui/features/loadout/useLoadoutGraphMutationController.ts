@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../../../../graphValidation.js';
-import { toWebUiLoadoutDto } from '../../../../../loadoutDto.js';
+import { fromWebUiLoadoutDto, toWebUiLoadoutDto } from '../../../../../loadoutDto.js';
 import {
   canDeleteSocket,
   extractMateriaReference,
@@ -43,6 +43,15 @@ import {
   materiaGeneratorOutput,
   toggledEdgeCondition,
 } from '../../utils/graphLayout.js';
+
+function stageValidatedWebUiLoadoutTransform(loadout: PipelineConfig, transform: LoadoutTransform, options?: Parameters<typeof stageValidatedPipelineGraphTransform>[2]) {
+  const result = stageValidatedPipelineGraphTransform(
+    fromWebUiLoadoutDto(loadout as never),
+    (coreLoadout) => fromWebUiLoadoutDto(transform(toWebUiLoadoutDto(coreLoadout) as PipelineConfig) as never),
+    options,
+  );
+  return result.ok ? { ...result, graph: toWebUiLoadoutDto(result.graph) as PipelineConfig } : result;
+}
 
 export interface LoadoutGraphMutationControllerOptions {
   activeLoadout: PipelineConfig | undefined;
@@ -119,7 +128,7 @@ export function useLoadoutGraphMutationController({
       setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${message}`);
       return;
     }
-    const result = stageValidatedPipelineGraphTransform(activeLoadout as never, (loadout: PipelineConfig) => createConnectedEmptySocket(loadout, afterSocketId) as never);
+    const result = stageValidatedWebUiLoadoutTransform(activeLoadout, (loadout) => createConnectedEmptySocket(loadout, afterSocketId));
     if (!result.ok) {
       setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${formatGraphValidationErrors(result.errors)}`);
       return;
@@ -146,7 +155,7 @@ export function useLoadoutGraphMutationController({
 
   function commitGraphMutation(description: string, transform: LoadoutTransform, onSuccess: string, onError: (message: string) => string) {
     if (!activeLoadoutName || !activeLoadout) return false;
-    const result = stageValidatedPipelineGraphTransform(activeLoadout as never, (loadout: PipelineConfig) => transform(loadout) as never, {
+    const result = stageValidatedWebUiLoadoutTransform(activeLoadout, transform, {
       isGeneratorNode: (nodeId) => {
         const referenced = extractMateriaReference(activeLoadout.nodes?.[nodeId]);
         return Boolean(referenced && materiaGeneratorOutput(materia[referenced.materia]));
@@ -381,7 +390,7 @@ export function useLoadoutGraphMutationController({
   function toggleEdgeCondition(edge: LoadoutEdge) {
     if (!activeLoadoutName || !activeLoadout) return;
     const edgeIndex = edge.edgeIndex;
-    const result = stageValidatedPipelineGraphTransform(activeLoadout as never, (loadout: PipelineConfig) => toggleEdgeConditionInLoadout(loadout, edge.from, edge.to, edge.when, toggledEdgeCondition(edge.when), edgeIndex) as never);
+    const result = stageValidatedWebUiLoadoutTransform(activeLoadout, (loadout) => toggleEdgeConditionInLoadout(loadout, edge.from, edge.to, edge.when, toggledEdgeCondition(edge.when), edgeIndex));
     if (!result.ok) {
       setStatus(`Cannot toggle edge ${edge.from} → ${edge.to}: ${formatGraphValidationErrors(result.errors)}`);
       return;

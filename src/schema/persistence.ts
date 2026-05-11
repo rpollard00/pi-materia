@@ -6,11 +6,9 @@ import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketCon
 /**
  * Persistence/schema anti-corruption adapters.
  *
- * `sockets` is the canonical external spelling for new loadout JSON handled by
- * these adapters. Legacy `nodes` input remains accepted only as a migration
- * compatibility path and is normalized before data reaches domain/application
- * callers. Writers in this module emit canonical `sockets` only; legacy DTO
- * aliases are handled by explicit compatibility adapters at the edge.
+ * `sockets` is the canonical external spelling for loadout JSON handled by
+ * these adapters. Legacy loadout-level or loop-level `nodes` input is rejected
+ * at this boundary with actionable errors.
  */
 
 export interface PersistedLoadoutSchema {
@@ -18,8 +16,6 @@ export interface PersistedLoadoutSchema {
   id?: string;
   entry?: unknown;
   sockets?: unknown;
-  /** @deprecated Migration-only alias for sockets. */
-  nodes?: unknown;
   loops?: unknown;
   layout?: unknown;
 }
@@ -27,19 +23,30 @@ export interface PersistedLoadoutSchema {
 export interface PersistedLoopSchema {
   label?: unknown;
   sockets?: unknown;
-  /** @deprecated Migration-only alias for sockets. */
-  nodes?: unknown;
   consumes?: unknown;
   iterator?: unknown;
   exits?: unknown;
+}
+
+export function validateSocketOnlyLoadoutTopology(value: unknown, path = "loadout"): DomainIssue[] {
+  const issues: DomainIssue[] = [];
+  if (!isPlainObject(value)) return issues;
+  if ("nodes" in value) issues.push({ path: `${path}.nodes`, message: "legacy loadout nodes are not supported; use sockets instead" });
+  if (isPlainObject(value.loops)) {
+    for (const [loopId, loop] of Object.entries(value.loops)) {
+      if (isPlainObject(loop) && "nodes" in loop) issues.push({ path: `${path}.loops.${loopId}.nodes`, message: "legacy loop nodes are not supported; use sockets instead" });
+    }
+  }
+  return issues;
 }
 
 export function parsePersistedLoadout(value: unknown, path = "loadout"): DomainResult<Loadout> {
   const issues: DomainIssue[] = [];
   if (!isPlainObject(value)) return { ok: false, issues: [{ path, message: "loadout must be an object" }] };
 
-  const rawSockets = value.sockets ?? value.nodes;
-  if (!isPlainObject(rawSockets)) issues.push({ path: `${path}.sockets`, message: "loadout must define canonical sockets or legacy nodes object" });
+  issues.push(...validateSocketOnlyLoadoutTopology(value, path));
+  const rawSockets = value.sockets;
+  if (!isPlainObject(rawSockets)) issues.push({ path: `${path}.sockets`, message: "loadout must define a sockets object; legacy nodes are not supported" });
   const loadout: Loadout = {
     ...(typeof value.id === "string" ? { id: value.id } : {}),
     entry: typeof value.entry === "string" ? value.entry : "",
@@ -66,7 +73,7 @@ export function pipelineConfigToDomainLoadout(loadout: MateriaPipelineConfig, id
   return {
     ...(id ? { id } : {}),
     entry: loadout.entry,
-    sockets: cloneRecord(loadout.sockets ?? loadout.nodes ?? {}) as Record<SocketId, LoadoutSocket>,
+    sockets: cloneRecord(loadout.sockets ?? {}) as Record<SocketId, LoadoutSocket>,
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([loopId, loop]) => [loopId, pipelineLoopToDomain(loop)])) } : {}),
   };
 }
@@ -88,14 +95,12 @@ export function normalizePersistedConfigForApplication<T extends Partial<PiMater
 }
 
 export function normalizePersistedLoadoutForApplication(value: unknown): unknown {
-  if (!isPlainObject(value)) return value;
-  const sockets = value.sockets ?? value.nodes;
-  if (!isPlainObject(sockets)) return value;
+  if (!isPlainObject(value) || !isPlainObject(value.sockets)) return value;
   const loops = isPlainObject(value.loops)
     ? Object.fromEntries(Object.entries(value.loops).map(([id, loop]) => [id, normalizeLoopForApplication(loop)]))
     : value.loops;
-  const { sockets: _sockets, nodes: _nodes, ...rest } = value;
-  return { ...rest, sockets: cloneRecord(sockets), ...(loops === undefined ? {} : { loops }) };
+  const { sockets: _sockets, ...rest } = value;
+  return { ...rest, sockets: cloneRecord(value.sockets), ...(loops === undefined ? {} : { loops }) };
 }
 
 export function validatePersistedHandoffPayload(value: unknown, path = "handoff"): DomainResult<HandoffObject> {
@@ -122,8 +127,8 @@ function parseLoop(value: unknown, path: string, issues: DomainIssue[]): Loadout
     issues.push({ path, message: "loop must be an object" });
     return { sockets: [] };
   }
-  const rawSockets = value.sockets ?? value.nodes;
-  if (!Array.isArray(rawSockets) || !rawSockets.every((item) => typeof item === "string")) issues.push({ path: `${path}.sockets`, message: "loop must define canonical sockets or legacy nodes string array" });
+  const rawSockets = value.sockets;
+  if (!Array.isArray(rawSockets) || !rawSockets.every((item) => typeof item === "string")) issues.push({ path: `${path}.sockets`, message: "loop must define a sockets string array; legacy nodes are not supported" });
   return {
     ...(typeof value.label === "string" ? { label: value.label } : {}),
     sockets: Array.isArray(rawSockets) ? rawSockets.filter((item): item is string => typeof item === "string") : [],
@@ -146,7 +151,7 @@ function serializeLoop(loop: LoadoutLoop): PersistedLoopSchema {
 function pipelineLoopToDomain(loop: MateriaLoopConfig): LoadoutLoop {
   return {
     ...(loop.label ? { label: loop.label } : {}),
-    sockets: [...(loop.sockets ?? loop.nodes ?? [])],
+    sockets: [...(loop.sockets ?? [])],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
@@ -165,9 +170,8 @@ function domainLoopToPipeline(loop: LoadoutLoop): MateriaLoopConfig {
 
 function normalizeLoopForApplication(value: unknown): unknown {
   if (!isPlainObject(value)) return value;
-  const sockets = value.sockets ?? value.nodes;
-  const { sockets: _sockets, nodes: _nodes, ...rest } = value;
-  return { ...rest, ...(Array.isArray(sockets) ? { sockets: [...sockets] } : {}) };
+  const { sockets: _sockets, ...rest } = value;
+  return { ...rest, ...(Array.isArray(value.sockets) ? { sockets: [...value.sockets] } : {}) };
 }
 
 function cloneRecord<T>(value: T): T {
