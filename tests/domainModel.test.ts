@@ -5,10 +5,15 @@ import {
   parseHandoffWorkItem,
   recordSocketVisit,
   validateLoadout,
+  validateLoadoutMateriaReferences,
+  validateMateriaDefinition,
+  normalizeMateriaCatalog,
   validateReservedHandoffFields,
   chooseRoutingOutcome,
   type CastStateCore,
   type Loadout,
+  type AgentMateriaDefinition,
+  type UtilityMateriaDefinition,
 } from "../src/domain/index.js";
 
 describe("pure materia/loadout domain", () => {
@@ -16,6 +21,51 @@ describe("pure materia/loadout domain", () => {
     expect(parseCanonicalSocketId("Socket-12")).toEqual({ id: "Socket-12", ordinal: 12 });
     expect(parseCanonicalSocketId("Socket-0")).toBeUndefined();
     expect(parseCanonicalSocketId("node-1")).toBeUndefined();
+  });
+
+  test("validates first-class materia definitions", () => {
+    const agent: AgentMateriaDefinition = {
+      id: "Build",
+      type: "agent",
+      behavior: { id: "Build", label: "Build Materia" },
+      tools: "coding",
+      prompt: "Implement the assigned work item.",
+      parse: "json",
+      generator: true,
+      multiTurn: true,
+      promptIntent: { intent: "build", includeHandoffContract: true, output: "canonical handoff JSON" },
+      generates: { output: "workItems", listType: "array", itemType: "work item" },
+    };
+    expect(validateMateriaDefinition(agent).ok).toBe(true);
+
+    const utility: UtilityMateriaDefinition = {
+      id: "Checkpoint",
+      type: "utility",
+      behavior: { id: "Checkpoint" },
+      utility: "checkpoint",
+      command: ["jj", "status"],
+      timeoutMs: 1000,
+    };
+    expect(validateMateriaDefinition(utility).ok).toBe(true);
+
+    const invalid = validateMateriaDefinition({ ...agent, id: "", behavior: { id: "other" }, tools: "danger" as never, prompt: "", parse: "yaml" as never, generator: "yes" as never, multiTurn: "sometimes" as never });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["materia..id", "materia..behavior.id", "materia..tools", "materia..prompt", "materia..parse", "materia..generator", "materia..multiTurn"]));
+  });
+
+  test("normalizes existing config-shaped materia records into the domain catalog", () => {
+    const catalog = normalizeMateriaCatalog({
+      Build: { tools: "coding", prompt: "Build it", parse: "json", generator: true, multiTurn: true, label: "Build" },
+      Checkpoint: { type: "utility", utility: "checkpoint", command: ["jj", "describe"] },
+    });
+
+    expect(catalog.ok).toBe(true);
+    if (catalog.ok) {
+      expect(catalog.value.Build.type).toBe("agent");
+      expect(catalog.value.Build.behavior).toEqual({ id: "Build", label: "Build" });
+      expect(catalog.value.Build.generator).toBe(true);
+      expect(catalog.value.Checkpoint.type).toBe("utility");
+    }
   });
 
   test("validates loadout socket references and routing conditions", () => {
@@ -35,6 +85,9 @@ describe("pure materia/loadout domain", () => {
     };
 
     expect(validateLoadout(loadout).ok).toBe(true);
+    const catalog = normalizeMateriaCatalog({ Build: { tools: "coding", prompt: "Build it" } });
+    expect(catalog.ok).toBe(true);
+    if (catalog.ok) expect(validateLoadoutMateriaReferences(loadout, catalog.value).ok).toBe(true);
 
     const invalid = validateLoadout({
       entry: "Node-1",
@@ -45,6 +98,12 @@ describe("pure materia/loadout domain", () => {
 
     expect(invalid.ok).toBe(false);
     if (!invalid.ok) expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["loadout.entry", "loadout.sockets.Node-1", "loadout.sockets.Node-1.materia", "loadout.sockets.Node-1.edges.0.when", "loadout.sockets.Node-1.edges.0.to"]));
+
+    if (catalog.ok) {
+      const missingMateria = validateLoadoutMateriaReferences({ entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Missing" } } }, catalog.value);
+      expect(missingMateria.ok).toBe(false);
+      if (!missingMateria.ok) expect(missingMateria.issues[0]?.path).toBe("loadout.sockets.Socket-1.materia");
+    }
   });
 
   test("chooses deterministic routing outcomes from reserved satisfied control state", () => {
