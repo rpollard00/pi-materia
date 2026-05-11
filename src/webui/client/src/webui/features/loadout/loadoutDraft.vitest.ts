@@ -5,6 +5,8 @@ import {
   createLoadoutDraft,
   deletedLoadoutNamesAfterRename,
   deleteLoadoutDraft,
+  duplicateLoadoutDraft,
+  makeDuplicateLoadoutName,
   makeNewLoadoutName,
   renameLoadoutDraft,
   saveTargetForSource,
@@ -44,6 +46,26 @@ describe('loadout draft mutations', () => {
     expect(created.loadouts?.['New Loadout 3']?.entry).toBeTruthy();
     expect(Object.keys(created.loadouts?.['New Loadout 3']?.sockets ?? {})).toHaveLength(1);
     expect((config.loadouts as Record<string, unknown>)['New Loadout 3']).toBeUndefined();
+  });
+
+  it('duplicates a loadout as an independent staged copy and makes it active', () => {
+    const frozen = deepFreeze(config);
+    const duplicated = duplicateLoadoutDraft({ config: frozen, name: 'Alpha', nextName: 'Alpha Copy' });
+
+    expect(duplicated.activeLoadout).toBe('Alpha Copy');
+    expect(duplicated.loadouts?.['Alpha Copy']).toMatchObject(config.loadouts.Alpha);
+    expect(duplicated.loadouts?.['Alpha Copy']).not.toBe(config.loadouts.Alpha);
+    expect(duplicated.loadouts?.['Alpha Copy']?.sockets).not.toBe(config.loadouts.Alpha.sockets);
+    expect(config.loadouts.Alpha).toBeTruthy();
+    expect(config.activeLoadout).toBe('Alpha');
+  });
+
+  it('chooses a unique duplicate loadout name with numbered suffixes', () => {
+    expect(makeDuplicateLoadoutName({
+      ...config.loadouts,
+      'Alpha Copy': config.loadouts.Alpha,
+      'Alpha Copy 2': config.loadouts.Alpha,
+    }, 'Alpha')).toBe('Alpha Copy 3');
   });
 
   it('deletes an active loadout and returns the fallback active name', () => {

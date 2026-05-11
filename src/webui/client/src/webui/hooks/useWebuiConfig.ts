@@ -15,6 +15,8 @@ import {
   createLoadoutDraft,
   deletedLoadoutNamesAfterRename,
   deleteLoadoutDraft,
+  duplicateLoadoutDraft,
+  makeDuplicateLoadoutName,
   makeNewLoadoutName,
   renameLoadoutDraft,
   saveTargetForSource,
@@ -362,29 +364,23 @@ export function useWebuiConfig() {
     setStatus('Created a new draft loadout with one empty entry socket. Rename and save when ready.');
   }
 
-  function makeDuplicateLoadoutName(name: string) {
-    const baseName = `${name} Copy`;
-    if (!loadouts[baseName]) return baseName;
-    let suffix = 2;
-    while (loadouts[`${baseName} ${suffix}`]) suffix += 1;
-    return `${baseName} ${suffix}`;
-  }
-
   function duplicateLoadout(name: string) {
     const loadout = loadouts[name];
     if (!loadout) {
       setStatus(`Cannot duplicate ${name}: loadout was not found.`);
       return false;
     }
-    const nextName = makeDuplicateLoadoutName(name);
-    const loadoutCopy = cloneConfig(loadout) as PipelineConfig;
-    setDraftConfig((current) => normalizeMateriaConfigEdges({
-      ...(current ?? {}),
-      activeLoadout: nextName,
-      loadouts: { ...buildLoadouts(current ?? {}), [nextName]: loadoutCopy },
-    }));
+    const nextName = makeDuplicateLoadoutName(loadouts, name);
+    setDraftConfig((current) => duplicateLoadoutDraft({ config: current ?? {}, name, nextName }));
     setLoadoutNameInput(nextName);
-    setStatus(`Duplicated ${name} as ${nextName}. Save to persist.`);
+    const readyStatus = `Duplicated ${name} as ${nextName}. Save to persist.`;
+    setStatus(readyStatus);
+    toast({
+      id: `loadout-duplicate:${nextName}`,
+      title: 'Loadout duplicated',
+      description: readyStatus,
+      variant: 'success',
+    });
     return true;
   }
 

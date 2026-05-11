@@ -6,6 +6,7 @@ import {
   type PipelineConfig,
 } from '../../../loadoutModel.js';
 import { buildLoadouts } from '../../utils/graphLayout.js';
+import { cloneConfig } from '../../utils/forms.js';
 import { fromWebUiConfigDto } from '../../../../../loadoutDto.js';
 import type { LoadoutSourceScope, SaveTarget } from '../../types.js';
 
@@ -41,6 +42,33 @@ export function createLoadoutDraft(config: MateriaConfig, name: string) {
     ...config,
     loadouts: { ...draftLoadouts, [name]: makeEmptyEntryLoadout() },
     activeLoadout: name,
+  });
+}
+
+export function makeDuplicateLoadoutName(loadouts: Record<string, PipelineConfig>, name: string) {
+  const baseName = `${name} Copy`;
+  if (!loadouts[baseName]) return baseName;
+  let suffix = 2;
+  while (loadouts[`${baseName} ${suffix}`]) suffix += 1;
+  return `${baseName} ${suffix}`;
+}
+
+export function duplicateLoadoutDraft({
+  config,
+  name,
+  nextName = makeDuplicateLoadoutName(buildLoadouts(config), name),
+}: {
+  config: MateriaConfig;
+  name: string;
+  nextName?: string;
+}) {
+  const draftLoadouts = buildLoadouts(config);
+  const loadout = draftLoadouts[name];
+  if (!loadout || draftLoadouts[nextName]) return normalizeMateriaConfigEdges(config);
+  return normalizeMateriaConfigEdges({
+    ...config,
+    loadouts: { ...draftLoadouts, [nextName]: cloneConfig(loadout) },
+    activeLoadout: nextName,
   });
 }
 
