@@ -1,5 +1,6 @@
 import { handleActiveLoadoutRoute } from './activeLoadout.js';
 import { handleGetConfigRoute, handlePostConfigRoute } from './config.js';
+import { handleDefaultLoadoutRoute } from './defaultLoadout.js';
 import { handleHealthRoute } from './health.js';
 import { sendJson } from './http.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
@@ -40,6 +41,10 @@ export async function handleMateriaWebUiRequest(req, res, deps) {
     }
     if (req.url?.startsWith('/api/loadout/active')) {
         await handleActiveLoadoutRoute(req, res, { setActiveLoadout: deps.session?.setActiveLoadout });
+        return;
+    }
+    if (req.url?.startsWith('/api/loadout/default')) {
+        await handleDefaultLoadoutRoute(req, res, { setDefaultLoadout: deps.session?.setDefaultLoadout });
         return;
     }
     if (req.url?.startsWith('/api/generate/materia-role')) {
