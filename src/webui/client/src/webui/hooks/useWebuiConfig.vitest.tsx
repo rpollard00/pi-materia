@@ -60,6 +60,8 @@ function ConfigProbe() {
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
       <button type="button" onClick={() => config.switchLoadout('Full-Auto')}>view Full-Auto</button>
       <button type="button" onClick={() => config.switchLoadout('Hojo-Consult')}>view Hojo-Consult</button>
+      <button type="button" onClick={() => void config.setRuntimeActiveLoadout('Hojo-Consult')}>set active Hojo-Consult</button>
+      <button type="button" onClick={() => void config.setDefaultLoadout('Hojo-Consult')}>set default Hojo-Consult</button>
       <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
       <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
       <button
@@ -226,6 +228,83 @@ describe('useWebuiConfig', () => {
 
     await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto'));
     expect(screen.getByLabelText('dirty').textContent).toBe('false');
+  });
+
+  it('reads a valid default loadout preference without treating it as editor selection', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      source: 'default < user < project',
+      config: reportedLayeredConfig,
+      loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+      defaultLoadoutId: 'Hojo-Consult',
+    }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('default-loadout').textContent).toBe('Hojo-Consult'));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+  });
+
+  it('ignores a missing default loadout preference on initial load', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      source: 'default < user < project',
+      config: reportedLayeredConfig,
+      loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+      defaultLoadoutId: 'Missing-Loadout',
+    }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('default-loadout').textContent).toBe(''));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+  });
+
+  it('persists default changes separately from runtime active loadout changes', async () => {
+    let responseConfig: MateriaConfig = reportedLayeredConfig;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/loadout/default' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ name: 'Hojo-Consult' });
+        return new Response(JSON.stringify({ ok: true, defaultLoadoutId: 'Hojo-Consult', message: 'Default loadout set to Hojo-Consult.' }));
+      }
+      if (url === '/api/loadout/active' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ name: 'Hojo-Consult' });
+        responseConfig = { ...reportedLayeredConfig, activeLoadout: 'Hojo-Consult' };
+        return new Response(JSON.stringify({
+          ok: true,
+          activeLoadout: 'Hojo-Consult',
+          config: { config: responseConfig, source: 'test', loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' } },
+          message: 'Active loadout changed to Hojo-Consult.',
+        }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        source: 'default < user < project',
+        config: responseConfig,
+        loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+        defaultLoadoutId: null,
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto'));
+    fireEvent.click(screen.getByRole('button', { name: 'set default Hojo-Consult' }));
+
+    await waitFor(() => expect(screen.getByLabelText('default-loadout').textContent).toBe('Hojo-Consult'));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(fetchMock).toHaveBeenCalledWith('/api/loadout/default', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'Hojo-Consult' }) }));
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'set active Hojo-Consult' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Active loadout changed to Hojo-Consult.'));
+    expect(screen.getByLabelText('default-loadout').textContent).toBe('Hojo-Consult');
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/default')).toHaveLength(1);
   });
 
   it('keeps Full-Auto and Hojo-Consult loadout selection clean while real persisted edits are dirty', async () => {

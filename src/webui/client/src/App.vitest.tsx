@@ -118,6 +118,14 @@ function expectHeaderStatus(source: string, status: 'clean' | 'staged edits') {
   expect(bodyText).toContain(`Status: ${status}`);
 }
 
+function loadoutCard(name: string) {
+  return screen.getByRole('button', { name: new RegExp(name) }).closest('.loadout-card') as HTMLElement;
+}
+
+function openLoadoutActions(name: string) {
+  fireEvent.click(within(loadoutCard(name)).getByLabelText('Loadout actions'));
+}
+
 describe('Materia loadout grid editor', () => {
   it('renders active and available loadouts with staged save controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
@@ -296,7 +304,9 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    const protectedDelete = await screen.findByTitle('Shipped default loadouts cannot be deleted.');
+    await screen.findByRole('button', { name: /Full-Auto/ });
+    openLoadoutActions('Full-Auto');
+    const protectedDelete = screen.getByTitle('Shipped default loadouts cannot be deleted.');
     expect(protectedDelete.hasAttribute('disabled')).toBe(true);
     expect(screen.getByText(/shipped default/i)).toBeTruthy();
   });
@@ -316,6 +326,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     expect(await screen.findByTestId('socket-Socket-1')).toBeTruthy();
+    openLoadoutActions('Planning-Consult');
     fireEvent.click(screen.getByTitle('Delete Planning-Consult'));
 
     await waitFor(() => expect(screen.queryByRole('button', { name: /Planning-Consult/ })).toBeNull());
