@@ -109,6 +109,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const persistedNames = Object.keys(persistedLoadouts);
+  const validatedDefaultLoadoutId = defaultLoadoutId && persistedLoadouts[defaultLoadoutId] ? defaultLoadoutId : null;
 
   async function changeRuntimeActiveLoadout(name: string) {
     // This quick selector changes only the runtime/session active loadout. It
@@ -151,12 +152,19 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const defaultLoadout = sourceScope === 'default';
           const deleteDisabled = !canDeleteLoadout(name);
           const isRuntimeActive = name === runtimeActiveLoadoutName;
-          const isDefaultLoadout = name === defaultLoadoutId;
           const persisted = Boolean(persistedLoadouts[name]);
+          const isDefaultLoadout = persisted && name === validatedDefaultLoadoutId;
           return (
             <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
               <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select">
-                <span>{name}</span>
+                <span className="loadout-card-title">
+                  <span className="loadout-card-name">{name}</span>
+                  {isDefaultLoadout && (
+                    <span className="loadout-default-indicator" role="img" aria-label="Default loadout" title="Default loadout">
+                      ★
+                    </span>
+                  )}
+                </span>
                 <small>{Object.keys(loadouts[name].sockets ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
               </button>
               <LoadoutActionsMenu

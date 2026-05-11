@@ -80,6 +80,29 @@
   display: block;
 }
 
+.loadout-card-select .loadout-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.loadout-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loadout-default-indicator {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: rgb(250 204 21);
+  font-size: 0.9rem;
+  line-height: 1;
+  text-shadow: 0 0 10px rgb(250 204 21 / 0.42);
+}
+
 .loadout-actions-menu {
   position: relative;
   flex: 0 0 auto;
