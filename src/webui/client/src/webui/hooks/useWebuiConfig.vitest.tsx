@@ -56,9 +56,12 @@ function ConfigProbe() {
       <output aria-label="status">{config.status}</output>
       <output aria-label="dirty">{String(config.isDirty)}</output>
       <output aria-label="active-loadout">{config.activeLoadoutName}</output>
+      <output aria-label="default-loadout">{config.defaultLoadoutId ?? ''}</output>
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
       <button type="button" onClick={() => config.switchLoadout('Full-Auto')}>view Full-Auto</button>
       <button type="button" onClick={() => config.switchLoadout('Hojo-Consult')}>view Hojo-Consult</button>
+      <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
+      <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
       <button
         type="button"
         onClick={() => config.updateDraft((draft) => {
@@ -206,6 +209,14 @@ function cloneConfigForTest(config: MateriaConfig): MateriaConfig {
   return JSON.parse(JSON.stringify(config)) as MateriaConfig;
 }
 
+function materializeSavedConfigForTest(config: MateriaConfig): MateriaConfig {
+  const next = cloneConfigForTest(config);
+  for (const [name, loadout] of Object.entries(next.loadouts ?? {})) {
+    if (loadout === null) delete next.loadouts?.[name];
+  }
+  return next;
+}
+
 describe('useWebuiConfig', () => {
   it('reports clean on initial load when the active loadout falls back without mutating the draft', async () => {
     const config = { ...reportedLayeredConfig, activeLoadout: 'Missing-Loadout' } satisfies MateriaConfig;
@@ -312,6 +323,80 @@ describe('useWebuiConfig', () => {
     expect(draft.materia?.Build?.prompt).toBe('new prompt');
     expect(draft.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('LocalEdit');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears the default preference after saving deletion of the default loadout', async () => {
+    let responseConfig: MateriaConfig = {
+      activeLoadout: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Beta: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/config' && init?.method === 'POST') {
+        responseConfig = materializeSavedConfigForTest(JSON.parse(String(init.body)).config as MateriaConfig);
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      if (url === '/api/loadout/default' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ name: null });
+        return new Response(JSON.stringify({ ok: true, defaultLoadoutId: null, message: 'Default loadout cleared.' }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: responseConfig, loadoutSources: { Alpha: 'user', Beta: 'user' }, defaultLoadoutId: 'Alpha' }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('default-loadout').textContent).toBe('Alpha'));
+    fireEvent.click(screen.getByRole('button', { name: 'delete Alpha' }));
+    await waitFor(() => expect(screen.getByLabelText('draft').textContent).not.toContain('"Alpha"'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Default loadout cleared.'));
+    expect(screen.getByLabelText('default-loadout').textContent).toBe('');
+    expect(fetchMock).toHaveBeenCalledWith('/api/loadout/default', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: null }) }));
+  });
+
+  it('keeps a saved default deletion usable when default preference cleanup fails', async () => {
+    let responseConfig: MateriaConfig = {
+      activeLoadout: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Beta: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/config' && init?.method === 'POST') {
+        responseConfig = materializeSavedConfigForTest(JSON.parse(String(init.body)).config as MateriaConfig);
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      if (url === '/api/loadout/default' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: false, error: 'profile is read-only' }), { status: 500 });
+      }
+      const defaultLoadoutId = responseConfig.loadouts?.Alpha ? 'Alpha' : null;
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: responseConfig, loadoutSources: { Alpha: 'user', Beta: 'user' }, defaultLoadoutId }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('default-loadout').textContent).toBe('Alpha'));
+    fireEvent.click(screen.getByRole('button', { name: 'delete Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toContain('Default loadout change failed: profile is read-only'));
+    expect(screen.getByLabelText('default-loadout').textContent).toBe('Alpha');
+
+    fireEvent.click(screen.getByRole('button', { name: 'reload cleanly' }));
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('reloaded cleanly'));
+    expect(screen.getByLabelText('default-loadout').textContent).toBe('');
+    expect(screen.getByLabelText('draft').textContent).toContain('Beta');
   });
 
   it('falls back to demo data when the initial config request fails', async () => {

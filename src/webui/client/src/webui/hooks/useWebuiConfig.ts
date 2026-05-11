@@ -468,6 +468,7 @@ export function useWebuiConfig() {
       for (const name of Object.keys(normalizedDraft.loadouts ?? {})) if (!next[name]) next[name] = body.target ?? saveTarget;
       return next;
     });
+    const deletedDefaultLoadoutId = defaultLoadoutId && deletedLoadoutNames.includes(defaultLoadoutId) ? defaultLoadoutId : null;
     const readyStatus = `Saved staged loadout edits to ${body.target ?? saveTarget} scope.`;
     setStatus(readyStatus);
     toast({
@@ -476,6 +477,16 @@ export function useWebuiConfig() {
       description: readyStatus,
       variant: 'success',
     });
+    if (deletedDefaultLoadoutId) {
+      try {
+        await setDefaultLoadout(null);
+      } catch {
+        // The loadout delete has already been saved. Keep the local preference
+        // state unchanged so render-time validation suppresses the stale star;
+        // reload/startup validation also treats the missing default as no
+        // default even if preference cleanup could not be persisted.
+      }
+    }
   }
 
   return {
