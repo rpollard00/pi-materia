@@ -13,7 +13,7 @@ interface YoloTestConfig extends PiMateriaConfig {
 }
 
 function testSockets(loadout: NonNullable<PiMateriaConfig["loadouts"]>[string]) {
-  return loadout.sockets!;
+  return (loadout.sockets ?? loadout.nodes)!;
 }
 
 async function makeHarness(config: PiMateriaConfig): Promise<FakePiHarness> {

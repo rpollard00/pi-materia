@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../../../../graphValidation.js';
+import { toWebUiLoadoutDto } from '../../../../../loadoutDto.js';
 import {
   canDeleteSocket,
   extractMateriaReference,
@@ -385,8 +386,9 @@ export function useLoadoutGraphMutationController({
       setStatus(`Cannot toggle edge ${edge.from} → ${edge.to}: ${formatGraphValidationErrors(result.errors)}`);
       return;
     }
-    updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig);
-    const updatedGraph = result.graph as PipelineConfig;
+    const webUiGraph = toWebUiLoadoutDto(result.graph as never) as PipelineConfig;
+    updateLoadoutDraft(activeLoadoutName, () => webUiGraph);
+    const updatedGraph = webUiGraph;
     const updatedEdge = edge.edgeIndex === undefined ? updatedGraph.nodes?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : updatedGraph.nodes?.[edge.from]?.edges?.[edge.edgeIndex];
     setStatus(`Staged edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)} as ${edgeConditionLabel(updatedEdge?.when)}.`);
   }

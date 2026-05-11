@@ -35,6 +35,29 @@ describe('loadout socket display model', () => {
     expect(formatSocketLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Socket-1 (Empty)');
   });
 
+  it('adapts socket-first loadouts to the WebUI nodes DTO during normalization', () => {
+    const config = normalizeMateriaConfigEdges({
+      activeLoadout: 'Canonical',
+      materia: { planner: { prompt: 'plan', generator: true }, Build: { prompt: 'build' } },
+      loadouts: {
+        Canonical: {
+          entry: 'Socket-1',
+          sockets: {
+            'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+          },
+          loops: { work: { sockets: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+        },
+      },
+    } as any);
+
+    expect(config.loadouts?.Canonical.nodes?.['Socket-1'].materia).toBe('planner');
+    expect(config.loadouts?.Canonical.nodes?.['Socket-1'].socketKind).toBe('entry');
+    expect(config.loadouts?.Canonical.loops?.work.nodes).toEqual(['Socket-2']);
+    expect(config.loadouts?.Canonical).not.toHaveProperty('sockets');
+    expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
+  });
+
   it('rejects semantic ids when creating a new empty entry socket', () => {
     expect(() => makeEmptyEntryLoadout('Build')).toThrow(/Invalid socket id "Build" referenced by new loadout entry/);
     expect(() => makeEmptyEntryLoadout('Socket-03')).toThrow(/Expected Socket-N/);

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
 import { normalizeMateriaConfigEdges } from './loadoutModel.js';
+import { fromWebUiLoadoutDto } from '../../loadoutDto.js';
 import { resetToastStoreForTests } from './toast/index.js';
 import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, layoutSockets, routeLoadoutEdges } from './webui/utils/graphLayout.js';
 
@@ -96,7 +97,7 @@ function configPostBody(fetchMock: FetchMock, index = 0) {
 }
 
 function normalizedTestLoadout(loadout: unknown) {
-  return normalizeMateriaConfigEdges(structuredClone({ materia: testConfig.materia, loadouts: { expected: loadout } }) as any).loadouts!.expected;
+  return fromWebUiLoadoutDto(normalizeMateriaConfigEdges(structuredClone({ materia: testConfig.materia, loadouts: { expected: loadout } }) as any).loadouts!.expected as any);
 }
 
 async function waitForConfigPostCount(fetchMock: FetchMock, count: number) {
@@ -528,7 +529,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all work items complete',
-        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
         consumes: { from: 'Socket-1', output: 'workItems' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
       },
@@ -617,7 +618,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all work items complete',
-        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
         consumes: { from: 'Socket-1', output: 'workItems' },
       },
     };
@@ -744,7 +745,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all tasks complete',
-        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
         exits: [
           { id: 'exit:Socket-4:always', from: 'Socket-4', condition: 'always', targetSocketId: 'Socket-1' },
@@ -781,7 +782,7 @@ describe('Materia loadout grid editor', () => {
     await waitForConfigPostCount(fetchMock, 1);
     const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.loops.taskIteration.exits).toEqual([{ id: 'exit:Socket-4:always', from: 'Socket-4', condition: 'satisfied', targetSocketId: 'Socket-1' }]);
-    expect(saved.nodes['Socket-4'].edges).toBeUndefined();
+    expect(saved.sockets['Socket-4'].edges).toBeUndefined();
 
     fireEvent.keyDown(loopExitEdge, { key: 'Enter' });
     await waitFor(() => expect(loopExitEdge.textContent).toContain('Upon Loop Exit: Not Satisfied'));
@@ -802,7 +803,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all tasks complete',
-        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
         iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
       },
@@ -868,7 +869,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all tasks complete',
-        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
         iterator: { items: 'state.tasks', as: 'task', cursor: 'taskIndex', done: 'end' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
       },
@@ -930,9 +931,9 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
     expect(saved.loops).toBeUndefined();
-    expect(saved.nodes['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
-    expect(saved.nodes['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
-    expect(saved.nodes['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }]);
+    expect(saved.sockets['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(saved.sockets['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+    expect(saved.sockets['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }]);
   });
 
   it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
@@ -963,7 +964,7 @@ describe('Materia loadout grid editor', () => {
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
     expect(saved.loops.loopSelection).toEqual({
       label: 'Loop: Socket-2 → Socket-3 → Socket-4',
-      nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+      sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
       consumes: { from: 'Socket-1', output: 'workItems' },
       exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
     });
@@ -996,11 +997,11 @@ describe('Materia loadout grid editor', () => {
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
     expect(saved.loops.loopSelection).toEqual({
       label: 'Loop: Socket-2',
-      nodes: ['Socket-2'],
+      sockets: ['Socket-2'],
       consumes: { from: 'Socket-1', output: 'workItems' },
       exit: { from: 'Socket-2', when: 'always', to: 'end' },
     });
-    expect(saved.nodes['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(saved.sockets['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
 
     cleanup();
     fetchMock.mockClear();
@@ -1029,7 +1030,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    expect(saved.nodes['Socket-2'].edges.filter((edge: { to: string }) => edge.to === 'Socket-2')).toEqual([{ when: 'not_satisfied', to: 'Socket-2' }]);
+    expect(saved.sockets['Socket-2'].edges.filter((edge: { to: string }) => edge.to === 'Socket-2')).toEqual([{ when: 'not_satisfied', to: 'Socket-2' }]);
   });
 
   it('deletes a normal socket, cleans graph references, and persists the result', async () => {
@@ -1037,7 +1038,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Full-Auto'] as any).loops = {
       loopSelection: {
         label: 'Loop: Socket-2 → Socket-3 → Socket-4',
-        nodes: ['Socket-2', 'Socket-3', 'Socket-4'],
+        sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
         consumes: { from: 'Socket-1', output: 'workItems' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
       },
@@ -1061,10 +1062,10 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    expect(saved.nodes['Socket-2']).toBeUndefined();
-    expect(saved.nodes['Socket-1'].edges).toBeUndefined();
-    expect(saved.nodes['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }]);
-    expect(saved.nodes['Socket-4'].edges).toBeUndefined();
+    expect(saved.sockets['Socket-2']).toBeUndefined();
+    expect(saved.sockets['Socket-1'].edges).toBeUndefined();
+    expect(saved.sockets['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }]);
+    expect(saved.sockets['Socket-4'].edges).toBeUndefined();
     expect(saved.loops).toBeUndefined();
   });
 
@@ -1096,11 +1097,11 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    expect(saved.nodes['Socket-1'].socketKind).toBe('entry');
-    expect(saved.nodes['Socket-2'].socketKind).toBe('normal');
-    expect(saved.nodes['Socket-5'].socketKind).toBe('normal');
-    expect(saved.nodes['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-5' }]);
-    expect(saved.nodes['Socket-5'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+    expect(saved.sockets['Socket-1'].socketKind).toBe('entry');
+    expect(saved.sockets['Socket-2'].socketKind).toBe('normal');
+    expect(saved.sockets['Socket-5'].socketKind).toBe('normal');
+    expect(saved.sockets['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-5' }]);
+    expect(saved.sockets['Socket-5'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
   });
 
   it('creates a loop from selected sockets on a fresh non-Build layout', async () => {
@@ -1423,7 +1424,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const savedEdge = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes['Socket-3'].edges[0];
+    const savedEdge = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].sockets['Socket-3'].edges[0];
     expect(savedEdge).toEqual({ when: 'satisfied', to: 'Socket-4' });
   });
 
@@ -1452,12 +1453,12 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const savedNodes = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].nodes;
-    expect(savedNodes['Socket-3'].edges).toEqual([
+    const savedSockets = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'].sockets;
+    expect(savedSockets['Socket-3'].edges).toEqual([
       { when: 'satisfied', to: 'Socket-4' },
       { when: 'always', to: 'Socket-2' },
     ]);
-    expect(savedNodes['Socket-4'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(savedSockets['Socket-4'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
   });
 
   it('shows validation failures from unreachable edge toggles without mutating draft state', async () => {
@@ -1504,10 +1505,10 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(Object.keys(created.nodes)).toEqual(['Socket-1']);
+    expect(Object.keys(created.sockets)).toEqual(['Socket-1']);
     expect(created.entry).toBe('Socket-1');
-    expect(created.nodes['Socket-1']).toEqual({ empty: true, socketKind: 'entry' });
-    expect(created.nodes['Socket-1'].type).toBeUndefined();
+    expect(created.sockets['Socket-1']).toEqual({ empty: true, socketKind: 'entry' });
+    expect(created.sockets['Socket-1'].type).toBeUndefined();
   });
 
   it('creates connected sockets with the same Empty display model', async () => {
@@ -1533,8 +1534,8 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(created.nodes['Socket-1']).toEqual({ empty: true, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
-    expect(created.nodes['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
+    expect(created.sockets['Socket-1']).toEqual({ empty: true, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created.sockets['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
   });
 
   it('keeps palette definitions and save payload materia stable during new loadout grid edits', async () => {
@@ -1569,8 +1570,8 @@ describe('Materia loadout grid editor', () => {
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
     const created = savedConfig.loadouts[savedConfig.activeLoadout];
     expect(savedConfig.materia).toEqual(initialMateria);
-    expect(created.nodes['Socket-1']).toEqual({ type: 'agent', materia: 'Build', empty: false, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
-    expect(created.nodes['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
+    expect(created.sockets['Socket-1']).toEqual({ type: 'agent', materia: 'Build', empty: false, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created.sockets['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
   });
 
   it('opens a valid tab from the URL query parameter', async () => {
@@ -1640,7 +1641,7 @@ describe('Materia loadout grid editor', () => {
     expect(saveCall[0]).toBe('/api/config');
     expect(JSON.parse(String(saveCall[1]?.body)).target).toBe('user');
     const savedLoadout = JSON.parse(String(saveCall[1]?.body)).config.loadouts['Full-Auto'];
-    const savedBuild = savedLoadout.nodes['Socket-2'];
+    const savedBuild = savedLoadout.sockets['Socket-2'];
     expect(savedBuild.materia).toBe('Maintain');
     expect(savedBuild.edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(savedBuild.layout).toBeUndefined();
@@ -1665,7 +1666,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    const saved = savedLoadout.nodes;
+    const saved = savedLoadout.sockets;
     expect(saved['Socket-2'].materia).toBe('Maintain');
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(saved['Socket-2'].layout).toBeUndefined();
@@ -1696,7 +1697,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    const saved = savedLoadout.nodes;
+    const saved = savedLoadout.sockets;
     expect(saved['Socket-4']).toMatchObject({ empty: true });
     expect(saved['Socket-4'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-4']).toEqual({ x: 3, y: 0 });
@@ -1727,7 +1728,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    const savedBuild = savedLoadout.nodes['Socket-2'];
+    const savedBuild = savedLoadout.sockets['Socket-2'];
     expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'node-shift' });
     expect(savedBuild.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
@@ -1753,7 +1754,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitForConfigPostCount(fetchMock, 1);
     const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
-    const savedBuild = savedLoadout.nodes['Socket-2'];
+    const savedBuild = savedLoadout.sockets['Socket-2'];
     expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'node-shift' });
     expect(savedBuild.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
@@ -1776,7 +1777,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Planning-Consult'].nodes;
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Planning-Consult'].sockets;
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(saved['Socket-3']).toEqual({ empty: true, socketKind: 'normal' });
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Planning-Consult');
@@ -1800,7 +1801,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    const saved = savedLoadout.nodes;
+    const saved = savedLoadout.sockets;
     expect(Object.keys(saved)).toContain('Socket-2');
     expect(saved['Socket-2'].materia).toBe('Maintain');
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
@@ -1853,7 +1854,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    const saved = savedLoadout.nodes;
+    const saved = savedLoadout.sockets;
     expect(saved['Socket-2']).toMatchObject({ materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'node-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 } });
     expect(saved['Socket-2'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 4, y: 1.5 });
@@ -1903,7 +1904,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    const savedBuild = savedLoadout.nodes['Socket-2'];
+    const savedBuild = savedLoadout.sockets['Socket-2'];
     expect(savedBuild.materia).toBe('Maintain');
     expect(savedBuild.parse).toBe('json');
     expect(savedBuild.assign).toEqual({ satisfied: '$.satisfied' });
@@ -1985,7 +1986,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes;
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.sockets;
     expect(saved['Socket-1'].edges).toEqual([{ to: 'Socket-2', when: 'not_satisfied' }]);
     expect(saved['Socket-2']).toBeTruthy();
   });
@@ -2033,7 +2034,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges;
     expect(saved.loops.reviewLoop.exits).toEqual([{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-3' }]);
-    expect(saved.nodes['Socket-1'].edges).toBeUndefined();
+    expect(saved.sockets['Socket-1'].edges).toBeUndefined();
   });
 
   it('prevents invalid conditional loop-exit routes with immediate feedback', async () => {
@@ -2121,8 +2122,8 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges;
     expect(saved.loops.reviewLoop.exits).toEqual([{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-4' }]);
-    expect(saved.nodes['Socket-1'].edges).toBeUndefined();
-    expect(saved.nodes['Socket-4']).toMatchObject({ empty: true, socketKind: 'normal' });
+    expect(saved.sockets['Socket-1'].edges).toBeUndefined();
+    expect(saved.sockets['Socket-4']).toMatchObject({ empty: true, socketKind: 'normal' });
   });
 
   it('does not create a new socket when a loop exit already has an always route', async () => {
@@ -2169,7 +2170,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes;
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.sockets;
     expect(saved['Socket-1'].edges).toBeUndefined();
     expect(saved['Socket-1']).toBeTruthy();
     expect(saved['Socket-2']).toBeTruthy();
@@ -2223,7 +2224,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.nodes;
+    const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges.sockets;
     expect(saved['Socket-1'].next).toBeUndefined();
     expect(saved['Socket-1'].edges).toEqual([{ to: 'Socket-3', when: 'satisfied' }]);
     expect(saved['Socket-2']).toBeTruthy();
@@ -2255,7 +2256,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts.Edges;
-    const savedStart = savedLoadout.nodes['Socket-1'];
+    const savedStart = savedLoadout.sockets['Socket-1'];
     expect(savedStart.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-1'].x).toBeCloseTo(8 / 208);
     expect(savedLoadout.layout.sockets['Socket-1'].y).toBeCloseTo(7 / 168);

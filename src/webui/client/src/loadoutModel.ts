@@ -2,6 +2,7 @@ import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../
 import { normalizeLoadedLoadout } from '../../../loadoutNormalization.js';
 import { materializeLoadoutLoopSemantics } from '../../../loopSemantics.js';
 import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socketIds.js';
+import { toWebUiConfigDto, toWebUiLoadoutDto } from '../../loadoutDto.js';
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 
 type NodeType = 'agent' | 'utility';
@@ -40,6 +41,7 @@ export interface PipelineLoopExitRoute {
 
 export interface PipelineLoop {
   label?: string;
+  sockets?: string[];
   nodes: string[];
   consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
@@ -55,6 +57,9 @@ export interface PipelineLayout {
 
 export interface PipelineConfig {
   entry?: string;
+  /** Canonical core shape. WebUI normalizes this to nodes at its DTO boundary. */
+  sockets?: Record<string, PipelineNode>;
+  /** Legacy WebUI editor DTO shape. */
   nodes?: Record<string, PipelineNode>;
   loops?: Record<string, PipelineLoop>;
   layout?: PipelineLayout;
@@ -74,7 +79,7 @@ export interface NormalizeMateriaConfigOptions {
 }
 
 export function normalizeMateriaConfigEdges(config: MateriaConfig, options: NormalizeMateriaConfigOptions = {}): MateriaConfig {
-  const normalized = cloneValue(config);
+  const normalized = toWebUiConfigDto(cloneValue(config) as PiMateriaConfig) as MateriaConfig;
   const semantic = options.semantic ?? true;
   normalizeCanonicalParseSemantics(normalized);
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
@@ -479,7 +484,7 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
     // loop semantics as config load/save and runtime preparation. Clone first so
     // validation remains a non-mutating read from editor state.
     const { loadout: sharedLoadout, analysis } = normalizeLoadedLoadout(cloneValue(rawLoadout) as MateriaPipelineConfig, config.materia ?? {});
-    const loadout = sharedLoadout as PipelineConfig;
+    const loadout = toWebUiLoadoutDto(sharedLoadout) as PipelineConfig;
     for (const [socketId, node] of Object.entries(loadout.nodes ?? {})) {
       for (const [index, edge] of (node.edges ?? []).entries()) {
         if (!jsonControlConditions.has(edge.when)) continue;

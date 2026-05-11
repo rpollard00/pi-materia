@@ -72,7 +72,8 @@ describe('loadout draft mutations', () => {
     const payload = buildConfigToSave(frozen, ['Beta']);
 
     expect(payload.loadouts?.Beta).toBeNull();
-    expect(payload.loadouts?.Alpha).toMatchObject(config.loadouts.Alpha);
+    expect(payload.loadouts?.Alpha).toMatchObject({ entry: 'Socket-1', sockets: config.loadouts.Alpha.nodes });
+    expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
     expect(config.loadouts.Beta).toMatchObject({ entry: 'Socket-1' });
   });
 
@@ -91,8 +92,31 @@ describe('loadout draft mutations', () => {
     }, []);
 
     expect(payload.loadouts?.Alpha?.layout?.sockets).toEqual({ 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 9, y: 9 } });
-    expect(payload.loadouts?.Alpha?.nodes?.['Socket-1'].layout).toBeUndefined();
-    expect(payload.loadouts?.Alpha?.nodes?.['Socket-2'].layout).toBeUndefined();
+    expect(payload.loadouts?.Alpha?.sockets?.['Socket-1'].layout).toBeUndefined();
+    expect(payload.loadouts?.Alpha?.sockets?.['Socket-2'].layout).toBeUndefined();
+    expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
+  });
+
+  it('round-trips WebUI nodes to canonical sockets for save payloads', () => {
+    const payload = buildConfigToSave({
+      activeLoadout: 'Alpha',
+      materia: { planner: { prompt: 'plan', generator: true }, Build: { prompt: 'build' } },
+      loadouts: {
+        Alpha: {
+          entry: 'Socket-1',
+          nodes: {
+            'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+          },
+          loops: { work: { nodes: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+        },
+      },
+    }, []);
+
+    expect(payload.loadouts?.Alpha?.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(payload.loadouts?.Alpha?.loops?.work.sockets).toEqual(['Socket-2']);
+    expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
+    expect(payload.loadouts?.Alpha?.loops?.work).not.toHaveProperty('nodes');
   });
 
   it('chooses the next unused loadout name without filling existing gaps unexpectedly', () => {

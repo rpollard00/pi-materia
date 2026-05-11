@@ -6,6 +6,7 @@ import {
   type PipelineConfig,
 } from '../../../loadoutModel.js';
 import { buildLoadouts } from '../../utils/graphLayout.js';
+import { fromWebUiConfigDto } from '../../../../../loadoutDto.js';
 import type { LoadoutSourceScope, SaveTarget } from '../../types.js';
 
 export function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
@@ -80,7 +81,7 @@ export function buildConfigToSave(normalizedDraft: MateriaConfig, deletedLoadout
   assertValidLoadoutSaveSemantics(preparedDraft);
   const loadouts: Record<string, PipelineConfig | null> = { ...(preparedDraft.loadouts ?? {}) };
   for (const name of deletedLoadoutNames) loadouts[name] = null;
-  return { ...preparedDraft, loadouts } as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
+  return fromWebUiConfigDto({ ...preparedDraft, loadouts } as never) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
 }
 
 export function saveTargetForSource(current: SaveTarget, sourceScope: LoadoutSourceScope | undefined) {
