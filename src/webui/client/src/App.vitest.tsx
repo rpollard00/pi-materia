@@ -21,7 +21,7 @@ const testConfig = {
       entry: 'Socket-1',
       sockets: {
         'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
-        'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
+        'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 }, insertedBy: 'socket-shift' },
         'Socket-3': { type: 'agent', materia: 'Auto-Eval', parse: 'json', edges: [{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }], layout: { x: 2, y: 0 } },
         'Socket-4': { type: 'agent', materia: 'Maintain', layout: { x: 3, y: 0 } },
       },
@@ -1251,10 +1251,10 @@ describe('Materia loadout grid editor', () => {
       },
     } as never;
     const positions = new Map<string, never>([
-      ['Socket-1', { id: 'Socket-1', node: {}, index: 0, x: 320, y: 100 } as never],
-      ['Socket-2', { id: 'Socket-2', node: {}, index: 1, x: 408, y: 100 } as never],
-      ['Socket-3', { id: 'Socket-3', node: {}, index: 2, x: 496, y: 100 } as never],
-      ['Socket-4', { id: 'Socket-4', node: {}, index: 3, x: 672, y: 100 } as never],
+      ['Socket-1', { id: 'Socket-1', socket: {}, index: 0, x: 320, y: 100 } as never],
+      ['Socket-2', { id: 'Socket-2', socket: {}, index: 1, x: 408, y: 100 } as never],
+      ['Socket-3', { id: 'Socket-3', socket: {}, index: 2, x: 496, y: 100 } as never],
+      ['Socket-4', { id: 'Socket-4', socket: {}, index: 3, x: 672, y: 100 } as never],
     ]);
 
     const [region] = getLoopRegions(loadout, positions);
@@ -1280,10 +1280,10 @@ describe('Materia loadout grid editor', () => {
       },
     } as never;
     const positions = new Map<string, never>([
-      ['Socket-1', { id: 'Socket-1', node: {}, index: 0, x: 100, y: 100 } as never],
-      ['Socket-2', { id: 'Socket-2', node: {}, index: 1, x: 308, y: 100 } as never],
-      ['Socket-3', { id: 'Socket-3', node: {}, index: 2, x: 100, y: 268 } as never],
-      ['Socket-4', { id: 'Socket-4', node: {}, index: 3, x: 308, y: 268 } as never],
+      ['Socket-1', { id: 'Socket-1', socket: {}, index: 0, x: 100, y: 100 } as never],
+      ['Socket-2', { id: 'Socket-2', socket: {}, index: 1, x: 308, y: 100 } as never],
+      ['Socket-3', { id: 'Socket-3', socket: {}, index: 2, x: 100, y: 268 } as never],
+      ['Socket-4', { id: 'Socket-4', socket: {}, index: 3, x: 308, y: 268 } as never],
     ]);
 
     const [region] = getLoopRegions(loadout, positions);
@@ -1310,7 +1310,7 @@ describe('Materia loadout grid editor', () => {
   });
 
   it('routes self edges outside the socket bounds with readable label clearance', () => {
-    const socket = { id: 'Socket-1', node: { type: 'agent', materia: 'Maintain', label: 'Maintain' }, index: 0, x: 320, y: 80 } as never;
+    const socket = { id: 'Socket-1', socket: { type: 'agent', materia: 'Maintain', label: 'Maintain' }, index: 0, x: 320, y: 80 } as never;
     const positions = new Map<string, never>([['Socket-1', socket]]);
     const [route] = routeLoadoutEdges([
       { id: 'Socket-1:edge:0:Socket-1:not_satisfied', from: 'Socket-1', to: 'Socket-1', kind: 'edge', edgeIndex: 0, when: 'not_satisfied' },
@@ -1332,10 +1332,10 @@ describe('Materia loadout grid editor', () => {
 
   it('routes parallel backward, loop, nearby, and crossing edges on separate lanes', () => {
     const positions = new Map<string, never>([
-      ['Socket-1', { id: 'Socket-1', node: { type: 'agent', materia: 'Build', label: 'A' }, index: 0, x: 520, y: 0 } as never],
-      ['Socket-2', { id: 'Socket-2', node: { type: 'agent', materia: 'Build', label: 'B' }, index: 1, x: 0, y: 20 } as never],
-      ['Socket-3', { id: 'Socket-3', node: { type: 'agent', materia: 'Build', label: 'C' }, index: 2, x: 0, y: 120 } as never],
-      ['Socket-4', { id: 'Socket-4', node: { type: 'agent', materia: 'Build', label: 'D' }, index: 3, x: 520, y: 140 } as never],
+      ['Socket-1', { id: 'Socket-1', socket: { type: 'agent', materia: 'Build', label: 'A' }, index: 0, x: 520, y: 0 } as never],
+      ['Socket-2', { id: 'Socket-2', socket: { type: 'agent', materia: 'Build', label: 'B' }, index: 1, x: 0, y: 20 } as never],
+      ['Socket-3', { id: 'Socket-3', socket: { type: 'agent', materia: 'Build', label: 'C' }, index: 2, x: 0, y: 120 } as never],
+      ['Socket-4', { id: 'Socket-4', socket: { type: 'agent', materia: 'Build', label: 'D' }, index: 3, x: 520, y: 140 } as never],
     ]);
     const edges = [
       { id: 'Socket-1:edge:0:Socket-2:satisfied', from: 'Socket-1', to: 'Socket-2', kind: 'edge', edgeIndex: 0, when: 'satisfied' },
@@ -1358,9 +1358,9 @@ describe('Materia loadout grid editor', () => {
 
   it('renders edge routes as organic curves instead of right-angle-only polylines', () => {
     const positions = new Map<string, never>([
-      ['Socket-1', { id: 'Socket-1', node: { type: 'agent', materia: 'Build', label: 'A' }, index: 0, x: 0, y: 0 } as never],
-      ['Socket-2', { id: 'Socket-2', node: { type: 'agent', materia: 'Build', label: 'B' }, index: 1, x: 208, y: 0 } as never],
-      ['Socket-3', { id: 'Socket-3', node: { type: 'agent', materia: 'Build', label: 'C' }, index: 2, x: 208, y: 176 } as never],
+      ['Socket-1', { id: 'Socket-1', socket: { type: 'agent', materia: 'Build', label: 'A' }, index: 0, x: 0, y: 0 } as never],
+      ['Socket-2', { id: 'Socket-2', socket: { type: 'agent', materia: 'Build', label: 'B' }, index: 1, x: 208, y: 0 } as never],
+      ['Socket-3', { id: 'Socket-3', socket: { type: 'agent', materia: 'Build', label: 'C' }, index: 2, x: 208, y: 176 } as never],
     ]);
     const sameRow = routeLoadoutEdges([{ id: 'Socket-1:edge:0:Socket-2:always', from: 'Socket-1', to: 'Socket-2', edgeIndex: 0, when: 'always' }] as never, positions)[0];
     const rowTransition = routeLoadoutEdges([{ id: 'Socket-2:edge:0:Socket-3:always', from: 'Socket-2', to: 'Socket-3', edgeIndex: 0, when: 'always' }] as never, positions)[0];
@@ -1646,7 +1646,7 @@ describe('Materia loadout grid editor', () => {
     expect(savedBuild.edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(savedBuild.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
-    expect(savedBuild.insertedBy).toBe('node-shift');
+    expect(savedBuild.insertedBy).toBe('socket-shift');
   });
 
   it('preserves socket graph structure when dragging materia between sockets', async () => {
@@ -1671,7 +1671,7 @@ describe('Materia loadout grid editor', () => {
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(saved['Socket-2'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
-    expect(saved['Socket-2'].insertedBy).toBe('node-shift');
+    expect(saved['Socket-2'].insertedBy).toBe('socket-shift');
     expect(saved['Socket-4'].materia).toBe('Build');
     expect(saved['Socket-4'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-4']).toEqual({ x: 3, y: 0 });
@@ -1729,7 +1729,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
     const savedBuild = savedLoadout.sockets['Socket-2'];
-    expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'node-shift' });
+    expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'socket-shift' });
     expect(savedBuild.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
     expect(savedBuild.materia).toBeUndefined();
@@ -1755,7 +1755,7 @@ describe('Materia loadout grid editor', () => {
     await waitForConfigPostCount(fetchMock, 1);
     const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const savedBuild = savedLoadout.sockets['Socket-2'];
-    expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'node-shift' });
+    expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'socket-shift' });
     expect(savedBuild.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
     expect(savedBuild.materia).toBeUndefined();
@@ -1807,7 +1807,7 @@ describe('Materia loadout grid editor', () => {
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(saved['Socket-2'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
-    expect(saved['Socket-2'].insertedBy).toBe('node-shift');
+    expect(saved['Socket-2'].insertedBy).toBe('socket-shift');
     expect(saved['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }]);
   });
 
@@ -1855,7 +1855,7 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedLoadout = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
     const saved = savedLoadout.sockets;
-    expect(saved['Socket-2']).toMatchObject({ materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'node-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 } });
+    expect(saved['Socket-2']).toMatchObject({ materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'socket-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 } });
     expect(saved['Socket-2'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 4, y: 1.5 });
     expect(saved['Socket-1'].layout).toBeUndefined();
@@ -1911,7 +1911,7 @@ describe('Materia loadout grid editor', () => {
     expect(savedBuild.edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(savedBuild.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 1, y: 0 });
-    expect(savedBuild.insertedBy).toBe('node-shift');
+    expect(savedBuild.insertedBy).toBe('socket-shift');
   });
 
   it('renders socketed materia with the same configured color as its palette materia after drop', async () => {
@@ -2202,9 +2202,9 @@ describe('Materia loadout grid editor', () => {
 
   it('removes a legacy default flow without dropping conditional edges or sockets', async () => {
     const config = structuredClone(edgeEditorConfig);
-    const startNode = config.loadouts.Edges.sockets['Socket-1'] as typeof config.loadouts.Edges.sockets['Socket-1'] & { next?: string };
-    startNode.next = 'Socket-2';
-    startNode.edges = [{ to: 'Socket-3', when: 'satisfied' }];
+    const startSocket = config.loadouts.Edges.sockets['Socket-1'] as typeof config.loadouts.Edges.sockets['Socket-1'] & { next?: string };
+    startSocket.next = 'Socket-2';
+    startSocket.edges = [{ to: 'Socket-3', when: 'satisfied' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -2902,15 +2902,15 @@ describe('Materia loadout grid editor', () => {
       ok: true,
       now: 61_000,
       uiStartedAt: 1_000,
-      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentNode: 'Socket-2', currentMateria: 'Build', nodeState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
-      emittedOutputs: [{ id: 'entry-1', type: 'pi-materia', text: 'Build · materia_prompt', timestamp: 61_000, node: 'Build' }],
-      artifactSummary: { runDir: '/tmp/run', summary: 'Completed nodes: planner', outputs: [{ node: 'Build', kind: 'node_output', artifact: 'nodes/Build/1.md', content: 'built' }] },
+      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentSocketId: 'Socket-2', currentMateria: 'Build', socketState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
+      emittedOutputs: [{ id: 'entry-1', type: 'pi-materia', text: 'Build · materia_prompt', timestamp: 61_000, socket: 'Build' }],
+      artifactSummary: { runDir: '/tmp/run', summary: 'Completed sockets: planner', outputs: [{ socket: 'Build', kind: 'socket_output', artifact: 'sockets/Build/1.md', content: 'built' }] },
     }) }));
 
     await waitFor(() => expect(screen.getByTestId('socket-Socket-2').className).toContain('materia-socket-active'));
     await openTab('Monitoring');
     expect(await screen.findByText('awaiting_agent_response')).toBeTruthy();
-    expect(screen.getByText('Completed nodes: planner')).toBeTruthy();
+    expect(screen.getByText('Completed sockets: planner')).toBeTruthy();
   });
 
   it('raises one deduped toast when an observed active cast completes', async () => {
@@ -2932,7 +2932,7 @@ describe('Materia loadout grid editor', () => {
       ok: true,
       now: 61_000,
       uiStartedAt: 1_000,
-      activeCast: { castId: 'stale-cast', active: false, phase: 'complete', currentNode: 'Socket-2', currentMateria: 'Build', nodeState: 'complete', awaitingResponse: false, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
+      activeCast: { castId: 'stale-cast', active: false, phase: 'complete', currentSocketId: 'Socket-2', currentMateria: 'Build', socketState: 'complete', awaitingResponse: false, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
     }) }));
     expect(await screen.findByText('complete')).toBeTruthy();
     expect(screen.queryByText('Cast completed')).toBeNull();
@@ -2941,7 +2941,7 @@ describe('Materia loadout grid editor', () => {
       ok: true,
       now: 62_000,
       uiStartedAt: 1_000,
-      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentNode: 'Socket-2', currentMateria: 'Build', nodeState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 62_000 },
+      activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentSocketId: 'Socket-2', currentMateria: 'Build', socketState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 62_000 },
     }) }));
     await screen.findByText('awaiting_agent_response');
 
@@ -2949,7 +2949,7 @@ describe('Materia loadout grid editor', () => {
       ok: true,
       now: 63_000,
       uiStartedAt: 1_000,
-      activeCast: { castId: 'cast-1', active: false, phase: 'complete', currentNode: 'Socket-2', currentMateria: 'Build', nodeState: 'complete', awaitingResponse: false, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 63_000 },
+      activeCast: { castId: 'cast-1', active: false, phase: 'complete', currentSocketId: 'Socket-2', currentMateria: 'Build', socketState: 'complete', awaitingResponse: false, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 63_000 },
     };
     listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify(completedSnapshot) }));
     listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify(completedSnapshot) }));

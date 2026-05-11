@@ -69,11 +69,11 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(prompt).toContain("You are the pi-materia planning materia");
     expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
     expectPromptIncludesCentralHandoffContract(prompt);
-    expect(prompt).toContain("Final output format: Return only JSON for this node");
+    expect(prompt).toContain("Final output format: Return only JSON for this socket");
     expect(prompt).toContain("emit generated work units as workItems");
   });
 
-  test("injects current workItem and global guidance into plain-text agent node prompts", async () => {
+  test("injects current workItem and global guidance into plain-text agent socket prompts", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
@@ -263,7 +263,7 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(finalizationPrompt).toContain("Synthetic context exposure policy");
     expect(finalizationPrompt).toContain("Do not expose it during multi-turn refinement");
     expectPromptIncludesCentralHandoffContract(finalizationPrompt);
-    expect(finalizationPrompt).toContain("Final output format: Return only JSON for this node");
+    expect(finalizationPrompt).toContain("Final output format: Return only JSON for this socket");
     expect(finalizationPrompt).toContain("Generated units of work belong in workItems, never tasks");
   });
 

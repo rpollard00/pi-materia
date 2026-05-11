@@ -52,7 +52,7 @@ Primary lifecycle:
 
 1. `/materia cast` loads config (`loadConfig`) and resolves pipeline (`resolvePipeline`).
 2. `startNativeCast` creates artifact directories, writes `config.resolved.json`, `manifest.json`, `usage.json`, and `events.jsonl`, appends session state, updates UI, then starts the entry socket.
-3. `startSocket` sets current socket/socket state, records node_start, checks limits, selects current loop item, then either:
+3. `startSocket` sets current socket/socket state, records socket_start, checks limits, selects current loop item, then either:
    - executes a utility socket locally and completes it, or
    - applies model/tool settings and sends an isolated agent prompt.
 4. `sendMateriaTurn` stores the hidden prompt, may compact proactively, writes a context artifact, emits visible and hidden Pi messages, and triggers the Pi agent turn.
@@ -105,7 +105,7 @@ Primary types in `src/types.ts`:
 - `PiMateriaConfig`: artifact/budget/limits/compaction, reusable `materia`, named `loadouts`, `activeLoadout`.
 - `MateriaConfig`: reusable agent or utility behavior definition.
 - `MateriaPipelineConfig`: active loadout graph with `entry`, `sockets`, `layout`, and `loops`.
-- `MateriaPipelineNodeConfig`: agent/utility socket config with parse, assign, edges, foreach, advance, limits, and legacy layout.
+- `MateriaPipelineSocketConfig`: agent/utility socket config with parse, assign, edges, foreach, advance, limits, and legacy layout.
 - `ResolvedMateriaPipeline` / `ResolvedMateriaNode`: runtime graph after resolving socket references to reusable materia.
 - `MateriaCastState`: persisted runtime cast state, including current socket/socket, data, cursors, visits, recovery state, usage run state, and resolved pipeline.
 - `HandoffEnvelope`/`HandoffWorkItem` in `handoffContract.ts`: canonical inter-socket payload.
@@ -223,22 +223,22 @@ Notable boundary leaks/cycles to address during extraction:
 
 No obvious import cycle was observed from the current source import map, but several modules have reversed or too-broad dependency direction for the target architecture.
 
-## Legacy `nodes` compatibility and socket migration points
+## Socket terminology migration points
 
-The canonical core model is now socket-first. Remaining `node`/`nodes` spellings are compatibility seams for saved casts, WebUI monitor/plugin status DTOs, artifact paths, and event names:
+The canonical core model is socket-first:
 
-- `MateriaPipelineConfig.sockets` is the canonical graph map in config/defaults and user/project configs; legacy loadout-level `nodes` input is rejected at schema/config/WebUI save edges with guidance to use `sockets`.
+- `MateriaPipelineConfig.sockets` is the canonical graph map in config/defaults and user/project configs.
 - `ResolvedMateriaPipeline.sockets`, socket ids, visits, edge traversals, task attempts, and loop membership are canonical runtime concepts.
-- Persisted compatibility DTO fields such as `MateriaCastState.currentNode`, `nodeState`, `UsageReport.byNode`, manifest `node`, and stable event names like `node_start`/`node_complete` remain legacy-only surfaces whose values are socket ids.
-- Artifact layout still uses `nodes/<socket-id>/...` for saved-tooling compatibility.
-- WebUI/server monitor DTOs may continue to expose legacy field names until a separate monitor contract migration is planned; WebUI config/loadout DTOs are socket-only.
+- Persisted DTO fields such as `MateriaCastState.currentSocketId`, `currentSocketState`, `UsageReport.bySocket`, manifest `socket`, and event names like `socket_start`/`socket_complete` use canonical socket terminology.
+- Artifact layout uses `sockets/<socket-id>/...`.
+- WebUI/server monitor and config/loadout DTOs are socket-only.
 
 Migration intent:
 
 - New domain/application APIs use socket terminology (`socketId`, `sockets`, socket state).
-- Legacy loadout `nodes` persisted fields are no longer readable through schema adapters; update saved loadouts to `sockets`.
-- Public DTOs consumed by WebUI config save/load paths are socket-only; saved cast artifacts and monitor surfaces still use legacy field names where compatibility is intentionally preserved.
-- Artifact directory/event field renames, if any, require explicit compatibility strategy and fixture tests.
+- Persisted loadouts use `sockets`.
+- Public DTOs consumed by WebUI config save/load paths are socket-only.
+- Artifact directory/event fields use socket names and should stay aligned with fixture tests.
 
 ## Target dependency direction
 

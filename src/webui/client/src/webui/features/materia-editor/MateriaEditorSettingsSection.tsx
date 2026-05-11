@@ -23,7 +23,7 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
       <p className="materia-form-section-title">Settings</p>
       <div className="materia-compact-grid">
         <label className="graph-field">Edit existing
-          <select data-testid="edit-materia-select" value={materiaForm.editingNodeId} onChange={(event) => event.target.value ? editMateria(event.target.value) : resetMateriaEditorForm()}>
+          <select data-testid="edit-materia-select" value={materiaForm.editingSocketId} onChange={(event) => event.target.value ? editMateria(event.target.value) : resetMateriaEditorForm()}>
             <option value="">new materia…</option>
             {editableDefinitionIds.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>

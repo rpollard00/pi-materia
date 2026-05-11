@@ -6,14 +6,14 @@ import type { MateriaEdgeCondition } from '../../../../../types.js';
 import {
   extractMateriaReference,
   formatSocketLabel,
-  getNodeLabel,
+  getSocketLabel,
   getSocketLayout,
   isEmptySocket,
   resolveSocketDisplayLabel,
-  type LegacyPipelineNode,
+  type LegacyPipelineSocket,
   type MateriaConfig,
   type PipelineConfig,
-  type PipelineNode,
+  type PipelineSocket,
 } from '../../loadoutModel.js';
 import {
   edgeConditionLabels,
@@ -80,19 +80,19 @@ export function materiaGeneratorOutput(definition?: NonNullable<MateriaConfig['m
   return canonicalGeneratorConfigFor(definition)?.output;
 }
 
-export function isGeneratorSocket(node?: PipelineNode, definitions?: MateriaConfig['materia']): boolean {
-  const referenced = extractMateriaReference(node);
+export function isGeneratorSocket(socket?: PipelineSocket, definitions?: MateriaConfig['materia']): boolean {
+  const referenced = extractMateriaReference(socket);
   return Boolean(referenced && materiaGeneratorOutput(definitions?.[referenced.materia]));
 }
 
-export function hasIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia']): boolean {
-  if (node?.foreach) return true;
-  const referenced = extractMateriaReference(node);
+export function hasIteratorBehavior(socket?: PipelineSocket, definitions?: MateriaConfig['materia']): boolean {
+  if (socket?.foreach) return true;
+  const referenced = extractMateriaReference(socket);
   return Boolean(referenced && (definitions?.[referenced.materia]?.foreach || materiaGeneratorOutput(definitions?.[referenced.materia])));
 }
 
-export function formatIteratorBehavior(node?: PipelineNode, definitions?: MateriaConfig['materia']): string {
-  const referenced = extractMateriaReference(node);
+export function formatIteratorBehavior(socket?: PipelineSocket, definitions?: MateriaConfig['materia']): string {
+  const referenced = extractMateriaReference(socket);
   const definition = referenced ? definitions?.[referenced.materia] : undefined;
   const generatorOutput = materiaGeneratorOutput(definition);
   if (generatorOutput) {
@@ -101,7 +101,7 @@ export function formatIteratorBehavior(node?: PipelineNode, definitions?: Materi
       ? 'Generator: canonical workItems output'
       : `Generator: migration-only ${generatorOutput}${generatorConfig?.itemType ? ` (${generatorConfig.itemType} list)` : ''}`;
   }
-  const foreach = node?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
+  const foreach = socket?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
   if (foreach) return `Iterator: ${foreach.items}${foreach.as ? ` as ${foreach.as}` : ''}${foreach.done ? ` until ${foreach.done}` : ''}`;
   return 'Iterator materia';
 }
@@ -142,8 +142,8 @@ function loopExitSummariesForSocket(loadout: PipelineConfig | undefined, socketI
 function generatorLoopOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
   const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.sockets.includes(edge.to));
   if (!loop) return undefined;
-  const fromNode = loadout?.sockets?.[edge.from];
-  const referenced = extractMateriaReference(fromNode);
+  const fromSocket = loadout?.sockets?.[edge.from];
+  const referenced = extractMateriaReference(fromSocket);
   const output = referenced ? materiaGeneratorOutput(definitions?.[referenced.materia]) : undefined;
   if (output) return output;
   return loop.consumes?.from === edge.from ? loop.consumes.output ?? 'workItems' : undefined;
@@ -154,9 +154,9 @@ function generatorEdgeOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: Pi
 }
 
 function generatorToGeneratorOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
-  const fromNode = loadout?.sockets?.[edge.from];
-  const toNode = loadout?.sockets?.[edge.to];
-  return isGeneratorSocket(fromNode, definitions) && isGeneratorSocket(toNode, definitions) ? 'workItems' : undefined;
+  const fromSocket = loadout?.sockets?.[edge.from];
+  const toSocket = loadout?.sockets?.[edge.to];
+  return isGeneratorSocket(fromSocket, definitions) && isGeneratorSocket(toSocket, definitions) ? 'workItems' : undefined;
 }
 
 export function isGeneratorOutputEdge(edge: Pick<LoadoutEdge, 'from' | 'to'> & { kind?: LoadoutEdge['kind'] }, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): boolean {
@@ -194,20 +194,20 @@ function summarizeHoverText(value?: unknown): string | undefined {
   return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
 }
 
-export function buildSocketHoverDetails(id: string, node?: PipelineNode, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig): string {
-  const lines = [`Socket: ${id}`, `Display: ${formatSocketLabel(id, node)}`];
-  if (isEmptySocket(node)) return [...lines, 'Empty socket'].join('\n');
+export function buildSocketHoverDetails(id: string, socket?: PipelineSocket, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig): string {
+  const lines = [`Socket: ${id}`, `Display: ${formatSocketLabel(id, socket)}`];
+  if (isEmptySocket(socket)) return [...lines, 'Empty socket'].join('\n');
 
-  const label = getNodeLabel(id, node);
+  const label = getSocketLabel(id, socket);
   lines.push(`Label: ${label}`);
-  if (hasIteratorBehavior(node, definitions)) lines.push(formatIteratorBehavior(node, definitions));
+  if (hasIteratorBehavior(socket, definitions)) lines.push(formatIteratorBehavior(socket, definitions));
   const loopConsumer = loopConsumerForSocket(loadout, id, definitions);
   if (loopConsumer) lines.push(loopConsumer);
   lines.push(...loopExitSummariesForSocket(loadout, id));
-  if (node?.type) lines.push(`Type: ${node.type}`);
-  if (node?.type === 'agent' && node.materia) {
-    lines.push(`Materia: ${node.materia}`);
-    const definition = definitions?.[node.materia];
+  if (socket?.type) lines.push(`Type: ${socket.type}`);
+  if (socket?.type === 'agent' && socket.materia) {
+    lines.push(`Materia: ${socket.materia}`);
+    const definition = definitions?.[socket.materia];
     if (definition?.model) lines.push(`Model: ${definition.model}`);
     if (definition?.tools) lines.push(`Tools: ${definition.tools}`);
     if (definition?.thinking) lines.push(`Thinking: ${definition.thinking}`);
@@ -215,24 +215,24 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
     const prompt = summarizeHoverText(definition?.prompt);
     if (prompt) lines.push(`Prompt: ${prompt}`);
   }
-  if (node?.type === 'utility') {
-    if (node.utility) lines.push(`Utility: ${node.utility}`);
-    if (node.command?.length) lines.push(`Command: ${node.command.join(' ')}`);
+  if (socket?.type === 'utility') {
+    if (socket.utility) lines.push(`Utility: ${socket.utility}`);
+    if (socket.command?.length) lines.push(`Command: ${socket.command.join(' ')}`);
   }
-  if (node?.edges?.length) {
-    lines.push(`Edges: ${node.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when, kind: 'normal' }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.sockets?.[edge.to])}`).join(', ')}`);
+  if (socket?.edges?.length) {
+    lines.push(`Edges: ${socket.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when, kind: 'normal' }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.sockets?.[edge.to])}`).join(', ')}`);
   }
   const loopExitRoutes = Object.entries(loadout?.loops ?? {}).flatMap(([, loop]) => (loop.exits ?? []).filter((route) => route.from === id && loadout?.sockets?.[route.targetSocketId]));
   if (loopExitRoutes.length) {
     lines.push(`Loop-exit routes: ${loopExitRoutes.map((route) => `${loopExitEdgeLabel(route.condition)} → ${formatSocketLabel(route.targetSocketId, loadout?.sockets?.[route.targetSocketId])}`).join(', ')}`);
   }
-  const legacyNext = (node as LegacyPipelineNode | undefined)?.next;
+  const legacyNext = (socket as LegacyPipelineSocket | undefined)?.next;
   if (legacyNext) lines.push(`Legacy flow: Always → ${legacyNext}`);
-  if (node?.limits) {
+  if (socket?.limits) {
     const limits = [
-      node.limits.maxVisits !== undefined ? `max visits ${node.limits.maxVisits}` : undefined,
-      node.limits.maxEdgeTraversals !== undefined ? `max edge traversals ${node.limits.maxEdgeTraversals}` : undefined,
-      node.limits.maxOutputBytes !== undefined ? `max output bytes ${node.limits.maxOutputBytes}` : undefined,
+      socket.limits.maxVisits !== undefined ? `max visits ${socket.limits.maxVisits}` : undefined,
+      socket.limits.maxEdgeTraversals !== undefined ? `max edge traversals ${socket.limits.maxEdgeTraversals}` : undefined,
+      socket.limits.maxOutputBytes !== undefined ? `max output bytes ${socket.limits.maxOutputBytes}` : undefined,
     ].filter(Boolean);
     if (limits.length) lines.push(`Limits: ${limits.join(', ')}`);
   }
@@ -246,11 +246,11 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
 export function getLoadoutEdges(loadout: PipelineConfig | undefined): LoadoutEdge[] {
   const sockets = loadout?.sockets ?? {};
   const edges: LoadoutEdge[] = [];
-  for (const [from, node] of Object.entries(sockets)) {
-    for (const [index, edge] of (node.edges ?? []).entries()) {
+  for (const [from, socket] of Object.entries(sockets)) {
+    for (const [index, edge] of (socket.edges ?? []).entries()) {
       if (sockets[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when}`, from, to: edge.to, when: edge.when, kind: 'normal', edgeIndex: index });
     }
-    const legacyNext = (node as LegacyPipelineNode).next;
+    const legacyNext = (socket as LegacyPipelineSocket).next;
     if (typeof legacyNext === 'string' && sockets[legacyNext]) {
       edges.push({ id: `${from}:legacy-next:${legacyNext}`, from, to: legacyNext, when: 'always', kind: 'legacy-next' });
     }
@@ -501,7 +501,7 @@ export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, P
   }).filter((route): route is RoutedLoadoutEdge => Boolean(route));
 }
 
-function getAutomaticSocketOrder(entries: Array<[string, PipelineNode]>, edges: LoadoutEdge[], entryId?: string) {
+function getAutomaticSocketOrder(entries: Array<[string, PipelineSocket]>, edges: LoadoutEdge[], entryId?: string) {
   const entryIds = entries.map(([id]) => id);
   const knownIds = new Set(entryIds);
   const visited = new Set<string>();
@@ -581,7 +581,7 @@ export function formatLoopDisplayLabel(loadout: PipelineConfig | undefined, loop
 
 export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>, definitions?: MateriaConfig['materia']): LoopRegion[] {
   return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop], index) => {
-    const sockets = loop.sockets.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
+    const sockets = loop.sockets.map((socketId) => positions.get(socketId)).filter(Boolean) as PositionedSocket[];
     if (sockets.length === 0) return [];
     const minX = Math.min(...sockets.map((socket) => socket.x));
     const minY = Math.min(...sockets.map((socket) => socket.y));
@@ -643,14 +643,14 @@ export function layoutSockets(loadout?: PipelineConfig, semanticEdges?: LoadoutE
     return typeof layout?.x === 'number' || typeof layout?.y === 'number';
   });
   const autoRowGap = hasExplicitLayout ? socketLayoutUnitY + 8 : socketLayoutRowGap;
-  let sockets: PositionedSocket[] = entries.map(([id, node], index) => {
+  let sockets: PositionedSocket[] = entries.map(([id, socket], index) => {
     const autoPosition = serpentineAutoPosition(autoIndexById.get(id) ?? index, autoRowGap);
     const layout = getSocketLayout(loadout, id);
     const explicitX = typeof layout?.x === 'number' ? layoutUnit(layout.x, socketLayoutUnitX) : undefined;
     const explicitY = typeof layout?.y === 'number' ? layoutUnit(layout.y, socketLayoutUnitY) : undefined;
     return {
       id,
-      node,
+      socket,
       index,
       x: socketLayoutOffsetX + (explicitX ?? autoPosition.x),
       y: socketLayoutOffsetY + (explicitY ?? autoPosition.y),

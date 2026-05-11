@@ -71,7 +71,7 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 
 pi-materia reports the config source, artifact directory, active loadout, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full materia prompts are hidden behind compact Materia cast messages, and each materia turn receives a curated Materia context instead of the full previous conversation.
 
-Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current socket. Use `/materia revive [cast-id]` only when a cast failed because same-node recovery exhausted its structured attempt allowance (for example, repeated context-window recovery failures). Revive first increases the exhausted recovery context's effective allowance by the original max-attempt value, then delegates to the normal recast path; repeated revives are additive (`original + original` each time), not exponential, and the bump is scoped to that one exhausted node/item context. Other terminal failures are not revivable; use `/materia recast` for general failed or aborted casts.
+Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current socket. Use `/materia revive [cast-id]` only when a cast failed because same-socket recovery exhausted its structured attempt allowance (for example, repeated context-window recovery failures). Revive first increases the exhausted recovery context's effective allowance by the original max-attempt value, then delegates to the normal recast path; repeated revives are additive (`original + original` each time), not exponential, and the bump is scoped to that one exhausted socket/item context. Other terminal failures are not revivable; use `/materia recast` for general failed or aborted casts.
 
 Use `/materia ui` to start or reuse a background WebUI server scoped to the current Pi session. It prints a clickable local URL. Browser auto-open is disabled by default and can be enabled in `~/.config/pi/pi-materia/config.json` with `{ "webui": { "autoOpenBrowser": true } }`; `preferredPort` and `host` are also supported.
 
@@ -87,7 +87,7 @@ Use `/materia loadout` to list configured graph loadouts and mark the active one
 
 Usage costs are reported in USD from Pi assistant-message usage metadata. When Pi provides a total cost, Materia preserves that total; otherwise it sums the available input/output/cache cost components.
 
-Attempt counts are per exact Materia work-item identity: the socket id plus the current `foreach` item key, or a singleton key for non-`foreach` sockets. A retry/self-loop of the same socket/item increments the attempt; moving to a different `foreach` item or another socket starts at attempt 1. Socket visit counts are used for visit limits; legacy artifact paths still use `nodes/` for saved-tooling compatibility.
+Attempt counts are per exact Materia work-item identity: the socket id plus the current `foreach` item key, or a singleton key for non-`foreach` sockets. A retry/self-loop of the same socket/item increments the attempt; moving to a different `foreach` item or another socket starts at attempt 1. Socket visit counts are used for visit limits, and cast artifacts are written under `sockets/` paths.
 
 ## Configuration
 

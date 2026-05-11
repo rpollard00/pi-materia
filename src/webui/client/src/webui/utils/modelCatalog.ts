@@ -88,11 +88,11 @@ export function thinkingLabel(level: string): string {
   return thinkingLevelLabels[level] ?? level;
 }
 
-function isOriginalSavedThinking(form: Pick<MateriaFormState, 'editingNodeId'>, original: OriginalMateriaModelSettings | undefined, modelValue: string, thinkingValue: string): boolean {
-  return Boolean(original && form.editingNodeId === original.editingNodeId && modelValue.trim() === original.model && thinkingValue.trim() === original.thinking && original.thinking);
+function isOriginalSavedThinking(form: Pick<MateriaFormState, 'editingSocketId'>, original: OriginalMateriaModelSettings | undefined, modelValue: string, thinkingValue: string): boolean {
+  return Boolean(original && form.editingSocketId === original.editingSocketId && modelValue.trim() === original.model && thinkingValue.trim() === original.thinking && original.thinking);
 }
 
-export function canKeepThinkingForModel(catalog: ModelCatalogResponse, modelValue: string, thinkingValue: string, form: Pick<MateriaFormState, 'editingNodeId'>, original: OriginalMateriaModelSettings | undefined): boolean {
+export function canKeepThinkingForModel(catalog: ModelCatalogResponse, modelValue: string, thinkingValue: string, form: Pick<MateriaFormState, 'editingSocketId'>, original: OriginalMateriaModelSettings | undefined): boolean {
   const normalizedThinking = thinkingValue.trim();
   if (!normalizedThinking) return true;
   const supported = supportedThinkingLevelsForSelection(catalog, modelValue);
@@ -110,7 +110,7 @@ export function modelSelectOptions(catalog: ModelCatalogResponse, original: Orig
   return options;
 }
 
-export function thinkingSelectOptions(catalog: ModelCatalogResponse, form: Pick<MateriaFormState, 'editingNodeId' | 'model' | 'thinking'>, original: OriginalMateriaModelSettings | undefined): SelectOption[] {
+export function thinkingSelectOptions(catalog: ModelCatalogResponse, form: Pick<MateriaFormState, 'editingSocketId' | 'model' | 'thinking'>, original: OriginalMateriaModelSettings | undefined): SelectOption[] {
   const supported = supportedThinkingLevelsForSelection(catalog, form.model);
   const options: SelectOption[] = [
     { value: '', label: activeThinkingOptionLabel },

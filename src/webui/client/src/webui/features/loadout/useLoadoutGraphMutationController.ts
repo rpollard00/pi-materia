@@ -8,9 +8,9 @@ import {
   extractMateriaReference,
   findLoopExitConnectionContext,
   getSocketLayout,
-  type LegacyPipelineNode,
+  type LegacyPipelineSocket,
   type PipelineConfig,
-  type PipelineNode,
+  type PipelineSocket,
 } from '../../../loadoutModel.js';
 import {
   addEdgeToLoadout,
@@ -35,7 +35,7 @@ import {
   emptySocketPropertyForm,
   parseOptionalFiniteNumber,
   parseOptionalPositiveInteger,
-  socketPropertyFormFromNode,
+  socketPropertyFormFromSocket,
 } from '../../utils/forms.js';
 import {
   edgeConditionLabel,
@@ -57,7 +57,7 @@ export interface LoadoutGraphMutationControllerOptions {
   activeLoadout: PipelineConfig | undefined;
   activeLoadoutName: string;
   loadoutGraph: { edges: LoadoutEdge[] };
-  materia: Record<string, PipelineNode>;
+  materia: Record<string, PipelineSocket>;
   selectedLoopSockets: Array<{ id: string }>;
   setSelectedLoopSocketIds: Dispatch<SetStateAction<string[]>>;
   setStatus: (status: string) => void;
@@ -100,9 +100,9 @@ export function useLoadoutGraphMutationController({
   }
 
   function deleteSocket(socketId: string) {
-    const node = activeLoadout?.sockets?.[socketId];
-    if (!node || !activeLoadoutName) return false;
-    if (!canDeleteSocket(node)) {
+    const socket = activeLoadout?.sockets?.[socketId];
+    if (!socket || !activeLoadoutName) return false;
+    if (!canDeleteSocket(socket)) {
       setStatus(`Cannot delete ${socketId}: entry sockets are protected.`);
       return false;
     }
@@ -139,7 +139,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function openSocketPropertyEditor(socketId: string) {
-    setSocketPropertyForm(socketPropertyFormFromNode(activeLoadout?.sockets?.[socketId], getSocketLayout(activeLoadout, socketId)));
+    setSocketPropertyForm(socketPropertyFormFromSocket(activeLoadout?.sockets?.[socketId], getSocketLayout(activeLoadout, socketId)));
     setSocketPropertyError('');
     setEdgeMutationError('');
     openSocketActionModal(socketId, 'edit');
@@ -156,8 +156,8 @@ export function useLoadoutGraphMutationController({
   function commitGraphMutation(description: string, transform: LoadoutTransform, onSuccess: string, onError: (message: string) => string) {
     if (!activeLoadoutName || !activeLoadout) return false;
     const result = stageValidatedWebUiLoadoutTransform(activeLoadout, transform, {
-      isGeneratorNode: (nodeId) => {
-        const referenced = extractMateriaReference(activeLoadout.sockets?.[nodeId]);
+      isGeneratorSocket: (socketId) => {
+        const referenced = extractMateriaReference(activeLoadout.sockets?.[socketId]);
         return Boolean(referenced && materiaGeneratorOutput(materia[referenced.materia]));
       },
     });
@@ -334,7 +334,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function removeLegacyNextEdge(from: string) {
-    const to = (activeLoadout?.sockets?.[from] as LegacyPipelineNode | undefined)?.next;
+    const to = (activeLoadout?.sockets?.[from] as LegacyPipelineSocket | undefined)?.next;
     if (!to) return;
     const removed = commitGraphMutation(
       `Removed legacy flow ${from} → ${to}.`,
@@ -360,7 +360,7 @@ export function useLoadoutGraphMutationController({
       return;
     }
 
-    const limits: PipelineNode['limits'] = {};
+    const limits: PipelineSocket['limits'] = {};
     if (maxVisits !== undefined) limits.maxVisits = maxVisits;
     if (maxEdgeTraversals !== undefined) limits.maxEdgeTraversals = maxEdgeTraversals;
     if (maxOutputBytes !== undefined) limits.maxOutputBytes = maxOutputBytes;
@@ -369,10 +369,10 @@ export function useLoadoutGraphMutationController({
     if (layoutX !== undefined) layout.x = layoutX;
     if (layoutY !== undefined) layout.y = layoutY;
     const nextLayout = Object.keys(layout).length > 0 ? layout : undefined;
-    const currentNode = activeLoadout.sockets[socketId];
-    const limitsChanged = (currentNode.limits?.maxVisits ?? undefined) !== (nextLimits?.maxVisits ?? undefined)
-      || (currentNode.limits?.maxEdgeTraversals ?? undefined) !== (nextLimits?.maxEdgeTraversals ?? undefined)
-      || (currentNode.limits?.maxOutputBytes ?? undefined) !== (nextLimits?.maxOutputBytes ?? undefined);
+    const currentSocket = activeLoadout.sockets[socketId];
+    const limitsChanged = (currentSocket.limits?.maxVisits ?? undefined) !== (nextLimits?.maxVisits ?? undefined)
+      || (currentSocket.limits?.maxEdgeTraversals ?? undefined) !== (nextLimits?.maxEdgeTraversals ?? undefined)
+      || (currentSocket.limits?.maxOutputBytes ?? undefined) !== (nextLimits?.maxOutputBytes ?? undefined);
     const currentLayout = getSocketLayout(activeLoadout, socketId);
     const layoutChanged = (currentLayout?.x ?? undefined) !== (nextLayout?.x ?? undefined) || (currentLayout?.y ?? undefined) !== (nextLayout?.y ?? undefined);
 

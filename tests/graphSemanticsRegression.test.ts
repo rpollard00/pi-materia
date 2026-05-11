@@ -162,9 +162,9 @@ describe("graph semantics regression", () => {
     });
     expect(state.cursors?.taskIndex).toBe(2);
     await expect(readFile(path.join(harness.cwd, ".gitignore"), "utf8")).resolves.toContain(".pi/pi-materia/");
-    const alphaRetryInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-4", "2-alpha.input.json"), "utf8"));
+    const alphaRetryInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-alpha.input.json"), "utf8"));
     expect(alphaRetryInput.itemKey).toBe("alpha");
-    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-4", "3-beta.input.json"), "utf8"));
+    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "3-beta.input.json"), "utf8"));
     expect(betaInput.itemKey).toBe("beta");
   });
 });

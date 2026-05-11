@@ -48,7 +48,7 @@ describe("core plugin characterization", () => {
     expect(state).toBeDefined();
     expect(state?.active).toBe(true);
     expect(state?.request).toBe("preserve observable startup");
-    expect(state?.currentNode).toBe("Socket-1");
+    expect(state?.currentSocketId).toBe("Socket-1");
     expect(state?.currentMateria).toBe("Build");
     expect(state?.awaitingResponse).toBe(true);
     expect(state?.artifactRoot).toBe(path.join(harness.cwd, ".pi/pi-materia-test-artifacts"));
@@ -99,7 +99,7 @@ describe("core plugin characterization", () => {
     });
 
     await harness.runCommand("materia", "cast route one item");
-    expect(loadActiveCastState(harness.ctx)?.currentNode).toBe("Socket-1");
+    expect(loadActiveCastState(harness.ctx)?.currentSocketId).toBe("Socket-1");
     harness.appendAssistantMessage(JSON.stringify({
       summary: "one item planned",
       workItems: [{ id: "wi-1", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "thin adapters", constraints: [], dependencies: [], risks: [] } }],
@@ -116,7 +116,7 @@ describe("core plugin characterization", () => {
 
     const state = loadActiveCastState(harness.ctx);
     expect(state?.active).toBe(true);
-    expect(state?.currentNode).toBe("Socket-2");
+    expect(state?.currentSocketId).toBe("Socket-2");
     expect(state?.currentItemKey).toBe("wi-1");
     expect(state?.data.summary).toBe("one item planned");
     expect(state?.data.workItems).toEqual([{ id: "wi-1", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "thin adapters", constraints: [], dependencies: [], risks: [] } }]);
@@ -137,7 +137,7 @@ describe("core plugin characterization", () => {
     expect(buildPrompt).toContain("Global guidance JSON");
     expect(buildPrompt).toContain("core only");
 
-    const jsonArtifact = JSON.parse(await readFile(path.join(state!.runDir, "nodes", "Socket-1", "1.json"), "utf8"));
+    const jsonArtifact = JSON.parse(await readFile(path.join(state!.runDir, "sockets", "Socket-1", "1.json"), "utf8"));
     expect(jsonArtifact.workItems).toHaveLength(1);
     expect(jsonArtifact.satisfied).toBe(true);
     expect(jsonArtifact.feedback).toBe("ready to build");
@@ -154,10 +154,10 @@ describe("core plugin characterization", () => {
       runDir: path.join(harness.cwd, ".pi/pi-materia/cast"),
       artifactRoot: path.join(harness.cwd, ".pi/pi-materia"),
       phase: "Socket-1",
-      currentNode: "Socket-1",
+      currentSocketId: "Socket-1",
       currentMateria: "Build",
       awaitingResponse: false,
-      nodeState: "failed",
+      socketState: "failed",
       startedAt: 1,
       updatedAt: 1,
       data: {},
@@ -166,12 +166,12 @@ describe("core plugin characterization", () => {
       multiTurnRefinements: {},
       taskAttempts: {},
       edgeTraversals: {},
-      runState: { castId: "older", runDir: path.join(harness.cwd, ".pi/pi-materia/cast"), usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, byNode: {}, byTask: {}, byAttempt: {} } },
-      pipeline: { entry: { id: "Socket-1", node: { type: "agent", materia: "Build" }, materia: { tools: "readOnly", prompt: "" } }, sockets: {} },
+      runState: { castId: "older", runDir: path.join(harness.cwd, ".pi/pi-materia/cast"), usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} } },
+      pipeline: { entry: { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "readOnly", prompt: "" } }, sockets: {} },
     };
 
     harness.pi.appendEntry("pi-materia-cast-state", { ...base, active: false, castId: "older", failedReason: "first failed" });
-    harness.pi.appendEntry("pi-materia-cast-state", { ...base, active: true, castId: "active", request: "active request", nodeState: "awaiting_agent_response", awaitingResponse: true, runState: { ...base.runState, castId: "active" } });
+    harness.pi.appendEntry("pi-materia-cast-state", { ...base, active: true, castId: "active", request: "active request", socketState: "awaiting_agent_response", awaitingResponse: true, runState: { ...base.runState, castId: "active" } });
     harness.pi.appendEntry("pi-materia-cast-state", { ...base, active: false, castId: "older", failedReason: "newest failed snapshot" });
 
     const latest = listLatestCastStates(harness.ctx);

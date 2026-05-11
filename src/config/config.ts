@@ -7,7 +7,7 @@ import { validateCompactionConfig } from "../compaction.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadoutNormalization.js";
 import { loadoutSockets } from "../loadoutAccessors.js";
-import { normalizePersistedConfigForApplication, validateSocketOnlyLoadoutTopology } from "../schema/persistence.js";
+import { normalizePersistedConfigForApplication } from "../schema/persistence.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "../types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -311,10 +311,6 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
       sockets: rawSockets,
       loops: loadout.loops ?? (hasLoadoutSocketMap(loadout) ? undefined : baseLoadout?.loops),
     } as MateriaPipelineConfig;
-    // Do not materialize the legacy `nodes` alias during core config merging;
-    // schema/persistence and WebUI boundaries reject old loadout DTOs with
-    // actionable guidance to use `sockets` instead.
-    delete mergedLoadout.nodes;
     merged[name] = normalizePipelineGraph(mergedLoadout);
   }
   return merged as PiMateriaConfig["loadouts"];
@@ -443,8 +439,6 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
   }
   for (const [loadoutName, loadout] of Object.entries((config.loadouts ?? {}) as Record<string, unknown>)) {
     if (!isPlainObject(loadout)) continue;
-    const topologyIssues = validateSocketOnlyLoadoutTopology(loadout, `Materia loadout "${loadoutName}"`);
-    if (topologyIssues.length > 0) throw new Error(topologyIssues.map((issue) => issue.message).join("\n"));
     if ("prompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete prompt. Define prompt on referenced materia instead.`);
     if ("systemPrompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete systemPrompt. Define prompt on referenced materia instead.`);
     for (const [socketName, socket] of Object.entries(loadoutSockets(loadout as unknown as MateriaPipelineConfig) as Record<string, unknown>)) {

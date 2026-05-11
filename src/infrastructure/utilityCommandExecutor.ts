@@ -43,7 +43,7 @@ export async function executeCommandUtility({ state, socket, input }: CommandUti
   const stdoutText = stdout.text();
   const stderrText = stderr.text();
   const artifacts = await recordCommandArtifacts(state, socket, stdoutText, stderrText, stdout.truncated, stderr.truncated);
-  await appendEvent(state.runState, "utility_command", { node: socket.id, command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
+  await appendEvent(state.runState, "utility_command", { socket: socket.id, command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
 
   if (timedOut) {
     throw new CommandUtilityError(`Utility command timed out for socket "${socket.id}" after ${timeoutMs}ms: ${formatCommandForError(command)}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`, { command, result, timedOut, timeoutMs, artifacts, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });

@@ -11,7 +11,7 @@ export function compactSocketOrdinal(socketId: string | undefined): number | und
 }
 
 export function formatMateriaNotificationDisplay(materiaName: string | undefined, socketId?: string): MateriaNotificationDisplay {
-  const nodeOrdinal = compactSocketOrdinal(socketId);
+  const socketOrdinalFromId = compactSocketOrdinal(socketId);
   const fallback = "materia";
   let displayName = materiaName?.trim() || fallback;
   let suffixOrdinal: number | undefined;
@@ -26,7 +26,7 @@ export function formatMateriaNotificationDisplay(materiaName: string | undefined
     }
   }
 
-  const socketOrdinal = nodeOrdinal ?? suffixOrdinal;
+  const socketOrdinal = socketOrdinalFromId ?? suffixOrdinal;
   return {
     materiaName: displayName,
     socketOrdinal,

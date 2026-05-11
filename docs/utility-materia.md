@@ -45,7 +45,6 @@ For command utilities, pi-materia starts the configured process with cwd set to 
   "request": "original user request",
   "castId": "2026-05-01T00-00-00-000Z",
   "socketId": "hello",
-  "nodeId": "hello",  // deprecated command protocol alias; value is the socket id
   "params": { "message": "HELLO WORLD" },
   "state": {},
   "item": null,
@@ -104,7 +103,7 @@ This loadout completes without an LLM turn by using an explicit command utility.
 }
 ```
 
-Expected result: the cast writes utility input/stdout/stderr/metadata under `.pi/pi-materia/<cast-id>/nodes/hello/` (legacy-stable artifact path, keyed by socket id), assigns `state.hello`, and ends without asking a model to respond.
+Expected result: the cast writes utility input/stdout/stderr/metadata under `.pi/pi-materia/<cast-id>/sockets/hello/` (legacy-stable artifact path, keyed by socket id), assigns `state.hello`, and ends without asking a model to respond.
 
 ## Python example: add ignore patterns
 
@@ -210,7 +209,7 @@ Utility JSON output can choose the next socket with edges:
 Utilities are easy to test without Pi because the command contract is plain JSON over stdin/stdout:
 
 ```bash
-printf '{"cwd":"%s","runDir":"%s/.pi/pi-materia/test","request":"test","castId":"test","socketId":"ignoreArtifacts","nodeId":"ignoreArtifacts","params":{"patterns":[".pi/pi-materia/"]},"state":{},"item":null,"itemKey":null,"itemLabel":null}\n' "$PWD" "$PWD" \
+printf '{"cwd":"%s","runDir":"%s/.pi/pi-materia/test","request":"test","castId":"test","socketId":"ignoreArtifacts","params":{"patterns":[".pi/pi-materia/"]},"state":{},"item":null,"itemKey":null,"itemLabel":null}\n' "$PWD" "$PWD" \
   | python3 scripts/ensure_ignored.py
 ```
 

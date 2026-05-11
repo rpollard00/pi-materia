@@ -218,9 +218,7 @@ export function activeResolvedSocket(state: MateriaCastState): ResolvedMateriaSo
 }
 
 export function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
-  // Compatibility for legacy test/fixture helpers that still construct resolved
-  // sockets with `node`; canonical resolved pipelines now materialize `socket` only.
-  return (socket.socket ?? (socket as unknown as { node: TSocket["socket"] }).node) as TSocket["socket"];
+  return socket.socket;
 }
 
 export function isAgentResolvedSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
@@ -232,15 +230,11 @@ export function isMultiTurnResolvedAgentSocket(socket: ResolvedMateriaSocket): s
 }
 
 export function currentSocketId(state: MateriaCastState): string | undefined {
-  // Persisted/plugin DTO compatibility: the saved field is still `currentNode`,
-  // but runtime code treats the value as the current socket id.
-  return state.currentNode;
+  return state.currentSocketId;
 }
 
-export function currentSocketState(state: MateriaCastState): MateriaCastState["nodeState"] {
-  // Persisted/plugin DTO compatibility: the saved field is still `nodeState`,
-  // but runtime code treats the value as the current socket execution state.
-  return state.nodeState;
+export function currentSocketState(state: MateriaCastState): MateriaCastState["socketState"] {
+  return state.socketState;
 }
 
 export function resolvedPipelineSockets(state: MateriaCastState): Record<string, ResolvedMateriaSocket> {

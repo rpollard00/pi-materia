@@ -1,15 +1,12 @@
 import type { MateriaLoopConfig, MateriaPipelineConfig, PiMateriaConfig } from "../types.js";
 
-/**
- * WebUI loadout DTOs are socket-first at the API boundary.
- * Legacy `nodes` payloads are rejected instead of being adapted.
- */
-export type WebUiLoadoutDto = Omit<MateriaPipelineConfig, "nodes" | "loops"> & {
+/** WebUI loadout DTOs are socket-first at the API boundary. */
+export type WebUiLoadoutDto = Omit<MateriaPipelineConfig, "loops"> & {
   sockets?: MateriaPipelineConfig["sockets"];
   loops?: Record<string, WebUiLoopDto>;
 };
 
-export type WebUiLoopDto = Omit<MateriaLoopConfig, "nodes"> & {
+export type WebUiLoopDto = MateriaLoopConfig & {
   sockets?: string[];
 };
 
@@ -18,7 +15,6 @@ export type WebUiConfigDto<TConfig extends Partial<PiMateriaConfig> = Partial<Pi
 };
 
 export function toWebUiLoadoutDto(loadout: MateriaPipelineConfig): WebUiLoadoutDto {
-  rejectLegacyNodes(loadout, "loadout");
   const cloned = clone(loadout) as WebUiLoadoutDto;
   if (cloned.loops) {
     cloned.loops = Object.fromEntries(Object.entries(cloned.loops).map(([id, loop]) => [id, toWebUiLoopDto(loop)]));
@@ -27,7 +23,6 @@ export function toWebUiLoadoutDto(loadout: MateriaPipelineConfig): WebUiLoadoutD
 }
 
 export function fromWebUiLoadoutDto(loadout: WebUiLoadoutDto): MateriaPipelineConfig {
-  rejectLegacyNodes(loadout, "loadout");
   const cloned = clone(loadout) as MateriaPipelineConfig;
   if (cloned.loops) {
     cloned.loops = Object.fromEntries(Object.entries(cloned.loops).map(([id, loop]) => [id, fromWebUiLoopDto(loop)]));
@@ -52,19 +47,11 @@ export function fromWebUiConfigDto<TConfig extends WebUiConfigDto>(config: TConf
 }
 
 function toWebUiLoopDto(loop: MateriaLoopConfig): WebUiLoopDto {
-  rejectLegacyNodes(loop, "loop");
   return clone(loop) as WebUiLoopDto;
 }
 
 function fromWebUiLoopDto(loop: WebUiLoopDto): MateriaLoopConfig {
-  rejectLegacyNodes(loop, "loop");
   return clone(loop) as MateriaLoopConfig;
-}
-
-function rejectLegacyNodes(value: unknown, label: string): void {
-  if (value && typeof value === "object" && "nodes" in value) {
-    throw new Error(`Legacy WebUI ${label} nodes are not supported; use sockets instead.`);
-  }
 }
 
 function clone<T>(value: T): T {

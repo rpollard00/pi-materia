@@ -154,7 +154,7 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
     `- cursor: ${canonical.cursor}`,
     `- done behavior: ${canonical.done}`,
     legacyNote,
-    "Treat this as node/socket adapter metadata for assignment and iteration. The generated role prompt must use the canonical handoff envelope and put generated units of work in workItems, not in reserved evaluator/route fields or legacy placement-specific outputs such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
+    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt must use the canonical handoff envelope and put generated units of work in workItems, not in reserved evaluator/route fields or legacy placement-specific outputs such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
   ].filter(Boolean).join("\n");
 }
 

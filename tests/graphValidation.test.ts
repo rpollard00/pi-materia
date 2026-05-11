@@ -27,7 +27,7 @@ describe("graph validation foundation", () => {
     for (const value of ["Socket-0", "Socket-03", "Socket 3", "Socket-only", "Build", "Auto-Eval"]) {
       expect(isCanonicalSocketId(value)).toBe(false);
     }
-    expect(() => assertCanonicalSocketId("Build", "nodes.Build")).toThrow("Socket IDs are structural graph identifiers");
+    expect(() => assertCanonicalSocketId("Build", "sockets.Build")).toThrow("Socket IDs are structural graph identifiers");
   });
 
   test("rejects non-canonical socket ids in loadout graph structure", () => {
@@ -285,7 +285,7 @@ describe("graph validation foundation", () => {
       },
     };
 
-    const result = validatePipelineGraph(graph, { isGeneratorNode: (nodeId) => nodeId === "Socket-1" });
+    const result = validatePipelineGraph(graph, { isGeneratorSocket: (socketId) => socketId === "Socket-1" });
 
     expect(result.ok).toBe(false);
     expect(result.errors).toContainEqual(expect.objectContaining({ source: "Socket-4.parse" }));
@@ -306,7 +306,7 @@ describe("graph validation foundation", () => {
       },
     };
 
-    const result = validatePipelineGraph(graph, { isGeneratorNode: (nodeId) => nodeId === "Socket-1" });
+    const result = validatePipelineGraph(graph, { isGeneratorSocket: (socketId) => socketId === "Socket-1" });
     const message = formatGraphValidationErrors(result.errors);
 
     expect(result.ok).toBe(false);
@@ -334,7 +334,7 @@ describe("graph validation foundation", () => {
       },
     };
 
-    const result = validatePipelineGraph(graph, { isGeneratorNode: (nodeId) => nodeId === "Socket-1" });
+    const result = validatePipelineGraph(graph, { isGeneratorSocket: (socketId) => socketId === "Socket-1" });
 
     expect(result.ok).toBe(false);
     expect(result.errors).toContainEqual(expect.objectContaining({ source: "Socket-4.edges" }));

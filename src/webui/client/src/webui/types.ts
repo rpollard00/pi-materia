@@ -1,10 +1,10 @@
 import type { MateriaEdgeCondition } from '../../../../types.js';
-import type { MateriaConfig, PipelineConfig, PipelineNode } from '../loadoutModel.js';
+import type { MateriaConfig, PipelineConfig, PipelineSocket } from '../loadoutModel.js';
 
 export type SaveTarget = 'user' | 'project' | 'explicit';
 
 export interface MateriaFormState {
-  editingNodeId: string;
+  editingSocketId: string;
   name: string;
   behavior: 'prompt' | 'tool';
   prompt: string;
@@ -79,7 +79,7 @@ export interface ModelCatalogResponse {
 export type ModelCatalogLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface OriginalMateriaModelSettings {
-  editingNodeId: string;
+  editingSocketId: string;
   model: string;
   thinking: string;
 }
@@ -103,21 +103,21 @@ export interface MonitorSnapshot {
   sessionKey?: string;
   uiStartedAt?: number;
   now?: number;
-  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }>;
+  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }>;
   artifactSummary?: {
     runDir?: string;
     request?: string;
     summary?: string;
     events?: Array<{ ts?: number; type?: string; data?: unknown }>;
-    outputs?: Array<{ node?: string; materia?: string; phase?: string; kind?: string; artifact?: string; timestamp?: number; content?: string }>;
+    outputs?: Array<{ socket?: string; materia?: string; phase?: string; kind?: string; artifact?: string; timestamp?: number; content?: string }>;
   };
   activeCast?: {
     castId: string;
     active: boolean;
     phase: string;
-    currentNode?: string;
+    currentSocketId?: string;
     currentMateria?: string;
-    nodeState?: string;
+    socketState?: string;
     awaitingResponse: boolean;
     runDir: string;
     artifactRoot: string;
@@ -148,7 +148,7 @@ export interface LoadoutEdge {
 
 export interface PositionedSocket {
   id: string;
-  node: PipelineNode;
+  socket: PipelineSocket;
   index: number;
   x: number;
   y: number;

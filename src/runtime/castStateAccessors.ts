@@ -3,36 +3,35 @@ import type { MateriaCastSocketState, MateriaCastState, MateriaRunState, UsageRe
 /**
  * Socket-first accessors for persisted/plugin cast DTOs.
  *
- * Saved casts, manifest events, usage reports, and WebUI monitor payloads still
- * expose legacy field names such as `currentNode`, `nodeState`, event `node`,
- * and `byNode`. Core code should use these helpers so those legacy names stay
- * isolated at the compatibility boundary.
+ * Saved casts, manifest events, usage reports, and WebUI monitor payloads use
+ * canonical socket field names such as `currentSocketId`, `socketState`, event
+ * `socket`, and `bySocket`.
  */
 export function currentCastSocketId(state: MateriaCastState): string | undefined {
-  return state.currentNode ?? state.runState.currentNode;
+  return state.currentSocketId ?? state.runState.currentSocketId;
 }
 
 export function setCurrentCastSocketId(state: MateriaCastState, socketId: string | undefined): void {
-  state.currentNode = socketId;
-  state.runState.currentNode = socketId;
+  state.currentSocketId = socketId;
+  state.runState.currentSocketId = socketId;
 }
 
 export function currentCastSocketState(state: MateriaCastState): MateriaCastSocketState | undefined {
-  return state.nodeState;
+  return state.socketState;
 }
 
 export function setCurrentCastSocketState(state: MateriaCastState, socketState: MateriaCastSocketState | undefined): void {
-  state.nodeState = socketState;
+  state.socketState = socketState;
 }
 
 export function runStateCurrentSocketId(state: MateriaRunState): string | undefined {
-  return state.currentNode;
+  return state.currentSocketId;
 }
 
 export function setRunStateCurrentSocketId(state: MateriaRunState, socketId: string | undefined): void {
-  state.currentNode = socketId;
+  state.currentSocketId = socketId;
 }
 
 export function usageBySocket(usage: UsageReport): Record<string, UsageTotals> {
-  return usage.byNode;
+  return usage.bySocket;
 }

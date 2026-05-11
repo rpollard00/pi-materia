@@ -625,7 +625,7 @@ describe("utility pipeline sockets", () => {
     expect(lines.find((line) => line.startsWith("- Socket-1:"))).toContain("materia.multiTurn=true");
   });
 
-  test("rejects obsolete node-level multiTurn", () => {
+  test("rejects obsolete socket-level multiTurn", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
     activeLoadout(config).sockets["Socket-1"] = { type: "utility", utility: "example", multiTurn: true } as never;
 

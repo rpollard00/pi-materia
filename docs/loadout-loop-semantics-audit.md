@@ -12,14 +12,14 @@ This note audits how loadouts, loops, cursor consumption, parsing, advancement, 
 
 ## Current execution order
 
-When a socket starts (`src/native.ts#startNode`):
+When a socket starts (`startSocket`):
 
-1. `setCurrentItem()` looks for direct `socket.foreach` or `loopIteratorForNode(state.pipeline, socket.id)`.
+1. `setCurrentItem()` looks for direct `socket.foreach` or `loopIteratorForSocket(state.pipeline, socket.id)`.
 2. If an iterator exists, the current cursor selects an item from `loop.items`, stores aliases such as `state.item`, `state.currentWorkItem`, and `state.workItem`, and exposes item metadata for the prompt/run state.
 3. If an iterator exists but no item is available, runtime routes to `loop.done ?? "end"` with no agent call.
 4. The socket visit/edge limits are enforced and the agent/utility socket runs.
 
-When a socket completes (`src/native.ts#completeNode`):
+When a socket completes (`src/native.ts#completeSocket`):
 
 1. The raw output is recorded and `state.lastOutput` is set.
 2. If `socket.parse === "json"`, the output is parsed, handoff JSON is validated by `validateHandoffJsonOutput()`, `state.lastJson` is set, and a JSON artifact is written. If parse is omitted or `"text"`, `parsed` remains raw text.
@@ -28,7 +28,7 @@ When a socket completes (`src/native.ts#completeNode`):
 5. `applyAdvance()` runs before edge selection. If `socket.advance` is absent, or `advance.when` evaluates false, it returns no target. If it runs, it increments `state.cursors[advance.cursor]`; only when the next cursor is at/past the item list length does it return `advance.done`.
 6. Runtime appends completion events and checks budget.
 7. `advanceTarget ?? selectNextTarget(...)` decides the next socket. This means `advance.done` wins only on final consumption; non-final consumed items fall through to normal edges.
-8. `selectNextTarget()` iterates `canonicalOutgoingEdges(socket.node)` in order and chooses the first edge whose condition evaluates true; otherwise it returns `"end"`.
+8. `selectNextTarget()` iterates `canonicalOutgoingEdges(socket.socket)` in order and chooses the first edge whose condition evaluates true; otherwise it returns `"end"`.
 
 Condition evaluation is canonical: `always` is true; `satisfied` and `not_satisfied` read the reserved JSON field `$.satisfied` from the parsed socket output. Therefore satisfied/not_satisfied control flow requires JSON parsing on that socket. `validateHandoffJsonOutput()` enforces a boolean `satisfied` when a JSON-parsed socket has satisfied/not_satisfied edges or `advance.when`.
 
@@ -36,9 +36,9 @@ Condition evaluation is canonical: `always` is true; `satisfied` and `not_satisf
 
 Loop types are declared in `src/types.ts`:
 
-- `loops[id].sockets` groups sockets for UI/validation/iterator discovery (`loops[id].nodes` is legacy persisted input only).
+- `loops[id].sockets` groups sockets for UI/validation/iterator discovery.
 - `loops[id].consumes` names the generator source and optional output/as/cursor/done overrides.
-- `loops[id].iterator` is legacy/shared iterator metadata.
+- `loops[id].iterator` is shared iterator metadata.
 - `loops[id].exit` is documented in the type as: "Optional documented exit edge/condition for UI and validation. Runtime routing remains canonical edges."
 
 Current runtime use of loop metadata is limited to iterator derivation and item setup:
@@ -47,7 +47,7 @@ Current runtime use of loop metadata is limited to iterator derivation and item 
 - `src/pipeline.ts#loopIteratorForSocket` returns that iterator for any member socket.
 - `src/native.ts#setCurrentItem` uses the iterator to expose the current item.
 
-There is no runtime lookup of `loop.exit` in `completeNode()`, `applyAdvance()`, `selectNextTarget()`, or `advanceToSocket()`. `loop.exit` is currently validated and rendered, but not executable routing.
+There is no runtime lookup of `loop.exit` in `completeSocket()`, `applyAdvance()`, `selectNextTarget()`, or `advanceToSocket()`. `loop.exit` is currently validated and rendered, but not executable routing.
 
 ## Why default loadouts work
 
@@ -63,7 +63,7 @@ The default loop metadata (`loops.taskIteration.exit` and `loops.taskIteration.c
 
 The UI creates and edits loops in `src/webui/client/src/App.tsx`:
 
-- `createTaskIteratorLoop()` writes `loops[loopId] = { label, sockets, consumes: { from, output }, exit: { from: lastSelectedNode, when: "satisfied", to: "end" } }`.
+- `createTaskIteratorLoop()` writes `loops[loopId] = { label, sockets, consumes: { from, output }, exit: { from: lastSelectedSocket, when: "satisfied", to: "end" } }`.
 - `updateLoopExit()` and `clearLoopExit()` mutate only `loop.exit`.
 - The loop editor copy currently says loop exits "use the same canonical edge model as graph edges", which is structurally true for validation but misleading because runtime does not execute `loop.exit`.
 - UI save calls `normalizeMateriaConfigEdges()`, whose generator normalization sets generator sockets to `parse: "json"` and assigns `workItems`, but it does not set the loop exit-source socket to `parse: "json"`, does not add `advance`, and does not rewrite edges.

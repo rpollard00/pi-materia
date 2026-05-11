@@ -25,10 +25,10 @@ function state(socket: ResolvedMateriaAgentSocket, overrides: Partial<MateriaCas
     runDir: "/repo/.pi/pi-materia/cast-1",
     artifactRoot: "/repo/.pi/pi-materia",
     phase: socket.id,
-    currentNode: socket.id,
+    currentSocketId: socket.id,
     currentMateria: "Build",
     awaitingResponse: true,
-    nodeState: "awaiting_agent_response",
+    socketState: "awaiting_agent_response",
     startedAt: 1,
     updatedAt: 1,
     data: {
@@ -41,7 +41,7 @@ function state(socket: ResolvedMateriaAgentSocket, overrides: Partial<MateriaCas
     multiTurnRefinements: {},
     taskAttempts: {},
     edgeTraversals: {},
-    runState: { castId: "cast-1", runDir: "/repo/.pi/pi-materia/cast-1", startedAt: 1, model: "test", usage: {}, currentNode: socket.id, currentMateria: "Build" },
+    runState: { castId: "cast-1", runDir: "/repo/.pi/pi-materia/cast-1", startedAt: 1, model: "test", usage: {}, currentSocketId: socket.id, currentMateria: "Build" },
     pipeline: { entry: socket, sockets: { [socket.id]: socket } },
     currentItemKey: "item-1",
     currentItemLabel: "Item 1",
@@ -99,7 +99,7 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Command-triggered finalization");
     expect(prompt).toContain("Canonical handoff contract context:");
     expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
-    expect(prompt).toContain("Final output format: Return only JSON for this node");
+    expect(prompt).toContain("Final output format: Return only JSON for this socket");
   });
 
   test("active system prompts and synthetic context use explicit state inputs", () => {

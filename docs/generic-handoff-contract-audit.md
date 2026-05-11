@@ -64,7 +64,7 @@ Primary production references that need migration to `workItems` or generic cont
   - `MateriaBehaviorConfig.generates` carries arbitrary generated-list metadata, so current UI-created planner roles can preserve `output: "tasks"`, `itemType: "task"`, alias `task`, cursor `taskIndex`, and `items: "state.tasks"` conventions.
   - `normalizeMateriaConfigEdges()` normalizes and preserves `edges` / legacy `next`, including `satisfied` and `not_satisfied` conditions, when loading configs into the WebUI model.
   - `materiaPaletteNode()`, `extractMateriaBehavior()`, `extractSocketStructure()`, and `placeMateriaInSocket()` intentionally split behavior from socket structure: generated-list config, parse/assign/foreach behavior, and socket edges/layout/limits are copied or preserved when dragging/placing materia into sockets.
-  - `makeEmptyEntryLoadout()`, `makeNewSocketId()`, `getNodeLabel()`, and `formatSocketLabel()` already implement adapter-oriented `Socket-N` creation/display, independent of materia ids.
+  - `makeEmptyEntryLoadout()`, `makeNewSocketId()`, `getSocketLabel()`, and `formatSocketLabel()` already implement adapter-oriented `Socket-N` creation/display, independent of materia ids.
 - `src/webui/server/index.ts` validates role-generation generator config from WebUI/API requests via `validateMateriaGeneratorConfig()`: it trims and forwards `generates.output`, `generates.items`, `generates.itemType`, `generates.as`, `generates.cursor`, and `generates.done`, and currently permits the `tasks` / `state.tasks` / `task` / `taskIndex` convention without translating it.
 - `src/roleGeneration.ts` injects generated-role metadata into generated materia prompts: `roleGenerationContext()` prints the configured output key, list type, item type, items path, item alias, cursor, and done behavior, then instructs the generated prompt to produce that list under the configured output key and item semantics. Any WebUI/API config that supplies `tasks`, `task`, `taskIndex`, or `state.tasks` is therefore propagated into new JSON-producing role prompts.
 - `src/types.ts` exposes runtime and usage metadata named for tasks: `UsageModelSelection.taskId`, `UsageTurn.taskId`, `UsageReport.byTask`, `UsageReport.byAttempt`, and `MateriaRunState.currentTask`.
@@ -84,7 +84,7 @@ Primary production references that need migration to `workItems` or generic cont
   - `src/webui/client/src/loadoutModel.vitest.ts`: adapter fixtures assert `Socket-N` creation/display and that placing/swapping/clearing sockets preserves structural fields such as `edges`, including `satisfied` and `not_satisfied` edge conditions.
   - `tests/usage.test.ts`: usage fixtures key model selections and turn aggregation with `taskId` values and exercise `byTask` / `byAttempt` behavior.
   - `tests/ui.test.ts`: terminal-state fixtures render `currentTask` labels and current task/title overflow behavior.
-  - `tests/sameNodeRecoveryNative.test.ts`: multi-turn planner fixture assigns `tasks` from `$.tasks`, later verifies unfinalized recovery does not write `state.data.tasks`, and includes an independent `state.items` / `workItem` / `itemCursor` advance fixture.
+  - `tests/sameSocketRecoveryNative.test.ts`: multi-turn planner fixture assigns `tasks` from `$.tasks`, later verifies unfinalized recovery does not write `state.data.tasks`, and includes an independent `state.items` / `workItem` / `itemCursor` advance fixture.
   - `tests/graphValidation.test.ts`: graph-control fixtures cover `satisfied` / `not_satisfied` edge validation, unreachable-edge handling, loop `iterator: { items: "state.tasks", as: "task", cursor: "taskIndex" }`, loop exits on `satisfied`, endpoint references under `loops.*`, and edge condition state/guard classification.
   - `tests/config.test.ts`, `tests/handoffContract.test.ts`, `tests/handoffContractDrift.test.ts`, and `tests/nativePromptContract.test.ts`: contract drift and adapter fixtures assert reserved `satisfied`, canonical edge conditions, default config alignment, and prompt contract injection.
   - `tests/genericEngine.test.ts`: runtime fixture helpers and assertions cover generic `itemCursor` state, prompt templating for iterated items, generic routing helpers for `always` / `satisfied` / `not_satisfied`, loop/advance-style item consumption, and usage fixtures that still expose task-named aggregation keys such as `byTask`, `byAttempt`, and `taskId`.
@@ -109,7 +109,7 @@ The bundled default loadouts currently use socket ids that encode materia/utilit
 ### `Full-Auto`
 
 - Entry: `ensureArtifactsIgnored`.
-- Nodes and routing:
+- Sockets and routing:
   - `ensureArtifactsIgnored` (`project.ensureIgnored`) --always--> `detectVcs`.
   - `detectVcs` (`vcs.detect`) --always--> `planner`.
   - `planner` (`planner`) --always--> `Build`.

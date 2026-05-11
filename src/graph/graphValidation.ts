@@ -22,8 +22,6 @@ export interface MateriaGraphValidationResult {
 
 export interface MateriaGraphValidationOptions {
   isGeneratorSocket?: (socketId: string) => boolean;
-  /** @deprecated Compatibility alias for callers not yet migrated to isGeneratorSocket. */
-  isGeneratorNode?: (socketId: string) => boolean;
 }
 
 export interface ValidatedGraphChangeResult<TGraph extends MateriaPipelineConfig = MateriaPipelineConfig> extends MateriaGraphValidationResult {
@@ -71,7 +69,7 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig, options: Mat
 
   // Materia graphs are workflow state machines, not DAGs: transitions may
   // intentionally revisit earlier sockets (for example Build -> Eval -> Maintain
-  // -> Build). Runtime node-visit and edge-traversal limits bound iterative
+  // -> Build). Runtime socket-visit and edge-traversal limits bound iterative
   // execution, so validation only checks structural graph integrity here.
   return { ok: errors.length === 0, errors };
 }
@@ -312,7 +310,7 @@ function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraph
   if (!containsDirectedCycle(graph, loopSet)) {
     errors.push({ code: "invalid-loop", source: `loops.${loopId}.sockets`, message: `Loop "${loopId}" must contain a directed cycle among its selected sockets before it can be created.` });
   }
-  const isGeneratorSocket = options.isGeneratorSocket ?? options.isGeneratorNode;
+  const isGeneratorSocket = options.isGeneratorSocket;
   if (!isGeneratorSocket) return;
 
   const inboundGeneratorEdges = loadoutSocketEntries(graph).flatMap(([from, socket]) => {

@@ -16,7 +16,7 @@ export function createRunState(runId: string, runDir: string, model: unknown, lo
       ...modelInfo,
       costKind: inferUsageCostKind(modelInfo),
       byMateria: {},
-      byNode: {},
+      bySocket: {},
       byTask: {},
       byAttempt: {},
       turns: [],
@@ -73,11 +73,11 @@ export function recordUsageModelSelection(report: UsageReport, key: { socket: st
   if (key.materiaModel.thinking) report.thinkingLevel = key.materiaModel.thinking;
   updateUsageCostKind(report, key.materiaModel);
   report.modelSelections ??= [];
-  report.modelSelections.push({ ...key.materiaModel, socket, node: socket, materia: key.materia, taskId: key.taskId, attempt: key.attempt });
+  report.modelSelections.push({ ...key.materiaModel, socket, materia: key.materia, taskId: key.taskId, attempt: key.attempt });
 }
 
-export function addUsage(report: UsageReport, usage: UsageTotals, key: { socket: string; materia: string; taskId?: string; attempt?: number; materiaModel?: MateriaModelSelection; messageModel?: Partial<MateriaModelSelection> } | { /** @deprecated External compatibility alias; use socket. */ node: string; materia: string; taskId?: string; attempt?: number; materiaModel?: MateriaModelSelection; messageModel?: Partial<MateriaModelSelection> }): void {
-  const socket = "socket" in key ? key.socket : key.node;
+export function addUsage(report: UsageReport, usage: UsageTotals, key: { socket: string; materia: string; taskId?: string; attempt?: number; materiaModel?: MateriaModelSelection; messageModel?: Partial<MateriaModelSelection> }): void {
+  const socket = key.socket;
   addUsageTotals(report, usage);
   const bySocket = usageBySocket(report);
   addUsageTotals(bySocket[socket] ??= emptyUsageTotals(), usage);
@@ -95,7 +95,6 @@ export function addUsage(report: UsageReport, usage: UsageTotals, key: { socket:
   report.turns.push({
     ...cloneUsageTotals(usage),
     socket,
-    node: socket,
     materia: key.materia,
     taskId: key.taskId,
     attempt: key.attempt,

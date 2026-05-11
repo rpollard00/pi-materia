@@ -5,7 +5,7 @@ import type { MonitorSnapshot } from '../types.js';
 interface ObservedActiveCast {
   castId: string;
   phase?: string;
-  currentNode?: string;
+  currentSocketId?: string;
   currentMateria?: string;
 }
 
@@ -14,7 +14,7 @@ function isCompleteState(value: string | undefined) {
 }
 
 function describeCompletedCast(cast: ObservedActiveCast) {
-  const location = cast.currentMateria ?? cast.currentNode ?? cast.phase;
+  const location = cast.currentMateria ?? cast.currentSocketId ?? cast.phase;
   return location ? `Cast ${cast.castId} finished after ${location}.` : `Cast ${cast.castId} finished.`;
 }
 
@@ -40,14 +40,14 @@ export function useCastCompletionToasts(monitor: MonitorSnapshot | undefined) {
       return;
     }
 
-    const terminal = isCompleteState(activeCast.phase) || isCompleteState(activeCast.nodeState);
+    const terminal = isCompleteState(activeCast.phase) || isCompleteState(activeCast.socketState);
     const currentlyActive = activeCast.active && !terminal;
 
     if (currentlyActive) {
       previousActiveCastRef.current = {
         castId: activeCast.castId,
         phase: activeCast.phase,
-        currentNode: activeCast.currentNode,
+        currentSocketId: activeCast.currentSocketId,
         currentMateria: activeCast.currentMateria,
       };
       return;
@@ -61,7 +61,7 @@ export function useCastCompletionToasts(monitor: MonitorSnapshot | undefined) {
         description: describeCompletedCast({
           castId: activeCast.castId,
           phase: activeCast.phase ?? previousActiveCast.phase,
-          currentNode: activeCast.currentNode ?? previousActiveCast.currentNode,
+          currentSocketId: activeCast.currentSocketId ?? previousActiveCast.currentSocketId,
           currentMateria: activeCast.currentMateria ?? previousActiveCast.currentMateria,
         }),
         variant: terminal ? 'success' : 'info',

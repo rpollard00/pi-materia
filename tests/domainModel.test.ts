@@ -20,7 +20,7 @@ describe("pure materia/loadout domain", () => {
   test("parses canonical socket ids only", () => {
     expect(parseCanonicalSocketId("Socket-12")).toEqual({ id: "Socket-12", ordinal: 12 });
     expect(parseCanonicalSocketId("Socket-0")).toBeUndefined();
-    expect(parseCanonicalSocketId("node-1")).toBeUndefined();
+    expect(parseCanonicalSocketId("slot-1")).toBeUndefined();
   });
 
   test("validates first-class materia definitions", () => {
@@ -90,14 +90,14 @@ describe("pure materia/loadout domain", () => {
     if (catalog.ok) expect(validateLoadoutMateriaReferences(loadout, catalog.value).ok).toBe(true);
 
     const invalid = validateLoadout({
-      entry: "Node-1",
+      entry: "Slot-1",
       sockets: {
-        "Node-1": { type: "agent", materia: "", edges: [{ when: "passed" as never, to: "Socket-9" }] },
+        "Slot-1": { type: "agent", materia: "", edges: [{ when: "passed" as never, to: "Socket-9" }] },
       },
     });
 
     expect(invalid.ok).toBe(false);
-    if (!invalid.ok) expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["loadout.entry", "loadout.sockets.Node-1", "loadout.sockets.Node-1.materia", "loadout.sockets.Node-1.edges.0.when", "loadout.sockets.Node-1.edges.0.to"]));
+    if (!invalid.ok) expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["loadout.entry", "loadout.sockets.Slot-1", "loadout.sockets.Slot-1.materia", "loadout.sockets.Slot-1.edges.0.when", "loadout.sockets.Slot-1.edges.0.to"]));
 
     if (catalog.ok) {
       const missingMateria = validateLoadoutMateriaReferences({ entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Missing" } } }, catalog.value);
@@ -134,7 +134,7 @@ describe("pure materia/loadout domain", () => {
 
   test("creates prompt intent and cast updates without mutating inputs", () => {
     expect(createPromptIntent({ socketId: "Socket-1", materiaId: "Build", parse: "json", includeHandoffContract: true }).ok).toBe(true);
-    expect(createPromptIntent({ socketId: "node", materiaId: "", parse: "json", includeHandoffContract: true }).ok).toBe(false);
+    expect(createPromptIntent({ socketId: "slot", materiaId: "", parse: "json", includeHandoffContract: true }).ok).toBe(false);
 
     const state: CastStateCore = {
       active: true,

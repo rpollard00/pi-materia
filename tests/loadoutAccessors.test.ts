@@ -3,34 +3,30 @@ import { getLoadoutSocket, loadoutLoopEntries, loadoutSocketEntries, loadoutSock
 import type { MateriaLoopConfig, MateriaPipelineConfig } from "../src/types.js";
 
 describe("socket-only loadout accessors", () => {
-  test("loadoutSockets does not read legacy nodes as a migration alias", () => {
+  test("loadoutSockets returns an empty map when sockets are omitted", () => {
     const loadout = {
       entry: "Socket-1",
-      nodes: { "Socket-1": { empty: true } },
     } as MateriaPipelineConfig;
 
     expect(loadoutSockets(loadout)).toEqual({});
   });
 
-  test("loopSockets does not read legacy loop nodes as a migration alias", () => {
-    const loop = { nodes: ["Socket-2"] } as MateriaLoopConfig;
+  test("loopSockets returns an empty list when sockets are omitted", () => {
+    const loop = {} as MateriaLoopConfig;
 
     expect(loopSockets(loop)).toEqual([]);
   });
 
-  test("materializeCanonicalSockets initializes sockets without copying legacy nodes", () => {
+  test("materializeCanonicalSockets initializes missing socket collections", () => {
     const loadout = {
       entry: "Socket-1",
-      nodes: { "Socket-1": { empty: true } },
-      loops: { work: { nodes: ["Socket-1"] } },
+      loops: { work: {} },
     } as MateriaPipelineConfig;
 
     const materialized = materializeCanonicalSockets(loadout);
 
     expect(materialized.sockets).toEqual({});
-    expect(materialized.nodes).toEqual({ "Socket-1": { empty: true } });
     expect(materialized.loops?.work.sockets).toEqual([]);
-    expect(materialized.loops?.work.nodes).toEqual(["Socket-1"]);
   });
 
   test("socket-shaped loadouts continue to resolve sockets and loop membership", () => {
@@ -70,14 +66,13 @@ describe("socket-only loadout accessors", () => {
     expect(loopSocketSet(loadout.loops.work)).toEqual(new Set(["Socket-2"]));
   });
 
-  test("validates missing socket references without reading legacy nodes", () => {
+  test("validates missing socket references against the canonical socket collection", () => {
     const loadout = {
       entry: "Socket-1",
       sockets: {
         "Socket-1": { empty: true, edges: [{ when: "always", to: "Socket-2" }], foreach: { items: "state.items", done: "Socket-3" } },
       },
       loops: { work: { sockets: ["Socket-4"], consumes: { from: "Socket-5", done: "Socket-6" }, iterator: { items: "state.items", done: "Socket-7" } } },
-      nodes: { "Socket-2": { empty: true }, "Socket-3": { empty: true }, "Socket-4": { empty: true }, "Socket-5": { empty: true }, "Socket-6": { empty: true }, "Socket-7": { empty: true } },
     } as MateriaPipelineConfig;
 
     const result = validateLoadoutSocketReferences(loadout);

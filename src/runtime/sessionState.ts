@@ -5,7 +5,6 @@ export function socketVisit(state: MateriaCastState, socketId: string): number {
   return state.visits[socketId] ?? 0;
 }
 
-/** @deprecated Legacy helper name retained only inside artifact/event compatibility code. */
 export function currentSocketVisit(state: MateriaCastState, fallback = 0): number {
   const socketId = currentSocketId(state);
   return socketId ? socketVisit(state, socketId) : fallback;
@@ -65,9 +64,7 @@ export function materiaStatusLabel(state: MateriaCastState, socket?: ResolvedMat
 }
 
 export function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
-  // Compatibility for legacy test/fixture helpers that still construct resolved
-  // sockets with `node`; canonical resolved pipelines now materialize `socket` only.
-  return (socket.socket ?? (socket as unknown as { node: TSocket["socket"] }).node) as TSocket["socket"];
+  return socket.socket;
 }
 
 export function socketMateriaName(socket: ResolvedMateriaSocket | undefined): string | undefined {
@@ -83,23 +80,19 @@ export function isMultiTurnResolvedAgentSocket(socket: ResolvedMateriaSocket): s
 }
 
 export function currentSocketId(state: MateriaCastState): string | undefined {
-  // Persisted/plugin DTO compatibility: the saved field is still `currentNode`,
-  // but runtime code treats the value as the current socket id.
-  return state.currentNode;
+  return state.currentSocketId;
 }
 
 export function setCurrentSocketId(state: MateriaCastState, socketId: string | undefined): void {
-  state.currentNode = socketId;
+  state.currentSocketId = socketId;
 }
 
-export function currentSocketState(state: MateriaCastState): MateriaCastState["nodeState"] {
-  // Persisted/plugin DTO compatibility: the saved field is still `nodeState`,
-  // but runtime code treats the value as the current socket execution state.
-  return state.nodeState;
+export function currentSocketState(state: MateriaCastState): MateriaCastState["socketState"] {
+  return state.socketState;
 }
 
-export function setCurrentSocketState(state: MateriaCastState, socketState: MateriaCastState["nodeState"]): void {
-  state.nodeState = socketState;
+export function setCurrentSocketState(state: MateriaCastState, socketState: MateriaCastState["socketState"]): void {
+  state.socketState = socketState;
 }
 
 export function currentSocketOrThrow(state: MateriaCastState): ResolvedMateriaSocket {

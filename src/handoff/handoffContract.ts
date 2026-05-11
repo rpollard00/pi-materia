@@ -52,12 +52,12 @@ export const HANDOFF_CONTRACT_PROMPT_TEXT = [
   `- ${JSON.stringify(HANDOFF_SATISFIED_FIELD)} is the canonical boolean control field for satisfied/not_satisfied routing and advancement. Use it only when a socket participates in that control flow, and return a real boolean value when present.`,
   "- Socket-specific payload fields may be requested by a local prompt for assignments, artifacts, or diagnostics. Compose them with the generic envelope; payload fields must not redefine or alias reserved evaluator/route semantics.",
   "- Do not invent alternate routing booleans. Legacy names such as \"passed\" are not canonical handoff fields.",
-  "- When a node/socket adapter asks for JSON output, return only the handoff JSON object with no markdown fences, prose, or extra commentary.",
+  "- When a socket adapter asks for JSON output, return only the handoff JSON object with no markdown fences, prose, or extra commentary.",
 ].join("\n");
 
 export function formatHandoffJsonFinalInstruction(): string {
   return [
-    "Final output format: Return only JSON for this node/socket adapter, with no markdown fences, prose, or extra commentary. Follow the central handoff contract below; if local prompt wording or adapter metadata mentions legacy placement fields such as tasks, interpret that context and still emit generated work units as workItems. Preserve and augment useful existing envelope context from Generic cast data or Previous output when applicable.",
+    "Final output format: Return only JSON for this socket adapter, with no markdown fences, prose, or extra commentary. Follow the central handoff contract below; if local prompt wording or adapter metadata mentions legacy placement fields such as tasks, interpret that context and still emit generated work units as workItems. Preserve and augment useful existing envelope context from Generic cast data or Previous output when applicable.",
     HANDOFF_CONTRACT_PROMPT_TEXT,
   ].join("\n\n");
 }

@@ -54,7 +54,7 @@ function attemptConfig() {
 }
 
 describe("native attempt identity", () => {
-  test("attempts are per exact node and foreach item task", async () => {
+  test("attempts are per exact socket and foreach item task", async () => {
     const harness = await makeHarness(attemptConfig());
 
     await harness.runCommand("materia", "cast attempt semantics");
@@ -72,11 +72,11 @@ describe("native attempt identity", () => {
     await harness.emit("agent_end", { messages: [] });
 
     const usage = await readUsage(harness);
-    expect(usage.turns.map((turn: { node: string; taskId?: string; attempt?: number }) => ({ node: turn.node, taskId: turn.taskId, attempt: turn.attempt }))).toEqual([
-      { node: "Socket-2", taskId: "a", attempt: 1 },
-      { node: "Socket-2", taskId: "a", attempt: 2 },
-      { node: "Socket-2", taskId: "b", attempt: 1 },
-      { node: "Socket-3", taskId: undefined, attempt: 1 },
+    expect(usage.turns.map((turn: { socket: string; taskId?: string; attempt?: number }) => ({ socket: turn.socket, taskId: turn.taskId, attempt: turn.attempt }))).toEqual([
+      { socket: "Socket-2", taskId: "a", attempt: 1 },
+      { socket: "Socket-2", taskId: "a", attempt: 2 },
+      { socket: "Socket-2", taskId: "b", attempt: 1 },
+      { socket: "Socket-3", taskId: undefined, attempt: 1 },
     ]);
     expect(Object.keys(usage.byAttempt).sort()).toEqual(["a:1", "a:2", "b:1"]);
   });

@@ -47,7 +47,7 @@ export function listLatestCastStates(ctx: ExtensionContext): MateriaCastState[] 
 }
 
 export function listResumableCastStates(ctx: ExtensionContext): MateriaCastState[] {
-  return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && state.nodeState !== "complete" && (state.phase === "failed" || state.nodeState === "failed"));
+  return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && state.socketState !== "complete" && (state.phase === "failed" || state.socketState === "failed"));
 }
 
 export function listRevivableCastStates(ctx: ExtensionContext): MateriaCastState[] {
@@ -78,7 +78,7 @@ export function saveCastState(pi: ExtensionAPI, state: MateriaCastState): void {
 export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason = "aborted"): MateriaCastState {
   state.active = false;
   state.awaitingResponse = false;
-  state.nodeState = "failed";
+  state.socketState = "failed";
   state.phase = reason === "aborted" ? "failed" : state.phase;
   state.failedReason = reason;
   state.updatedAt = Date.now();
@@ -88,9 +88,9 @@ export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason
 }
 
 function isRevivableCastState(state: MateriaCastState): boolean {
-  if (state.active || (state.phase !== "failed" && state.nodeState !== "failed")) return false;
+  if (state.active || (state.phase !== "failed" && state.socketState !== "failed")) return false;
   const exhaustion = state.recoveryExhaustion;
-  if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted" || !exhaustion.key) return false;
+  if (!exhaustion || exhaustion.kind !== "same_socket_recovery_exhausted" || !exhaustion.key) return false;
   if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
   const allowance = state.recoveryAllowances?.[exhaustion.key];
   return Boolean(

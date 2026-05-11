@@ -17,7 +17,7 @@ function makeState(overrides: Partial<MateriaCastState> = {}): MateriaCastState 
     runDir: "/tmp/project/.pi/pi-materia/test-cast",
     artifactRoot: "/tmp/project/.pi/pi-materia",
     phase: "hello",
-    currentNode: "hello",
+    currentSocketId: "hello",
     currentMateria: "utility",
     awaitingResponse: false,
     startedAt: 0,
@@ -42,7 +42,7 @@ function makeState(overrides: Partial<MateriaCastState> = {}): MateriaCastState 
         tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         byMateria: {},
-        byNode: {},
+        bySocket: {},
         byTask: {},
         byAttempt: {},
       },
@@ -103,9 +103,9 @@ describe("generic engine helper mechanics", () => {
   });
 
   test("advances loop completion through loop-owned exit routes without materialized edges", () => {
-    const node = {
+    const socket = {
       id: "Socket-2",
-      node: {
+      socket: {
         type: "utility",
         utility: "echo",
         advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
@@ -131,18 +131,18 @@ describe("generic engine helper mechanics", () => {
       },
     });
 
-    expect(applyAdvance(state, node, { satisfied: true })).toBe("Socket-3");
+    expect(applyAdvance(state, socket, { satisfied: true })).toBe("Socket-3");
     state.cursors.itemCursor = 0;
-    expect(applyAdvance(state, node, { satisfied: false })).toBe("Socket-4");
+    expect(applyAdvance(state, socket, { satisfied: false })).toBe("Socket-4");
     state.cursors.itemCursor = 0;
-    expect(applyAdvance(state, node, {})).toBe("Socket-5");
-    expect(node.socket).not.toHaveProperty("edges");
+    expect(applyAdvance(state, socket, {})).toBe("Socket-5");
+    expect(socket.socket).not.toHaveProperty("edges");
   });
 
   test("preserves existing loop completion behavior when no loop-exit route matches", () => {
-    const node = {
+    const socket = {
       id: "Socket-2",
-      node: {
+      socket: {
         type: "utility",
         utility: "echo",
         advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
@@ -164,7 +164,7 @@ describe("generic engine helper mechanics", () => {
       },
     });
 
-    expect(applyAdvance(state, node, { satisfied: false })).toBe("Socket-9");
+    expect(applyAdvance(state, socket, { satisfied: false })).toBe("Socket-9");
   });
 
   test("sets nested assignment paths", () => {
@@ -173,7 +173,7 @@ describe("generic engine helper mechanics", () => {
     expect(target).toEqual({ utility: { result: { value: 7 } } });
   });
 
-  test("preserves and augments the generic handoff envelope from JSON node output", () => {
+  test("preserves and augments the generic handoff envelope from JSON socket output", () => {
     const state = makeState({
       data: {
         envelope: {
@@ -228,7 +228,7 @@ describe("generic engine helper mechanics", () => {
     const state = makeState({ data: { workItems: generatedWorkItems } });
     const evaluator = {
       id: "Socket-5",
-      node: { type: "agent", materia: "Auto-Eval", parse: "json" },
+      socket: { type: "agent", materia: "Auto-Eval", parse: "json" },
       materia: { tools: "coding", prompt: "evaluate" },
     } satisfies ResolvedMateriaSocket;
 
@@ -246,17 +246,17 @@ describe("generic engine helper mechanics", () => {
     const state = makeState({ data: {}, cursors: {}, currentItemKey: undefined, currentItemLabel: undefined });
     const planner = {
       id: "Socket-3",
-      node: { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" } },
+      socket: { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" } },
       materia: { tools: "readOnly", prompt: "plan" },
     } satisfies ResolvedMateriaSocket;
     const builder = {
       id: "Socket-4",
-      node: { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
+      socket: { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
       materia: { tools: "coding", prompt: "build {{item.id}}" },
     } satisfies ResolvedMateriaSocket;
     const maintainer = {
       id: "Socket-6",
-      node: { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" } },
+      socket: { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" } },
       materia: { tools: "coding", prompt: "maintain" },
     } satisfies ResolvedMateriaSocket;
 
@@ -288,7 +288,7 @@ describe("generic engine helper mechanics", () => {
       context: { constraints: ["small safe edits"], dependencies: [], risks: [] },
     };
     const state = makeState({
-      currentNode: "Socket-4",
+      currentSocketId: "Socket-4",
       currentMateria: "Build",
       data: { item: workItem, workItem, guidance: { testCommand: "bun test", architecture: "materia are reusable behavior" } },
       pipeline: {
@@ -296,7 +296,7 @@ describe("generic engine helper mechanics", () => {
         sockets: {
           "Socket-4": {
             id: "Socket-4",
-            node: { type: "agent", materia: "Build", parse: "text" },
+            socket: { type: "agent", materia: "Build", parse: "text" },
             materia: { tools: "coding", prompt: "Build {{item.id}} with {{state.guidance.testCommand}}." },
           },
         },
@@ -316,7 +316,7 @@ describe("generic engine helper mechanics", () => {
 });
 
 describe("agent and utility validation", () => {
-  test("accepts a valid agent node and rejects an agent node with an unknown materia", () => {
+  test("accepts a valid agent socket and rejects an agent socket with an unknown materia", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",

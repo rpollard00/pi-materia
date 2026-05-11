@@ -50,7 +50,7 @@ export function useLoadoutGraphViewModel({
   } : undefined;
   const createLoopDisabled = selectedLoopSocketIds.length === 0;
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
-  const currentMonitorNode = monitor?.activeCast?.currentNode;
+  const currentMonitorSocket = monitor?.activeCast?.currentSocketId;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
 
   return {
@@ -69,7 +69,7 @@ export function useLoadoutGraphViewModel({
     createLoopDisabled,
     socketLabel,
     socketDisplayLabel,
-    currentMonitorNode,
+    currentMonitorSocket,
     elapsed,
   };
 }

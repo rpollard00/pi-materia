@@ -11,15 +11,11 @@ import type { MateriaPipelineSocketConfig } from "../types.js";
 export interface HandoffValidationOptions {
   socketId?: string;
   socket?: MateriaPipelineSocketConfig;
-  /** @deprecated Compatibility DTO field; value is a socket id. */
-  nodeId?: string;
-  /** @deprecated Compatibility DTO field; value is a socket config. */
-  node?: MateriaPipelineSocketConfig;
 }
 
 export function validateHandoffJsonOutput(value: unknown, options: HandoffValidationOptions): Record<string, unknown> {
-  const socketId = options.socketId ?? options.nodeId ?? "unknown";
-  const socket = options.socket ?? options.node;
+  const socketId = options.socketId ?? "unknown";
+  const socket = options.socket;
   const socketLabel = `socket "${socketId}"`;
   if (!isPlainJsonObject(value)) {
     throw new Error(`Invalid handoff JSON output for ${socketLabel}: expected a JSON object at the top level.`);

@@ -39,6 +39,6 @@ describe("materia cast notification formatting", () => {
     const message = harness.sentMessages.map(({ message }) => message as { customType?: string; content?: string; details?: Record<string, unknown> }).find((candidate) => candidate.customType === "pi-materia");
     expect(message?.content).toBe("Casting **interactivePlan (3)**");
     expect(message?.content).not.toContain("Socket-3");
-    expect(message?.details).toMatchObject({ nodeId: "Socket-3", materiaName: "interactivePlan", socketOrdinal: 3, eventType: "materia_prompt" });
+    expect(message?.details).toMatchObject({ socketId: "Socket-3", materiaName: "interactivePlan", socketOrdinal: 3, eventType: "materia_prompt" });
   });
 });

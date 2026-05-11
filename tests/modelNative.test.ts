@@ -80,17 +80,17 @@ describe("native per-materia model settings", () => {
     const harness = await makeHarness(agentConfig());
 
     await harness.runCommand("materia", "cast state model");
-    const activeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as { active?: boolean; awaitingResponse?: boolean; nodeState?: string; phase?: string };
+    const activeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as { active?: boolean; awaitingResponse?: boolean; socketState?: string; phase?: string };
     expect(activeState.active).toBe(true);
     expect(activeState.awaitingResponse).toBe(true);
-    expect(activeState.nodeState).toBe("awaiting_agent_response");
+    expect(activeState.socketState).toBe("awaiting_agent_response");
 
     harness.appendAssistantMessage("done");
     await harness.emit("agent_end", { messages: [] });
-    const completeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as { active?: boolean; awaitingResponse?: boolean; nodeState?: string; phase?: string };
+    const completeState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as { active?: boolean; awaitingResponse?: boolean; socketState?: string; phase?: string };
     expect(completeState.active).toBe(false);
     expect(completeState.awaitingResponse).toBe(false);
-    expect(completeState.nodeState).toBe("complete");
+    expect(completeState.socketState).toBe("complete");
     expect(completeState.phase).toBe("complete");
   });
 
@@ -180,8 +180,8 @@ describe("native per-materia model settings", () => {
     expect(events.some((event) => event.type === "materia_model_settings" && event.data.materiaModel.model === "claude-test")).toBe(true);
     const usage = JSON.parse(await readFile(path.join(castDir, "usage.json"), "utf8"));
     expect(usage.tokens.total).toBe(7);
-    expect(usage.modelSelections[0]).toMatchObject({ node: "Socket-1", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
-    expect(usage.turns[0]).toMatchObject({ node: "Socket-1", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+    expect(usage.modelSelections[0]).toMatchObject({ socket: "Socket-1", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
+    expect(usage.turns[0]).toMatchObject({ socket: "Socket-1", materia: "Build", model: "claude-test", provider: "anthropic", api: "anthropic", thinking: "high" });
   });
 
   test("fallback model metadata is labeled as the active Pi model", async () => {

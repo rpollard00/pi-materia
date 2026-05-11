@@ -5,7 +5,7 @@ import { formatMateriaNotificationDisplay } from "../notificationFormatting.js";
 
 interface MateriaMessageDetails {
   prefix?: string;
-  nodeId?: string;
+  socketId?: string;
   materiaName?: string;
   eventType?: string;
 }
@@ -14,9 +14,9 @@ export function registerMateriaRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer<MateriaMessageDetails>("pi-materia", (message, { expanded }, theme) => {
     const details = message.details as MateriaMessageDetails | undefined;
     const prefix = details?.prefix ?? "materia";
-    const materia = formatMateriaNotificationDisplay(details?.materiaName, details?.nodeId).label;
+    const materia = formatMateriaNotificationDisplay(details?.materiaName, details?.socketId).label;
     const event = details?.eventType ? ` ${details.eventType.replace(/_/g, " ")}` : "";
-    const compactPrefix = prefix === details?.nodeId ? "materia" : prefix;
+    const compactPrefix = prefix === details?.socketId ? "materia" : prefix;
     const label = theme.fg("customMessageLabel", `◆ Materia: ${materia}`);
     const sublabel = theme.fg("dim", ` ${compactPrefix}${event}`);
 

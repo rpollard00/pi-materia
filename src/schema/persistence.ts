@@ -7,8 +7,8 @@ import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketCon
  * Persistence/schema anti-corruption adapters.
  *
  * `sockets` is the canonical external spelling for loadout JSON handled by
- * these adapters. Legacy loadout-level or loop-level `nodes` input is rejected
- * at this boundary with actionable errors.
+ * these adapters. Socket fields are required by canonical validation; legacy
+ * socket-collection aliases are not adapted at this boundary.
  */
 
 export interface PersistedLoadoutSchema {
@@ -28,25 +28,12 @@ export interface PersistedLoopSchema {
   exits?: unknown;
 }
 
-export function validateSocketOnlyLoadoutTopology(value: unknown, path = "loadout"): DomainIssue[] {
-  const issues: DomainIssue[] = [];
-  if (!isPlainObject(value)) return issues;
-  if ("nodes" in value) issues.push({ path: `${path}.nodes`, message: "legacy loadout nodes are not supported; use sockets instead" });
-  if (isPlainObject(value.loops)) {
-    for (const [loopId, loop] of Object.entries(value.loops)) {
-      if (isPlainObject(loop) && "nodes" in loop) issues.push({ path: `${path}.loops.${loopId}.nodes`, message: "legacy loop nodes are not supported; use sockets instead" });
-    }
-  }
-  return issues;
-}
-
 export function parsePersistedLoadout(value: unknown, path = "loadout"): DomainResult<Loadout> {
   const issues: DomainIssue[] = [];
   if (!isPlainObject(value)) return { ok: false, issues: [{ path, message: "loadout must be an object" }] };
 
-  issues.push(...validateSocketOnlyLoadoutTopology(value, path));
   const rawSockets = value.sockets;
-  if (!isPlainObject(rawSockets)) issues.push({ path: `${path}.sockets`, message: "loadout must define a sockets object; legacy nodes are not supported" });
+  if (!isPlainObject(rawSockets)) issues.push({ path: `${path}.sockets`, message: "loadout must define a sockets object" });
   const loadout: Loadout = {
     ...(typeof value.id === "string" ? { id: value.id } : {}),
     entry: typeof value.entry === "string" ? value.entry : "",
@@ -128,7 +115,7 @@ function parseLoop(value: unknown, path: string, issues: DomainIssue[]): Loadout
     return { sockets: [] };
   }
   const rawSockets = value.sockets;
-  if (!Array.isArray(rawSockets) || !rawSockets.every((item) => typeof item === "string")) issues.push({ path: `${path}.sockets`, message: "loop must define a sockets string array; legacy nodes are not supported" });
+  if (!Array.isArray(rawSockets) || !rawSockets.every((item) => typeof item === "string")) issues.push({ path: `${path}.sockets`, message: "loop must define a sockets string array" });
   return {
     ...(typeof value.label === "string" ? { label: value.label } : {}),
     sockets: Array.isArray(rawSockets) ? rawSockets.filter((item): item is string => typeof item === "string") : [],

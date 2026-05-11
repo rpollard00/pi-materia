@@ -16,7 +16,7 @@ function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
     runDir: "/tmp/run",
     artifactRoot: "/tmp",
     phase: "Socket-1",
-    currentNode: "Socket-1",
+    currentSocketId: "Socket-1",
     currentMateria: "Materia",
     awaitingResponse: false,
     startedAt: 0,

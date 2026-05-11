@@ -71,35 +71,18 @@ describe("POST /api/config", () => {
     expect(calls[0]?.patch).toEqual({ loadouts: { Active: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } }, loops: { work: { sockets: ["Socket-1"] } } } } });
   });
 
-  test("rejects legacy WebUI loadout nodes before saving", async () => {
-    let calls = 0;
-    const baseUrl = await startTestServer(async () => {
-      calls += 1;
+  test("passes config patches to save validation", async () => {
+    const calls: Array<{ patch: MateriaConfigPatch; target: MateriaSaveTarget }> = [];
+    const baseUrl = await startTestServer(async (patch, target) => {
+      calls.push({ patch, target });
       return "/tmp/materia.json";
     });
 
-    const response = await postConfig(baseUrl, {
-      config: { loadouts: { Legacy: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } } },
-    });
+    const patch = { loadouts: { Empty: { entry: "Socket-1", sockets: {} } } };
+    const response = await postConfig(baseUrl, { config: patch });
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ ok: false, error: "Legacy WebUI loadout nodes are not supported; use sockets instead." });
-    expect(calls).toBe(0);
-  });
-
-  test("rejects legacy WebUI loop nodes before saving", async () => {
-    let calls = 0;
-    const baseUrl = await startTestServer(async () => {
-      calls += 1;
-      return "/tmp/materia.json";
-    });
-
-    const response = await postConfig(baseUrl, {
-      config: { loadouts: { Legacy: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } }, loops: { work: { nodes: ["Socket-1"] } } } } },
-    });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ ok: false, error: "Legacy WebUI loop nodes are not supported; use sockets instead." });
-    expect(calls).toBe(0);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, target: "user", written: "/tmp/materia.json" });
+    expect(calls[0]).toEqual({ patch, target: "user" });
   });
 });

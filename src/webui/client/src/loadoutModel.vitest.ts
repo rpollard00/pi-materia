@@ -6,7 +6,7 @@ import {
   canDeleteSocket,
   deleteSocketFromLoadout,
   formatSocketLabel,
-  getNodeLabel,
+  getSocketLabel,
   findLoopExitConnectionContext,
   makeEmptyEntryLoadout,
   makeEmptySocket,
@@ -19,7 +19,7 @@ import {
   type MateriaBehaviorConfig,
   type MateriaConfig,
   type PipelineConfig,
-  type PipelineNode,
+  type PipelineSocket,
 } from './loadoutModel.js';
 
 const paletteSignature = (definitions: Record<string, MateriaBehaviorConfig>) => JSON.stringify(buildMateriaPalette(definitions));
@@ -31,7 +31,7 @@ describe('loadout socket display model', () => {
     expect(loadout.entry).toBe('Socket-1');
     expect(Object.keys(loadout.sockets!)).toEqual(['Socket-1']);
     expect(loadout.sockets!['Socket-1'].socketKind).toBe('entry');
-    expect(getNodeLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('Empty');
+    expect(getSocketLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('Empty');
     expect(formatSocketLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('Socket-1 (Empty)');
   });
 
@@ -54,7 +54,6 @@ describe('loadout socket display model', () => {
     expect(config.loadouts?.Canonical.sockets?.['Socket-1'].materia).toBe('planner');
     expect(config.loadouts?.Canonical.sockets?.['Socket-1'].socketKind).toBe('entry');
     expect(config.loadouts?.Canonical.loops?.work.sockets).toEqual(['Socket-2']);
-    expect(config.loadouts?.Canonical).not.toHaveProperty('nodes');
     expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
   });
 
@@ -68,7 +67,7 @@ describe('loadout socket display model', () => {
     loadout.sockets!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
     loadout.sockets!['Socket-2'] = makeEmptySocket({ edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
 
-    expect(getNodeLabel('Socket-2', loadout.sockets!['Socket-2'])).toBe('Empty');
+    expect(getSocketLabel('Socket-2', loadout.sockets!['Socket-2'])).toBe('Empty');
     expect(loadout.sockets!['Socket-2']).toEqual({ empty: true, socketKind: 'normal', edges: [{ when: 'always', to: 'After' }], limits: { maxVisits: 2 } });
   });
 
@@ -281,7 +280,7 @@ describe('loadout normalization model', () => {
         Draft: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Critique', outputFormat: 'json' } as PipelineNode,
+            'Socket-1': { type: 'agent', materia: 'Critique', outputFormat: 'json' } as PipelineSocket,
           },
         },
       },
@@ -349,7 +348,7 @@ describe('loadout normalization model', () => {
         LegacyEditorState: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Generate', next: 'Socket-2' } as PipelineNode,
+            'Socket-1': { type: 'agent', materia: 'Generate', next: 'Socket-2' } as PipelineSocket,
             'Socket-2': { type: 'agent', materia: 'Build', layout: { x: 10, y: 20 } },
           },
           loops: {
@@ -511,7 +510,7 @@ describe('loadout socket deletion model', () => {
     expect(loadout.loops?.selected).toBeUndefined();
     expect(loadout.sockets!['Socket-3'].advance).toBeUndefined();
     expect(loadout.sockets!['Socket-3'].edges).toBeUndefined();
-    expect(Object.values(loadout.sockets!).flatMap((node) => node.edges ?? [])).not.toContainEqual(expect.objectContaining({ to: 'Socket-5' }));
+    expect(Object.values(loadout.sockets!).flatMap((socket) => socket.edges ?? [])).not.toContainEqual(expect.objectContaining({ to: 'Socket-5' }));
   });
 });
 
@@ -628,7 +627,7 @@ describe('loadout materia palette model', () => {
     };
 
     expect(buildMateriaPalette(materia).map(([id]) => id)).toEqual(['Build', 'Check']);
-    expect(Object.values(loadouts.Active.sockets ?? {}).some((node) => node.materia === 'AdHoc')).toBe(true);
+    expect(Object.values(loadouts.Active.sockets ?? {}).some((socket) => socket.materia === 'AdHoc')).toBe(true);
   });
 
   it('includes first-class utility materia in the palette with executable bindings', () => {
@@ -677,7 +676,7 @@ describe('loadout materia palette model', () => {
     loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], utilityMateria);
 
     expect(loadout.sockets!['Socket-1']).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false, socketKind: 'entry' });
-    expect(getNodeLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('vcs.detect');
+    expect(getSocketLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('vcs.detect');
   });
 
   it('keeps palette contents stable when palette materia is placed into a new loadout socket', () => {
@@ -710,7 +709,7 @@ describe('loadout materia palette model', () => {
   });
 
   it('preserves each socket structure when swapping socket materia', () => {
-    const source: PipelineNode = {
+    const source: PipelineSocket = {
       type: 'agent',
       materia: 'Build',
       edges: [{ to: 'SourceEdge', when: 'satisfied' }, { to: 'AfterSource', when: 'always' }],
@@ -718,7 +717,7 @@ describe('loadout materia palette model', () => {
       limits: { maxVisits: 3 },
       socketKind: 'entry',
     };
-    const target: PipelineNode = {
+    const target: PipelineSocket = {
       type: 'agent',
       materia: 'Check',
       edges: [{ to: 'TargetEdge', when: 'not_satisfied' }, { to: 'AfterTarget', when: 'always' }],

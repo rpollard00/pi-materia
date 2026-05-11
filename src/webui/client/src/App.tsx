@@ -81,7 +81,7 @@ export function App() {
       createLoopDisabled,
       socketLabel,
       socketDisplayLabel,
-      currentMonitorNode,
+      currentMonitorSocket,
       elapsed,
     },
     selectedMateriaId,
@@ -189,7 +189,7 @@ export function App() {
             viewModel={{
               activeLoadout,
               activeLoadoutName,
-              currentMonitorNode,
+              currentMonitorSocket,
               loadoutGraph,
               loopExitBadges,
               loopMemberships,
@@ -286,7 +286,7 @@ export function App() {
         </div>
       )}
       materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} />}
-      monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorNode={currentMonitorNode} elapsed={elapsed} />}
+      monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorSocket={currentMonitorSocket} elapsed={elapsed} />}
     />
   );
 }

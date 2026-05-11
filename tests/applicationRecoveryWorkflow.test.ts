@@ -14,10 +14,10 @@ function makeState(): MateriaCastState {
     runDir: "/tmp/run",
     artifactRoot: "/tmp/artifacts",
     phase: "Socket-1",
-    currentNode: "Socket-1",
+    currentSocketId: "Socket-1",
     currentMateria: "Build",
     awaitingResponse: true,
-    nodeState: "awaiting_agent_response",
+    socketState: "awaiting_agent_response",
     startedAt: 1,
     updatedAt: 1,
     data: {},
@@ -26,7 +26,7 @@ function makeState(): MateriaCastState {
     multiTurnRefinements: {},
     taskAttempts: {},
     edgeTraversals: {},
-    runState: { castId: "cast-1", runDir: "/tmp/run", model: {}, currentNode: "Socket-1", currentMateria: "Build", lastMessage: "", usage: { totals: {} }, events: [] } as any,
+    runState: { castId: "cast-1", runDir: "/tmp/run", model: {}, currentSocketId: "Socket-1", currentMateria: "Build", lastMessage: "", usage: { totals: {} }, events: [] } as any,
     pipeline: { entry: { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "Build" } }, sockets: { "Socket-1": { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "Build" } } } } as any,
   } as MateriaCastState;
 }
@@ -42,9 +42,9 @@ function makeDeps(events: Array<{ type: string; data: Record<string, unknown> }>
     buildRecoveryPrompt: () => "retry prompt",
     updateWidget: () => { calls.push("updateWidget"); },
     notifyWarning: (message) => { calls.push(`notify:${message}`); },
-    setCurrentSocketState: (state, socketState) => { state.nodeState = socketState; },
-    currentSocketId: (state) => state.currentNode,
-    currentSocketVisit: (state, fallback = 0) => state.currentNode ? state.visits[state.currentNode] ?? fallback : fallback,
+    setCurrentSocketState: (state, socketState) => { state.socketState = socketState; },
+    currentSocketId: (state) => state.currentSocketId,
+    currentSocketVisit: (state, fallback = 0) => state.currentSocketId ? state.visits[state.currentSocketId] ?? fallback : fallback,
     shortMetadataLabel: (value) => value,
     currentMateria: () => ({ tools: "coding", prompt: "Build" } as any),
     runRecoveryAction: async () => { calls.push("runRecoveryAction"); },
@@ -71,10 +71,10 @@ describe("same-socket recovery workflow", () => {
 
     expect(recovered).toBe(true);
     expect(state.awaitingResponse).toBe(true);
-    expect(state.nodeState).toBe("awaiting_agent_response");
+    expect(state.socketState).toBe("awaiting_agent_response");
     expect(Object.values(state.recoveryAttempts ?? {})).toEqual([1]);
-    expect(events.map((event) => event.type)).toEqual(["same_node_recovery_start", "same_node_recovery_retry"]);
-    expect(events[0].data).toMatchObject({ reason: "context_window", attempt: 1, maxAttempts: 1, entryId: "entry-1", node: "Socket-1", mode: "normal" });
+    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry"]);
+    expect(events[0].data).toMatchObject({ reason: "context_window", attempt: 1, maxAttempts: 1, entryId: "entry-1", socket: "Socket-1", mode: "normal" });
     expect(calls).toContain("runRecoveryAction");
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
   });
@@ -90,8 +90,8 @@ describe("same-socket recovery workflow", () => {
 
     expect(recovered).toBe(true);
     expect(state.active).toBe(false);
-    expect(state.recoveryExhaustion).toMatchObject({ kind: "same_node_recovery_exhausted", reason: "context_window", attempts: 1, effectiveMaxAttempts: 1, node: "Socket-1", mode: "normal" });
-    expect(events.at(-1)).toMatchObject({ type: "same_node_recovery_exhausted", data: { attempts: 1, entryId: "entry-2" } });
+    expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "context_window", attempts: 1, effectiveMaxAttempts: 1, socket: "Socket-1", mode: "normal" });
+    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { attempts: 1, entryId: "entry-2" } });
     expect(calls).toContain("failCast:true");
   });
 
@@ -104,7 +104,7 @@ describe("same-socket recovery workflow", () => {
     const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded"), deps);
 
     expect(recovered).toBe(true);
-    expect(events.map((event) => event.type)).toEqual(["same_node_recovery_start", "same_node_recovery_retry_failed"]);
+    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry_failed"]);
     expect(events[1].data.error).toBe("retry send failed");
     expect(calls).toContain("failCast:false");
   });
@@ -120,10 +120,10 @@ describe("same-socket recovery action workflow", () => {
       appendEvent: async (_runState, type, data) => { events.push({ type, data }); },
       saveState: () => { saves.push("save"); },
       runCompaction: async () => ({ tokensBefore: 100, tokensAfter: 50, ignored: true }),
-      currentSocketId: (nextState) => nextState.currentNode,
+      currentSocketId: (nextState) => nextState.currentSocketId,
     });
 
-    expect(events.map((event) => event.type)).toEqual(["same_node_recovery_action_start", "same_node_recovery_action_complete"]);
+    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_action_start", "same_socket_recovery_action_complete"]);
     expect(events[1].data.result).toEqual({ tokensBefore: 100, tokensAfter: 50 });
     expect(saves).toHaveLength(2);
   });
@@ -136,10 +136,10 @@ describe("same-socket recovery action workflow", () => {
       appendEvent: async (_runState, type, data) => { events.push({ type, data }); },
       saveState: () => {},
       runCompaction: async () => { throw new Error("compact failed"); },
-      currentSocketId: (nextState) => nextState.currentNode,
+      currentSocketId: (nextState) => nextState.currentSocketId,
     })).rejects.toThrow("Same-socket recovery action compact failed");
 
-    expect(events.map((event) => event.type)).toEqual(["same_node_recovery_action_start", "same_node_recovery_action_failed"]);
+    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_action_start", "same_socket_recovery_action_failed"]);
     expect(events[1].data.error).toBe("compact failed");
   });
 });

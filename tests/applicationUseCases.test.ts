@@ -7,7 +7,7 @@ function loaded(activeLoadout = "default"): LoadedConfig {
 }
 
 function pipeline(): ResolvedMateriaPipeline {
-  return { entry: { id: "Socket-1", node: { type: "utility", utility: "noop" } }, sockets: { "Socket-1": { id: "Socket-1", node: { type: "utility", utility: "noop" } } } };
+  return { entry: { id: "Socket-1", socket: { type: "utility", utility: "noop" } }, sockets: { "Socket-1": { id: "Socket-1", socket: { type: "utility", utility: "noop" } } } };
 }
 
 function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
@@ -30,7 +30,7 @@ function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
     outputs: {},
     errors: [],
     handoffs: [],
-    usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, byNode: {}, byTask: {}, byAttempt: {} },
+    usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} },
     ...overrides,
   };
 }
@@ -76,7 +76,7 @@ describe("application use cases", () => {
   });
 
   test("cast execution use case prepares prompts and delegates lifecycle actions", async () => {
-    const active = state({ awaitingResponse: true, nodeState: "awaiting_agent_response", currentNode: "Socket-1" });
+    const active = state({ awaitingResponse: true, socketState: "awaiting_agent_response", currentSocketId: "Socket-1" });
     const events: string[] = [];
     const states: CastStateRepository<string> = { loadActive: () => active, listLatest: () => [], listResumable: () => [state({ castId: "resume-me" })], listRevivable: () => [state({ castId: "revive-me" })] };
     const context: CastContextPort = { buildIsolatedContext: (messages) => ({ messages }) };

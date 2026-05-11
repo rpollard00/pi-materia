@@ -62,8 +62,8 @@ function ConfigProbe() {
       <button
         type="button"
         onClick={() => config.updateDraft((draft) => {
-          const node = draft.loadouts?.Alpha?.sockets?.['Socket-1'] ?? draft.loadouts?.['Full-Auto']?.sockets?.['Socket-1'];
-          if (node) node.materia = 'LocalEdit';
+          const socket = draft.loadouts?.Alpha?.sockets?.['Socket-1'] ?? draft.loadouts?.['Full-Auto']?.sockets?.['Socket-1'];
+          if (socket) socket.materia = 'LocalEdit';
         })}
       >
         edit loadout locally
@@ -143,7 +143,7 @@ describe('dirty config comparison', () => {
     expect(dirtyConfigKey(baseline)).toBe(dirtyConfigKey(draft));
   });
 
-  it('does not mark migrated legacy node layout dirty after normalization', () => {
+  it('does not mark migrated legacy socket layout dirty after normalization', () => {
     const legacy = {
       loadouts: {
         Layout: {

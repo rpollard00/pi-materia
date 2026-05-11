@@ -18,14 +18,14 @@ function values(record: Record<string, UsageTotals>): UsageTotals[] {
 }
 
 describe("usage aggregation", () => {
-  test("aggregates total, materia, node, and task costs from captured turn usage", () => {
+  test("aggregates total, materia, socket, and task costs from captured turn usage", () => {
     const state = createRunState("run", "/tmp/run", { id: "gpt-test", provider: "openai" });
     const turns = [
-      { node: "Plan", materia: "Maintain", taskId: "task-1", usage: usageTotals(100000, 0.05) },
-      { node: "Plan", materia: "Maintain", taskId: "task-1", usage: usageTotals(67153, 0.0787) },
-      { node: "Build", materia: "Build", taskId: "task-4", usage: usageTotals(97629, 0.2148) },
-      { node: "Eval", materia: "Auto-Eval", taskId: "task-4", usage: usageTotals(45545, 0.1537) },
-      { node: "Plan", materia: "planner", taskId: "task-0", usage: usageTotals(2410, 0.0344) },
+      { socket: "Plan", materia: "Maintain", taskId: "task-1", usage: usageTotals(100000, 0.05) },
+      { socket: "Plan", materia: "Maintain", taskId: "task-1", usage: usageTotals(67153, 0.0787) },
+      { socket: "Build", materia: "Build", taskId: "task-4", usage: usageTotals(97629, 0.2148) },
+      { socket: "Eval", materia: "Auto-Eval", taskId: "task-4", usage: usageTotals(45545, 0.1537) },
+      { socket: "Plan", materia: "planner", taskId: "task-0", usage: usageTotals(2410, 0.0344) },
     ];
 
     for (const turn of turns) addUsage(state.usage, turn.usage, turn);
@@ -33,7 +33,7 @@ describe("usage aggregation", () => {
     const report: UsageReport = state.usage;
     expect(report.cost.total).toBeCloseTo(sumCosts(turns.map((turn) => turn.usage)), 10);
     expect(sumCosts(values(report.byMateria))).toBeCloseTo(report.cost.total, 10);
-    expect(sumCosts(values(report.byNode))).toBeCloseTo(report.cost.total, 10);
+    expect(sumCosts(values(report.bySocket))).toBeCloseTo(report.cost.total, 10);
     expect(sumCosts(values(report.byTask))).toBeCloseTo(report.cost.total, 10);
     expect(sumCosts(report.turns ?? [])).toBeCloseTo(report.cost.total, 10);
 
@@ -41,9 +41,9 @@ describe("usage aggregation", () => {
     expect(report.byMateria["Build"].cost.total).toBeCloseTo(0.2148, 10);
     expect(report.byMateria["Auto-Eval"].cost.total).toBeCloseTo(0.1537, 10);
     expect(report.byMateria.planner.cost.total).toBeCloseTo(0.0344, 10);
-    expect(report.byNode.Plan.cost.total).toBeCloseTo(0.1631, 10);
-    expect(report.byNode.Build.cost.total).toBeCloseTo(0.2148, 10);
-    expect(report.byNode.Eval.cost.total).toBeCloseTo(0.1537, 10);
+    expect(report.bySocket.Plan.cost.total).toBeCloseTo(0.1631, 10);
+    expect(report.bySocket.Build.cost.total).toBeCloseTo(0.2148, 10);
+    expect(report.bySocket.Eval.cost.total).toBeCloseTo(0.1537, 10);
     expect(report.byTask["task-4"].cost.total).toBeCloseTo(0.3685, 10);
   });
 });

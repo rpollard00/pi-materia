@@ -434,16 +434,16 @@ describe("config loadouts", () => {
     const canonical = new Set(["always", "satisfied", "not_satisfied"]);
 
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { next?: unknown; parse?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
-      for (const [nodeName, node] of Object.entries(loadout.sockets ?? {})) {
-        expect(node.next, `${loadoutName}.${nodeName}.next`).toBeUndefined();
-        expect(["text", "json"].includes(String(node.parse)), `${loadoutName}.${nodeName}.parse`).toBe(true);
-        for (const [index, edge] of (node.edges ?? []).entries()) {
-          expect(edge.when, `${loadoutName}.${nodeName}.edges[${index}].when`).toBeDefined();
-          expect(canonical.has(edge.when as string), `${loadoutName}.${nodeName}.edges[${index}].when`).toBe(true);
+      for (const [socketName, socket] of Object.entries(loadout.sockets ?? {})) {
+        expect(socket.next, `${loadoutName}.${socketName}.next`).toBeUndefined();
+        expect(["text", "json"].includes(String(socket.parse)), `${loadoutName}.${socketName}.parse`).toBe(true);
+        for (const [index, edge] of (socket.edges ?? []).entries()) {
+          expect(edge.when, `${loadoutName}.${socketName}.edges[${index}].when`).toBeDefined();
+          expect(canonical.has(edge.when as string), `${loadoutName}.${socketName}.edges[${index}].when`).toBe(true);
           if (edge.when === "satisfied" || edge.when === "not_satisfied") {
-            expect(node.parse, `${loadoutName}.${nodeName}.parse for ${edge.when}`).toBe("json");
+            expect(socket.parse, `${loadoutName}.${socketName}.parse for ${edge.when}`).toBe("json");
           }
-          expect(edge.to === "end" || Boolean(loadout.sockets?.[edge.to ?? ""]), `${loadoutName}.${nodeName}.edges[${index}].to`).toBe(true);
+          expect(edge.to === "end" || Boolean(loadout.sockets?.[edge.to ?? ""]), `${loadoutName}.${socketName}.edges[${index}].to`).toBe(true);
         }
       }
     }
@@ -452,30 +452,29 @@ describe("config loadouts", () => {
   test("bundled default loadouts use canonical adapter socket ids", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { entry?: string; nodes?: unknown; sockets?: Record<string, { materia?: string; utility?: string; edges?: Array<{ to?: string }>; advance?: { done?: string } }>; loops?: Record<string, { sockets?: string[]; exit?: { from?: string; to?: string }; consumes?: { from?: string } }> }]>) {
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { entry?: string; sockets?: Record<string, { materia?: string; utility?: string; edges?: Array<{ to?: string }>; advance?: { done?: string } }>; loops?: Record<string, { sockets?: string[]; exit?: { from?: string; to?: string }; consumes?: { from?: string } }> }]>) {
       expect(() => resolvePipeline({ ...rawDefault, activeLoadout: loadoutName })).not.toThrow();
 
-      const nodeIds = Object.keys(loadout.sockets ?? {});
-      expect(loadout.nodes, `${loadoutName}.nodes`).toBeUndefined();
+      const socketIds = Object.keys(loadout.sockets ?? {});
       expect(loadout.entry, `${loadoutName}.entry`).toBe("Socket-1");
-      expect(nodeIds, `${loadoutName}.sockets`).toEqual(nodeIds.map((_, index) => `Socket-${index + 1}`));
-      expect(Object.values(loadout.sockets ?? {}).map((node) => node.materia), `${loadoutName}.materia`).toContain("Build");
+      expect(socketIds, `${loadoutName}.sockets`).toEqual(socketIds.map((_, index) => `Socket-${index + 1}`));
+      expect(Object.values(loadout.sockets ?? {}).map((socket) => socket.materia), `${loadoutName}.materia`).toContain("Build");
 
-      for (const [socketId, node] of Object.entries(loadout.sockets ?? {})) {
+      for (const [socketId, socket] of Object.entries(loadout.sockets ?? {})) {
         expect(socketId, `${loadoutName}.${socketId}`).toMatch(/^Socket-\d+$/);
-        expect(socketId, `${loadoutName}.${socketId}`).not.toBe(node.materia ?? "");
-        expect(socketId, `${loadoutName}.${socketId}`).not.toBe(node.utility ?? "");
-        for (const edge of node.edges ?? []) {
-          expect(edge.to === "end" || nodeIds.includes(edge.to ?? ""), `${loadoutName}.${socketId}.edge.to`).toBe(true);
+        expect(socketId, `${loadoutName}.${socketId}`).not.toBe(socket.materia ?? "");
+        expect(socketId, `${loadoutName}.${socketId}`).not.toBe(socket.utility ?? "");
+        for (const edge of socket.edges ?? []) {
+          expect(edge.to === "end" || socketIds.includes(edge.to ?? ""), `${loadoutName}.${socketId}.edge.to`).toBe(true);
         }
-        if (node.advance?.done) expect(node.advance.done, `${loadoutName}.${socketId}.advance.done`).toBe("end");
+        if (socket.advance?.done) expect(socket.advance.done, `${loadoutName}.${socketId}.advance.done`).toBe("end");
       }
 
       for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
-        for (const nodeId of loop.sockets ?? []) expect(nodeIds.includes(nodeId), `${loadoutName}.${loopId}.sockets`).toBe(true);
-        if (loop.exit?.from) expect(nodeIds.includes(loop.exit.from), `${loadoutName}.${loopId}.exit.from`).toBe(true);
-        if (loop.exit?.to && loop.exit.to !== "end") expect(nodeIds.includes(loop.exit.to), `${loadoutName}.${loopId}.exit.to`).toBe(true);
-        if (loop.consumes?.from) expect(nodeIds.includes(loop.consumes.from), `${loadoutName}.${loopId}.consumes.from`).toBe(true);
+        for (const socketId of loop.sockets ?? []) expect(socketIds.includes(socketId), `${loadoutName}.${loopId}.sockets`).toBe(true);
+        if (loop.exit?.from) expect(socketIds.includes(loop.exit.from), `${loadoutName}.${loopId}.exit.from`).toBe(true);
+        if (loop.exit?.to && loop.exit.to !== "end") expect(socketIds.includes(loop.exit.to), `${loadoutName}.${loopId}.exit.to`).toBe(true);
+        if (loop.consumes?.from) expect(socketIds.includes(loop.consumes.from), `${loadoutName}.${loopId}.consumes.from`).toBe(true);
       }
     }
   });

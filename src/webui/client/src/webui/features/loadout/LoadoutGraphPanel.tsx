@@ -3,13 +3,13 @@ import type { MateriaEdgeCondition } from '../../../../../../types.js';
 import {
   canDeleteSocket,
   formatSocketLabel,
-  getNodeLabel,
+  getSocketLabel,
   isEmptySocket,
   isEntrySocket,
-  nodeColor,
-  type LegacyPipelineNode,
+  socketColor,
+  type LegacyPipelineSocket,
   type PipelineConfig,
-  type PipelineNode,
+  type PipelineSocket,
 } from '../../../loadoutModel.js';
 import { edgeConditionLabels } from '../../constants.js';
 import type {
@@ -50,14 +50,14 @@ interface LoopSelectionRectangle {
 interface LoadoutGraphViewModel {
   activeLoadout?: PipelineConfig;
   activeLoadoutName?: string;
-  currentMonitorNode?: string;
+  currentMonitorSocket?: string;
   loadoutGraph: LayoutSocketsResult;
   loopExitBadges: Map<string, LoopExitBadge>;
   loopMemberships: Map<string, LoopMembership>;
   loopRegions: LoopRegion[];
   loopSelectionRectangle?: LoopSelectionRectangle;
-  materia: Record<string, PipelineNode>;
-  palette: Array<[string, PipelineNode]>;
+  materia: Record<string, PipelineSocket>;
+  palette: Array<[string, PipelineSocket]>;
   routedEdges: RoutedLoadoutEdge[];
   selectedLoopSocketIds: string[];
   selectedLoopSocketSet: Set<string>;
@@ -154,7 +154,7 @@ export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActio
       <GraphCanvas
         activeLoadout={viewModel.activeLoadout}
         activeLoadoutName={viewModel.activeLoadoutName}
-        currentMonitorNode={viewModel.currentMonitorNode}
+        currentMonitorSocket={viewModel.currentMonitorSocket}
         loadoutGraph={viewModel.loadoutGraph}
         loopExitBadges={viewModel.loopExitBadges}
         loopMemberships={viewModel.loopMemberships}
@@ -262,13 +262,13 @@ function GraphToolbar({ createLoopDisabled, createTaskIteratorLoop, loadoutNameI
 interface GraphCanvasProps {
   activeLoadout?: PipelineConfig;
   activeLoadoutName?: string;
-  currentMonitorNode?: string;
+  currentMonitorSocket?: string;
   loadoutGraph: LayoutSocketsResult;
   loopExitBadges: Map<string, LoopExitBadge>;
   loopMemberships: Map<string, LoopMembership>;
   loopRegions: LoopRegion[];
   loopSelectionRectangle?: LoopSelectionRectangle;
-  materia: Record<string, PipelineNode>;
+  materia: Record<string, PipelineSocket>;
   routedEdges: RoutedLoadoutEdge[];
   selectedLoopSocketSet: Set<string>;
   selectedMateriaId?: string;
@@ -291,7 +291,7 @@ interface GraphCanvasProps {
 
 function GraphCanvas(props: GraphCanvasProps) {
   const {
-    activeLoadout, activeLoadoutName, currentMonitorNode, loadoutGraph, loopExitBadges, loopMemberships,
+    activeLoadout, activeLoadoutName, currentMonitorSocket, loadoutGraph, loopExitBadges, loopMemberships,
     loopRegions, loopSelectionRectangle, materia, routedEdges, selectedLoopSocketSet, selectedMateriaId,
     socketLayoutDrag, beginSocketLayoutDrag, beginSocketRegionSelection, cancelSocketLayoutDrag,
     cancelSocketRegionSelection, dragMateria, finishSocketLayoutDrag, finishSocketRegionSelection, handleDrop,
@@ -326,7 +326,7 @@ function GraphCanvas(props: GraphCanvasProps) {
             key={socket.id}
             activeLoadout={activeLoadout}
             activeLoadoutName={activeLoadoutName}
-            currentMonitorNode={currentMonitorNode}
+            currentMonitorSocket={currentMonitorSocket}
             dragMateria={dragMateria}
             handleDrop={handleDrop}
             handleSocketClick={handleSocketClick}
@@ -352,7 +352,7 @@ interface EdgeLayerProps {
   activeLoadout?: PipelineConfig;
   height: number;
   loopRegions: LoopRegion[];
-  materia: Record<string, PipelineNode>;
+  materia: Record<string, PipelineSocket>;
   routedEdges: RoutedLoadoutEdge[];
   toggleEdgeCondition: (edge: RoutedLoadoutEdge['edge']) => void;
   toggleLoopExitCondition: (loopId: string, routeId: string) => void;
@@ -419,13 +419,13 @@ function LoopRegionsLayer({ loopRegions, loopSelectionRectangle }: LoopRegionsLa
 interface SocketCardProps {
   activeLoadout?: PipelineConfig;
   activeLoadoutName?: string;
-  currentMonitorNode?: string;
+  currentMonitorSocket?: string;
   dragMateria: (payload: DragPayload, event: DragEvent) => void;
   handleDrop: (socketId: string, event: DragEvent) => void;
   handleSocketClick: (socketId: string, event: ReactMouseEvent<HTMLButtonElement>) => void;
   loopExitBadge?: LoopExitBadge;
   loopMembership?: LoopMembership;
-  materia: Record<string, PipelineNode>;
+  materia: Record<string, PipelineSocket>;
   selectedLoopSocketSet: Set<string>;
   selectedMateriaId?: string;
   socket: GraphSocket;
@@ -438,29 +438,29 @@ interface SocketCardProps {
 
 function SocketCard(props: SocketCardProps) {
   const {
-    activeLoadout, activeLoadoutName, currentMonitorNode, dragMateria, handleDrop, handleSocketClick,
-    loopExitBadge, loopMembership, materia, selectedLoopSocketSet, selectedMateriaId, socket, socketLayoutDrag,
+    activeLoadout, activeLoadoutName, currentMonitorSocket, dragMateria, handleDrop, handleSocketClick,
+    loopExitBadge, loopMembership, materia, selectedLoopSocketSet, selectedMateriaId, socket: graphSocket, socketLayoutDrag,
     beginSocketLayoutDrag, cancelSocketLayoutDrag, finishSocketLayoutDrag, moveSocketLayoutDrag,
   } = props;
-  const { id, node, index, x, y } = socket;
+  const { id, socket, index, x, y } = graphSocket;
   const dragPreview = socketLayoutDrag?.socketId === id ? socketLayoutDrag : undefined;
   const socketX = dragPreview?.currentX ?? x;
   const socketY = dragPreview?.currentY ?? y;
-  const nodeLabel = getNodeLabel(id, node);
-  const socketHoverDetails = buildSocketHoverDetails(id, node, materia, activeLoadout);
-  const isIterator = hasIteratorBehavior(node, materia);
-  const isGenerator = isGeneratorSocket(node, materia);
-  const iteratorDetails = isIterator ? formatIteratorBehavior(node, materia) : undefined;
+  const socketLabel = getSocketLabel(id, socket);
+  const socketHoverDetails = buildSocketHoverDetails(id, socket, materia, activeLoadout);
+  const isIterator = hasIteratorBehavior(socket, materia);
+  const isGenerator = isGeneratorSocket(socket, materia);
+  const iteratorDetails = isIterator ? formatIteratorBehavior(socket, materia) : undefined;
   const isLoopSelected = selectedLoopSocketSet.has(id);
-  const isEntry = isEntrySocket(node);
+  const isEntry = isEntrySocket(socket);
   const socketStyle = loopMembership ? { left: `${socketX}px`, top: `${socketY}px`, '--loop-accent': loopMembership.accent, '--loop-accent-soft': loopMembership.accentSoft } as CSSProperties : { left: `${socketX}px`, top: `${socketY}px` };
 
   return (
-    <button data-testid={`socket-${id}`} className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorNode ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${loopExitBadge ? 'materia-socket-loop-exit' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`} style={socketStyle} data-loop-ids={loopMembership?.loopIds.join(' ')} data-loop-exit-ids={loopExitBadge?.loopIds.join(' ')} aria-pressed={isLoopSelected} onClick={(event) => handleSocketClick(id, event)} onPointerDown={(event) => beginSocketLayoutDrag(socket, event)} onPointerMove={moveSocketLayoutDrag} onPointerUp={(event) => finishSocketLayoutDrag(id, event)} onPointerCancel={cancelSocketLayoutDrag} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDrop(id, event)} title={socketHoverDetails} aria-label={`${nodeLabel} socket details`}>
-      <div className="materia-socket-orb-stage"><div draggable={!isEmptySocket(node)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}><Orb color={nodeColor(id, index, materia, node)} label={socketHoverDetails} empty={isEmptySocket(node)} iterator={isIterator} /></div>{isIterator && <span className={`materia-iterator-badge graph-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}</div>
+    <button data-testid={`socket-${id}`} className={`materia-socket graph-materia-socket ${selectedMateriaId ? 'materia-socket-selectable' : ''} ${id === currentMonitorSocket ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${loopExitBadge ? 'materia-socket-loop-exit' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`} style={socketStyle} data-loop-ids={loopMembership?.loopIds.join(' ')} data-loop-exit-ids={loopExitBadge?.loopIds.join(' ')} aria-pressed={isLoopSelected} onClick={(event) => handleSocketClick(id, event)} onPointerDown={(event) => beginSocketLayoutDrag(graphSocket, event)} onPointerMove={moveSocketLayoutDrag} onPointerUp={(event) => finishSocketLayoutDrag(id, event)} onPointerCancel={cancelSocketLayoutDrag} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDrop(id, event)} title={socketHoverDetails} aria-label={`${socketLabel} socket details`}>
+      <div className="materia-socket-orb-stage"><div draggable={!isEmptySocket(socket)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}><Orb color={socketColor(id, index, materia, socket)} label={socketHoverDetails} empty={isEmptySocket(socket)} iterator={isIterator} /></div>{isIterator && <span className={`materia-iterator-badge graph-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}</div>
       {isEntry && <span className="entry-rune">Entry</span>}
       {loopExitBadge && <span className="loop-exit-rune" title={loopExitBadge.title} style={{ '--loop-accent': loopExitBadge.accent, '--loop-accent-soft': loopExitBadge.accentSoft } as CSSProperties}>Loop exit</span>}
-      <span className="materia-socket-label">{nodeLabel}</span>
+      <span className="materia-socket-label">{socketLabel}</span>
     </button>
   );
 }
@@ -487,9 +487,9 @@ function LoopEditorPanel({ activeLoadout, breakLoop, clearLoopExit, socketDispla
           return (
             <div key={loopId} className="flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200/10 bg-slate-900/60 p-3" data-testid={`loop-editor-${loopId}`}>
               <div className="min-w-48 flex-1"><div className="font-semibold text-cyan-100">{formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets, loop.label)}</div><div className="text-xs text-slate-400">Members: {loop.sockets.map(socketDisplayLabel).join(', ')}</div></div>
-              <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit source<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-source-${loopId}`} value={exit.from} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>{loop.sockets.map((nodeId) => <option key={nodeId} value={nodeId}>{socketDisplayLabel(nodeId)}</option>)}</select></label>
+              <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit source<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-source-${loopId}`} value={exit.from} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>{loop.sockets.map((socketId) => <option key={socketId} value={socketId}>{socketDisplayLabel(socketId)}</option>)}</select></label>
               <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit condition<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-condition-${loopId}`} value={exit.when} onChange={(event) => updateLoopExit(loopId, { when: event.target.value as MateriaEdgeCondition })}>{Object.entries(edgeConditionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit target<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-target-${loopId}`} value={exit.to} onChange={(event) => updateLoopExit(loopId, { to: event.target.value })}><option value="end">end</option>{Object.keys(activeLoadout?.sockets ?? {}).map((nodeId) => <option key={nodeId} value={nodeId}>{socketLabel(nodeId)}</option>)}</select></label>
+              <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit target<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-target-${loopId}`} value={exit.to} onChange={(event) => updateLoopExit(loopId, { to: event.target.value })}><option value="end">end</option>{Object.keys(activeLoadout?.sockets ?? {}).map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
               {loop.exit && <button type="button" className="materia-button-secondary" data-testid={`loop-exit-clear-${loopId}`} onClick={() => clearLoopExit(loopId)}>Clear exit</button>}
               <button type="button" className="materia-button-secondary" data-testid={`loop-break-${loopId}`} onClick={() => breakLoop(loopId)}>Break loop</button>
             </div>
@@ -505,8 +505,8 @@ interface SocketActionModalProps {
   edgeCondition: MateriaEdgeCondition;
   edgeMutationError: string;
   edgeTargetId: string;
-  materia: Record<string, PipelineNode>;
-  palette: Array<[string, PipelineNode]>;
+  materia: Record<string, PipelineSocket>;
+  palette: Array<[string, PipelineSocket]>;
   socketActionId?: string;
   socketActionMode: SocketActionMode;
   socketPropertyError: string;
@@ -546,13 +546,13 @@ function SocketActionModal(props: SocketActionModalProps) {
       <section className="socket-action-modal" role="dialog" aria-modal="true" aria-labelledby="socket-action-title" data-testid="socket-action-modal" onMouseDown={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : socketActionMode === 'connect' ? 'connect edge' : 'socket actions'}</p><h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{formatSocketLabel(socketActionId, activeLoadout.sockets[socketActionId])}</h3><p className="mt-1 text-sm text-slate-300">Socket id: {socketActionId}</p></div><button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' || socketActionMode === 'connect' ? 'Cancel' : 'Close'}</button></div>
         {socketActionMode === 'replace' ? (
-          <div className="mt-5"><p className="text-sm text-slate-300">Choose reusable materia to assign to this socket. Socket id, edges, traversal settings, and layout metadata will be preserved.</p><div className="materia-replacement-list mt-4" role="list" aria-label="Available replacement materia" data-testid="materia-replacement-list">{palette.map(([id, node], index) => (<button key={id} type="button" className="materia-replacement-row" data-testid={`replacement-materia-${id}`} onClick={() => replaceMateriaFromModal(socketActionId, id)}><Orb small color={nodeColor(id, index, materia, node)} label={id} /><span className="flex min-w-0 flex-col text-left"><span className="truncate font-black text-cyan-50">{id}</span><span className="truncate text-xs text-slate-300">{getNodeLabel(id, node)}</span></span></button>))}</div>{palette.length === 0 && <p className="mt-4 text-sm text-amber-200">No available materia definitions found.</p>}</div>
+          <div className="mt-5"><p className="text-sm text-slate-300">Choose reusable materia to assign to this socket. Socket id, edges, traversal settings, and layout metadata will be preserved.</p><div className="materia-replacement-list mt-4" role="list" aria-label="Available replacement materia" data-testid="materia-replacement-list">{palette.map(([id, socket], index) => (<button key={id} type="button" className="materia-replacement-row" data-testid={`replacement-materia-${id}`} onClick={() => replaceMateriaFromModal(socketActionId, id)}><Orb small color={socketColor(id, index, materia, socket)} label={id} /><span className="flex min-w-0 flex-col text-left"><span className="truncate font-black text-cyan-50">{id}</span><span className="truncate text-xs text-slate-300">{getSocketLabel(id, socket)}</span></span></button>))}</div>{palette.length === 0 && <p className="mt-4 text-sm text-amber-200">No available materia definitions found.</p>}</div>
         ) : socketActionMode === 'edit' ? (
           <div className="mt-5 space-y-4" data-testid="socket-property-editor"><p className="text-sm text-slate-300">Edit socket-level traversal limits and explicit layout coordinates. Empty fields clear that socket property.</p><div className="grid gap-3 sm:grid-cols-3"><label className="graph-field">Max visits<input data-testid="socket-max-visits" inputMode="numeric" value={socketPropertyForm.maxVisits} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxVisits: event.target.value })} placeholder="default" /></label><label className="graph-field">Retries / edge traversals<input data-testid="socket-max-edge-traversals" inputMode="numeric" value={socketPropertyForm.maxEdgeTraversals} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxEdgeTraversals: event.target.value })} placeholder="default" /></label><label className="graph-field">Max output bytes<input data-testid="socket-max-output-bytes" inputMode="numeric" value={socketPropertyForm.maxOutputBytes} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxOutputBytes: event.target.value })} placeholder="default" /></label></div><div className="grid gap-3 sm:grid-cols-2"><label className="graph-field">Layout X<input data-testid="socket-layout-x" value={socketPropertyForm.layoutX} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutX: event.target.value })} placeholder="auto" /></label><label className="graph-field">Layout Y<input data-testid="socket-layout-y" value={socketPropertyForm.layoutY} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutY: event.target.value })} placeholder="auto" /></label></div>{socketPropertyError && <p className="socket-property-error" role="alert">{socketPropertyError}</p>}<div className="flex flex-wrap gap-3"><button type="button" className="materia-button" data-testid="save-socket-properties" onClick={() => saveSocketProperties(socketActionId)}>Save socket properties</button><button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button></div></div>
         ) : socketActionMode === 'connect' ? (
           <div className="mt-5 space-y-4" data-testid="edge-connector"><p className="text-sm text-slate-300">Create a validated {activeLoadout.loops && Object.values(activeLoadout.loops).some((loop) => loop.exit?.from === socketActionId) ? 'loop-exit route' : 'canonical edge'} from this socket to an existing socket.</p><div className="grid gap-3 sm:grid-cols-2"><label className="graph-field">Target socket<select data-testid="edge-target" value={edgeTargetId} onChange={(event) => setEdgeTargetId(event.target.value)}><option value="">choose socket…</option>{Object.keys(activeLoadout.sockets ?? {}).filter((id) => id !== socketActionId).map((id) => <option key={id} value={id}>{socketLabel(id)}</option>)}</select></label><label className="graph-field">Condition<select data-testid="edge-condition" value={edgeCondition} onChange={(event) => setEdgeCondition(event.target.value as MateriaEdgeCondition)}><option value="always">Always</option><option value="satisfied">Satisfied</option><option value="not_satisfied">Not Satisfied</option></select></label></div>{edgeMutationError && <p className="socket-property-error" role="alert">{edgeMutationError}</p>}<div className="flex flex-wrap gap-3"><button type="button" className="materia-button" data-testid="create-edge" onClick={() => createEdge(socketActionId)}>Create edge</button><button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button></div></div>
         ) : (
-          <div className="mt-5 space-y-4"><p className="text-sm text-slate-300">Tip: drag this socket's orb onto the graph background to clear it without opening this menu.</p><div className="grid gap-3 sm:grid-cols-2"><button type="button" className="socket-action-button socket-action-button-muted" onClick={() => removeMateria(socketActionId)}>Clear socket</button><button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button><button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button><button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button><button type="button" className="socket-action-button" onClick={() => openEdgeConnector(socketActionId)}>Connect Edge</button><button type="button" className="socket-action-button socket-action-button-danger" data-testid={`delete-socket-${socketActionId}`} disabled={!canDeleteSocket(activeLoadout.sockets[socketActionId])} title={canDeleteSocket(activeLoadout.sockets[socketActionId]) ? 'Delete this socket and clean graph references' : 'Entry sockets cannot be deleted'} onClick={() => deleteSocket(socketActionId)}>Delete Socket</button></div><div className="edge-removal-list" data-testid="edge-removal-list"><p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>{((activeLoadout.sockets[socketActionId] as LegacyPipelineNode).next) && (<button type="button" className="edge-removal-row" data-testid={`remove-next-edge-${socketActionId}`} onClick={() => removeLegacyNextEdge(socketActionId)}>Remove legacy flow to {socketLabel((activeLoadout.sockets[socketActionId] as LegacyPipelineNode).next as string)}</button>)}{(activeLoadout.sockets[socketActionId].edges ?? []).map((edge, index) => (<button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>Remove {edgeConditionLabel(edge.when)} edge to {socketLabel(edge.to)}</button>))}{Object.entries(activeLoadout.loops ?? {}).flatMap(([loopId, loop]) => (loop.exits ?? []).filter((route) => route.from === socketActionId).map((route) => (<button key={`${loopId}-${route.id}`} type="button" className="edge-removal-row" data-testid={`remove-loop-exit-route-${loopId}-${route.id}`} onClick={() => removeLoopExitConnection(loopId, route.id)}>Remove loop-exit {edgeConditionLabel(route.condition)} route to {socketLabel(route.targetSocketId)}</button>)))}{!(activeLoadout.sockets[socketActionId] as LegacyPipelineNode).next && (activeLoadout.sockets[socketActionId].edges ?? []).length === 0 && Object.values(activeLoadout.loops ?? {}).every((loop) => !(loop.exits ?? []).some((route) => route.from === socketActionId)) && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}</div></div>
+          <div className="mt-5 space-y-4"><p className="text-sm text-slate-300">Tip: drag this socket's orb onto the graph background to clear it without opening this menu.</p><div className="grid gap-3 sm:grid-cols-2"><button type="button" className="socket-action-button socket-action-button-muted" onClick={() => removeMateria(socketActionId)}>Clear socket</button><button type="button" className="socket-action-button" onClick={() => setSocketActionMode('replace')}>Replace</button><button type="button" className="socket-action-button" onClick={() => openSocketPropertyEditor(socketActionId)}>Edit</button><button type="button" className="socket-action-button" onClick={() => createConnectedSocket(socketActionId)}>New Socket</button><button type="button" className="socket-action-button" onClick={() => openEdgeConnector(socketActionId)}>Connect Edge</button><button type="button" className="socket-action-button socket-action-button-danger" data-testid={`delete-socket-${socketActionId}`} disabled={!canDeleteSocket(activeLoadout.sockets[socketActionId])} title={canDeleteSocket(activeLoadout.sockets[socketActionId]) ? 'Delete this socket and clean graph references' : 'Entry sockets cannot be deleted'} onClick={() => deleteSocket(socketActionId)}>Delete Socket</button></div><div className="edge-removal-list" data-testid="edge-removal-list"><p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Outgoing edges</p>{((activeLoadout.sockets[socketActionId] as LegacyPipelineSocket).next) && (<button type="button" className="edge-removal-row" data-testid={`remove-next-edge-${socketActionId}`} onClick={() => removeLegacyNextEdge(socketActionId)}>Remove legacy flow to {socketLabel((activeLoadout.sockets[socketActionId] as LegacyPipelineSocket).next as string)}</button>)}{(activeLoadout.sockets[socketActionId].edges ?? []).map((edge, index) => (<button key={`${edge.to}-${index}`} type="button" className="edge-removal-row" data-testid={`remove-edge-${socketActionId}-${index}`} onClick={() => removeEdge(socketActionId, index)}>Remove {edgeConditionLabel(edge.when)} edge to {socketLabel(edge.to)}</button>))}{Object.entries(activeLoadout.loops ?? {}).flatMap(([loopId, loop]) => (loop.exits ?? []).filter((route) => route.from === socketActionId).map((route) => (<button key={`${loopId}-${route.id}`} type="button" className="edge-removal-row" data-testid={`remove-loop-exit-route-${loopId}-${route.id}`} onClick={() => removeLoopExitConnection(loopId, route.id)}>Remove loop-exit {edgeConditionLabel(route.condition)} route to {socketLabel(route.targetSocketId)}</button>)))}{!(activeLoadout.sockets[socketActionId] as LegacyPipelineSocket).next && (activeLoadout.sockets[socketActionId].edges ?? []).length === 0 && Object.values(activeLoadout.loops ?? {}).every((loop) => !(loop.exits ?? []).some((route) => route.from === socketActionId)) && <p className="mt-2 text-sm text-slate-400">No outgoing edges from this socket.</p>}</div></div>
         )}
       </section>
     </div>

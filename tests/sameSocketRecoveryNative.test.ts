@@ -75,8 +75,8 @@ function promptMessages(harness: FakePiHarness): any[] {
   return harness.sentMessages.map(({ message }) => message as any).filter((message) => message.customType === "pi-materia-prompt");
 }
 
-describe("native same-node recovery", () => {
-  test("context-window assistant errors retry the same active node without a new node start", async () => {
+describe("native same-socket recovery", () => {
+  test("context-window assistant errors retry the same active socket without a new socket start", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast recover me");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
@@ -90,17 +90,17 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(latestState.recoveryAttempts).toBeDefined();
 
     const events = await readEvents(harness);
-    expect(events.filter((event) => event.type === "node_start")).toHaveLength(1);
-    expect(events.some((event) => event.type === "same_node_recovery_start" && event.data.reason === "context_window" && event.data.mode === "normal")).toBe(true);
-    expect(events.some((event) => event.type === "same_node_recovery_retry")).toBe(true);
+    expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "context_window" && event.data.mode === "normal")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_retry")).toBe(true);
   });
 
-  test("Codex context_length_exceeded websocket errors retry the same active node", async () => {
+  test("Codex context_length_exceeded websocket errors retry the same active socket", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast codex websocket context length");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
@@ -114,15 +114,15 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
 
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_node_recovery_start" && event.data.reason === "context_window" && event.data.error.includes(errorMessage))).toBe(true);
-    expect(events.some((event) => event.type === "same_node_recovery_retry")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "context_window" && event.data.error.includes(errorMessage))).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_retry")).toBe(true);
   });
 
-  test("agent_end failures without assistant output retry the same active node", async () => {
+  test("agent_end failures without assistant output retry the same active socket", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast no assistant");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
@@ -149,18 +149,18 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.nodeState).toBe("awaiting_agent_response");
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.failedReason).toBeUndefined();
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Transient transport failure"))).toBe(true);
 
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "transient_transport_turn_failure" && event.data.warning === true && event.data.error.includes("WebSocket error"))).toBe(true);
-    expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
     expect(events.filter((event) => event.type === "cast_end")).toHaveLength(0);
   });
 
-  test("plain WebSocket assistant error entries are ignored and later success completes the same node", async () => {
+  test("plain WebSocket assistant error entries are ignored and later success completes the same socket", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast websocket assistant blip");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
@@ -173,7 +173,7 @@ describe("native same-node recovery", () => {
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.nodeState).toBe("awaiting_agent_response");
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.failedReason).toBeUndefined();
     expect(latestState.lastProcessedEntryId).toBe(transientEntry.id);
 
@@ -183,16 +183,16 @@ describe("native same-node recovery", () => {
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
     expect(latestState.awaitingResponse).toBe(false);
-    expect(latestState.nodeState).toBe("complete");
+    expect(latestState.socketState).toBe("complete");
     expect(latestState.lastProcessedEntryId).toBe(successEntry.id);
     expect(latestState.lastAssistantText).toBe("done after websocket blip");
     expect(latestState.failedReason).toBeUndefined();
 
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "transient_transport_turn_failure" && event.data.entryId === transientEntry.id)).toBe(true);
-    expect(events.some((event) => event.type === "node_complete" && event.data.entryId === successEntry.id && event.data.node === "Socket-1")).toBe(true);
+    expect(events.some((event) => event.type === "socket_complete" && event.data.entryId === successEntry.id && event.data.socket === "Socket-1")).toBe(true);
     expect(events.some((event) => event.type === "cast_end" && event.data.ok === true && event.data.entryId === successEntry.id)).toBe(true);
-    expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
   });
 
   test("non-recoverable assistant errors fail without retry", async () => {
@@ -207,10 +207,10 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
-    expect(latestState.nodeState).toBe("failed");
+    expect(latestState.socketState).toBe("failed");
     expect(latestState.failedReason).toContain("provider auth failed");
     const events = await readEvents(harness);
-    expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
   });
 
   test("non-recoverable agent_end failures fail without retry", async () => {
@@ -224,11 +224,11 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
-    expect(latestState.nodeState).toBe("failed");
+    expect(latestState.socketState).toBe("failed");
     expect(latestState.failedReason).toContain("Non-recoverable turn failure");
     expect(latestState.failedReason).toContain("invalid_request_error: provider rejected request");
     const events = await readEvents(harness);
-    expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
     expect(events.some((event) => event.type === "cast_end" && event.data.ok === false)).toBe(true);
   });
 
@@ -247,7 +247,7 @@ describe("native same-node recovery", () => {
     expect(latestState.failedReason).toContain("Same-socket recovery action compact failed");
     expect(latestState.failedReason).toContain("compaction provider unavailable");
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_node_recovery_action_failed" && event.data.action === "compact")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_action_failed" && event.data.action === "compact")).toBe(true);
   });
 
   test("proactive compaction failures are warnings and later context-window recovery still retries", async () => {
@@ -262,7 +262,7 @@ describe("native same-node recovery", () => {
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Proactive compaction failed"))).toBe(true);
 
@@ -280,8 +280,8 @@ describe("native same-node recovery", () => {
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "proactive_compaction_start" && event.data.action === "compact" && event.data.reason === "context_pressure")).toBe(true);
     expect(events.some((event) => event.type === "proactive_compaction_failed" && event.data.warning === true)).toBe(true);
-    expect(events.some((event) => event.type === "same_node_recovery_action_start" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
-    expect(events.some((event) => event.type === "same_node_recovery_action_complete" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_action_start" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_action_complete" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
   });
 
   test("non-recoverable assistant errors fail with non-recoverable diagnostics", async () => {
@@ -297,7 +297,7 @@ describe("native same-node recovery", () => {
     expect(latestState.failedReason).toContain("Non-recoverable turn failure");
     expect(latestState.failedReason).toContain("provider auth failed");
     const events = await readEvents(harness);
-    expect(events.filter((event) => event.type.startsWith("same_node_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
   });
 
   test("recovery attempts are bounded and exhaustion fails clearly", async () => {
@@ -313,10 +313,10 @@ describe("native same-node recovery", () => {
     expect(latestState.active).toBe(false);
     expect(latestState.failedReason).toContain("Same-socket recovery exhausted");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
-    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_node_recovery_exhausted", reason: "context_window", node: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "context_window", socket: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
     expect(latestState.recoveryAllowances[latestState.recoveryExhaustion.key]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_node_recovery_exhausted" && event.data.originalMaxAttempts === 1 && event.data.effectiveMaxAttempts === 1)).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.originalMaxAttempts === 1 && event.data.effectiveMaxAttempts === 1)).toBe(true);
   });
 
   test("revive allowance extension is scoped and grows linearly", async () => {
@@ -352,7 +352,7 @@ describe("native same-node recovery", () => {
     expect(extendSameSocketRecoveryAllowanceForRevive(state).newEffectiveMaxAttempts).toBe(2);
 
     state.recoveryExhaustion = staleExhaustion;
-    state.failedReason = "Non-recoverable turn failure for normal turn for node \\\"Socket-1\\\": provider auth failed";
+    state.failedReason = "Non-recoverable turn failure for normal turn for socket \\\"Socket-1\\\": provider auth failed";
     expect(() => extendSameSocketRecoveryAllowanceForRevive(state)).toThrow(/does not match the current terminal failure/);
   });
 
@@ -365,7 +365,7 @@ describe("native same-node recovery", () => {
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(() => extendSameSocketRecoveryAllowanceForRevive(state)).toThrow(/missing structured same-socket recovery exhaustion metadata/);
 
-    const legacy = { ...state, failedReason: "Same-socket recovery exhausted for node", recoveryExhaustion: undefined };
+    const legacy = { ...state, failedReason: "Same-socket recovery exhausted for socket", recoveryExhaustion: undefined };
     expect(() => extendSameSocketRecoveryAllowanceForRevive(legacy)).toThrow(/missing structured same-socket recovery exhaustion metadata/);
   });
 
@@ -386,8 +386,8 @@ describe("native same-node recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
-    expect(latestState.nodeState).toBe("awaiting_agent_response");
-    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.multiTurnFinalizing).toBe(false);
     expect(latestState.multiTurnRefinements).toEqual({ '["Socket-1","__singleton__",1]': 1 });
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
@@ -396,7 +396,7 @@ describe("native same-node recovery", () => {
     expect(retryPrompt).toContain("Previous output:\nDraft plan; please clarify scope.");
     expect(retryPrompt).not.toContain("partial stale output");
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_node_recovery_start" && event.data.mode === "refinement" && event.data.reason === "context_window")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.mode === "refinement" && event.data.reason === "context_window")).toBe(true);
   });
 
   test("multi-turn finalization context-window failures compact and retry finalization without advancing", async () => {
@@ -414,7 +414,7 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(triggerTurnsBefore + 1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
-    expect(latestState.currentNode).toBe("Socket-1");
+    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.awaitingResponse).toBe(true);
     expect(latestState.multiTurnFinalizing).toBe(true);
     expect(latestState.data.tasks).toBeUndefined();
@@ -424,10 +424,10 @@ describe("native same-node recovery", () => {
     expect(retryPrompt).toContain("Return only JSON");
     expect(retryPrompt).toContain("Previous output:\nDraft plan; ready to finalize.");
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_node_recovery_start" && event.data.mode === "finalization" && event.data.reason === "context_window")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.mode === "finalization" && event.data.reason === "context_window")).toBe(true);
   });
 
-  test("foreach context-window recovery preserves cursor and avoids duplicate node start", async () => {
+  test("foreach context-window recovery preserves cursor and avoids duplicate socket start", async () => {
     const harness = await makeHarness(foreachConfig());
     await harness.runCommand("materia", "cast foreach recovery");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
@@ -439,21 +439,21 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(triggerTurnsBefore + 1);
     expect(harness.operationLog).toContain("compact");
     expect(latestState.active).toBe(true);
-    expect(latestState.currentNode).toBe("Socket-2");
+    expect(latestState.currentSocketId).toBe("Socket-2");
     expect(latestState.currentItemKey).toBe("a");
     expect(latestState.currentItemLabel).toBe("Alpha");
     expect(latestState.cursors).toEqual({ itemCursor: 0 });
     expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 1 });
     expect(latestState.taskAttempts).toEqual({ '["Socket-1","__singleton__"]': 1, '["Socket-2","a"]': 1 });
     expect(latestState.recoveryAttempts).toBeDefined();
-    const nodeStartsBeforeCompletion = (await readEvents(harness)).filter((event) => event.type === "node_start" && event.data.node === "Socket-2");
-    expect(nodeStartsBeforeCompletion).toHaveLength(1);
+    const socketStartsBeforeCompletion = (await readEvents(harness)).filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2");
+    expect(socketStartsBeforeCompletion).toHaveLength(1);
 
     harness.appendAssistantMessage('{"done":true}');
     await harness.emit("agent_end", { messages: [] });
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
-    expect(latestState.currentNode).toBe("Socket-2");
+    expect(latestState.currentSocketId).toBe("Socket-2");
     expect(latestState.currentItemKey).toBe("b");
     expect(latestState.currentItemLabel).toBe("Beta");
     expect(latestState.cursors).toEqual({ itemCursor: 1 });

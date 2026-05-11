@@ -1,6 +1,6 @@
 # Materia handoff JSON contract
 
-JSON-parsed materia sockets hand off reusable work context to the rest of the graph by returning a single JSON object. Nodes and sockets are the placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
+JSON-parsed materia sockets hand off reusable work context to the rest of the graph by returning a single JSON object. Sockets are the placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
 
 ## Canonical generic envelope
 

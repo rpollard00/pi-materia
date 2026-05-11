@@ -61,7 +61,7 @@ export function extendSameSocketRecoveryAllowanceForRevive(state: MateriaCastSta
   if (state.active) throw new Error(`pi-materia cast ${state.castId} is still active and cannot be revived.`);
   if (state.phase !== "failed" && currentSocketState(state) !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed and cannot be revived.`);
   const exhaustion = state.recoveryExhaustion;
-  if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted") {
+  if (!exhaustion || exhaustion.kind !== "same_socket_recovery_exhausted") {
     throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured same-socket recovery exhaustion metadata. Use /materia recast for general failed casts.`);
   }
   if (!exhaustion.key) throw new Error(`pi-materia cast ${state.castId} is not revivable: exhausted recovery context is missing.`);
@@ -120,13 +120,13 @@ function refinementIdentityKey(state: MateriaCastState, socketId: string): strin
 }
 
 function currentSocketId(state: MateriaCastState): string | undefined {
-  if (state.currentNode && state.currentNode !== "complete" && state.currentNode !== "failed") return state.currentNode;
+  if (state.currentSocketId && state.currentSocketId !== "complete" && state.currentSocketId !== "failed") return state.currentSocketId;
   if (state.phase !== "complete" && state.phase !== "failed") return state.phase;
   return undefined;
 }
 
-function currentSocketState(state: MateriaCastState): MateriaCastState["nodeState"] {
-  return state.nodeState;
+function currentSocketState(state: MateriaCastState): MateriaCastState["socketState"] {
+  return state.socketState;
 }
 
 export function currentSocketForRecovery(state: MateriaCastState): ResolvedMateriaSocket | undefined {

@@ -14,25 +14,21 @@ import {
 const materia = { Build: { tools: "coding", prompt: "build" }, Check: { tools: "none", prompt: "check" } };
 
 describe("schema/persistence adapters", () => {
-  test("rejects legacy nodes payloads with actionable sockets errors", () => {
+  test("requires canonical sockets payloads", () => {
     const parsed = parsePersistedLoadout({
       entry: "Socket-1",
-      nodes: {
-        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Check" },
-      },
       loops: {
-        review: { nodes: ["Socket-2"], consumes: { from: "Socket-1", output: "workItems" } },
+        review: { consumes: { from: "Socket-1", output: "workItems" } },
       },
     });
 
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["loadout.nodes", "loadout.loops.review.nodes", "loadout.sockets", "loadout.loops.review.sockets"]));
+    expect(parsed.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["loadout.sockets", "loadout.loops.review.sockets"]));
     expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("sockets");
   });
 
-  test("reads current sockets payloads and serializes new data with sockets, not nodes", () => {
+  test("reads and serializes current sockets payloads", () => {
     const parsed = parsePersistedLoadout({
       schemaVersion: 2,
       entry: "Socket-1",
@@ -50,9 +46,7 @@ describe("schema/persistence adapters", () => {
     const serialized = serializePersistedLoadout(parsed.value);
     expect(serialized.schemaVersion).toBe(2);
     expect(serialized.sockets).toBeDefined();
-    expect(serialized.nodes).toBeUndefined();
     expect((serialized.loops as Record<string, { sockets: string[] }>).main.sockets).toEqual(["Socket-1", "Socket-2"]);
-    expect((serialized.loops as Record<string, { nodes?: string[] }>).main.nodes).toBeUndefined();
   });
 
   test("reports malformed loadout data and missing optional fields remain optional", () => {
@@ -85,7 +79,7 @@ describe("schema/persistence adapters", () => {
     }
   });
 
-  test("bridges domain sockets to the canonical pipeline DTO without leaking nodes into the domain", () => {
+  test("bridges domain sockets to the canonical pipeline DTO", () => {
     const pipeline = domainLoadoutToPipelineConfig({
       entry: "Socket-1",
       sockets: { "Socket-1": { type: "agent", materia: "Build" } },
@@ -97,7 +91,6 @@ describe("schema/persistence adapters", () => {
     const domain = pipelineConfigToDomainLoadout(pipeline);
     expect(domain.sockets["Socket-1"].type).toBe("agent");
     expect(domain.loops?.one.sockets).toEqual(["Socket-1"]);
-    expect("nodes" in domain).toBe(false);
   });
 
   test("config loading accepts sockets-format loadouts while preserving current application DTOs", async () => {
@@ -120,35 +113,34 @@ describe("schema/persistence adapters", () => {
     expect(loaded.config.loadouts?.SocketConfig.loops?.only.sockets).toEqual(["Socket-1"]);
   });
 
-  test("config loading rejects legacy nodes in loadouts and loops", async () => {
+  test("config loading fails malformed socket payloads through canonical graph validation", async () => {
     const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
     const file = path.join(dir, "materia.json");
     await writeFile(file, JSON.stringify({
-      activeLoadout: "LegacyConfig",
+      activeLoadout: "BadConfig",
       materia,
       loadouts: {
-        LegacyConfig: {
+        BadConfig: {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "Build" } },
-          loops: { only: { nodes: ["Socket-1"] } },
+          sockets: {},
+          loops: { only: { sockets: ["Socket-1"] } },
         },
       },
     }), "utf8");
 
-    await expect(loadConfig(dir, file)).rejects.toThrow(/nodes.*sockets|sockets.*nodes/);
+    await expect(loadConfig(dir, file)).rejects.toThrow(/Unknown graph endpoint|must include at least one socket id/);
   });
 
-  test("application adapter preserves socket-shaped loadouts without reading legacy nodes", () => {
+  test("application adapter preserves socket-shaped loadouts", () => {
     const normalized = normalizePersistedLoadoutForApplication({
       entry: "Socket-1",
       sockets: { "Socket-1": { type: "agent", materia: "Build" } },
-    }) as { sockets: Record<string, { materia: string }>; nodes?: unknown };
+    }) as { sockets: Record<string, { materia: string }> };
 
     expect(normalized.sockets["Socket-1"].materia).toBe("Build");
-    expect(normalized.nodes).toBeUndefined();
   });
 
-  test("rejects saved legacy node patches instead of migrating them", async () => {
+  test("saved malformed socket patches fail through canonical graph validation", async () => {
     const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
     const cwd = await Bun.$`mktemp -d`.text().then((value) => value.trim());
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
@@ -156,9 +148,9 @@ describe("schema/persistence adapters", () => {
     try {
       await expect(saveMateriaConfigPatch(cwd, {
         materia,
-        loadouts: { Custom: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } as never },
+        loadouts: { Custom: { entry: "Socket-1", sockets: {} } },
         activeLoadout: "Custom",
-      })).rejects.toThrow(/nodes.*sockets|sockets.*nodes/);
+      })).rejects.toThrow(/Unknown graph endpoint/);
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

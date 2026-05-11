@@ -52,8 +52,8 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 
 ## Pipeline graph editor
 
-1. Add a new node and save; confirm existing nodes keep their previous layout.
-2. Insert a node between two connected nodes and confirm the surrounding `next`/edge path is rewired through the inserted node.
+1. Add a new socket and save; confirm existing sockets keep their previous layout.
+2. Insert a socket between two connected sockets and confirm the surrounding edge path is rewired through the inserted socket.
 3. Add or change `satisfied` and `not_satisfied` branches.
 4. Tweak retry/visit limits and save; confirm unrelated graph metadata such as `insertedBy`, `inserted`, and `layout` remains intact.
 
@@ -71,5 +71,5 @@ These complement the automated WebUI tests for graph sizing, routing, and drag/d
 
 1. Start a short `/materia cast` from the same Pi session that launched the UI.
 2. Confirm the monitor panel shows emitted outputs, elapsed time, artifact summary text, and recent artifact contents.
-3. Confirm the graph highlights the currently active node.
+3. Confirm the graph highlights the currently active socket.
 4. Open a second independent Pi session and verify this WebUI does not aggregate outputs from that other session.

@@ -1,5 +1,5 @@
 export interface MateriaMonitorArtifactEntry {
-  node?: string;
+  socket?: string;
   materia?: string;
   phase?: string;
   kind?: string;
@@ -24,7 +24,7 @@ export interface MateriaWebUiSessionSnapshot {
   sessionId: string;
   uiStartedAt: number;
   now: number;
-  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }>;
+  emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }>;
   artifactSummary?: {
     runDir?: string;
     request?: string;
@@ -36,9 +36,9 @@ export interface MateriaWebUiSessionSnapshot {
     castId: string;
     active: boolean;
     phase: string;
-    currentNode?: string;
+    currentSocketId?: string;
     currentMateria?: string;
-    nodeState?: string;
+    socketState?: string;
     awaitingResponse: boolean;
     runDir: string;
     artifactRoot: string;

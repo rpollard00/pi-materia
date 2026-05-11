@@ -166,7 +166,5 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 }
 
 export function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
-  // Compatibility for legacy test/fixture helpers that still construct resolved
-  // sockets with `node`; canonical resolved pipelines now materialize `socket` only.
-  return (socket.socket ?? (socket as unknown as { node: TSocket["socket"] }).node) as TSocket["socket"];
+  return socket.socket;
 }

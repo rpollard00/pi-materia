@@ -67,8 +67,6 @@ export interface MateriaBudgetConfig {
 export interface MateriaLimitsConfig {
   /** Canonical socket visit cap for a cast. */
   maxSocketVisits?: number;
-  /** @deprecated Legacy config alias. Use maxSocketVisits. */
-  maxNodeVisits?: number;
   maxEdgeTraversals?: number;
 }
 
@@ -129,8 +127,6 @@ export interface MateriaModelSelection {
 
 export interface UsageModelSelection extends MateriaModelSelection {
   socket: string;
-  /** @deprecated Persisted/WebUI usage DTO field; value is the socket id. */
-  node: string;
   materia: string;
   taskId?: string;
   attempt?: number;
@@ -138,8 +134,6 @@ export interface UsageModelSelection extends MateriaModelSelection {
 
 export interface UsageTurn extends UsageTotals {
   socket: string;
-  /** @deprecated Persisted/WebUI usage DTO field; value is the socket id. */
-  node: string;
   materia: string;
   taskId?: string;
   attempt?: number;
@@ -166,17 +160,14 @@ export interface UsageReport extends UsageTotals {
   thinkingLevel?: string;
   costKind?: UsageCostKind;
   byMateria: Record<string, UsageTotals>;
-  /** @deprecated Persisted/WebUI usage DTO bucket keyed by socket id. Use `usageBySocket()` in core internals. */
-  byNode: Record<string, UsageTotals>;
+  bySocket: Record<string, UsageTotals>;
   byTask: Record<string, UsageTotals>;
   byAttempt: Record<string, UsageTotals>;
   turns?: UsageTurn[];
   modelSelections?: UsageModelSelection[];
 }
 
-export interface SocketUsageReportView extends Omit<UsageReport, "byNode"> {
-  bySocket: Record<string, UsageTotals>;
-}
+export interface SocketUsageReportView extends UsageReport {}
 
 export type MateriaCastPhase = string;
 
@@ -188,16 +179,13 @@ export type MateriaCastSocketState =
   | "complete"
   | "failed";
 
-/** @deprecated External/persisted casts still spell this nodeState; internal code should say socket state. */
-export type MateriaCastNodeState = MateriaCastSocketState;
-
 export interface MateriaCastRuntimeView {
   currentSocketId?: string;
   currentSocketState?: MateriaCastSocketState;
 }
 
 export interface MateriaCastState {
-  version: 1;
+  version: 2;
   active: boolean;
   castId: string;
   request: string;
@@ -207,8 +195,7 @@ export interface MateriaCastState {
   runDir: string;
   artifactRoot: string;
   phase: MateriaCastPhase;
-  /** @deprecated External/persisted cast DTO field; value is the current socket id. Use socket terminology in new internal APIs. */
-  currentNode?: string;
+  currentSocketId?: string;
   currentMateria?: string;
   currentItemKey?: string;
   currentItemLabel?: string;
@@ -219,8 +206,7 @@ export interface MateriaCastState {
    * multi-turn refinement pauses from turns awaiting an agent response.
    */
   awaitingResponse: boolean;
-  /** @deprecated External/persisted cast DTO field; use socket terminology in new internal APIs. */
-  nodeState?: MateriaCastSocketState;
+  socketState?: MateriaCastSocketState;
   lastProcessedEntryId?: string;
   lastAssistantText?: string;
   /** Hidden prompt for the active in-flight agent turn; used to retry without re-running socket start. */
@@ -254,7 +240,7 @@ export interface MateriaRecoveryAllowance {
 }
 
 export interface MateriaRecoveryExhaustion {
-  kind: "same_node_recovery_exhausted";
+  kind: "same_socket_recovery_exhausted";
   reason: "context_window";
   key: string;
   attempts: number;
@@ -263,7 +249,7 @@ export interface MateriaRecoveryExhaustion {
   reviveCount: number;
   /** Exact terminal failedReason recorded for the exhaustion failure; guards against stale revive metadata. */
   failedReason: string;
-  node?: string;
+  socket?: string;
   itemKey?: string;
   mode: "normal" | "refinement" | "finalization";
   exhaustedAt: number;
@@ -271,8 +257,7 @@ export interface MateriaRecoveryExhaustion {
 
 export interface MateriaManifestEntry {
   phase: MateriaCastPhase;
-  /** @deprecated Manifest/event compatibility field; value is a socket id. */
-  node?: string;
+  socket?: string;
   materia?: string;
   itemKey?: string;
   itemLabel?: string;
@@ -305,8 +290,7 @@ export interface MateriaRunState {
   runDir: string;
   eventsFile: string;
   usageFile: string;
-  /** @deprecated External/persisted run-state DTO field; value is the current socket id. */
-  currentNode?: string;
+  currentSocketId?: string;
   currentMateria?: string;
   currentTask?: string;
   attempt?: number;
@@ -325,8 +309,6 @@ export type MateriaMirrorEvent =
 
 export interface MateriaRunContext {
   socketId: string;
-  /** @deprecated Plugin/runtime callback DTO field; value is a socket id. Prefer socketId in internal code. */
-  nodeId?: string;
   materiaName: string;
   itemKey?: string;
   itemLabel?: string;
@@ -340,8 +322,6 @@ export interface MateriaPipelineConfig {
   entry: string;
   /** Canonical socket map for core/domain/application code. */
   sockets?: Record<string, MateriaPipelineSocketConfig>;
-  /** @deprecated Legacy persisted/WebUI DTO alias. Use sockets in core internals. */
-  nodes?: Record<string, MateriaPipelineSocketConfig>;
   /** Persisted visual metadata for this loadout. Semantic validation must ignore it. */
   layout?: MateriaPipelineLayoutConfig;
   /** Explicit loop consumer regions that group sockets and can consume a generator-provided list. */
@@ -435,8 +415,6 @@ export interface MateriaLoopConfig {
   label?: string;
   /** Socket ids contained by this loop region. */
   sockets?: string[];
-  /** @deprecated Legacy persisted/WebUI DTO alias. Use sockets in core internals. */
-  nodes?: string[];
   /** Optional generator consumed by this loop region. Prefer this over directly tagging loop members as iterators. */
   consumes?: MateriaLoopConsumerConfig;
   /** Legacy/shared iterator metadata. Prefer consumes so this is derived from generator metadata. */

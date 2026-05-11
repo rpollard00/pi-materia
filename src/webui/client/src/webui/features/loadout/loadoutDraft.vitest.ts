@@ -73,11 +73,10 @@ describe('loadout draft mutations', () => {
 
     expect(payload.loadouts?.Beta).toBeNull();
     expect(payload.loadouts?.Alpha).toMatchObject({ entry: 'Socket-1', sockets: config.loadouts.Alpha.sockets });
-    expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
     expect(config.loadouts.Beta).toMatchObject({ entry: 'Socket-1' });
   });
 
-  it('migrates legacy node layout into loadout layout before save', () => {
+  it('migrates legacy socket layout into loadout layout before save', () => {
     const payload = buildConfigToSave({
       loadouts: {
         Alpha: {
@@ -94,7 +93,6 @@ describe('loadout draft mutations', () => {
     expect(payload.loadouts?.Alpha?.layout?.sockets).toEqual({ 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 9, y: 9 } });
     expect(payload.loadouts?.Alpha?.sockets?.['Socket-1'].layout).toBeUndefined();
     expect(payload.loadouts?.Alpha?.sockets?.['Socket-2'].layout).toBeUndefined();
-    expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
   });
 
   it('round-trips WebUI sockets to canonical sockets for save payloads', () => {
@@ -115,8 +113,6 @@ describe('loadout draft mutations', () => {
 
     expect(payload.loadouts?.Alpha?.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
     expect(payload.loadouts?.Alpha?.loops?.work.sockets).toEqual(['Socket-2']);
-    expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
-    expect(payload.loadouts?.Alpha?.loops?.work).not.toHaveProperty('nodes');
   });
 
   it('chooses the next unused loadout name without filling existing gaps unexpectedly', () => {

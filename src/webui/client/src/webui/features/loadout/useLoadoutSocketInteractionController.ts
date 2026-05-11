@@ -104,8 +104,8 @@ export function useLoadoutSocketInteractionController({
     updateLoadoutDraft(activeLoadoutName, (loadout) => {
       if (!loadout.sockets) return loadout;
       if (fromSocket && fromSocket !== socketId) return swapSocketMateria(loadout, fromSocket, socketId);
-      const sourceNode = palette.find(([id]) => id === materiaId)?.[1];
-      return sourceNode ? setSocketMateria(loadout, socketId, sourceNode) : loadout;
+      const sourceSocket = palette.find(([id]) => id === materiaId)?.[1];
+      return sourceSocket ? setSocketMateria(loadout, socketId, sourceSocket) : loadout;
     });
     setSelectedMateriaId(undefined);
     setStatus(`Staged ${materiaId} in socket ${socketId}; socket graph links and layout were preserved.`);
@@ -114,12 +114,12 @@ export function useLoadoutSocketInteractionController({
 
   function removeMateria(socketId: string) {
     if (!activeLoadoutName) return false;
-    const currentNode = loadouts[activeLoadoutName]?.sockets?.[socketId];
-    if (!currentNode) {
+    const currentSocket = loadouts[activeLoadoutName]?.sockets?.[socketId];
+    if (!currentSocket) {
       setStatus(`Ignored unsocket: socket ${socketId} is not available in the active loadout.`);
       return false;
     }
-    if (isEmptySocket(currentNode)) {
+    if (isEmptySocket(currentSocket)) {
       setStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
       return false;
     }

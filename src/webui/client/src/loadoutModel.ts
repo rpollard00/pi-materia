@@ -5,7 +5,7 @@ import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socket
 import { fromWebUiLoadoutDto, toWebUiConfigDto, toWebUiLoadoutDto } from '../../loadoutDto.js';
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 
-type NodeType = 'agent' | 'utility';
+type SocketType = 'agent' | 'utility';
 export type SocketKind = 'entry' | 'normal';
 
 export interface SocketLayout {
@@ -13,8 +13,8 @@ export interface SocketLayout {
   y?: number;
 }
 
-export interface PipelineNode {
-  type?: NodeType;
+export interface PipelineSocket {
+  type?: SocketType;
   socketKind?: SocketKind;
   materia?: string;
   utility?: string;
@@ -56,13 +56,13 @@ export interface PipelineLayout {
 
 export interface PipelineConfig {
   entry?: string;
-  sockets?: Record<string, PipelineNode>;
+  sockets?: Record<string, PipelineSocket>;
   loops?: Record<string, PipelineLoop>;
   layout?: PipelineLayout;
   [key: string]: unknown;
 }
 
-export type LegacyPipelineNode = PipelineNode & { next?: string };
+export type LegacyPipelineSocket = PipelineSocket & { next?: string };
 
 function normalizeEdgeConditionForClient(when: unknown): MateriaEdgeCondition {
   if (when === undefined || when === '' || when === 'flow' || when === 'Flow') return 'always';
@@ -81,13 +81,13 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig, options: Norm
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
     normalizeLoadoutSocketKinds(loadout);
     normalizeLoadoutLayout(loadout);
-    for (const node of Object.values(loadout.sockets ?? {}) as LegacyPipelineNode[]) {
-      normalizeCanonicalParseSemantics(node);
-      const edges = (node.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
-      if (typeof node.next === 'string' && node.next) edges.push({ when: 'always', to: node.next });
-      if (edges.length > 0) node.edges = edges;
-      else delete node.edges;
-      delete node.next;
+    for (const socket of Object.values(loadout.sockets ?? {}) as LegacyPipelineSocket[]) {
+      normalizeCanonicalParseSemantics(socket);
+      const edges = (socket.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
+      if (typeof socket.next === 'string' && socket.next) edges.push({ when: 'always', to: socket.next });
+      if (edges.length > 0) socket.edges = edges;
+      else delete socket.edges;
+      delete socket.next;
     }
     if (semantic) {
       let semanticLoadout = fromWebUiLoadoutDto(loadout as never);
@@ -111,11 +111,11 @@ function normalizeCanonicalParseSemantics(container: { parse?: unknown; outputFo
 
 function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
   for (const id of generatorPipelineSocketIds(loadout, definitions)) {
-    const node = loadout.sockets?.[id];
-    if (node?.type !== 'agent' || typeof node.materia !== 'string') continue;
-    if (!canonicalMateriaGeneratorOutput(definitions[node.materia])) continue;
-    node.parse = 'json';
-    node.assign = { ...(node.assign as Record<string, string> | undefined ?? {}), workItems: '$.workItems' };
+    const socket = loadout.sockets?.[id];
+    if (socket?.type !== 'agent' || typeof socket.materia !== 'string') continue;
+    if (!canonicalMateriaGeneratorOutput(definitions[socket.materia])) continue;
+    socket.parse = 'json';
+    socket.assign = { ...(socket.assign as Record<string, string> | undefined ?? {}), workItems: '$.workItems' };
   }
 }
 
@@ -128,7 +128,7 @@ function canonicalMateriaGeneratorOutput(definition?: MateriaBehaviorConfig): st
 }
 
 export interface MateriaBehaviorConfig {
-  type?: NodeType;
+  type?: SocketType;
   tools?: 'none' | 'readOnly' | 'coding';
   prompt?: string;
   model?: string;
@@ -207,12 +207,12 @@ export function isSocketKind(value: unknown): value is SocketKind {
   return value === 'entry' || value === 'normal';
 }
 
-export function isEntrySocket(node?: PipelineNode): boolean {
-  return node?.socketKind === 'entry';
+export function isEntrySocket(socket?: PipelineSocket): boolean {
+  return socket?.socketKind === 'entry';
 }
 
-export function canDeleteSocket(node?: PipelineNode): boolean {
-  return node?.socketKind === 'normal';
+export function canDeleteSocket(socket?: PipelineSocket): boolean {
+  return socket?.socketKind === 'normal';
 }
 
 function deleteOptionalTarget(container: { done?: string } | undefined, deletedSocketId: string): void {
@@ -221,26 +221,26 @@ function deleteOptionalTarget(container: { done?: string } | undefined, deletedS
 
 function removeLoopOwnedRuntimeControls(loadout: PipelineConfig, loop: PipelineLoop): void {
   const exitSource = loop.exit?.from;
-  const sourceNode = exitSource ? loadout.sockets?.[exitSource] : undefined;
-  if (!sourceNode) return;
+  const sourceSocket = exitSource ? loadout.sockets?.[exitSource] : undefined;
+  if (!sourceSocket) return;
 
   const loopExitTargets = new Set((loop.exits ?? []).map((route) => route.targetSocketId));
   const advanceDoneTarget = loop.exit?.to;
   if (advanceDoneTarget && advanceDoneTarget !== 'end') loopExitTargets.add(advanceDoneTarget);
 
-  if (sourceNode.advance && sourceNode.advance.done === advanceDoneTarget) delete sourceNode.advance;
-  if (sourceNode.edges && loopExitTargets.size > 0) {
-    sourceNode.edges = sourceNode.edges.filter((edge) => !loopExitTargets.has(edge.to));
-    if (sourceNode.edges.length === 0) delete sourceNode.edges;
+  if (sourceSocket.advance && sourceSocket.advance.done === advanceDoneTarget) delete sourceSocket.advance;
+  if (sourceSocket.edges && loopExitTargets.size > 0) {
+    sourceSocket.edges = sourceSocket.edges.filter((edge) => !loopExitTargets.has(edge.to));
+    if (sourceSocket.edges.length === 0) delete sourceSocket.edges;
   }
 }
 
 export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: string): boolean {
-  const node = loadout.sockets?.[socketId];
-  if (!loadout.sockets || !canDeleteSocket(node)) return false;
+  const socket = loadout.sockets?.[socketId];
+  if (!loadout.sockets || !canDeleteSocket(socket)) return false;
 
   delete loadout.sockets[socketId];
-  for (const current of Object.values(loadout.sockets) as LegacyPipelineNode[]) {
+  for (const current of Object.values(loadout.sockets) as LegacyPipelineSocket[]) {
     if (current.edges) {
       current.edges = current.edges.filter((edge) => edge.to !== socketId);
       if (current.edges.length === 0) delete current.edges;
@@ -272,8 +272,8 @@ export function normalizeLoadoutSocketKinds(loadout: PipelineConfig): PipelineCo
   const sockets = loadout.sockets ?? {};
   const entryId = loadout.entry && sockets[loadout.entry] ? loadout.entry : Object.keys(sockets)[0];
   if (entryId && !loadout.entry) loadout.entry = entryId;
-  for (const [id, node] of Object.entries(sockets)) {
-    node.socketKind = id === entryId ? 'entry' : 'normal';
+  for (const [id, socket] of Object.entries(sockets)) {
+    socket.socketKind = id === entryId ? 'entry' : 'normal';
   }
   return loadout;
 }
@@ -327,11 +327,11 @@ export function normalizeLoadoutLayout(loadout: PipelineConfig): PipelineConfig 
   return loadout;
 }
 
-export function isEmptySocket(node?: PipelineNode): boolean {
-  return !node || node.empty === true || Object.keys(extractMateriaBehavior(node)).length === 0;
+export function isEmptySocket(socket?: PipelineSocket): boolean {
+  return !socket || socket.empty === true || Object.keys(extractMateriaBehavior(socket)).length === 0;
 }
 
-export function makeEmptySocket(structure: PipelineNode = {}): PipelineNode {
+export function makeEmptySocket(structure: PipelineSocket = {}): PipelineSocket {
   return { socketKind: 'normal', ...extractSocketStructure(structure), empty: true };
 }
 
@@ -340,7 +340,7 @@ export function makeEmptyEntryLoadout(entry = 'Socket-1'): PipelineConfig {
   return { entry, sockets: { [entry]: makeEmptySocket({ socketKind: 'entry' }) } };
 }
 
-export function makeNewSocketId(sockets: Record<string, PipelineNode>): string {
+export function makeNewSocketId(sockets: Record<string, PipelineSocket>): string {
   const usedNumbers = new Set<number>();
   for (const id of Object.keys(sockets)) {
     const parsed = parseCanonicalSocketId(id);
@@ -390,7 +390,7 @@ export function createMateriaReference(materiaId: string): MateriaReference {
   return { type: 'agent', materia: materiaId };
 }
 
-export function materiaPaletteNode(id: string, definition?: MateriaBehaviorConfig): PipelineNode {
+export function materiaPaletteSocket(id: string, definition?: MateriaBehaviorConfig): PipelineSocket {
   if (definition?.type === 'utility') {
     return {
       type: 'utility',
@@ -412,27 +412,27 @@ export function materiaPaletteNode(id: string, definition?: MateriaBehaviorConfi
   };
 }
 
-export function buildMateriaPalette(definitions: Record<string, MateriaBehaviorConfig> = {}): Array<[string, PipelineNode]> {
-  return Object.keys(definitions).map((id) => [id, materiaPaletteNode(id, definitions[id])]);
+export function buildMateriaPalette(definitions: Record<string, MateriaBehaviorConfig> = {}): Array<[string, PipelineSocket]> {
+  return Object.keys(definitions).map((id) => [id, materiaPaletteSocket(id, definitions[id])]);
 }
 
-export function extractMateriaReference(node?: PipelineNode): MateriaReference | undefined {
-  if (!node || node.empty || node.type !== 'agent' || typeof node.materia !== 'string' || !node.materia) return undefined;
-  return createMateriaReference(node.materia);
+export function extractMateriaReference(socket?: PipelineSocket): MateriaReference | undefined {
+  if (!socket || socket.empty || socket.type !== 'agent' || typeof socket.materia !== 'string' || !socket.materia) return undefined;
+  return createMateriaReference(socket.materia);
 }
 
-export function extractMateriaBehavior(node?: PipelineNode): PipelineNode {
-  if (!node || node.empty) return {};
-  const behavior: PipelineNode = {};
-  for (const [key, value] of Object.entries(node)) {
+export function extractMateriaBehavior(socket?: PipelineSocket): PipelineSocket {
+  if (!socket || socket.empty) return {};
+  const behavior: PipelineSocket = {};
+  for (const [key, value] of Object.entries(socket)) {
     if (materiaBehaviorKeys.has(key)) behavior[key] = cloneValue(value);
   }
   return behavior;
 }
 
-export function extractSocketStructure(node?: PipelineNode): PipelineNode {
-  const structure: PipelineNode = {};
-  for (const [key, value] of Object.entries(node ?? {})) {
+export function extractSocketStructure(socket?: PipelineSocket): PipelineSocket {
+  const structure: PipelineSocket = {};
+  for (const [key, value] of Object.entries(socket ?? {})) {
     if (key === 'socketKind') {
       if (isSocketKind(value)) structure.socketKind = value;
       continue;
@@ -442,25 +442,25 @@ export function extractSocketStructure(node?: PipelineNode): PipelineNode {
   return structure;
 }
 
-export function placeMateriaInSocket(socket?: PipelineNode, materia?: PipelineNode): PipelineNode {
+export function placeMateriaInSocket(socket?: PipelineSocket, materia?: PipelineSocket): PipelineSocket {
   const behavior = extractMateriaBehavior(materia);
   if (Object.keys(behavior).length === 0) return makeEmptySocket(socket);
   return { ...extractSocketStructure(socket), ...behavior, empty: false };
 }
 
-export function clearSocketMateria(socket?: PipelineNode): PipelineNode {
+export function clearSocketMateria(socket?: PipelineSocket): PipelineSocket {
   return makeEmptySocket(socket);
 }
 
-export function getNodeLabel(id: string, node?: PipelineNode): string {
-  if (isEmptySocket(node)) return emptySocketLabel;
-  if (node?.type === 'agent') return node.materia ?? id;
-  if (node?.type === 'utility') return node.label ?? node.utility ?? node.command?.join(' ') ?? id;
-  return node?.materia ?? node?.utility ?? id;
+export function getSocketLabel(id: string, socket?: PipelineSocket): string {
+  if (isEmptySocket(socket)) return emptySocketLabel;
+  if (socket?.type === 'agent') return socket.materia ?? id;
+  if (socket?.type === 'utility') return socket.label ?? socket.utility ?? socket.command?.join(' ') ?? id;
+  return socket?.materia ?? socket?.utility ?? id;
 }
 
-export function formatSocketLabel(id: string, node?: PipelineNode): string {
-  return `${id} (${getNodeLabel(id, node)})`;
+export function formatSocketLabel(id: string, socket?: PipelineSocket): string {
+  return `${id} (${getSocketLabel(id, socket)})`;
 }
 
 const jsonControlConditions = new Set<MateriaEdgeCondition>(['satisfied', 'not_satisfied']);
@@ -469,9 +469,9 @@ function isJsonControlCondition(when: unknown): when is MateriaEdgeCondition {
   return when === 'satisfied' || when === 'not_satisfied';
 }
 
-function controlParseError(loadoutName: string, socketId: string, node: PipelineNode, source: string, condition: MateriaEdgeCondition): string {
-  const label = formatSocketLabel(socketId, node);
-  const parseMode = node.parse ?? 'text';
+function controlParseError(loadoutName: string, socketId: string, socket: PipelineSocket, source: string, condition: MateriaEdgeCondition): string {
+  const label = formatSocketLabel(socketId, socket);
+  const parseMode = socket.parse ?? 'text';
   return `Loadout "${loadoutName}" socket ${label} uses ${condition} control routing at ${source}, but its output format is ${JSON.stringify(parseMode)}. Set the socket Output format to JSON (parse: "json") or change the route to always; satisfied/not_satisfied routing requires JSON output parsing.`;
 }
 
@@ -484,14 +484,14 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
     // validation remains a non-mutating read from editor state.
     const { loadout: sharedLoadout, analysis } = normalizeLoadedLoadout(fromWebUiLoadoutDto(cloneValue(rawLoadout) as never), config.materia ?? {});
     const loadout = toWebUiLoadoutDto(sharedLoadout) as PipelineConfig;
-    for (const [socketId, node] of Object.entries(loadout.sockets ?? {})) {
-      for (const [index, edge] of (node.edges ?? []).entries()) {
+    for (const [socketId, socket] of Object.entries(loadout.sockets ?? {})) {
+      for (const [index, edge] of (socket.edges ?? []).entries()) {
         if (!jsonControlConditions.has(edge.when)) continue;
-        if (node.parse !== 'json') errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.edges[${index}]`, edge.when));
+        if (socket.parse !== 'json') errors.push(controlParseError(loadoutName, socketId, socket, `${socketId}.edges[${index}]`, edge.when));
       }
-      const advanceWhen = node.advance?.when;
-      if (isJsonControlCondition(advanceWhen) && node.parse !== 'json') {
-        errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.advance.when`, advanceWhen));
+      const advanceWhen = socket.advance?.when;
+      if (isJsonControlCondition(advanceWhen) && socket.parse !== 'json') {
+        errors.push(controlParseError(loadoutName, socketId, socket, `${socketId}.advance.when`, advanceWhen));
       }
     }
     for (const diagnostic of analysis.diagnostics) {
@@ -516,7 +516,7 @@ export function assertValidLoadoutSaveSemantics(config: MateriaConfig): void {
 
 export function resolveSocketDisplayLabel(loadout: PipelineConfig | undefined, socketId: string): string {
   if (loadout?.sockets && !loadout.sockets[socketId]) return socketId;
-  return getNodeLabel(socketId, loadout?.sockets?.[socketId]);
+  return getSocketLabel(socketId, loadout?.sockets?.[socketId]);
 }
 
 function fallbackColorIndex(materiaId: string): number {
@@ -531,6 +531,6 @@ export function resolveMateriaColor(materiaId: string, definitions?: Record<stri
   return paletteColors[fallbackColorIndex(materiaId)];
 }
 
-export function nodeColor(id: string, _index: number, definitions?: Record<string, MateriaBehaviorConfig>, node?: PipelineNode): string {
-  return resolveMateriaColor(extractMateriaReference(node)?.materia ?? id, definitions);
+export function socketColor(id: string, _index: number, definitions?: Record<string, MateriaBehaviorConfig>, socket?: PipelineSocket): string {
+  return resolveMateriaColor(extractMateriaReference(socket)?.materia ?? id, definitions);
 }

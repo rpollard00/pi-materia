@@ -32,22 +32,9 @@ export async function handlePostConfigRoute(req: IncomingMessage, res: ServerRes
     if (!isPlainObject(body) || !isPlainObject(body.config)) throw new Error('Expected JSON body with object field "config".');
     const target = typeof body.target === 'string' ? body.target : 'user';
     if (!['user', 'project', 'explicit'].includes(target)) throw new Error('Invalid save target. Expected user, project, or explicit.');
-    rejectLegacyWebUiNodes(body.config);
     const written = await deps.saveConfig(body.config, target as MateriaSaveTarget);
     sendJson(res, 200, { ok: true, target, written });
   } catch (error) {
     sendJson(res, 400, { ok: false, error: errorMessage(error) });
-  }
-}
-
-function rejectLegacyWebUiNodes(config: unknown): void {
-  if (!isPlainObject(config) || !isPlainObject(config.loadouts)) return;
-  for (const loadout of Object.values(config.loadouts)) {
-    if (loadout === null || !isPlainObject(loadout)) continue;
-    if ('nodes' in loadout) throw new Error('Legacy WebUI loadout nodes are not supported; use sockets instead.');
-    if (!isPlainObject(loadout.loops)) continue;
-    for (const loop of Object.values(loadout.loops)) {
-      if (isPlainObject(loop) && 'nodes' in loop) throw new Error('Legacy WebUI loop nodes are not supported; use sockets instead.');
-    }
   }
 }

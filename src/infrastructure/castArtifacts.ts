@@ -12,9 +12,9 @@ export interface CastArtifactStore {
   writeManifest(runDir: string, manifest: MateriaManifest): Promise<void>;
   appendManifest(state: MateriaCastState, entry: Omit<MateriaManifestEntry, "timestamp">): Promise<void>;
   writeContextArtifact(input: WriteContextArtifactInput): Promise<string>;
-  recordNodeOutput(input: NodeTextArtifactInput): Promise<string>;
-  recordNodeParsedJson(input: NodeParsedJsonArtifactInput): Promise<string>;
-  recordNodeRefinement(input: NodeTextArtifactInput & { refinementTurn: number }): Promise<string>;
+  recordSocketOutput(input: SocketTextArtifactInput): Promise<string>;
+  recordSocketParsedJson(input: SocketParsedJsonArtifactInput): Promise<string>;
+  recordSocketRefinement(input: SocketTextArtifactInput & { refinementTurn: number }): Promise<string>;
   recordUtilityInput(input: UtilityInputArtifactInput): Promise<string>;
   recordCommandArtifacts(input: CommandArtifactsInput): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }>;
 }
@@ -26,9 +26,9 @@ export function createFileCastArtifactStore(): CastArtifactStore {
     writeManifest,
     appendManifest,
     writeContextArtifact,
-    recordNodeOutput,
-    recordNodeParsedJson,
-    recordNodeRefinement,
+    recordSocketOutput,
+    recordSocketParsedJson,
+    recordSocketRefinement,
     recordUtilityInput,
     recordCommandArtifacts,
   };
@@ -36,9 +36,6 @@ export function createFileCastArtifactStore(): CastArtifactStore {
 
 export async function initializeRun(runDir: string, config: PiMateriaConfig, manifest: MateriaManifest): Promise<void> {
   await mkdir(path.join(runDir, "sockets"), { recursive: true });
-  // Legacy artifact path kept for saved tooling compatibility. New runtime code
-  // still writes node-named artifact fields/paths only at this external seam.
-  await mkdir(path.join(runDir, "nodes"), { recursive: true });
   await mkdir(path.join(runDir, "contexts"), { recursive: true });
   await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
   await writeManifest(runDir, manifest);
@@ -70,7 +67,7 @@ export async function appendManifest(state: MateriaCastState, entry: Omit<Materi
   await writeManifest(state.runDir, manifest);
 }
 
-export interface NodeTextArtifactInput {
+export interface SocketTextArtifactInput {
   state: MateriaCastState;
   socketId: string;
   materia?: string;
@@ -83,32 +80,30 @@ export interface NodeTextArtifactInput {
   materiaModel?: MateriaModelSelection;
 }
 
-export async function recordNodeOutput(input: NodeTextArtifactInput): Promise<string> {
-  const artifact = nodeArtifactPath(input.state, input.socketId, input.visit, ".md");
+export async function recordSocketOutput(input: SocketTextArtifactInput): Promise<string> {
+  const artifact = socketArtifactPath(input.state, input.socketId, input.visit, ".md");
   await writeRunFile(input.state.runDir, artifact, input.text);
-  await appendManifest(input.state, nodeManifestEntry(input, artifact));
+  await appendManifest(input.state, socketManifestEntry(input, artifact));
   return artifact;
 }
 
-export interface NodeParsedJsonArtifactInput {
+export interface SocketParsedJsonArtifactInput {
   state: MateriaCastState;
   socketId: string;
   visit: number;
   parsed: unknown;
 }
 
-export async function recordNodeParsedJson(input: NodeParsedJsonArtifactInput): Promise<string> {
-  // Legacy node-named JSON sidecar path is an external artifact compatibility seam.
-  // It intentionally omits item suffixes to preserve the historical layout.
-  const artifact = path.join("nodes", safePathSegment(input.socketId), `${input.visit}.json`);
+export async function recordSocketParsedJson(input: SocketParsedJsonArtifactInput): Promise<string> {
+  const artifact = path.join("sockets", safePathSegment(input.socketId), `${input.visit}.json`);
   await writeRunFile(input.state.runDir, artifact, JSON.stringify(input.parsed, null, 2));
   return artifact;
 }
 
-export async function recordNodeRefinement(input: NodeTextArtifactInput & { refinementTurn: number }): Promise<string> {
-  const artifact = nodeArtifactPath(input.state, input.socketId, input.visit, `.refinement-${input.refinementTurn}-${safePathSegment(input.entryId)}.md`);
+export async function recordSocketRefinement(input: SocketTextArtifactInput & { refinementTurn: number }): Promise<string> {
+  const artifact = socketArtifactPath(input.state, input.socketId, input.visit, `.refinement-${input.refinementTurn}-${safePathSegment(input.entryId)}.md`);
   await writeRunFile(input.state.runDir, artifact, input.text);
-  await appendManifest(input.state, nodeManifestEntry(input, artifact));
+  await appendManifest(input.state, socketManifestEntry(input, artifact));
   return artifact;
 }
 
@@ -121,9 +116,9 @@ export interface UtilityInputArtifactInput {
 }
 
 export async function recordUtilityInput(input: UtilityInputArtifactInput): Promise<string> {
-  const artifact = nodeArtifactPath(input.state, input.socketId, input.visit, ".input.json");
+  const artifact = socketArtifactPath(input.state, input.socketId, input.visit, ".input.json");
   await writeRunFile(input.state.runDir, artifact, JSON.stringify(input.input, null, 2));
-  await appendManifest(input.state, { phase: input.state.phase, node: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:input`, artifact });
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:input`, artifact });
   return artifact;
 }
 
@@ -140,15 +135,15 @@ export interface CommandArtifactsInput {
 }
 
 export async function recordCommandArtifacts(input: CommandArtifactsInput): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }> {
-  const stdoutArtifact = nodeArtifactPath(input.state, input.socketId, input.visit, ".command.stdout.txt");
-  const stderrArtifact = nodeArtifactPath(input.state, input.socketId, input.visit, ".command.stderr.txt");
-  const metaArtifact = nodeArtifactPath(input.state, input.socketId, input.visit, ".command.json");
+  const stdoutArtifact = socketArtifactPath(input.state, input.socketId, input.visit, ".command.stdout.txt");
+  const stderrArtifact = socketArtifactPath(input.state, input.socketId, input.visit, ".command.stderr.txt");
+  const metaArtifact = socketArtifactPath(input.state, input.socketId, input.visit, ".command.json");
   await writeRunFile(input.state.runDir, stdoutArtifact, input.stdout);
   await writeRunFile(input.state.runDir, stderrArtifact, input.stderr);
   await writeRunFile(input.state.runDir, metaArtifact, JSON.stringify({ stdoutArtifact, stderrArtifact, stdoutTruncated: input.stdoutTruncated, stderrTruncated: input.stderrTruncated, maxBytes: input.maxBytes }, null, 2));
-  await appendManifest(input.state, { phase: input.state.phase, node: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stdout`, artifact: stdoutArtifact });
-  await appendManifest(input.state, { phase: input.state.phase, node: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stderr`, artifact: stderrArtifact });
-  await appendManifest(input.state, { phase: input.state.phase, node: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:meta`, artifact: metaArtifact });
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stdout`, artifact: stdoutArtifact });
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stderr`, artifact: stderrArtifact });
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:meta`, artifact: metaArtifact });
   return { stdoutArtifact, stderrArtifact, metaArtifact };
 }
 
@@ -195,10 +190,10 @@ export async function writeContextArtifact(input: WriteContextArtifactInput): Pr
   return relativePath;
 }
 
-function nodeManifestEntry(input: NodeTextArtifactInput, artifact: string): Omit<MateriaManifestEntry, "timestamp"> {
+function socketManifestEntry(input: SocketTextArtifactInput, artifact: string): Omit<MateriaManifestEntry, "timestamp"> {
   return {
     phase: input.state.phase,
-    node: input.socketId,
+    socket: input.socketId,
     materia: input.materia,
     itemKey: input.state.currentItemKey,
     visit: input.visit,
@@ -211,8 +206,8 @@ function nodeManifestEntry(input: NodeTextArtifactInput, artifact: string): Omit
   };
 }
 
-function nodeArtifactPath(state: MateriaCastState, socketId: string, visit: number, suffix: string): string {
-  const dir = path.join("nodes", safePathSegment(socketId));
+function socketArtifactPath(state: MateriaCastState, socketId: string, visit: number, suffix: string): string {
+  const dir = path.join("sockets", safePathSegment(socketId));
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
   return path.join(dir, `${visit}${item}${suffix}`);
 }

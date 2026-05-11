@@ -249,9 +249,9 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
       castId: state.castId,
       active: state.active,
       phase: state.phase,
-      currentNode: state.currentNode,
+      currentSocketId: state.currentSocketId,
       currentMateria: state.currentMateria,
-      nodeState: state.nodeState,
+      socketState: state.socketState,
       awaitingResponse: state.awaitingResponse,
       runDir: state.runDir,
       artifactRoot: state.artifactRoot,
@@ -261,14 +261,14 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
   };
 }
 
-function readSessionEmittedOutputs(ctx: ExtensionContext, since: number): Array<{ id: string; type: string; text: string; timestamp?: number; node?: string }> {
+function readSessionEmittedOutputs(ctx: ExtensionContext, since: number): Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }> {
   return ctx.sessionManager.getBranch().slice(-80).flatMap((entry) => {
     const rawTimestamp = (entry as { timestamp?: unknown }).timestamp;
     const timestamp = typeof rawTimestamp === "number" ? rawTimestamp : typeof rawTimestamp === "string" ? Date.parse(rawTimestamp) : undefined;
     if (timestamp && Number.isFinite(timestamp) && timestamp < since) return [];
     if (entry.type === "custom" && typeof entry.customType === "string" && entry.customType.startsWith("pi-materia")) {
       const data = (entry as { data?: Record<string, unknown> }).data ?? {};
-      return [{ id: entry.id, type: entry.customType, text: summarizeUnknown(data), timestamp, node: typeof data.nodeId === "string" ? data.nodeId : undefined }];
+      return [{ id: entry.id, type: entry.customType, text: summarizeUnknown(data), timestamp, socket: typeof data.socketId === "string" ? data.socketId : undefined }];
     }
     if (entry.type === "message") {
       const message = (entry as { message?: unknown }).message as { role?: unknown; content?: unknown } | undefined;
@@ -285,10 +285,10 @@ async function readArtifactSummary(runDir: string): Promise<MateriaWebUiSessionS
     readEventsFile(`${runDir}/events.jsonl`),
   ]);
   const outputs = await Promise.all((manifest?.entries ?? [])
-    .filter((entry) => entry.artifact && (entry.kind === "node_output" || entry.kind === "node_refinement" || entry.kind === "context" || entry.kind === undefined))
+    .filter((entry) => entry.artifact && (entry.kind === "socket_output" || entry.kind === "socket_refinement" || entry.kind === "context" || entry.kind === undefined))
     .slice(-12)
     .map(async (entry) => ({ ...entry, content: await readArtifactText(runDir, entry.artifact) })));
-  const completed = outputs.filter((entry) => entry.kind === "node_output").map((entry) => entry.node).filter(Boolean).join(" → ");
+  const completed = outputs.filter((entry) => entry.kind === "socket_output").map((entry) => entry.socket).filter(Boolean).join(" → ");
   const lastEvent = events.at(-1);
   return {
     runDir,
@@ -297,7 +297,7 @@ async function readArtifactSummary(runDir: string): Promise<MateriaWebUiSessionS
     outputs,
     summary: [
       manifest?.request ? `Request: ${manifest.request}` : undefined,
-      completed ? `Completed nodes: ${completed}` : undefined,
+      completed ? `Completed sockets: ${completed}` : undefined,
       lastEvent?.type ? `Latest event: ${lastEvent.type}` : undefined,
       outputs.length ? `${outputs.length} recent artifact entries loaded.` : "No artifact outputs recorded yet.",
     ].filter(Boolean).join("\n"),
@@ -332,7 +332,7 @@ async function readEventsFile(file: string): Promise<MateriaMonitorEventEntry[]>
 function summarizeUnknown(value: unknown): string {
   if (!value || typeof value !== "object") return truncate(String(value ?? ""), 1200);
   const object = value as Record<string, unknown>;
-  const label = [object.phase, object.nodeId, object.materiaName, object.eventType].filter((part) => typeof part === "string").join(" · ");
+  const label = [object.phase, object.socketId, object.materiaName, object.eventType].filter((part) => typeof part === "string").join(" · ");
   return label || truncate(JSON.stringify(object), 1200);
 }
 

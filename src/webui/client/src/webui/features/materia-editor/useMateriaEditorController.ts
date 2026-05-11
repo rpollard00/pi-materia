@@ -71,7 +71,7 @@ export interface MateriaEditorController {
 
 export function useMateriaEditorController({ materia, selectedTab, status, setStatus, reloadConfig }: UseMateriaEditorControllerOptions): MateriaEditorController {
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
-  const [originalMateriaModelSettings, setOriginalMateriaModelSettings] = useState<{ editingNodeId: string; model: string; thinking: string } | undefined>();
+  const [originalMateriaModelSettings, setOriginalMateriaModelSettings] = useState<{ editingSocketId: string; model: string; thinking: string } | undefined>();
   const { modelCatalog, modelCatalogStatus, modelCatalogError } = useModelCatalog(selectedTab);
   const [materiaColorOpen, setMateriaColorOpen] = useState(false);
   const materiaColorDropdownRef = useRef<HTMLFieldSetElement | null>(null);
@@ -121,7 +121,7 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
 
   const editableDefinitionIds = useMemo(() => Object.keys(materia ?? {}).sort((a, b) => a.localeCompare(b)), [materia]);
   const modelOptions = useMemo(() => modelSelectOptions(modelCatalog, originalMateriaModelSettings), [modelCatalog, originalMateriaModelSettings]);
-  const thinkingOptions = useMemo(() => thinkingSelectOptions(modelCatalog, materiaForm, originalMateriaModelSettings), [modelCatalog, materiaForm.editingNodeId, materiaForm.model, materiaForm.thinking, originalMateriaModelSettings]);
+  const thinkingOptions = useMemo(() => thinkingSelectOptions(modelCatalog, materiaForm, originalMateriaModelSettings), [modelCatalog, materiaForm.editingSocketId, materiaForm.model, materiaForm.thinking, originalMateriaModelSettings]);
   const activeModelDescription = modelCatalog.activeModel?.label ?? modelCatalog.activeModelValue;
   const selectedModel = selectedCatalogModel(modelCatalog, materiaForm.model);
   const thinkingLevelsForSelection = selectedModel?.supportedThinkingLevels ?? [];
@@ -146,9 +146,9 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
     const generator = isGeneratorMateria(definition);
     const savedModel = isUtility ? '' : String(definition.model ?? '').trim();
     const savedThinking = isUtility ? '' : String(definition.thinking ?? '').trim();
-    setOriginalMateriaModelSettings({ editingNodeId: id, model: savedModel, thinking: savedThinking });
+    setOriginalMateriaModelSettings({ editingSocketId: id, model: savedModel, thinking: savedThinking });
     setMateriaForm({
-      editingNodeId: id,
+      editingSocketId: id,
       name: id,
       behavior: isUtility ? 'tool' : 'prompt',
       prompt: isUtility ? '' : String(definition.prompt ?? ''),

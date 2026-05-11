@@ -15,21 +15,21 @@ This audit traces the current Pi-native Materia execution paths in `src/native.t
 7. Pi fires `agent_end`; `handleAgentEnd()` finds the latest assistant entry, records text/error/usage, marks the state no longer awaiting, and either:
    - calls `completeSocket()` for a normal agent socket, or
    - records a multi-turn refinement instead of completing the socket.
-8. `completeSocket()` records output, parses JSON if configured, applies assignments/advance, emits `node_complete`, checks budget, then `advanceToSocket()` either starts the next socket or `finishCast()`.
+8. `completeSocket()` records output, parses JSON if configured, applies assignments/advance, emits `socket_complete`, checks budget, then `advanceToSocket()` either starts the next socket or `finishCast()`.
 
 ### Multi-turn refinement turn
 
 1. A multi-turn agent socket starts through the same `startSocket()` path as a normal socket.
 2. On `agent_end`, `handleAgentEnd()` sees `isMultiTurnResolvedAgentSocket(socket)` and `multiTurnFinalizing !== true`.
 3. It calls `recordMultiTurnRefinement()`, which increments the refinement counter and writes the refinement artifact/manifest.
-4. State is changed to socket state (`nodeState` legacy DTO field) = `"awaiting_user_refinement"`, `awaitingResponse = false`; the graph does not advance.
+4. State is changed to socket state (`currentSocketState` legacy DTO field) = `"awaiting_user_refinement"`, `awaitingResponse = false`; the graph does not advance.
 5. User follow-up causes Pi to start another turn. In `before_agent_start`, if state is `awaiting_user_refinement`, `prepareMultiTurnRefinementTurn()` applies materia model settings, flips state back to `awaiting_agent_response`, writes a `context_refinement` artifact/event, saves state, and lets Pi run using the user's prompt plus Materia isolated context.
 6. The next `agent_end` repeats the refinement-recording path until the user runs `/materia continue`.
 
 ### Multi-turn finalization turn
 
 1. `/materia continue` loads state and calls `continueNativeCast()`.
-2. If socket state (`nodeState` legacy DTO field) is `"awaiting_user_refinement"`, `startMultiTurnFinalizationTurn()` applies materia model settings, sets `awaitingResponse = true`, socket state (`nodeState` legacy DTO field) to `"awaiting_agent_response"`, and `multiTurnFinalizing = true`.
+2. If socket state (`currentSocketState` legacy DTO field) is `"awaiting_user_refinement"`, `startMultiTurnFinalizationTurn()` applies materia model settings, sets `awaitingResponse = true`, socket state (`currentSocketState` legacy DTO field) to `"awaiting_agent_response"`, and `multiTurnFinalizing = true`.
 3. It sends `buildMultiTurnFinalizationPrompt()` through `sendMateriaTurn()`.
 4. On `agent_end`, `handleAgentEnd()` captures `wasAwaitingFinalization`, clears `multiTurnFinalizing`, and calls `completeSocket(..., { finalizedMultiTurn: true })`.
 5. `completeSocket()` then records final output, parses/assigns/advances, and proceeds like a normal socket completion.
@@ -50,14 +50,14 @@ Relevant context-window/token-limit surfaces for recovery classification:
 - Pi auto-compaction is enabled at the Pi layer and can recover overflow before Materia sees a failure, but Materia currently does not observe compaction start/end or force compaction.
 - `ctx.compact(options)` is available in extension contexts and can trigger compaction with completion/error callbacks; `session_before_compact` and `session_compact` events can be observed for proactive compaction telemetry.
 
-## Node-start/state mutations unsafe to repeat during same-socket recovery
+## Socket-start/state mutations unsafe to repeat during same-socket recovery
 
 A full `startSocket()` call is not a safe retry primitive once a turn has been sent:
 
 - `setCurrentItem()` mutates foreach state: initializes cursor, writes `state.data.item` and the loop alias, and sets `currentItemKey/currentItemLabel`; on empty loops it can advance to the foreach `done` target.
 - `enforceSocketVisitLimit()` increments `state.visits[socket.id]`; retrying would consume visits and change artifact paths/refinement identity keys.
 - `startTaskAttempt()` increments `taskAttempts` keyed by socket/item and updates `runState.attempt`; retrying would create duplicate attempts for the same logical turn.
-- `startSocket()` rewrites phase/current materia/current task/socket state and emits another `node_start` event.
+- `startSocket()` rewrites phase/current materia/current task/socket state and emits another `socket_start` event.
 - Utility sockets execute side effects immediately; recovery should target incomplete agent turns only, not re-run utility commands.
 - `completeSocket()` applies non-idempotent completion mutations: output artifacts, JSON artifacts, assignments into `state.data`, foreach cursor advancement via `applyAdvance()`, edge traversal increments in `selectNextTarget()`, and graph advancement through `advanceToSocket()`.
 - `recordMultiTurnRefinement()` increments `multiTurnRefinements`; retrying after an incomplete refinement turn must happen before this path, not by replaying a partially recorded refinement.

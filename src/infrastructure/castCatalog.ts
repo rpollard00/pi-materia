@@ -68,7 +68,7 @@ async function readCastSummary(id: string, dir: string, state?: MateriaCastState
     status,
     recastTarget: state ? isRecastTargetState(state) : status === "failed" || status === "aborted",
     request,
-    currentSocketId: (state ? currentCastSocketId(state) : undefined) ?? stringField(latestProgress, "node") ?? stringField(endData, "node"),
+    currentSocketId: (state ? currentCastSocketId(state) : undefined) ?? stringField(latestProgress, "socket") ?? stringField(endData, "socket"),
     currentMateria: state?.currentMateria ?? stringField(latestProgress, "materia"),
     currentItemKey: state?.currentItemKey ?? stringField(latestProgress, "itemKey"),
     currentItemLabel: state?.currentItemLabel ?? stringField(latestProgress, "itemLabel"),
@@ -130,7 +130,7 @@ function failureStatus(reason?: string): string {
 
 function latestProgressEvent(events: CastEvent[]): Record<string, unknown> | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
-    if (events[i].type !== "node_start" && events[i].type !== "node_complete" && events[i].type !== "materia_model_settings") continue;
+    if (events[i].type !== "socket_start" && events[i].type !== "socket_complete" && events[i].type !== "materia_model_settings") continue;
     const data = objectData(events[i]);
     if (data) return data;
   }

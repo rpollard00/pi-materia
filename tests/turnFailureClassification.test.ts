@@ -4,7 +4,7 @@ import { classifyTurnFailure } from "../src/application/recoveryPolicy.js";
 describe("turn failure classification", () => {
   test("classifies plain WebSocket transport failures as transient", () => {
     expect(classifyTurnFailure(new Error("WebSocket error"))).toBe("transient_transport");
-    expect(classifyTurnFailure(new Error('Pi agent turn failed for node "Build": WebSocket error'))).toBe("transient_transport");
+    expect(classifyTurnFailure(new Error('Pi agent turn failed for socket "Build": WebSocket error'))).toBe("transient_transport");
   });
 
   test("context-window signals wrapped in WebSocket text remain context-window failures", () => {

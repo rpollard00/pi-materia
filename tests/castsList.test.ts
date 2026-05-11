@@ -9,12 +9,12 @@ describe("/materia casts listing", () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-materia-casts-"));
     await writeCast(root, "2026-05-05T17-26-59-323Z", [
       { type: "cast_start", data: { request: "older failed recast implementation" } },
-      { type: "node_start", data: { node: "Auto-Eval", materia: "Auto-Eval", itemKey: "recast-003", itemLabel: "Implement /materia recast", visit: 3 } },
-      { type: "cast_end", data: { ok: false, error: "WebSocket closed 1006", node: "Auto-Eval" } },
+      { type: "socket_start", data: { socket: "Auto-Eval", materia: "Auto-Eval", itemKey: "recast-003", itemLabel: "Implement /materia recast", visit: 3 } },
+      { type: "cast_end", data: { ok: false, error: "WebSocket closed 1006", socket: "Auto-Eval" } },
     ]);
     await writeCast(root, "2026-05-05T20-12-49-507Z", [
       { type: "cast_start", data: { request: "new active follow-up" } },
-      { type: "node_start", data: { node: "Build", materia: "Build", itemKey: "recast-004", itemLabel: "Improve discoverability", visit: 1 } },
+      { type: "socket_start", data: { socket: "Build", materia: "Build", itemKey: "recast-004", itemLabel: "Improve discoverability", visit: 1 } },
     ]);
 
     const lines = await renderCastList(root);
@@ -31,8 +31,8 @@ describe("/materia casts listing", () => {
     const id = "2026-05-05T19-30-00-000Z";
     await writeCast(root, id, [
       { type: "cast_start", data: { request: "completed request" } },
-      { type: "node_start", data: { node: "Build", materia: "Build", itemKey: "done-001" } },
-      { type: "cast_end", data: { ok: true, node: "Build" } },
+      { type: "socket_start", data: { socket: "Build", materia: "Build", itemKey: "done-001" } },
+      { type: "cast_end", data: { ok: true, socket: "Build" } },
     ]);
 
     const lines = await renderCastList(root);
@@ -47,7 +47,7 @@ describe("/materia casts listing", () => {
     const id = "2026-05-05T18-55-00-685Z";
     const dir = await writeCast(root, id, [
       { type: "cast_start", data: { request: "aborted request" } },
-      { type: "node_start", data: { node: "Build", materia: "Build" } },
+      { type: "socket_start", data: { socket: "Build", materia: "Build" } },
     ]);
 
     const lines = await renderCastList(root, [{
@@ -61,12 +61,12 @@ describe("/materia casts listing", () => {
       runDir: dir,
       artifactRoot: root,
       phase: "Build",
-      currentNode: "Build",
+      currentSocketId: "Build",
       currentMateria: "Build",
       currentItemKey: "recast-004",
       currentItemLabel: "Improve discoverability",
       awaitingResponse: false,
-      nodeState: "failed",
+      socketState: "failed",
       failedReason: "aborted by user",
       startedAt: Date.now(),
       updatedAt: Date.now(),
@@ -76,8 +76,8 @@ describe("/materia casts listing", () => {
       multiTurnRefinements: {},
       taskAttempts: {},
       edgeTraversals: {},
-      runState: { castId: id, runDir: dir, usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, byNode: {}, byTask: {}, byAttempt: {} }, attempt: 1 },
-      pipeline: { entry: { id: "Build", node: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "" } }, sockets: {} },
+      runState: { castId: id, runDir: dir, usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} }, attempt: 1 },
+      pipeline: { entry: { id: "Build", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "" } }, sockets: {} },
     }]);
 
     const text = lines.join("\n");

@@ -29,11 +29,11 @@ function runState(overrides: Partial<MateriaRunState> = {}): MateriaRunState {
 }
 
 function loopCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
-  const run = runState({ loadoutName: "Hojo-Consult", currentNode: "Socket-2", currentMateria: "Auto-Eval", currentTask: "Implement status layout" });
+  const run = runState({ loadoutName: "Hojo-Consult", currentSocketId: "Socket-2", currentMateria: "Auto-Eval", currentTask: "Implement status layout" });
   return {
     active: true,
     phase: "Socket-2",
-    currentNode: "Socket-2",
+    currentSocketId: "Socket-2",
     currentMateria: "Auto-Eval",
     currentItemLabel: "Implement status layout",
     awaitingResponse: true,
@@ -48,9 +48,9 @@ function loopCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastSt
     pipeline: {
       entry: {} as never,
       sockets: {
-        "Socket-1": { id: "Socket-1", node: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "", label: "Build" } },
-        "Socket-2": { id: "Socket-2", node: { type: "agent", materia: "Auto-Eval" }, materia: { tools: "readOnly", prompt: "", label: "Auto-Eval" } },
-        "Socket-3": { id: "Socket-3", node: { type: "agent", materia: "Maintain" }, materia: { tools: "coding", prompt: "", label: "Maintain" } },
+        "Socket-1": { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "", label: "Build" } },
+        "Socket-2": { id: "Socket-2", socket: { type: "agent", materia: "Auto-Eval" }, materia: { tools: "readOnly", prompt: "", label: "Auto-Eval" } },
+        "Socket-3": { id: "Socket-3", socket: { type: "agent", materia: "Maintain" }, materia: { tools: "coding", prompt: "", label: "Maintain" } },
       },
       loops: { itemLoop: { sockets: ["Socket-1", "Socket-2", "Socket-3"], iterator: { items: "state.workItems", cursor: "workItemsIndex" } } },
     },
@@ -66,11 +66,11 @@ describe("persistent Materia widget formatting", () => {
       runDir: "/tmp/cast",
       eventsFile: "/tmp/cast/events.jsonl",
       usageFile: "/tmp/cast/usage.json",
-      currentNode: "planner",
+      currentSocketId: "planner",
       currentMateria: "Interactive Planning Consult With A Very Long Name",
       currentTask: "task-123 - Implement a very long task title that should not be allowed to wrap across the terminal widget",
       attempt: 2,
-      lastMessage: "Multi-turn node planner waiting for refinement; run /materia continue to finalize.",
+      lastMessage: "Multi-turn planner waiting for refinement; run /materia continue to finalize.",
       usage: { ...totals(0, 0), tokens: { input: 19381, output: 2100, cacheRead: 4000, cacheWrite: 10, total: 25491 } },
       budgetWarned: false,
     };
@@ -111,7 +111,7 @@ describe("persistent Materia widget formatting", () => {
   test("renders active single-materia cast details without permanent-panel duplication", () => {
     const run = runState({
       loadoutName: "Hojo-Consult",
-      currentNode: "Socket-5",
+      currentSocketId: "Socket-5",
       currentMateria: "Maintain",
       currentTask: "Remove unused WebUI unsocket drop panel",
       attempt: 2,
@@ -120,7 +120,7 @@ describe("persistent Materia widget formatting", () => {
     const state = {
       active: true,
       phase: "Socket-5",
-      currentNode: "Socket-5",
+      currentSocketId: "Socket-5",
       currentMateria: "Maintain",
       currentItemLabel: "Remove unused WebUI unsocket drop panel",
       awaitingResponse: true,
@@ -200,7 +200,7 @@ describe("persistent Materia widget formatting", () => {
 
   test("prefers Materia names over Socket IDs in user-facing status values", () => {
     const state = runState({
-      currentNode: "Socket-3",
+      currentSocketId: "Socket-3",
       currentMateria: "Build",
       currentTask: "Socket-3",
       attempt: 1,
@@ -216,7 +216,7 @@ describe("persistent Materia widget formatting", () => {
 
   test("falls back to Socket IDs when current Materia is unavailable", () => {
     const state = runState({
-      currentNode: "Socket-3",
+      currentSocketId: "Socket-3",
       currentTask: "Socket-3",
       attempt: 1,
       lastMessage: "Socket-3",
@@ -229,11 +229,11 @@ describe("persistent Materia widget formatting", () => {
   });
 
   test("renders cast status third line with status icon and Materia wording", () => {
-    const run = runState({ currentNode: "Socket-4", currentMateria: "Build", lastMessage: "Socket-4" });
+    const run = runState({ currentSocketId: "Socket-4", currentMateria: "Build", lastMessage: "Socket-4" });
     const state = {
       active: true,
       phase: "Socket-4",
-      currentNode: "Socket-4",
+      currentSocketId: "Socket-4",
       currentMateria: "Build",
       awaitingResponse: true,
       runState: run,
@@ -268,7 +268,7 @@ describe("persistent Materia widget formatting", () => {
       active: false,
       phase: "complete",
       awaitingResponse: false,
-      nodeState: "complete",
+      socketState: "complete",
       runState: run,
     } as MateriaCastState;
 
@@ -282,15 +282,15 @@ describe("persistent Materia widget formatting", () => {
   });
 
   test("renders resumed cast state with the same compact ordering as basic run state", () => {
-    const run = runState({ loadoutName: "Review", currentNode: "Socket-7", currentMateria: "Build", currentTask: "Validate resumed cast", attempt: 4 });
+    const run = runState({ loadoutName: "Review", currentSocketId: "Socket-7", currentMateria: "Build", currentTask: "Validate resumed cast", attempt: 4 });
     const resumed = {
       active: true,
       phase: "Socket-7",
-      currentNode: "Socket-7",
+      currentSocketId: "Socket-7",
       currentMateria: "Build",
       currentItemLabel: "Validate resumed cast",
       awaitingResponse: false,
-      nodeState: "idle",
+      socketState: "idle",
       runState: run,
     } as MateriaCastState;
 
@@ -306,11 +306,11 @@ describe("persistent Materia widget formatting", () => {
   });
 
   test("keeps missing current materia fallback understandable in rich cast status", () => {
-    const run = runState({ loadoutName: "Review", currentNode: "Socket-9", currentMateria: undefined, currentTask: undefined, lastMessage: undefined });
+    const run = runState({ loadoutName: "Review", currentSocketId: "Socket-9", currentMateria: undefined, currentTask: undefined, lastMessage: undefined });
     const state = {
       active: true,
       phase: "Socket-9",
-      currentNode: "Socket-9",
+      currentSocketId: "Socket-9",
       awaitingResponse: true,
       runState: run,
     } as MateriaCastState;
@@ -500,7 +500,7 @@ describe("usage UI formatting", () => {
       model: "openai-codex/gpt-5.5",
       costKind: "subscription",
       byMateria: { Build: totals(100, 0.4567) },
-      byNode: {},
+      bySocket: {},
       byTask: {},
       byAttempt: {},
     };
@@ -532,7 +532,7 @@ describe("usage UI formatting", () => {
         "Auto-Eval": totals(45545, 0.1537),
         planner: totals(2410, 0.0344),
       },
-      byNode: {
+      bySocket: {
         Maintain: totals(167153, 0.1287),
         Build: totals(97629, 0.2148),
         "Auto-Eval": totals(45545, 0.1537),
@@ -563,12 +563,12 @@ describe("usage UI formatting", () => {
     expect(taskLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
   });
 
-  test("renders an empty by-node breakdown without hiding total or materia costs", () => {
+  test("renders an empty by-socket breakdown without hiding total or materia costs", () => {
     const usage: UsageReport = {
       ...totals(42, 0.1234),
       costKind: "actual",
       byMateria: { Build: totals(42, 0.1234) },
-      byNode: {},
+      bySocket: {},
       byTask: { "task-4": totals(42, 0.1234) },
       byAttempt: {},
     };

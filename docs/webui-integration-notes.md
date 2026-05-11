@@ -39,7 +39,7 @@ Important TypeScript interfaces are in `src/types.ts`:
 
 - `PiMateriaConfig`: `artifactDir`, `budget`, `limits`, `compaction`, named `loadouts`, `activeLoadout`, and top-level `materia`.
 - `MateriaPipelineConfig`: `{ entry, sockets }`.
-- `MateriaPipelineNodeConfig`: agent or utility socket.
+- `MateriaPipelineSocketConfig`: agent or utility socket.
 - `MateriaAgentNodeConfig`: `type: "agent"`, `materia`, plus common routing fields.
 - `MateriaUtilityNodeConfig`: `type: "utility"`, `utility` or `command`, optional `params` and `timeoutMs`, plus common routing fields.
 - Common routing/editable graph fields: `parse`, `assign`, `next`, `edges`, `foreach`, `advance`, and `limits`.
@@ -52,7 +52,7 @@ Important TypeScript interfaces are in `src/types.ts`:
 
 The active cast is session-scoped through custom session entries with custom type `pi-materia-cast-state` in `src/native.ts`. `loadActiveCastState(ctx)` reads only `ctx.sessionManager.getBranch()`, so it intentionally follows the current Pi session branch and does not aggregate across other Pi sessions. `/materia ui` should use that same branch-scoped source of truth.
 
-`MateriaCastState` includes `castId`, `cwd`, `runDir`, `artifactRoot`, current socket/materia/item fields, `nodeState`, `awaitingResponse`, `visits`, `cursors`, `taskAttempts`, `edgeTraversals`, `lastOutput`, `lastJson`, `runState`, and the resolved `pipeline` snapshot. The WebUI monitor can read this state through a session-scoped in-memory bridge and through artifact files.
+`MateriaCastState` includes `castId`, `cwd`, `runDir`, `artifactRoot`, current socket/materia/item fields, `currentSocketState`, `awaitingResponse`, `visits`, `cursors`, `taskAttempts`, `edgeTraversals`, `lastOutput`, `lastJson`, `runState`, and the resolved `pipeline` snapshot. The WebUI monitor can read this state through a session-scoped in-memory bridge and through artifact files.
 
 ### Artifact paths
 
@@ -64,17 +64,17 @@ Default artifact root is `.pi/pi-materia`, via `resolveArtifactRoot(cwd, config.
   events.jsonl
   usage.json
   manifest.json
-  nodes/<socket-id>/<visit>.md
-  nodes/<socket-id>/<visit>.json
-  nodes/<socket-id>/<visit>.refinement-<n>-<entry>.md
-  nodes/<socket-id>/<visit>.command.stdout.txt
-  nodes/<socket-id>/<visit>.command.stderr.txt
-  nodes/<socket-id>/<visit>.command.json
-  nodes/<socket-id>/<visit>.input.json
+  sockets/<socket-id>/<visit>.md
+  sockets/<socket-id>/<visit>.json
+  sockets/<socket-id>/<visit>.refinement-<n>-<entry>.md
+  sockets/<socket-id>/<visit>.command.stdout.txt
+  sockets/<socket-id>/<visit>.command.stderr.txt
+  sockets/<socket-id>/<visit>.command.json
+  sockets/<socket-id>/<visit>.input.json
   contexts/<socket-id>-<visit>.md
 ```
 
-`events.jsonl` receives `cast_start`, `node_start`, `materia_model_settings`, `utility_input`, `utility_command`, `node_refinement`, `context_refinement`, `node_complete`, and `cast_end`. `manifest.json` collates artifacts with socket, materia, item, visit, kind, refinement/finalization flags, and timestamps.
+`events.jsonl` receives `cast_start`, `socket_start`, `materia_model_settings`, `utility_input`, `utility_command`, `socket_refinement`, `context_refinement`, `socket_complete`, and `cast_end`. `manifest.json` collates artifacts with socket, materia, item, visit, kind, refinement/finalization flags, and timestamps.
 
 ## WebUI implementation plan constraints
 

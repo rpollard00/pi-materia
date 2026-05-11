@@ -1,6 +1,6 @@
 # pi-materia Next Features Plan
 
-> Historical implementation plan. Remaining `role`/`roles`/`systemPrompt` examples and terminology in this file document older designs or migration history; active configuration now uses top-level `materia` entries and agent-node `materia` assignments.
+> Historical implementation plan. Examples and terminology in this file document older designs or migration history; active configuration now uses top-level `materia` entries and socket `materia` assignments. Historical `node`/`nodes` wording below refers to pre-socket-era design notes only and is not part of the current contract.
 
 This plan turns the first test feedback into a staged roadmap for pi-materia, a Pi extension for configurable agent pipelines.
 
@@ -172,7 +172,7 @@ Tasks:
 - [x] Add a live status widget using `ctx.ui.setWidget()`.
 - [x] Display:
   - run id
-  - current node
+  - current socket
   - current role
   - current task
   - attempt count
@@ -345,7 +345,7 @@ Implementation tasks:
   - request
   - config source/hash
   - artifact dir/run dir
-  - current node
+  - current socket
   - current phase: `planning | building | evaluating | maintaining | complete | failed`
   - current task id/title
   - task list
@@ -544,7 +544,7 @@ Input sent to the utility on stdin:
   "runDir": "/path/to/project/.pi/pi-materia/20260430-120000",
   "request": "build auth",
   "castId": "20260430-120000",
-  "nodeId": "bootstrap",
+  "socketId": "bootstrap",
   "params": {
     "patterns": [".pi/pi-materia/"]
   },
@@ -773,7 +773,7 @@ Acceptance:
 10. Utility Materia documentation and examples.
 11. Optional named utility registry, starting with artifact ignore/VCS detection utilities.
 12. Update bundled default loadout to use utility nodes explicitly for deterministic bootstrap hygiene.
-13. Maintainer/checkpoint policy as configured nodes/utilities, not engine branches.
+13. Maintainer/checkpoint policy as configured sockets/utilities, not engine branches.
 14. Per-role model/thinking/tool settings.
 15. Advanced graph edge conditions/parallelism if needed.
 
@@ -804,7 +804,7 @@ Status: implemented. `src/native.ts` now uses one generic node start path and on
 
 ### 13. Remove semantic node behavior from framework source — Done
 
-Problem: current code still has framework-level concepts like node output modes (`plan`, `evaluation`) and phase-specific branches. That prevents users from defining arbitrary Materia Grids such as a single node that says `HELLO WORLD` and exits.
+Problem: current code still has framework-level concepts like socket output modes (`plan`, `evaluation`) and phase-specific branches. That prevents users from defining arbitrary Materia Grids such as a single socket that says `HELLO WORLD` and exits.
 
 Target principle:
 
@@ -856,7 +856,7 @@ advanceTaskOnSuccess
 Introduce generic node fields:
 
 ```ts
-interface MateriaPipelineNodeConfig {
+interface MateriaPipelineSocketConfig {
   type: "agent";
   role: string;
   prompt?: string;
@@ -969,7 +969,7 @@ Acceptance:
 Replace all start functions/branches with one path:
 
 ```ts
-startNode(nodeId)
+startSocket(socketId)
 ```
 
 Responsibilities:
@@ -1007,14 +1007,14 @@ completeNode(outputText)
 ```
 
 Responsibilities:
-- write raw output artifact under `nodes/<node-id>/...`
+- write raw output artifact under `sockets/<socket-id>/...`
 - set `state.lastOutput`
 - parse JSON only when `node.parse === "json"`
 - set `state.lastJson` when parsed
 - apply `assign` mappings
 - apply cursor advancement when configured
 - evaluate edges/next
-- call `startNode(next)` or complete cast
+- call `startSocket(next)` or complete cast
 
 Generic assignment examples:
 
@@ -1038,7 +1038,7 @@ Do not add a large dependency initially. Implement a minimal helper set.
 JSON path support:
 
 ```text
-$              whole parsed node output
+$              whole parsed socket output
 $.field        parsed output field
 $.a.b          nested parsed output field
 state.foo      generic cast data
@@ -1079,7 +1079,7 @@ Generic next resolution order:
 Track:
 
 ```ts
-visits[nodeId]
+visits[socketId]
 edgeTraversals[`${from}->${to}`]
 ```
 

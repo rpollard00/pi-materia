@@ -129,7 +129,7 @@ describe("Yolo loop semantics regression", () => {
     expect(state.cursors?.workItemIndex).toBe(2);
     expect(state.data?.maintainAttempts).toEqual({ alpha: 1, beta: 1 });
 
-    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-4", "2-beta.input.json"), "utf8"));
+    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-beta.input.json"), "utf8"));
     expect(betaInput.itemKey).toBe("beta");
   });
 
@@ -144,7 +144,7 @@ describe("Yolo loop semantics regression", () => {
     expect(state.cursors?.workItemIndex).toBe(2);
     expect(state.data?.maintainAttempts).toEqual({ alpha: 2, beta: 1 });
 
-    const retryInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-4", "2-alpha.input.json"), "utf8"));
+    const retryInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-alpha.input.json"), "utf8"));
     expect(retryInput.itemKey).toBe("alpha");
     expect(retryInput.cursor).toEqual({ name: "workItemIndex", index: 0 });
   });

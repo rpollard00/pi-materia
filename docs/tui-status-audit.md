@@ -6,11 +6,11 @@ This audit identifies the current pi-materia-owned render paths for the compact 
 
 ### Compact status badge
 
-- `src/native.ts` — `materiaStatusLabel(state, node?, options?)` builds the value passed to Pi's compact extension status API.
-  - Sources: `nodeMateriaName(node)`, `state.currentMateria`, `node.id`, `state.currentNode`, `state.phase`, optional suffix, and optional `state.currentItemLabel`.
+- `src/runtime/sessionState.ts` — `materiaStatusLabel(state, socket?, options?)` builds the value passed to Pi's compact extension status API.
+  - Sources: `socketMateriaName(socket)`, `state.currentMateria`, `socket.id`, `state.currentSocketId`, `state.phase`, optional suffix, and optional `state.currentItemLabel`.
   - Call sites:
     - `src/index.ts` session restore: `ctx.ui.setStatus("materia", materiaStatusLabel(state))`.
-    - `src/native.ts` node start / recast / refinement paths: `ctx.ui.setStatus("materia", materiaStatusLabel(...))`.
+    - Runtime socket start / recast / refinement paths: `ctx.ui.setStatus("materia", materiaStatusLabel(...))`.
     - `src/native.ts` failure/completion paths: `ctx.ui.setStatus("materia", "failed" | "done")`.
     - `src/index.ts` abort/start-failure paths: clears or sets `ctx.ui.setStatus("materia", undefined | "failed")`.
 
@@ -64,25 +64,25 @@ Available to the basic renderer in `src/ui.ts`:
 - Attempt/turn-ish counter: `attempt` from task attempts, not loop current/total.
 - Elapsed: `startedAt` and optional `endedAt`.
 - Usage: `usage.tokens.input/cacheRead/output/cacheWrite`.
-- Current node/materia: `currentNode`, `currentMateria`.
+- Current socket/materia: `currentSocketId`, `currentMateria`.
 - Task/cast label: `currentTask` currently mirrors `currentItemLabel` when set; otherwise falls back to `-`.
 - Status/message: `lastMessage`.
 - Model selection exists as `currentMateriaModel`, but the current widget does not render it.
 
-`MateriaRunState` does not contain the resolved pipeline, loop definitions, cursor totals, request/cast title, cast phase/node state, or full active/resumed cast metadata needed to render `Build -> [Auto-Eval] -> Maintain` or current/total loop turns safely.
+`MateriaRunState` does not contain the resolved pipeline, loop definitions, cursor totals, request/cast title, cast phase/socket state, or full active/resumed cast metadata needed to render `Build -> [Auto-Eval] -> Maintain` or current/total loop turns safely.
 
 ### pi-materia-owned fields only available from richer `MateriaCastState`
 
 Available to `renderMateriaCastStatusWidget(state)` and follow-up richer render work:
 
 - Request/task title: `request`.
-- Cast lifecycle: `active`, `phase`, `awaitingResponse`, `nodeState`, `failedReason`.
-- Current graph position: `currentNode`, `currentMateria`, `currentItemKey`, `currentItemLabel`.
+- Cast lifecycle: `active`, `phase`, `awaitingResponse`, `currentSocketState`, `failedReason`.
+- Current graph position: `currentSocketId`, `currentMateria`, `currentItemKey`, `currentItemLabel`.
 - Loop/progress data: `pipeline`, `pipeline.loops`, `cursors`, `visits`, `taskAttempts`, `edgeTraversals`, `data`, `lastJson`.
 - Paths/artifacts: `cwd`, `runDir`, `artifactRoot`, `configSource`.
 - Run-state fallback: embedded `runState`.
 
-This richer state is the appropriate source for loop-aware display and active pipeline-position display. The current `renderMateriaCastStatusWidget(...)` only uses a small subset: it reuses `runState`, overlays `currentNode/currentMateria`, derives `nodeState`, and renders a one-line status message.
+This richer state is the appropriate source for loop-aware display and active pipeline-position display. The current `renderMateriaCastStatusWidget(...)` only uses a small subset: it reuses `runState`, overlays `currentSocketId/currentMateria`, derives `currentSocketState`, and renders a one-line status message.
 
 ## Duplicate or low-value display currently observed
 

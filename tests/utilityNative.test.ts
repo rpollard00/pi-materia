@@ -41,7 +41,7 @@ function utilityConfig(socket: Record<string, unknown>, extraSockets: Record<str
   };
 }
 
-describe("native utility node execution", () => {
+describe("native utility socket execution", () => {
   test("project.ensureIgnored adds configured patterns without duplicates", async () => {
     const harness = await makeHarness(utilityConfig({ utility: "project.ensureIgnored", parse: "json", params: { patterns: [".pi/pi-materia/", "dist/"] }, assign: { ignored: "$.patterns" } }));
 
@@ -57,7 +57,7 @@ describe("native utility node execution", () => {
     expect(state.lastJson?.unchanged).toEqual([".pi/pi-materia/", "dist/"]);
     expect(state.lastJson?.file).toBe(path.join(harness.cwd, ".gitignore"));
     expect(state.data?.ignored).toEqual([".pi/pi-materia/", "dist/"]);
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.json"), "utf8")).resolves.toContain('"ok": true');
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.json"), "utf8")).resolves.toContain('"ok": true');
   });
 
   test("vcs.detect returns JSON with kind, root, and tool availability", async () => {
@@ -75,7 +75,7 @@ describe("native utility node execution", () => {
     expect(state.data?.vcs).toEqual(state.lastJson);
   });
 
-  test("runs a single utility node to completion without an agent turn", async () => {
+  test("runs a single utility socket to completion without an agent turn", async () => {
     const harness = await makeHarness(utilityConfig({ utility: "echo", params: { text: "HELLO WORLD" } }));
 
     await harness.runCommand("materia", "cast say hi");
@@ -89,11 +89,11 @@ describe("native utility node execution", () => {
 
     const manifest = JSON.parse(await readFile(path.join(state.runDir!, "manifest.json"), "utf8"));
     const outputEntry = manifest.entries.find((entry: { artifact?: string }) => entry.artifact?.endsWith("1.md"));
-    expect(outputEntry.artifact).toBe(path.join("nodes", "Socket-1", "1.md"));
+    expect(outputEntry.artifact).toBe(path.join("sockets", "Socket-1", "1.md"));
     await expect(readFile(path.join(state.runDir!, outputEntry.artifact), "utf8")).resolves.toBe("HELLO WORLD");
     const events = await readFile(path.join(state.runDir!, "events.jsonl"), "utf8");
-    expect(events).toContain('"type":"node_complete"');
-    expect(events).toContain('"artifact":"nodes/Socket-1/1.md"');
+    expect(events).toContain('"type":"socket_complete"');
+    expect(events).toContain('"artifact":"sockets/Socket-1/1.md"');
   });
 
   test("config-driven JSON params.output uses the shared deterministic handoff serializer", async () => {
@@ -106,7 +106,7 @@ describe("native utility node execution", () => {
     expect(state.phase).toBe("complete");
     expect(state.data?.answer).toBe(7);
     expect(state.lastJson).toEqual(JSON.parse(stringifyDeterministicHandoffOutput(output)));
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.md"), "utf8")).resolves.toBe(stringifyDeterministicHandoffOutput(output));
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.md"), "utf8")).resolves.toBe(stringifyDeterministicHandoffOutput(output));
 
     const utilityExecutionSource = await readFile(path.resolve("src", "application", "utilityExecution.ts"), "utf8");
     expect(utilityExecutionSource).toContain("stringifyDeterministicHandoffOutput(value)");
@@ -133,7 +133,7 @@ describe("native utility node execution", () => {
     expect(state.lastJson).not.toHaveProperty("tasks");
     expect(state.data?.workItems).toEqual(output.workItems);
     expect(state.data?.feedback).toBe("needs build");
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.md"), "utf8")).resolves.toBe(stringifyDeterministicHandoffOutput(output));
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.md"), "utf8")).resolves.toBe(stringifyDeterministicHandoffOutput(output));
   });
 
   test("parses JSON output, assigns state, and routes edges", async () => {
@@ -149,9 +149,9 @@ describe("native utility node execution", () => {
     expect(state.data?.answer).toBe(7);
     expect(state.lastJson).toEqual({ satisfied: true, value: 7 });
     expect(state.visits?.["Socket-2"]).toBe(1);
-    const parsed = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.json"), "utf8"));
+    const parsed = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.json"), "utf8"));
     expect(parsed.value).toBe(7);
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-2", "1.md"), "utf8")).resolves.toBe("second");
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-2", "1.md"), "utf8")).resolves.toBe("second");
   });
 
   test("canonical not_satisfied routes only when satisfied is false", async () => {
@@ -334,7 +334,7 @@ describe("native utility node execution", () => {
     expect(state.data?.evalCycle).toBe(2);
     expect(state.visits).toMatchObject({ "Socket-1": 2, "Socket-2": 2, "Socket-3": 1 });
     expect(state.edgeTraversals).toMatchObject({ "Socket-2->Socket-1": 1, "Socket-2->Socket-3": 1 });
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-3", "1.md"), "utf8")).resolves.toBe("maintain");
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-3", "1.md"), "utf8")).resolves.toBe("maintain");
   });
 
   test("foreach utility sockets expose item and cursor metadata in input artifacts", async () => {
@@ -355,12 +355,12 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; runDir?: string };
     expect(state.phase).toBe("complete");
-    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "1-a.input.json"), "utf8"));
+    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "1-a.input.json"), "utf8"));
     expect(firstInput.item).toEqual({ id: "a", title: "Alpha" });
     expect(firstInput.itemKey).toBe("a");
     expect(firstInput.itemLabel).toBe("Alpha");
     expect(firstInput.cursor).toEqual({ name: "itemCursor", index: 0 });
-    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "2-b.input.json"), "utf8"));
+    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "2-b.input.json"), "utf8"));
     expect(secondInput.itemKey).toBe("b");
     expect(secondInput.itemLabel).toBe("Beta");
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
@@ -396,18 +396,18 @@ describe("native utility node execution", () => {
     expect(state.phase).toBe("complete");
     expect(state.visits?.["Socket-2"]).toBe(2);
     expect(state.cursors?.itemCursor).toBe(2);
-    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "1-a.input.json"), "utf8"));
+    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "1-a.input.json"), "utf8"));
     expect(firstInput.item).toEqual({ id: "a", title: "Alpha" });
     expect(firstInput.state.work).toEqual({ id: "a", title: "Alpha" });
     expect(firstInput.cursor).toEqual({ name: "itemCursor", index: 0 });
-    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-2", "2-b.input.json"), "utf8"));
+    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "2-b.input.json"), "utf8"));
     expect(secondInput.itemKey).toBe("b");
     expect(secondInput.itemLabel).toBe("Beta");
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
   });
 
   test("command utility receives JSON stdin, captures stdout result, and writes stderr artifact", async () => {
-    const script = `let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const i=JSON.parse(s);console.error("diagnostic stderr");process.stdout.write(JSON.stringify({cwd:i.cwd===process.cwd(),runDir:!!i.runDir,request:i.request,castId:!!i.castId,nodeId:i.nodeId,params:i.params,state:i.state,item:i.item,itemKey:i.itemKey,itemLabel:i.itemLabel}));});`;
+    const script = `let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const i=JSON.parse(s);console.error("diagnostic stderr");process.stdout.write(JSON.stringify({cwd:i.cwd===process.cwd(),runDir:!!i.runDir,request:i.request,castId:!!i.castId,socketId:i.socketId,params:i.params,state:i.state,item:i.item,itemKey:i.itemKey,itemLabel:i.itemLabel}));});`;
     const harness = await makeHarness(utilityConfig({ command: ["node", "-e", script], parse: "json", params: { greeting: "hi" }, assign: { seenRequest: "$.request" } }));
 
     await harness.runCommand("materia", "cast command request");
@@ -415,8 +415,8 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; lastJson?: Record<string, unknown>; runDir?: string };
     expect(state.phase).toBe("complete");
     expect(state.data?.seenRequest).toBe("command request");
-    expect(state.lastJson).toMatchObject({ cwd: true, runDir: true, request: "command request", castId: true, nodeId: "Socket-1", params: { greeting: "hi" }, state: {}, item: null, itemKey: null, itemLabel: null });
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.command.stderr.txt"), "utf8")).resolves.toBe("diagnostic stderr\n");
+    expect(state.lastJson).toMatchObject({ cwd: true, runDir: true, request: "command request", castId: true, socketId: "Socket-1", params: { greeting: "hi" }, state: {}, item: null, itemKey: null, itemLabel: null });
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.command.stderr.txt"), "utf8")).resolves.toBe("diagnostic stderr\n");
     const events = await readFile(path.join(state.runDir!, "events.jsonl"), "utf8");
     expect(events).toContain('"type":"utility_command"');
   });
@@ -429,7 +429,7 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; lastOutput?: string; runDir?: string };
     expect(state.phase).toBe("complete");
     expect(state.lastOutput).toBe("plain text result");
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.md"), "utf8")).resolves.toBe("plain text result");
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.md"), "utf8")).resolves.toBe("plain text result");
   });
 
   test("command utility failure includes exit diagnostics and artifact paths", async () => {
@@ -441,8 +441,8 @@ describe("native utility node execution", () => {
     expect(state.phase).toBe("failed");
     expect(state.failedReason).toContain("exited with code 7");
     expect(state.failedReason).toContain("bad things happened");
-    expect(state.failedReason).toContain("nodes/Socket-1/1.command.stdout.txt");
-    await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.command.stderr.txt"), "utf8")).resolves.toBe("bad things happened\n");
+    expect(state.failedReason).toContain("sockets/Socket-1/1.command.stdout.txt");
+    await expect(readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.command.stderr.txt"), "utf8")).resolves.toBe("bad things happened\n");
   });
 
   test("command utility parse json fails clearly on invalid JSON", async () => {
@@ -474,7 +474,7 @@ describe("native utility node execution", () => {
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; lastOutput?: string; runDir?: string };
     expect(state.phase).toBe("complete");
     expect(state.lastOutput?.length).toBe(1024 * 1024);
-    const meta = JSON.parse(await readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.command.json"), "utf8"));
+    const meta = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-1", "1.command.json"), "utf8"));
     expect(meta.stdoutTruncated).toBe(true);
     expect(meta.stderrTruncated).toBe(false);
   });

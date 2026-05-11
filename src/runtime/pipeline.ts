@@ -402,7 +402,7 @@ function edgeLabel(edge: MateriaEdgeConfig): string {
 
 function formatLimits(config: PiMateriaConfig): string {
   return [
-    `socket visits ${config.limits?.maxSocketVisits ?? config.limits?.maxNodeVisits ?? 25}`,
+    `socket visits ${config.limits?.maxSocketVisits ?? 25}`,
     `edge traversals ${config.limits?.maxEdgeTraversals ?? 25}`,
   ].join(", ");
 }

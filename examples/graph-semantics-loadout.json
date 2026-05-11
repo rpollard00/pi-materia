@@ -4,7 +4,7 @@
   "loadouts": {
     "Graph Semantics Example": {
       "entry": "Socket-1",
-      "nodes": {
+      "sockets": {
         "Socket-1": {
           "type": "utility",
           "utility": "project.ensureIgnored",
@@ -58,7 +58,7 @@
       "loops": {
         "workItemIteration": {
           "label": "Build → Eval → Maintain until all work items complete",
-          "nodes": ["Socket-4", "Socket-5", "Socket-6"],
+          "sockets": ["Socket-4", "Socket-5", "Socket-6"],
           "consumes": { "from": "Socket-3", "output": "workItems" },
           "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" }
         }

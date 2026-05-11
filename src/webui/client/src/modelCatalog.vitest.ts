@@ -33,7 +33,7 @@ describe('modelSelectOptions', () => {
     };
 
     expect(modelSelectOptions(catalog, {
-      editingNodeId: 'agent-a',
+      editingSocketId: 'agent-a',
       model: 'legacy-provider/legacy-model',
       thinking: 'high',
     })).toContainEqual({

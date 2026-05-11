@@ -51,8 +51,6 @@ export function buildUtilityInput(state: MateriaCastState, socket: UtilityResolv
     request: state.request,
     castId: state.castId,
     socketId: socket.id,
-    // Legacy utility-command input alias retained for existing utility scripts.
-    nodeId: socket.id,
     params: resolvedSocketConfig(socket).params ?? {},
     state: state.data,
     item: currentItem(state) ?? null,

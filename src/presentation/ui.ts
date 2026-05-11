@@ -315,8 +315,8 @@ function displayMateriaStatusValue(state: MateriaRunState, value: string): strin
   return value
     .replace(new RegExp(`socket\\s+"${escapedSocketId}"`, "g"), materia)
     .replace(new RegExp(`socket\\s+${escapedSocketId}`, "g"), materia)
-    .replace(new RegExp(`node\\s+"${escapedSocketId}"`, "g"), materia)
-    .replace(new RegExp(`node\\s+${escapedSocketId}`, "g"), materia)
+    .replace(new RegExp(`socket\\s+"${escapedSocketId}"`, "g"), materia)
+    .replace(new RegExp(`socket\\s+${escapedSocketId}`, "g"), materia)
     .replace(new RegExp(`\\b${escapedSocketId}\\b`, "g"), materia);
 }
 

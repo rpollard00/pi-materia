@@ -1,9 +1,9 @@
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from '../../../../../generator.js';
-import { materiaColorChoices, type MateriaConfig, type PipelineNode, type SocketLayout } from '../../loadoutModel.js';
+import { materiaColorChoices, type MateriaConfig, type PipelineSocket, type SocketLayout } from '../../loadoutModel.js';
 import type { DragPayload, GeneratedListOutputConfig, MateriaFormState, SocketPropertyFormState } from '../types.js';
 
 export const emptyMateriaForm = (): MateriaFormState => ({
-  editingNodeId: '',
+  editingSocketId: '',
   name: '',
   behavior: 'prompt',
   prompt: '',
@@ -54,11 +54,11 @@ export function commandParts(raw: string): string[] | undefined {
   return raw.split(/\s+/).map((part) => part.trim()).filter(Boolean);
 }
 
-export function socketPropertyFormFromNode(node?: PipelineNode, layout?: SocketLayout): SocketPropertyFormState {
+export function socketPropertyFormFromSocket(socket?: PipelineSocket, layout?: SocketLayout): SocketPropertyFormState {
   return {
-    maxVisits: node?.limits?.maxVisits === undefined ? '' : String(node.limits.maxVisits),
-    maxEdgeTraversals: node?.limits?.maxEdgeTraversals === undefined ? '' : String(node.limits.maxEdgeTraversals),
-    maxOutputBytes: node?.limits?.maxOutputBytes === undefined ? '' : String(node.limits.maxOutputBytes),
+    maxVisits: socket?.limits?.maxVisits === undefined ? '' : String(socket.limits.maxVisits),
+    maxEdgeTraversals: socket?.limits?.maxEdgeTraversals === undefined ? '' : String(socket.limits.maxEdgeTraversals),
+    maxOutputBytes: socket?.limits?.maxOutputBytes === undefined ? '' : String(socket.limits.maxOutputBytes),
     layoutX: layout?.x === undefined ? '' : String(layout.x),
     layoutY: layout?.y === undefined ? '' : String(layout.y),
   };
@@ -125,7 +125,7 @@ export function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
     color: form.color.trim() || undefined,
     parse: form.outputFormat,
     multiTurn: form.multiTurn || undefined,
-    ...(form.generator ? { generator: true, generates: null } : form.editingNodeId ? { generator: null, generates: null } : {}),
+    ...(form.generator ? { generator: true, generates: null } : form.editingSocketId ? { generator: null, generates: null } : {}),
   };
   return {
     materia: {
