@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
+import { safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
@@ -16,18 +16,19 @@ import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaManifest, MateriaManifestEntry, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
+import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
+import { appendEvent, appendManifest, initializeRun, recordCommandArtifacts as recordCommandArtifactsFile, recordNodeOutput, recordNodeRefinement, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel, writeContextArtifact as writeContextArtifactFile } from "./infrastructure/castArtifacts.js";
+import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "./infrastructure/castStateRepository.js";
+export { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "./infrastructure/castStateRepository.js";
 
-const STATE_ENTRY = "pi-materia-cast-state";
-const MANIFEST_FILE = "manifest.json";
+
 const DEFAULT_MAX_SOCKET_VISITS = 25;
 const DEFAULT_UTILITY_TIMEOUT_MS = 30_000;
 const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
-const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
 const DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS = 1;
 
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
@@ -37,19 +38,15 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
   const castId = safeTimestamp();
   const runDir = path.join(artifactRoot, castId);
-  await mkdir(path.join(runDir, "sockets"), { recursive: true });
-  await mkdir(path.join(runDir, "nodes"), { recursive: true }); // Legacy artifact path kept for saved tooling compatibility.
-  await mkdir(path.join(runDir, "contexts"), { recursive: true });
-  await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
 
   const effectivePipeline = getEffectivePipelineConfig(config);
   const runState = createRunState(castId, runDir, ctx.model, effectivePipeline.loadoutName);
   runState.currentNode = pipeline.entry.id;
   runState.currentMateria = socketMateriaName(pipeline.entry);
   runState.lastMessage = pipeline.entry.id;
+  await initializeRun(runDir, config, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
   await writeUsage(runState);
   await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedMateriaContext: true });
-  await writeManifest(runDir, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
 
   const state: MateriaCastState = {
     version: 1,
@@ -98,35 +95,6 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   }
 
   await startSocket(pi, ctx, state, currentSocketOrThrow(state));
-}
-
-export function loadCastStateById(ctx: ExtensionContext, castId: string): MateriaCastState | undefined {
-  const requested = castId.trim();
-  if (!requested) return undefined;
-  return listLatestCastStates(ctx).find((state) => state.castId === requested);
-}
-
-export function listLatestCastStates(ctx: ExtensionContext): MateriaCastState[] {
-  const entries = ctx.sessionManager.getBranch();
-  const seenCastIds = new Set<string>();
-  const states: MateriaCastState[] = [];
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry.type !== "custom" || entry.customType !== STATE_ENTRY || !entry.data) continue;
-    const state = entry.data as MateriaCastState;
-    if (seenCastIds.has(state.castId)) continue;
-    seenCastIds.add(state.castId);
-    states.push(state);
-  }
-  return states;
-}
-
-export function listResumableCastStates(ctx: ExtensionContext): MateriaCastState[] {
-  return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && currentSocketState(state) !== "complete" && (state.phase === "failed" || currentSocketState(state) === "failed"));
-}
-
-export function listRevivableCastStates(ctx: ExtensionContext): MateriaCastState[] {
-  return listResumableCastStates(ctx).filter(isRevivableCastState);
 }
 
 export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, castId: string): Promise<MateriaCastState> {
@@ -352,26 +320,13 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
 }
 
 async function recordSocketOutput(state: MateriaCastState, socket: ResolvedMateriaSocket, text: string, entryId: string): Promise<string> {
-  const visit = socketVisit(state, socket.id);
-  const dir = path.join("nodes", safePathSegment(socket.id));
-  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
-  const artifact = path.join(dir, `${visit}${item}.md`);
-  await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
-  await writeFile(path.join(state.runDir, artifact), text);
   const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
-  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, materiaModel: state.currentMateriaModel });
-  return artifact;
+  return recordNodeOutput({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), text, entryId, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, materiaModel: state.currentMateriaModel });
 }
 
 async function recordMultiTurnRefinement(state: MateriaCastState, socket: ResolvedMateriaSocket, text: string, entryId: string): Promise<{ artifact: string; turn: number }> {
-  const visit = socketVisit(state, socket.id);
   const turn = nextRefinementTurn(state, socket.id);
-  const dir = path.join("nodes", safePathSegment(socket.id));
-  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
-  const artifact = path.join(dir, `${visit}${item}.refinement-${turn}-${safePathSegment(entryId)}.md`);
-  await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
-  await writeFile(path.join(state.runDir, artifact), text);
-  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
+  const artifact = await recordNodeRefinement({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), text, entryId, kind: "node_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
   return { artifact, turn };
 }
 
@@ -544,20 +499,7 @@ function createBoundedCapture(maxBytes: number): { push(chunk: Buffer | string):
 }
 
 async function recordCommandArtifacts(state: MateriaCastState, socket: ResolvedMateriaSocket, stdout: string, stderr: string, stdoutTruncated: boolean, stderrTruncated: boolean): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }> {
-  const visit = socketVisit(state, socket.id);
-  const dir = path.join("nodes", safePathSegment(socket.id));
-  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
-  const stdoutArtifact = path.join(dir, `${visit}${item}.command.stdout.txt`);
-  const stderrArtifact = path.join(dir, `${visit}${item}.command.stderr.txt`);
-  const metaArtifact = path.join(dir, `${visit}${item}.command.json`);
-  await mkdir(path.dirname(path.join(state.runDir, stdoutArtifact)), { recursive: true });
-  await writeFile(path.join(state.runDir, stdoutArtifact), stdout);
-  await writeFile(path.join(state.runDir, stderrArtifact), stderr);
-  await writeFile(path.join(state.runDir, metaArtifact), JSON.stringify({ stdoutArtifact, stderrArtifact, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES }, null, 2));
-  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:command:stdout`, artifact: stdoutArtifact });
-  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:command:stderr`, artifact: stderrArtifact });
-  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:command:meta`, artifact: metaArtifact });
-  return { stdoutArtifact, stderrArtifact, metaArtifact };
+  return recordCommandArtifactsFile({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), stdout, stderr, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES });
 }
 
 function summarizeStderr(stderr: string, truncated: boolean): string {
@@ -591,14 +533,7 @@ function buildUtilityInput(state: MateriaCastState, socket: Extract<ResolvedMate
 }
 
 async function recordUtilityInput(state: MateriaCastState, socket: ResolvedMateriaSocket, input: Record<string, unknown>): Promise<string> {
-  const visit = socketVisit(state, socket.id);
-  const dir = path.join("nodes", safePathSegment(socket.id));
-  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
-  const artifact = path.join(dir, `${visit}${item}.input.json`);
-  await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
-  await writeFile(path.join(state.runDir, artifact), JSON.stringify(input, null, 2));
-  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:input`, artifact });
-  return artifact;
+  return recordUtilityInputFile({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), input });
 }
 
 async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<void> {
@@ -822,14 +757,6 @@ function isValidRecoveryAllowance(value: unknown): value is MateriaRecoveryAllow
   );
 }
 
-function isRevivableCastState(state: MateriaCastState): boolean {
-  if (state.active || (state.phase !== "failed" && currentSocketState(state) !== "failed")) return false;
-  const exhaustion = state.recoveryExhaustion;
-  if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted" || !exhaustion.key) return false;
-  if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
-  return isValidRecoveryAllowance(state.recoveryAllowances?.[exhaustion.key]);
-}
-
 export interface MateriaReviveAllowanceResult {
   key: string;
   priorEffectiveMaxAttempts: number;
@@ -959,40 +886,20 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
 }
 
 async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, prompt: string, suffix?: string): Promise<string> {
-  const relativePath = contextArtifactPath(state, suffix);
-  const fullPath = path.join(state.runDir, relativePath);
-  await mkdir(path.dirname(fullPath), { recursive: true });
-  const activeTools = pi.getActiveTools();
   const materiaModel = state.currentMateriaModel;
-  const model = materiaModel?.label ?? "active Pi model";
-  const thinking = materiaModel?.thinking ?? (materiaModel?.thinkingExplicit ? materiaModel.requestedThinking : undefined) ?? "active Pi thinking";
-  const modelSource = formatModelSource(materiaModel);
-  const thinkingSource = formatThinkingSource(materiaModel);
-  const content = [
-    "# Materia Isolated Context",
-    "",
-    `cast: ${state.castId}`,
-    `socket: ${currentSocketId(state) ?? "-"}`,
-    `materia: ${state.currentMateria ?? "-"}`,
-    `item: ${state.currentItemLabel ?? "-"}`,
-    `visit: ${currentSocketId(state) ? currentSocketVisit(state) : "-"}`,
-    `model: ${model}`,
-    `model source: ${modelSource}`,
-    `thinking: ${thinking}`,
-    `thinking source: ${thinkingSource}`,
-    `active tools: ${activeTools.length ? activeTools.join(", ") : "none"}`,
-    `timestamp: ${new Date().toISOString()}`,
-    "",
-    "## Synthetic cast context",
-    "",
-    buildSyntheticCastContext(state),
-    "",
-    "## Hidden materia prompt",
-    "",
+  return writeContextArtifactFile({
+    state,
     prompt,
-  ].join("\n");
-  await writeFile(fullPath, content);
-  return relativePath;
+    suffix,
+    syntheticContext: buildSyntheticCastContext(state),
+    activeTools: pi.getActiveTools(),
+    socketId: currentSocketId(state),
+    visit: currentSocketVisit(state, 1),
+    model: materiaModel?.label ?? "active Pi model",
+    modelSource: formatModelSource(materiaModel),
+    thinking: materiaModel?.thinking ?? (materiaModel?.thinkingExplicit ? materiaModel.requestedThinking : undefined) ?? "active Pi thinking",
+    thinkingSource: formatThinkingSource(materiaModel),
+  });
 }
 
 function materiaModelSelection(applied: AppliedMateriaModelSettings): MateriaModelSelection {
@@ -1034,13 +941,6 @@ function formatThinkingSource(materiaModel: MateriaModelSelection | undefined): 
   return `safe thinking fallback (configured thinking${requested} unsupported: ${materiaModel.thinkingFallbackReason})`;
 }
 
-function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
-  const socket = safePathSegment(currentSocketId(state) ?? state.phase);
-  const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
-  const visit = currentSocketVisit(state, 1);
-  const extra = suffix ? `-${safePathSegment(suffix)}` : "";
-  return path.join("contexts", `${socket}${item}-${visit}${extra}.md`);
-}
 
 export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   if (!isPausedMultiTurnRefinement(state)) return;
@@ -1128,39 +1028,6 @@ function currentTaskAttempt(state: MateriaCastState): number | undefined {
   const socketId = currentSocketId(state);
   if (!socketId) return undefined;
   return state.runState.attempt ?? state.taskAttempts?.[taskIdentityKey(state, socketId)];
-}
-
-export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | undefined {
-  const entries = ctx.sessionManager.getBranch();
-  const seenCastIds = new Set<string>();
-  let latest: MateriaCastState | undefined;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    if (entry.type !== "custom" || entry.customType !== STATE_ENTRY || !entry.data) continue;
-    const state = entry.data as MateriaCastState;
-    if (!latest) latest = state;
-    if (seenCastIds.has(state.castId)) continue;
-    seenCastIds.add(state.castId);
-    if (state.active) return state;
-  }
-  return latest;
-}
-
-export function saveCastState(pi: ExtensionAPI, state: MateriaCastState): void {
-  state.updatedAt = Date.now();
-  pi.appendEntry(STATE_ENTRY, state);
-}
-
-export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason = "aborted"): MateriaCastState {
-  state.active = false;
-  state.awaitingResponse = false;
-  setCurrentSocketState(state, "failed");
-  state.phase = reason === "aborted" ? "failed" : state.phase;
-  state.failedReason = reason;
-  state.updatedAt = Date.now();
-  markRunEnded(state);
-  saveCastState(pi, state);
-  return state;
 }
 
 function findLatestAssistantEntry(entries: SessionEntry[], afterId?: string): { entry: SessionEntry; message: unknown } | undefined {
@@ -1270,36 +1137,6 @@ function resolvedPipelineSockets(state: MateriaCastState): Record<string, Resolv
   // Compatibility for persisted/fixture state snapshots that predate resolved
   // pipeline socket materialization. Runtime-created pipelines use `sockets`.
   return state.pipeline.sockets ?? (state.pipeline as unknown as { nodes?: Record<string, ResolvedMateriaSocket> }).nodes ?? {};
-}
-
-async function writeManifest(runDir: string, manifest: MateriaManifest): Promise<void> {
-  await writeFile(path.join(runDir, MANIFEST_FILE), JSON.stringify(manifest, null, 2));
-}
-
-async function appendManifest(state: MateriaCastState, entry: Omit<MateriaManifestEntry, "timestamp">): Promise<void> {
-  const file = path.join(state.runDir, MANIFEST_FILE);
-  let manifest: MateriaManifest;
-  try {
-    manifest = JSON.parse(await readFile(file, "utf8")) as MateriaManifest;
-  } catch {
-    manifest = { castId: state.castId, request: state.request, configSource: state.configSource, entries: [] };
-  }
-  const itemLabel = entry.itemLabel ?? (entry.itemKey && entry.itemKey === state.currentItemKey ? state.currentItemLabel : undefined);
-  manifest.entries.push({
-    ...entry,
-    itemLabel,
-    itemLabelShort: entry.itemLabelShort ?? shortMetadataLabel(itemLabel),
-    timestamp: Date.now(),
-  });
-  await writeManifest(state.runDir, manifest);
-}
-
-function shortMetadataLabel(label: unknown): string | undefined {
-  if (typeof label !== "string") return undefined;
-  const normalized = label.replace(/\s+/g, " ").trim();
-  if (!normalized) return undefined;
-  if (normalized.length <= MAX_METADATA_ITEM_LABEL_LENGTH) return normalized;
-  return `${normalized.slice(0, MAX_METADATA_ITEM_LABEL_LENGTH - 1)}…`;
 }
 
 async function loadConfigFromState(state: MateriaCastState): Promise<PiMateriaConfig> {

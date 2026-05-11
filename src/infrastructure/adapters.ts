@@ -1,7 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "../config.js";
 import { renderLoadoutList } from "../loadouts.js";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, clearCastState, continueNativeCast, currentMateria, handleAgentEnd, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, reviveNativeCast, startNativeCast } from "../native.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, continueNativeCast, currentMateria, handleAgentEnd, materiaStatusLabel, prepareMultiTurnRefinementTurn, resumeNativeCast, reviveNativeCast, startNativeCast } from "../native.js";
+import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState } from "./castStateRepository.js";
 import { renderGrid, resolvePipeline } from "../pipeline.js";
 import type { ArtifactCatalog, CastRuntime, CastStateRepository, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
 import { renderCastList } from "./castCatalog.js";

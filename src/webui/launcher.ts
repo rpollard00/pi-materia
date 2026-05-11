@@ -6,7 +6,7 @@ import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
-import { loadActiveCastState } from "../native.js";
+import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../config.js";
 import { publishActiveLoadoutChange } from "../activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../roleGeneration.js";
