@@ -14,7 +14,7 @@ export {
 
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "./application/promptAssembly.js";
 export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "./application/recoveryPolicy.js";
-export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
+export { defaultProactiveCompactionThresholdPercent } from "./runtime/compaction.js";
 export {
   clearCastState,
   listLatestCastStates,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createArtifactCatalog, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../src/infrastructure/index.js";
-import { createMateriaPluginAdapters } from "../src/pluginAdapters.js";
+import { createMateriaPluginAdapters } from "../src/runtime/pluginAdapters.js";
 
 // These tests keep plugin composition honest without invoking the expensive native Pi runtime.
 describe("infrastructure adapters", () => {

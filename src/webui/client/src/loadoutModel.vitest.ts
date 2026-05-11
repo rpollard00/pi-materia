@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../loadoutGraphAnalysis.js';
+import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../graph/loadoutGraphAnalysis.js';
 import {
   assertValidLoadoutSaveSemantics,
   buildMateriaPalette,

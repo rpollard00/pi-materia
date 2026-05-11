@@ -1,4 +1,4 @@
-import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, ResolvedMateriaPipeline, ResolvedMateriaSocket } from "../types.js";
+import type { MateriaForeachConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, ResolvedMateriaPipeline, ResolvedMateriaSocket } from "../types.js";
 
 export class LoadoutTopologyError extends Error {
   constructor(public readonly path: string, message: string) {
@@ -66,6 +66,18 @@ export function resolvedPipelineSocketEntries(pipeline: Partial<Pick<ResolvedMat
 
 export function getResolvedPipelineSocket(pipeline: Partial<Pick<ResolvedMateriaPipeline, "sockets">>, socketId: string): ResolvedMateriaSocket | undefined {
   return resolvedPipelineSockets(pipeline)[socketId];
+}
+
+export function loopIteratorForSocket(pipeline: Pick<MateriaPipelineConfig, "sockets" | "loops"> | Pick<ResolvedMateriaPipeline, "sockets" | "loops">, socketId: string): MateriaForeachConfig | undefined {
+  const resolved = resolvedPipelineSockets(pipeline as Partial<Pick<ResolvedMateriaPipeline, "sockets">>);
+  const entry = resolved[socketId] as ResolvedMateriaSocket | undefined;
+  const socket = entry?.socket ?? getLoadoutSocket(pipeline as Pick<MateriaPipelineConfig, "sockets">, socketId);
+  const direct = socket?.foreach;
+  if (direct) return direct;
+  for (const loop of Object.values(pipeline.loops ?? {})) {
+    if (loop.iterator && loopSockets(loop).includes(socketId)) return loop.iterator;
+  }
+  return undefined;
 }
 
 export function validateLoadoutSocketReferences(loadout: Pick<MateriaPipelineConfig, "entry" | "sockets" | "loops">): SocketReferenceValidation {

@@ -1,4 +1,4 @@
-import { parseCanonicalSocketId } from "../socketIds.js";
+import { parseCanonicalSocketId } from "../domain/socket.js";
 
 export interface MateriaNotificationDisplay {
   materiaName: string;

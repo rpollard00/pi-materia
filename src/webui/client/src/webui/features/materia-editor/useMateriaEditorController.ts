@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import { isGeneratorMateria } from '../../../../../../generator.js';
+import { isGeneratorMateria } from '../../../../../../graph/generator.js';
 import type { MateriaConfig } from '../../../loadoutModel.js';
 import { materiaSavedEventName } from '../../constants.js';
 import { generateMateriaRole, saveConfig } from '../../api/index.js';

@@ -48,9 +48,9 @@ The installed Pi provider code for OpenAI/Codex responses constructs assistant u
 
 So, for the observed `openai-codex/gpt-5.5` path, costs do not arrive from the Codex subscription API as cents or microdollars. Pi estimates USD from token counts.
 
-## src/usage.ts flaw identified
+## src/telemetry/usage.ts flaw identified
 
-`src/usage.ts` extracts component costs and then prefers any provider/Pi total alias directly:
+`src/telemetry/usage.ts` extracts component costs and then prefers any provider/Pi total alias directly:
 
 ```ts
 const providedCostTotal = firstNumber(cost, ["total", "totalCost", "totalUsd", "costUsd", "usd"])

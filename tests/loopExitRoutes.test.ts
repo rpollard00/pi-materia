@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveLoopExitRoute } from "../src/loopExitRoutes.js";
+import { resolveLoopExitRoute } from "../src/graph/loopExitRoutes.js";
 import type { MateriaLoopConfig } from "../src/types.js";
 
 const loop = (): MateriaLoopConfig => ({

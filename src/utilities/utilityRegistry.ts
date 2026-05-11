@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { stringifyDeterministicHandoffOutput } from "../handoffContract.js";
+import { stringifyDeterministicHandoffOutput } from "../handoff/handoffContract.js";
 
 export type BuiltInUtilityInput = {
   cwd: string;

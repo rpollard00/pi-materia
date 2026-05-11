@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { addUsage, createRunState, extractUsage } from "../src/usage.js";
+import { addUsage, createRunState, extractUsage } from "../src/telemetry/usage.js";
 import type { UsageReport, UsageTotals } from "../src/types.js";
 
 function usageTotals(tokens: number, cost: number): UsageTotals {

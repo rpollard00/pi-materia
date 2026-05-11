@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
-import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../../../../graphValidation.js';
+import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../../../../graph/graphValidation.js';
 import { fromWebUiLoadoutDto, toWebUiLoadoutDto } from '../../../../../loadoutDto.js';
 import {
   canDeleteSocket,

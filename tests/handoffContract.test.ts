@@ -9,8 +9,8 @@ import {
   HANDOFF_RESERVED_CONTROL_FIELDS,
   HANDOFF_RESERVED_EVALUATOR_FIELDS,
   HANDOFF_SATISFIED_FIELD,
-} from "../src/handoffContract.js";
-import { CANONICAL_EDGE_CONDITIONS } from "../src/graphValidation.js";
+} from "../src/handoff/handoffContract.js";
+import { CANONICAL_EDGE_CONDITIONS } from "../src/graph/graphValidation.js";
 
 describe("canonical handoff contract", () => {
   test("exports satisfied as the reserved runtime control field and evaluator fields", () => {

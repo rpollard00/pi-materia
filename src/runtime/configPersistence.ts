@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { parseJson } from "../json.js";
-import { getEffectivePipelineConfig } from "../pipeline.js";
+import { parseJson } from "../utilities/json.js";
+import { getEffectivePipelineConfig } from "./pipeline.js";
 import type { MateriaCastState, PiMateriaConfig } from "../types.js";
 
 export async function loadConfigFromState(state: MateriaCastState): Promise<PiMateriaConfig> {

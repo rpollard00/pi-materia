@@ -1,4 +1,4 @@
-import { getResolvedPipelineSocket } from "../loadoutAccessors.js";
+import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import type { MateriaAgentConfig, MateriaCastState, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 
 export function socketVisit(state: MateriaCastState, socketId: string): number {

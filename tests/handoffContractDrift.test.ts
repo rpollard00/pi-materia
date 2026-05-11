@@ -8,8 +8,8 @@ import {
   HANDOFF_RESERVED_CONTROL_FIELDS,
   HANDOFF_RESERVED_EVALUATOR_FIELDS,
   HANDOFF_SATISFIED_FIELD,
-} from "../src/handoffContract.js";
-import { buildRoleGenerationPrompt } from "../src/roleGeneration.js";
+} from "../src/handoff/handoffContract.js";
+import { buildRoleGenerationPrompt } from "../src/handoff/roleGeneration.js";
 
 describe("handoff contract drift regressions", () => {
   test("central exports remain the canonical source consumed by prompt generation", () => {

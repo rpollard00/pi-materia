@@ -1,9 +1,9 @@
 import { selectMatchingEdge } from "../domain/routing.js";
-import { HANDOFF_SATISFIED_FIELD } from "../handoffContract.js";
-import { canonicalOutgoingEdges } from "../graphValidation.js";
-import { loopSockets } from "../loadoutAccessors.js";
-import { resolveLoopExitRoute } from "../loopExitRoutes.js";
-import { loopIteratorForSocket } from "../pipeline.js";
+import { HANDOFF_SATISFIED_FIELD } from "../handoff/handoffContract.js";
+import { canonicalOutgoingEdges } from "../graph/graphValidation.js";
+import { loopSockets } from "../loadout/loadoutAccessors.js";
+import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
+import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 import type { MateriaCastState, MateriaEdgeCondition, MateriaEdgeConfig, PiMateriaConfig, ResolvedMateriaSocket } from "../types.js";
 
 export const DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS = 25;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getLoadoutSocket, loadoutLoopEntries, loadoutSocketEntries, loadoutSocketIdSet, loadoutSocketIds, loadoutSockets, loopSocketSet, loopSockets, materializeCanonicalSockets, validateLoadoutSocketReferences } from "../src/loadoutAccessors.js";
+import { getLoadoutSocket, loadoutLoopEntries, loadoutSocketEntries, loadoutSocketIdSet, loadoutSocketIds, loadoutSockets, loopSocketSet, loopSockets, materializeCanonicalSockets, validateLoadoutSocketReferences } from "../src/loadout/loadoutAccessors.js";
 import type { MateriaLoopConfig, MateriaPipelineConfig } from "../src/types.js";
 
 describe("socket-only loadout accessors", () => {

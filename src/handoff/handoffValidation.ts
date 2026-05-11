@@ -5,7 +5,7 @@ import {
   HANDOFF_NOT_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_FIELD,
-} from "../handoffContract.js";
+} from "./handoffContract.js";
 import type { MateriaPipelineSocketConfig } from "../types.js";
 
 export interface HandoffValidationOptions {

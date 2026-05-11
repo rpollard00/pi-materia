@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
-import { validatePipelineGraph } from "../src/graphValidation.js";
+import { validatePipelineGraph } from "../src/graph/graphValidation.js";
 import type { PiMateriaConfig } from "../src/types.js";
 import { buildMateriaPalette } from "../src/webui/client/src/loadoutModel.js";
 import { FakePiHarness } from "./fakePi.js";

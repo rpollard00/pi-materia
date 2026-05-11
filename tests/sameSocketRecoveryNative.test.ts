@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
-import { extendSameSocketRecoveryAllowanceForRevive } from "../src/native.js";
+import { extendSameSocketRecoveryAllowanceForRevive } from "../src/castRuntime.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {

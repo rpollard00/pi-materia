@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
-import { defaultProactiveCompactionThresholdPercent } from "../src/native.js";
-import { resolveProactiveCompactionThreshold, validateCompactionConfig } from "../src/compaction.js";
+import { defaultProactiveCompactionThresholdPercent } from "../src/castRuntime.js";
+import { resolveProactiveCompactionThreshold, validateCompactionConfig } from "../src/runtime/compaction.js";
 import { FakePiHarness } from "./fakePi.js";
 
 const cases: Array<[number, number]> = [

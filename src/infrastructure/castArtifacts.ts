@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { safePathSegment } from "../artifacts.js";
+import { safePathSegment } from "../utilities/artifacts.js";
 import type { MateriaCastState, MateriaManifest, MateriaManifestEntry, MateriaModelSelection, MateriaRunState, PiMateriaConfig } from "../types.js";
 
 export const MATERIA_MANIFEST_FILE = "manifest.json";

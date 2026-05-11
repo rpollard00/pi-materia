@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoffContract.js";
-import { buildRoleGenerationPrompt, generateMateriaRolePrompt, resolveRoleGenerationSettings } from "../src/roleGeneration.js";
+import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
+import { buildRoleGenerationPrompt, generateMateriaRolePrompt, resolveRoleGenerationSettings } from "../src/handoff/roleGeneration.js";
 
 const activeModel = { provider: "active-provider", id: "active-model", name: "Active", api: "active-api" };
 const overrideModel = { provider: "override-provider", id: "role-model", name: "Role", api: "override-api" };

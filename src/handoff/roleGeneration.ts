@@ -2,10 +2,10 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { createAgentSession, SessionManager } from "@mariozechner/pi-coding-agent";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, Model } from "@mariozechner/pi-ai";
-import { loadProfileConfig } from "../config.js";
-import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "../generator.js";
-import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../handoffContract.js";
-import { getActiveModelInfo } from "../modelSettings.js";
+import { loadProfileConfig } from "../config/config.js";
+import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "../graph/generator.js";
+import { HANDOFF_CONTRACT_PROMPT_TEXT } from "./handoffContract.js";
+import { getActiveModelInfo } from "../config/modelSettings.js";
 import type { MateriaGeneratorConfig, MateriaRoleGenerationProfileConfig } from "../types.js";
 
 export interface MateriaRolePromptGenerationRequest {

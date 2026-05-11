@@ -24,7 +24,7 @@ Preferred Pi-native pieces for `/materia ui`:
 
 ### Config loading
 
-Current `src/config.ts` precedence is:
+Current `src/config/config.ts` precedence is:
 
 1. explicit `--materia-config` flag path, supplied via `getConfiguredConfigPath(pi)`;
 2. `MATERIA_CONFIG` env var, also supplied through `getConfiguredConfigPath(pi)`;
@@ -46,11 +46,11 @@ Important TypeScript interfaces are in `src/types.ts`:
 - `MateriaEdgeConfig`: `when`, `to`, `maxTraversals`.
 - `MateriaConfig`: `tools`, `prompt`, optional `model`, optional `thinking`, and optional `multiTurn`.
 
-`src/pipeline.ts` resolves the active loadout with `getEffectivePipelineConfig()` and validates target links. `renderGrid()` is the current textual visualization and should remain a regression oracle for the WebUI graph.
+`src/runtime/pipeline.ts` resolves the active loadout with `getEffectivePipelineConfig()` and validates target links. `renderGrid()` is the current textual visualization and should remain a regression oracle for the WebUI graph.
 
 ### Runtime/session state
 
-The active cast is session-scoped through custom session entries with custom type `pi-materia-cast-state` in `src/native.ts`. `loadActiveCastState(ctx)` reads only `ctx.sessionManager.getBranch()`, so it intentionally follows the current Pi session branch and does not aggregate across other Pi sessions. `/materia ui` should use that same branch-scoped source of truth.
+The active cast is session-scoped through custom session entries with custom type `pi-materia-cast-state` in `src/castRuntime.ts`. `loadActiveCastState(ctx)` reads only `ctx.sessionManager.getBranch()`, so it intentionally follows the current Pi session branch and does not aggregate across other Pi sessions. `/materia ui` should use that same branch-scoped source of truth.
 
 `MateriaCastState` includes `castId`, `cwd`, `runDir`, `artifactRoot`, current socket/materia/item fields, `currentSocketState`, `awaitingResponse`, `visits`, `cursors`, `taskAttempts`, `edgeTraversals`, `lastOutput`, `lastJson`, `runState`, and the resolved `pipeline` snapshot. The WebUI monitor can read this state through a session-scoped in-memory bridge and through artifact files.
 

@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { currentCastSocketId, currentCastSocketState, runStateCurrentSocketId, usageBySocket } from "../castStateAccessors.js";
-import { loopSockets, resolvedPipelineSockets } from "../loadoutAccessors.js";
+import { currentCastSocketId, currentCastSocketState, runStateCurrentSocketId, usageBySocket } from "../runtime/castStateAccessors.js";
+import { loopSockets, resolvedPipelineSockets } from "../loadout/loadoutAccessors.js";
 import type { MateriaCastState, MateriaRunState, UsageCostKind, UsageReport, UsageTotals } from "../types.js";
 
 const WIDGET_MAX_LINE_LENGTH = 78;

@@ -11,43 +11,43 @@ This audit identifies the current pi-materia-owned render paths for the compact 
   - Call sites:
     - `src/index.ts` session restore: `ctx.ui.setStatus("materia", materiaStatusLabel(state))`.
     - Runtime socket start / recast / refinement paths: `ctx.ui.setStatus("materia", materiaStatusLabel(...))`.
-    - `src/native.ts` failure/completion paths: `ctx.ui.setStatus("materia", "failed" | "done")`.
+    - `src/castRuntime.ts` failure/completion paths: `ctx.ui.setStatus("materia", "failed" | "done")`.
     - `src/index.ts` abort/start-failure paths: clears or sets `ctx.ui.setStatus("materia", undefined | "failed")`.
 
 ### Main pi-materia below-editor widget
 
-- `src/ui.ts` — `renderMateriaRunWidget(state, now?)` renders the basic three-line widget from `MateriaRunState`.
+- `src/presentation/ui.ts` — `renderMateriaRunWidget(state, now?)` renders the basic three-line widget from `MateriaRunState`.
   - Line 1: cast id, loadout, attempt, elapsed, usage.
   - Line 2: task and current materia.
   - Line 3: last message.
-- `src/ui.ts` — `renderConfiguredLoadoutWidget(loadoutName)` renders the no-active-cast/configured state.
+- `src/presentation/ui.ts` — `renderConfiguredLoadoutWidget(loadoutName)` renders the no-active-cast/configured state.
   - Line 1: `configured`, active loadout, placeholder attempt/elapsed/usage.
   - Line 2: `active loadout` and `no active cast`.
   - Line 3: readiness text.
-- `src/ui.ts` — `renderMateriaCastStatusWidget(state, now?)` renders the richer active/resumed cast state by reusing the first two lines of `renderMateriaRunWidget(state.runState)` and replacing line 3 with cast-state status.
+- `src/presentation/ui.ts` — `renderMateriaCastStatusWidget(state, now?)` renders the richer active/resumed cast state by reusing the first two lines of `renderMateriaRunWidget(state.runState)` and replacing line 3 with cast-state status.
 - Widget call sites:
-  - `src/ui.ts` `updateWidget(...)` sets widget key `materia` with `renderMateriaRunWidget(...)` and starts the ticker.
-  - `src/ui.ts` `syncConfiguredLoadoutWidget(...)` sets widget key `materia` with `renderMateriaRunWidget(...)` or `renderConfiguredLoadoutWidget(...)`.
-  - `src/ui.ts` ticker refresh sets widget key `materia` with `renderMateriaRunWidget(...)`.
+  - `src/presentation/ui.ts` `updateWidget(...)` sets widget key `materia` with `renderMateriaRunWidget(...)` and starts the ticker.
+  - `src/presentation/ui.ts` `syncConfiguredLoadoutWidget(...)` sets widget key `materia` with `renderMateriaRunWidget(...)` or `renderConfiguredLoadoutWidget(...)`.
+  - `src/presentation/ui.ts` ticker refresh sets widget key `materia` with `renderMateriaRunWidget(...)`.
   - `src/index.ts` `/materia status` sets widget key `materia` with `renderMateriaCastStatusWidget(...)`.
 
 ### Loadout below-editor widget
 
-- `src/loadouts.ts` — `renderLoadoutList(config, source)` renders a separate loadout list.
+- `src/loadout/loadouts.ts` — `renderLoadoutList(config, source)` renders a separate loadout list.
   - Lines currently include `Loadout: ...` and `Available: ...`.
 - Call sites:
   - `src/index.ts` `/materia loadout` with no argument sends the rendered list as a displayed pi-materia message.
-  - `src/activeLoadoutEvents.ts` `publishActiveLoadoutChange(...)` sets widget key `materia-loadouts` with the same rendered list, sends it as a displayed message, and appends it to history.
+  - `src/presentation/activeLoadoutEvents.ts` `publishActiveLoadoutChange(...)` sets widget key `materia-loadouts` with the same rendered list, sends it as a displayed message, and appends it to history.
 
 ### Other pi-materia below-editor widgets/messages
 
 These are separate command/summary panels rather than the permanent cast status panel, but they also construct below-editor content directly:
 
-- `src/ui.ts` `showUsageSummary(...)` sets widget key `materia-usage` with `renderCompactUsageWidget(...)`.
+- `src/presentation/ui.ts` `showUsageSummary(...)` sets widget key `materia-usage` with `renderCompactUsageWidget(...)`.
 - `src/index.ts` `/materia status`, `/materia casts`, `/materia grid`, `/materia ui`, and `/materia loadout` build or render lines and send displayed pi-materia messages.
 - `src/index.ts` `renderCastList(...)` and `renderCastSummaryLines(...)` construct cast-list panel/message lines.
-- `src/pipeline.ts` `renderGrid(...)` constructs grid panel/message lines.
-- `src/ui.ts` `clearMateriaAuxiliaryWidgets(...)` clears auxiliary widget keys: `materia-webui`, `materia-loadouts`, `materia-status`, `materia-casts`, `materia-usage`, `materia-grid`.
+- `src/runtime/pipeline.ts` `renderGrid(...)` constructs grid panel/message lines.
+- `src/presentation/ui.ts` `clearMateriaAuxiliaryWidgets(...)` clears auxiliary widget keys: `materia-webui`, `materia-loadouts`, `materia-status`, `materia-casts`, `materia-usage`, `materia-grid`.
 
 ## Field ownership and sources
 
@@ -57,7 +57,7 @@ The directory, VCS detached indicator, model/provider/thinking, cost, token tota
 
 ### pi-materia-owned fields from `MateriaRunState`
 
-Available to the basic renderer in `src/ui.ts`:
+Available to the basic renderer in `src/presentation/ui.ts`:
 
 - Cast id/name: `runId`, displayed via `shortCastId(...)`; timestamp-like ids are made prominent today.
 - Loadout: `loadoutName`.
@@ -86,8 +86,8 @@ This richer state is the appropriate source for loop-aware display and active pi
 
 ## Duplicate or low-value display currently observed
 
-- `Loadout: ...` in `src/loadouts.ts` duplicates the compact loadout already shown in the main `materia` widget (`⌘ ...`) and in the configured widget.
-- `Available: ...` in `src/loadouts.ts` is low-value as persistent panel content after a loadout change; it is more appropriate for an explicit `/materia loadout` query or WebUI/config inspection.
+- `Loadout: ...` in `src/loadout/loadouts.ts` duplicates the compact loadout already shown in the main `materia` widget (`⌘ ...`) and in the configured widget.
+- `Available: ...` in `src/loadout/loadouts.ts` is low-value as persistent panel content after a loadout change; it is more appropriate for an explicit `/materia loadout` query or WebUI/config inspection.
 - The cast id displayed by `shortCastId(runId)` is a timestamp-derived value and occupies the first/most stable field despite often being less useful than the request/current item.
 - The current materia can repeat between Pi's compact `ctx.ui.setStatus("materia", ...)` badge and the below-editor `◉ ...` field.
 - The active/current item can repeat as a status badge suffix, `◆` task field, and `›` message depending on state.
@@ -96,6 +96,6 @@ This richer state is the appropriate source for loop-aware display and active pi
 
 ## Suggested central render seam for follow-up work
 
-The practical seam is `src/ui.ts`: both `renderMateriaRunWidget(...)` and `renderMateriaCastStatusWidget(...)` already converge there, and all main `materia` widget updates route through `updateWidget(...)`, `syncConfiguredLoadoutWidget(...)`, the ticker, or `/materia status`.
+The practical seam is `src/presentation/ui.ts`: both `renderMateriaRunWidget(...)` and `renderMateriaCastStatusWidget(...)` already converge there, and all main `materia` widget updates route through `updateWidget(...)`, `syncConfiguredLoadoutWidget(...)`, the ticker, or `/materia status`.
 
-For the loadout bloat, `src/loadouts.ts` and `src/activeLoadoutEvents.ts` are the separate seam: persistent `materia-loadouts` content should be reduced or routed through the same display policy so future changes do not reintroduce redundant `Loadout:`/`Available:` lines.
+For the loadout bloat, `src/loadout/loadouts.ts` and `src/presentation/activeLoadoutEvents.ts` are the separate seam: persistent `materia-loadouts` content should be reduced or routed through the same display policy so future changes do not reintroduce redundant `Loadout:`/`Available:` lines.

@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { currentCastSocketId, currentCastSocketState } from "../castStateAccessors.js";
+import { currentCastSocketId, currentCastSocketState } from "../runtime/castStateAccessors.js";
 import type { MateriaCastState } from "../types.js";
 
 export async function renderCastList(artifactRoot: string, sessionStates: MateriaCastState[] = []): Promise<string[]> {

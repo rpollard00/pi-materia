@@ -11,15 +11,15 @@ Current JSON sockets are selected by socket/socket adapter config with `parse: "
 ### Built-in utility JSON materia
 
 - `config/default.json` materia `ensureArtifactsIgnored` / utility `project.ensureIgnored`:
-  - Shape produced by `src/utilityRegistry.ts`: `{ "ok": boolean, "root": string, "file": string, "patterns": string[], "added": string[], "unchanged": string[] }`.
+  - Shape produced by `src/utilities/utilityRegistry.ts`: `{ "ok": boolean, "root": string, "file": string, "patterns": string[], "added": string[], "unchanged": string[] }`.
   - Default adapters assign the whole object with `assign: { "artifactIgnore": "$" }`.
 - `config/default.json` materia `detectVcs` / utility `vcs.detect`:
-  - Shape produced by `src/utilityRegistry.ts`: `{ "kind": "jj" | "git" | "none", "root": string | null, "available": { "jj": boolean, "git": boolean } }`.
+  - Shape produced by `src/utilities/utilityRegistry.ts`: `{ "kind": "jj" | "git" | "none", "root": string | null, "available": { "jj": boolean, "git": boolean } }`.
   - Default adapters assign the whole object with `assign: { "vcs": "$" }`.
 - `config/default.json` materia `GitMaintain`:
   - Prompt asks for the same maintenance-control family as `Maintain`, restricted to git: `{ "satisfied": boolean, "commitMessage": string, "reason": string, "vcs": "git" | "none", "checkpointCreated": boolean, "commands": string[] }`.
   - It is not used by the bundled default loadout sockets today, but it is a JSON-producing materia definition because the prompt explicitly requires JSON and uses `satisfied` as an evaluator/route-style control field.
-- Utility command sockets in `src/native.ts` can also be JSON parsed when a socket sets `parse: "json"`; their parsed stdout is validated as a handoff object before assignment/routing.
+- Utility command sockets in `src/castRuntime.ts` can also be JSON parsed when a socket sets `parse: "json"`; their parsed stdout is validated as a handoff object before assignment/routing.
 
 ### Built-in agent JSON materia
 
@@ -37,14 +37,14 @@ Current JSON sockets are selected by socket/socket adapter config with `parse: "
 
 ## Runtime handoff consumers and adapter responsibilities
 
-- `src/json.ts` extracts a fenced JSON block or first balanced JSON object/array, then parses it.
-- `src/native.ts` parses only for sockets with `socket.socket.parse === "json"`, validates via `validateHandoffJsonOutput()`, stores `state.lastJson`, writes a `.json` artifact, applies `assign`, applies `advance`, and selects edges.
-- `src/handoffValidation.ts` currently requires a top-level JSON object, validates `satisfied` as boolean when present, and requires `satisfied` when a socket has `satisfied`/`not_satisfied` edges or `advance.when` control flow.
-- `src/native.ts` `applyAssignments()` copies values from parsed `$`, `state.*`, `item.*`, or `lastJson.*` paths into `state.data`.
-- `src/native.ts` `setCurrentItem()` is the current work-item adapter: for socket `foreach` or loop-derived iterators, it reads `loop.items`, writes `state.data.item` and the loop alias (currently usually `task`), and sets `currentItemKey` / `currentItemLabel` from item `id`/`key` and `title`/`name`.
-- Prompt templating in `src/native.ts` exposes `{{itemJson}}`, `{{item.*}}`, `{{state.*}}`, `{{lastOutput}}`, and `{{lastJson.*}}`; built-in Build/Eval/Maintain prompts currently consume `item` as a task-shaped object.
-- `src/pipeline.ts` resolves generator loops from materia `generates` metadata. It requires generator sockets to parse JSON and assign the declared output, then derives iterator defaults such as `items: "state.<output>"`.
-- `src/graphValidation.ts` validates endpoints for `entry`, `next`, `edges[].to`, `foreach.done`, `advance.done`, `loops.*.sockets`, `loops.*.consumes.from`, `loops.*.consumes.done`, `loops.*.iterator.done`, and `loops.*.exit`.
+- `src/utilities/json.ts` extracts a fenced JSON block or first balanced JSON object/array, then parses it.
+- `src/castRuntime.ts` parses only for sockets with `socket.socket.parse === "json"`, validates via `validateHandoffJsonOutput()`, stores `state.lastJson`, writes a `.json` artifact, applies `assign`, applies `advance`, and selects edges.
+- `src/handoff/handoffValidation.ts` currently requires a top-level JSON object, validates `satisfied` as boolean when present, and requires `satisfied` when a socket has `satisfied`/`not_satisfied` edges or `advance.when` control flow.
+- `src/castRuntime.ts` `applyAssignments()` copies values from parsed `$`, `state.*`, `item.*`, or `lastJson.*` paths into `state.data`.
+- `src/castRuntime.ts` `setCurrentItem()` is the current work-item adapter: for socket `foreach` or loop-derived iterators, it reads `loop.items`, writes `state.data.item` and the loop alias (currently usually `task`), and sets `currentItemKey` / `currentItemLabel` from item `id`/`key` and `title`/`name`.
+- Prompt templating in `src/castRuntime.ts` exposes `{{itemJson}}`, `{{item.*}}`, `{{state.*}}`, `{{lastOutput}}`, and `{{lastJson.*}}`; built-in Build/Eval/Maintain prompts currently consume `item` as a task-shaped object.
+- `src/runtime/pipeline.ts` resolves generator loops from materia `generates` metadata. It requires generator sockets to parse JSON and assign the declared output, then derives iterator defaults such as `items: "state.<output>"`.
+- `src/graph/graphValidation.ts` validates endpoints for `entry`, `next`, `edges[].to`, `foreach.done`, `advance.done`, `loops.*.sockets`, `loops.*.consumes.from`, `loops.*.consumes.done`, `loops.*.iterator.done`, and `loops.*.exit`.
 
 ## References to `tasks` and work-item assignment
 
@@ -57,8 +57,8 @@ Primary production references that need migration to `workItems` or generic cont
   - Maintain sockets advance over `state.tasks` with cursor `taskIndex` in both default loadouts.
   - Loop `taskIteration.consumes` uses `{ "from": "planner", "output": "tasks" }` in both default loadouts.
   - Built-in Build, Auto-Eval, and Maintain prompts call the current unit a `Task` or `task`.
-- `src/types.ts` and `src/pipeline.ts` are generic, but examples/comments and generator validation assume a generated list output; current defaults name it `tasks`.
-- `src/native.ts` state/event/usage labels still use historical names such as `currentTask`, `taskId`, and `taskIdentityKey`; these are runtime metadata names for the current iterated item.
+- `src/types.ts` and `src/runtime/pipeline.ts` are generic, but examples/comments and generator validation assume a generated list output; current defaults name it `tasks`.
+- `src/castRuntime.ts` state/event/usage labels still use historical names such as `currentTask`, `taskId`, and `taskIdentityKey`; these are runtime metadata names for the current iterated item.
 - `src/webui/client/src/App.tsx` still has production WebUI defaults/placeholders for generator setup: `generatedOutput` defaults to `tasks`, `generatedItemType` and `generatedAs` default to `task`, `generatedCursor` defaults to `taskIndex`, generated-materia submit falls back to `tasks`/`taskIndex`, and the generated-materia form placeholders include `tasks`, `state.tasks`, and `taskIndex`.
 - `src/webui/client/src/loadoutModel.ts` is another production adapter surface:
   - `MateriaBehaviorConfig.generates` carries arbitrary generated-list metadata, so current UI-created planner roles can preserve `output: "tasks"`, `itemType: "task"`, alias `task`, cursor `taskIndex`, and `items: "state.tasks"` conventions.
@@ -66,10 +66,10 @@ Primary production references that need migration to `workItems` or generic cont
   - `materiaPaletteNode()`, `extractMateriaBehavior()`, `extractSocketStructure()`, and `placeMateriaInSocket()` intentionally split behavior from socket structure: generated-list config, parse/assign/foreach behavior, and socket edges/layout/limits are copied or preserved when dragging/placing materia into sockets.
   - `makeEmptyEntryLoadout()`, `makeNewSocketId()`, `getSocketLabel()`, and `formatSocketLabel()` already implement adapter-oriented `Socket-N` creation/display, independent of materia ids.
 - `src/webui/server/index.ts` validates role-generation generator config from WebUI/API requests via `validateMateriaGeneratorConfig()`: it trims and forwards `generates.output`, `generates.items`, `generates.itemType`, `generates.as`, `generates.cursor`, and `generates.done`, and currently permits the `tasks` / `state.tasks` / `task` / `taskIndex` convention without translating it.
-- `src/roleGeneration.ts` injects generated-role metadata into generated materia prompts: `roleGenerationContext()` prints the configured output key, list type, item type, items path, item alias, cursor, and done behavior, then instructs the generated prompt to produce that list under the configured output key and item semantics. Any WebUI/API config that supplies `tasks`, `task`, `taskIndex`, or `state.tasks` is therefore propagated into new JSON-producing role prompts.
+- `src/handoff/roleGeneration.ts` injects generated-role metadata into generated materia prompts: `roleGenerationContext()` prints the configured output key, list type, item type, items path, item alias, cursor, and done behavior, then instructs the generated prompt to produce that list under the configured output key and item semantics. Any WebUI/API config that supplies `tasks`, `task`, `taskIndex`, or `state.tasks` is therefore propagated into new JSON-producing role prompts.
 - `src/types.ts` exposes runtime and usage metadata named for tasks: `UsageModelSelection.taskId`, `UsageTurn.taskId`, `UsageReport.byTask`, `UsageReport.byAttempt`, and `MateriaRunState.currentTask`.
-- `src/usage.ts` creates and updates `byTask` and `byAttempt` aggregations keyed by `taskId`, records model selections with `taskId`, and writes per-turn usage entries with `taskId` and `attempt`.
-- `src/ui.ts` renders the current item as `Task ...` via `state.currentTask` and labels usage breakdowns as `By task:` from `usage.byTask`.
+- `src/telemetry/usage.ts` creates and updates `byTask` and `byAttempt` aggregations keyed by `taskId`, records model selections with `taskId`, and writes per-turn usage entries with `taskId` and `attempt`.
+- `src/presentation/ui.ts` renders the current item as `Task ...` via `state.currentTask` and labels usage breakdowns as `By task:` from `usage.byTask`.
 - `README.md` contains impacted task-contract examples: the model config example says the planner breaks requests into implementation tasks, the graph semantics section uses `"tasks": "$.tasks"`, a custom `interactivePlan` loadout assigns `tasks`, reads `state.tasks`, uses alias `task`, cursor `taskIndex`, and final JSON shape `{ "tasks": [...] }`, and the Planning-Consult documentation says `/materia continue` parses the plan into configured `{ "tasks": [...] }` artifacts.
 - `docs/handoff-contract.md`, `docs/graph-semantics.md`, `docs/handoff-contract-audit.md`, `docs/turn-failure-audit.md`, and `docs/utility-materia.md` contain task-loop examples or notes using `tasks`, `state.tasks`, `taskIndex`, `task`, and/or `satisfied` / `feedback` / `missing` contract references.
 - `examples/graph-semantics-loadout.json` demonstrates a planner returning `{ "tasks": [...] }` and a loop consuming `tasks`.
@@ -94,9 +94,9 @@ Primary production references that need migration to `workItems` or generic cont
 
 ## References to reserved evaluator/route fields
 
-- `src/handoffContract.ts` defines `satisfied` as the only reserved control field and `always` / `satisfied` / `not_satisfied` as canonical edge conditions.
-- `src/handoffValidation.ts` reserves `satisfied`, rejects non-boolean values, requires it for satisfied-controlled routing/advancement, and warns that legacy `passed` is not canonical.
-- `src/native.ts` `evaluateEdgeCondition()` and `evaluateCondition()` route/advance from `$.satisfied` only.
+- `src/handoff/handoffContract.ts` defines `satisfied` as the only reserved control field and `always` / `satisfied` / `not_satisfied` as canonical edge conditions.
+- `src/handoff/handoffValidation.ts` reserves `satisfied`, rejects non-boolean values, requires it for satisfied-controlled routing/advancement, and warns that legacy `passed` is not canonical.
+- `src/castRuntime.ts` `evaluateEdgeCondition()` and `evaluateCondition()` route/advance from `$.satisfied` only.
 - `config/default.json` Auto-Eval and Maintain prompts and sockets consume `satisfied`; Auto-Eval consumes `feedback` and `missing`; Maintain uses `satisfied` for cursor advancement and retry routing.
 - `src/webui/client/src/App.tsx` has production routing/control references to the reserved conditions: display labels for `satisfied` and `not_satisfied`, edge-state CSS classes for those conditions, `nextCondition()` cycling through `always` -> `satisfied` -> `not_satisfied`, default edge-condition React state initialized to `satisfied`, edge-form reset back to `satisfied`, edge-condition form options for `Satisfied` and `Not Satisfied`, loop creation defaults with `exit.when: "satisfied"`, loop exit fallback defaults using `satisfied`, loop-exit condition selects, and helper/copy text explaining canonical loop exit conditions.
 - `docs/handoff-contract.md`, `docs/handoff-contract-audit.md`, `docs/graph-semantics.md`, `docs/webui-integration-notes.md`, and `docs/webui-smoke-tests.md` document or test `satisfied` / `feedback` / `missing` payloads and `satisfied` / `not_satisfied` routing.

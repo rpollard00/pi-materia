@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { saveMateriaConfigPatch } from "../src/config.js";
-import { prepareLoadoutForRuntime, prepareLoadoutForSave, normalizeLoadedLoadout } from "../src/loadoutNormalization.js";
+import { saveMateriaConfigPatch } from "../src/config/config.js";
+import { prepareLoadoutForRuntime, prepareLoadoutForSave, normalizeLoadedLoadout } from "../src/loadout/loadoutNormalization.js";
 import type { MateriaPipelineConfig, PiMateriaConfig } from "../src/types.js";
 
 const materia = {

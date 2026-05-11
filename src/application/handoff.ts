@@ -1,4 +1,4 @@
-import { canonicalGeneratorConfigFor } from "../generator.js";
+import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import {
   HANDOFF_DECISIONS_FIELD,
   HANDOFF_GUIDANCE_FIELD,
@@ -6,7 +6,7 @@ import {
   HANDOFF_SUMMARY_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
   pickHandoffEnvelopeFields,
-} from "../handoffContract.js";
+} from "../handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { isPlainObject, resolvedSocketConfig } from "./workflowTransitions.js";
 

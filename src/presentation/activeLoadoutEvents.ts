@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { LoadedConfig } from "../types.js";
-import { renderLoadoutList } from "../loadouts.js";
-import { syncConfiguredLoadoutWidget } from "../ui.js";
+import { renderLoadoutList } from "../loadout/loadouts.js";
+import { syncConfiguredLoadoutWidget } from "./ui.js";
 
 export const ACTIVE_LOADOUT_CHANGED_EVENT = "active-loadout-changed";
 export const ACTIVE_LOADOUT_CHANGED_ENTRY = "pi-materia-active-loadout-changed";

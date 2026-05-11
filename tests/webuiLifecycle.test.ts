@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
 import { launchMateriaWebUi, webUiLauncherTestInternals } from "../src/webui/launcher.js";
-import { getUserProfileConfigPath } from "../src/config.js";
+import { getUserProfileConfigPath } from "../src/config/config.js";
 import { FakePiHarness } from "./fakePi.js";
 
 const previousProfileDir = process.env.PI_MATERIA_PROFILE_DIR;

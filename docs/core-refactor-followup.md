@@ -17,7 +17,7 @@ Passing tests are useful regression evidence, but they do not prove the architec
 | Area | Prior cast artifact claimed | Current targeted evidence | Follow-up conclusion |
 | --- | --- | --- | --- |
 | Layered core | The prior summary says it completed a staged refactor into domain, application, infrastructure, schema adapters, plugin composition, and layering checks. | The layers exist, and lifecycle behavior has since moved out of the old broad runtime module into focused runtime/application/infrastructure modules. | Keep extracting behavior by ownership instead of creating broad facades. |
-| Native runtime shape | The prior summary says application services and infrastructure/plugin adapters were introduced. | `src/native.ts` is now a thin compatibility barrel; active Pi-facing lifecycle code lives behind focused runtime modules. | Preserve `src/native.ts` as a compatibility import surface only. |
+| Native runtime shape | The prior summary says application services and infrastructure/plugin adapters were introduced. | `src/castRuntime.ts` is the retained Pi-facing runtime facade; active lifecycle implementation lives behind focused runtime modules. | Import `src/castRuntime.ts` only for intentional Pi-facing runtime facade use. |
 | Cast execution split | The prior summary says application ports/use cases were added. | Cast execution use cases now depend on narrow lifecycle/context/agent/status ports instead of one broad runtime facade. | Continue keeping application ports narrow and behavior-oriented. |
 | Domain model | The prior summary says a pure materia/loadout domain model was extracted. | `src/domain` now owns pure socket/loadout/handoff/prompt intent concepts. | Keep domain deterministic and free of IO/plugin dependencies. |
 | Socket terminology | The socket-only migration supersedes older topology wording. | Config/defaults, saved loadouts, persisted runtime state, artifacts, events, usage, and WebUI DTOs now use socket terminology. | Keep sockets canonical in core and WebUI boundaries. |
@@ -34,8 +34,8 @@ Passing tests are useful regression evidence, but they do not prove the architec
 
 The planned extraction sequence has been carried through the cleanup slices:
 
-- `src/native.ts` is a tiny compatibility barrel; Pi-facing lifecycle implementation delegates prompt, handoff/routing, persistence/artifact, utility, recovery, and compaction behavior to focused modules.
+- `src/castRuntime.ts` is the retained Pi-facing runtime facade; lifecycle implementation delegates prompt, handoff/routing, persistence/artifact, utility, recovery, and compaction behavior to focused modules.
 - The temporary broad application facade was removed. Cast execution use cases depend on narrow ports.
-- Runtime/plugin composition moved to `src/pluginAdapters.ts`; infrastructure adapters no longer import native runtime code.
-- `docs/core-layering.md` and `tests/coreLayering.test.ts` document/enforce that domain stays pure, application avoids native/WebUI/infrastructure, infrastructure avoids native/WebUI/plugin composition, and `src/native.ts` remains thin.
+- Runtime/plugin composition moved to `src/runtime/pluginAdapters.ts`; infrastructure adapters no longer import native runtime code.
+- `docs/core-layering.md` and `tests/coreLayering.test.ts` document/enforce that domain stays pure, application avoids native/WebUI/infrastructure, infrastructure avoids native/WebUI/plugin composition, and `src/castRuntime.ts` remains thin.
 - Canonical runtime/persistence terminology is socket-based: `currentSocketId`, `currentSocketState`, `socketState`, `bySocket`, `socket_*` events/artifacts, and `sockets/` artifact paths.

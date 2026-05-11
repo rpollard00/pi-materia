@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeLoadoutGraph } from '../../../loadoutGraphAnalysis.js';
+import { analyzeLoadoutGraph } from '../../../graph/loadoutGraphAnalysis.js';
 import { fromWebUiLoadoutDto } from '../../loadoutDto.js';
 import type { PipelineConfig } from './loadoutModel.js';
 import {

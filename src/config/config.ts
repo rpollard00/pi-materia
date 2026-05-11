@@ -3,10 +3,10 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateCompactionConfig } from "../compaction.js";
-import { assertValidPipelineGraph, normalizePipelineGraph } from "../graphValidation.js";
-import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadoutNormalization.js";
-import { loadoutSockets } from "../loadoutAccessors.js";
+import { validateCompactionConfig } from "./compactionConfig.js";
+import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
+import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
+import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { normalizePersistedConfigForApplication } from "../schema/persistence.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "../types.js";
 

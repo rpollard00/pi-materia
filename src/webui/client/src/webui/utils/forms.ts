@@ -1,4 +1,4 @@
-import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from '../../../../../generator.js';
+import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from '../../../../../graph/generator.js';
 import { materiaColorChoices, type MateriaConfig, type PipelineSocket, type SocketLayout } from '../../loadoutModel.js';
 import type { DragPayload, GeneratedListOutputConfig, MateriaFormState, SocketPropertyFormState } from '../types.js';
 

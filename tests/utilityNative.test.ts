@@ -9,7 +9,7 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
   createHandoffEnvelope,
   stringifyDeterministicHandoffOutput,
-} from "../src/handoffContract.js";
+} from "../src/handoff/handoffContract.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {

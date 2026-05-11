@@ -1,8 +1,8 @@
-import { resolveArtifactRoot } from "../config.js";
-import { assertValidPipelineGraph } from "../graphValidation.js";
-import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../generator.js";
-import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, loopSockets, resolvedPipelineSockets } from "../loadoutAccessors.js";
-import { prepareLoadoutForRuntime } from "../loadoutNormalization.js";
+import { resolveArtifactRoot } from "../config/config.js";
+import { assertValidPipelineGraph } from "../graph/graphValidation.js";
+import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../graph/generator.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, loopSockets } from "../loadout/loadoutAccessors.js";
+import { prepareLoadoutForRuntime } from "../loadout/loadoutNormalization.js";
 import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline } from "../types.js";
 
 export interface EffectiveMateriaPipelineConfig {
@@ -380,17 +380,7 @@ function generatorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConf
   return generator;
 }
 
-export function loopIteratorForSocket(pipeline: Pick<MateriaPipelineConfig, "sockets" | "loops"> | Pick<ResolvedMateriaPipeline, "sockets" | "loops">, socketId: string): MateriaForeachConfig | undefined {
-  const resolved = resolvedPipelineSockets(pipeline as Partial<Pick<ResolvedMateriaPipeline, "sockets">>);
-  const entry = resolved[socketId] as ResolvedMateriaSocket | undefined;
-  const socket = entry?.socket ?? getLoadoutSocket(pipeline as Pick<MateriaPipelineConfig, "sockets">, socketId);
-  const direct = socket?.foreach;
-  if (direct) return direct;
-  for (const loop of Object.values(pipeline.loops ?? {})) {
-    if (loop.iterator && loopSockets(loop).includes(socketId)) return loop.iterator;
-  }
-  return undefined;
-}
+export { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 
 function formatForeach(loop: MateriaForeachConfig): string {
   return `${loop.items}${loop.as ? ` as ${loop.as}` : ""}${loop.done ? ` done ${loop.done}` : ""}`;

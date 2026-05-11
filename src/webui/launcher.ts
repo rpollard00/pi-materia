@@ -7,9 +7,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
-import { clearStaleDefaultLoadoutPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch } from "../config.js";
-import { publishActiveLoadoutChange } from "../activeLoadoutEvents.js";
-import { generateMateriaRolePrompt } from "../roleGeneration.js";
+import { clearStaleDefaultLoadoutPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch } from "../config/config.js";
+import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
+import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
 
 export interface MateriaWebUiLaunchResult {
   url: string;

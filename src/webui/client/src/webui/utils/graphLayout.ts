@@ -1,6 +1,6 @@
-import { canonicalGeneratorConfigFor } from '../../../../../generator.js';
-import { edgeConditionState } from '../../../../../graphValidation.js';
-import { analyzeLoadoutGraph } from '../../../../../loadoutGraphAnalysis.js';
+import { canonicalGeneratorConfigFor } from '../../../../../graph/generator.js';
+import { edgeConditionState } from '../../../../../graph/graphValidation.js';
+import { analyzeLoadoutGraph } from '../../../../../graph/loadoutGraphAnalysis.js';
 import { fromWebUiLoadoutDto } from '../../../../loadoutDto.js';
 import type { MateriaEdgeCondition } from '../../../../../types.js';
 import {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateHandoffJsonOutput } from "../src/handoffValidation.js";
+import { validateHandoffJsonOutput } from "../src/handoff/handoffValidation.js";
 import type { MateriaPipelineSocketConfig } from "../src/types.js";
 
 function socket(overrides: Partial<MateriaPipelineSocketConfig> = {}): MateriaPipelineSocketConfig {

@@ -1,8 +1,8 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "../config.js";
-import { renderLoadoutList } from "../loadouts.js";
+import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "../config/config.js";
+import { renderLoadoutList } from "../loadout/loadouts.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState } from "./castStateRepository.js";
-import { renderGrid, resolvePipeline } from "../pipeline.js";
+import { renderGrid, resolvePipeline } from "../runtime/pipeline.js";
 import type { ArtifactCatalog, CastStateRepository, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
 import { renderCastList } from "./castCatalog.js";
 

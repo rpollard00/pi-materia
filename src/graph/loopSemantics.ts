@@ -1,6 +1,6 @@
-import { canonicalGeneratorConfigFor } from "../generator.js";
-import { getLoadoutSocket } from "../loadoutAccessors.js";
-import { reconcileLoadoutLoopConsumersFromGraphInPlace } from "../loadoutGraphAnalysis.js";
+import { canonicalGeneratorConfigFor } from "./generator.js";
+import { getLoadoutSocket } from "../loadout/loadoutAccessors.js";
+import { reconcileLoadoutLoopConsumersFromGraphInPlace } from "./loadoutGraphAnalysis.js";
 import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, PiMateriaConfig } from "../types.js";
 
 const JSON_CONTROL_CONDITIONS = new Set<MateriaEdgeCondition>(["satisfied", "not_satisfied"]);

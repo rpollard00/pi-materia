@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
-import { loadActiveCastState, listLatestCastStates } from "../src/native.js";
+import { loadActiveCastState, listLatestCastStates } from "../src/castRuntime.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeCoreHarness(config: unknown): Promise<FakePiHarness> {

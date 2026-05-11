@@ -7,8 +7,8 @@ The core refactor uses dependency inversion around materia/loadout behavior. Soc
 - **Domain (`src/domain`)**: pure materia/loadout concepts and invariants: materia definitions, loadouts, sockets, handoff/work-item shape, routing outcomes, prompt intent, and validation helpers. Domain modules must not import Pi plugin APIs, WebUI code, filesystem/process/network modules, provider/runtime modules, persistence implementations, or package dependencies.
 - **Application (`src/application`)**: workflow use cases plus narrow ports (`ConfigRepository`, `PipelinePresenter`, `CastStateRepository`, `ArtifactCatalog`, `CastContextPort`, `CastAgentTurnPort`, `CastLifecyclePort`, `CastStatusPort`, `EnvironmentLookup`, and optional `Logger`). Application code depends on domain/core DTOs and these ports, not concrete adapters, native runtime, WebUI, or Node builtins.
 - **Infrastructure (`src/infrastructure`)**: concrete IO adapters for config/session persistence, artifact/cast-list filesystem access, usage/event IO, utility process execution, process environment lookup, and console-backed logging. Infrastructure may import application port types, but must not import WebUI, plugin composition, or the native cast runtime.
-- **Native runtime (`src/castRuntime.ts`)**: Pi-facing cast lifecycle edge code. It wires the already-extracted application/domain/infrastructure workflows to Pi transport and session APIs. `src/native.ts` is only a compatibility barrel for older module imports.
-- **Plugin composition (`src/index.ts`, `src/pluginAdapters.ts`)**: the Pi extension entrypoint and adapter wiring. It registers flags/events/commands, creates infrastructure/runtime adapters, constructs application use cases, and translates Pi UI/command events to use-case calls.
+- **Native runtime (`src/castRuntime.ts`)**: Pi-facing cast lifecycle facade. It wires the already-extracted application/domain/infrastructure workflows to Pi transport and session APIs while the focused implementation lives under `src/runtime`.
+- **Plugin composition (`src/index.ts`, `src/runtime/pluginAdapters.ts`)**: the Pi extension entrypoint and adapter wiring. It registers flags/events/commands, creates infrastructure/runtime adapters, constructs application use cases, and translates Pi UI/command events to use-case calls.
 - **Schema (`src/schema`, `src/loadout`, `src/graph`)**: adapters for saved JSON shape/version handling, graph normalization, and validation. New core code uses canonical socket terminology.
 
 Dependency direction should remain:
@@ -30,9 +30,9 @@ Schema handling is an edge concern: external JSON loadouts must use `sockets` an
 - Put deterministic invariants, parsers, and state-transition helpers in `src/domain`.
 - Put user-facing workflows and orchestration in `src/application`, depending on explicit ports for IO/runtime work.
 - Put filesystem, environment, process execution, artifact/event/session persistence, and usage IO in `src/infrastructure`.
-- Put Pi transport/session lifecycle glue in `src/castRuntime.ts`, and keep `src/native.ts` as a tiny compatibility barrel only while imports migrate.
+- Put Pi transport/session lifecycle facade exports in `src/castRuntime.ts` and focused implementation modules under `src/runtime`.
 - Put saved JSON shape/version/migration handling in `src/schema` and WebUI loadout shape conversion in `src/webui/loadoutDto.ts`.
-- Put Pi command/event registration and adapter wiring in `src/index.ts`/`src/pluginAdapters.ts`.
+- Put Pi command/event registration and adapter wiring in `src/index.ts`/`src/runtime/pluginAdapters.ts`.
 
 ## Lightweight layering check
 
@@ -42,7 +42,7 @@ Schema handling is an edge concern: external JSON loadouts must use `sockets` an
 - application imports infrastructure, native runtime, WebUI, plugin composition, or Node builtins;
 - infrastructure imports WebUI, native runtime, or plugin composition;
 - schema imports application, infrastructure, WebUI, or plugin composition;
-- `src/native.ts` stops being a thin compatibility module.
+- root compatibility shims are reintroduced instead of importing focused nested modules.
 
 Run it with the normal suite (`npm test`).
 

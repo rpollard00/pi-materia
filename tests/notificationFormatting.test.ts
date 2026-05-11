@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import piMateria from "../src/index.js";
-import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../src/notificationFormatting.js";
+import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../src/presentation/notificationFormatting.js";
 import { FakePiHarness } from "./fakePi.js";
 
 describe("materia cast notification formatting", () => {

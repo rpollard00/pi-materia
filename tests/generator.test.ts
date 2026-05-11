@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../src/generator.js";
+import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../src/graph/generator.js";
 
 import type { MateriaConfig } from "../src/types.js";
 

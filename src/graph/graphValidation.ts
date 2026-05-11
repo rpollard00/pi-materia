@@ -1,6 +1,6 @@
-import { HANDOFF_EDGE_CONDITIONS } from "../handoffContract.js";
-import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "../loadoutAccessors.js";
-import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "../socketIds.js";
+import { HANDOFF_EDGE_CONDITIONS } from "../handoff/handoffContract.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "../loadout/loadoutAccessors.js";
+import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "../domain/socket.js";
 import type { LegacyMateriaPipelineSocketConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "../types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;

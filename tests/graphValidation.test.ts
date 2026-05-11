@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { edgeConditionState, edgeGuard, formatGraphValidationErrors, normalizePipelineGraph, stageValidatedPipelineGraphChange, validatePipelineGraph } from "../src/graphValidation.js";
-import { assertCanonicalSocketId, isCanonicalSocketId, parseCanonicalSocketId } from "../src/socketIds.js";
+import { edgeConditionState, edgeGuard, formatGraphValidationErrors, normalizePipelineGraph, stageValidatedPipelineGraphChange, validatePipelineGraph } from "../src/graph/graphValidation.js";
+import { assertCanonicalSocketId, isCanonicalSocketId, parseCanonicalSocketId } from "../src/domain/socket.js";
 import type { MateriaPipelineConfig } from "../src/types.js";
 
 const validGraph = (): MateriaPipelineConfig => ({

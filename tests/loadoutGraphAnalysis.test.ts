@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { analyzeLoadoutGraph } from "../src/loadoutGraphAnalysis.js";
-import { normalizeLoadedLoadout, prepareLoadoutForSave } from "../src/loadoutNormalization.js";
+import { analyzeLoadoutGraph } from "../src/graph/loadoutGraphAnalysis.js";
+import { normalizeLoadedLoadout, prepareLoadoutForSave } from "../src/loadout/loadoutNormalization.js";
 import type { MateriaPipelineConfig, PiMateriaConfig } from "../src/types.js";
 
 const materia = {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { activeMateriaSystemPrompt, nativeTestInternals } from "../src/native.js";
+import { activeMateriaSystemPrompt, nativeTestInternals } from "../src/castRuntime.js";
 import { applyGenericHandoffEnvelope } from "../src/application/handoff.js";
 import { applyAdvance, applyAssignments, evaluateCondition, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../src/application/workflowTransitions.js";
-import { resolvePipeline } from "../src/pipeline.js";
+import { resolvePipeline } from "../src/runtime/pipeline.js";
 import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket } from "../src/types.js";
 
 function makeState(overrides: Partial<MateriaCastState> = {}): MateriaCastState {

@@ -1,10 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
-import { safeTimestamp } from "../artifacts.js";
-import { resolveArtifactRoot } from "../config.js";
-import { getEffectivePipelineConfig, loopIteratorForSocket } from "../pipeline.js";
-import { getResolvedPipelineSocket } from "../loadoutAccessors.js";
-import { parseJson } from "../json.js";
+import { safeTimestamp } from "../utilities/artifacts.js";
+import { resolveArtifactRoot } from "../config/config.js";
+import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
+import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
+import { parseJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
@@ -15,13 +15,13 @@ import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js
 import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
 import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
-import { validateHandoffJsonOutput } from "../handoffValidation.js";
-import { applyMateriaModelSettings } from "../modelSettings.js";
-import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../notificationFormatting.js";
+import { validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
+import { applyMateriaModelSettings } from "../config/modelSettings.js";
+import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
 import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline } from "../types.js";
-import { formatUsage, showUsageSummary, updateWidget } from "../ui.js";
-import { createRunState, recordUsageModelSelection } from "../usage.js";
-import { executeBuiltInUtility, hasBuiltInUtility } from "../utilityRegistry.js";
+import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
+import { createRunState, recordUsageModelSelection } from "../telemetry/usage.js";
+import { executeBuiltInUtility, hasBuiltInUtility } from "../utilities/utilityRegistry.js";
 import { appendEvent, appendManifest, initializeRun, recordSocketParsedJson, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel } from "../infrastructure/castArtifacts.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
@@ -35,7 +35,7 @@ export { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 
 
 const DEFAULT_MAX_SOCKET_VISITS = 25;
-export { defaultProactiveCompactionThresholdPercent } from "../compaction.js";
+export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
   const config = loaded.config;

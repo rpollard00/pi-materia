@@ -4,11 +4,11 @@ This note audits how loadouts, loops, cursor consumption, parsing, advancement, 
 
 ## Authoritative load/save/normalize paths
 
-- Runtime and CLI load config through `src/config.ts#loadConfig`. Config layers are merged in this order: bundled `config/default.json`, user profile asset, project config, then explicit config. `mergeLoadouts()` and `normalizeLoadouts()` call `normalizePipelineGraph()`.
+- Runtime and CLI load config through `src/config/config.ts#loadConfig`. Config layers are merged in this order: bundled `config/default.json`, user profile asset, project config, then explicit config. `mergeLoadouts()` and `normalizeLoadouts()` call `normalizePipelineGraph()`.
 - UI config GET/POST is wired in `src/webui/server/index.ts` and launched from `src/webui/launcher.ts`; GET uses `loadConfig()`, POST uses `saveMateriaConfigPatch()`.
 - UI save (`src/webui/client/src/App.tsx#saveDraft`) posts `normalizeMateriaConfigEdges(draftConfig)` to `/api/config`.
-- Shared graph normalization lives in `src/graphValidation.ts#normalizePipelineGraph`. It only normalizes legacy `next` and edge condition aliases into canonical `edges`; it does not materialize `loops.exit` or `loops.consumes` into socket `advance`/routing.
-- Runtime resolution is in `src/pipeline.ts#resolvePipeline`: it normalizes the active loadout, migrates legacy loop iterator metadata to `consumes` when possible, normalizes generator sockets, validates graph structure, resolves sockets, validates generator contracts, and derives loop iterator metadata with `resolveLoopIterators()`.
+- Shared graph normalization lives in `src/graph/graphValidation.ts#normalizePipelineGraph`. It only normalizes legacy `next` and edge condition aliases into canonical `edges`; it does not materialize `loops.exit` or `loops.consumes` into socket `advance`/routing.
+- Runtime resolution is in `src/runtime/pipeline.ts#resolvePipeline`: it normalizes the active loadout, migrates legacy loop iterator metadata to `consumes` when possible, normalizes generator sockets, validates graph structure, resolves sockets, validates generator contracts, and derives loop iterator metadata with `resolveLoopIterators()`.
 
 ## Current execution order
 
@@ -19,7 +19,7 @@ When a socket starts (`startSocket`):
 3. If an iterator exists but no item is available, runtime routes to `loop.done ?? "end"` with no agent call.
 4. The socket visit/edge limits are enforced and the agent/utility socket runs.
 
-When a socket completes (`src/native.ts#completeSocket`):
+When a socket completes (`src/castRuntime.ts#completeSocket`):
 
 1. The raw output is recorded and `state.lastOutput` is set.
 2. If `socket.parse === "json"`, the output is parsed, handoff JSON is validated by `validateHandoffJsonOutput()`, `state.lastJson` is set, and a JSON artifact is written. If parse is omitted or `"text"`, `parsed` remains raw text.
@@ -43,9 +43,9 @@ Loop types are declared in `src/types.ts`:
 
 Current runtime use of loop metadata is limited to iterator derivation and item setup:
 
-- `src/pipeline.ts#resolveLoopIterators` derives `loop.iterator` from `loop.consumes` plus generator metadata.
-- `src/pipeline.ts#loopIteratorForSocket` returns that iterator for any member socket.
-- `src/native.ts#setCurrentItem` uses the iterator to expose the current item.
+- `src/runtime/pipeline.ts#resolveLoopIterators` derives `loop.iterator` from `loop.consumes` plus generator metadata.
+- `src/runtime/pipeline.ts#loopIteratorForSocket` returns that iterator for any member socket.
+- `src/castRuntime.ts#setCurrentItem` uses the iterator to expose the current item.
 
 There is no runtime lookup of `loop.exit` in `completeSocket()`, `applyAdvance()`, `selectNextTarget()`, or `advanceToSocket()`. `loop.exit` is currently validated and rendered, but not executable routing.
 
@@ -72,7 +72,7 @@ Thus a UI-authored Build → Maintain loop can save `loops.exit` and `loops.cons
 
 ## Validation coverage and gap
 
-`src/graphValidation.ts` validates:
+`src/graph/graphValidation.ts` validates:
 
 - Socket ids and target existence for entries, edges, `foreach.done`, `advance.done`, `loops.consumes.done`, `loops.iterator.done`, and `loops.exit.to`.
 - Canonical edge conditions on socket edges and `loops.exit.when`.

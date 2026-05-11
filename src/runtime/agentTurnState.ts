@@ -1,6 +1,6 @@
 import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { MateriaAgentConfig, MateriaCastState } from "../types.js";
-import { addUsage, extractMessageModelInfo, extractUsage } from "../usage.js";
+import { addUsage, extractMessageModelInfo, extractUsage } from "../telemetry/usage.js";
 import { currentSocketId, currentTaskAttempt } from "./sessionState.js";
 
 export function findLatestAssistantEntry(entries: SessionEntry[], afterId?: string): { entry: SessionEntry; message: unknown } | undefined {

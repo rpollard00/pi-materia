@@ -1,4 +1,4 @@
-import type { AppliedMateriaModelSettings } from "../modelSettings.js";
+import type { AppliedMateriaModelSettings } from "../config/modelSettings.js";
 import type { MateriaModelSelection } from "../types.js";
 
 export function materiaModelSelection(applied: AppliedMateriaModelSettings): MateriaModelSelection {

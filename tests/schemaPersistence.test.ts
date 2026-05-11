@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { loadConfig, saveMateriaConfigPatch } from "../src/config.js";
+import { loadConfig, saveMateriaConfigPatch } from "../src/config/config.js";
 import {
   domainLoadoutToPipelineConfig,
   normalizePersistedLoadoutForApplication,

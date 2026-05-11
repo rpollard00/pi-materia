@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { resolveProactiveCompactionThreshold } from "../compaction.js";
+import { resolveProactiveCompactionThreshold } from "../config/compactionConfig.js";
 import type { MateriaCastState, PiMateriaConfig } from "../types.js";
 import { errorMessage, recoveryDiagnosticLabel, recoveryTurnMode } from "./recoveryPolicy.js";
 

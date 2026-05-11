@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clearWidgetTicker, formatCostLabel, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/ui.js";
+import { clearWidgetTicker, formatCostLabel, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 
 function totals(tokens: number, cost: number): UsageTotals {

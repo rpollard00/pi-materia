@@ -1,6 +1,6 @@
 # Materia agent turn lifecycle and failure-surface audit
 
-This audit traces the current Pi-native Materia execution paths in `src/native.ts`/`src/index.ts` for long-turn compaction recovery work.
+This audit traces the current Pi-native Materia execution paths in `src/castRuntime.ts`/`src/index.ts` for long-turn compaction recovery work.
 
 ## Lifecycle paths
 

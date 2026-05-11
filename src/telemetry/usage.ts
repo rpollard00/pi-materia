@@ -1,5 +1,5 @@
 import path from "node:path";
-import { usageBySocket } from "../castStateAccessors.js";
+import { usageBySocket } from "../runtime/castStateAccessors.js";
 import type { MateriaRunState, MateriaModelSelection, UsageCostKind, UsageReport, UsageTotals } from "../types.js";
 
 export function createRunState(runId: string, runDir: string, model: unknown, loadoutName?: string): MateriaRunState {

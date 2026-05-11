@@ -1,10 +1,10 @@
-import { canonicalGeneratorConfigFor } from "../generator.js";
+import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import {
   HANDOFF_CONTRACT_DOC_TEXT,
   HANDOFF_RESERVED_EVALUATOR_FIELDS,
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
-} from "../handoffContract.js";
+} from "../handoff/handoffContract.js";
 import type { MateriaAgentConfig, MateriaCastState, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { currentItem, getPath } from "./workflowTransitions.js";
 

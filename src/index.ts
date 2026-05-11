@@ -1,12 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type CastStateRepository } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
-import { currentCastSocketId } from "./castStateAccessors.js";
-import { publishActiveLoadoutChange } from "./activeLoadoutEvents.js";
-import { registerMateriaRenderer } from "./renderer.js";
+import { currentCastSocketId } from "./runtime/castStateAccessors.js";
+import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
+import { registerMateriaRenderer } from "./presentation/renderer.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
-import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./ui.js";
-import { createMateriaPluginAdapters } from "./pluginAdapters.js";
+import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./presentation/ui.js";
+import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 export { renderCastList } from "./infrastructure/index.js";
 
 export default function piMateria(pi: ExtensionAPI) {

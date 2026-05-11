@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Box, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { getMarkdownTheme } from "@mariozechner/pi-coding-agent";
-import { formatMateriaNotificationDisplay } from "../notificationFormatting.js";
+import { formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 
 interface MateriaMessageDetails {
   prefix?: string;

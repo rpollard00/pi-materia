@@ -1,8 +1,8 @@
-import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "../generator.js";
-import { normalizePipelineGraph } from "../graphValidation.js";
-import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, materializeCanonicalSockets } from "../loadoutAccessors.js";
-import { analyzeLoadoutGraph, type LoadoutGraphAnalysis } from "../loadoutGraphAnalysis.js";
-import { materializeLoadoutLoopSemantics } from "../loopSemantics.js";
+import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "../graph/generator.js";
+import { normalizePipelineGraph } from "../graph/graphValidation.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, materializeCanonicalSockets } from "./loadoutAccessors.js";
+import { analyzeLoadoutGraph, type LoadoutGraphAnalysis } from "../graph/loadoutGraphAnalysis.js";
+import { materializeLoadoutLoopSemantics } from "../graph/loopSemantics.js";
 import type { MateriaConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaSocketLayoutConfig, PiMateriaConfig } from "../types.js";
 
 export interface NormalizedLoadoutResult<TLoadout extends MateriaPipelineConfig = MateriaPipelineConfig> {

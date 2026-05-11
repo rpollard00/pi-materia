@@ -1,7 +1,7 @@
-import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../loadoutGraphAnalysis.js';
-import { normalizeLoadedLoadout } from '../../../loadoutNormalization.js';
-import { materializeLoadoutLoopSemantics } from '../../../loopSemantics.js';
-import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../socketIds.js';
+import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../graph/loadoutGraphAnalysis.js';
+import { normalizeLoadedLoadout } from '../../../loadout/loadoutNormalization.js';
+import { materializeLoadoutLoopSemantics } from '../../../graph/loopSemantics.js';
+import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../domain/socket.js';
 import { fromWebUiLoadoutDto, toWebUiConfigDto, toWebUiLoadoutDto } from '../../loadoutDto.js';
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 

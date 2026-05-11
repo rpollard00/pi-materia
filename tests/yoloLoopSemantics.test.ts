@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
-import { resolvePipeline } from "../src/pipeline.js";
+import { resolvePipeline } from "../src/runtime/pipeline.js";
 import type { PiMateriaConfig } from "../src/types.js";
 import { normalizeMateriaConfigEdges } from "../src/webui/client/src/loadoutModel.js";
 import { FakePiHarness } from "./fakePi.js";

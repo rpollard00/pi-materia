@@ -1,5 +1,5 @@
-import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "../generator.js";
-import { getLoadoutSocket, loadoutSocketEntries, loadoutSockets, loopSocketSet } from "../loadoutAccessors.js";
+import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "./generator.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSockets, loopSocketSet } from "../loadout/loadoutAccessors.js";
 import type { MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopConsumerConfig, MateriaPipelineConfig } from "../types.js";
 
 export type LoadoutGraphDiagnosticCode =

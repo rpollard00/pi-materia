@@ -2,9 +2,9 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config.js";
-import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoffContract.js";
-import { getEffectivePipelineConfig, resolvePipeline } from "../src/pipeline.js";
+import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config/config.js";
+import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
+import { getEffectivePipelineConfig, resolvePipeline } from "../src/runtime/pipeline.js";
 import { paletteColors } from "../src/webui/client/src/loadoutModel.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {

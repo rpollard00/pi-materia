@@ -46,7 +46,7 @@ Registered command: `/materia` with subcommands:
 
 ### Cast lifecycle and runtime orchestration
 
-`src/native.ts` is the current core runtime/god module. It coordinates Pi APIs, filesystem artifacts, prompt assembly, schema validation, routing, usage, widgets, recovery, and utility execution.
+`src/castRuntime.ts` is the current core runtime/god module. It coordinates Pi APIs, filesystem artifacts, prompt assembly, schema validation, routing, usage, widgets, recovery, and utility execution.
 
 Primary lifecycle:
 
@@ -65,7 +65,7 @@ Primary lifecycle:
 
 Config persistence/loading:
 
-- `src/config.ts` loads layered config from bundled `config/default.json`, user profile asset (`~/.config/pi/pi-materia/materia.json` or `PI_MATERIA_PROFILE_DIR`), project config (`.pi/pi-materia.json`), and optional explicit path from flag/env.
+- `src/config/config.ts` loads layered config from bundled `config/default.json`, user profile asset (`~/.config/pi/pi-materia/materia.json` or `PI_MATERIA_PROFILE_DIR`), project config (`.pi/pi-materia.json`), and optional explicit path from flag/env.
 - `saveMateriaConfigPatch` writes JSON patches to user/project/explicit targets.
 - `saveActiveLoadout` writes minimal `activeLoadout` to project or explicit config.
 - Load/save paths normalize loadouts and validate graph semantics before runtime.
@@ -84,7 +84,7 @@ Cast/session persistence:
 
 ### Prompt and handoff paths
 
-- Handoff contract source is `src/handoffContract.ts`; validation is in `src/handoffValidation.ts`.
+- Handoff contract source is `src/handoff/handoffContract.ts`; validation is in `src/handoff/handoffValidation.ts`.
 - Prompt assembly currently lives in `native.ts` (`buildSocketPrompt`, `buildMultiTurnFinalizationPrompt`, `activeMateriaSystemPrompt`, `buildSyntheticCastContext`, `materiaPrompt`, template rendering).
 - JSON sockets receive the canonical handoff contract final instruction; multi-turn JSON sockets receive it only on `/materia continue` finalization.
 - Text/build sockets receive adapter context containing current work item and global guidance.
@@ -153,7 +153,7 @@ Concrete IO/runtime implementations:
 Thin composition/orchestration shell:
 
 - `src/index.ts`: register flags/hooks/commands, parse command args, call application services, translate results to Pi UI/messages.
-- `src/renderer.ts`: Pi custom renderer registration.
+- `src/presentation/renderer.ts`: Pi custom renderer registration.
 - WebUI launch command wiring in `index.ts` should remain at plugin edge.
 
 ### Compatibility/schema candidates

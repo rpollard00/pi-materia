@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
-import { loopIteratorForSocket, renderGrid, resolvePipeline } from "../src/pipeline.js";
+import { loopIteratorForSocket, renderGrid, resolvePipeline } from "../src/runtime/pipeline.js";
 import type { PiMateriaConfig } from "../src/types.js";
 
 const baseLoadout = {
