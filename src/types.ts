@@ -362,10 +362,8 @@ export type MateriaParseMode = "text" | "json";
 
 export type MateriaSocketKind = "entry" | "normal";
 export type MateriaPipelineSocketConfig = MateriaAgentSocketConfig | MateriaUtilitySocketConfig;
-/** @deprecated Persisted/WebUI DTO alias. New internal APIs should use MateriaPipelineSocketConfig. */
-export type MateriaPipelineNodeConfig = MateriaPipelineSocketConfig;
-/** @deprecated Legacy migration-only shape for old next-based graph edges. */
-export type LegacyMateriaPipelineNodeConfig = MateriaPipelineSocketConfig & { next?: string };
+/** Legacy migration-only shape for old next-based graph edges. */
+export type LegacyMateriaPipelineSocketConfig = MateriaPipelineSocketConfig & { next?: string };
 
 export interface MateriaPipelineSocketCommonConfig {
   socketKind?: MateriaSocketKind;
@@ -385,9 +383,6 @@ export interface MateriaAgentSocketConfig extends MateriaPipelineSocketCommonCon
   materia: string;
 }
 
-/** @deprecated Use MateriaAgentSocketConfig for internal code. */
-export type MateriaAgentNodeConfig = MateriaAgentSocketConfig;
-
 export interface MateriaUtilitySocketConfig extends MateriaPipelineSocketCommonConfig {
   type: "utility";
   utility?: string;
@@ -395,9 +390,6 @@ export interface MateriaUtilitySocketConfig extends MateriaPipelineSocketCommonC
   params?: Record<string, unknown>;
   timeoutMs?: number;
 }
-
-/** @deprecated Use MateriaUtilitySocketConfig for internal code. */
-export type MateriaUtilityNodeConfig = MateriaUtilitySocketConfig;
 
 export type MateriaEdgeCondition = "always" | "satisfied" | "not_satisfied";
 
@@ -498,9 +490,6 @@ export interface MateriaSocketLimitsConfig {
   maxOutputBytes?: number;
 }
 
-/** @deprecated Use MateriaSocketLimitsConfig for internal code. */
-export type MateriaNodeLimitsConfig = MateriaSocketLimitsConfig;
-
 export interface ResolvedMateriaPipeline {
   entry: ResolvedMateriaSocket;
   sockets: Record<string, ResolvedMateriaSocket>;
@@ -508,8 +497,6 @@ export interface ResolvedMateriaPipeline {
 }
 
 export type ResolvedMateriaSocket = ResolvedMateriaAgentSocket | ResolvedMateriaUtilitySocket;
-/** @deprecated Use ResolvedMateriaSocket for internal code. */
-export type ResolvedMateriaNode = ResolvedMateriaSocket;
 
 export interface ResolvedMateriaAgentSocket {
   id: string;
@@ -517,16 +504,10 @@ export interface ResolvedMateriaAgentSocket {
   materia: MateriaAgentConfig;
 }
 
-/** @deprecated Use ResolvedMateriaAgentSocket for internal code. */
-export type ResolvedMateriaAgentNode = ResolvedMateriaAgentSocket;
-
 export interface ResolvedMateriaUtilitySocket {
   id: string;
   socket: MateriaUtilitySocketConfig;
 }
-
-/** @deprecated Use ResolvedMateriaUtilitySocket for internal code. */
-export type ResolvedMateriaUtilityNode = ResolvedMateriaUtilitySocket;
 
 export type MateriaConfig = MateriaAgentConfig | MateriaUtilityConfig;
 

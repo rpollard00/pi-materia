@@ -392,10 +392,6 @@ export function loopIteratorForSocket(pipeline: Pick<MateriaPipelineConfig, "soc
   return undefined;
 }
 
-/** @deprecated Compatibility alias for older imports; use loopIteratorForSocket. */
-/** @deprecated Use loopIteratorForSocket; retained for external compatibility imports only. */
-export const loopIteratorForNode = loopIteratorForSocket;
-
 function formatForeach(loop: MateriaForeachConfig): string {
   return `${loop.items}${loop.as ? ` as ${loop.as}` : ""}${loop.done ? ` done ${loop.done}` : ""}`;
 }

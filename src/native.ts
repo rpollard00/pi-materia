@@ -956,9 +956,6 @@ export function extendSameSocketRecoveryAllowanceForRevive(state: MateriaCastSta
   return { key: exhaustion.key, priorEffectiveMaxAttempts, increment, newEffectiveMaxAttempts: allowance.effectiveMaxAttempts, reviveCount: allowance.reviveCount };
 }
 
-/** @deprecated Compatibility export for existing tests/integrations; use same-socket terminology internally. */
-export const extendSameNodeRecoveryAllowanceForRevive = extendSameSocketRecoveryAllowanceForRevive;
-
 function recoveryDiagnosticLabel(state: MateriaCastState): string {
   const item = state.currentItemKey ? ` item ${JSON.stringify(state.currentItemKey)}` : "";
   return `${recoveryTurnMode(state)} turn for socket "${currentSocketId(state) ?? state.phase}"${item}`;

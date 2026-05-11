@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { validateHandoffJsonOutput } from "../src/handoffValidation.js";
-import type { MateriaPipelineNodeConfig } from "../src/types.js";
+import type { MateriaPipelineSocketConfig } from "../src/types.js";
 
-function node(overrides: Partial<MateriaPipelineNodeConfig> = {}): MateriaPipelineNodeConfig {
+function node(overrides: Partial<MateriaPipelineSocketConfig> = {}): MateriaPipelineSocketConfig {
   return { type: "utility", utility: "echo", parse: "json", ...overrides };
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { activeMateriaSystemPrompt, nativeTestInternals } from "../src/native.js";
 import { resolvePipeline } from "../src/pipeline.js";
-import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaNode } from "../src/types.js";
+import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket } from "../src/types.js";
 
 function makeState(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
   return {
@@ -92,7 +92,7 @@ describe("generic engine helper mechanics", () => {
         ],
       },
       materia: { tools: "none", prompt: "check" },
-    } satisfies ResolvedMateriaNode;
+    } satisfies ResolvedMateriaSocket;
 
     expect(nativeTestInternals.selectNextTarget(state, socket, { satisfied: true }, config)).toBe("Done");
     expect(nativeTestInternals.selectNextTarget(state, socket, { satisfied: false }, config)).toBe("Build");
@@ -109,7 +109,7 @@ describe("generic engine helper mechanics", () => {
         advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
       },
       materia: { type: "utility", utility: "echo" },
-    } satisfies ResolvedMateriaNode;
+    } satisfies ResolvedMateriaSocket;
     const state = makeState({
       cursors: { itemCursor: 0 },
       pipeline: {
@@ -146,7 +146,7 @@ describe("generic engine helper mechanics", () => {
         advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
       },
       materia: { type: "utility", utility: "echo" },
-    } satisfies ResolvedMateriaNode;
+    } satisfies ResolvedMateriaSocket;
     const state = makeState({
       cursors: { itemCursor: 0 },
       pipeline: {
@@ -228,7 +228,7 @@ describe("generic engine helper mechanics", () => {
       id: "Socket-5",
       node: { type: "agent", materia: "Auto-Eval", parse: "json" },
       materia: { tools: "coding", prompt: "evaluate" },
-    } satisfies ResolvedMateriaNode;
+    } satisfies ResolvedMateriaSocket;
 
     nativeTestInternals.applyGenericHandoffEnvelope(state, { workItems: echoedCurrentWorkItem, satisfied: true }, evaluator);
 
@@ -246,17 +246,17 @@ describe("generic engine helper mechanics", () => {
       id: "Socket-3",
       node: { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" } },
       materia: { tools: "readOnly", prompt: "plan" },
-    } satisfies ResolvedMateriaNode;
+    } satisfies ResolvedMateriaSocket;
     const builder = {
       id: "Socket-4",
       node: { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
       materia: { tools: "coding", prompt: "build {{item.id}}" },
-    } satisfies ResolvedMateriaNode;
+    } satisfies ResolvedMateriaSocket;
     const maintainer = {
       id: "Socket-6",
       node: { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" } },
       materia: { tools: "coding", prompt: "maintain" },
-    } satisfies ResolvedMateriaNode;
+    } satisfies ResolvedMateriaSocket;
 
     nativeTestInternals.applyAssignments(state, planner, { workItems });
     expect(state.data.workItems).toEqual(workItems);

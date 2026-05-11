@@ -1,7 +1,7 @@
 import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
 import { loadoutSockets, loopSockets, materializeCanonicalSockets } from "./loadoutAccessors.js";
 import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "./socketIds.js";
-import type { LegacyMateriaPipelineNodeConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "./types.js";
+import type { LegacyMateriaPipelineSocketConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "./types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
 export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
@@ -32,7 +32,7 @@ export interface ValidatedGraphChangeResult<TGraph extends MateriaPipelineConfig
 
 export function normalizePipelineGraph<TGraph extends MateriaPipelineConfig>(graph: TGraph): TGraph {
   const normalized = materializeCanonicalSockets(cloneGraph(graph));
-  for (const socket of Object.values(loadoutSockets(normalized)) as LegacyMateriaPipelineNodeConfig[]) {
+  for (const socket of Object.values(loadoutSockets(normalized)) as LegacyMateriaPipelineSocketConfig[]) {
     const edges = (socket.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeCondition(edge.when) }));
     if (socket.next) edges.push({ when: "always", to: socket.next });
     socket.edges = edges.length > 0 ? edges : undefined;
@@ -48,7 +48,7 @@ export function normalizeEdgeCondition(value: unknown): MateriaEdgeCondition {
 }
 
 export function canonicalOutgoingEdges(socket: MateriaPipelineSocketConfig): MateriaEdgeConfig[] {
-  const legacySocket = socket as LegacyMateriaPipelineNodeConfig;
+  const legacySocket = socket as LegacyMateriaPipelineSocketConfig;
   const edges = (legacySocket.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeCondition(edge.when) }));
   if (legacySocket.next) edges.push({ when: "always", to: legacySocket.next });
   return edges;
@@ -111,7 +111,7 @@ export function edgeGuard(edge: { when?: unknown }): MateriaGraphEdgeGuard {
 }
 
 function validateSocketLinks(id: string, socket: MateriaPipelineSocketConfig, errors: MateriaGraphValidationError[], socketIds: Set<string>): void {
-  const legacySocket = socket as LegacyMateriaPipelineNodeConfig;
+  const legacySocket = socket as LegacyMateriaPipelineSocketConfig;
   validateOptionalTarget(errors, socketIds, id, legacySocket.next, `${id}.next`);
   validateOptionalTarget(errors, socketIds, id, socket.foreach?.done, `${id}.foreach.done`);
   validateOptionalTarget(errors, socketIds, id, socket.advance?.done, `${id}.advance.done`);
