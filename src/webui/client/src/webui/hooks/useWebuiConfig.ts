@@ -362,6 +362,32 @@ export function useWebuiConfig() {
     setStatus('Created a new draft loadout with one empty entry socket. Rename and save when ready.');
   }
 
+  function makeDuplicateLoadoutName(name: string) {
+    const baseName = `${name} Copy`;
+    if (!loadouts[baseName]) return baseName;
+    let suffix = 2;
+    while (loadouts[`${baseName} ${suffix}`]) suffix += 1;
+    return `${baseName} ${suffix}`;
+  }
+
+  function duplicateLoadout(name: string) {
+    const loadout = loadouts[name];
+    if (!loadout) {
+      setStatus(`Cannot duplicate ${name}: loadout was not found.`);
+      return false;
+    }
+    const nextName = makeDuplicateLoadoutName(name);
+    const loadoutCopy = cloneConfig(loadout) as PipelineConfig;
+    setDraftConfig((current) => normalizeMateriaConfigEdges({
+      ...(current ?? {}),
+      activeLoadout: nextName,
+      loadouts: { ...buildLoadouts(current ?? {}), [nextName]: loadoutCopy },
+    }));
+    setLoadoutNameInput(nextName);
+    setStatus(`Duplicated ${name} as ${nextName}. Save to persist.`);
+    return true;
+  }
+
   function canDeleteLoadout(name: string) {
     return Boolean(name && loadouts[name] && loadoutSources[name] !== 'default' && Object.keys(loadouts).length > 1);
   }
@@ -469,6 +495,7 @@ export function useWebuiConfig() {
     createLoadout,
     defaultLoadoutId,
     deleteLoadout,
+    duplicateLoadout,
     draftConfig,
     isDirty,
     loadoutNameInput,

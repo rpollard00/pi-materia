@@ -25,8 +25,10 @@ export function App() {
     canRevert,
     commitEditingLoadoutRename,
     createLoadout,
+    defaultLoadoutId,
     deleteLoadout: deleteLoadoutDraft,
     draftConfig,
+    duplicateLoadout,
     isDirty,
     loadoutNameInput,
     loadoutSources,
@@ -37,6 +39,7 @@ export function App() {
     revertDraft,
     saveDraft,
     saveTarget,
+    setDefaultLoadout,
     setLoadoutNameInput,
     setRuntimeActiveLoadout,
     setSaveTarget,
@@ -176,12 +179,15 @@ export function App() {
             loadouts={loadouts}
             editingLoadoutName={editingLoadoutName}
             runtimeActiveLoadoutName={runtimeActiveLoadoutName}
+            defaultLoadoutId={defaultLoadoutId}
             persistedLoadouts={persistedLoadouts}
             loadoutSources={loadoutSources}
             canDeleteLoadout={canDeleteLoadout}
             onCreateLoadout={createLoadout}
             onSwitchEditingLoadout={switchLoadout}
             onDeleteLoadout={deleteLoadout}
+            onDuplicateLoadout={duplicateLoadout}
+            onSetDefaultLoadout={setDefaultLoadout}
             onSetRuntimeActiveLoadout={setRuntimeActiveLoadout}
           />
 

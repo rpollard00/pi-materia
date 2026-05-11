@@ -80,26 +80,76 @@
   display: block;
 }
 
-.loadout-delete-button {
+.loadout-actions-menu {
+  position: relative;
   flex: 0 0 auto;
+}
+
+.loadout-actions-trigger {
+  display: inline-flex;
+  min-width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
-  border: 1px solid rgb(248 113 113 / 0.28);
-  padding: 0.35rem 0.6rem;
-  font-size: 0.72rem;
+  border: 1px solid rgb(103 232 249 / 0.28);
+  color: rgb(207 250 254);
+  font-size: 1.2rem;
   font-weight: 800;
-  color: rgb(254 202 202);
+  line-height: 1;
   transition: 160ms ease;
 }
 
-.loadout-delete-button:not(:disabled):hover {
-  border-color: rgb(248 113 113 / 0.75);
-  background: rgb(127 29 29 / 0.45);
+.loadout-actions-trigger:hover,
+.loadout-actions-trigger[aria-expanded="true"] {
+  border-color: rgb(165 243 252 / 0.7);
+  background: rgb(8 47 73 / 0.72);
 }
 
-.loadout-delete-button:disabled {
+.loadout-actions-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 30;
+  display: grid;
+  min-width: 11rem;
+  overflow: hidden;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(103 232 249 / 0.28);
+  background: rgb(15 23 42 / 0.98);
+  padding: 0.35rem;
+  box-shadow: 0 20px 50px rgb(2 6 23 / 0.48), 0 0 24px rgb(34 211 238 / 0.12);
+}
+
+.loadout-actions-popover button {
+  border-radius: 0.65rem;
+  padding: 0.48rem 0.65rem;
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: rgb(226 232 240);
+  transition: 140ms ease;
+}
+
+.loadout-actions-popover button:not(:disabled):hover,
+.loadout-actions-popover button:not(:disabled):focus-visible {
+  background: rgb(8 47 73 / 0.82);
+  color: rgb(255 255 255);
+}
+
+.loadout-actions-popover button:disabled {
   cursor: not-allowed;
-  border-color: rgb(148 163 184 / 0.16);
   color: rgb(148 163 184 / 0.55);
+}
+
+.loadout-actions-popover .loadout-actions-destructive {
+  color: rgb(254 202 202);
+}
+
+.loadout-actions-popover .loadout-actions-destructive:not(:disabled):hover,
+.loadout-actions-popover .loadout-actions-destructive:not(:disabled):focus-visible {
+  background: rgb(127 29 29 / 0.52);
+  color: rgb(254 226 226);
 }
 
 .loadout-card:hover,

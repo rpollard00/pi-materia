@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { LoadoutSourceScope } from '../../types.js';
 
@@ -6,16 +6,106 @@ export interface LoadoutListPanelProps {
   loadouts: Record<string, PipelineConfig>;
   editingLoadoutName: string | undefined;
   runtimeActiveLoadoutName: string | undefined;
+  defaultLoadoutId: string | null;
   persistedLoadouts: Record<string, PipelineConfig>;
   loadoutSources: Record<string, LoadoutSourceScope>;
   canDeleteLoadout: (name: string) => boolean;
   onCreateLoadout: () => void;
   onSwitchEditingLoadout: (name: string) => void;
   onDeleteLoadout: (name: string) => void;
+  onDuplicateLoadout: (name: string) => void;
+  onSetDefaultLoadout: (name: string) => Promise<string | null>;
   onSetRuntimeActiveLoadout: (name: string) => Promise<string>;
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutName, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onSetRuntimeActiveLoadout }: LoadoutListPanelProps) {
+interface LoadoutActionsMenuProps {
+  name: string;
+  isRuntimeActive: boolean;
+  isDefaultLoadout: boolean;
+  canSetRuntimeActive: boolean;
+  canSetDefault: boolean;
+  deleteDisabled: boolean;
+  deleteTitle: string;
+  onSetRuntimeActive: (name: string) => void;
+  onSetDefault: (name: string) => void;
+  onDuplicate: (name: string) => void;
+  onDelete: (name: string) => void;
+}
+
+function stopMenuEvent(event: ReactMouseEvent | KeyboardEvent) {
+  event.stopPropagation();
+}
+
+function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRuntimeActive, canSetDefault, deleteDisabled, deleteTitle, onSetRuntimeActive, onSetDefault, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuId = `loadout-actions-${name.replace(/[^a-zA-Z0-9_-]+/g, '-') || 'loadout'}`;
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  function runAction(action: (loadoutName: string) => void) {
+    setOpen(false);
+    action(name);
+  }
+
+  return (
+    <div className="loadout-actions-menu" ref={menuRef} onClick={stopMenuEvent}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="loadout-actions-trigger"
+        aria-label="Loadout actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        title={`Actions for ${name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        …
+      </button>
+      {open && (
+        <div id={menuId} className="loadout-actions-popover" role="menu" aria-label={`Actions for ${name}`}>
+          <button type="button" role="menuitem" disabled={!canSetRuntimeActive} title={isRuntimeActive ? 'This loadout is already active.' : undefined} onClick={() => runAction(onSetRuntimeActive)}>
+            {isRuntimeActive ? 'Active loadout' : 'Set Active'}
+          </button>
+          <button type="button" role="menuitem" disabled={!canSetDefault} title={isDefaultLoadout ? 'This loadout is already the default.' : undefined} onClick={() => runAction(onSetDefault)}>
+            {isDefaultLoadout ? 'Default loadout' : 'Set as Default'}
+          </button>
+          <button type="button" role="menuitem" onClick={() => runAction(onDuplicate)}>
+            Duplicate
+          </button>
+          <button type="button" role="menuitem" className="loadout-actions-destructive" disabled={deleteDisabled} title={deleteTitle} onClick={() => runAction(onDelete)}>
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutName, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout }: LoadoutListPanelProps) {
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const persistedNames = Object.keys(persistedLoadouts);
@@ -60,22 +150,28 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const sourceScope = loadoutSources[name] ?? 'user';
           const defaultLoadout = sourceScope === 'default';
           const deleteDisabled = !canDeleteLoadout(name);
+          const isRuntimeActive = name === runtimeActiveLoadoutName;
+          const isDefaultLoadout = name === defaultLoadoutId;
+          const persisted = Boolean(persistedLoadouts[name]);
           return (
             <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
               <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select">
                 <span>{name}</span>
                 <small>{Object.keys(loadouts[name].sockets ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
               </button>
-              <button
-                type="button"
-                className="loadout-delete-button"
-                disabled={deleteDisabled}
-                onClick={() => onDeleteLoadout(name)}
-                title={defaultLoadout ? 'Shipped default loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
-                aria-label={defaultLoadout ? 'Protected default loadout' : 'Delete loadout'}
-              >
-                Delete
-              </button>
+              <LoadoutActionsMenu
+                name={name}
+                isRuntimeActive={isRuntimeActive}
+                isDefaultLoadout={isDefaultLoadout}
+                canSetRuntimeActive={persisted && !isRuntimeActive && !activeChangePending}
+                canSetDefault={persisted && !isDefaultLoadout}
+                deleteDisabled={deleteDisabled}
+                deleteTitle={defaultLoadout ? 'Shipped default loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
+                onSetRuntimeActive={(loadoutName) => void changeRuntimeActiveLoadout(loadoutName)}
+                onSetDefault={(loadoutName) => void onSetDefaultLoadout(loadoutName).catch(() => undefined)}
+                onDuplicate={onDuplicateLoadout}
+                onDelete={onDeleteLoadout}
+              />
             </div>
           );
         })}
