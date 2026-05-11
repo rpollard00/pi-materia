@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { appendManifest, initializeRun, recordCommandArtifacts, recordNodeOutput, recordUtilityInput, writeContextArtifact } from "../src/infrastructure/castArtifacts.js";
+import { appendEvent, appendManifest, initializeRun, recordCommandArtifacts, recordNodeOutput, recordNodeParsedJson, recordUtilityInput, writeContextArtifact } from "../src/infrastructure/castArtifacts.js";
+import { assertBudget, writeUsage } from "../src/infrastructure/castUsage.js";
 import { clearCastState, listLatestCastStates, loadActiveCastState, saveCastState } from "../src/infrastructure/castStateRepository.js";
 import type { MateriaCastState } from "../src/types.js";
 
@@ -82,18 +83,37 @@ describe("cast persistence infrastructure", () => {
 
     const output = await recordNodeOutput({ state, socketId: "Build", materia: "Build", visit: 2, text: "done", entryId: "entry-1", kind: "node_output" });
     await appendManifest(state, { phase: "Build", node: "Build", itemKey: "item/1", entryId: "manual" });
+    const parsed = await recordNodeParsedJson({ state, socketId: "Build", visit: 2, parsed: { ok: true } });
     const input = await recordUtilityInput({ state, socketId: "Build", materia: "Build", visit: 2, input: { ok: true } });
     const command = await recordCommandArtifacts({ state, socketId: "Build", materia: "Build", visit: 2, stdout: "out", stderr: "err", stdoutTruncated: false, stderrTruncated: true, maxBytes: 123 });
 
     expect(output).toBe(path.join("nodes", "Build", "2-item-1.md"));
+    expect(parsed).toBe(path.join("nodes", "Build", "2.json"));
     expect(input).toBe(path.join("nodes", "Build", "2-item-1.input.json"));
     expect(command.stderrArtifact).toBe(path.join("nodes", "Build", "2-item-1.command.stderr.txt"));
     expect(await readFile(path.join(runDir, output), "utf8")).toBe("done");
+    expect(JSON.parse(await readFile(path.join(runDir, parsed), "utf8"))).toEqual({ ok: true });
 
     const manifest = JSON.parse(await readFile(path.join(runDir, "manifest.json"), "utf8"));
     expect(manifest.entries.map((entry: any) => entry.entryId)).toEqual(["entry-1", "manual", "utility:Build:2:input", "utility:Build:2:command:stdout", "utility:Build:2:command:stderr", "utility:Build:2:command:meta"]);
     expect(manifest.entries[0].node).toBe("Build");
     expect(manifest.entries[0].itemLabelShort).toContain("A very descriptive item label");
+  });
+
+  test("events and usage IO are owned by infrastructure adapters", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-usage-"));
+    const state = castState(root);
+
+    state.runState.usage.tokens.total = 75;
+    await writeUsage(state.runState);
+    await appendEvent(state.runState, "custom_event", { ok: true });
+    await assertBudget({ materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxTokens: 100, warnAtPercent: 50, stopAtLimit: false } } as any, state.runState, { ui: { notify: () => undefined }, hasUI: true } as any);
+
+    const usage = JSON.parse(await readFile(path.join(root, "usage.json"), "utf8"));
+    expect(usage.tokens.total).toBe(75);
+    const eventLines = (await readFile(path.join(root, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(eventLines.map((event) => event.type)).toEqual(["custom_event", "budget_warning"]);
+    expect(state.runState.budgetWarned).toBe(true);
   });
 
   test("context artifact writer keeps isolated context layout", async () => {

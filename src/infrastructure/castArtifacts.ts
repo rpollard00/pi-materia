@@ -1,7 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { appendEvent, safePathSegment } from "../artifacts.js";
-export { appendEvent } from "../artifacts.js";
+import { safePathSegment } from "../artifacts.js";
 import type { MateriaCastState, MateriaManifest, MateriaManifestEntry, MateriaModelSelection, MateriaRunState, PiMateriaConfig } from "../types.js";
 
 export const MATERIA_MANIFEST_FILE = "manifest.json";
@@ -14,6 +13,7 @@ export interface CastArtifactStore {
   appendManifest(state: MateriaCastState, entry: Omit<MateriaManifestEntry, "timestamp">): Promise<void>;
   writeContextArtifact(input: WriteContextArtifactInput): Promise<string>;
   recordNodeOutput(input: NodeTextArtifactInput): Promise<string>;
+  recordNodeParsedJson(input: NodeParsedJsonArtifactInput): Promise<string>;
   recordNodeRefinement(input: NodeTextArtifactInput & { refinementTurn: number }): Promise<string>;
   recordUtilityInput(input: UtilityInputArtifactInput): Promise<string>;
   recordCommandArtifacts(input: CommandArtifactsInput): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }>;
@@ -27,6 +27,7 @@ export function createFileCastArtifactStore(): CastArtifactStore {
     appendManifest,
     writeContextArtifact,
     recordNodeOutput,
+    recordNodeParsedJson,
     recordNodeRefinement,
     recordUtilityInput,
     recordCommandArtifacts,
@@ -41,6 +42,10 @@ export async function initializeRun(runDir: string, config: PiMateriaConfig, man
   await mkdir(path.join(runDir, "contexts"), { recursive: true });
   await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
   await writeManifest(runDir, manifest);
+}
+
+export async function appendEvent(state: MateriaRunState, type: string, data: unknown): Promise<void> {
+  await appendFile(state.eventsFile, `${JSON.stringify({ ts: Date.now(), type, data })}\n`);
 }
 
 export async function writeManifest(runDir: string, manifest: MateriaManifest): Promise<void> {
@@ -82,6 +87,21 @@ export async function recordNodeOutput(input: NodeTextArtifactInput): Promise<st
   const artifact = nodeArtifactPath(input.state, input.socketId, input.visit, ".md");
   await writeRunFile(input.state.runDir, artifact, input.text);
   await appendManifest(input.state, nodeManifestEntry(input, artifact));
+  return artifact;
+}
+
+export interface NodeParsedJsonArtifactInput {
+  state: MateriaCastState;
+  socketId: string;
+  visit: number;
+  parsed: unknown;
+}
+
+export async function recordNodeParsedJson(input: NodeParsedJsonArtifactInput): Promise<string> {
+  // Legacy node-named JSON sidecar path is an external artifact compatibility seam.
+  // It intentionally omits item suffixes to preserve the historical layout.
+  const artifact = path.join("nodes", safePathSegment(input.socketId), `${input.visit}.json`);
+  await writeRunFile(input.state.runDir, artifact, JSON.stringify(input.parsed, null, 2));
   return artifact;
 }
 

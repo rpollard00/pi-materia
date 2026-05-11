@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { safePathSegment, safeTimestamp } from "./artifacts.js";
+import { safeTimestamp } from "./artifacts.js";
 import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
@@ -18,10 +18,11 @@ import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./no
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
 import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
-import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
+import { addUsage, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
-import { appendEvent, appendManifest, initializeRun, recordCommandArtifacts as recordCommandArtifactsFile, recordNodeOutput, recordNodeRefinement, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel, writeContextArtifact as writeContextArtifactFile } from "./infrastructure/castArtifacts.js";
+import { appendEvent, appendManifest, initializeRun, recordCommandArtifacts as recordCommandArtifactsFile, recordNodeOutput, recordNodeParsedJson, recordNodeRefinement, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel, writeContextArtifact as writeContextArtifactFile } from "./infrastructure/castArtifacts.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "./infrastructure/castStateRepository.js";
+import { assertBudget, writeUsage } from "./infrastructure/castUsage.js";
 export { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "./infrastructure/castStateRepository.js";
 
 
@@ -305,7 +306,7 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
     }
     parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: socket.socket });
     state.lastJson = parsed;
-    await writeFile(path.join(state.runDir, "nodes", safePathSegment(socket.id), `${socketVisit(state, socket.id)}.json`), JSON.stringify(parsed, null, 2));
+    await recordNodeParsedJson({ state, socketId: socket.id, visit: socketVisit(state, socket.id), parsed });
   }
 
   applyGenericHandoffEnvelope(state, parsed, socket);
