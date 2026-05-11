@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { activeMateriaSystemPrompt, nativeTestInternals } from "../src/native.js";
+import { applyGenericHandoffEnvelope } from "../src/application/handoff.js";
+import { applyAdvance, applyAssignments, evaluateCondition, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../src/application/workflowTransitions.js";
 import { resolvePipeline } from "../src/pipeline.js";
 import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket } from "../src/types.js";
 
@@ -66,15 +68,15 @@ describe("generic engine helper mechanics", () => {
     const state = makeState();
     const parsed = { route: "next", ok: true, count: 2, list: [{ label: "zero" }] };
 
-    expect(nativeTestInternals.resolveValue("$", state, parsed)).toEqual(parsed);
-    expect(nativeTestInternals.resolveValue("$.list.0.label", state, parsed)).toBe("zero");
-    expect(nativeTestInternals.resolveValue("state.nested.value", state, parsed)).toBe(42);
-    expect(nativeTestInternals.resolveValue("item.meta.done", state, parsed)).toBe(true);
-    expect(nativeTestInternals.resolveValue("lastJson.nested.ok", state, parsed)).toBe(true);
-    expect(nativeTestInternals.evaluateCondition("$.route == 'next'", state, parsed)).toBe(true);
-    expect(nativeTestInternals.evaluateCondition("$.count != 3", state, parsed)).toBe(true);
-    expect(nativeTestInternals.evaluateCondition("exists($.ok)", state, parsed)).toBe(true);
-    expect(nativeTestInternals.evaluateCondition("!exists($.missing)", state, parsed)).toBe(true);
+    expect(resolveValue("$", state, parsed)).toEqual(parsed);
+    expect(resolveValue("$.list.0.label", state, parsed)).toBe("zero");
+    expect(resolveValue("state.nested.value", state, parsed)).toBe(42);
+    expect(resolveValue("item.meta.done", state, parsed)).toBe(true);
+    expect(resolveValue("lastJson.nested.ok", state, parsed)).toBe(true);
+    expect(evaluateCondition("$.route == 'next'", state, parsed)).toBe(true);
+    expect(evaluateCondition("$.count != 3", state, parsed)).toBe(true);
+    expect(evaluateCondition("exists($.ok)", state, parsed)).toBe(true);
+    expect(evaluateCondition("!exists($.missing)", state, parsed)).toBe(true);
   });
 
   test("routes canonical always/satisfied/not_satisfied edges and legacy next with one handoff contract", () => {
@@ -94,10 +96,10 @@ describe("generic engine helper mechanics", () => {
       materia: { tools: "none", prompt: "check" },
     } satisfies ResolvedMateriaSocket;
 
-    expect(nativeTestInternals.selectNextTarget(state, socket, { satisfied: true }, config)).toBe("Done");
-    expect(nativeTestInternals.selectNextTarget(state, socket, { satisfied: false }, config)).toBe("Build");
-    expect(nativeTestInternals.selectNextTarget(state, socket, {}, config)).toBe("Fallback");
-    expect(nativeTestInternals.selectNextTarget(state, { ...socket, socket: { ...socket.socket, edges: undefined, next: "Legacy" } }, {}, config)).toBe("Legacy");
+    expect(selectNextTarget(state, socket, { satisfied: true }, config)).toBe("Done");
+    expect(selectNextTarget(state, socket, { satisfied: false }, config)).toBe("Build");
+    expect(selectNextTarget(state, socket, {}, config)).toBe("Fallback");
+    expect(selectNextTarget(state, { ...socket, socket: { ...socket.socket, edges: undefined, next: "Legacy" } }, {}, config)).toBe("Legacy");
   });
 
   test("advances loop completion through loop-owned exit routes without materialized edges", () => {
@@ -129,11 +131,11 @@ describe("generic engine helper mechanics", () => {
       },
     });
 
-    expect(nativeTestInternals.applyAdvance(state, node, { satisfied: true })).toBe("Socket-3");
+    expect(applyAdvance(state, node, { satisfied: true })).toBe("Socket-3");
     state.cursors.itemCursor = 0;
-    expect(nativeTestInternals.applyAdvance(state, node, { satisfied: false })).toBe("Socket-4");
+    expect(applyAdvance(state, node, { satisfied: false })).toBe("Socket-4");
     state.cursors.itemCursor = 0;
-    expect(nativeTestInternals.applyAdvance(state, node, {})).toBe("Socket-5");
+    expect(applyAdvance(state, node, {})).toBe("Socket-5");
     expect(node.socket).not.toHaveProperty("edges");
   });
 
@@ -162,12 +164,12 @@ describe("generic engine helper mechanics", () => {
       },
     });
 
-    expect(nativeTestInternals.applyAdvance(state, node, { satisfied: false })).toBe("Socket-9");
+    expect(applyAdvance(state, node, { satisfied: false })).toBe("Socket-9");
   });
 
   test("sets nested assignment paths", () => {
     const target: Record<string, unknown> = {};
-    nativeTestInternals.setPath(target, "utility.result.value", 7);
+    setPath(target, "utility.result.value", 7);
     expect(target).toEqual({ utility: { result: { value: 7 } } });
   });
 
@@ -206,7 +208,7 @@ describe("generic engine helper mechanics", () => {
       missing: [],
     };
 
-    nativeTestInternals.applyGenericHandoffEnvelope(state, parsed);
+    applyGenericHandoffEnvelope(state, parsed);
 
     expect(state.data.envelope).toMatchObject(parsed);
     expect(state.data.workItems).toEqual(parsed.workItems);
@@ -230,7 +232,7 @@ describe("generic engine helper mechanics", () => {
       materia: { tools: "coding", prompt: "evaluate" },
     } satisfies ResolvedMateriaSocket;
 
-    nativeTestInternals.applyGenericHandoffEnvelope(state, { workItems: echoedCurrentWorkItem, satisfied: true }, evaluator);
+    applyGenericHandoffEnvelope(state, { workItems: echoedCurrentWorkItem, satisfied: true }, evaluator);
 
     expect(state.data.envelope).toMatchObject({ workItems: echoedCurrentWorkItem, satisfied: true });
     expect(state.data.workItems).toEqual(generatedWorkItems);
@@ -258,23 +260,23 @@ describe("generic engine helper mechanics", () => {
       materia: { tools: "coding", prompt: "maintain" },
     } satisfies ResolvedMateriaSocket;
 
-    nativeTestInternals.applyAssignments(state, planner, { workItems });
+    applyAssignments(state, planner, { workItems });
     expect(state.data.workItems).toEqual(workItems);
 
-    expect(nativeTestInternals.setCurrentItem(state, builder)).toBe(true);
+    expect(setCurrentItem(state, builder)).toBe(true);
     expect(state.data.item).toEqual(workItems[0]);
     expect(state.data.workItem).toEqual(workItems[0]);
     expect(state.data.currentWorkItem).toEqual(workItems[0]);
     expect(state.currentItemKey).toBe("one");
     expect(state.currentItemLabel).toBe("First");
 
-    expect(nativeTestInternals.applyAdvance(state, maintainer, { satisfied: false })).toBeUndefined();
+    expect(applyAdvance(state, maintainer, { satisfied: false })).toBeUndefined();
     expect(state.cursors.workItemIndex).toBe(0);
-    expect(nativeTestInternals.applyAdvance(state, maintainer, { satisfied: true })).toBeUndefined();
+    expect(applyAdvance(state, maintainer, { satisfied: true })).toBeUndefined();
     expect(state.cursors.workItemIndex).toBe(1);
-    expect(nativeTestInternals.setCurrentItem(state, builder)).toBe(true);
+    expect(setCurrentItem(state, builder)).toBe(true);
     expect(state.data.workItem).toEqual(workItems[1]);
-    expect(nativeTestInternals.applyAdvance(state, maintainer, { satisfied: true })).toBe("end");
+    expect(applyAdvance(state, maintainer, { satisfied: true })).toBe("end");
   });
 
   test("builder text prompt includes adapter-provided current workItem and global guidance", () => {

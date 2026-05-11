@@ -8,27 +8,20 @@ import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { canonicalGeneratorConfigFor } from "./generator.js";
-import { canonicalOutgoingEdges } from "./graphValidation.js";
-import { loopSockets } from "./loadoutAccessors.js";
-import { resolveLoopExitRoute } from "./loopExitRoutes.js";
+import { applyGenericHandoffEnvelope } from "./application/handoff.js";
+import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveValue, selectNextTarget, setCurrentItem, setPath } from "./application/workflowTransitions.js";
 import {
   HANDOFF_CONTRACT_DOC_TEXT,
-  HANDOFF_DECISIONS_FIELD,
   HANDOFF_RESERVED_EVALUATOR_FIELDS,
   formatHandoffJsonFinalInstruction,
-  HANDOFF_GUIDANCE_FIELD,
-  HANDOFF_RISKS_FIELD,
-  HANDOFF_SATISFIED_FIELD,
-  HANDOFF_SUMMARY_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
-  pickHandoffEnvelopeFields,
   stringifyDeterministicHandoffOutput,
 } from "./handoffContract.js";
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
+import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaManifest, MateriaManifestEntry, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
@@ -36,7 +29,6 @@ import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } fr
 const STATE_ENTRY = "pi-materia-cast-state";
 const MANIFEST_FILE = "manifest.json";
 const DEFAULT_MAX_SOCKET_VISITS = 25;
-const DEFAULT_MAX_EDGE_TRAVERSALS = 25;
 const DEFAULT_UTILITY_TIMEOUT_MS = 30_000;
 const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
@@ -386,85 +378,6 @@ async function recordMultiTurnRefinement(state: MateriaCastState, socket: Resolv
   await writeFile(path.join(state.runDir, artifact), text);
   await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
   return { artifact, turn };
-}
-
-function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, socket?: ResolvedMateriaSocket): void {
-  if (!isPlainObject(parsed)) return;
-
-  const envelope = isPlainObject(state.data.envelope)
-    ? { ...(state.data.envelope as Record<string, unknown>) }
-    : {};
-  Object.assign(envelope, pickHandoffEnvelopeFields(parsed));
-  if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
-
-  const workItems = parsed[HANDOFF_WORK_ITEMS_FIELD];
-  if (Array.isArray(workItems) && workItems.length > 0 && shouldAdoptEnvelopeWorkItems(state, socket)) {
-    state.data.workItems = workItems;
-  }
-  const guidance = parsed[HANDOFF_GUIDANCE_FIELD];
-  if (isPlainObject(guidance)) {
-    const existing = isPlainObject(state.data.guidance) ? state.data.guidance : {};
-    state.data.guidance = { ...existing, ...guidance };
-  }
-  const summary = parsed[HANDOFF_SUMMARY_FIELD];
-  if (typeof summary === "string" && summary.trim()) state.data.summary = summary;
-  const decisions = parsed[HANDOFF_DECISIONS_FIELD];
-  if (Array.isArray(decisions) && decisions.length > 0) state.data.decisions = decisions;
-  const risks = parsed[HANDOFF_RISKS_FIELD];
-  if (Array.isArray(risks) && risks.length > 0) state.data.risks = risks;
-}
-
-function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, socket?: ResolvedMateriaSocket): boolean {
-  if (!Array.isArray(state.data.workItems) || state.data.workItems.length === 0) return true;
-  return Boolean(socket && isAgentResolvedSocket(socket) && canonicalGeneratorConfigFor(socket.materia)?.output === "workItems");
-}
-
-function applyAssignments(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): void {
-  for (const [target, source] of Object.entries(resolvedSocketConfig(socket).assign ?? {})) {
-    setPath(state.data, target, resolveValue(source, state, parsed));
-  }
-}
-
-function applyAdvance(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): string | undefined {
-  const advance = resolvedSocketConfig(socket).advance;
-  if (!advance) return undefined;
-  if (advance.when && !evaluateCondition(advance.when, state, parsed)) return undefined;
-  const items = asArray(resolveValue(advance.items, state));
-  const next = (state.cursors[advance.cursor] ?? 0) + 1;
-  state.cursors[advance.cursor] = next;
-  state.currentItemKey = undefined;
-  state.currentItemLabel = undefined;
-  if (next < items.length) return undefined;
-  return resolveRuntimeLoopExitTarget(state, socket.id, parsed) ?? advance.done;
-}
-
-function resolveRuntimeLoopExitTarget(state: MateriaCastState, from: string, parsed: unknown): string | undefined {
-  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => loopSockets(candidate).includes(from) && candidate.exits?.some((route) => route.from === from));
-  if (!loop) return undefined;
-  return resolveLoopExitRoute(loop, { from, satisfied: canonicalSatisfiedOutcome(state, parsed) })?.targetSocketId;
-}
-
-function canonicalSatisfiedOutcome(state: MateriaCastState, parsed: unknown): boolean | undefined {
-  const satisfied = resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed);
-  return typeof satisfied === "boolean" ? satisfied : undefined;
-}
-
-function selectNextTarget(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown, config: PiMateriaConfig): string {
-  for (const edge of canonicalOutgoingEdges(resolvedSocketConfig(socket))) {
-    if (evaluateEdgeCondition(edge.when, state, parsed)) {
-      enforceEdgeLimit(state, socket.id, edge, config);
-      return edge.to;
-    }
-  }
-  return "end";
-}
-
-function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEdgeConfig, config: PiMateriaConfig): void {
-  const key = `${from}->${edge.to}`;
-  const count = (state.edgeTraversals[key] ?? 0) + 1;
-  state.edgeTraversals[key] = count;
-  const limit = edge.maxTraversals ?? config.limits?.maxEdgeTraversals ?? DEFAULT_MAX_EDGE_TRAVERSALS;
-  if (count > limit) throw new Error(`Materia edge traversal limit exceeded for ${key} (${count}/${limit}).`);
 }
 
 async function advanceToSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string): Promise<void> {
@@ -1007,34 +920,6 @@ function enforceSocketVisitLimit(state: MateriaCastState, socket: ResolvedMateri
   state.visits[socket.id] = count;
 }
 
-function setCurrentItem(state: MateriaCastState, socket: ResolvedMateriaSocket): boolean {
-  const loop = resolvedSocketConfig(socket).foreach ?? loopIteratorForSocket(state.pipeline, socket.id);
-  if (!loop) {
-    state.currentItemKey = undefined;
-    state.currentItemLabel = undefined;
-    return true;
-  }
-  const cursor = loop.cursor ?? `${socket.id}Index`;
-  const index = state.cursors[cursor] ?? 0;
-  state.cursors[cursor] = index;
-  const item = asArray(resolveValue(loop.items, state))[index];
-  if (item === undefined) {
-    state.currentItemKey = undefined;
-    state.currentItemLabel = undefined;
-    return false;
-  }
-  const alias = loop.as ?? "item";
-  setPath(state.data, "item", item);
-  setPath(state.data, "currentWorkItem", item);
-  if (alias !== "item") setPath(state.data, alias, item);
-  if (alias === "workItem" || loop.items.includes("workItems")) setPath(state.data, "workItem", item);
-  const key = readObjectField(item, "id") ?? readObjectField(item, "key") ?? index;
-  const label = readObjectField(item, "title") ?? readObjectField(item, "name") ?? key;
-  state.currentItemKey = String(key);
-  state.currentItemLabel = String(label);
-  return true;
-}
-
 async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, entryId: string, message: string): Promise<void> {
   state.active = false;
   state.phase = "complete";
@@ -1385,91 +1270,6 @@ function messageContentText(content: unknown): string {
 
 function materiaPrompt(materia: MateriaAgentConfig, state: MateriaCastState, sections: (string | undefined)[]): string {
   return ["<materia-instructions>", renderTemplate(materia.prompt, state), "</materia-instructions>", ...sections.filter(Boolean)].join("\n\n");
-}
-
-function evaluateEdgeCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
-  if (condition === "always") return true;
-  const satisfied = resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed);
-  if (condition === "satisfied") return satisfied === true;
-  if (condition === "not_satisfied") return satisfied === false;
-  throw new Error(`Unsupported Materia edge condition: ${condition}`);
-}
-
-function evaluateCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {
-  const text = condition.trim();
-  if (text === "always") return true;
-  if (text === "satisfied") return resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed) === true;
-  if (text === "not_satisfied") return resolveValue(`$.${HANDOFF_SATISFIED_FIELD}`, state, parsed) === false;
-  const exists = text.match(/^!?exists\((.+)\)$/);
-  if (exists) {
-    const value = resolveValue(exists[1].trim(), state, parsed);
-    return text.startsWith("!") ? value === undefined : value !== undefined;
-  }
-  const match = text.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
-  if (!match) throw new Error(`Unsupported Materia condition: ${condition}`);
-  const left = resolveValue(match[1].trim(), state, parsed);
-  const right = parseLiteral(match[3].trim(), state, parsed);
-  return match[2] === "==" ? left === right : left !== right;
-}
-
-function parseLiteral(input: string, state: MateriaCastState, parsed: unknown): unknown {
-  if (input === "true") return true;
-  if (input === "false") return false;
-  if (input === "null") return null;
-  if (/^-?\d+(\.\d+)?$/.test(input)) return Number(input);
-  if ((input.startsWith('"') && input.endsWith('"')) || (input.startsWith("'") && input.endsWith("'"))) return input.slice(1, -1);
-  return resolveValue(input, state, parsed);
-}
-
-function resolveValue(source: string, state: MateriaCastState, parsed: unknown = state.lastJson): unknown {
-  if (source === "$") return parsed;
-  if (source.startsWith("$.")) return getPath(parsed, source.slice(2));
-  if (source === "state") return state.data;
-  if (source.startsWith("state.")) return getPath(state.data, source.slice("state.".length));
-  if (source === "item") return currentItem(state);
-  if (source.startsWith("item.")) return getPath(currentItem(state), source.slice("item.".length));
-  if (source === "lastJson") return state.lastJson;
-  if (source.startsWith("lastJson.")) return getPath(state.lastJson, source.slice("lastJson.".length));
-  if (source === "lastOutput") return state.lastOutput;
-  return getPath(state.data, source);
-}
-
-function currentItem(state: MateriaCastState): unknown {
-  return state.data.item;
-}
-
-function getPath(value: unknown, pathValue: string): unknown {
-  if (!pathValue) return value;
-  return pathValue.split(".").reduce<unknown>((current, part) => {
-    if (current === undefined || current === null) return undefined;
-    if (Array.isArray(current) && /^\d+$/.test(part)) return current[Number(part)];
-    if (typeof current === "object") return (current as Record<string, unknown>)[part];
-    return undefined;
-  }, value);
-}
-
-function setPath(target: Record<string, unknown>, pathValue: string, value: unknown): void {
-  const parts = pathValue.split(".").filter(Boolean);
-  if (!parts.length) throw new Error("Materia assignment target cannot be empty.");
-  let current: Record<string, unknown> = target;
-  for (const part of parts.slice(0, -1)) {
-    const next = current[part];
-    if (!next || typeof next !== "object" || Array.isArray(next)) current[part] = {};
-    current = current[part] as Record<string, unknown>;
-  }
-  current[parts[parts.length - 1]] = value;
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function readObjectField(value: unknown, field: string): unknown {
-  return value && typeof value === "object" ? (value as Record<string, unknown>)[field] : undefined;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function stringifyTemplateValue(value: unknown): string {
