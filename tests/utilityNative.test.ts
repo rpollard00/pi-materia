@@ -108,9 +108,9 @@ describe("native utility node execution", () => {
     expect(state.lastJson).toEqual(JSON.parse(stringifyDeterministicHandoffOutput(output)));
     await expect(readFile(path.join(state.runDir!, "nodes", "Socket-1", "1.md"), "utf8")).resolves.toBe(stringifyDeterministicHandoffOutput(output));
 
-    const nativeSource = await readFile(path.resolve("src", "native.ts"), "utf8");
-    expect(nativeSource).toContain("stringifyDeterministicHandoffOutput(value)");
-    expect(nativeSource).not.toContain("JSON.stringify(value)");
+    const utilityExecutionSource = await readFile(path.resolve("src", "application", "utilityExecution.ts"), "utf8");
+    expect(utilityExecutionSource).toContain("stringifyDeterministicHandoffOutput(value)");
+    expect(utilityExecutionSource).not.toContain("JSON.stringify(value)");
   });
 
   test("deterministic utility handoff JSON preserves workItems and reserved evaluator fields", async () => {

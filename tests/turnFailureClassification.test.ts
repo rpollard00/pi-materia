@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { classifyTurnFailure } from "../src/native.js";
+import { classifyTurnFailure } from "../src/application/recoveryPolicy.js";
 
 describe("turn failure classification", () => {
   test("classifies plain WebSocket transport failures as transient", () => {

@@ -1,37 +1,35 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { safeTimestamp } from "./artifacts.js";
-import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { applyGenericHandoffEnvelope } from "./application/handoff.js";
-import { buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isActiveMultiTurnSocket, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "./application/promptAssembly.js";
+import { buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "./application/promptAssembly.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "./application/promptAssembly.js";
+export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "./application/recoveryPolicy.js";
 import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveValue, selectNextTarget, setCurrentItem, setPath } from "./application/workflowTransitions.js";
-import { stringifyDeterministicHandoffOutput } from "./handoffContract.js";
+import { executeUtilitySocketWithDeps } from "./application/utilityExecution.js";
+import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryTurnMode, type TurnFailureClassification } from "./application/recoveryPolicy.js";
+import { maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "./application/compactionWorkflow.js";
+import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "./application/recoveryWorkflow.js";
 import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
+import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection } from "./usage.js";
-import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
-import { appendEvent, appendManifest, initializeRun, recordCommandArtifacts as recordCommandArtifactsFile, recordNodeOutput, recordNodeParsedJson, recordNodeRefinement, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel, writeContextArtifact as writeContextArtifactFile } from "./infrastructure/castArtifacts.js";
+import { executeBuiltInUtility, hasBuiltInUtility } from "./utilityRegistry.js";
+import { appendEvent, appendManifest, initializeRun, recordNodeOutput, recordNodeParsedJson, recordNodeRefinement, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel, writeContextArtifact as writeContextArtifactFile } from "./infrastructure/castArtifacts.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "./infrastructure/castStateRepository.js";
 import { assertBudget, writeUsage } from "./infrastructure/castUsage.js";
+import { executeCommandUtility } from "./infrastructure/utilityCommandExecutor.js";
 export { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "./infrastructure/castStateRepository.js";
 
 
 const DEFAULT_MAX_SOCKET_VISITS = 25;
-const DEFAULT_UTILITY_TIMEOUT_MS = 30_000;
-const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
-const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
-const DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS = 1;
-
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
@@ -399,142 +397,13 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
 }
 
 async function executeUtilitySocket(state: MateriaCastState, socket: Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>): Promise<{ output: string; entryId: string }> {
-  const visit = socketVisit(state, socket.id);
-  const input = buildUtilityInput(state, socket);
-  const inputArtifact = await recordUtilityInput(state, socket, input);
-  await appendEvent(state.runState, "utility_input", { node: socket.id, artifact: inputArtifact, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit });
-
-  const utilityConfig = resolvedSocketConfig(socket);
-  const params = utilityConfig.params ?? {};
-  let output: string;
-  if (utilityConfig.command) {
-    output = await executeCommandUtility(state, socket, input);
-  } else if (Object.prototype.hasOwnProperty.call(params, "output")) {
-    const value = params.output;
-    output = typeof value === "string" ? value : stringifyDeterministicHandoffOutput(value);
-  } else if (hasBuiltInUtility(utilityConfig.utility)) {
-    output = await executeBuiltInUtility(utilityConfig.utility, input as BuiltInUtilityInput);
-  } else {
-    throw new Error(`Unknown utility alias "${utilityConfig.utility}" for socket "${socket.id}".`);
-  }
-
-  return { output, entryId: `utility:${socket.id}:${visit}` };
-}
-
-async function executeCommandUtility(state: MateriaCastState, socket: Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>, input: Record<string, unknown>): Promise<string> {
-  const command = resolvedSocketConfig(socket).command;
-  if (!command || command.length === 0) throw new Error(`Utility socket "${socket.id}" has no explicit command configured.`);
-
-  const timeoutMs = resolvedSocketConfig(socket).timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;
-  const child = spawn(command[0], command.slice(1), { cwd: state.cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
-  const stdout = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
-  const stderr = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
-  let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    child.kill("SIGTERM");
-    setTimeout(() => child.kill("SIGKILL"), 1_000).unref();
-  }, timeoutMs);
-  timeout.unref();
-
-  child.stdout.on("data", (chunk: Buffer | string) => stdout.push(chunk));
-  child.stderr.on("data", (chunk: Buffer | string) => stderr.push(chunk));
-
-  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (code, signal) => resolve({ code, signal }));
+  return executeUtilitySocketWithDeps(state, socket, {
+    executeCommand: executeCommandUtility,
+    executeBuiltInUtility,
+    hasBuiltInUtility,
+    recordUtilityInput: (input) => recordUtilityInputFile({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), input }),
+    appendUtilityInputEvent: (artifact, visit) => appendEvent(state.runState, "utility_input", { node: socket.id, artifact, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit }),
   });
-
-  child.stdin.end(`${JSON.stringify(input)}\n`);
-
-  let result: { code: number | null; signal: NodeJS.Signals | null };
-  try {
-    result = await closed;
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  const stdoutText = stdout.text();
-  const stderrText = stderr.text();
-  const artifacts = await recordCommandArtifacts(state, socket, stdoutText, stderrText, stdout.truncated, stderr.truncated);
-  await appendEvent(state.runState, "utility_command", { node: socket.id, command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
-
-  if (timedOut) {
-    throw new Error(`Utility command timed out for socket "${socket.id}" after ${timeoutMs}ms: ${formatCommandForError(command)}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
-  }
-  if (result.code !== 0) {
-    const summary = summarizeStderr(stderrText, stderr.truncated);
-    throw new Error(`Utility command failed for socket "${socket.id}": ${formatCommandForError(command)} exited with code ${result.code ?? `signal ${result.signal ?? "unknown"}`}. stderr: ${summary}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
-  }
-  return stdoutText;
-}
-
-function createBoundedCapture(maxBytes: number): { push(chunk: Buffer | string): void; text(): string; truncated: boolean } {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  let truncated = false;
-  return {
-    push(chunk) {
-      if (bytes >= maxBytes) {
-        truncated = true;
-        return;
-      }
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const remaining = maxBytes - bytes;
-      if (buffer.byteLength > remaining) {
-        chunks.push(buffer.subarray(0, remaining));
-        bytes += remaining;
-        truncated = true;
-      } else {
-        chunks.push(buffer);
-        bytes += buffer.byteLength;
-      }
-    },
-    text() {
-      return Buffer.concat(chunks).toString("utf8");
-    },
-    get truncated() {
-      return truncated;
-    },
-  };
-}
-
-async function recordCommandArtifacts(state: MateriaCastState, socket: ResolvedMateriaSocket, stdout: string, stderr: string, stdoutTruncated: boolean, stderrTruncated: boolean): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }> {
-  return recordCommandArtifactsFile({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), stdout, stderr, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES });
-}
-
-function summarizeStderr(stderr: string, truncated: boolean): string {
-  const summary = stderr.trim().replace(/\s+/g, " ").slice(0, MAX_UTILITY_ERROR_SUMMARY_LENGTH);
-  return `${summary || "<empty>"}${truncated ? " (truncated)" : ""}`;
-}
-
-function formatCommandForError(command: string[]): string {
-  return command.map((part) => JSON.stringify(part)).join(" ");
-}
-
-function buildUtilityInput(state: MateriaCastState, socket: Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>): Record<string, unknown> {
-  const loop = resolvedSocketConfig(socket).foreach ?? loopIteratorForSocket(state.pipeline, socket.id);
-  const cursorName = loop?.cursor ?? (loop ? `${socket.id}Index` : undefined);
-  return {
-    cwd: state.cwd,
-    runDir: state.runDir,
-    request: state.request,
-    castId: state.castId,
-    socketId: socket.id,
-    // Legacy utility-command input alias retained for existing utility scripts.
-    nodeId: socket.id,
-    params: resolvedSocketConfig(socket).params ?? {},
-    state: state.data,
-    item: currentItem(state) ?? null,
-    itemKey: state.currentItemKey ?? null,
-    itemLabel: state.currentItemLabel ?? null,
-    cursor: cursorName ? { name: cursorName, index: state.cursors[cursorName] ?? 0 } : null,
-    cursors: state.cursors,
-  };
-}
-
-async function recordUtilityInput(state: MateriaCastState, socket: ResolvedMateriaSocket, input: Record<string, unknown>): Promise<string> {
-  return recordUtilityInputFile({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), input });
 }
 
 async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<void> {
@@ -551,101 +420,32 @@ async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, 
 }
 
 async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<boolean> {
-  const reason = classifyRecoverableTurnFailure(error);
-  if (!reason) {
-    return false;
-  }
-
-  const key = recoveryIdentityKey(state);
-  state.recoveryAttempts ??= {};
-  const allowance = ensureRecoveryAllowance(state, key);
-  const previousAttempts = state.recoveryAttempts[key] ?? 0;
-  const maxAttempts = allowance.effectiveMaxAttempts;
-  if (previousAttempts >= maxAttempts) {
-    const exhausted = `Same-socket recovery exhausted for ${recoveryDiagnosticLabel(state)} after ${previousAttempts}/${maxAttempts} attempt(s): ${errorMessage(error)}`;
-    state.recoveryExhaustion = {
-      kind: "same_node_recovery_exhausted",
-      reason,
-      key,
-      attempts: previousAttempts,
-      originalMaxAttempts: allowance.originalMaxAttempts,
-      effectiveMaxAttempts: allowance.effectiveMaxAttempts,
-      reviveCount: allowance.reviveCount,
-      failedReason: exhausted,
-      node: currentSocketId(state),
-      itemKey: state.currentItemKey,
-      mode: recoveryTurnMode(state),
-      exhaustedAt: Date.now(),
-    };
-    await appendEvent(state.runState, "same_node_recovery_exhausted", { reason, key, attempts: previousAttempts, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
-    await failCast(pi, ctx, state, new Error(exhausted), options.entryId, { preserveRecoveryExhaustion: true });
-    return true;
-  }
-
-  const attempt = previousAttempts + 1;
-  state.recoveryAttempts[key] = attempt;
-  state.awaitingResponse = true;
-  setCurrentSocketState(state, "awaiting_agent_response");
-  state.updatedAt = Date.now();
-  state.runState.lastMessage = `Retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`;
-  await appendEvent(state.runState, "same_node_recovery_start", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: currentSocketVisit(state, undefined), mode: recoveryTurnMode(state) });
-  await writeUsage(state.runState);
-  saveCastState(pi, state);
-
-  try {
-    if (reason === "context_window") await runSameSocketRecoveryAction(pi, ctx, state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
-    updateToolScope(pi, currentMateria(state));
-    await sendMateriaTurn(pi, ctx, state, buildSameSocketRecoveryPrompt(state), { skipProactiveCompaction: true });
-    await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
-    saveCastState(pi, state);
-    updateWidget(ctx, state);
-    ctx.ui.notify(`pi-materia retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`, "warning");
-    return true;
-  } catch (retryError) {
-    await appendEvent(state.runState, "same_node_recovery_retry_failed", { reason, key, attempt, maxAttempts, error: errorMessage(retryError), originalError: errorMessage(error), entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
-    await failCast(pi, ctx, state, new Error(`Same-socket recovery retry failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(retryError)}. Original failure: ${errorMessage(error)}`), options.entryId);
-    return true;
-  }
+  return handleSameSocketRecoverableTurnFailureWorkflow(state, error, {
+    appendEvent,
+    writeUsage,
+    saveState: (nextState) => saveCastState(pi, nextState),
+    failCast: (nextState, nextError, entryId, failOptions) => failCast(pi, ctx, nextState, nextError, entryId, failOptions),
+    updateToolScope: (materia) => updateToolScope(pi, materia),
+    sendMateriaTurn: (nextState, prompt, turnOptions) => sendMateriaTurn(pi, ctx, nextState, prompt, turnOptions),
+    buildRecoveryPrompt: buildSameSocketRecoveryPrompt,
+    updateWidget: (nextState) => updateWidget(ctx, nextState),
+    notifyWarning: (message) => ctx.ui.notify(message, "warning"),
+    setCurrentSocketState,
+    currentSocketId,
+    currentSocketVisit,
+    shortMetadataLabel,
+    currentMateria,
+    runRecoveryAction: (nextState, actionOptions) => runSameSocketRecoveryAction(pi, ctx, nextState, actionOptions),
+  }, options);
 }
 
-async function runSameSocketRecoveryAction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, options: { action: "compact"; reason: "context_window"; key: string; attempt: number; maxAttempts: number; entryId?: string }): Promise<void> {
-  await appendEvent(state.runState, "same_node_recovery_action_start", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
-  saveCastState(pi, state);
-
-  try {
-    const result = await forceContextCompaction(ctx, state);
-    await appendEvent(state.runState, "same_node_recovery_action_complete", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), result: summarizeCompactionResult(result) });
-    saveCastState(pi, state);
-  } catch (actionError) {
-    await appendEvent(state.runState, "same_node_recovery_action_failed", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), error: errorMessage(actionError) });
-    throw new Error(`Same-socket recovery action compact failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(actionError)}`);
-  }
-}
-
-function forceContextCompaction(ctx: ExtensionContext, state: MateriaCastState): Promise<unknown> {
-  return compactContext(ctx, `Pi Materia forced context-window recovery for ${recoveryDiagnosticLabel(state)}. Preserve the active cast state, task requirements, and any durable artifacts/events needed to continue the same turn.`);
-}
-
-function compactContext(ctx: ExtensionContext, customInstructions: string): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    try {
-      ctx.compact({ customInstructions, onComplete: resolve, onError: reject });
-    } catch (error) {
-      reject(error);
-    }
+async function runSameSocketRecoveryAction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, options: SameSocketRecoveryActionOptions): Promise<void> {
+  return runSameSocketRecoveryActionWorkflow(state, options, {
+    appendEvent,
+    saveState: (nextState) => saveCastState(pi, nextState),
+    runCompaction: (nextState) => runSameSocketRecoveryCompaction(ctx, nextState),
+    currentSocketId,
   });
-}
-
-function summarizeCompactionResult(result: unknown): unknown {
-  if (!result || typeof result !== "object") return result;
-  const value = result as Record<string, unknown>;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => ["tokensBefore", "tokensAfter", "entriesRemoved", "summaryTokens", "firstKeptEntryId"].includes(key)));
-}
-
-function effectiveContextWindow(ctx: ExtensionContext, usage: { contextWindow?: number }): number | undefined {
-  const modelContextWindow = ctx.model?.contextWindow;
-  if (Number.isFinite(modelContextWindow) && modelContextWindow != null && modelContextWindow > 0) return modelContextWindow;
-  return Number.isFinite(usage.contextWindow) && usage.contextWindow != null && usage.contextWindow > 0 ? usage.contextWindow : undefined;
 }
 
 async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
@@ -655,68 +455,16 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
   // active-turn tool results retained by context isolation, or provider-specific
   // tokenization overhead. Keep docs/materia-compaction-budgeting.md in sync
   // when changing this decision point.
-  const usage = ctx.getContextUsage();
-  if (!usage) return;
-  const config = await loadConfigFromState(state);
-  const contextWindow = effectiveContextWindow(ctx, usage);
-  const threshold = resolveProactiveCompactionThreshold(config.compaction, contextWindow);
-  const thresholdPercent = threshold.thresholdPercent;
-  const percent = usage.tokens != null && contextWindow != null && contextWindow > 0 ? (usage.tokens / contextWindow) * 100 : usage.percent;
-  if (percent == null || percent < thresholdPercent) return;
-
-  const eventBase = {
-    action: "compact" as const,
-    reason: "context_pressure" as const,
-    thresholdPercent,
-    thresholdMode: threshold.mode,
-    thresholdTier: threshold.tier,
-    tokens: usage.tokens,
-    contextWindow,
-    percent,
-    socket: currentSocketId(state),
-    itemKey: state.currentItemKey,
-    itemLabel: state.currentItemLabel,
-    itemLabelShort: shortMetadataLabel(state.currentItemLabel),
-    visit: currentSocketVisit(state, undefined),
-    mode: recoveryTurnMode(state),
-  };
-  await appendEvent(state.runState, "proactive_compaction_start", eventBase);
-  saveCastState(pi, state);
-
-  try {
-    const result = await compactContext(ctx, `Pi Materia proactive context-pressure compaction before ${recoveryDiagnosticLabel(state)}. Preserve the active cast state, task requirements, and any durable artifacts/events needed to continue the same turn.`);
-    await appendEvent(state.runState, "proactive_compaction_complete", { ...eventBase, result: summarizeCompactionResult(result) });
-    saveCastState(pi, state);
-  } catch (error) {
-    const message = `Proactive compaction failed before ${recoveryDiagnosticLabel(state)}; continuing turn so same-socket recovery can handle any later context-window failure: ${errorMessage(error)}`;
-    state.runState.lastMessage = message;
-    await appendEvent(state.runState, "proactive_compaction_failed", { ...eventBase, error: errorMessage(error), warning: true });
-    await writeUsage(state.runState);
-    saveCastState(pi, state);
-    ctx.ui.notify(`pi-materia warning: ${message}`, "warning");
-  }
-}
-
-export type TurnFailureClassification = "context_window" | "transient_transport";
-
-export function classifyTurnFailure(error: unknown): TurnFailureClassification | undefined {
-  const message = errorMessage(error);
-  if (isContextWindowFailureMessage(message)) return "context_window";
-  if (isPlainWebSocketTransportFailure(message)) return "transient_transport";
-  return undefined;
-}
-
-function classifyRecoverableTurnFailure(error: unknown): "context_window" | undefined {
-  return classifyTurnFailure(error) === "context_window" ? "context_window" : undefined;
-}
-
-function isContextWindowFailureMessage(message: string): boolean {
-  return /context[_-]?length[_-]?exceeded|context[_-]?window[_-]?exceeded|context (window|length|limit|overflow)|token limit|max(?:imum)? tokens|input too long|request too large|too many tokens/i.test(message);
-}
-
-function isPlainWebSocketTransportFailure(message: string): boolean {
-  const normalized = message.trim().replace(/\s+/g, " ");
-  return /(?:^|:\s*)(?:error:\s*)?websocket (?:error|closed|close|connection (?:closed|error|lost)|disconnected)(?:\s+\d{3,4})?\.?$/i.test(normalized);
+  await maybeRunProactiveCompactionWorkflow(ctx, state, {
+    loadConfigFromState,
+    appendEvent,
+    writeUsage,
+    saveState: (nextState) => saveCastState(pi, nextState),
+    notifyWarning: (message) => ctx.ui.notify(message, "warning"),
+    currentSocketId,
+    currentSocketVisit,
+    shortMetadataLabel,
+  });
 }
 
 function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {
@@ -724,85 +472,6 @@ function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {
   const socket = currentSocketOrThrow(state);
   if (recoveryTurnMode(state) === "finalization") return buildMultiTurnFinalizationPrompt(state, socket);
   return buildSocketPrompt(state, socket);
-}
-
-function recoveryTurnMode(state: MateriaCastState): "normal" | "refinement" | "finalization" {
-  if (state.multiTurnFinalizing === true) return "finalization";
-  return isActiveMultiTurnSocket(state) ? "refinement" : "normal";
-}
-
-function recoveryIdentityKey(state: MateriaCastState): string {
-  const socketId = currentSocketId(state) ?? state.phase;
-  const visit = currentSocketVisit(state, 0);
-  const refinementTurn = currentSocketId(state) ? currentRefinementTurn(state, currentSocketId(state)!) : 0;
-  return JSON.stringify([recoveryTurnMode(state), socketId, state.currentItemKey ?? "__singleton__", visit, refinementTurn]);
-}
-
-function ensureRecoveryAllowance(state: MateriaCastState, key: string): MateriaRecoveryAllowance {
-  state.recoveryAllowances ??= {};
-  const existing = state.recoveryAllowances[key];
-  if (isValidRecoveryAllowance(existing)) return existing;
-  const originalMaxAttempts = DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS;
-  const allowance: MateriaRecoveryAllowance = { originalMaxAttempts, effectiveMaxAttempts: originalMaxAttempts, reviveCount: 0 };
-  state.recoveryAllowances[key] = allowance;
-  return allowance;
-}
-
-function isValidRecoveryAllowance(value: unknown): value is MateriaRecoveryAllowance {
-  const allowance = value as Partial<MateriaRecoveryAllowance> | undefined;
-  return Boolean(
-    allowance &&
-    Number.isSafeInteger(allowance.originalMaxAttempts) && allowance.originalMaxAttempts! > 0 &&
-    Number.isSafeInteger(allowance.effectiveMaxAttempts) && allowance.effectiveMaxAttempts! >= allowance.originalMaxAttempts! &&
-    Number.isSafeInteger(allowance.reviveCount) && allowance.reviveCount! >= 0
-  );
-}
-
-export interface MateriaReviveAllowanceResult {
-  key: string;
-  priorEffectiveMaxAttempts: number;
-  increment: number;
-  newEffectiveMaxAttempts: number;
-  reviveCount: number;
-}
-
-export function extendSameSocketRecoveryAllowanceForRevive(state: MateriaCastState): MateriaReviveAllowanceResult {
-  if (state.active) throw new Error(`pi-materia cast ${state.castId} is still active and cannot be revived.`);
-  if (state.phase !== "failed" && currentSocketState(state) !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed and cannot be revived.`);
-  const exhaustion = state.recoveryExhaustion;
-  if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted") {
-    throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured same-socket recovery exhaustion metadata. Use /materia recast for general failed casts.`);
-  }
-  if (!exhaustion.key) throw new Error(`pi-materia cast ${state.castId} is not revivable: exhausted recovery context is missing.`);
-  if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) {
-    throw new Error(`pi-materia cast ${state.castId} is not revivable: same-socket recovery exhaustion metadata does not match the current terminal failure. Use /materia recast for general failed casts.`);
-  }
-  const allowance = state.recoveryAllowances?.[exhaustion.key];
-  if (!isValidRecoveryAllowance(allowance)) {
-    throw new Error(`pi-materia cast ${state.castId} is not revivable: recovery allowance metadata is missing or invalid. Use /materia recast instead.`);
-  }
-  const priorEffectiveMaxAttempts = allowance.effectiveMaxAttempts;
-  const increment = allowance.originalMaxAttempts;
-  allowance.effectiveMaxAttempts = priorEffectiveMaxAttempts + increment;
-  allowance.reviveCount += 1;
-  exhaustion.effectiveMaxAttempts = allowance.effectiveMaxAttempts;
-  exhaustion.originalMaxAttempts = allowance.originalMaxAttempts;
-  exhaustion.reviveCount = allowance.reviveCount;
-  state.updatedAt = Date.now();
-  return { key: exhaustion.key, priorEffectiveMaxAttempts, increment, newEffectiveMaxAttempts: allowance.effectiveMaxAttempts, reviveCount: allowance.reviveCount };
-}
-
-function recoveryDiagnosticLabel(state: MateriaCastState): string {
-  const item = state.currentItemKey ? ` item ${JSON.stringify(state.currentItemKey)}` : "";
-  return `${recoveryTurnMode(state)} turn for socket "${currentSocketId(state) ?? state.phase}"${item}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function nonRecoverableTurnError(state: MateriaCastState, error: unknown): Error {
-  return new Error(`Non-recoverable turn failure for ${recoveryDiagnosticLabel(state)} (same-socket recovery not attempted): ${errorMessage(error)}`);
 }
 
 async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string, options: { preserveRecoveryExhaustion?: boolean } = {}): Promise<void> {
