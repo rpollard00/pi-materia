@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
-import { loopIteratorForNode, renderGrid, resolvePipeline } from "../src/pipeline.js";
+import { loopIteratorForSocket, renderGrid, resolvePipeline } from "../src/pipeline.js";
 import type { PiMateriaConfig } from "../src/types.js";
 
 const baseLoadout = {
   entry: "Socket-1",
-  nodes: {
+  sockets: {
     "Socket-1": {
       type: "utility" as const,
       command: ["node", "hello.js"],
@@ -35,12 +35,16 @@ function activeLoadout(config: PiMateriaConfig) {
   return config.loadouts![config.activeLoadout!]!;
 }
 
+function testSockets(loadout: NonNullable<PiMateriaConfig["loadouts"]>[string]) {
+  return loadout.sockets!;
+}
+
 describe("loadout-aware pipeline resolution", () => {
   test("configs without named loadouts or a valid activeLoadout are rejected clearly", () => {
     expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", materia: {} })).toThrow(/must define named "loadouts"/);
     expect(() => resolvePipeline({
       artifactDir: ".pi/pi-materia",
-      loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "utility", utility: "echo" } } } },
+      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", utility: "echo" } } } },
       materia: {},
     })).toThrow(/No active Materia loadout configured/);
   });
@@ -52,11 +56,11 @@ describe("loadout-aware pipeline resolution", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
+          sockets: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
         },
       },
       materia: {
@@ -69,7 +73,9 @@ describe("loadout-aware pipeline resolution", () => {
     const lines = renderGrid(config, pipeline, "test", "/tmp/project");
 
     expect(pipeline.entry.id).toBe("Socket-1");
-    expect(pipeline.entry.node.type).toBe("agent");
+    expect(pipeline.entry.socket.type).toBe("agent");
+    expect(pipeline.sockets["Socket-1"]).toBe(pipeline.entry);
+    expect(pipeline.sockets["Socket-1"]).toBe(pipeline.sockets["Socket-1"]);
     expect(pipeline.entry.materia.prompt).toBe("Plan interactively.");
     expect(lines).toContain("loadout: Planning-Consult");
   });
@@ -125,14 +131,14 @@ describe("loadout-aware pipeline resolution", () => {
 
   test("resolvePipeline uses shared graph validation for ordered outgoing edges and missing endpoints", () => {
     const withUnreachableEdge = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(withUnreachableEdge).nodes["Socket-1"].edges = [
+    activeLoadout(withUnreachableEdge).sockets["Socket-1"].edges = [
       { when: "always", to: "Socket-2" },
       { when: "satisfied", to: "Socket-2" },
     ];
     expect(() => resolvePipeline(withUnreachableEdge)).toThrow(/unreachable outgoing edge/);
 
     const withMissingEdgeEndpoint = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(withMissingEdgeEndpoint).nodes["Socket-1"].edges = [{ when: "satisfied", to: undefined as never }];
+    activeLoadout(withMissingEdgeEndpoint).sockets["Socket-1"].edges = [{ when: "satisfied", to: undefined as never }];
     expect(() => resolvePipeline(withMissingEdgeEndpoint)).toThrow(/Missing graph endpoint referenced by Socket-1\.edges\[0\]\.to/);
   });
 
@@ -145,12 +151,12 @@ describe("loadout-aware pipeline resolution", () => {
           entry: "Socket-1",
           loops: {
             loopSelection: {
-              nodes: ["Socket-3", "Socket-4"],
+              sockets: ["Socket-3", "Socket-4"],
               consumes: { from: "Socket-1", output: "workItems" },
               exit: { from: "Socket-4", when: "satisfied", to: "Socket-2" },
             },
           },
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-2": { type: "agent", materia: "Done" },
             "Socket-3": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
@@ -168,9 +174,9 @@ describe("loadout-aware pipeline resolution", () => {
 
     const pipeline = resolvePipeline(config);
 
-    expect(pipeline.nodes["Socket-4"].node.parse).toBe("json");
-    expect(pipeline.nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "Socket-2", when: "satisfied" });
-    expect(pipeline.nodes["Socket-4"].node.edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    expect(pipeline.sockets["Socket-4"].socket.parse).toBe("json");
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "Socket-2", when: "satisfied" });
+    expect(pipeline.sockets["Socket-4"].socket.edges).toEqual([{ when: "always", to: "Socket-3" }]);
     expect(pipeline.loops?.loopSelection.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
   });
 
@@ -183,12 +189,12 @@ describe("loadout-aware pipeline resolution", () => {
           entry: "Socket-1",
           loops: {
             taskIteration: {
-              nodes: ["Socket-2"],
+              sockets: ["Socket-2"],
               consumes: { from: "Socket-1", output: "workItems" },
               exit: { from: "Socket-2", when: "satisfied", to: "end" },
             },
           },
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": {
               type: "agent",
@@ -207,14 +213,14 @@ describe("loadout-aware pipeline resolution", () => {
     };
 
     const pipeline = resolvePipeline(config);
-    expect(pipeline.nodes["Socket-2"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(pipeline.sockets["Socket-2"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
 
     const conflictingParse = structuredClone(config) as PiMateriaConfig;
-    conflictingParse.loadouts!.Loop.nodes["Socket-2"].parse = "text";
+    testSockets(conflictingParse.loadouts!.Loop)["Socket-2"].parse = "text";
     expect(() => resolvePipeline(conflictingParse)).toThrow(/requires parse: "json".*Current parse is "text"/);
 
     const conflictingAdvance = structuredClone(config) as PiMateriaConfig;
-    conflictingAdvance.loadouts!.Loop.nodes["Socket-2"].advance = { cursor: "otherIndex", items: "state.workItems", done: "end", when: "satisfied" };
+    testSockets(conflictingAdvance.loadouts!.Loop)["Socket-2"].advance = { cursor: "otherIndex", items: "state.workItems", done: "end", when: "satisfied" };
     expect(() => resolvePipeline(conflictingAdvance)).toThrow(/existing advance block.*cursor: current "otherIndex", expected "workItemIndex"/);
   });
 
@@ -228,12 +234,12 @@ describe("loadout-aware pipeline resolution", () => {
           loops: {
             taskIteration: {
               label: "Generated workItems loop",
-              nodes: ["Socket-2"],
+              sockets: ["Socket-2"],
               consumes: { from: "Socket-1", output: "workItems" },
               exit: { from: "Socket-2", when: "satisfied", to: "end" },
             },
           },
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
           },
@@ -249,7 +255,7 @@ describe("loadout-aware pipeline resolution", () => {
     const lines = renderGrid(config, pipeline, "test", "/tmp/project");
 
     expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
-    expect(loopIteratorForNode(pipeline, "Socket-2")?.items).toBe("state.workItems");
+    expect(loopIteratorForSocket(pipeline, "Socket-2")?.items).toBe("state.workItems");
     expect(lines).toContain("- planner: tools=readOnly, model=active Pi model, thinking=active Pi thinking, generator=workItems:array<workItem>");
     expect(lines).toContain("loop taskIteration (Generated workItems loop): [Socket-2] consumes=Socket-1.workItems iterator=state.workItems as workItem done end exit=Socket-2.satisfied->end");
   });
@@ -264,12 +270,12 @@ describe("loadout-aware pipeline resolution", () => {
           loops: {
             taskIteration: {
               label: "Architected-Consult-style generated workItems loop",
-              nodes: ["Socket-2", "Socket-3"],
+              sockets: ["Socket-2", "Socket-3"],
               consumes: { from: "Socket-4", output: "workItems" },
               exit: { from: "Socket-3", when: "satisfied", to: "end" },
             },
           },
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-4" }] },
             "Socket-4": { type: "agent", materia: "architect", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
@@ -295,22 +301,22 @@ describe("loadout-aware pipeline resolution", () => {
     expect(lines.join("\n")).not.toContain("generator=work:");
 
     const missingUpstreamParse = structuredClone(config) as PiMateriaConfig;
-    delete missingUpstreamParse.loadouts!.Loop.nodes["Socket-1"].parse;
+    delete testSockets(missingUpstreamParse.loadouts!.Loop)["Socket-1"].parse;
     const normalizedMissingUpstreamParse = resolvePipeline(missingUpstreamParse);
-    expect(normalizedMissingUpstreamParse.nodes["Socket-1"].node.parse).toBe("json");
-    expect(normalizedMissingUpstreamParse.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
+    expect(normalizedMissingUpstreamParse.sockets["Socket-1"].socket.parse).toBe("json");
+    expect(normalizedMissingUpstreamParse.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
 
     const missingDownstreamParse = structuredClone(config) as PiMateriaConfig;
-    delete missingDownstreamParse.loadouts!.Loop.nodes["Socket-4"].parse;
+    delete testSockets(missingDownstreamParse.loadouts!.Loop)["Socket-4"].parse;
     const normalizedMissingDownstreamParse = resolvePipeline(missingDownstreamParse);
-    expect(normalizedMissingDownstreamParse.nodes["Socket-4"].node.parse).toBe("json");
-    expect(normalizedMissingDownstreamParse.nodes["Socket-4"].node.assign?.workItems).toBe("$.workItems");
+    expect(normalizedMissingDownstreamParse.sockets["Socket-4"].socket.parse).toBe("json");
+    expect(normalizedMissingDownstreamParse.sockets["Socket-4"].socket.assign?.workItems).toBe("$.workItems");
 
     const incompleteDownstreamAssignment = structuredClone(config) as PiMateriaConfig;
-    incompleteDownstreamAssignment.loadouts!.Loop.nodes["Socket-4"].assign = { tasks: "$.tasks" };
+    testSockets(incompleteDownstreamAssignment.loadouts!.Loop)["Socket-4"].assign = { tasks: "$.tasks" };
     const normalizedIncompleteDownstreamAssignment = resolvePipeline(incompleteDownstreamAssignment);
-    expect(normalizedIncompleteDownstreamAssignment.nodes["Socket-4"].node.parse).toBe("json");
-    expect(normalizedIncompleteDownstreamAssignment.nodes["Socket-4"].node.assign?.workItems).toBe("$.workItems");
+    expect(normalizedIncompleteDownstreamAssignment.sockets["Socket-4"].socket.parse).toBe("json");
+    expect(normalizedIncompleteDownstreamAssignment.sockets["Socket-4"].socket.assign?.workItems).toBe("$.workItems");
   });
 
   test("resolvePipeline reconciles stale loop consumer source from current graph edges", () => {
@@ -322,12 +328,12 @@ describe("loadout-aware pipeline resolution", () => {
           entry: "Socket-1",
           loops: {
             taskIteration: {
-              nodes: ["Socket-3", "Socket-4"],
+              sockets: ["Socket-3", "Socket-4"],
               consumes: { from: "Socket-1", output: "workItems" },
               exit: { from: "Socket-4", when: "satisfied", to: "end" },
             },
           },
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "refiner", edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-3": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
@@ -346,9 +352,9 @@ describe("loadout-aware pipeline resolution", () => {
     const pipeline = resolvePipeline(config);
 
     expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-2", output: "workItems" });
-    expect(pipeline.nodes["Socket-2"].node.parse).toBe("json");
-    expect(pipeline.nodes["Socket-2"].node.assign?.workItems).toBe("$.workItems");
-    expect(pipeline.nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(pipeline.sockets["Socket-2"].socket.parse).toBe("json");
+    expect(pipeline.sockets["Socket-2"].socket.assign?.workItems).toBe("$.workItems");
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
   });
 
   test("resolvePipeline normalizes generator-to-generator pipeline sockets without a loop consumer", () => {
@@ -358,7 +364,7 @@ describe("loadout-aware pipeline resolution", () => {
       loadouts: {
         Yolo: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "refiner", edges: [{ when: "always", to: "end" }] },
           },
@@ -372,10 +378,10 @@ describe("loadout-aware pipeline resolution", () => {
 
     const pipeline = resolvePipeline(config);
 
-    expect(pipeline.nodes["Socket-1"].node.parse).toBe("json");
-    expect(pipeline.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
-    expect(pipeline.nodes["Socket-2"].node.parse).toBe("json");
-    expect(pipeline.nodes["Socket-2"].node.assign?.workItems).toBe("$.workItems");
+    expect(pipeline.sockets["Socket-1"].socket.parse).toBe("json");
+    expect(pipeline.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    expect(pipeline.sockets["Socket-2"].socket.parse).toBe("json");
+    expect(pipeline.sockets["Socket-2"].socket.assign?.workItems).toBe("$.workItems");
   });
 
   test("resolvePipeline rejects authored legacy generates metadata with migration guidance", () => {
@@ -388,12 +394,12 @@ describe("loadout-aware pipeline resolution", () => {
           loops: {
             taskIteration: {
               label: "Legacy generated task loop",
-              nodes: ["Socket-2", "Socket-3"],
+              sockets: ["Socket-2", "Socket-3"],
               iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
               exit: { from: "Socket-3", when: "satisfied", to: "end" },
             },
           },
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-3": { type: "agent", materia: "Check", edges: [{ when: "always", to: "Socket-2" }] },
@@ -417,8 +423,8 @@ describe("loadout-aware pipeline resolution", () => {
       loadouts: {
         Loop: {
           entry: "Socket-1",
-          loops: { taskIteration: { nodes: ["Socket-2", "Socket-3"], iterator: { items: "state.workItems" } } },
-          nodes: {
+          loops: { taskIteration: { sockets: ["Socket-2", "Socket-3"], iterator: { items: "state.workItems" } } },
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-4": { type: "agent", materia: "otherPlanner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
@@ -450,12 +456,12 @@ describe("loadout-aware pipeline resolution", () => {
           loops: {
             taskIteration: {
               label: "Build → Eval → Maintain until all tasks complete",
-              nodes: ["Socket-1", "Socket-2", "Socket-3"],
+              sockets: ["Socket-1", "Socket-2", "Socket-3"],
               iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
               exit: { from: "Socket-3", when: "satisfied", to: "end" },
             },
           },
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Auto-Eval", edges: [{ when: "satisfied", to: "Socket-3" }, { when: "not_satisfied", to: "Socket-1" }] },
             "Socket-3": { type: "agent", materia: "Maintain", edges: [{ when: "always", to: "Socket-1" }] },
@@ -472,8 +478,8 @@ describe("loadout-aware pipeline resolution", () => {
     const pipeline = resolvePipeline(config);
     const lines = renderGrid(config, pipeline, "test", "/tmp/project");
 
-    expect(pipeline.loops?.taskIteration.nodes).toEqual(["Socket-1", "Socket-2", "Socket-3"]);
-    expect(loopIteratorForNode(pipeline, "Socket-3")?.cursor).toBe("taskIndex");
+    expect(pipeline.loops?.taskIteration.sockets).toEqual(["Socket-1", "Socket-2", "Socket-3"]);
+    expect(loopIteratorForSocket(pipeline, "Socket-3")?.cursor).toBe("taskIndex");
     expect(lines).toContain("loop taskIteration (Build → Eval → Maintain until all tasks complete): [Socket-1, Socket-2, Socket-3] iterator=state.tasks as task done end exit=Socket-3.satisfied->end");
   });
 
@@ -484,7 +490,7 @@ describe("loadout-aware pipeline resolution", () => {
       loadouts: {
         Loop: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "Build", next: "Socket-2" },
             "Socket-2": {
               type: "agent",
@@ -510,12 +516,12 @@ describe("loadout-aware pipeline resolution", () => {
   });
 });
 
-describe("utility pipeline nodes", () => {
-  test("resolvePipeline accepts command and named utility nodes", () => {
+describe("utility pipeline sockets", () => {
+  test("resolvePipeline accepts command and named utility sockets", () => {
     const pipeline = resolvePipeline(baseConfig);
 
-    expect(pipeline.entry.node.type).toBe("utility");
-    expect(pipeline.nodes["Socket-2"].node.type).toBe("utility");
+    expect(pipeline.entry.socket.type).toBe("utility");
+    expect(pipeline.sockets["Socket-2"].socket.type).toBe("utility");
   });
 
   test("renderGrid shows utility command, parse, routing, foreach, limits, and timeout", () => {
@@ -543,7 +549,7 @@ describe("utility pipeline nodes", () => {
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", next: "Socket-2" },
             "Socket-2": { type: "agent", materia: "Build" },
           },
@@ -580,16 +586,16 @@ describe("utility pipeline nodes", () => {
     expect(build).toContain("thinking=active Pi thinking");
   });
 
-  test("rejects utility nodes without command or utility", () => {
+  test("rejects utility sockets without command or utility", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).nodes["Socket-1"] = { type: "utility" };
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility" };
 
     expect(() => resolvePipeline(config)).toThrow(/must configure either "utility" or "command"/);
   });
 
   test("rejects unsupported parse modes with a friendly error", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).nodes["Socket-1"] = { type: "utility", utility: "example", parse: "yaml" as never };
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility", utility: "example", parse: "yaml" as never };
 
     expect(() => resolvePipeline(config)).toThrow(/unsupported parse mode "yaml"/);
   });
@@ -600,7 +606,7 @@ describe("utility pipeline nodes", () => {
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", parse: "json" },
           },
         },
@@ -613,7 +619,7 @@ describe("utility pipeline nodes", () => {
     const pipeline = resolvePipeline(config);
     const lines = renderGrid(config, pipeline, "test", "/tmp/project");
 
-    expect(pipeline.entry.node.type).toBe("agent");
+    expect(pipeline.entry.socket.type).toBe("agent");
     expect(pipeline.entry.materia.multiTurn).toBe(true);
     expect(lines).toContain("- planner: tools=readOnly, multiTurn=true, model=active Pi model, thinking=active Pi thinking");
     expect(lines.find((line) => line.startsWith("- Socket-1:"))).toContain("materia.multiTurn=true");
@@ -621,7 +627,7 @@ describe("utility pipeline nodes", () => {
 
   test("rejects obsolete node-level multiTurn", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).nodes["Socket-1"] = { type: "utility", utility: "example", multiTurn: true } as never;
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility", utility: "example", multiTurn: true } as never;
 
     expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
@@ -633,12 +639,12 @@ describe("utility pipeline nodes", () => {
       loadouts: {
         Loop: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "customGenerator", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-3": { type: "agent", materia: "Check", edges: [{ when: "always", to: "Socket-2" }] },
           },
-          loops: { workLoop: { nodes: ["Socket-2", "Socket-3"], consumes: { from: "Socket-1", output: "workItems" } } },
+          loops: { workLoop: { sockets: ["Socket-2", "Socket-3"], consumes: { from: "Socket-1", output: "workItems" } } },
         },
       },
       materia: {
@@ -652,15 +658,15 @@ describe("utility pipeline nodes", () => {
     expect(resolved.loops?.workLoop.iterator).toMatchObject({ items: "state.workItems", as: "workItem" });
 
     const noCycle = structuredClone(config) as PiMateriaConfig;
-    noCycle.loadouts!.Loop.nodes["Socket-3"].edges = [{ when: "always", to: "end" }];
+    testSockets(noCycle.loadouts!.Loop)["Socket-3"].edges = [{ when: "always", to: "end" }];
     expect(() => resolvePipeline(noCycle)).toThrow(/must contain a directed cycle/);
 
     const missingGeneratorInput = structuredClone(config) as PiMateriaConfig;
-    missingGeneratorInput.loadouts!.Loop.nodes["Socket-1"].edges = [{ when: "always", to: "end" }];
+    testSockets(missingGeneratorInput.loadouts!.Loop)["Socket-1"].edges = [{ when: "always", to: "end" }];
     expect(() => resolvePipeline(missingGeneratorInput)).toThrow(/exactly one inbound edge from a generator socket.*found none/s);
 
     const multipleGeneratorInputs = structuredClone(config) as PiMateriaConfig;
-    multipleGeneratorInputs.loadouts!.Loop.nodes["Socket-4"] = { type: "agent", materia: "otherGenerator", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-3" }] };
+    testSockets(multipleGeneratorInputs.loadouts!.Loop)["Socket-4"] = { type: "agent", materia: "otherGenerator", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-3" }] };
     multipleGeneratorInputs.materia.otherGenerator = { tools: "readOnly", prompt: "Make more work.", generator: true };
     expect(() => resolvePipeline(multipleGeneratorInputs)).toThrow(/exactly one inbound edge from a generator socket.*found 2/s);
   });
@@ -672,11 +678,11 @@ describe("utility pipeline nodes", () => {
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner", parse: "text", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
           },
-          loops: { taskIteration: { nodes: ["Socket-2"], consumes: { from: "Socket-1", output: "workItems" } } },
+          loops: { taskIteration: { sockets: ["Socket-2"], consumes: { from: "Socket-1", output: "workItems" } } },
         },
       },
       materia: {
@@ -686,19 +692,19 @@ describe("utility pipeline nodes", () => {
     };
 
     const normalizedTextParse = resolvePipeline(config);
-    expect(normalizedTextParse.nodes["Socket-1"].node.parse).toBe("json");
-    expect(normalizedTextParse.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
+    expect(normalizedTextParse.sockets["Socket-1"].socket.parse).toBe("json");
+    expect(normalizedTextParse.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
 
-    config.loadouts!.Test.nodes["Socket-1"].parse = "json";
+    testSockets(config.loadouts!.Test)["Socket-1"].parse = "json";
     const normalizedMissingAssignment = resolvePipeline(config);
-    expect(normalizedMissingAssignment.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
+    expect(normalizedMissingAssignment.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
 
-    config.loadouts!.Test.nodes["Socket-1"].assign = { tasks: "$.tasks" };
+    testSockets(config.loadouts!.Test)["Socket-1"].assign = { tasks: "$.tasks" };
     const normalizedLegacyAssignment = resolvePipeline(config);
-    expect(normalizedLegacyAssignment.nodes["Socket-1"].node.parse).toBe("json");
-    expect(normalizedLegacyAssignment.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
+    expect(normalizedLegacyAssignment.sockets["Socket-1"].socket.parse).toBe("json");
+    expect(normalizedLegacyAssignment.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
 
-    config.loadouts!.Test.nodes["Socket-1"].assign = { workItems: "$.workItems" };
+    testSockets(config.loadouts!.Test)["Socket-1"].assign = { workItems: "$.workItems" };
     expect(resolvePipeline(config).entry.materia.generator).toBe(true);
 
     config.materia.planner!.generates = { output: "tasks", listType: "array", itemType: "task" } as never;
@@ -711,7 +717,7 @@ describe("utility pipeline nodes", () => {
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "planner" },
           },
         },
@@ -726,32 +732,32 @@ describe("utility pipeline nodes", () => {
 
   test("rejects malformed command arrays with a friendly error", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).nodes["Socket-1"] = { type: "utility", command: ["node", ""] };
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility", command: ["node", ""] };
 
     expect(() => resolvePipeline(config)).toThrow(/malformed command element at index 1/);
   });
 
-  test("default loadout shows explicit utility bootstrap before agent nodes", async () => {
+  test("default loadout shows explicit utility bootstrap before agent sockets", async () => {
     const config = JSON.parse(await readFile("config/default.json", "utf8")) as PiMateriaConfig;
     const pipeline = resolvePipeline(config);
     const lines = renderGrid(config, pipeline, "default", "/tmp/project");
 
     const loadout = activeLoadout(config);
     expect(loadout.entry).toBe("Socket-1");
-    expect(Object.keys(loadout.nodes)).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
-    expect(pipeline.entry.node.type).toBe("utility");
-    expect(loadout.nodes["Socket-1"]).toMatchObject({
+    expect(Object.keys(loadout.sockets ?? {})).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
+    expect(pipeline.entry.socket.type).toBe("utility");
+    expect(loadout.sockets?.["Socket-1"]).toMatchObject({
       type: "utility",
       utility: "project.ensureIgnored",
       edges: [{ when: "always", to: "Socket-2" }],
     });
-    expect(loadout.nodes["Socket-2"]).toMatchObject({
+    expect(loadout.sockets?.["Socket-2"]).toMatchObject({
       type: "utility",
       utility: "vcs.detect",
       assign: { vcs: "$" },
       edges: [{ when: "always", to: "Socket-3" }],
     });
-    expect(JSON.stringify(loadout.nodes)).not.toContain('"next"');
+    expect(JSON.stringify(loadout.sockets)).not.toContain('"next"');
 
     const slotsIndex = lines.indexOf("Slots:");
     const ensureLineIndex = lines.findIndex((line, index) => index > slotsIndex && line.startsWith("- Socket-1:"));
@@ -763,11 +769,11 @@ describe("utility pipeline nodes", () => {
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
     expect(config.materia.planner?.generator).toBe(true);
-    expect(loadout.loops?.taskIteration.nodes).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
+    expect(loadout.loops?.taskIteration.sockets).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
     expect(loadout.loops?.taskIteration.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });
     expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "Socket-3", output: "workItems" });
     expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
-    expect(loadout.nodes["Socket-6"]).toMatchObject({
+    expect(loadout.sockets?.["Socket-6"]).toMatchObject({
       type: "agent",
       materia: "Maintain",
       parse: "json",
@@ -803,7 +809,7 @@ describe("utility pipeline nodes", () => {
       const pipeline = resolvePipeline(config);
       const loadout = activeLoadout(config);
       expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "Socket-3", output: "workItems" });
-      expect(loadout.nodes["Socket-3"]).toMatchObject({ parse: "json", assign: { workItems: "$.workItems" } });
+      expect(loadout.sockets?.["Socket-3"]).toMatchObject({ parse: "json", assign: { workItems: "$.workItems" } });
       expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
       expect(renderGrid(config, pipeline, "default", "/tmp/project").join("\n")).toContain("generator=workItems:array<workItem>");
     }

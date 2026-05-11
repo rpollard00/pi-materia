@@ -128,18 +128,18 @@ describe("layered config loading and persistence", () => {
       await writeFile(getUserMateriaAssetPath(), JSON.stringify({
         activeLoadout: "UserLoadout",
         materia: { Build: { model: "user/model" } },
-        loadouts: { UserLoadout: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "planner" } } } },
+        loadouts: { UserLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "planner" } } } },
       }), "utf8");
       await mkdir(path.join(cwd, ".pi"), { recursive: true });
       await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
         activeLoadout: "ProjectLoadout",
         materia: { Build: { model: "project/model" } },
-        loadouts: { ProjectLoadout: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { ProjectLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
       }), "utf8");
       await writeFile(explicit, JSON.stringify({
         activeLoadout: "ExplicitLoadout",
         materia: { Build: { model: "explicit/model" } },
-        loadouts: { ExplicitLoadout: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Check" } } } },
+        loadouts: { ExplicitLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Check" } } } },
       }), "utf8");
 
       const loaded = await loadConfig(cwd, explicit);
@@ -166,7 +166,7 @@ describe("layered config loading and persistence", () => {
       await mkdir(path.dirname(projectFile), { recursive: true });
       await writeFile(projectFile, JSON.stringify({
         activeLoadout: "ProjectOnly",
-        loadouts: { ProjectOnly: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { ProjectOnly: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
       }), "utf8");
 
       await saveMateriaConfigPatch(cwd, { activeLoadout: "Full-Auto", loadouts: { ProjectOnly: null } } as never, { target: "project" });
@@ -190,7 +190,7 @@ describe("layered config loading and persistence", () => {
     try {
       await mkdir(profile, { recursive: true });
       await writeFile(getUserMateriaAssetPath(), JSON.stringify({
-        loadouts: { "Full-Auto": { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { "Full-Auto": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
       }), "utf8");
 
       const loaded = await loadConfig(cwd);
@@ -222,7 +222,7 @@ describe("layered config loading and persistence", () => {
 
       const userWritten = await saveMateriaConfigPatch(cwd, {
         materia: { Custom: { tools: "none", prompt: "custom user materia" } },
-        loadouts: { UserCreated: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Custom" } } } },
+        loadouts: { UserCreated: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Custom" } } } },
       });
       expect(userWritten).toBe(getUserMateriaAssetPath());
       expect(await readFile(projectFile, "utf8")).toBe(beforeProject);
@@ -284,8 +284,8 @@ describe("config loadouts", () => {
         assign: { vcs: "$" },
       });
       expect(pipeline.entry.id).toBe("Socket-1");
-      expect(pipeline.nodes["Socket-1"].node).toMatchObject({ type: "utility", utility: "project.ensureIgnored" });
-      expect(pipeline.nodes["Socket-2"].node).toMatchObject({ type: "utility", utility: "vcs.detect" });
+      expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ type: "utility", utility: "project.ensureIgnored" });
+      expect(pipeline.sockets["Socket-2"].socket).toMatchObject({ type: "utility", utility: "vcs.detect" });
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
@@ -303,14 +303,14 @@ describe("config loadouts", () => {
       loadouts: {
         Yolo: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "yoloPlanner", edges: [{ when: "always", to: "Socket-3" }] },
             "Socket-3": { type: "agent", materia: "yoloBuild", edges: [{ when: "always", to: "Socket-4" }] },
             "Socket-4": { type: "agent", materia: "yoloMaintain", edges: [{ when: "always", to: "Socket-3" }] },
           },
           loops: {
             loopSelection: {
-              nodes: ["Socket-3", "Socket-4"],
+              sockets: ["Socket-3", "Socket-4"],
               consumes: { from: "Socket-1", output: "workItems" },
               exit: { from: "Socket-4", when: "satisfied", to: "end" },
             },
@@ -321,13 +321,13 @@ describe("config loadouts", () => {
 
     const loaded = await loadConfig(saved.dir, saved.file);
 
-    expect(loaded.config.loadouts?.Yolo.nodes["Socket-4"].parse).toBe("json");
-    expect(loaded.config.loadouts?.Yolo.nodes["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
-    expect(loaded.config.loadouts?.Yolo.nodes["Socket-4"].edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].parse).toBe("json");
+    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].edges).toEqual([{ when: "always", to: "Socket-3" }]);
     const pipeline = resolvePipeline(loaded.config);
-    expect(pipeline.nodes["Socket-1"].node.parse).toBe("json");
-    expect(pipeline.nodes["Socket-1"].node.assign?.workItems).toBe("$.workItems");
-    expect(pipeline.nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(pipeline.sockets["Socket-1"].socket.parse).toBe("json");
+    expect(pipeline.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
   });
 
   test("loadConfig reports loop materialization conflicts instead of overwriting authored semantics", async () => {
@@ -340,7 +340,7 @@ describe("config loadouts", () => {
       loadouts: {
         ConflictingLoop: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "conflictPlanner", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": {
               type: "agent",
@@ -352,7 +352,7 @@ describe("config loadouts", () => {
           },
           loops: {
             taskIteration: {
-              nodes: ["Socket-2"],
+              sockets: ["Socket-2"],
               consumes: { from: "Socket-1", output: "workItems" },
               exit: { from: "Socket-2", when: "satisfied", to: "end" },
             },
@@ -370,7 +370,7 @@ describe("config loadouts", () => {
         Custom: {
           entry: "Socket-1",
           prompt: "obsolete loadout behavior",
-          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
         },
       },
     });
@@ -381,7 +381,7 @@ describe("config loadouts", () => {
         Custom: {
           entry: "Socket-1",
           systemPrompt: "obsolete loadout system behavior",
-          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
         },
       },
     });
@@ -427,8 +427,8 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const canonical = new Set(["always", "satisfied", "not_satisfied"]);
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { next?: unknown; parse?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
-      for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { next?: unknown; parse?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
+      for (const [nodeName, node] of Object.entries(loadout.sockets ?? {})) {
         expect(node.next, `${loadoutName}.${nodeName}.next`).toBeUndefined();
         expect(["text", "json"].includes(String(node.parse)), `${loadoutName}.${nodeName}.parse`).toBe(true);
         for (const [index, edge] of (node.edges ?? []).entries()) {
@@ -437,7 +437,7 @@ describe("config loadouts", () => {
           if (edge.when === "satisfied" || edge.when === "not_satisfied") {
             expect(node.parse, `${loadoutName}.${nodeName}.parse for ${edge.when}`).toBe("json");
           }
-          expect(edge.to === "end" || Boolean(loadout.nodes?.[edge.to ?? ""]), `${loadoutName}.${nodeName}.edges[${index}].to`).toBe(true);
+          expect(edge.to === "end" || Boolean(loadout.sockets?.[edge.to ?? ""]), `${loadoutName}.${nodeName}.edges[${index}].to`).toBe(true);
         }
       }
     }
@@ -446,16 +446,16 @@ describe("config loadouts", () => {
   test("bundled default loadouts use sequential adapter socket ids", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { entry?: string; nodes?: Record<string, { materia?: string; utility?: string; edges?: Array<{ to?: string }>; advance?: { done?: string } }>; loops?: Record<string, { nodes?: string[]; exit?: { from?: string; to?: string }; consumes?: { from?: string } }> }]>) {
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { entry?: string; sockets?: Record<string, { materia?: string; utility?: string; edges?: Array<{ to?: string }>; advance?: { done?: string } }>; loops?: Record<string, { sockets?: string[]; exit?: { from?: string; to?: string }; consumes?: { from?: string } }> }]>) {
       expect(() => resolvePipeline({ ...rawDefault, activeLoadout: loadoutName })).not.toThrow();
 
-      const nodeIds = Object.keys(loadout.nodes ?? {});
+      const nodeIds = Object.keys(loadout.sockets ?? {});
       expect(loadout.entry, `${loadoutName}.entry`).toBe("Socket-1");
-      expect(nodeIds, `${loadoutName}.nodes`).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
-      expect(loadout.nodes?.["Socket-4"]?.materia, `${loadoutName}.Socket-4`).toBe("Build");
-      expect(Object.values(loadout.nodes ?? {}).map((node) => node.materia), `${loadoutName}.materia`).not.toContain("Auto-Architect");
+      expect(nodeIds, `${loadoutName}.sockets`).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
+      expect(loadout.sockets?.["Socket-4"]?.materia, `${loadoutName}.Socket-4`).toBe("Build");
+      expect(Object.values(loadout.sockets ?? {}).map((node) => node.materia), `${loadoutName}.materia`).not.toContain("Auto-Architect");
 
-      for (const [socketId, node] of Object.entries(loadout.nodes ?? {})) {
+      for (const [socketId, node] of Object.entries(loadout.sockets ?? {})) {
         expect(socketId, `${loadoutName}.${socketId}`).toMatch(/^Socket-\d+$/);
         expect(socketId, `${loadoutName}.${socketId}`).not.toBe(node.materia ?? "");
         expect(socketId, `${loadoutName}.${socketId}`).not.toBe(node.utility ?? "");
@@ -466,7 +466,7 @@ describe("config loadouts", () => {
       }
 
       for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
-        for (const nodeId of loop.nodes ?? []) expect(nodeIds.includes(nodeId), `${loadoutName}.${loopId}.nodes`).toBe(true);
+        for (const nodeId of loop.sockets ?? []) expect(nodeIds.includes(nodeId), `${loadoutName}.${loopId}.sockets`).toBe(true);
         if (loop.exit?.from) expect(nodeIds.includes(loop.exit.from), `${loadoutName}.${loopId}.exit.from`).toBe(true);
         if (loop.exit?.to && loop.exit.to !== "end") expect(nodeIds.includes(loop.exit.to), `${loadoutName}.${loopId}.exit.to`).toBe(true);
         if (loop.consumes?.from) expect(nodeIds.includes(loop.consumes.from), `${loadoutName}.${loopId}.consumes.from`).toBe(true);
@@ -494,7 +494,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Socket-1",
             prompt: "obsolete saved behavior",
-            nodes: { "Socket-1": { type: "agent", materia: "planner" } },
+            sockets: { "Socket-1": { type: "agent", materia: "planner" } },
           } as never,
         },
       })).rejects.toThrow(/loadout "Custom" configures obsolete prompt/);
@@ -514,7 +514,7 @@ describe("config loadouts", () => {
         loadouts: {
           Custom: {
             entry: "Socket-1",
-            nodes: {
+            sockets: {
               "Socket-1": {
                 type: "agent",
                 materia: "Check",
@@ -533,7 +533,7 @@ describe("config loadouts", () => {
         loadouts: {
           Custom: {
             entry: "Socket-1",
-            nodes: {
+            sockets: {
               "Socket-1": { type: "agent", materia: "Check", edges: [{ when: "satisfied", to: undefined as never }] },
             },
           },
@@ -544,7 +544,7 @@ describe("config loadouts", () => {
         loadouts: {
           Custom: {
             entry: "Socket-1",
-            nodes: {
+            sockets: {
               "Socket-1": { type: "agent", materia: "Check", edges: [{ when: " " as never, to: "Socket-1" }] },
             },
           },
@@ -555,7 +555,7 @@ describe("config loadouts", () => {
         loadouts: {
           Custom: {
             entry: "Socket-1",
-            nodes: {
+            sockets: {
               "Socket-1": { type: "agent", materia: "Check", edges: [{ when: "$.passed == true" as never, to: "Socket-1" }] },
             },
           },
@@ -566,7 +566,7 @@ describe("config loadouts", () => {
         loadouts: {
           Custom: {
             entry: "Socket-1",
-            nodes: {
+            sockets: {
               "Socket-1": { type: "agent", materia: "Build", next: "Socket-2" } as never,
               "Socket-2": {
                 type: "agent",
@@ -596,11 +596,11 @@ describe("config loadouts", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
+          sockets: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
         },
       },
     });
@@ -629,8 +629,8 @@ describe("config loadouts", () => {
     }
 
     expect(loaded.config.activeLoadout).toBe("Full-Auto");
-    const fullAutoPlanner = loaded.config.loadouts?.["Full-Auto"]?.nodes["Socket-3"];
-    const planningConsultPlanner = loaded.config.loadouts?.["Planning-Consult"]?.nodes["Socket-3"];
+    const fullAutoPlanner = loaded.config.loadouts?.["Full-Auto"]?.sockets["Socket-3"];
+    const planningConsultPlanner = loaded.config.loadouts?.["Planning-Consult"]?.sockets["Socket-3"];
     expect(fullAutoPlanner).toMatchObject({ materia: "planner" });
     expect(planningConsultPlanner).toMatchObject({
       type: "agent",
@@ -656,20 +656,20 @@ describe("config loadouts", () => {
     expect(planningConsultPrompt).not.toContain("Return only JSON");
 
     const fullAuto = resolvePipeline(loaded.config);
-    expect(fullAuto.nodes["Socket-3"].node.type).toBe("agent");
-    expect(fullAuto.nodes["Socket-3"].materia.multiTurn).toBeUndefined();
-    expect(fullAuto.nodes["Socket-3"].materia.prompt).toContain("planning materia");
+    expect(fullAuto.sockets["Socket-3"].socket.type).toBe("agent");
+    expect(fullAuto.sockets["Socket-3"].materia.multiTurn).toBeUndefined();
+    expect(fullAuto.sockets["Socket-3"].materia.prompt).toContain("planning materia");
 
     loaded.config.activeLoadout = "Planning-Consult";
     const planningConsult = resolvePipeline(loaded.config);
-    expect(planningConsult.nodes["Socket-3"].node).toMatchObject({
+    expect(planningConsult.sockets["Socket-3"].socket).toMatchObject({
       type: "agent",
       materia: "interactivePlan",
       parse: "json",
     });
-    expect("multiTurn" in planningConsult.nodes["Socket-3"].node).toBe(false);
-    expect(planningConsult.nodes["Socket-3"].materia.multiTurn).toBe(true);
-    expect(planningConsult.nodes["Socket-3"].materia.prompt).toContain("interactive planning materia");
+    expect("multiTurn" in planningConsult.sockets["Socket-3"].socket).toBe(false);
+    expect(planningConsult.sockets["Socket-3"].materia.multiTurn).toBe(true);
+    expect(planningConsult.sockets["Socket-3"].materia.prompt).toContain("interactive planning materia");
   });
 });
 
@@ -679,11 +679,11 @@ describe("active loadout persistence", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
+          sockets: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
         },
       },
     });
@@ -713,7 +713,7 @@ describe("active loadout persistence", () => {
     expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
     expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
-    expect(resolvePipeline(reloaded.config).nodes["Socket-3"].materia.prompt).toContain("interactive planning materia");
+    expect(resolvePipeline(reloaded.config).sockets["Socket-3"].materia.prompt).toContain("interactive planning materia");
   });
 
   test("rejects unknown loadout names without changing the config file", async () => {
@@ -722,7 +722,7 @@ describe("active loadout persistence", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          nodes: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
         },
       },
     });

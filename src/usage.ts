@@ -2,6 +2,7 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appendEvent } from "./artifacts.js";
+import { usageBySocket } from "./castStateAccessors.js";
 import type { MateriaRunState, PiMateriaConfig, MateriaModelSelection, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
 
 export function createRunState(runId: string, runDir: string, model: unknown, loadoutName?: string): MateriaRunState {
@@ -97,19 +98,22 @@ export function extractUsage(message: unknown): UsageTotals | undefined {
   };
 }
 
-export function recordUsageModelSelection(report: UsageReport, key: { node: string; materia: string; taskId?: string; attempt?: number; materiaModel: MateriaModelSelection }): void {
+export function recordUsageModelSelection(report: UsageReport, key: { socket: string; materia: string; taskId?: string; attempt?: number; materiaModel: MateriaModelSelection }): void {
+  const socket = key.socket;
   if (key.materiaModel.model) report.model = key.materiaModel.model;
   if (key.materiaModel.provider) report.provider = key.materiaModel.provider;
   if (key.materiaModel.api) report.api = key.materiaModel.api;
   if (key.materiaModel.thinking) report.thinkingLevel = key.materiaModel.thinking;
   updateUsageCostKind(report, key.materiaModel);
   report.modelSelections ??= [];
-  report.modelSelections.push({ ...key.materiaModel, node: key.node, materia: key.materia, taskId: key.taskId, attempt: key.attempt });
+  report.modelSelections.push({ ...key.materiaModel, socket, node: socket, materia: key.materia, taskId: key.taskId, attempt: key.attempt });
 }
 
-export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: string; materia: string; taskId?: string; attempt?: number; materiaModel?: MateriaModelSelection; messageModel?: Partial<MateriaModelSelection> }): void {
+export function addUsage(report: UsageReport, usage: UsageTotals, key: { socket: string; materia: string; taskId?: string; attempt?: number; materiaModel?: MateriaModelSelection; messageModel?: Partial<MateriaModelSelection> } | { /** @deprecated External compatibility alias; use socket. */ node: string; materia: string; taskId?: string; attempt?: number; materiaModel?: MateriaModelSelection; messageModel?: Partial<MateriaModelSelection> }): void {
+  const socket = "socket" in key ? key.socket : key.node;
   addUsageTotals(report, usage);
-  addUsageTotals(report.byNode[key.node] ??= emptyUsageTotals(), usage);
+  const bySocket = usageBySocket(report);
+  addUsageTotals(bySocket[socket] ??= emptyUsageTotals(), usage);
   addUsageTotals(report.byMateria[key.materia] ??= emptyUsageTotals(), usage);
   if (key.taskId) addUsageTotals(report.byTask[key.taskId] ??= emptyUsageTotals(), usage);
   if (key.taskId && key.attempt !== undefined) addUsageTotals(report.byAttempt[`${key.taskId}:${key.attempt}`] ??= emptyUsageTotals(), usage);
@@ -123,7 +127,8 @@ export function addUsage(report: UsageReport, usage: UsageTotals, key: { node: s
   report.turns ??= [];
   report.turns.push({
     ...cloneUsageTotals(usage),
-    node: key.node,
+    socket,
+    node: socket,
     materia: key.materia,
     taskId: key.taskId,
     attempt: key.attempt,

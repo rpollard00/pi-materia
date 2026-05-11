@@ -80,7 +80,7 @@ describe("native JSON prompt handoff contract guidance", () => {
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": {
               type: "utility",
               utility: "echo",
@@ -112,7 +112,7 @@ describe("native JSON prompt handoff contract guidance", () => {
 
     const prompt = promptMessages(harness).at(-1) ?? "";
     expect(prompt).toContain("Build prompt body.");
-    expect(prompt).toContain("Node/socket adapter context");
+    expect(prompt).toContain("Socket adapter context");
     expect(prompt).toContain("Current workItem JSON");
     expect(prompt).toContain('"id": "one"');
     expect(prompt).toContain("Global guidance JSON");
@@ -127,7 +127,7 @@ describe("native JSON prompt handoff contract guidance", () => {
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Architect", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "end" }] },
           },
@@ -142,7 +142,7 @@ describe("native JSON prompt handoff contract guidance", () => {
     await harness.runCommand("materia", "cast chain generators");
 
     const firstPrompt = promptMessages(harness).at(-1) ?? "";
-    expect(firstPrompt).toContain("Generator node/socket adapter context");
+    expect(firstPrompt).toContain("Generator socket adapter context");
     expect(firstPrompt).toContain("generated-output stage");
     expect(firstPrompt).toContain("Return only the canonical handoff JSON envelope");
     expect(firstPrompt).toContain("expose generated output as workItems");
@@ -179,7 +179,7 @@ describe("native JSON prompt handoff contract guidance", () => {
       loadouts: {
         Yolo: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "Plan", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "agent", materia: "Architect", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "end" }] },
           },
@@ -194,20 +194,20 @@ describe("native JSON prompt handoff contract guidance", () => {
     await expect(harness.runCommand("materia", "cast yolo generator chain")).resolves.toBeUndefined();
 
     const firstPrompt = promptMessages(harness).at(-1) ?? "";
-    expect(firstPrompt).toContain("Generator node/socket adapter context");
+    expect(firstPrompt).toContain("Generator socket adapter context");
     expect(firstPrompt).toContain("expose generated output as workItems");
     expect(firstPrompt).toContain("must come from $.workItems");
     expect(firstPrompt).not.toContain("Generator pipeline slot \"Socket-2\"");
   });
 
-  test("appends the central handoff contract to single-turn JSON agent nodes", async () => {
+  test("appends the central handoff contract to single-turn JSON agent sockets", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "Check", parse: "json" },
           },
         },
@@ -235,7 +235,7 @@ describe("native JSON prompt handoff contract guidance", () => {
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "Plan", parse: "json" },
           },
         },
@@ -267,14 +267,14 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(finalizationPrompt).toContain("Generated units of work belong in workItems, never tasks");
   });
 
-  test("does not append JSON handoff contract guidance to plain-text agent nodes", async () => {
+  test("does not append JSON handoff contract guidance to plain-text agent sockets", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "agent", materia: "Speak" },
           },
         },

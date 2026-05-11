@@ -17,7 +17,7 @@ async function makeHarness(options: { nodeId?: string; materia?: string } = {}):
     loadouts: {
       Test: {
         entry: nodeId,
-        nodes: {
+        sockets: {
           [nodeId]: { type: "agent", materia },
         },
       },
@@ -114,7 +114,7 @@ describe("/materia recast", () => {
     expect(resumed.castId).toBe(aborted.castId);
     expect(resumed.active).toBe(true);
     expect(resumed.nodeState).toBe("awaiting_agent_response");
-    expect(resumed.runState.lastMessage).toBe("Recasting from node Socket-1.");
+    expect(resumed.runState.lastMessage).toBe("Recasting from socket Socket-1.");
     expect(secondRunning.castId).toBe(aborted.castId);
   });
 
@@ -129,7 +129,7 @@ describe("/materia recast", () => {
     const resumed = latestState(harness);
     expect(resumed.castId).toBe(failed.castId);
     expect(resumed.active).toBe(true);
-    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${failed.castId} recast from node "Socket-1".`);
+    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${failed.castId} recast from socket "Socket-1".`);
     const eventTypes = await readEventTypes(resumed);
     expect(eventTypes).toContain("cast_recast");
     expect(eventTypes).not.toContain("cast_revive");
@@ -147,7 +147,7 @@ describe("/materia recast", () => {
     const resumed = latestState(harness);
     expect(resumed.castId).toBe(aborted.castId);
     expect(resumed.active).toBe(true);
-    expect(resumed.runState.lastMessage).toBe("Recasting from node Socket-1.");
+    expect(resumed.runState.lastMessage).toBe("Recasting from socket Socket-1.");
   });
 
   test("recast backfills missing legacy loadout metadata from persisted cast config", async () => {
@@ -207,11 +207,11 @@ describe("/materia recast", () => {
     });
   });
 
-  test("revive extends an exhausted same-node recovery allowance then follows recast", async () => {
+  test("revive extends an exhausted same-socket recovery allowance then follows recast", async () => {
     const harness = await makeHarness();
 
     await harness.runCommand("materia", "cast exhausted task");
-    const failed = await failCurrentCast(harness, "Same-node recovery exhausted for normal turn");
+    const failed = await failCurrentCast(harness, "Same-socket recovery exhausted for normal turn");
     const revivable = makeRevivableState(failed);
     const recoveryKey = revivable.recoveryExhaustion!.key;
     harness.pi.appendEntry("pi-materia-cast-state", revivable);
@@ -225,7 +225,7 @@ describe("/materia recast", () => {
     const allowance = resumed.recoveryAllowances?.[recoveryKey];
     expect(allowance).toMatchObject({ originalMaxAttempts: 1, effectiveMaxAttempts: 2, reviveCount: 1 });
     expect(resumed.recoveryExhaustion).toBeUndefined();
-    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${revivable.castId} recast from node "Socket-1".`);
+    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${revivable.castId} recast from socket "Socket-1".`);
 
     const events = await readEvents(resumed);
     const eventTypes = events.map((event) => event.type ?? "");
@@ -250,7 +250,7 @@ describe("/materia recast", () => {
     const harness = await makeHarness();
 
     await harness.runCommand("materia", "cast repeated revive task");
-    const failed = await failCurrentCast(harness, "Same-node recovery exhausted first time");
+    const failed = await failCurrentCast(harness, "Same-socket recovery exhausted first time");
     const recoveryKey = JSON.stringify(["normal", failed.currentNode ?? failed.phase, "__singleton__", failed.currentNode ? failed.visits[failed.currentNode] ?? 0 : 0, 0]);
     const otherKey = JSON.stringify(["normal", "Other-Socket", "__singleton__", 1, 0]);
     const revivable = makeRevivableState(failed, {
@@ -266,7 +266,7 @@ describe("/materia recast", () => {
     expect(firstResume.recoveryAllowances?.[recoveryKey]).toMatchObject({ originalMaxAttempts: 2, effectiveMaxAttempts: 4, reviveCount: 1 });
     expect(firstResume.recoveryAllowances?.[otherKey]).toMatchObject({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
 
-    const secondFailureReason = "Same-node recovery exhausted second time";
+    const secondFailureReason = "Same-socket recovery exhausted second time";
     const exhaustedAgain = makeRevivableState(cloneState(firstResume, {
       active: false,
       awaitingResponse: false,
@@ -309,7 +309,7 @@ describe("/materia recast", () => {
       active: false,
       phase: "failed",
       nodeState: "failed",
-      failedReason: "Same-node recovery exhausted before structured allowances existed",
+      failedReason: "Same-socket recovery exhausted before structured allowances existed",
       recoveryAllowances: undefined,
       recoveryExhaustion: {
         kind: "same_node_recovery_exhausted",
@@ -319,7 +319,7 @@ describe("/materia recast", () => {
         originalMaxAttempts: 1,
         effectiveMaxAttempts: 1,
         reviveCount: 0,
-        failedReason: "Same-node recovery exhausted before structured allowances existed",
+        failedReason: "Same-socket recovery exhausted before structured allowances existed",
         node: aborted.currentNode,
         mode: "normal",
         exhaustedAt: Date.now(),
@@ -353,7 +353,7 @@ describe("/materia recast", () => {
 
     await harness.runCommand("materia", "revive");
     expect(harness.notifications.at(-1)).toEqual({
-      message: "No failed pi-materia casts exhausted by same-node recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.",
+      message: "No failed pi-materia casts exhausted by same-socket recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.",
       type: "info",
     });
 

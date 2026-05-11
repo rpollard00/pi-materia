@@ -1,6 +1,6 @@
 # Materia handoff JSON contract
 
-JSON-parsed materia nodes hand off reusable work context to the rest of the graph by returning a single JSON object. Nodes and sockets are the placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
+JSON-parsed materia sockets hand off reusable work context to the rest of the graph by returning a single JSON object. Nodes and sockets are the placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
 
 ## Canonical generic envelope
 
@@ -36,7 +36,7 @@ Generated units of work use `workItems`, not `tasks`. pi-materia intentionally d
 }
 ```
 
-JSON nodes should preserve useful existing `summary`, `workItems`, `guidance`, `decisions`, and `risks` context, augmenting it when possible. The output should be the object only: no markdown fences, prose, or extra commentary. Plain text nodes (`"parse": "text"`) do not use this JSON handoff contract.
+JSON sockets should preserve useful existing `summary`, `workItems`, `guidance`, `decisions`, and `risks` context, augmenting it when possible. The output should be the object only: no markdown fences, prose, or extra commentary. Plain text sockets (`"parse": "text"`) do not use this JSON handoff contract.
 
 ## Generator pipeline contract
 
@@ -52,7 +52,7 @@ Generator-to-generator pipelines behave like iterator transforms: the upstream g
 - `feedback` and `missing` are reserved evaluator fields.
 - Reserved evaluator/route fields must not be repurposed by general payload logic.
 - When present, `satisfied` must be a JSON boolean (`true` or `false`).
-- Nodes whose graph control flow depends on `satisfied` or `not_satisfied` must return `satisfied`.
+- Sockets whose graph control flow depends on `satisfied` or `not_satisfied` must return `satisfied`.
 - Do not use legacy aliases such as `passed` as routing fields. They are not canonical handoff fields.
 
 ## Routing semantics

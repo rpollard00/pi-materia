@@ -1,4 +1,5 @@
-import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
+import { currentCastSocketId, currentCastSocketState } from "../castStateAccessors.js";
+import type { LoadedConfig, MateriaCastSocketState, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
 import type { ArtifactCatalog, CastRuntime, CastStateRepository, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "./ports.js";
 
 export interface LoadoutUseCasesDeps {
@@ -78,11 +79,11 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   async prepareAgentStart(input: { pi: TPi; session: TSession; systemPrompt: string }): Promise<string | undefined> {
     const state = this.deps.states.loadActive(input.session);
     if (!state?.active) return undefined;
-    if (state.nodeState === "awaiting_user_refinement") await this.deps.runtime.prepareMultiTurnRefinementTurn(input.pi, input.session, state);
+    if (currentSocketState(state) === "awaiting_user_refinement") await this.deps.runtime.prepareMultiTurnRefinementTurn(input.pi, input.session, state);
     if (!state.awaitingResponse) return undefined;
     const materia = this.deps.runtime.currentMateria(state);
     if (!materia) return undefined;
-    return `${input.systemPrompt}\n\nMateria active materia (${state.currentNode ?? state.phase}):\n${this.deps.runtime.activeSystemPrompt(state, materia)}`;
+    return `${input.systemPrompt}\n\nMateria active materia (${currentSocketId(state) ?? state.phase}):\n${this.deps.runtime.activeSystemPrompt(state, materia)}`;
   }
 
   handleAgentEnd(pi: TPi, event: TAgentEvent, session: TSession): Promise<void> {
@@ -131,6 +132,14 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   statusLabel(state: MateriaCastState): string {
     return this.deps.runtime.statusLabel(state);
   }
+}
+
+function currentSocketId(state: MateriaCastState): string | undefined {
+  return currentCastSocketId(state);
+}
+
+function currentSocketState(state: MateriaCastState): MateriaCastSocketState | undefined {
+  return currentCastSocketState(state);
 }
 
 export function configuredConfigPath(flags: { getFlag(name: string): unknown }, env: EnvironmentLookup): string | undefined {

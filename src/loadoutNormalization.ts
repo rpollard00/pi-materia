@@ -1,5 +1,6 @@
 import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "./generator.js";
 import { normalizePipelineGraph } from "./graphValidation.js";
+import { loadoutSockets, materializeCanonicalSockets } from "./loadoutAccessors.js";
 import { analyzeLoadoutGraph, type LoadoutGraphAnalysis } from "./loadoutGraphAnalysis.js";
 import { materializeLoadoutLoopSemantics } from "./loopSemantics.js";
 import type { MateriaConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaSocketLayoutConfig, PiMateriaConfig } from "./types.js";
@@ -14,14 +15,14 @@ export interface NormalizedLoadoutResult<TLoadout extends MateriaPipelineConfig 
  * validation/preparation, and runtime preparation.
  *
  * Performance: semantic analysis indexes loop membership once and then walks
- * nodes and node edges once (O(nodes + edges + loop memberships + edge-loop
+ * sockets and socket edges once (O(sockets + edges + loop memberships + edge-loop
  * hits), where edge-loop hits are edges targeting sockets that belong to loops).
  * These helpers clone only at the boundary where persisted/runtime loadouts are
  * prepared; hot WebUI graph/layout edits should continue to use the immutable
  * transform utilities so dragging layout metadata does not force semantic work.
  */
 export function normalizeLoadedLoadout<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, materia: Record<string, GeneratorMateriaLike> = {}): NormalizedLoadoutResult<TLoadout> {
-  const normalized = normalizePipelineGraph(loadout) as TLoadout;
+  const normalized = materializeCanonicalSockets(normalizePipelineGraph(loadout) as TLoadout);
   normalizeLoadoutSocketKinds(normalized);
   normalizeLoadoutLayout(normalized);
   const analysis = analyzeLoadoutGraph(normalized, materia);
@@ -62,25 +63,25 @@ function normalizeConfigLoadouts(config: PiMateriaConfig, normalize: (loadout: M
 }
 
 function normalizeLoadoutSocketKinds(loadout: MateriaPipelineConfig): void {
-  const nodes = loadout.nodes ?? {};
-  const entryId = loadout.entry && nodes[loadout.entry] ? loadout.entry : Object.keys(nodes)[0];
+  const sockets = loadoutSockets(loadout);
+  const entryId = loadout.entry && sockets[loadout.entry] ? loadout.entry : Object.keys(sockets)[0];
   if (entryId && !loadout.entry) loadout.entry = entryId;
-  for (const [id, node] of Object.entries(nodes)) node.socketKind = id === entryId ? "entry" : "normal";
+  for (const [id, socket] of Object.entries(sockets)) socket.socketKind = id === entryId ? "entry" : "normal";
 }
 
 function normalizeLoadoutLayout(loadout: MateriaPipelineConfig): void {
-  const nodes = loadout.nodes ?? {};
+  const sockets = loadoutSockets(loadout);
   const existing = isPlainObject(loadout.layout) ? loadout.layout : {};
   const existingSockets = isPlainObject(existing.sockets) ? existing.sockets : {};
   const socketLayouts: Record<string, MateriaSocketLayoutConfig> = {};
 
-  for (const id of Object.keys(nodes).sort((a, b) => a.localeCompare(b))) {
-    const node = nodes[id];
+  for (const id of Object.keys(sockets).sort((a, b) => a.localeCompare(b))) {
+    const socket = sockets[id];
     const authoritative = existingSockets[id];
-    const fallback = node?.layout;
+    const fallback = socket?.layout;
     const source = isSocketLayout(authoritative) ? authoritative : isSocketLayout(fallback) ? fallback : undefined;
     if (source) socketLayouts[id] = { ...(typeof source.x === "number" ? { x: source.x } : {}), ...(typeof source.y === "number" ? { y: source.y } : {}) };
-    if (node && "layout" in node) delete node.layout;
+    if (socket && "layout" in socket) delete socket.layout;
   }
 
   const nextLayout: MateriaPipelineLayoutConfig = { ...existing };
@@ -105,12 +106,12 @@ function reconcileLoopConsumers(loadout: MateriaPipelineConfig, materia: Record<
 
 function normalizeGeneratorPipelineSockets(loadout: MateriaPipelineConfig, materia: Record<string, GeneratorMateriaLike>): void {
   for (const id of analyzeLoadoutGraph(loadout, materia).workItemProducingSocketIds) {
-    const node = loadout.nodes?.[id];
-    if (!node || node.type !== "agent") continue;
-    const generator = canonicalGeneratorConfigFor(materia[node.materia]);
+    const socket = loadoutSockets(loadout)[id];
+    if (!socket || socket.type !== "agent") continue;
+    const generator = canonicalGeneratorConfigFor(materia[socket.materia]);
     if (!generator) continue;
-    node.parse = "json";
-    node.assign = { ...(node.assign ?? {}), [generator.output]: `$.${generator.output}` };
+    socket.parse = "json";
+    socket.assign = { ...(socket.assign ?? {}), [generator.output]: `$.${generator.output}` };
   }
 }
 

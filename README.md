@@ -1,8 +1,8 @@
 # pi-materia
 
-pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent workflows. A Materia Grid is a data-driven graph: each socket/node renders a reusable materia behavior, exposes a configured tool scope, optionally parses output, assigns state, and follows configured links.
+pi-materia is a [Pi](https://pi.dev) extension for configurable, materia-themed agent workflows. A Materia Grid is a data-driven graph: each socket renders a reusable materia behavior, exposes a configured tool scope, optionally parses output, assigns state, and follows configured links.
 
-The bundled default loadout is a software-development workflow, but the engine itself is generic. Materia are reusable behaviors/skills; nodes and sockets are placement adapters that decide parse mode, assignment, routing, and iteration. You can replace the grid with a single socket that says `HELLO WORLD`, or with any arbitrary sequence/loop of materia turns.
+The bundled default loadout is a software-development workflow, but the engine itself is generic. Materia are reusable behaviors/skills; sockets are placement adapters that decide parse mode, assignment, routing, and iteration. You can replace the grid with a single socket that says `HELLO WORLD`, or with any arbitrary sequence/loop of materia turns.
 
 ## Current status
 
@@ -71,7 +71,7 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 
 pi-materia reports the config source, artifact directory, active loadout, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full materia prompts are hidden behind compact Materia cast messages, and each materia turn receives a curated Materia context instead of the full previous conversation.
 
-Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current node. Use `/materia revive [cast-id]` only when a cast failed because same-node recovery exhausted its structured attempt allowance (for example, repeated context-window recovery failures). Revive first increases the exhausted recovery context's effective allowance by the original max-attempt value, then delegates to the normal recast path; repeated revives are additive (`original + original` each time), not exponential, and the bump is scoped to that one exhausted node/item context. Other terminal failures are not revivable; use `/materia recast` for general failed or aborted casts.
+Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current socket. Use `/materia revive [cast-id]` only when a cast failed because same-node recovery exhausted its structured attempt allowance (for example, repeated context-window recovery failures). Revive first increases the exhausted recovery context's effective allowance by the original max-attempt value, then delegates to the normal recast path; repeated revives are additive (`original + original` each time), not exponential, and the bump is scoped to that one exhausted node/item context. Other terminal failures are not revivable; use `/materia recast` for general failed or aborted casts.
 
 Use `/materia ui` to start or reuse a background WebUI server scoped to the current Pi session. It prints a clickable local URL. Browser auto-open is disabled by default and can be enabled in `~/.config/pi/pi-materia/config.json` with `{ "webui": { "autoOpenBrowser": true } }`; `preferredPort` and `host` are also supported.
 
@@ -87,7 +87,7 @@ Use `/materia loadout` to list configured graph loadouts and mark the active one
 
 Usage costs are reported in USD from Pi assistant-message usage metadata. When Pi provides a total cost, Materia preserves that total; otherwise it sums the available input/output/cache cost components.
 
-Attempt counts are per exact Materia work-item identity: the node id plus the current `foreach` item key, or a singleton key for non-`foreach` nodes. A retry/self-loop of the same node/item increments the attempt; moving to a different `foreach` item or another node starts at attempt 1. Node visit counts are still used for visit limits and artifact file names.
+Attempt counts are per exact Materia work-item identity: the socket id plus the current `foreach` item key, or a singleton key for non-`foreach` sockets. A retry/self-loop of the same socket/item increments the attempt; moving to a different `foreach` item or another socket starts at attempt 1. Socket visit counts are used for visit limits; legacy artifact paths still use `nodes/` for saved-tooling compatibility.
 
 ## Configuration
 
@@ -135,7 +135,7 @@ Minimal hello-world loadout:
   "loadouts": {
     "Hello": {
       "entry": "hello",
-      "nodes": {
+      "sockets": {
         "hello": {
           "type": "agent",
           "materia": "echoer",
@@ -162,14 +162,14 @@ Configs can also define named `loadouts` that share the top-level `materia`, `li
   "loadouts": {
     "Full-Auto": {
       "entry": "planner",
-      "nodes": {
+      "sockets": {
         "planner": { "type": "agent", "materia": "planner", "next": "Build" },
         "Build": { "type": "agent", "materia": "Build", "next": "end" }
       }
     },
     "Planning-Consult": {
       "entry": "planner",
-      "nodes": {
+      "sockets": {
         "planner": { "type": "agent", "materia": "interactivePlan", "next": "Build" },
         "Build": { "type": "agent", "materia": "Build", "next": "end" }
       }
@@ -250,35 +250,35 @@ Run `/materia grid` to verify the resolved materia settings before casting. Agen
 
 Provider/runtime limitations: explicit model switching requires Pi's runtime to expose model switching and the requested model must exist in Pi's registry with usable credentials. Explicit thinking requires Pi's runtime to expose thinking-level controls, and individual providers/models may ignore or map levels differently. If a configured model is unknown, unavailable, or cannot be used because credentials are missing or unauthorized, pi-materia shows a warning naming that configured model and continues the cast with the active Pi session model. If configured thinking is unsupported by the effective model, pi-materia falls back to the active or nearest safe supported thinking setting and warns or records the fallback where possible. Runtime usage/events may record the requested model/thinking, effective model/thinking, and fallback reason when Pi exposes enough metadata.
 
-Generic node mechanics:
+Generic socket mechanics:
 
-- `materia`: named top-level materia assigned to an agent node
-- `parse`: `"text"` or `"json"`; JSON-parsed node outputs follow the canonical [materia handoff JSON contract](docs/handoff-contract.md)
+- `materia`: named top-level materia assigned to an agent socket
+- `parse`: `"text"` or `"json"`; JSON-parsed socket outputs follow the canonical [materia handoff JSON contract](docs/handoff-contract.md)
 - `assign`: copy parsed output/state values into generic cast state
 - `edges`: ordered condition-driven links using canonical conditions such as `satisfied`, `not_satisfied`, or `always`; runtime selects the first edge whose guard matches, so repeated guarded predicates are allowed, while edges after an unconditional edge are invalid because they are unreachable. The WebUI's **Flow** label is the `always` condition, not a separate edge model.
 - `next`: fallback link when no edge matches
-- `foreach`: iterate a node over an array in state
+- `foreach`: iterate a socket over an array in state
 - `advance`: advance a configured cursor
-- `limits`: node/edge cycle safety
+- `limits`: socket/edge cycle safety
 
-Materia graphs are workflow state machines, not DAGs. Loops such as `Socket-4 (Build) -> Socket-5 (Auto-Eval) -> Socket-6 (Maintain) -> Socket-4 (Build)` are valid and model repeated work-item sections/retry paths; runtime node-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Prefer declaring a top-level Generator materia with `generator: true`, wiring its JSON node with `parse: "json"` and an assign entry for the canonical handoff path (`"workItems": "$.workItems"`), then adding a loadout-level `loops` region with `consumes: { from, output: "workItems" }`. pi-materia derives the loop consumer iterator path from the canonical Generator config (`state.workItems`) instead of tagging arbitrary loop members as iterators. Generated units of work intentionally use `workItems`; pi-materia does not retain a `tasks` compatibility output for new generated work units. Existing authored `generates` metadata is migration-only compatibility, not the canonical schema. See [docs/handoff-contract.md](docs/handoff-contract.md), [docs/graph-semantics.md](docs/graph-semantics.md), and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
+Materia graphs are workflow state machines, not DAGs. Loops such as `Socket-4 (Build) -> Socket-5 (Auto-Eval) -> Socket-6 (Maintain) -> Socket-4 (Build)` are valid and model repeated work-item sections/retry paths; runtime socket-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Prefer declaring a top-level Generator materia with `generator: true`, wiring its JSON socket with `parse: "json"` and an assign entry for the canonical handoff path (`"workItems": "$.workItems"`), then adding a loadout-level `loops` region with `consumes: { from, output: "workItems" }`. pi-materia derives the loop consumer iterator path from the canonical Generator config (`state.workItems`) instead of tagging arbitrary loop members as iterators. Generated units of work intentionally use `workItems`; pi-materia does not retain a `tasks` compatibility output for new generated work units. Existing authored `generates` metadata is migration-only compatibility, not the canonical schema. See [docs/handoff-contract.md](docs/handoff-contract.md), [docs/graph-semantics.md](docs/graph-semantics.md), and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
 
-Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, optional `multiTurn`, and optional `generator: true` for list-producing Generator materia. Set `"multiTurn": true` on a materia to let any agent node using that materia pause for interactive refinement until the user runs `/materia continue`.
+Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, optional `multiTurn`, and optional `generator: true` for list-producing Generator materia. Set `"multiTurn": true` on a materia to let any agent socket using that materia pause for interactive refinement until the user runs `/materia continue`.
 
 ### Multi-turn planner materia
 
-Agent nodes are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent materia when you want nodes using that materia to run a manual refinement loop. A multi-turn materia records each assistant response as a refinement artifact, keeps the cast active at the current node, and treats ordinary user replies as refinement instructions instead of finalization.
+Agent sockets are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent materia when you want sockets using that materia to run a manual refinement loop. A multi-turn materia records each assistant response as a refinement artifact, keeps the cast active at the current socket, and treats ordinary user replies as refinement instructions instead of finalization.
 
-Examples of refinement replies that do **not** finalize or advance the node:
+Examples of refinement replies that do **not** finalize or advance the socket:
 
 - `Let's do a full CRT-inspired shader with phosphor glow.`
 - `Add rollback steps before we continue.`
 - `Can you split the bootstrap work into its own work item?`
 - `Continue refining the risk section.`
 
-Natural-language replies never finalize or advance the node, even when they say things like `ready to continue`, `looks good, proceed`, or `finalize`. When the latest draft is ready, run `/materia continue`; this command is the only supported way to finalize a paused multi-turn node.
+Natural-language replies never finalize or advance the socket, even when they say things like `ready to continue`, `looks good, proceed`, or `finalize`. When the latest draft is ready, run `/materia continue`; this command is the only supported way to finalize a paused multi-turn socket.
 
-Only after `/materia continue` does pi-materia request the final assistant output and process it using the node's normal `parse`, `assign`, `edges`, and `next` behavior. For JSON-parsed multi-turn nodes, refinement turns should stay conversational: the agent should not emit final structured JSON, and pi-materia should not parse final JSON, until the command-triggered finalization turn.
+Only after `/materia continue` does pi-materia request the final assistant output and process it using the socket's normal `parse`, `assign`, `edges`, and `next` behavior. For JSON-parsed multi-turn sockets, refinement turns should stay conversational: the agent should not emit final structured JSON, and pi-materia should not parse final JSON, until the command-triggered finalization turn.
 
 The bundled config wires the `interactivePlan` materia, which has `multiTurn: true`, into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with named `loadouts` and `activeLoadout` like this excerpt:
 
@@ -289,7 +289,7 @@ The bundled config wires the `interactivePlan` materia, which has `multiTurn: tr
   "loadouts": {
     "Custom": {
       "entry": "ensureArtifactsIgnored",
-      "nodes": {
+      "sockets": {
         "ensureArtifactsIgnored": {
           "type": "utility",
           "utility": "project.ensureIgnored",
@@ -356,9 +356,9 @@ Each cast writes enough information to debug the run after the fact:
   events.jsonl
   usage.json       # token totals and USD cost totals/breakdowns from Pi usage metadata
   manifest.json
-  nodes/<node-id>/<visit>.md
-  nodes/<node-id>/<visit>.json
-  contexts/<node-id>-<visit>.md
+  sockets/<socket-id>/<visit>.md       # legacy-stable artifact directory name
+  sockets/<socket-id>/<visit>.json
+  contexts/<socket-id>-<visit>.md
 ```
 
 ## Default loadouts
@@ -366,8 +366,8 @@ Each cast writes enough information to debug the run after the fact:
 The bundled defaults live at `config/default.json` and set `activeLoadout` to `Full-Auto`.
 
 - `Full-Auto`: the autonomous software-development workflow. The `planner` materia immediately produces a generic handoff envelope with structured `workItems` from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
-- `Planning-Consult`: the conversational planning workflow. The planner node uses the `interactivePlan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate work-item JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
+- `Planning-Consult`: the conversational planning workflow. The planner socket uses the `interactivePlan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate work-item JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
 
 When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured generic envelope (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing`), and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 
-Both loadouts are defined entirely as config using top-level reusable materia prompts plus socket/node adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-6`); materia identity stays in node fields such as `materia` or `utility`, while displays can add context like `Socket-4 (Build)`. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
+Both loadouts are defined entirely as config using top-level reusable materia prompts plus socket adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-6`); materia identity stays in socket fields such as `materia` or `utility`, while displays can add context like `Socket-4 (Build)`. Legacy `nodes` field names are accepted only at persistence/WebUI/artifact compatibility boundaries. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.

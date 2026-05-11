@@ -1,5 +1,6 @@
 import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "./generator.js";
-import type { MateriaEdgeConfig, MateriaLoopConsumerConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
+import { loadoutSockets, loopSockets } from "./loadoutAccessors.js";
+import type { MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopConsumerConfig, MateriaPipelineConfig } from "./types.js";
 
 export type LoadoutGraphDiagnosticCode =
   | "loop-consumer-missing"
@@ -21,48 +22,50 @@ export interface DerivedLoopConsumerSource {
 
 export interface LoadoutGraphAnalysis {
   workItemProducingSocketIds: Set<string>;
-  workItemProducingNodeIds: Set<string>;
   loopConsumerSources: Map<string, DerivedLoopConsumerSource>;
   diagnostics: LoadoutGraphDiagnostic[];
 }
 
-interface AnalyzeableNode {
+interface AnalyzeableSocket {
   type?: string;
   materia?: string;
   edges?: MateriaEdgeConfig[];
 }
 
 interface AnalyzeableLoop {
-  nodes: string[];
+  sockets?: string[];
+  /** @deprecated Legacy persisted/WebUI DTO alias. */
+  nodes?: string[];
   consumes?: Partial<MateriaLoopConsumerConfig> & { from?: string };
   iterator?: unknown;
 }
 
 interface AnalyzeableLoadout {
-  nodes?: Record<string, AnalyzeableNode | undefined>;
+  sockets?: Record<string, AnalyzeableSocket | undefined>;
+  /** @deprecated Legacy persisted/WebUI DTO alias. */
+  nodes?: Record<string, AnalyzeableSocket | undefined>;
   loops?: Record<string, AnalyzeableLoop | undefined>;
 }
 
 export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record<string, GeneratorMateriaLike> = {}): LoadoutGraphAnalysis {
   // Keep this analysis tied to semantic graph inputs: build loop membership
-  // indexes once, walk node edges once, then finalize each loop. Complexity is
-  // O(nodes + edges + loop memberships + edge-loop hits) instead of scanning
-  // every node/edge once per loop; nested loops only add proportional hits for
+  // indexes once, walk socket edges once, then finalize each loop. Complexity is
+  // O(sockets + edges + loop memberships + edge-loop hits) instead of scanning
+  // every socket/edge once per loop; nested loops only add proportional hits for
   // edges that actually target sockets belonging to multiple loops.
-  const nodes = loadout.nodes ?? {};
+  const sockets = loadoutSockets(loadout as MateriaPipelineConfig) as Record<string, AnalyzeableSocket | undefined>;
   const diagnostics: LoadoutGraphDiagnostic[] = [];
   const loopConsumerSources = new Map<string, DerivedLoopConsumerSource>();
   const workItemProducingSocketIds = new Set<string>();
-  const workItemProducingNodeIds = new Set<string>();
-  const loopNodeSets = new Map<string, Set<string>>();
+  const loopSocketSets = new Map<string, Set<string>>();
   const loopConsumerFlags = new Map<string, boolean>();
   const socketLoopIds = new Map<string, Set<string>>();
   const inboundGeneratorSourcesByLoop = new Map<string, Set<string>>();
 
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
     if (!loop) continue;
-    const loopSet = new Set(loop.nodes ?? []);
-    loopNodeSets.set(loopId, loopSet);
+    const loopSet = new Set(loopSockets(loop as MateriaLoopConfig));
+    loopSocketSets.set(loopId, loopSet);
     loopConsumerFlags.set(loopId, Boolean(loop.consumes || loop.iterator));
     inboundGeneratorSourcesByLoop.set(loopId, new Set());
     for (const socketId of loopSet) {
@@ -72,13 +75,13 @@ export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record
     }
   }
 
-  for (const [from, node] of Object.entries(nodes)) {
-    if (!node || !isWorkItemsGeneratorNode(node, materia)) continue;
-    for (const edge of node.edges ?? []) {
+  for (const [from, socket] of Object.entries(sockets)) {
+    if (!socket || !isWorkItemsGeneratorSocket(socket, materia)) continue;
+    for (const edge of socket.edges ?? []) {
       const targetLoopIds = socketLoopIds.get(edge.to);
       if (!targetLoopIds) continue;
       for (const loopId of targetLoopIds) {
-        const loopSet = loopNodeSets.get(loopId);
+        const loopSet = loopSocketSets.get(loopId);
         if (!loopSet || loopSet.has(from)) continue;
         inboundGeneratorSourcesByLoop.get(loopId)?.add(from);
       }
@@ -93,10 +96,9 @@ export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record
 
     if (uniqueSources.length === 1) {
       const from = uniqueSources[0]!;
-      const output = loop.consumes?.output ?? generatorOutputForNode(nodes[from], materia) ?? "workItems";
+      const output = loop.consumes?.output ?? generatorOutputForSocket(sockets[from], materia) ?? "workItems";
       loopConsumerSources.set(loopId, { from, output });
       workItemProducingSocketIds.add(from);
-      workItemProducingNodeIds.add(from);
       if (loop.consumes?.from && loop.consumes.from !== from) {
         diagnostics.push({
           code: "loop-consumer-stale",
@@ -123,18 +125,16 @@ export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record
     }
   }
 
-  for (const [from, node] of Object.entries(nodes)) {
-    if (!node || !isWorkItemsGeneratorNode(node, materia)) continue;
-    for (const edge of node.edges ?? []) {
-      if (!isWorkItemsGeneratorNode(nodes[edge.to], materia)) continue;
+  for (const [from, socket] of Object.entries(sockets)) {
+    if (!socket || !isWorkItemsGeneratorSocket(socket, materia)) continue;
+    for (const edge of socket.edges ?? []) {
+      if (!isWorkItemsGeneratorSocket(sockets[edge.to], materia)) continue;
       workItemProducingSocketIds.add(from);
       workItemProducingSocketIds.add(edge.to);
-      workItemProducingNodeIds.add(from);
-      workItemProducingNodeIds.add(edge.to);
     }
   }
 
-  return { workItemProducingSocketIds, workItemProducingNodeIds, loopConsumerSources, diagnostics };
+  return { workItemProducingSocketIds, loopConsumerSources, diagnostics };
 }
 
 export function reconcileLoadoutLoopConsumersFromGraph<TLoadout extends AnalyzeableLoadout>(loadout: TLoadout, materia: Record<string, GeneratorMateriaLike> = {}): TLoadout {
@@ -160,12 +160,12 @@ export function reconcileLoadoutLoopConsumersFromGraphInPlace(loadout: MateriaPi
   return analysis;
 }
 
-function isWorkItemsGeneratorNode(node: AnalyzeableNode | undefined, materia: Record<string, GeneratorMateriaLike>): boolean {
-  return node?.type === "agent" && typeof node.materia === "string" && Boolean(canonicalGeneratorConfigFor(materia[node.materia]));
+function isWorkItemsGeneratorSocket(socket: AnalyzeableSocket | undefined, materia: Record<string, GeneratorMateriaLike>): boolean {
+  return socket?.type === "agent" && typeof socket.materia === "string" && Boolean(canonicalGeneratorConfigFor(materia[socket.materia]));
 }
 
-function generatorOutputForNode(node: AnalyzeableNode | undefined, materia: Record<string, GeneratorMateriaLike>): string | undefined {
-  return node?.type === "agent" && typeof node.materia === "string" ? canonicalGeneratorConfigFor(materia[node.materia])?.output : undefined;
+function generatorOutputForSocket(socket: AnalyzeableSocket | undefined, materia: Record<string, GeneratorMateriaLike>): string | undefined {
+  return socket?.type === "agent" && typeof socket.materia === "string" ? canonicalGeneratorConfigFor(materia[socket.materia])?.output : undefined;
 }
 
 function cloneValue<T>(value: T): T {

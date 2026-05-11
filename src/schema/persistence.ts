@@ -1,7 +1,7 @@
 import { validateReservedHandoffFields, type HandoffObject } from "../domain/handoff.js";
 import { validateLoadout, type Loadout, type LoadoutLoop, type LoadoutSocket, type SocketId } from "../domain/loadout.js";
 import type { DomainIssue, DomainResult } from "../domain/result.js";
-import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, PiMateriaConfig } from "../types.js";
+import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, PiMateriaConfig } from "../types.js";
 
 /**
  * Persistence/schema anti-corruption adapters.
@@ -9,9 +9,8 @@ import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineNodeConfi
  * `sockets` is the canonical external spelling for new loadout JSON handled by
  * these adapters. Legacy `nodes` input remains accepted only as a migration
  * compatibility path and is normalized before data reaches domain/application
- * callers. The current runtime still consumes `MateriaPipelineConfig.nodes`, so
- * this module also provides a narrow bridge back to that legacy application DTO
- * until later refactor stages rename internals mechanically.
+ * callers. Writers in this module emit canonical `sockets` only; legacy DTO
+ * aliases are handled by explicit compatibility adapters at the edge.
  */
 
 export interface PersistedLoadoutSchema {
@@ -67,7 +66,7 @@ export function pipelineConfigToDomainLoadout(loadout: MateriaPipelineConfig, id
   return {
     ...(id ? { id } : {}),
     entry: loadout.entry,
-    sockets: cloneRecord(loadout.nodes) as Record<SocketId, LoadoutSocket>,
+    sockets: cloneRecord(loadout.sockets ?? loadout.nodes ?? {}) as Record<SocketId, LoadoutSocket>,
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([loopId, loop]) => [loopId, pipelineLoopToDomain(loop)])) } : {}),
   };
 }
@@ -75,7 +74,7 @@ export function pipelineConfigToDomainLoadout(loadout: MateriaPipelineConfig, id
 export function domainLoadoutToPipelineConfig(loadout: Loadout): MateriaPipelineConfig {
   return {
     entry: loadout.entry,
-    nodes: cloneRecord(loadout.sockets) as Record<string, MateriaPipelineNodeConfig>,
+    sockets: cloneRecord(loadout.sockets) as Record<string, MateriaPipelineSocketConfig>,
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([loopId, loop]) => [loopId, domainLoopToPipeline(loop)])) } : {}),
   };
 }
@@ -96,7 +95,7 @@ export function normalizePersistedLoadoutForApplication(value: unknown): unknown
     ? Object.fromEntries(Object.entries(value.loops).map(([id, loop]) => [id, normalizeLoopForApplication(loop)]))
     : value.loops;
   const { sockets: _sockets, nodes: _nodes, ...rest } = value;
-  return { ...rest, nodes: cloneRecord(sockets), ...(loops === undefined ? {} : { loops }) };
+  return { ...rest, sockets: cloneRecord(sockets), ...(loops === undefined ? {} : { loops }) };
 }
 
 export function validatePersistedHandoffPayload(value: unknown, path = "handoff"): DomainResult<HandoffObject> {
@@ -147,7 +146,7 @@ function serializeLoop(loop: LoadoutLoop): PersistedLoopSchema {
 function pipelineLoopToDomain(loop: MateriaLoopConfig): LoadoutLoop {
   return {
     ...(loop.label ? { label: loop.label } : {}),
-    sockets: [...(loop.nodes ?? [])],
+    sockets: [...(loop.sockets ?? loop.nodes ?? [])],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
@@ -157,7 +156,7 @@ function pipelineLoopToDomain(loop: MateriaLoopConfig): LoadoutLoop {
 function domainLoopToPipeline(loop: LoadoutLoop): MateriaLoopConfig {
   return {
     ...(loop.label ? { label: loop.label } : {}),
-    nodes: [...loop.sockets],
+    sockets: [...loop.sockets],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
@@ -168,7 +167,7 @@ function normalizeLoopForApplication(value: unknown): unknown {
   if (!isPlainObject(value)) return value;
   const sockets = value.sockets ?? value.nodes;
   const { sockets: _sockets, nodes: _nodes, ...rest } = value;
-  return { ...rest, ...(Array.isArray(sockets) ? { nodes: [...sockets] } : {}) };
+  return { ...rest, ...(Array.isArray(sockets) ? { sockets: [...sockets] } : {}) };
 }
 
 function cloneRecord<T>(value: T): T {

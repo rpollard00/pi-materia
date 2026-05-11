@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { currentCastSocketId, currentCastSocketState } from "../castStateAccessors.js";
 import type { MateriaCastState } from "../types.js";
 
 export async function renderCastList(artifactRoot: string, sessionStates: MateriaCastState[] = []): Promise<string[]> {
@@ -39,7 +40,7 @@ interface CastSummary {
   status: string;
   recastTarget: boolean;
   request?: string;
-  currentNode?: string;
+  currentSocketId?: string;
   currentMateria?: string;
   currentItemKey?: string;
   currentItemLabel?: string;
@@ -67,7 +68,7 @@ async function readCastSummary(id: string, dir: string, state?: MateriaCastState
     status,
     recastTarget: state ? isRecastTargetState(state) : status === "failed" || status === "aborted",
     request,
-    currentNode: state?.currentNode ?? stringField(latestProgress, "node") ?? stringField(endData, "node"),
+    currentSocketId: (state ? currentCastSocketId(state) : undefined) ?? stringField(latestProgress, "node") ?? stringField(endData, "node"),
     currentMateria: state?.currentMateria ?? stringField(latestProgress, "materia"),
     currentItemKey: state?.currentItemKey ?? stringField(latestProgress, "itemKey"),
     currentItemLabel: state?.currentItemLabel ?? stringField(latestProgress, "itemLabel"),
@@ -93,7 +94,7 @@ function renderCastSummaryLines(cast: CastSummary): string[] {
 
 function castProgressLine(cast: CastSummary): string | undefined {
   const parts = [
-    cast.currentNode ? `node ${cast.currentNode}` : undefined,
+    cast.currentSocketId ? `socket ${cast.currentSocketId}` : undefined,
     cast.currentMateria ? `materia ${cast.currentMateria}` : undefined,
     cast.currentItemKey ? `item ${cast.currentItemKey}${cast.currentItemLabel ? ` - ${cast.currentItemLabel}` : ""}` : cast.currentItemLabel ? `item ${cast.currentItemLabel}` : undefined,
     typeof cast.visit === "number" ? `visit ${cast.visit}` : undefined,
@@ -111,14 +112,16 @@ function castSortTime(id: string, fallback: number): number {
 }
 
 function stateStatus(state: MateriaCastState): string {
+  const socketState = currentCastSocketState(state);
   if (state.active) return "running";
-  if (state.phase === "complete" || state.nodeState === "complete") return "complete";
-  if (state.phase === "failed" || state.nodeState === "failed") return failureStatus(state.failedReason);
-  return state.nodeState ?? state.phase ?? "active/unknown";
+  if (state.phase === "complete" || socketState === "complete") return "complete";
+  if (state.phase === "failed" || socketState === "failed") return failureStatus(state.failedReason);
+  return socketState ?? state.phase ?? "active/unknown";
 }
 
 function isRecastTargetState(state: MateriaCastState): boolean {
-  return !state.active && state.phase !== "complete" && state.nodeState !== "complete" && (state.phase === "failed" || state.nodeState === "failed");
+  const socketState = currentCastSocketState(state);
+  return !state.active && state.phase !== "complete" && socketState !== "complete" && (state.phase === "failed" || socketState === "failed");
 }
 
 function failureStatus(reason?: string): string {

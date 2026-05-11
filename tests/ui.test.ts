@@ -47,12 +47,12 @@ function loopCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastSt
     runState: run,
     pipeline: {
       entry: {} as never,
-      nodes: {
+      sockets: {
         "Socket-1": { id: "Socket-1", node: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "", label: "Build" } },
         "Socket-2": { id: "Socket-2", node: { type: "agent", materia: "Auto-Eval" }, materia: { tools: "readOnly", prompt: "", label: "Auto-Eval" } },
         "Socket-3": { id: "Socket-3", node: { type: "agent", materia: "Maintain" }, materia: { tools: "coding", prompt: "", label: "Maintain" } },
       },
-      loops: { itemLoop: { nodes: ["Socket-1", "Socket-2", "Socket-3"], iterator: { items: "state.workItems", cursor: "workItemsIndex" } } },
+      loops: { itemLoop: { sockets: ["Socket-1", "Socket-2", "Socket-3"], iterator: { items: "state.workItems", cursor: "workItemsIndex" } } },
     },
     ...overrides,
   } as MateriaCastState;
@@ -513,7 +513,7 @@ describe("usage UI formatting", () => {
       "By materia:",
       "- Build: 100 tokens, estimated token value: $0.4567 (subscription; no per-token billing implied)",
       "",
-      "By node:",
+      "By socket:",
       "- none observed",
       "",
       "By task:",
@@ -555,8 +555,8 @@ describe("usage UI formatting", () => {
     expect(lines).toContain("- task-4: 143174 tokens, billed cost: $0.3685");
 
     const total = costFromLine(lines.find((line) => line.startsWith("total:")) ?? "");
-    const materiaLines = lines.slice(lines.indexOf("By materia:") + 1, lines.indexOf("By node:"));
-    const nodeLines = lines.slice(lines.indexOf("By node:") + 1, lines.indexOf("By task:"));
+    const materiaLines = lines.slice(lines.indexOf("By materia:") + 1, lines.indexOf("By socket:"));
+    const nodeLines = lines.slice(lines.indexOf("By socket:") + 1, lines.indexOf("By task:"));
     const taskLines = lines.slice(lines.indexOf("By task:") + 1);
     expect(materiaLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
     expect(nodeLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
@@ -581,7 +581,7 @@ describe("usage UI formatting", () => {
       "By materia:",
       "- Build: 42 tokens, billed cost: $0.1234",
       "",
-      "By node:",
+      "By socket:",
       "- none observed",
       "",
       "By task:",

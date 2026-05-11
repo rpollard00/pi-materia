@@ -4,14 +4,14 @@ This is the canonical developer reference for generator-driven loop exits.
 
 ## Canonical runtime model
 
-Runtime executes only the node-level control fields:
+Runtime executes only the socket-level control fields:
 
-1. `parse` decides whether the node output is parsed as JSON.
+1. `parse` decides whether the socket output is parsed as JSON.
 2. `assign` copies parsed values into state.
 3. `advance` may advance a cursor and return its `done` target.
 4. ordered `edges` choose the next socket when `advance` did not finish the consumed list.
 
-`loops.<id>.exit` is declarative loadout intent, not a second router. For generator-consumer loops, pi-materia compiles this intent into the runtime model by materializing the loop exit source node. A loop with both:
+`loops.<id>.exit` is declarative loadout intent, not a second router. For generator-consumer loops, pi-materia compiles this intent into the runtime model by materializing the loop exit source socket. A loop with both:
 
 ```json
 "consumes": { "from": "Socket-1", "output": "workItems" },
@@ -36,7 +36,7 @@ The normal outgoing `edges` remain in place. This is intentional: `advance` runs
 
 ## Control field
 
-`satisfied` is the canonical boolean control field for `satisfied` / `not_satisfied` routing and for `advance.when`. Nodes that use those conditions must return JSON containing a boolean `satisfied`, and the node must parse JSON. Legacy aliases such as `passed` are not canonical; if any compatibility support exists, treat it as migration-only and do not author new loadouts or materia prompts with those aliases.
+`satisfied` is the canonical boolean control field for `satisfied` / `not_satisfied` routing and for `advance.when`. Sockets that use those conditions must return JSON containing a boolean `satisfied`, and the socket must parse JSON. Legacy aliases such as `passed` are not canonical; if any compatibility support exists, treat it as migration-only and do not author new loadouts or materia prompts with those aliases.
 
 ## Load/save/run-time compatibility migration
 
@@ -56,14 +56,14 @@ A UI-authored loop may be saved with only the declarative region and an uncondit
 ```json
 {
   "entry": "Socket-1",
-  "nodes": {
+  "sockets": {
     "Socket-1": { "type": "agent", "materia": "planner", "edges": [{ "when": "always", "to": "Socket-3" }] },
     "Socket-3": { "type": "agent", "materia": "Build", "edges": [{ "when": "always", "to": "Socket-4" }] },
     "Socket-4": { "type": "agent", "materia": "Maintain", "edges": [{ "when": "always", "to": "Socket-3" }] }
   },
   "loops": {
     "workItemIteration": {
-      "nodes": ["Socket-3", "Socket-4"],
+      "sockets": ["Socket-3", "Socket-4"],
       "consumes": { "from": "Socket-1", "output": "workItems" },
       "exit": { "from": "Socket-4", "when": "satisfied", "to": "end" }
     }
@@ -79,7 +79,7 @@ A richer loop keeps explicit retry routing and still uses the same exit material
 
 ```json
 {
-  "nodes": {
+  "sockets": {
     "Socket-1": { "type": "agent", "materia": "planner", "edges": [{ "when": "always", "to": "Socket-4" }] },
     "Socket-4": { "type": "agent", "materia": "Build", "edges": [{ "when": "always", "to": "Socket-5" }] },
     "Socket-5": {
@@ -102,7 +102,7 @@ A richer loop keeps explicit retry routing and still uses the same exit material
   },
   "loops": {
     "workItemIteration": {
-      "nodes": ["Socket-4", "Socket-5", "Socket-6"],
+      "sockets": ["Socket-4", "Socket-5", "Socket-6"],
       "consumes": { "from": "Socket-1", "output": "workItems" },
       "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" }
     }

@@ -32,11 +32,11 @@ function canonicalizeFixtureSockets<T>(value: T, parentKey = ""): T {
   return mapped as T;
 }
 
-function utilityConfig(node: Record<string, unknown>, extraNodes: Record<string, unknown> = {}) {
+function utilityConfig(socket: Record<string, unknown>, extraSockets: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": canonicalizeFixtureSockets({ type: "utility", ...node }), ...canonicalizeFixtureSockets(extraNodes) } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": canonicalizeFixtureSockets({ type: "utility", ...socket }), ...canonicalizeFixtureSockets(extraSockets) } } },
     materia: {},
   };
 }
@@ -190,7 +190,7 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string };
     expect(state.phase).toBe("failed");
-    expect(state.failedReason).toContain('Invalid handoff JSON output for node "Socket-1"');
+    expect(state.failedReason).toContain('Invalid handoff JSON output for socket "Socket-1"');
     expect(state.failedReason).toContain("expected a JSON object at the top level");
   });
 
@@ -224,7 +224,7 @@ describe("native utility node execution", () => {
       loadouts: {
         "Hojo-like": {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": {
               type: "utility",
               utility: "echo",
@@ -261,7 +261,7 @@ describe("native utility node execution", () => {
           loops: {
             loopSelection: {
               label: "Hojo-like Build → Auto-Eval → Maintain",
-              nodes: ["Socket-2", "Socket-3", "Socket-4"],
+              sockets: ["Socket-2", "Socket-3", "Socket-4"],
               iterator: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" },
               exit: { from: "Socket-4", when: "satisfied", to: "end" },
             },
@@ -307,7 +307,7 @@ describe("native utility node execution", () => {
       loadouts: {
         Loop: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "utility", utility: "echo", params: { text: "build" }, next: "Socket-2", limits: { maxVisits: 5 } },
             "Socket-2": {
               type: "utility",
@@ -337,7 +337,7 @@ describe("native utility node execution", () => {
     await expect(readFile(path.join(state.runDir!, "nodes", "Socket-3", "1.md"), "utf8")).resolves.toBe("maintain");
   });
 
-  test("foreach utility nodes expose item and cursor metadata in input artifacts", async () => {
+  test("foreach utility sockets expose item and cursor metadata in input artifacts", async () => {
     const harness = await makeHarness(utilityConfig({
       utility: "echo",
       params: { text: "item" },
@@ -366,21 +366,21 @@ describe("native utility node execution", () => {
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
   });
 
-  test("explicit loop iterator metadata drives runtime item selection for member nodes", async () => {
+  test("explicit loop iterator metadata drives runtime item selection for member sockets", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "utility", utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { type: "utility", utility: "echo", params: { text: "loop item" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, edges: [{ when: "always", to: "Socket-2" }] },
           },
           loops: {
             taskIteration: {
               label: "Runtime item loop",
-              nodes: ["Socket-2"],
+              sockets: ["Socket-2"],
               iterator: { items: "state.items", as: "work", cursor: "itemCursor", done: "end" },
               exit: { from: "Socket-2", when: "satisfied", to: "end" },
             },
@@ -452,7 +452,7 @@ describe("native utility node execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string };
     expect(state.phase).toBe("failed");
-    expect(state.failedReason).toContain('Invalid JSON output for node "Socket-1"');
+    expect(state.failedReason).toContain('Invalid JSON output for socket "Socket-1"');
   });
 
   test("command utility timeout terminates the process and fails the cast", async () => {

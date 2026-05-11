@@ -28,7 +28,7 @@ function multiTurnConfig(overrides: Record<string, unknown> = {}) {
     loadouts: {
       Test: {
         entry: "Socket-1",
-        nodes: {
+        sockets: {
           "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
         },
       },
@@ -44,7 +44,7 @@ function singleTurnConfig() {
     loadouts: {
       Test: {
         entry: "Socket-1",
-        nodes: {
+        sockets: {
           "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "Socket-2" },
           "Socket-2": { type: "agent", materia: "Build" },
         },
@@ -67,7 +67,7 @@ function multiTurnWithDownstreamConfig(parse: "json" | "text") {
     loadouts: {
       Test: {
         entry: "Socket-1",
-        nodes: {
+        sockets: {
           "Socket-1": plan,
           "Socket-2": { type: "agent", materia: "Build" },
         },
@@ -87,11 +87,11 @@ function loadoutSwitchingConfig() {
     loadouts: {
       Single: {
         entry: "Socket-1",
-        nodes: { "Socket-1": { type: "agent", materia: "PlanSingle", parse: "json", assign: { tasks: "$.tasks" } } },
+        sockets: { "Socket-1": { type: "agent", materia: "PlanSingle", parse: "json", assign: { tasks: "$.tasks" } } },
       },
       Interactive: {
         entry: "Socket-1",
-        nodes: { "Socket-1": { type: "agent", materia: "PlanInteractive", parse: "json", assign: { tasks: "$.tasks" } } },
+        sockets: { "Socket-1": { type: "agent", materia: "PlanInteractive", parse: "json", assign: { tasks: "$.tasks" } } },
       },
     },
     materia: {
@@ -102,7 +102,7 @@ function loadoutSwitchingConfig() {
 }
 
 describe("native multi-turn runtime", () => {
-  test("single-turn agent nodes still parse, assign, and advance automatically", async () => {
+  test("single-turn agent sockets still parse, assign, and advance automatically", async () => {
     const harness = await makeHarness(singleTurnConfig());
 
     await harness.runCommand("materia", "cast make a plan");
@@ -135,7 +135,7 @@ describe("native multi-turn runtime", () => {
     expect(firstPrompt.content).toContain("Collaboratively refine an implementation plan");
     expect(firstPrompt.content).toContain("normal conversation");
     expect(firstPrompt.content).toContain("Do not emit the structured workItems JSON during refinement");
-    expect(firstPrompt.content).toContain("/materia continue is the only way to finalize this multi-turn node");
+    expect(firstPrompt.content).toContain("/materia continue is the only way to finalize this multi-turn socket");
     expect(firstPrompt.content).toContain("do not emit final JSON");
     expect(firstPrompt.content).not.toContain("Return only JSON");
 
@@ -253,7 +253,7 @@ describe("native multi-turn runtime", () => {
     const failedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(failedState.active).toBe(false);
     expect(failedState.nodeState).toBe("failed");
-    expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for node \"Socket-1\"");
+    expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for socket \"Socket-1\"");
   });
 
   test("normal CRT refinement text does not finalize or parse paused JSON multi-turn output", async () => {
@@ -440,7 +440,7 @@ describe("native multi-turn runtime", () => {
     const contextResults = await harness.emit("context", { messages });
     const isolated = (contextResults.at(-1) as any).messages;
     const synthetic = isolated[0].content as string;
-    expect(synthetic).toContain("Current node: Socket-1");
+    expect(synthetic).toContain("Current socket: Socket-1");
     expect(synthetic).toContain("Current materia: Plan");
     expect(synthetic).toContain("Artifact directory:");
     expect(synthetic).toContain("Previous output:\ndraft response");

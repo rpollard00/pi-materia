@@ -9,7 +9,9 @@ export type BuiltInUtilityInput = {
   runDir: string;
   request: string;
   castId: string;
-  nodeId: string;
+  socketId: string;
+  /** @deprecated Legacy utility-command protocol alias; value is the socket id. */
+  nodeId?: string;
   params: Record<string, unknown>;
   state: unknown;
   item: unknown;

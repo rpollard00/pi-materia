@@ -1,7 +1,7 @@
 {
   "artifactDir": ".pi/pi-materia",
   "limits": {
-    "maxNodeVisits": 50,
+    "maxSocketVisits": 50,
     "maxEdgeTraversals": 25
   },
   "budget": {
@@ -14,7 +14,26 @@
   "loadouts": {
     "Full-Auto": {
       "entry": "Socket-1",
-      "nodes": {
+      "loops": {
+        "taskIteration": {
+          "label": "Build → Eval → Maintain until all work items complete",
+          "exit": {
+            "from": "Socket-6",
+            "when": "satisfied",
+            "to": "end"
+          },
+          "consumes": {
+            "from": "Socket-3",
+            "output": "workItems"
+          },
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
+          ]
+        }
+      },
+      "sockets": {
         "Socket-1": {
           "type": "utility",
           "utility": "project.ensureIgnored",
@@ -118,15 +137,13 @@
           ],
           "materia": "Maintain"
         }
-      },
+      }
+    },
+    "Planning-Consult": {
+      "entry": "Socket-1",
       "loops": {
         "taskIteration": {
           "label": "Build → Eval → Maintain until all work items complete",
-          "nodes": [
-            "Socket-4",
-            "Socket-5",
-            "Socket-6"
-          ],
           "exit": {
             "from": "Socket-6",
             "when": "satisfied",
@@ -135,13 +152,15 @@
           "consumes": {
             "from": "Socket-3",
             "output": "workItems"
-          }
+          },
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
+          ]
         }
-      }
-    },
-    "Planning-Consult": {
-      "entry": "Socket-1",
-      "nodes": {
+      },
+      "sockets": {
         "Socket-1": {
           "type": "utility",
           "utility": "project.ensureIgnored",
@@ -244,25 +263,6 @@
             }
           ],
           "materia": "Maintain"
-        }
-      },
-      "loops": {
-        "taskIteration": {
-          "label": "Build → Eval → Maintain until all work items complete",
-          "nodes": [
-            "Socket-4",
-            "Socket-5",
-            "Socket-6"
-          ],
-          "exit": {
-            "from": "Socket-6",
-            "when": "satisfied",
-            "to": "end"
-          },
-          "consumes": {
-            "from": "Socket-3",
-            "output": "workItems"
-          }
         }
       }
     }

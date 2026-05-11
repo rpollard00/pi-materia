@@ -12,6 +12,10 @@ interface YoloTestConfig extends PiMateriaConfig {
   __workItems: Array<{ id: string; title: string }>;
 }
 
+function testSockets(loadout: NonNullable<PiMateriaConfig["loadouts"]>[string]) {
+  return loadout.sockets!;
+}
+
 async function makeHarness(config: PiMateriaConfig): Promise<FakePiHarness> {
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-yolo-loop-"));
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
@@ -38,7 +42,7 @@ const maintainScript = `
 
 function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { retryOnce?: string[]; exitTo?: string } = {}): YoloTestConfig {
   const exitTo = options.exitTo ?? "end";
-  const nodes: Record<string, unknown> = {
+  const sockets: Record<string, unknown> = {
     "Socket-3": {
       type: "utility",
       utility: "echo",
@@ -63,7 +67,7 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
     },
   } as never;
   if (exitTo !== "end") {
-    (nodes as Record<string, unknown>)[exitTo] = { type: "utility", utility: "echo", params: { output: { done: true } }, parse: "json", assign: { done: "$.done" } };
+    (sockets as Record<string, unknown>)[exitTo] = { type: "utility", utility: "echo", params: { output: { done: true } }, parse: "json", assign: { done: "$.done" } };
   }
 
   return {
@@ -73,10 +77,10 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
     loadouts: {
       Yolo: {
         entry: "Socket-5",
-        nodes: nodes as never,
+        sockets: sockets as never,
         loops: {
           loopSelection: {
-            nodes: ["Socket-3", "Socket-4"],
+            sockets: ["Socket-3", "Socket-4"],
             consumes: { from: "Socket-5", output: "workItems" },
             exit: { from: "Socket-4", when: "satisfied", to: exitTo },
           },
@@ -102,7 +106,7 @@ async function runYolo(config: YoloTestConfig) {
 describe("Yolo loop semantics regression", () => {
   test("single-item UI-created Yolo exits after satisfied instead of following the unconditional back-edge forever", async () => {
     const config = yoloConfig([{ id: "one", title: "One" }]);
-    expect(resolvePipeline(config).nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(resolvePipeline(config).sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
 
     const { state } = await runYolo(config);
 
@@ -147,7 +151,7 @@ describe("Yolo loop semantics regression", () => {
 
   test("satisfied loop-exit route overrides legacy loop exit target with always fallback", async () => {
     const config = yoloConfig([{ id: "one", title: "One" }]);
-    config.loadouts!.Yolo.nodes["Socket-2"] = { type: "utility", utility: "echo", params: { output: { routed: true } }, parse: "json", assign: { routed: "$.routed" } };
+    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", utility: "echo", params: { output: { routed: true } }, parse: "json", assign: { routed: "$.routed" } };
     config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-satisfied", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-2" }];
 
     const { state } = await runYolo(config);
@@ -173,9 +177,9 @@ describe("Yolo loop semantics regression", () => {
 
   test("loop-exit route can enter another loop and preserves no-match fallback behavior", async () => {
     const config = yoloConfig([{ id: "one", title: "One" }], { exitTo: "Socket-2" });
-    config.loadouts!.Yolo.nodes["Socket-2"] = { type: "utility", utility: "echo", params: { output: { fallbackDone: true } }, parse: "json", assign: { fallbackDone: "$.fallbackDone" } };
-    config.loadouts!.Yolo.nodes["Socket-6"] = { type: "utility", utility: "echo", params: { text: "second build" }, foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
-    config.loadouts!.Yolo.nodes["Socket-7"] = { type: "utility", utility: "echo", params: { output: { satisfied: true, secondLoopDone: true } }, parse: "json", assign: { secondLoopDone: "$.secondLoopDone" }, advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
+    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", utility: "echo", params: { output: { fallbackDone: true } }, parse: "json", assign: { fallbackDone: "$.fallbackDone" } };
+    testSockets(config.loadouts!.Yolo)["Socket-6"] = { type: "utility", utility: "echo", params: { text: "second build" }, foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
+    testSockets(config.loadouts!.Yolo)["Socket-7"] = { type: "utility", utility: "echo", params: { output: { satisfied: true, secondLoopDone: true } }, parse: "json", assign: { secondLoopDone: "$.secondLoopDone" }, advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
     config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-first-loop", from: "Socket-4", condition: "always", targetSocketId: "Socket-6" }];
 
     const { state } = await runYolo(config);
@@ -196,11 +200,11 @@ describe("Yolo loop semantics regression", () => {
   test("UI-authored and default-style Yolo loadouts normalize to equivalent executable semantics", () => {
     const uiAuthored = yoloConfig([{ id: "one", title: "One" }]);
     const defaultStyle = structuredClone(uiAuthored) as PiMateriaConfig;
-    defaultStyle.loadouts!.Yolo.nodes["Socket-4"].parse = "json";
-    defaultStyle.loadouts!.Yolo.nodes["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" };
+    testSockets(defaultStyle.loadouts!.Yolo)["Socket-4"].parse = "json";
+    testSockets(defaultStyle.loadouts!.Yolo)["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" };
 
     const normalizedUiConfig = normalizeMateriaConfigEdges(uiAuthored as never) as PiMateriaConfig;
-    expect(normalizedUiConfig.loadouts!.Yolo.nodes["Socket-4"]).toMatchObject({
+    expect(testSockets(normalizedUiConfig.loadouts!.Yolo)["Socket-4"]).toMatchObject({
       parse: "json",
       advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
       edges: [{ when: "always", to: "Socket-3" }],
@@ -208,18 +212,18 @@ describe("Yolo loop semantics regression", () => {
 
     const uiPipeline = resolvePipeline(uiAuthored);
     const defaultPipeline = resolvePipeline(defaultStyle);
-    expect(uiPipeline.nodes["Socket-4"].node).toEqual(defaultPipeline.nodes["Socket-4"].node);
+    expect(uiPipeline.sockets["Socket-4"].socket).toEqual(defaultPipeline.sockets["Socket-4"].socket);
     expect(uiPipeline.loops?.loopSelection).toEqual(defaultPipeline.loops?.loopSelection);
   });
 
   test("normalization preserves compatible explicit advance definitions and rejects conflicting ones", () => {
     const compatible = yoloConfig([{ id: "one", title: "One" }]);
-    compatible.loadouts!.Yolo.nodes["Socket-4"].parse = "json";
-    compatible.loadouts!.Yolo.nodes["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" };
-    expect(resolvePipeline(compatible).nodes["Socket-4"].node.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    testSockets(compatible.loadouts!.Yolo)["Socket-4"].parse = "json";
+    testSockets(compatible.loadouts!.Yolo)["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" };
+    expect(resolvePipeline(compatible).sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
 
     const conflicting = structuredClone(compatible) as PiMateriaConfig;
-    conflicting.loadouts!.Yolo.nodes["Socket-4"].advance = { cursor: "otherIndex", items: "state.workItems", done: "end", when: "satisfied" };
+    testSockets(conflicting.loadouts!.Yolo)["Socket-4"].advance = { cursor: "otherIndex", items: "state.workItems", done: "end", when: "satisfied" };
     expect(() => resolvePipeline(conflicting)).toThrow(/existing advance block.*cursor: current "otherIndex", expected "workItemIndex"/);
   });
 });

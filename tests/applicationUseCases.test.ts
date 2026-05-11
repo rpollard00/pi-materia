@@ -3,11 +3,11 @@ import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, Lo
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../src/types.js";
 
 function loaded(activeLoadout = "default"): LoadedConfig {
-  return { source: "/repo/materia.json", config: { activeLoadout, materia: {}, loadouts: { [activeLoadout]: { entry: "Socket-1", nodes: {} } } } };
+  return { source: "/repo/materia.json", config: { activeLoadout, materia: {}, loadouts: { [activeLoadout]: { entry: "Socket-1", sockets: {} } } } };
 }
 
 function pipeline(): ResolvedMateriaPipeline {
-  return { entry: { id: "Socket-1", node: { type: "utility", utility: "noop" } }, nodes: { "Socket-1": { id: "Socket-1", node: { type: "utility", utility: "noop" } } } };
+  return { entry: { id: "Socket-1", node: { type: "utility", utility: "noop" } }, sockets: { "Socket-1": { id: "Socket-1", node: { type: "utility", utility: "noop" } } } };
 }
 
 function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {

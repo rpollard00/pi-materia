@@ -1,6 +1,7 @@
 import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
+import { loadoutSockets, loopSockets, materializeCanonicalSockets } from "./loadoutAccessors.js";
 import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "./socketIds.js";
-import type { LegacyMateriaPipelineNodeConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig } from "./types.js";
+import type { LegacyMateriaPipelineNodeConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "./types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
 export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
@@ -20,7 +21,9 @@ export interface MateriaGraphValidationResult {
 }
 
 export interface MateriaGraphValidationOptions {
-  isGeneratorNode?: (nodeId: string) => boolean;
+  isGeneratorSocket?: (socketId: string) => boolean;
+  /** @deprecated Compatibility alias for callers not yet migrated to isGeneratorSocket. */
+  isGeneratorNode?: (socketId: string) => boolean;
 }
 
 export interface ValidatedGraphChangeResult<TGraph extends MateriaPipelineConfig = MateriaPipelineConfig> extends MateriaGraphValidationResult {
@@ -28,12 +31,12 @@ export interface ValidatedGraphChangeResult<TGraph extends MateriaPipelineConfig
 }
 
 export function normalizePipelineGraph<TGraph extends MateriaPipelineConfig>(graph: TGraph): TGraph {
-  const normalized = cloneGraph(graph);
-  for (const node of Object.values(normalized.nodes ?? {}) as LegacyMateriaPipelineNodeConfig[]) {
-    const edges = (node.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeCondition(edge.when) }));
-    if (node.next) edges.push({ when: "always", to: node.next });
-    node.edges = edges.length > 0 ? edges : undefined;
-    delete node.next;
+  const normalized = materializeCanonicalSockets(cloneGraph(graph));
+  for (const socket of Object.values(loadoutSockets(normalized)) as LegacyMateriaPipelineNodeConfig[]) {
+    const edges = (socket.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeCondition(edge.when) }));
+    if (socket.next) edges.push({ when: "always", to: socket.next });
+    socket.edges = edges.length > 0 ? edges : undefined;
+    delete socket.next;
   }
   return normalized;
 }
@@ -44,27 +47,27 @@ export function normalizeEdgeCondition(value: unknown): MateriaEdgeCondition {
   return value as MateriaEdgeCondition;
 }
 
-export function canonicalOutgoingEdges(node: MateriaPipelineNodeConfig): MateriaEdgeConfig[] {
-  const legacyNode = node as LegacyMateriaPipelineNodeConfig;
-  const edges = (legacyNode.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeCondition(edge.when) }));
-  if (legacyNode.next) edges.push({ when: "always", to: legacyNode.next });
+export function canonicalOutgoingEdges(socket: MateriaPipelineSocketConfig): MateriaEdgeConfig[] {
+  const legacySocket = socket as LegacyMateriaPipelineNodeConfig;
+  const edges = (legacySocket.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeCondition(edge.when) }));
+  if (legacySocket.next) edges.push({ when: "always", to: legacySocket.next });
   return edges;
 }
 
 export function validatePipelineGraph(graph: MateriaPipelineConfig, options: MateriaGraphValidationOptions = {}): MateriaGraphValidationResult {
   const normalized = normalizePipelineGraph(graph);
   const errors: MateriaGraphValidationError[] = [];
-  const nodeIds = new Set(Object.keys(normalized.nodes ?? {}));
+  const socketIds = new Set(Object.keys(loadoutSockets(normalized)));
 
-  for (const id of nodeIds) validateSocketId(errors, id, `nodes.${id}`);
-  validateSocketReference(errors, nodeIds, graph.entry, "entry");
+  for (const id of socketIds) validateSocketId(errors, id, `sockets.${id}`);
+  validateSocketReference(errors, socketIds, graph.entry, "entry");
 
-  for (const [id, node] of Object.entries(normalized.nodes ?? {})) {
-    const errorCountBeforeNode = errors.length;
-    validateNodeLinks(id, node, errors, nodeIds);
-    if (errors.length === errorCountBeforeNode) validateOutgoingEdgeConditions(id, node.edges ?? [], errors);
+  for (const [id, socket] of Object.entries(loadoutSockets(normalized))) {
+    const errorCountBeforeSocket = errors.length;
+    validateSocketLinks(id, socket, errors, socketIds);
+    if (errors.length === errorCountBeforeSocket) validateOutgoingEdgeConditions(id, socket.edges ?? [], errors);
   }
-  validateLoops(normalized, errors, nodeIds, options);
+  validateLoops(normalized, errors, socketIds, options);
 
   // Materia graphs are workflow state machines, not DAGs: transitions may
   // intentionally revisit earlier sockets (for example Build -> Eval -> Maintain
@@ -107,13 +110,13 @@ export function edgeGuard(edge: { when?: unknown }): MateriaGraphEdgeGuard {
   return edgeConditionState(edge) === "always" ? "unconditional" : "guarded";
 }
 
-function validateNodeLinks(id: string, node: MateriaPipelineNodeConfig, errors: MateriaGraphValidationError[], nodeIds: Set<string>): void {
-  const legacyNode = node as LegacyMateriaPipelineNodeConfig;
-  validateOptionalTarget(errors, nodeIds, id, legacyNode.next, `${id}.next`);
-  validateOptionalTarget(errors, nodeIds, id, node.foreach?.done, `${id}.foreach.done`);
-  validateOptionalTarget(errors, nodeIds, id, node.advance?.done, `${id}.advance.done`);
-  for (const [index, edge] of (node.edges ?? []).entries()) {
-    validateOptionalTarget(errors, nodeIds, id, edge.to, `${id}.edges[${index}].to`);
+function validateSocketLinks(id: string, socket: MateriaPipelineSocketConfig, errors: MateriaGraphValidationError[], socketIds: Set<string>): void {
+  const legacySocket = socket as LegacyMateriaPipelineNodeConfig;
+  validateOptionalTarget(errors, socketIds, id, legacySocket.next, `${id}.next`);
+  validateOptionalTarget(errors, socketIds, id, socket.foreach?.done, `${id}.foreach.done`);
+  validateOptionalTarget(errors, socketIds, id, socket.advance?.done, `${id}.advance.done`);
+  for (const [index, edge] of (socket.edges ?? []).entries()) {
+    validateOptionalTarget(errors, socketIds, id, edge.to, `${id}.edges[${index}].to`);
   }
 }
 
@@ -147,38 +150,39 @@ function validateOutgoingEdgeConditions(id: string, edges: MateriaEdgeConfig[], 
   }
 }
 
-function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], nodeIds: Set<string>, options: MateriaGraphValidationOptions): void {
+function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], socketIds: Set<string>, options: MateriaGraphValidationOptions): void {
   for (const [loopId, loop] of Object.entries(graph.loops ?? {})) {
-    if (!Array.isArray(loop.nodes) || loop.nodes.length === 0) {
-      errors.push({ code: "invalid-loop", source: `loops.${loopId}.nodes`, message: `Loop "${loopId}" must include at least one socket id in loops.${loopId}.nodes.` });
+    const sockets = loopSockets(loop);
+    if (!Array.isArray(sockets) || sockets.length === 0) {
+      errors.push({ code: "invalid-loop", source: `loops.${loopId}.sockets`, message: `Loop "${loopId}" must include at least one socket id in loops.${loopId}.sockets.` });
       continue;
     }
-    let loopNodesAreValid = true;
-    for (const [index, nodeId] of loop.nodes.entries()) {
-      if (!validateSocketReference(errors, nodeIds, nodeId, `loops.${loopId}.nodes[${index}]`)) loopNodesAreValid = false;
+    let loopSocketsAreValid = true;
+    for (const [index, socketId] of sockets.entries()) {
+      if (!validateSocketReference(errors, socketIds, socketId, `loops.${loopId}.sockets[${index}]`)) loopSocketsAreValid = false;
     }
-    const consumesFromIsValid = !loop.consumes || validateSocketReference(errors, nodeIds, loop.consumes.from, `loops.${loopId}.consumes.from`, { from: loop.consumes.from });
-    validateOptionalTarget(errors, nodeIds, loopId, loop.consumes?.done, `loops.${loopId}.consumes.done`);
-    validateOptionalTarget(errors, nodeIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
-    const exitIsValid = validateLoopExit(errors, nodeIds, loopId, loop.nodes, loop.exit);
-    validateLoopExitRoutes(errors, nodeIds, loopId, loop.nodes, loop.exits);
-    if (loop.consumes && consumesFromIsValid && loopNodesAreValid) validateLoopTopology(graph, errors, loopId, loop.nodes, loop.consumes.from, options);
-    if (loop.consumes && loopNodesAreValid && exitIsValid) validateExecutableLoopSemantics(graph, errors, loopId, loop.nodes, loop.consumes, loop.exit);
+    const consumesFromIsValid = !loop.consumes || validateSocketReference(errors, socketIds, loop.consumes.from, `loops.${loopId}.consumes.from`, { from: loop.consumes.from });
+    validateOptionalTarget(errors, socketIds, loopId, loop.consumes?.done, `loops.${loopId}.consumes.done`);
+    validateOptionalTarget(errors, socketIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
+    const exitIsValid = validateLoopExit(errors, socketIds, loopId, sockets, loop.exit);
+    validateLoopExitRoutes(errors, socketIds, loopId, sockets, loop.exits);
+    if (loop.consumes && consumesFromIsValid && loopSocketsAreValid) validateLoopTopology(graph, errors, loopId, sockets, loop.consumes.from, options);
+    if (loop.consumes && loopSocketsAreValid && exitIsValid) validateExecutableLoopSemantics(graph, errors, loopId, sockets, loop.consumes, loop.exit);
   }
 }
 
-function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopNodes: string[], consumes: NonNullable<MateriaLoopConfig["consumes"]>, exit: MateriaLoopExitConfig | undefined): void {
+function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopMemberSockets: string[], consumes: NonNullable<MateriaLoopConfig["consumes"]>, exit: MateriaLoopExitConfig | undefined): void {
   if (!exit) return;
 
-  const node = graph.nodes?.[exit.from];
-  if (!node) return;
+  const socket = loadoutSockets(graph)[exit.from];
+  if (!socket) return;
   const sourceLabel = `Loop "${loopId}" exit source "${exit.from}"`;
-  if ((exit.when === "satisfied" || exit.when === "not_satisfied") && node.parse !== undefined && node.parse !== "json") {
+  if ((exit.when === "satisfied" || exit.when === "not_satisfied") && socket.parse !== undefined && socket.parse !== "json") {
     errors.push({
       code: "invalid-loop",
       source: `${exit.from}.parse`,
       from: exit.from,
-      message: `${sourceLabel} field parse has current value ${JSON.stringify(node.parse)}, expected "json" because loops.${loopId}.exit.when is "${exit.when}" and runtime reads the canonical satisfied JSON field. Suggested fix: set ${exit.from}.parse to "json" or choose an unconditional exit condition.`,
+      message: `${sourceLabel} field parse has current value ${JSON.stringify(socket.parse)}, expected "json" because loops.${loopId}.exit.when is "${exit.when}" and runtime reads the canonical satisfied JSON field. Suggested fix: set ${exit.from}.parse to "json" or choose an unconditional exit condition.`,
     });
   }
 
@@ -189,9 +193,9 @@ function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: M
     done: exit.to,
     when: exit.when,
   };
-  if (node.advance) {
+  if (socket.advance) {
     for (const [field, expectedValue] of Object.entries(expectedAdvance)) {
-      const currentValue = node.advance[field as keyof MateriaAdvanceConfig];
+      const currentValue = socket.advance[field as keyof MateriaAdvanceConfig];
       if (currentValue !== expectedValue) {
         errors.push({
           code: "invalid-loop",
@@ -203,13 +207,13 @@ function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: M
     }
   }
 
-  const continuationEdges = canonicalOutgoingEdges(node).filter((edge) => loopNodes.includes(edge.to));
+  const continuationEdges = canonicalOutgoingEdges(socket).filter((edge) => loopMemberSockets.includes(edge.to));
   if (continuationEdges.length === 0) {
     errors.push({
       code: "invalid-loop",
       source: `${exit.from}.edges`,
       from: exit.from,
-      message: `${sourceLabel} has no outgoing route back into loop members (${loopNodes.join(", ")}) for non-final consumed items after advance runs. Suggested fix: add an always edge, or an opposite-condition retry edge, from ${exit.from} to a loop socket.`,
+      message: `${sourceLabel} has no outgoing route back into loop members (${loopMemberSockets.join(", ")}) for non-final consumed items after advance runs. Suggested fix: add an always edge, or an opposite-condition retry edge, from ${exit.from} to a loop socket.`,
     });
   }
 
@@ -235,18 +239,18 @@ function oppositeCondition(condition: MateriaEdgeCondition): MateriaEdgeConditio
   return undefined;
 }
 
-function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<string>, loopId: string, loopNodes: string[], exit: MateriaLoopExitConfig | undefined): boolean {
+function validateLoopExit(errors: MateriaGraphValidationError[], socketIds: Set<string>, loopId: string, loopMemberSockets: string[], exit: MateriaLoopExitConfig | undefined): boolean {
   if (!exit) return true;
   const errorCount = errors.length;
-  validateOptionalTarget(errors, nodeIds, loopId, exit.to, `loops.${loopId}.exit.to`);
+  validateOptionalTarget(errors, socketIds, loopId, exit.to, `loops.${loopId}.exit.to`);
   if (!exit.from) {
     errors.push({ code: "missing-endpoint", source: `loops.${loopId}.exit.from`, message: `Missing graph endpoint referenced by loops.${loopId}.exit.from.` });
   } else if (!validateSocketId(errors, exit.from, `loops.${loopId}.exit.from`, { from: exit.from })) {
     return false;
-  } else if (!nodeIds.has(exit.from)) {
+  } else if (!socketIds.has(exit.from)) {
     errors.push({ code: "unknown-endpoint", source: `loops.${loopId}.exit.from`, from: exit.from, message: `Unknown graph endpoint "${exit.from}" referenced by loops.${loopId}.exit.from.` });
-  } else if (!loopNodes.includes(exit.from)) {
-    errors.push({ code: "invalid-loop", source: `loops.${loopId}.exit.from`, from: exit.from, message: `Loop "${loopId}" exit source "${exit.from}" must be one of its member sockets: ${loopNodes.join(", ")}.` });
+  } else if (!loopMemberSockets.includes(exit.from)) {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.exit.from`, from: exit.from, message: `Loop "${loopId}" exit source "${exit.from}" must be one of its member sockets: ${loopMemberSockets.join(", ")}.` });
   }
   if (!isCanonicalEdgeCondition(exit.when)) {
     errors.push({ code: "invalid-edge-condition", source: `loops.${loopId}.exit.when`, from: exit.from, to: exit.to, message: `Loop "${loopId}" has invalid exit condition at loops.${loopId}.exit.when. Expected one of: ${CANONICAL_EDGE_CONDITIONS.join(", ")}.` });
@@ -254,7 +258,7 @@ function validateLoopExit(errors: MateriaGraphValidationError[], nodeIds: Set<st
   return errors.length === errorCount;
 }
 
-function validateLoopExitRoutes(errors: MateriaGraphValidationError[], nodeIds: Set<string>, loopId: string, loopNodes: string[], exits: MateriaLoopExitRouteConfig[] | undefined): void {
+function validateLoopExitRoutes(errors: MateriaGraphValidationError[], socketIds: Set<string>, loopId: string, loopMemberSockets: string[], exits: MateriaLoopExitRouteConfig[] | undefined): void {
   if (exits === undefined) return;
   if (!Array.isArray(exits)) {
     errors.push({ code: "invalid-loop", source: `loops.${loopId}.exits`, message: `Loop "${loopId}" exits must be an array of loop-owned exit route records.` });
@@ -281,10 +285,10 @@ function validateLoopExitRoutes(errors: MateriaGraphValidationError[], nodeIds: 
     if (!route.from) {
       errors.push({ code: "missing-endpoint", source: `${routeSource}.from`, message: `Missing graph endpoint referenced by ${routeSource}.from.` });
     } else if (validateSocketId(errors, route.from, `${routeSource}.from`, { from: route.from })) {
-      if (!nodeIds.has(route.from)) {
+      if (!socketIds.has(route.from)) {
         errors.push({ code: "unknown-endpoint", source: `${routeSource}.from`, from: route.from, message: `Unknown graph endpoint "${route.from}" referenced by ${routeSource}.from.` });
-      } else if (!loopNodes.includes(route.from)) {
-        errors.push({ code: "invalid-loop", source: `${routeSource}.from`, from: route.from, message: `Loop "${loopId}" loop-exit route source "${route.from}" must be one of its member sockets: ${loopNodes.join(", ")}.` });
+      } else if (!loopMemberSockets.includes(route.from)) {
+        errors.push({ code: "invalid-loop", source: `${routeSource}.from`, from: route.from, message: `Loop "${loopId}" loop-exit route source "${route.from}" must be one of its member sockets: ${loopMemberSockets.join(", ")}.` });
       }
     }
 
@@ -299,20 +303,21 @@ function validateLoopExitRoutes(errors: MateriaGraphValidationError[], nodeIds: 
       }
     }
 
-    validateSocketReference(errors, nodeIds, route.targetSocketId, `${routeSource}.targetSocketId`, { from: route.from, to: route.targetSocketId });
+    validateSocketReference(errors, socketIds, route.targetSocketId, `${routeSource}.targetSocketId`, { from: route.from, to: route.targetSocketId });
   }
 }
 
-function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopNodes: string[], consumesFrom: string, options: MateriaGraphValidationOptions): void {
-  const loopSet = new Set(loopNodes);
+function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopMemberSockets: string[], consumesFrom: string, options: MateriaGraphValidationOptions): void {
+  const loopSet = new Set(loopMemberSockets);
   if (!containsDirectedCycle(graph, loopSet)) {
-    errors.push({ code: "invalid-loop", source: `loops.${loopId}.nodes`, message: `Loop "${loopId}" must contain a directed cycle among its selected sockets before it can be created.` });
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.sockets`, message: `Loop "${loopId}" must contain a directed cycle among its selected sockets before it can be created.` });
   }
-  if (!options.isGeneratorNode) return;
+  const isGeneratorSocket = options.isGeneratorSocket ?? options.isGeneratorNode;
+  if (!isGeneratorSocket) return;
 
-  const inboundGeneratorEdges = Object.entries(graph.nodes ?? {}).flatMap(([from, node]) => {
-    if (loopSet.has(from) || !options.isGeneratorNode?.(from)) return [];
-    return (node.edges ?? []).filter((edge) => loopSet.has(edge.to)).map((edge) => ({ from, to: edge.to }));
+  const inboundGeneratorEdges = Object.entries(loadoutSockets(graph)).flatMap(([from, socket]) => {
+    if (loopSet.has(from) || !isGeneratorSocket(from)) return [];
+    return (socket.edges ?? []).filter((edge) => loopSet.has(edge.to)).map((edge) => ({ from, to: edge.to }));
   });
 
   if (inboundGeneratorEdges.length === 0) {
@@ -328,37 +333,37 @@ function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraph
 function containsDirectedCycle(graph: MateriaPipelineConfig, loopSet: Set<string>): boolean {
   const visiting = new Set<string>();
   const visited = new Set<string>();
-  const visit = (nodeId: string): boolean => {
-    if (visiting.has(nodeId)) return true;
-    if (visited.has(nodeId)) return false;
-    visiting.add(nodeId);
-    for (const edge of graph.nodes[nodeId]?.edges ?? []) {
+  const visit = (socketId: string): boolean => {
+    if (visiting.has(socketId)) return true;
+    if (visited.has(socketId)) return false;
+    visiting.add(socketId);
+    for (const edge of loadoutSockets(graph)[socketId]?.edges ?? []) {
       if (loopSet.has(edge.to) && visit(edge.to)) return true;
     }
-    visiting.delete(nodeId);
-    visited.add(nodeId);
+    visiting.delete(socketId);
+    visited.add(socketId);
     return false;
   };
-  return Array.from(loopSet).some((nodeId) => visit(nodeId));
+  return Array.from(loopSet).some((socketId) => visit(socketId));
 }
 
-function validateOptionalTarget(errors: MateriaGraphValidationError[], nodeIds: Set<string>, from: string, to: string | undefined, source: string): void {
+function validateOptionalTarget(errors: MateriaGraphValidationError[], socketIds: Set<string>, from: string, to: string | undefined, source: string): void {
   if (!to) {
     if (source.includes(".edges[")) errors.push({ code: "missing-endpoint", source, from, message: `Missing graph endpoint referenced by ${source}.` });
     return;
   }
   if (to === "end") return;
   if (!validateSocketId(errors, to, source, { from, to })) return;
-  if (!nodeIds.has(to)) errors.push({ code: "unknown-endpoint", source, from, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
+  if (!socketIds.has(to)) errors.push({ code: "unknown-endpoint", source, from, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
 }
 
-function validateSocketReference(errors: MateriaGraphValidationError[], nodeIds: Set<string>, to: string | undefined, source: string, endpoint: Pick<MateriaGraphValidationError, "from" | "to"> = { to }): boolean {
+function validateSocketReference(errors: MateriaGraphValidationError[], socketIds: Set<string>, to: string | undefined, source: string, endpoint: Pick<MateriaGraphValidationError, "from" | "to"> = { to }): boolean {
   if (!to) {
     errors.push({ code: "missing-endpoint", source, message: `Missing graph endpoint referenced by ${source}.` });
     return false;
   }
   if (!validateSocketId(errors, to, source, endpoint)) return false;
-  if (!nodeIds.has(to)) {
+  if (!socketIds.has(to)) {
     errors.push({ code: "unknown-endpoint", source, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
     return false;
   }

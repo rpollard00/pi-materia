@@ -27,7 +27,7 @@ function attemptConfig() {
     loadouts: {
       Test: {
         entry: "Socket-1",
-        nodes: {
+        sockets: {
           "Socket-1": {
             type: "utility",
             utility: "echo",

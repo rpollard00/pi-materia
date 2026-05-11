@@ -38,8 +38,8 @@ Current `src/config.ts` precedence is:
 Important TypeScript interfaces are in `src/types.ts`:
 
 - `PiMateriaConfig`: `artifactDir`, `budget`, `limits`, `compaction`, named `loadouts`, `activeLoadout`, and top-level `materia`.
-- `MateriaPipelineConfig`: `{ entry, nodes }`.
-- `MateriaPipelineNodeConfig`: agent or utility node.
+- `MateriaPipelineConfig`: `{ entry, sockets }`.
+- `MateriaPipelineNodeConfig`: agent or utility socket.
 - `MateriaAgentNodeConfig`: `type: "agent"`, `materia`, plus common routing fields.
 - `MateriaUtilityNodeConfig`: `type: "utility"`, `utility` or `command`, optional `params` and `timeoutMs`, plus common routing fields.
 - Common routing/editable graph fields: `parse`, `assign`, `next`, `edges`, `foreach`, `advance`, and `limits`.
@@ -52,7 +52,7 @@ Important TypeScript interfaces are in `src/types.ts`:
 
 The active cast is session-scoped through custom session entries with custom type `pi-materia-cast-state` in `src/native.ts`. `loadActiveCastState(ctx)` reads only `ctx.sessionManager.getBranch()`, so it intentionally follows the current Pi session branch and does not aggregate across other Pi sessions. `/materia ui` should use that same branch-scoped source of truth.
 
-`MateriaCastState` includes `castId`, `cwd`, `runDir`, `artifactRoot`, current node/materia/item fields, `nodeState`, `awaitingResponse`, `visits`, `cursors`, `taskAttempts`, `edgeTraversals`, `lastOutput`, `lastJson`, `runState`, and the resolved `pipeline` snapshot. The WebUI monitor can read this state through a session-scoped in-memory bridge and through artifact files.
+`MateriaCastState` includes `castId`, `cwd`, `runDir`, `artifactRoot`, current socket/materia/item fields, `nodeState`, `awaitingResponse`, `visits`, `cursors`, `taskAttempts`, `edgeTraversals`, `lastOutput`, `lastJson`, `runState`, and the resolved `pipeline` snapshot. The WebUI monitor can read this state through a session-scoped in-memory bridge and through artifact files.
 
 ### Artifact paths
 
@@ -64,17 +64,17 @@ Default artifact root is `.pi/pi-materia`, via `resolveArtifactRoot(cwd, config.
   events.jsonl
   usage.json
   manifest.json
-  nodes/<node-id>/<visit>.md
-  nodes/<node-id>/<visit>.json
-  nodes/<node-id>/<visit>.refinement-<n>-<entry>.md
-  nodes/<node-id>/<visit>.command.stdout.txt
-  nodes/<node-id>/<visit>.command.stderr.txt
-  nodes/<node-id>/<visit>.command.json
-  nodes/<node-id>/<visit>.input.json
-  contexts/<node-id>-<visit>.md
+  nodes/<socket-id>/<visit>.md
+  nodes/<socket-id>/<visit>.json
+  nodes/<socket-id>/<visit>.refinement-<n>-<entry>.md
+  nodes/<socket-id>/<visit>.command.stdout.txt
+  nodes/<socket-id>/<visit>.command.stderr.txt
+  nodes/<socket-id>/<visit>.command.json
+  nodes/<socket-id>/<visit>.input.json
+  contexts/<socket-id>-<visit>.md
 ```
 
-`events.jsonl` receives `cast_start`, `node_start`, `materia_model_settings`, `utility_input`, `utility_command`, `node_refinement`, `context_refinement`, `node_complete`, and `cast_end`. `manifest.json` collates artifacts with node, materia, item, visit, kind, refinement/finalization flags, and timestamps.
+`events.jsonl` receives `cast_start`, `node_start`, `materia_model_settings`, `utility_input`, `utility_command`, `node_refinement`, `context_refinement`, `node_complete`, and `cast_end`. `manifest.json` collates artifacts with socket, materia, item, visit, kind, refinement/finalization flags, and timestamps.
 
 ## WebUI implementation plan constraints
 
@@ -88,11 +88,11 @@ Default artifact root is `.pi/pi-materia`, via `resolveArtifactRoot(cwd, config.
 
 ## Regression coverage required before graph/loadout editing
 
-The existing tests already cover loadout resolution, config precedence among explicit/project/default for current behavior, materia-level `multiTurn`, utility nodes, branch edges, foreach/advance retry loops, and native cast state reconstruction. Add focused WebUI/editor tests before changing graph mutation logic:
+The existing tests already cover loadout resolution, config precedence among explicit/project/default for current behavior, materia-level `multiTurn`, utility sockets, branch edges, foreach/advance retry loops, and native cast state reconstruction. Add focused WebUI/editor tests before changing graph mutation logic:
 
-- Inserting a node between `A -> B` preserves `A` and `B` node objects and changes only `A.next` (or the selected edge target) plus the new node.
-- Inserting into an edge preserves the original `when`/`maxTraversals` on the edge moved to the new node or otherwise matches an explicitly documented rule.
+- Inserting a socket between `A -> B` preserves `A` and `B` socket objects and changes only `A.next` (or the selected edge target) plus the new socket.
+- Inserting into an edge preserves the original `when`/`maxTraversals` on the edge moved to the new socket or otherwise matches an explicitly documented rule.
 - Adding satisfied/not-satisfied branches emits standard `edges` entries using canonical condition syntax: `when: "satisfied"` and `when: "not_satisfied"`. The routed handoff payload uses `satisfied` as the canonical boolean control field; legacy aliases such as `passed` must not be emitted as routing fields.
-- Editing retry behavior changes only `maxTraversals` on the chosen edge or `limits.maxVisits`/`limits.maxEdgeTraversals` on the chosen node.
+- Editing retry behavior changes only `maxTraversals` on the chosen edge or `limits.maxVisits`/`limits.maxEdgeTraversals` on the chosen socket.
 - Layout metadata, when introduced, must be stored separately from runtime routing fields so existing configs without layout continue to resolve and render identically.
 - Loadout insert/remove/swap operations must not rewrite top-level materia definitions or unrelated loadouts and must keep current `saveActiveLoadout()` minimal-active-loadout behavior intact until explicit project/user persistence is implemented.

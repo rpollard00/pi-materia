@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type CastStateRepository } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
+import { currentCastSocketId } from "./castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
@@ -184,7 +185,7 @@ export default function piMateria(pi: ExtensionAPI) {
           const requestedCastId = rest.join(" ").trim();
           const castId = await castExecutionUseCases.reviveLatestOrRequested(pi, ctx, requestedCastId);
           if (!castId) {
-            ctx.ui.notify("No failed pi-materia casts exhausted by same-node recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
+            ctx.ui.notify("No failed pi-materia casts exhausted by same-socket recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
             return;
           }
         } catch (error) {
@@ -194,7 +195,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia recast [cast-id], /materia revive [cast-id] (only after same-node recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia recast [cast-id], /materia revive [cast-id] (only after same-socket recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -244,7 +245,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
     .filter((state) => state.castId.startsWith(castIdPrefix))
     .map((state) => ({
       value: `${command} ${state.castId}`,
-      label: `${state.castId}  ${command === "revive" ? "revivable" : recastStatusLabel(state)}  node:${state.currentNode ?? "-"}`,
+      label: `${state.castId}  ${command === "revive" ? "revivable" : recastStatusLabel(state)}  socket:${currentCastSocketId(state) ?? "-"}`,
       description: truncateLine(state.request ?? state.failedReason ?? state.runState?.lastMessage ?? "", 72),
     }));
   return completions.length ? completions : null;

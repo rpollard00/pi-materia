@@ -41,7 +41,7 @@ Registered command: `/materia` with subcommands:
 - `abort`: mark active cast failed/aborted and update UI.
 - `continue`: finalize or continue paused/runnable cast state.
 - `recast [cast-id]`: resume newest or specified failed/aborted cast.
-- `revive [cast-id]`: extend same-node recovery allowance for eligible exhausted casts, then resume.
+- `revive [cast-id]`: extend same-socket recovery allowance for eligible exhausted casts, then resume.
 - `cast <request>`: load config, resolve active loadout, start native cast.
 
 ### Cast lifecycle and runtime orchestration
@@ -52,13 +52,13 @@ Primary lifecycle:
 
 1. `/materia cast` loads config (`loadConfig`) and resolves pipeline (`resolvePipeline`).
 2. `startNativeCast` creates artifact directories, writes `config.resolved.json`, `manifest.json`, `usage.json`, and `events.jsonl`, appends session state, updates UI, then starts the entry socket.
-3. `startNode` sets current node/socket state, records node_start, checks limits, selects current loop item, then either:
-   - executes a utility node locally and completes it, or
+3. `startSocket` sets current socket/socket state, records node_start, checks limits, selects current loop item, then either:
+   - executes a utility socket locally and completes it, or
    - applies model/tool settings and sends an isolated agent prompt.
 4. `sendMateriaTurn` stores the hidden prompt, may compact proactively, writes a context artifact, emits visible and hidden Pi messages, and triggers the Pi agent turn.
-5. `handleAgentEnd` finds the latest assistant response, captures usage, handles transport/context-window recovery, pauses multi-turn nodes for refinement, or completes the node.
-6. `completeNode` records node output artifacts, parses/validates JSON handoff if requested, updates generic envelope and assignments, applies loop advancement, enforces budget, chooses next route, and advances/finishes.
-7. `advanceToNode` starts the next socket or `finishCast` writes terminal artifacts/events/state and UI updates.
+5. `handleAgentEnd` finds the latest assistant response, captures usage, handles transport/context-window recovery, pauses multi-turn sockets for refinement, or completes the socket.
+6. `completeSocket` records socket output artifacts, parses/validates JSON handoff if requested, updates generic envelope and assignments, applies loop advancement, enforces budget, chooses next route, and advances/finishes.
+7. `advanceToSocket` starts the next socket or `finishCast` writes terminal artifacts/events/state and UI updates.
 8. `resumeNativeCast`/`reviveNativeCast` rehydrate latest persisted session state and continue from the failed current socket.
 
 ### Persistence and artifact paths
@@ -79,16 +79,16 @@ Cast/session persistence:
   - `manifest.json`: cast request plus artifact entries.
   - `events.jsonl`: runtime event stream.
   - `usage.json`: usage totals/model selections.
-  - `nodes/<socket>/<visit...>.md|.json|.input.json|.command.*`: node/utility outputs and command artifacts.
+  - `sockets/<socket>/<visit...>.md|.json|.input.json|.command.*`: socket/utility outputs and command artifacts.
   - `contexts/<socket...>.md`: isolated hidden prompt/context artifacts.
 
 ### Prompt and handoff paths
 
 - Handoff contract source is `src/handoffContract.ts`; validation is in `src/handoffValidation.ts`.
-- Prompt assembly currently lives in `native.ts` (`buildNodePrompt`, `buildMultiTurnFinalizationPrompt`, `activeMateriaSystemPrompt`, `buildSyntheticCastContext`, `materiaPrompt`, template rendering).
-- JSON nodes receive the canonical handoff contract final instruction; multi-turn JSON nodes receive it only on `/materia continue` finalization.
-- Text/build nodes receive adapter context containing current work item and global guidance.
-- Generator nodes receive adapter context requiring canonical `workItems`; legacy `tasks`/custom generated aliases are not active runtime outputs.
+- Prompt assembly currently lives in `native.ts` (`buildSocketPrompt`, `buildMultiTurnFinalizationPrompt`, `activeMateriaSystemPrompt`, `buildSyntheticCastContext`, `materiaPrompt`, template rendering).
+- JSON sockets receive the canonical handoff contract final instruction; multi-turn JSON sockets receive it only on `/materia continue` finalization.
+- Text/build sockets receive adapter context containing current work item and global guidance.
+- Generator sockets receive adapter context requiring canonical `workItems`; legacy `tasks`/custom generated aliases are not active runtime outputs.
 
 ### Assignment, routing, and loop flows
 
@@ -104,11 +104,11 @@ Primary types in `src/types.ts`:
 
 - `PiMateriaConfig`: artifact/budget/limits/compaction, reusable `materia`, named `loadouts`, `activeLoadout`.
 - `MateriaConfig`: reusable agent or utility behavior definition.
-- `MateriaPipelineConfig`: active loadout graph with `entry`, `nodes`, `layout`, and `loops`.
+- `MateriaPipelineConfig`: active loadout graph with `entry`, `sockets`, `layout`, and `loops`.
 - `MateriaPipelineNodeConfig`: agent/utility socket config with parse, assign, edges, foreach, advance, limits, and legacy layout.
 - `ResolvedMateriaPipeline` / `ResolvedMateriaNode`: runtime graph after resolving socket references to reusable materia.
-- `MateriaCastState`: persisted runtime cast state, including current node/socket, data, cursors, visits, recovery state, usage run state, and resolved pipeline.
-- `HandoffEnvelope`/`HandoffWorkItem` in `handoffContract.ts`: canonical inter-node payload.
+- `MateriaCastState`: persisted runtime cast state, including current socket/socket, data, cursors, visits, recovery state, usage run state, and resolved pipeline.
+- `HandoffEnvelope`/`HandoffWorkItem` in `handoffContract.ts`: canonical inter-socket payload.
 
 ## Module responsibility inventory and target layering
 
@@ -134,7 +134,7 @@ Workflow orchestration with ports, no concrete Pi/fs/process/webui imports:
 - Load/select active loadout workflow around config repository port.
 - Prompt preparation as a use case using prompt renderer/model/tool ports.
 - Cast listing/status workflow using cast repository/artifact index ports.
-- Utility-node execution orchestration should depend on a utility executor port; built-in/command execution are infrastructure.
+- Utility-socket execution orchestration should depend on a utility executor port; built-in/command execution are infrastructure.
 - Budget/usage updates can be application services around pure aggregation plus persistence ports.
 
 ### Infrastructure/adapter candidates
@@ -163,7 +163,7 @@ Anti-corruption layer for external JSON and legacy formats:
 - `config.ts` read/merge/write JSON schema handling and obsolete field rejection.
 - `loadoutNormalization.ts`, `loopSemantics.ts`, `loadoutGraphAnalysis.ts`: migration/normalization for legacy layout, loop iterator/consumer metadata, and generated output conventions.
 - Legacy `next` edge normalization in `graphValidation.ts` should move to schema adapter while domain consumes canonical edges.
-- Legacy `nodes` terminology compatibility should be isolated here before canonical internal APIs move toward sockets.
+- Legacy `sockets` terminology compatibility should be isolated here before canonical internal APIs move toward sockets.
 
 ## Dependency map and boundary leaks
 
@@ -223,23 +223,21 @@ Notable boundary leaks/cycles to address during extraction:
 
 No obvious import cycle was observed from the current source import map, but several modules have reversed or too-broad dependency direction for the target architecture.
 
-## Legacy `nodes` terminology and socket migration points
+## Legacy `nodes` compatibility and socket migration points
 
-Current persisted and internal model still uses `nodes` heavily even though visible/canonical UI terminology is moving toward sockets:
+The canonical core model is now socket-first. Remaining `node`/`nodes` spellings are compatibility seams for saved casts, WebUI/plugin DTOs, artifact paths, and event names:
 
-- `MateriaPipelineConfig.nodes` is the persisted graph map in config/defaults and user/project configs.
-- `ResolvedMateriaPipeline.nodes`, `MateriaCastState.currentNode`, `nodeState`, `visits`, `edgeTraversals`, `taskAttempts`, `byNode`, manifest/events fields (`node`, `node_start`, `node_complete`) are persisted/runtime state fields.
-- Artifact layout uses `nodes/<socket-id>/...` directories.
-- Config validation messages and obsolete field checks refer to loadout nodes.
-- `loops.*.nodes` persists loop membership. Comments increasingly describe these as socket ids.
-- WebUI/server monitor DTOs expose `currentNode`, `nodeState`, emitted-output `node`, and artifact `node` fields.
-- Tests and fixtures assert many node names/events/paths.
+- `MateriaPipelineConfig.sockets` is the canonical graph map in config/defaults and user/project configs; legacy `nodes` input is normalized at schema/config edges.
+- `ResolvedMateriaPipeline.sockets`, socket ids, visits, edge traversals, task attempts, and loop membership are canonical runtime concepts.
+- Persisted compatibility DTO fields such as `MateriaCastState.currentNode`, `nodeState`, `UsageReport.byNode`, manifest `node`, and stable event names like `node_start`/`node_complete` remain legacy-only surfaces whose values are socket ids.
+- Artifact layout still uses `nodes/<socket-id>/...` for saved-tooling compatibility.
+- WebUI/server monitor DTOs may continue to expose legacy field names until a separate WebUI contract migration is planned.
 
 Migration intent:
 
-- Canonical domain/application APIs should use socket terminology (`socketId`, `sockets`, socket state) after compatibility adapters exist.
-- Legacy `nodes` persisted fields should remain readable through schema adapters and mapped to domain sockets.
-- Public DTOs consumed by WebUI or saved cast artifacts should be bridged rather than mechanically renamed in early stages.
+- New domain/application APIs use socket terminology (`socketId`, `sockets`, socket state).
+- Legacy `nodes` persisted fields remain readable through schema adapters and are mapped to domain sockets.
+- Public DTOs consumed by WebUI or saved cast artifacts are bridged rather than mechanically renamed in this core refactor stage.
 - Artifact directory/event field renames, if any, require explicit compatibility strategy and fixture tests.
 
 ## Target dependency direction
@@ -262,13 +260,13 @@ Rules:
 - Application imports domain and defines minimal use-case-oriented ports.
 - Infrastructure imports application ports/domain DTOs to implement concrete fs/Pi/runtime/provider/VCS/prompt adapters.
 - Plugin entrypoints compose concrete adapters and delegate workflows.
-- Schema adapters own legacy `nodes`/`next`/layout/generates compatibility and produce canonical domain/application models.
+- Schema adapters own legacy `sockets`/`next`/layout/generates compatibility and produce canonical domain/application models.
 
 ## Suggested extraction order notes
 
 1. Add characterization tests around existing plugin-facing behavior and persisted formats before moving logic.
 2. Split pure domain helpers first behind compatibility barrels: socket ids, handoff contract/validation, graph invariants, loop exit routing, assignment/condition helpers.
-3. Add schema adapters for config/session/cast formats, including legacy `nodes` to canonical sockets mapping.
+3. Add schema adapters for config/session/cast formats, including legacy `sockets` to canonical sockets mapping.
 4. Move use cases out of `native.ts` in vertical slices: start cast, process agent end, continue/recast/revive, utility execution, prompt prep.
 5. Replace direct Pi/fs/process calls with narrow ports as each use case moves.
 6. Keep WebUI contracts stable; migrate internals to socket terminology only after adapters and fixtures are in place.

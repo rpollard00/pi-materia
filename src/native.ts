@@ -5,10 +5,11 @@ import path from "node:path";
 import { appendEvent, safePathSegment, safeTimestamp } from "./artifacts.js";
 import { resolveProactiveCompactionThreshold } from "./compaction.js";
 import { resolveArtifactRoot } from "./config.js";
-import { getEffectivePipelineConfig, loopIteratorForNode } from "./pipeline.js";
+import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
 import { parseJson } from "./json.js";
 import { canonicalGeneratorConfigFor } from "./generator.js";
 import { canonicalOutgoingEdges } from "./graphValidation.js";
+import { loopSockets } from "./loadoutAccessors.js";
 import { resolveLoopExitRoute } from "./loopExitRoutes.js";
 import {
   HANDOFF_CONTRACT_DOC_TEXT,
@@ -27,20 +28,20 @@ import { validateHandoffJsonOutput } from "./handoffValidation.js";
 import { applyMateriaModelSettings } from "./modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "./notificationFormatting.js";
 import type { AppliedMateriaModelSettings } from "./modelSettings.js";
-import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentNode, ResolvedMateriaNode, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
+import type { LoadedConfig, MateriaAgentConfig, MateriaCastState, MateriaEdgeConfig, MateriaManifest, MateriaManifestEntry, MateriaRecoveryAllowance, PiMateriaConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaPipeline, MateriaModelSelection } from "./types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "./ui.js";
 import { addUsage, assertBudget, createRunState, extractMessageModelInfo, extractUsage, recordUsageModelSelection, writeUsage } from "./usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility, type BuiltInUtilityInput } from "./utilityRegistry.js";
 
 const STATE_ENTRY = "pi-materia-cast-state";
 const MANIFEST_FILE = "manifest.json";
-const DEFAULT_MAX_NODE_VISITS = 25;
+const DEFAULT_MAX_SOCKET_VISITS = 25;
 const DEFAULT_MAX_EDGE_TRAVERSALS = 25;
 const DEFAULT_UTILITY_TIMEOUT_MS = 30_000;
 const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 const MAX_METADATA_ITEM_LABEL_LENGTH = 80;
-const DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS = 1;
+const DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS = 1;
 
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
@@ -49,14 +50,15 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
   const castId = safeTimestamp();
   const runDir = path.join(artifactRoot, castId);
-  await mkdir(path.join(runDir, "nodes"), { recursive: true });
+  await mkdir(path.join(runDir, "sockets"), { recursive: true });
+  await mkdir(path.join(runDir, "nodes"), { recursive: true }); // Legacy artifact path kept for saved tooling compatibility.
   await mkdir(path.join(runDir, "contexts"), { recursive: true });
   await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
 
   const effectivePipeline = getEffectivePipelineConfig(config);
   const runState = createRunState(castId, runDir, ctx.model, effectivePipeline.loadoutName);
   runState.currentNode = pipeline.entry.id;
-  runState.currentMateria = nodeMateriaName(pipeline.entry);
+  runState.currentMateria = socketMateriaName(pipeline.entry);
   runState.lastMessage = pipeline.entry.id;
   await writeUsage(runState);
   await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedMateriaContext: true });
@@ -74,7 +76,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     artifactRoot,
     phase: pipeline.entry.id,
     currentNode: pipeline.entry.id,
-    currentMateria: nodeMateriaName(pipeline.entry),
+    currentMateria: socketMateriaName(pipeline.entry),
     awaitingResponse: true,
     nodeState: "awaiting_agent_response",
     startedAt: Date.now(),
@@ -93,22 +95,22 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   saveCastState(pi, state);
   updateWidget(ctx, state, { replaceOwner: true });
   ctx.ui.notify(`pi-materia cast started. Artifacts: ${runDir}`, "info");
-  await startNode(pi, ctx, state, pipeline.entry);
+  await startSocket(pi, ctx, state, pipeline.entry);
 }
 
 export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   if (!state.active) throw new Error("No active pi-materia cast to continue.");
   if (state.awaitingResponse) throw new Error("Materia is already awaiting a Pi agent response.");
 
-  if (state.nodeState === "awaiting_user_refinement") {
+  if (currentSocketState(state) === "awaiting_user_refinement") {
     if (!isPausedMultiTurnRefinement(state)) {
-      throw new Error("Materia is awaiting user refinement, but the current node's resolved materia is not multi-turn.");
+      throw new Error("Materia is awaiting user refinement, but the current socket's resolved materia is not multi-turn.");
     }
     await startMultiTurnFinalizationTurn(pi, ctx, state);
     return;
   }
 
-  await startNode(pi, ctx, state, currentNodeOrThrow(state));
+  await startSocket(pi, ctx, state, currentSocketOrThrow(state));
 }
 
 export function loadCastStateById(ctx: ExtensionContext, castId: string): MateriaCastState | undefined {
@@ -133,7 +135,7 @@ export function listLatestCastStates(ctx: ExtensionContext): MateriaCastState[] 
 }
 
 export function listResumableCastStates(ctx: ExtensionContext): MateriaCastState[] {
-  return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && state.nodeState !== "complete" && (state.phase === "failed" || state.nodeState === "failed"));
+  return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && currentSocketState(state) !== "complete" && (state.phase === "failed" || currentSocketState(state) === "failed"));
 }
 
 export function listRevivableCastStates(ctx: ExtensionContext): MateriaCastState[] {
@@ -144,13 +146,14 @@ export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   const state = loadCastStateById(ctx, castId);
   if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
   assertNoActiveNativeCast(ctx, state, "reviving");
-  const result = extendSameNodeRecoveryAllowanceForRevive(state);
+  const result = extendSameSocketRecoveryAllowanceForRevive(state);
   await appendEvent(state.runState, "cast_revive", {
     castId: state.castId,
     exhaustedRecoveryKey: result.key,
     recoveryContext: {
       key: result.key,
-      node: state.recoveryExhaustion?.node ?? state.currentNode,
+      node: state.recoveryExhaustion?.node ?? currentSocketId(state),
+      socket: state.recoveryExhaustion?.node ?? currentSocketId(state),
       mode: state.recoveryExhaustion?.mode,
       itemKey: state.currentItemKey,
     },
@@ -181,140 +184,140 @@ function assertNoActiveNativeCast(ctx: ExtensionContext, state: MateriaCastState
 
 function assertRecastableNativeCast(state: MateriaCastState): void {
   if (state.active) throw new Error(`pi-materia cast ${state.castId} is already running.`);
-  if (state.phase === "complete" || state.nodeState === "complete") throw new Error(`pi-materia cast ${state.castId} is complete and cannot be recast.`);
-  if (state.phase !== "failed" && state.nodeState !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed or aborted (phase: ${state.phase}, node state: ${state.nodeState ?? "unknown"}).`);
+  if (state.phase === "complete" || currentSocketState(state) === "complete") throw new Error(`pi-materia cast ${state.castId} is complete and cannot be recast.`);
+  if (state.phase !== "failed" && currentSocketState(state) !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed or aborted (phase: ${state.phase}, socket state: ${currentSocketState(state) ?? "unknown"}).`);
 }
 
 async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<MateriaCastState> {
-  const node = currentNodeOrThrow(state);
+  const socket = currentSocketOrThrow(state);
   const previousFailure = state.failedReason;
 
   state.recoveryExhaustion = undefined;
   state.active = true;
-  state.phase = node.id;
-  state.currentNode = node.id;
-  state.currentMateria = nodeMateriaName(node);
-  state.awaitingResponse = isAgentResolvedNode(node);
-  state.nodeState = isAgentResolvedNode(node) ? "awaiting_agent_response" : "running_utility";
+  state.phase = socket.id;
+  setCurrentSocketId(state, socket.id);
+  state.currentMateria = socketMateriaName(socket);
+  state.awaitingResponse = isAgentResolvedSocket(socket);
+  setCurrentSocketState(state, isAgentResolvedSocket(socket) ? "awaiting_agent_response" : "running_utility");
   state.failedReason = undefined;
   state.runState.endedAt = undefined;
   state.runState.loadoutName ||= await resolvePersistedCastLoadoutName(state);
-  state.runState.currentNode = node.id;
-  state.runState.currentMateria = nodeMateriaName(node);
-  state.runState.lastMessage = `Recasting from node ${node.id}.`;
-  await appendEvent(state.runState, "cast_recast", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, previousFailure, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id), reusedActivePrompt: isAgentResolvedNode(node) && Boolean(state.activeTurnPrompt) });
+  state.runState.currentNode = socket.id;
+  state.runState.currentMateria = socketMateriaName(socket);
+  state.runState.lastMessage = `Recasting from socket ${socket.id}.`;
+  await appendEvent(state.runState, "cast_recast", { node: socket.id, materia: socketMateriaName(socket), type: resolvedSocketConfig(socket).type, previousFailure, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: socketVisit(state, socket.id), reusedActivePrompt: isAgentResolvedSocket(socket) && Boolean(state.activeTurnPrompt) });
   await writeUsage(state.runState);
   saveCastState(pi, state);
-  ctx.ui.setStatus("materia", materiaStatusLabel(state, node));
+  ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
   updateWidget(ctx, state, { replaceOwner: true });
 
-  if (isAgentResolvedNode(node) && state.activeTurnPrompt) {
-    updateToolScope(pi, node.materia);
+  if (isAgentResolvedSocket(socket) && state.activeTurnPrompt) {
+    updateToolScope(pi, socket.materia);
     await sendMateriaTurn(pi, ctx, state, state.activeTurnPrompt);
   } else {
-    await startNode(pi, ctx, state, node);
+    await startSocket(pi, ctx, state, socket);
   }
-  ctx.ui.notify(`pi-materia cast ${state.castId} recast from node "${node.id}".`, "info");
+  ctx.ui.notify(`pi-materia cast ${state.castId} recast from socket "${socket.id}".`, "info");
   return state;
 }
 
 async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
-  const node = currentNodeOrThrow(state);
-  if (!isMultiTurnResolvedAgentNode(node)) {
-    throw new Error(`Cannot finalize refinement for node "${node.id}" because its resolved materia is not multi-turn.`);
+  const socket = currentSocketOrThrow(state);
+  if (!isMultiTurnResolvedAgentSocket(socket)) {
+    throw new Error(`Cannot finalize refinement for socket "${socket.id}" because its resolved materia is not multi-turn.`);
   }
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: node.node.materia, model: node.materia.model, thinking: node.materia.thinking });
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking });
   const materiaModel = materiaModelSelection(appliedModel);
-  state.currentMateria = nodeMateriaName(node);
+  state.currentMateria = socketMateriaName(socket);
   state.currentMateriaModel = materiaModel;
-  state.runState.currentMateria = nodeMateriaName(node);
+  state.runState.currentMateria = socketMateriaName(socket);
   state.runState.currentMateriaModel = materiaModel;
   state.awaitingResponse = true;
-  state.nodeState = "awaiting_agent_response";
+  setCurrentSocketState(state, "awaiting_agent_response");
   state.multiTurnFinalizing = true;
   state.updatedAt = Date.now();
-  const refinementTurn = currentRefinementTurn(state, node.id) + 1;
-  recordUsageModelSelection(state.runState.usage, { node: node.id, materia: node.node.materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
+  const refinementTurn = currentRefinementTurn(state, socket.id) + 1;
+  recordUsageModelSelection(state.runState.usage, { socket: socket.id, materia: resolvedSocketConfig(socket).materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "materia_model_settings", { node: node.id, materia: node.node.materia, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn, finalization: true });
-  updateToolScope(pi, node.materia);
+  await appendEvent(state.runState, "materia_model_settings", { node: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn, finalization: true });
+  updateToolScope(pi, socket.materia);
   saveCastState(pi, state);
-  await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, node));
+  await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, socket));
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
   const state = loadActiveCastState(ctx);
   if (!state?.active) return;
-  const nodeAtEnd = currentNodeOrThrow(state);
-  const acceptingRefinement = !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isMultiTurnResolvedAgentNode(nodeAtEnd);
+  const socketAtEnd = currentSocketOrThrow(state);
+  const acceptingRefinement = !state.awaitingResponse && currentSocketState(state) === "awaiting_user_refinement" && isMultiTurnResolvedAgentSocket(socketAtEnd);
   if (!state.awaitingResponse && !acceptingRefinement) return;
 
   const latest = findLatestAssistantEntry(ctx.sessionManager.getEntries(), state.lastProcessedEntryId);
   if (!latest || latest.entry.id === state.lastProcessedEntryId) {
     const eventFailure = agentEndFailureMessage(event);
     if (!eventFailure) return;
-    const error = new Error(`Pi agent turn failed before producing an assistant response for node "${state.currentNode ?? state.phase}": ${eventFailure}`);
+    const error = new Error(`Pi agent turn failed before producing an assistant response for socket "${currentSocketId(state) ?? state.phase}": ${eventFailure}`);
     if (classifyTurnFailure(error) === "transient_transport") {
       await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error);
       return;
     }
-    const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error);
+    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error);
     if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error));
     return;
   }
 
   const text = assistantText(latest.message);
   const agentError = assistantErrorMessage(latest.message);
-  const wasAwaitingFinalization = state.awaitingResponse && state.nodeState === "awaiting_agent_response" && state.multiTurnFinalizing === true;
+  const wasAwaitingFinalization = state.awaitingResponse && currentSocketState(state) === "awaiting_agent_response" && state.multiTurnFinalizing === true;
   state.lastProcessedEntryId = latest.entry.id;
   state.lastAssistantText = text;
   captureUsage(state, latest.message);
 
   if (agentError) {
-    const error = new Error(`Pi agent turn failed for node "${state.currentNode ?? state.phase}": ${agentError}`);
+    const error = new Error(`Pi agent turn failed for socket "${currentSocketId(state) ?? state.phase}": ${agentError}`);
     if (classifyTurnFailure(error) === "transient_transport") {
       await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error, { entryId: latest.entry.id });
       return;
     }
-    const recovered = await handleSameNodeRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id });
+    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id });
     if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error), latest.entry.id);
     return;
   }
 
   state.awaitingResponse = false;
-  state.nodeState = "idle";
+  setCurrentSocketState(state, "idle");
   state.updatedAt = Date.now();
 
   try {
-    const node = currentNodeOrThrow(state);
+    const socket = currentSocketOrThrow(state);
     // Multi-turn pausing is materia-driven: if the resolved agent materia omits
-    // multiTurn, even an interactive planning node completes and advances.
+    // multiTurn, even an interactive planning socket completes and advances.
     // Keep this generic runtime gate materia-name agnostic.
-    if (isMultiTurnResolvedAgentNode(node)) {
+    if (isMultiTurnResolvedAgentSocket(socket)) {
       if (wasAwaitingFinalization) {
         state.multiTurnFinalizing = false;
-        state.nodeState = "idle";
+        setCurrentSocketState(state, "idle");
         saveCastState(pi, state);
-        await completeNode(pi, ctx, state, text, latest.entry.id, { finalizedMultiTurn: true });
+        await completeSocket(pi, ctx, state, text, latest.entry.id, { finalizedMultiTurn: true });
         return;
       }
       state.multiTurnFinalizing = false;
-      const refinement = await recordMultiTurnRefinement(state, node, text, latest.entry.id);
-      state.nodeState = "awaiting_user_refinement";
-      state.runState.lastMessage = `Multi-turn node ${node.id} waiting for refinement; run /materia continue to finalize.`;
+      const refinement = await recordMultiTurnRefinement(state, socket, text, latest.entry.id);
+      setCurrentSocketState(state, "awaiting_user_refinement");
+      state.runState.lastMessage = `Multi-turn socket ${socket.id} waiting for refinement; run /materia continue to finalize.`;
       await writeUsage(state.runState);
-      await appendEvent(state.runState, "node_refinement", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
+      await appendEvent(state.runState, "node_refinement", { node: socket.id, materia: socketMateriaName(socket), type: resolvedSocketConfig(socket).type, artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
       saveCastState(pi, state);
-      ctx.ui.setStatus("materia", materiaStatusLabel(state, node, { suffix: "refine", includeItem: false }));
+      ctx.ui.setStatus("materia", materiaStatusLabel(state, socket, { suffix: "refine", includeItem: false }));
       updateWidget(ctx, state);
-      ctx.ui.notify(`pi-materia multi-turn node "${node.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
+      ctx.ui.notify(`pi-materia multi-turn socket "${socket.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
       return;
     }
-    await completeNode(pi, ctx, state, text, latest.entry.id);
+    await completeSocket(pi, ctx, state, text, latest.entry.id);
   } catch (error) {
     state.active = false;
     state.phase = "failed";
-    state.nodeState = "failed";
+    setCurrentSocketState(state, "failed");
     state.failedReason = error instanceof Error ? error.message : String(error);
     state.runState.lastMessage = state.failedReason;
     markRunEnded(state);
@@ -328,64 +331,64 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   }
 }
 
-async function completeNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean } = {}): Promise<void> {
+async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean } = {}): Promise<void> {
   const config = await loadConfigFromState(state);
-  const node = currentNodeOrThrow(state);
-  if (isMultiTurnResolvedAgentNode(node) && !options.finalizedMultiTurn) {
-    throw new Error(`Internal multi-turn state error for node "${node.id}": completion requires explicit /materia continue finalization.`);
+  const socket = currentSocketOrThrow(state);
+  if (isMultiTurnResolvedAgentSocket(socket) && !options.finalizedMultiTurn) {
+    throw new Error(`Internal multi-turn state error for socket "${socket.id}": completion requires explicit /materia continue finalization.`);
   }
-  const artifact = await recordNodeOutput(state, node, text, entryId);
+  const artifact = await recordSocketOutput(state, socket, text, entryId);
   state.lastOutput = text;
 
   let parsed: unknown = text;
-  if (node.node.parse === "json") {
+  if (resolvedSocketConfig(socket).parse === "json") {
     try {
       parsed = parseJson<unknown>(text);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`Invalid JSON output for node "${node.id}": ${detail}`);
+      throw new Error(`Invalid JSON output for socket "${socket.id}": ${detail}`);
     }
-    parsed = validateHandoffJsonOutput(parsed, { nodeId: node.id, node: node.node });
+    parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: socket.socket });
     state.lastJson = parsed;
-    await writeFile(path.join(state.runDir, "nodes", safePathSegment(node.id), `${nodeVisit(state, node.id)}.json`), JSON.stringify(parsed, null, 2));
+    await writeFile(path.join(state.runDir, "nodes", safePathSegment(socket.id), `${socketVisit(state, socket.id)}.json`), JSON.stringify(parsed, null, 2));
   }
 
-  applyGenericHandoffEnvelope(state, parsed, node);
-  applyAssignments(state, node, parsed);
-  const advanceTarget = applyAdvance(state, node, parsed);
-  const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
-  await appendEvent(state.runState, "node_complete", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, artifact, parsed: node.node.parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
+  applyGenericHandoffEnvelope(state, parsed, socket);
+  applyAssignments(state, socket, parsed);
+  const advanceTarget = applyAdvance(state, socket, parsed);
+  const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
+  await appendEvent(state.runState, "node_complete", { node: socket.id, materia: socketMateriaName(socket), type: resolvedSocketConfig(socket).type, artifact, parsed: resolvedSocketConfig(socket).parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
   await assertBudget(config, state.runState, ctx);
 
-  const nextTarget = advanceTarget ?? selectNextTarget(state, node, parsed, config);
-  await advanceToNode(pi, ctx, state, nextTarget, entryId);
+  const nextTarget = advanceTarget ?? selectNextTarget(state, socket, parsed, config);
+  await advanceToSocket(pi, ctx, state, nextTarget, entryId);
 }
 
-async function recordNodeOutput(state: MateriaCastState, node: ResolvedMateriaNode, text: string, entryId: string): Promise<string> {
-  const visit = nodeVisit(state, node.id);
-  const dir = path.join("nodes", safePathSegment(node.id));
+async function recordSocketOutput(state: MateriaCastState, socket: ResolvedMateriaSocket, text: string, entryId: string): Promise<string> {
+  const visit = socketVisit(state, socket.id);
+  const dir = path.join("nodes", safePathSegment(socket.id));
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
   const artifact = path.join(dir, `${visit}${item}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
-  const finalizedRefinement = isMultiTurnResolvedAgentNode(node);
-  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, node.id) : undefined, materiaModel: state.currentMateriaModel });
+  const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
+  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, materiaModel: state.currentMateriaModel });
   return artifact;
 }
 
-async function recordMultiTurnRefinement(state: MateriaCastState, node: ResolvedMateriaNode, text: string, entryId: string): Promise<{ artifact: string; turn: number }> {
-  const visit = nodeVisit(state, node.id);
-  const turn = nextRefinementTurn(state, node.id);
-  const dir = path.join("nodes", safePathSegment(node.id));
+async function recordMultiTurnRefinement(state: MateriaCastState, socket: ResolvedMateriaSocket, text: string, entryId: string): Promise<{ artifact: string; turn: number }> {
+  const visit = socketVisit(state, socket.id);
+  const turn = nextRefinementTurn(state, socket.id);
+  const dir = path.join("nodes", safePathSegment(socket.id));
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
   const artifact = path.join(dir, `${visit}${item}.refinement-${turn}-${safePathSegment(entryId)}.md`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), text);
-  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
+  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId, artifact, kind: "node_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
   return { artifact, turn };
 }
 
-function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, node?: ResolvedMateriaNode): void {
+function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, socket?: ResolvedMateriaSocket): void {
   if (!isPlainObject(parsed)) return;
 
   const envelope = isPlainObject(state.data.envelope)
@@ -395,7 +398,7 @@ function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, n
   if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
 
   const workItems = parsed[HANDOFF_WORK_ITEMS_FIELD];
-  if (Array.isArray(workItems) && workItems.length > 0 && shouldAdoptEnvelopeWorkItems(state, node)) {
+  if (Array.isArray(workItems) && workItems.length > 0 && shouldAdoptEnvelopeWorkItems(state, socket)) {
     state.data.workItems = workItems;
   }
   const guidance = parsed[HANDOFF_GUIDANCE_FIELD];
@@ -411,19 +414,19 @@ function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, n
   if (Array.isArray(risks) && risks.length > 0) state.data.risks = risks;
 }
 
-function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, node?: ResolvedMateriaNode): boolean {
+function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, socket?: ResolvedMateriaSocket): boolean {
   if (!Array.isArray(state.data.workItems) || state.data.workItems.length === 0) return true;
-  return Boolean(node && isAgentResolvedNode(node) && canonicalGeneratorConfigFor(node.materia)?.output === "workItems");
+  return Boolean(socket && isAgentResolvedSocket(socket) && canonicalGeneratorConfigFor(socket.materia)?.output === "workItems");
 }
 
-function applyAssignments(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): void {
-  for (const [target, source] of Object.entries(node.node.assign ?? {})) {
+function applyAssignments(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): void {
+  for (const [target, source] of Object.entries(resolvedSocketConfig(socket).assign ?? {})) {
     setPath(state.data, target, resolveValue(source, state, parsed));
   }
 }
 
-function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown): string | undefined {
-  const advance = node.node.advance;
+function applyAdvance(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): string | undefined {
+  const advance = resolvedSocketConfig(socket).advance;
   if (!advance) return undefined;
   if (advance.when && !evaluateCondition(advance.when, state, parsed)) return undefined;
   const items = asArray(resolveValue(advance.items, state));
@@ -432,11 +435,11 @@ function applyAdvance(state: MateriaCastState, node: ResolvedMateriaNode, parsed
   state.currentItemKey = undefined;
   state.currentItemLabel = undefined;
   if (next < items.length) return undefined;
-  return resolveRuntimeLoopExitTarget(state, node.id, parsed) ?? advance.done;
+  return resolveRuntimeLoopExitTarget(state, socket.id, parsed) ?? advance.done;
 }
 
 function resolveRuntimeLoopExitTarget(state: MateriaCastState, from: string, parsed: unknown): string | undefined {
-  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => candidate.nodes.includes(from) && candidate.exits?.some((route) => route.from === from));
+  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => loopSockets(candidate).includes(from) && candidate.exits?.some((route) => route.from === from));
   if (!loop) return undefined;
   return resolveLoopExitRoute(loop, { from, satisfied: canonicalSatisfiedOutcome(state, parsed) })?.targetSocketId;
 }
@@ -446,10 +449,10 @@ function canonicalSatisfiedOutcome(state: MateriaCastState, parsed: unknown): bo
   return typeof satisfied === "boolean" ? satisfied : undefined;
 }
 
-function selectNextTarget(state: MateriaCastState, node: ResolvedMateriaNode, parsed: unknown, config: PiMateriaConfig): string {
-  for (const edge of canonicalOutgoingEdges(node.node)) {
+function selectNextTarget(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown, config: PiMateriaConfig): string {
+  for (const edge of canonicalOutgoingEdges(resolvedSocketConfig(socket))) {
     if (evaluateEdgeCondition(edge.when, state, parsed)) {
-      enforceEdgeLimit(state, node.id, edge, config);
+      enforceEdgeLimit(state, socket.id, edge, config);
       return edge.to;
     }
   }
@@ -464,100 +467,101 @@ function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEd
   if (count > limit) throw new Error(`Materia edge traversal limit exceeded for ${key} (${count}/${limit}).`);
 }
 
-async function advanceToNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string): Promise<void> {
+async function advanceToSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string): Promise<void> {
   const target = targetId ?? "end";
   if (target === "end") return await finishCast(pi, ctx, state, entryId, "Cast complete.");
-  const node = state.pipeline.nodes[target];
-  if (!node) throw new Error(`Unknown graph target "${target}"`);
-  await startNode(pi, ctx, state, node);
+  const socket = resolvedPipelineSockets(state)[target];
+  if (!socket) throw new Error(`Unknown graph target "${target}"`);
+  await startSocket(pi, ctx, state, socket);
 }
 
-async function startNode(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, node: ResolvedMateriaNode): Promise<void> {
+async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket): Promise<void> {
   const config = await loadConfigFromState(state);
-  const hasItem = setCurrentItem(state, node);
-  const loop = loopIteratorForNode(state.pipeline, node.id);
-  if (loop && !hasItem) return await advanceToNode(pi, ctx, state, loop.done ?? "end", "foreach-empty");
-  enforceNodeLimit(state, node, config);
-  const attempt = startTaskAttempt(state, node.id);
+  const hasItem = setCurrentItem(state, socket);
+  const loop = loopIteratorForSocket(state.pipeline, socket.id);
+  if (loop && !hasItem) return await advanceToSocket(pi, ctx, state, loop.done ?? "end", "foreach-empty");
+  enforceSocketVisitLimit(state, socket, config);
+  const attempt = startTaskAttempt(state, socket.id);
 
-  state.phase = node.id;
-  state.currentNode = node.id;
-  state.currentMateria = nodeMateriaName(node);
+  state.phase = socket.id;
+  setCurrentSocketId(state, socket.id);
+  state.currentMateria = socketMateriaName(socket);
   state.currentMateriaModel = undefined;
   state.awaitingResponse = true;
-  state.nodeState = isAgentResolvedNode(node) ? "awaiting_agent_response" : "running_utility";
+  setCurrentSocketState(state, isAgentResolvedSocket(socket) ? "awaiting_agent_response" : "running_utility");
   state.updatedAt = Date.now();
-  state.runState.currentNode = node.id;
-  state.runState.currentMateria = nodeMateriaName(node);
+  state.runState.currentNode = socket.id;
+  state.runState.currentMateria = socketMateriaName(socket);
   state.runState.currentMateriaModel = undefined;
   state.runState.currentTask = state.currentItemLabel;
   state.runState.attempt = attempt;
-  state.runState.lastMessage = node.id;
+  state.runState.lastMessage = socket.id;
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "node_start", { node: node.id, materia: nodeMateriaName(node), type: node.node.type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: nodeVisit(state, node.id) });
+  await appendEvent(state.runState, "node_start", { node: socket.id, materia: socketMateriaName(socket), type: resolvedSocketConfig(socket).type, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: socketVisit(state, socket.id) });
   saveCastState(pi, state);
   updateWidget(ctx, state);
-  ctx.ui.setStatus("materia", materiaStatusLabel(state, node));
+  ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
 
-  if (!isAgentResolvedNode(node)) {
+  if (!isAgentResolvedSocket(socket)) {
     state.awaitingResponse = false;
-    state.nodeState = "running_utility";
+    setCurrentSocketState(state, "running_utility");
     state.currentMateria = undefined;
     state.currentMateriaModel = undefined;
     state.runState.currentMateria = undefined;
     state.runState.currentMateriaModel = undefined;
     saveCastState(pi, state);
     try {
-      const result = await executeUtilityNode(state, node);
-      await completeNode(pi, ctx, state, result.output, result.entryId);
+      const result = await executeUtilitySocket(state, socket);
+      await completeSocket(pi, ctx, state, result.output, result.entryId);
     } catch (error) {
-      await failCast(pi, ctx, state, error, `utility:${node.id}:${nodeVisit(state, node.id)}`);
+      await failCast(pi, ctx, state, error, `utility:${socket.id}:${socketVisit(state, socket.id)}`);
     }
     return;
   }
 
   state.awaitingResponse = true;
-  state.nodeState = "awaiting_agent_response";
+  setCurrentSocketState(state, "awaiting_agent_response");
   saveCastState(pi, state);
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: node.node.materia, model: node.materia.model, thinking: node.materia.thinking });
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking });
   const materiaModel = materiaModelSelection(appliedModel);
   state.currentMateriaModel = materiaModel;
   state.runState.currentMateriaModel = materiaModel;
-  recordUsageModelSelection(state.runState.usage, { node: node.id, materia: node.node.materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
+  recordUsageModelSelection(state.runState.usage, { socket: socket.id, materia: resolvedSocketConfig(socket).materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "materia_model_settings", { node: node.id, materia: node.node.materia, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
+  await appendEvent(state.runState, "materia_model_settings", { node: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
   saveCastState(pi, state);
-  updateToolScope(pi, node.materia);
-  await sendMateriaTurn(pi, ctx, state, buildNodePrompt(state, node));
+  updateToolScope(pi, socket.materia);
+  await sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket));
 }
 
-async function executeUtilityNode(state: MateriaCastState, node: Extract<ResolvedMateriaNode, { node: { type: "utility" } }>): Promise<{ output: string; entryId: string }> {
-  const visit = nodeVisit(state, node.id);
-  const input = buildUtilityInput(state, node);
-  const inputArtifact = await recordUtilityInput(state, node, input);
-  await appendEvent(state.runState, "utility_input", { node: node.id, artifact: inputArtifact, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit });
+async function executeUtilitySocket(state: MateriaCastState, socket: Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>): Promise<{ output: string; entryId: string }> {
+  const visit = socketVisit(state, socket.id);
+  const input = buildUtilityInput(state, socket);
+  const inputArtifact = await recordUtilityInput(state, socket, input);
+  await appendEvent(state.runState, "utility_input", { node: socket.id, artifact: inputArtifact, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit });
 
-  const params = node.node.params ?? {};
+  const utilityConfig = resolvedSocketConfig(socket);
+  const params = utilityConfig.params ?? {};
   let output: string;
-  if (node.node.command) {
-    output = await executeCommandUtility(state, node, input);
+  if (utilityConfig.command) {
+    output = await executeCommandUtility(state, socket, input);
   } else if (Object.prototype.hasOwnProperty.call(params, "output")) {
     const value = params.output;
     output = typeof value === "string" ? value : stringifyDeterministicHandoffOutput(value);
-  } else if (hasBuiltInUtility(node.node.utility)) {
-    output = await executeBuiltInUtility(node.node.utility, input as BuiltInUtilityInput);
+  } else if (hasBuiltInUtility(utilityConfig.utility)) {
+    output = await executeBuiltInUtility(utilityConfig.utility, input as BuiltInUtilityInput);
   } else {
-    throw new Error(`Unknown utility alias "${node.node.utility}" for node "${node.id}".`);
+    throw new Error(`Unknown utility alias "${utilityConfig.utility}" for socket "${socket.id}".`);
   }
 
-  return { output, entryId: `utility:${node.id}:${visit}` };
+  return { output, entryId: `utility:${socket.id}:${visit}` };
 }
 
-async function executeCommandUtility(state: MateriaCastState, node: Extract<ResolvedMateriaNode, { node: { type: "utility" } }>, input: Record<string, unknown>): Promise<string> {
-  const command = node.node.command;
-  if (!command || command.length === 0) throw new Error(`Utility node "${node.id}" has no explicit command configured.`);
+async function executeCommandUtility(state: MateriaCastState, socket: Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>, input: Record<string, unknown>): Promise<string> {
+  const command = resolvedSocketConfig(socket).command;
+  if (!command || command.length === 0) throw new Error(`Utility socket "${socket.id}" has no explicit command configured.`);
 
-  const timeoutMs = node.node.timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;
+  const timeoutMs = resolvedSocketConfig(socket).timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;
   const child = spawn(command[0], command.slice(1), { cwd: state.cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
   const stdout = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
   const stderr = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
@@ -588,15 +592,15 @@ async function executeCommandUtility(state: MateriaCastState, node: Extract<Reso
 
   const stdoutText = stdout.text();
   const stderrText = stderr.text();
-  const artifacts = await recordCommandArtifacts(state, node, stdoutText, stderrText, stdout.truncated, stderr.truncated);
-  await appendEvent(state.runState, "utility_command", { node: node.id, command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
+  const artifacts = await recordCommandArtifacts(state, socket, stdoutText, stderrText, stdout.truncated, stderr.truncated);
+  await appendEvent(state.runState, "utility_command", { node: socket.id, command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
 
   if (timedOut) {
-    throw new Error(`Utility command timed out for node "${node.id}" after ${timeoutMs}ms: ${formatCommandForError(command)}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
+    throw new Error(`Utility command timed out for socket "${socket.id}" after ${timeoutMs}ms: ${formatCommandForError(command)}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
   }
   if (result.code !== 0) {
     const summary = summarizeStderr(stderrText, stderr.truncated);
-    throw new Error(`Utility command failed for node "${node.id}": ${formatCommandForError(command)} exited with code ${result.code ?? `signal ${result.signal ?? "unknown"}`}. stderr: ${summary}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
+    throw new Error(`Utility command failed for socket "${socket.id}": ${formatCommandForError(command)} exited with code ${result.code ?? `signal ${result.signal ?? "unknown"}`}. stderr: ${summary}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`);
   }
   return stdoutText;
 }
@@ -631,9 +635,9 @@ function createBoundedCapture(maxBytes: number): { push(chunk: Buffer | string):
   };
 }
 
-async function recordCommandArtifacts(state: MateriaCastState, node: ResolvedMateriaNode, stdout: string, stderr: string, stdoutTruncated: boolean, stderrTruncated: boolean): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }> {
-  const visit = nodeVisit(state, node.id);
-  const dir = path.join("nodes", safePathSegment(node.id));
+async function recordCommandArtifacts(state: MateriaCastState, socket: ResolvedMateriaSocket, stdout: string, stderr: string, stdoutTruncated: boolean, stderrTruncated: boolean): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }> {
+  const visit = socketVisit(state, socket.id);
+  const dir = path.join("nodes", safePathSegment(socket.id));
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
   const stdoutArtifact = path.join(dir, `${visit}${item}.command.stdout.txt`);
   const stderrArtifact = path.join(dir, `${visit}${item}.command.stderr.txt`);
@@ -642,9 +646,9 @@ async function recordCommandArtifacts(state: MateriaCastState, node: ResolvedMat
   await writeFile(path.join(state.runDir, stdoutArtifact), stdout);
   await writeFile(path.join(state.runDir, stderrArtifact), stderr);
   await writeFile(path.join(state.runDir, metaArtifact), JSON.stringify({ stdoutArtifact, stderrArtifact, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES }, null, 2));
-  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stdout`, artifact: stdoutArtifact });
-  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:stderr`, artifact: stderrArtifact });
-  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:command:meta`, artifact: metaArtifact });
+  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:command:stdout`, artifact: stdoutArtifact });
+  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:command:stderr`, artifact: stderrArtifact });
+  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:command:meta`, artifact: metaArtifact });
   return { stdoutArtifact, stderrArtifact, metaArtifact };
 }
 
@@ -657,16 +661,18 @@ function formatCommandForError(command: string[]): string {
   return command.map((part) => JSON.stringify(part)).join(" ");
 }
 
-function buildUtilityInput(state: MateriaCastState, node: Extract<ResolvedMateriaNode, { node: { type: "utility" } }>): Record<string, unknown> {
-  const loop = node.node.foreach ?? loopIteratorForNode(state.pipeline, node.id);
-  const cursorName = loop?.cursor ?? (loop ? `${node.id}Index` : undefined);
+function buildUtilityInput(state: MateriaCastState, socket: Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>): Record<string, unknown> {
+  const loop = resolvedSocketConfig(socket).foreach ?? loopIteratorForSocket(state.pipeline, socket.id);
+  const cursorName = loop?.cursor ?? (loop ? `${socket.id}Index` : undefined);
   return {
     cwd: state.cwd,
     runDir: state.runDir,
     request: state.request,
     castId: state.castId,
-    nodeId: node.id,
-    params: node.node.params ?? {},
+    socketId: socket.id,
+    // Legacy utility-command input alias retained for existing utility scripts.
+    nodeId: socket.id,
+    params: resolvedSocketConfig(socket).params ?? {},
     state: state.data,
     item: currentItem(state) ?? null,
     itemKey: state.currentItemKey ?? null,
@@ -676,31 +682,31 @@ function buildUtilityInput(state: MateriaCastState, node: Extract<ResolvedMateri
   };
 }
 
-async function recordUtilityInput(state: MateriaCastState, node: ResolvedMateriaNode, input: Record<string, unknown>): Promise<string> {
-  const visit = nodeVisit(state, node.id);
-  const dir = path.join("nodes", safePathSegment(node.id));
+async function recordUtilityInput(state: MateriaCastState, socket: ResolvedMateriaSocket, input: Record<string, unknown>): Promise<string> {
+  const visit = socketVisit(state, socket.id);
+  const dir = path.join("nodes", safePathSegment(socket.id));
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
   const artifact = path.join(dir, `${visit}${item}.input.json`);
   await mkdir(path.dirname(path.join(state.runDir, artifact)), { recursive: true });
   await writeFile(path.join(state.runDir, artifact), JSON.stringify(input, null, 2));
-  await appendManifest(state, { phase: state.phase, node: node.id, materia: nodeMateriaName(node), itemKey: state.currentItemKey, visit, entryId: `utility:${node.id}:${visit}:input`, artifact });
+  await appendManifest(state, { phase: state.phase, node: socket.id, materia: socketMateriaName(socket), itemKey: state.currentItemKey, visit, entryId: `utility:${socket.id}:${visit}:input`, artifact });
   return artifact;
 }
 
 async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<void> {
   state.active = true;
   state.awaitingResponse = true;
-  state.nodeState = "awaiting_agent_response";
+  setCurrentSocketState(state, "awaiting_agent_response");
   state.updatedAt = Date.now();
   state.runState.lastMessage = `Transient transport failure while awaiting ${recoveryDiagnosticLabel(state)}; preserving active Pi turn: ${errorMessage(error)}`;
-  await appendEvent(state.runState, "transient_transport_turn_failure", { warning: true, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), mode: recoveryTurnMode(state) });
+  await appendEvent(state.runState, "transient_transport_turn_failure", { warning: true, error: errorMessage(error), entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), mode: recoveryTurnMode(state) });
   await writeUsage(state.runState);
   saveCastState(pi, state);
   updateWidget(ctx, state);
   ctx.ui.notify(`pi-materia warning: ${state.runState.lastMessage}`, "warning");
 }
 
-async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<boolean> {
+async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<boolean> {
   const reason = classifyRecoverableTurnFailure(error);
   if (!reason) {
     return false;
@@ -712,7 +718,7 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
   const previousAttempts = state.recoveryAttempts[key] ?? 0;
   const maxAttempts = allowance.effectiveMaxAttempts;
   if (previousAttempts >= maxAttempts) {
-    const exhausted = `Same-node recovery exhausted for ${recoveryDiagnosticLabel(state)} after ${previousAttempts}/${maxAttempts} attempt(s): ${errorMessage(error)}`;
+    const exhausted = `Same-socket recovery exhausted for ${recoveryDiagnosticLabel(state)} after ${previousAttempts}/${maxAttempts} attempt(s): ${errorMessage(error)}`;
     state.recoveryExhaustion = {
       kind: "same_node_recovery_exhausted",
       reason,
@@ -722,12 +728,12 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
       effectiveMaxAttempts: allowance.effectiveMaxAttempts,
       reviveCount: allowance.reviveCount,
       failedReason: exhausted,
-      node: state.currentNode,
+      node: currentSocketId(state),
       itemKey: state.currentItemKey,
       mode: recoveryTurnMode(state),
       exhaustedAt: Date.now(),
     };
-    await appendEvent(state.runState, "same_node_recovery_exhausted", { reason, key, attempts: previousAttempts, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    await appendEvent(state.runState, "same_node_recovery_exhausted", { reason, key, attempts: previousAttempts, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     await failCast(pi, ctx, state, new Error(exhausted), options.entryId, { preserveRecoveryExhaustion: true });
     return true;
   }
@@ -735,40 +741,40 @@ async function handleSameNodeRecoverableTurnFailure(pi: ExtensionAPI, ctx: Exten
   const attempt = previousAttempts + 1;
   state.recoveryAttempts[key] = attempt;
   state.awaitingResponse = true;
-  state.nodeState = "awaiting_agent_response";
+  setCurrentSocketState(state, "awaiting_agent_response");
   state.updatedAt = Date.now();
   state.runState.lastMessage = `Retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`;
-  await appendEvent(state.runState, "same_node_recovery_start", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, mode: recoveryTurnMode(state) });
+  await appendEvent(state.runState, "same_node_recovery_start", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: currentSocketVisit(state, undefined), mode: recoveryTurnMode(state) });
   await writeUsage(state.runState);
   saveCastState(pi, state);
 
   try {
-    if (reason === "context_window") await runSameNodeRecoveryAction(pi, ctx, state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
+    if (reason === "context_window") await runSameSocketRecoveryAction(pi, ctx, state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
     updateToolScope(pi, currentMateria(state));
-    await sendMateriaTurn(pi, ctx, state, buildSameNodeRecoveryPrompt(state), { skipProactiveCompaction: true });
-    await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    await sendMateriaTurn(pi, ctx, state, buildSameSocketRecoveryPrompt(state), { skipProactiveCompaction: true });
+    await appendEvent(state.runState, "same_node_recovery_retry", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     saveCastState(pi, state);
     updateWidget(ctx, state);
     ctx.ui.notify(`pi-materia retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`, "warning");
     return true;
   } catch (retryError) {
-    await appendEvent(state.runState, "same_node_recovery_retry_failed", { reason, key, attempt, maxAttempts, error: errorMessage(retryError), originalError: errorMessage(error), entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
-    await failCast(pi, ctx, state, new Error(`Same-node recovery retry failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(retryError)}. Original failure: ${errorMessage(error)}`), options.entryId);
+    await appendEvent(state.runState, "same_node_recovery_retry_failed", { reason, key, attempt, maxAttempts, error: errorMessage(retryError), originalError: errorMessage(error), entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+    await failCast(pi, ctx, state, new Error(`Same-socket recovery retry failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(retryError)}. Original failure: ${errorMessage(error)}`), options.entryId);
     return true;
   }
 }
 
-async function runSameNodeRecoveryAction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, options: { action: "compact"; reason: "context_window"; key: string; attempt: number; maxAttempts: number; entryId?: string }): Promise<void> {
-  await appendEvent(state.runState, "same_node_recovery_action_start", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
+async function runSameSocketRecoveryAction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, options: { action: "compact"; reason: "context_window"; key: string; attempt: number; maxAttempts: number; entryId?: string }): Promise<void> {
+  await appendEvent(state.runState, "same_node_recovery_action_start", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
   saveCastState(pi, state);
 
   try {
     const result = await forceContextCompaction(ctx, state);
-    await appendEvent(state.runState, "same_node_recovery_action_complete", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state), result: summarizeCompactionResult(result) });
+    await appendEvent(state.runState, "same_node_recovery_action_complete", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), result: summarizeCompactionResult(result) });
     saveCastState(pi, state);
   } catch (actionError) {
-    await appendEvent(state.runState, "same_node_recovery_action_failed", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: state.currentNode, itemKey: state.currentItemKey, mode: recoveryTurnMode(state), error: errorMessage(actionError) });
-    throw new Error(`Same-node recovery action compact failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(actionError)}`);
+    await appendEvent(state.runState, "same_node_recovery_action_failed", { action: options.action, reason: options.reason, key: options.key, attempt: options.attempt, maxAttempts: options.maxAttempts, entryId: options.entryId, node: currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), error: errorMessage(actionError) });
+    throw new Error(`Same-socket recovery action compact failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(actionError)}`);
   }
 }
 
@@ -823,11 +829,11 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
     tokens: usage.tokens,
     contextWindow,
     percent,
-    node: state.currentNode,
+    socket: currentSocketId(state),
     itemKey: state.currentItemKey,
     itemLabel: state.currentItemLabel,
     itemLabelShort: shortMetadataLabel(state.currentItemLabel),
-    visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined,
+    visit: currentSocketVisit(state, undefined),
     mode: recoveryTurnMode(state),
   };
   await appendEvent(state.runState, "proactive_compaction_start", eventBase);
@@ -838,7 +844,7 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
     await appendEvent(state.runState, "proactive_compaction_complete", { ...eventBase, result: summarizeCompactionResult(result) });
     saveCastState(pi, state);
   } catch (error) {
-    const message = `Proactive compaction failed before ${recoveryDiagnosticLabel(state)}; continuing turn so same-node recovery can handle any later context-window failure: ${errorMessage(error)}`;
+    const message = `Proactive compaction failed before ${recoveryDiagnosticLabel(state)}; continuing turn so same-socket recovery can handle any later context-window failure: ${errorMessage(error)}`;
     state.runState.lastMessage = message;
     await appendEvent(state.runState, "proactive_compaction_failed", { ...eventBase, error: errorMessage(error), warning: true });
     await writeUsage(state.runState);
@@ -869,30 +875,30 @@ function isPlainWebSocketTransportFailure(message: string): boolean {
   return /(?:^|:\s*)(?:error:\s*)?websocket (?:error|closed|close|connection (?:closed|error|lost)|disconnected)(?:\s+\d{3,4})?\.?$/i.test(normalized);
 }
 
-function buildSameNodeRecoveryPrompt(state: MateriaCastState): string {
+function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {
   if (state.activeTurnPrompt) return state.activeTurnPrompt;
-  const node = currentNodeOrThrow(state);
-  if (recoveryTurnMode(state) === "finalization") return buildMultiTurnFinalizationPrompt(state, node);
-  return buildNodePrompt(state, node);
+  const socket = currentSocketOrThrow(state);
+  if (recoveryTurnMode(state) === "finalization") return buildMultiTurnFinalizationPrompt(state, socket);
+  return buildSocketPrompt(state, socket);
 }
 
 function recoveryTurnMode(state: MateriaCastState): "normal" | "refinement" | "finalization" {
   if (state.multiTurnFinalizing === true) return "finalization";
-  return isActiveMultiTurnNode(state) ? "refinement" : "normal";
+  return isActiveMultiTurnSocket(state) ? "refinement" : "normal";
 }
 
 function recoveryIdentityKey(state: MateriaCastState): string {
-  const nodeId = state.currentNode ?? state.phase;
-  const visit = state.currentNode ? nodeVisit(state, state.currentNode) : 0;
-  const refinementTurn = state.currentNode ? currentRefinementTurn(state, state.currentNode) : 0;
-  return JSON.stringify([recoveryTurnMode(state), nodeId, state.currentItemKey ?? "__singleton__", visit, refinementTurn]);
+  const socketId = currentSocketId(state) ?? state.phase;
+  const visit = currentSocketVisit(state, 0);
+  const refinementTurn = currentSocketId(state) ? currentRefinementTurn(state, currentSocketId(state)!) : 0;
+  return JSON.stringify([recoveryTurnMode(state), socketId, state.currentItemKey ?? "__singleton__", visit, refinementTurn]);
 }
 
 function ensureRecoveryAllowance(state: MateriaCastState, key: string): MateriaRecoveryAllowance {
   state.recoveryAllowances ??= {};
   const existing = state.recoveryAllowances[key];
   if (isValidRecoveryAllowance(existing)) return existing;
-  const originalMaxAttempts = DEFAULT_MAX_SAME_NODE_RECOVERY_ATTEMPTS;
+  const originalMaxAttempts = DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS;
   const allowance: MateriaRecoveryAllowance = { originalMaxAttempts, effectiveMaxAttempts: originalMaxAttempts, reviveCount: 0 };
   state.recoveryAllowances[key] = allowance;
   return allowance;
@@ -909,7 +915,7 @@ function isValidRecoveryAllowance(value: unknown): value is MateriaRecoveryAllow
 }
 
 function isRevivableCastState(state: MateriaCastState): boolean {
-  if (state.active || (state.phase !== "failed" && state.nodeState !== "failed")) return false;
+  if (state.active || (state.phase !== "failed" && currentSocketState(state) !== "failed")) return false;
   const exhaustion = state.recoveryExhaustion;
   if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted" || !exhaustion.key) return false;
   if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
@@ -924,16 +930,16 @@ export interface MateriaReviveAllowanceResult {
   reviveCount: number;
 }
 
-export function extendSameNodeRecoveryAllowanceForRevive(state: MateriaCastState): MateriaReviveAllowanceResult {
+export function extendSameSocketRecoveryAllowanceForRevive(state: MateriaCastState): MateriaReviveAllowanceResult {
   if (state.active) throw new Error(`pi-materia cast ${state.castId} is still active and cannot be revived.`);
-  if (state.phase !== "failed" && state.nodeState !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed and cannot be revived.`);
+  if (state.phase !== "failed" && currentSocketState(state) !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed and cannot be revived.`);
   const exhaustion = state.recoveryExhaustion;
   if (!exhaustion || exhaustion.kind !== "same_node_recovery_exhausted") {
-    throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured same-node recovery exhaustion metadata. Use /materia recast for general failed casts.`);
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured same-socket recovery exhaustion metadata. Use /materia recast for general failed casts.`);
   }
   if (!exhaustion.key) throw new Error(`pi-materia cast ${state.castId} is not revivable: exhausted recovery context is missing.`);
   if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) {
-    throw new Error(`pi-materia cast ${state.castId} is not revivable: same-node recovery exhaustion metadata does not match the current terminal failure. Use /materia recast for general failed casts.`);
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: same-socket recovery exhaustion metadata does not match the current terminal failure. Use /materia recast for general failed casts.`);
   }
   const allowance = state.recoveryAllowances?.[exhaustion.key];
   if (!isValidRecoveryAllowance(allowance)) {
@@ -950,9 +956,12 @@ export function extendSameNodeRecoveryAllowanceForRevive(state: MateriaCastState
   return { key: exhaustion.key, priorEffectiveMaxAttempts, increment, newEffectiveMaxAttempts: allowance.effectiveMaxAttempts, reviveCount: allowance.reviveCount };
 }
 
+/** @deprecated Compatibility export for existing tests/integrations; use same-socket terminology internally. */
+export const extendSameNodeRecoveryAllowanceForRevive = extendSameSocketRecoveryAllowanceForRevive;
+
 function recoveryDiagnosticLabel(state: MateriaCastState): string {
   const item = state.currentItemKey ? ` item ${JSON.stringify(state.currentItemKey)}` : "";
-  return `${recoveryTurnMode(state)} turn for node "${state.currentNode ?? state.phase}"${item}`;
+  return `${recoveryTurnMode(state)} turn for socket "${currentSocketId(state) ?? state.phase}"${item}`;
 }
 
 function errorMessage(error: unknown): string {
@@ -960,21 +969,21 @@ function errorMessage(error: unknown): string {
 }
 
 function nonRecoverableTurnError(state: MateriaCastState, error: unknown): Error {
-  return new Error(`Non-recoverable turn failure for ${recoveryDiagnosticLabel(state)} (same-node recovery not attempted): ${errorMessage(error)}`);
+  return new Error(`Non-recoverable turn failure for ${recoveryDiagnosticLabel(state)} (same-socket recovery not attempted): ${errorMessage(error)}`);
 }
 
 async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string, options: { preserveRecoveryExhaustion?: boolean } = {}): Promise<void> {
   if (!options.preserveRecoveryExhaustion) state.recoveryExhaustion = undefined;
   state.active = false;
   state.awaitingResponse = false;
-  state.nodeState = "failed";
+  setCurrentSocketState(state, "failed");
   state.phase = "failed";
   state.failedReason = error instanceof Error ? error.message : String(error);
   state.runState.lastMessage = state.failedReason;
   markRunEnded(state);
-  await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, node: state.currentNode });
+  await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, node: currentSocketId(state) });
   await writeUsage(state.runState);
-  await appendManifest(state, { phase: "failed", node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
+  await appendManifest(state, { phase: "failed", node: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", "failed");
   updateWidget(ctx, state);
@@ -994,21 +1003,21 @@ async function resolvePersistedCastLoadoutName(state: MateriaCastState): Promise
   }
 }
 
-function enforceNodeLimit(state: MateriaCastState, node: ResolvedMateriaNode, config: PiMateriaConfig): void {
-  const count = (state.visits[node.id] ?? 0) + 1;
-  const limit = node.node.limits?.maxVisits ?? config.limits?.maxNodeVisits ?? DEFAULT_MAX_NODE_VISITS;
-  if (count > limit) throw new Error(`Materia node visit limit exceeded for ${node.id} (${count}/${limit}).`);
-  state.visits[node.id] = count;
+function enforceSocketVisitLimit(state: MateriaCastState, socket: ResolvedMateriaSocket, config: PiMateriaConfig): void {
+  const count = (state.visits[socket.id] ?? 0) + 1;
+  const limit = resolvedSocketConfig(socket).limits?.maxVisits ?? config.limits?.maxSocketVisits ?? config.limits?.maxNodeVisits ?? DEFAULT_MAX_SOCKET_VISITS;
+  if (count > limit) throw new Error(`Materia socket visit limit exceeded for ${socket.id} (${count}/${limit}).`);
+  state.visits[socket.id] = count;
 }
 
-function setCurrentItem(state: MateriaCastState, node: ResolvedMateriaNode): boolean {
-  const loop = node.node.foreach ?? loopIteratorForNode(state.pipeline, node.id);
+function setCurrentItem(state: MateriaCastState, socket: ResolvedMateriaSocket): boolean {
+  const loop = resolvedSocketConfig(socket).foreach ?? loopIteratorForSocket(state.pipeline, socket.id);
   if (!loop) {
     state.currentItemKey = undefined;
     state.currentItemLabel = undefined;
     return true;
   }
-  const cursor = loop.cursor ?? `${node.id}Index`;
+  const cursor = loop.cursor ?? `${socket.id}Index`;
   const index = state.cursors[cursor] ?? 0;
   state.cursors[cursor] = index;
   const item = asArray(resolveValue(loop.items, state))[index];
@@ -1033,7 +1042,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.active = false;
   state.phase = "complete";
   state.awaitingResponse = false;
-  state.nodeState = "complete";
+  setCurrentSocketState(state, "complete");
   state.recoveryExhaustion = undefined;
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
@@ -1053,22 +1062,22 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
   saveCastState(pi, state);
   if (!options.skipProactiveCompaction) await maybeRunProactiveCompaction(pi, ctx, state);
   const contextArtifact = await writeContextArtifact(pi, state, prompt);
-  await appendManifest(state, { phase: state.phase, node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, visit: state.currentNode ? nodeVisit(state, state.currentNode) : undefined, artifact: contextArtifact, kind: "context", materiaModel: state.currentMateriaModel });
+  await appendManifest(state, { phase: state.phase, node: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, visit: currentSocketVisit(state, undefined), artifact: contextArtifact, kind: "context", materiaModel: state.currentMateriaModel });
 
-  const display = formatMateriaNotificationDisplay(state.currentMateria, state.currentNode);
+  const display = formatMateriaNotificationDisplay(state.currentMateria, currentSocketId(state));
   pi.sendMessage({
     customType: "pi-materia",
-    content: formatMateriaCastContent(state.currentMateria, state.currentNode, state.currentItemLabel),
+    content: formatMateriaCastContent(state.currentMateria, currentSocketId(state), state.currentItemLabel),
     display: true,
-    details: { prefix: "materia", nodeId: state.currentNode, materiaName: display.materiaName, socketOrdinal: display.socketOrdinal, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "materia_prompt", materiaModel: state.currentMateriaModel },
+    details: { prefix: "materia", nodeId: currentSocketId(state), materiaName: display.materiaName, socketOrdinal: display.socketOrdinal, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "materia_prompt", materiaModel: state.currentMateriaModel },
   });
 
-  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: state.currentNode, materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact, materiaModel: state.currentMateriaModel });
+  pi.appendEntry("pi-materia-context", { phase: state.phase, nodeId: currentSocketId(state), materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact, materiaModel: state.currentMateriaModel });
   pi.sendMessage({
     customType: "pi-materia-prompt",
     content: prompt,
     display: false,
-    details: { phase: state.phase, nodeId: state.currentNode, materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, materiaModel: state.currentMateriaModel },
+    details: { phase: state.phase, nodeId: currentSocketId(state), materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, materiaModel: state.currentMateriaModel },
   }, { triggerTurn: true });
 }
 
@@ -1086,10 +1095,10 @@ async function writeContextArtifact(pi: ExtensionAPI, state: MateriaCastState, p
     "# Materia Isolated Context",
     "",
     `cast: ${state.castId}`,
-    `node: ${state.currentNode ?? "-"}`,
+    `socket: ${currentSocketId(state) ?? "-"}`,
     `materia: ${state.currentMateria ?? "-"}`,
     `item: ${state.currentItemLabel ?? "-"}`,
-    `visit: ${state.currentNode ? nodeVisit(state, state.currentNode) : "-"}`,
+    `visit: ${currentSocketId(state) ? currentSocketVisit(state) : "-"}`,
     `model: ${model}`,
     `model source: ${modelSource}`,
     `thinking: ${thinking}`,
@@ -1149,81 +1158,81 @@ function formatThinkingSource(materiaModel: MateriaModelSelection | undefined): 
 }
 
 function contextArtifactPath(state: MateriaCastState, suffix?: string): string {
-  const node = safePathSegment(state.currentNode ?? state.phase);
+  const socket = safePathSegment(currentSocketId(state) ?? state.phase);
   const item = state.currentItemKey ? `-${safePathSegment(state.currentItemKey)}` : "";
-  const visit = state.currentNode ? nodeVisit(state, state.currentNode) : 1;
+  const visit = currentSocketVisit(state, 1);
   const extra = suffix ? `-${safePathSegment(suffix)}` : "";
-  return path.join("contexts", `${node}${item}-${visit}${extra}.md`);
+  return path.join("contexts", `${socket}${item}-${visit}${extra}.md`);
 }
 
 // Central prompt assembly policy for the handoff contract:
-// - single-turn JSON agent nodes receive the canonical contract via singleTurnJsonFormatInstruction();
-// - multi-turn JSON agent nodes receive refinement guidance during normal turns and the
+// - single-turn JSON agent sockets receive the canonical contract via singleTurnJsonFormatInstruction();
+// - multi-turn JSON agent sockets receive refinement guidance during normal turns and the
 //   same canonical contract only during /materia continue finalization;
 // - synthetic cast context may expose only concise, non-authoritative handoff-contract
-//   context for JSON nodes that are already in a final-output mode, and never during
+//   context for JSON sockets that are already in a final-output mode, and never during
 //   refinement; the authoritative final-output instruction remains finalFormatInstruction();
-// - plain-text agent nodes receive no JSON-only handoff contract unless their local prompt asks for one.
-function buildNodePrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
-  if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
-  return materiaPrompt(node.materia, state, [nodeAdapterContextInstruction(state, node), multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)]);
+// - plain-text agent sockets receive no JSON-only handoff contract unless their local prompt asks for one.
+function buildSocketPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
+  if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
+  return materiaPrompt(socket.materia, state, [socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)]);
 }
 
-function buildMultiTurnFinalizationPrompt(state: MateriaCastState, node: ResolvedMateriaNode): string {
-  if (!isAgentResolvedNode(node)) throw new Error(`Utility node "${node.id}" does not have an agent prompt.`);
-  return materiaPrompt(node.materia, state, [
+function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
+  if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
+  return materiaPrompt(socket.materia, state, [
     buildSyntheticCastContext(state),
-    nodeAdapterContextInstruction(state, node),
-    "Command-triggered finalization: the user ran /materia continue for this multi-turn node. This is the only finalization mechanism and this is the finalization turn.",
-    finalFormatInstruction(node),
+    socketAdapterContextInstruction(state, socket),
+    "Command-triggered finalization: the user ran /materia continue for this multi-turn socket. This is the only finalization mechanism and this is the finalization turn.",
+    finalFormatInstruction(socket),
   ]);
 }
 
-function multiTurnTurnInstruction(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
-  if (!isMultiTurnResolvedAgentNode(node)) return undefined;
-  return state.multiTurnFinalizing ? finalFormatInstruction(node) : multiTurnRefinementGuidance();
+function multiTurnTurnInstruction(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {
+  if (!isMultiTurnResolvedAgentSocket(socket)) return undefined;
+  return state.multiTurnFinalizing ? finalFormatInstruction(socket) : multiTurnRefinementGuidance();
 }
 
 function multiTurnRefinementGuidance(): string {
-  return "Current multi-turn mode: refinement conversation. /materia continue is the only way to finalize this multi-turn node. Until the user runs /materia continue, respond conversationally, incorporate refinement feedback, and do not emit final JSON, final structured output, or other final machine-parseable output. If the refinement appears complete or the conversation is stalling, prompt the user to run /materia continue when they are ready for the final output.";
+  return "Current multi-turn mode: refinement conversation. /materia continue is the only way to finalize this multi-turn socket. Until the user runs /materia continue, respond conversationally, incorporate refinement feedback, and do not emit final JSON, final structured output, or other final machine-parseable output. If the refinement appears complete or the conversation is stalling, prompt the user to run /materia continue when they are ready for the final output.";
 }
 
-function singleTurnJsonFormatInstruction(node: ResolvedMateriaNode): string | undefined {
-  if (!isAgentResolvedNode(node)) return undefined;
-  if (node.materia.multiTurn === true) return undefined;
-  return jsonHandoffContractInstruction(node);
+function singleTurnJsonFormatInstruction(socket: ResolvedMateriaSocket): string | undefined {
+  if (!isAgentResolvedSocket(socket)) return undefined;
+  if (socket.materia.multiTurn === true) return undefined;
+  return jsonHandoffContractInstruction(socket);
 }
 
-function jsonHandoffContractInstruction(node: ResolvedMateriaNode): string | undefined {
-  if (!isAgentResolvedNode(node)) return undefined;
-  return node.node.parse === "json" ? formatHandoffJsonFinalInstruction() : undefined;
+function jsonHandoffContractInstruction(socket: ResolvedMateriaSocket): string | undefined {
+  if (!isAgentResolvedSocket(socket)) return undefined;
+  return resolvedSocketConfig(socket).parse === "json" ? formatHandoffJsonFinalInstruction() : undefined;
 }
 
-function finalFormatInstruction(node: ResolvedMateriaNode): string {
-  if (!isAgentResolvedNode(node)) return "";
-  return jsonHandoffContractInstruction(node) ?? "Final output format: return the final plain-text implementation summary for this node. Do not emit routing JSON or evaluator control fields unless the local node prompt explicitly asks for them.";
+function finalFormatInstruction(socket: ResolvedMateriaSocket): string {
+  if (!isAgentResolvedSocket(socket)) return "";
+  return jsonHandoffContractInstruction(socket) ?? "Final output format: return the final plain-text implementation summary for this socket. Do not emit routing JSON or evaluator control fields unless the local socket prompt explicitly asks for them.";
 }
 
-function nodeAdapterContextInstruction(state: MateriaCastState, node: ResolvedMateriaNode): string | undefined {
-  if (!isAgentResolvedNode(node)) return undefined;
-  if (node.node.parse === "json") return generatorJsonAdapterContextInstruction(state, node);
+function socketAdapterContextInstruction(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {
+  if (!isAgentResolvedSocket(socket)) return undefined;
+  if (resolvedSocketConfig(socket).parse === "json") return generatorJsonAdapterContextInstruction(state, socket);
   const workItem = currentItem(state) ?? getPath(state.data, "currentWorkItem") ?? getPath(state.data, "workItem");
   const guidance = getPath(state.data, "guidance") ?? {};
   return [
-    "Node/socket adapter context: this placement supplies the current workItem and global guidance; the reusable materia should focus on its behavior, not graph placement, routing, assignment, or iteration.",
+    "Socket adapter context: this placement supplies the current workItem and global guidance; the reusable materia should focus on its behavior, not graph placement, routing, assignment, or iteration.",
     `Current workItem JSON: ${JSON.stringify(workItem ?? null, null, 2)}`,
     `Global guidance JSON: ${JSON.stringify(guidance ?? {}, null, 2)}`,
-    "For text/build nodes, consume the current workItem plus global guidance and return a concise implementation summary. The node/socket adapter will handle downstream state and graph flow.",
+    "For text/build sockets, consume the current workItem plus global guidance and return a concise implementation summary. The socket adapter will handle downstream state and graph flow.",
   ].join("\n");
 }
 
-function generatorJsonAdapterContextInstruction(state: MateriaCastState, node: ResolvedMateriaAgentNode): string | undefined {
-  const generator = canonicalGeneratorConfigFor(node.materia);
+function generatorJsonAdapterContextInstruction(state: MateriaCastState, socket: ResolvedMateriaAgentSocket): string | undefined {
+  const generator = canonicalGeneratorConfigFor(socket.materia);
   if (!generator) return undefined;
-  if (isMultiTurnResolvedAgentNode(node) && state.multiTurnFinalizing !== true) return undefined;
+  if (isMultiTurnResolvedAgentSocket(socket) && state.multiTurnFinalizing !== true) return undefined;
   const upstreamWorkItems = getPath(state.data, HANDOFF_WORK_ITEMS_FIELD);
   return [
-    "Generator node/socket adapter context: this placement is a generated-output stage. Return only the canonical handoff JSON envelope and expose generated output as workItems.",
+    "Generator socket adapter context: this placement is a generated-output stage. Return only the canonical handoff JSON envelope and expose generated output as workItems.",
     `Canonical generated output assignment: ${JSON.stringify(generator.output)} must come from $.${HANDOFF_WORK_ITEMS_FIELD}.`,
     `Emit ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not emit generated units under tasks, work, custom generates.output names, or any other alias.`,
     `Reserved evaluator/route fields ${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")} must not carry generator payload data.`,
@@ -1234,8 +1243,8 @@ function generatorJsonAdapterContextInstruction(state: MateriaCastState, node: R
 }
 
 export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaAgentConfig): string {
-  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
-  const suffixes = node && isAgentResolvedNode(node) ? [nodeAdapterContextInstruction(state, node), multiTurnTurnInstruction(state, node), singleTurnJsonFormatInstruction(node)] : [];
+  const socket = activeResolvedSocket(state);
+  const suffixes = socket && isAgentResolvedSocket(socket) ? [socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)] : [];
   return [renderTemplate(materia.prompt, state), ...suffixes].filter(Boolean).join("\n\n");
 }
 
@@ -1259,28 +1268,28 @@ function resolveTemplateValue(key: string, state: MateriaCastState): unknown {
 
 export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   if (!isPausedMultiTurnRefinement(state)) return;
-  const node = currentNodeOrThrow(state);
-  if (!isAgentResolvedNode(node)) return;
+  const socket = currentSocketOrThrow(state);
+  if (!isAgentResolvedSocket(socket)) return;
 
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: node.node.materia, model: node.materia.model, thinking: node.materia.thinking });
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking });
   const materiaModel = materiaModelSelection(appliedModel);
-  state.currentMateria = nodeMateriaName(node);
+  state.currentMateria = socketMateriaName(socket);
   state.currentMateriaModel = materiaModel;
-  state.runState.currentMateria = nodeMateriaName(node);
+  state.runState.currentMateria = socketMateriaName(socket);
   state.runState.currentMateriaModel = materiaModel;
   state.awaitingResponse = true;
-  state.nodeState = "awaiting_agent_response";
+  setCurrentSocketState(state, "awaiting_agent_response");
   state.multiTurnFinalizing = false;
-  state.activeTurnPrompt = materiaPrompt(node.materia, state, [buildSyntheticCastContext(state), multiTurnRefinementGuidance()]);
+  state.activeTurnPrompt = materiaPrompt(socket.materia, state, [buildSyntheticCastContext(state), multiTurnRefinementGuidance()]);
   state.updatedAt = Date.now();
-  const refinementTurn = currentRefinementTurn(state, node.id) + 1;
-  recordUsageModelSelection(state.runState.usage, { node: node.id, materia: node.node.materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
+  const refinementTurn = currentRefinementTurn(state, socket.id) + 1;
+  recordUsageModelSelection(state.runState.usage, { socket: socket.id, materia: resolvedSocketConfig(socket).materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
   await writeUsage(state.runState);
-  await appendEvent(state.runState, "materia_model_settings", { node: node.id, materia: node.node.materia, visit: nodeVisit(state, node.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn });
+  await appendEvent(state.runState, "materia_model_settings", { node: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn });
   const contextArtifact = await writeContextArtifact(pi, state, buildSyntheticCastContext(state), `refinement-${refinementTurn}-${safeTimestamp()}`);
-  await appendManifest(state, { phase: state.phase, node: state.currentNode, materia: state.currentMateria, itemKey: state.currentItemKey, visit: nodeVisit(state, node.id), artifact: contextArtifact, kind: "context_refinement", refinementTurn, materiaModel: state.currentMateriaModel });
-  await appendEvent(state.runState, "context_refinement", { node: node.id, materia: nodeMateriaName(node), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
-  updateToolScope(pi, node.materia);
+  await appendManifest(state, { phase: state.phase, node: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, visit: socketVisit(state, socket.id), artifact: contextArtifact, kind: "context_refinement", refinementTurn, materiaModel: state.currentMateriaModel });
+  await appendEvent(state.runState, "context_refinement", { node: socket.id, materia: socketMateriaName(socket), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
+  updateToolScope(pi, socket.materia);
   saveCastState(pi, state);
 }
 
@@ -1296,22 +1305,22 @@ function shouldUseIsolatedMateriaContext(state: MateriaCastState): boolean {
 }
 
 function isPausedMultiTurnRefinement(state: MateriaCastState): boolean {
-  return !state.awaitingResponse && state.nodeState === "awaiting_user_refinement" && isActiveMultiTurnNode(state);
+  return !state.awaitingResponse && currentSocketState(state) === "awaiting_user_refinement" && isActiveMultiTurnSocket(state);
 }
 
-function isActiveMultiTurnNode(state: MateriaCastState): boolean {
+function isActiveMultiTurnSocket(state: MateriaCastState): boolean {
   if (!state.active) return false;
-  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
-  return Boolean(node && isMultiTurnResolvedAgentNode(node));
+  const socket = activeResolvedSocket(state);
+  return Boolean(socket && isMultiTurnResolvedAgentSocket(socket));
 }
 
 function buildSyntheticCastContext(state: MateriaCastState): string {
   const latestOutput = state.lastAssistantText ?? state.lastOutput;
-  const activeMultiTurn = isActiveMultiTurnNode(state);
+  const activeMultiTurn = isActiveMultiTurnSocket(state);
   const multiTurnRefining = activeMultiTurn && state.multiTurnFinalizing !== true;
   const mode = activeMultiTurn
-    ? `multi-turn refinement (${state.multiTurnFinalizing === true ? "/materia continue finalization" : state.nodeState === "awaiting_user_refinement" ? "awaiting user refinement or /materia continue" : state.nodeState ?? "active"})`
-    : state.nodeState ?? "active";
+    ? `multi-turn refinement (${state.multiTurnFinalizing === true ? "/materia continue finalization" : currentSocketState(state) === "awaiting_user_refinement" ? "awaiting user refinement or /materia continue" : currentSocketState(state) ?? "active"})`
+    : currentSocketState(state) ?? "active";
   return [
     "Materia isolated context.",
     "Use only this cast context, the current materia prompt, and any tool results from this materia turn. Do not rely on unrelated earlier visible transcript messages.",
@@ -1320,7 +1329,7 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
-    `Current node: ${state.currentNode ?? "-"}`,
+    `Current socket: ${currentSocketId(state) ?? "-"}`,
     `Current materia: ${state.currentMateria ?? "-"}`,
     `Current item: ${state.currentItemLabel ?? "-"}`,
     `Mode: ${mode}`,
@@ -1336,13 +1345,13 @@ function buildSyntheticCastContext(state: MateriaCastState): string {
 }
 
 function syntheticHandoffContractContext(state: MateriaCastState): string | undefined {
-  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : undefined;
-  if (!node || !isAgentResolvedNode(node) || node.node.parse !== "json") return undefined;
+  const socket = activeResolvedSocket(state);
+  if (!socket || !isAgentResolvedSocket(socket) || resolvedSocketConfig(socket).parse !== "json") return undefined;
 
-  const activeMultiTurn = isActiveMultiTurnNode(state);
+  const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
 
-  const exposureMode = activeMultiTurn ? "/materia continue finalization" : "single-turn JSON nodes";
+  const exposureMode = activeMultiTurn ? "/materia continue finalization" : "single-turn JSON sockets";
   return [
     "Canonical handoff contract context:",
     `Synthetic context exposure policy: include this concise contract summary only for ${exposureMode} that are already expected to produce final JSON. Do not expose it during multi-turn refinement; refinement turns must remain conversational until /materia continue. The authoritative final-output instructions are still injected separately by prompt assembly.`,
@@ -1484,41 +1493,53 @@ export const nativeTestInternals = {
   setPath,
 };
 
-function nodeVisit(state: MateriaCastState, nodeId: string): number {
-  return state.visits[nodeId] ?? 0;
+function socketVisit(state: MateriaCastState, socketId: string): number {
+  return state.visits[socketId] ?? 0;
 }
 
-function currentRefinementTurn(state: MateriaCastState, nodeId: string): number {
-  return state.multiTurnRefinements?.[refinementIdentityKey(state, nodeId)] ?? 0;
+/** @deprecated Legacy helper name retained only inside artifact/event compatibility code. */
+function currentSocketVisit(state: MateriaCastState, fallback = 0): number {
+  const socketId = currentSocketId(state);
+  return socketId ? socketVisit(state, socketId) : fallback;
 }
 
-function nextRefinementTurn(state: MateriaCastState, nodeId: string): number {
+function activeResolvedSocket(state: MateriaCastState): ResolvedMateriaSocket | undefined {
+  const socketId = currentSocketId(state);
+  return socketId ? resolvedPipelineSockets(state)[socketId] : undefined;
+}
+
+function currentRefinementTurn(state: MateriaCastState, socketId: string): number {
+  return state.multiTurnRefinements?.[refinementIdentityKey(state, socketId)] ?? 0;
+}
+
+function nextRefinementTurn(state: MateriaCastState, socketId: string): number {
   state.multiTurnRefinements ??= {};
-  const key = refinementIdentityKey(state, nodeId);
+  const key = refinementIdentityKey(state, socketId);
   const turn = (state.multiTurnRefinements[key] ?? 0) + 1;
   state.multiTurnRefinements[key] = turn;
   return turn;
 }
 
-function refinementIdentityKey(state: MateriaCastState, nodeId: string): string {
-  return JSON.stringify([nodeId, state.currentItemKey ?? "__singleton__", nodeVisit(state, nodeId)]);
+function refinementIdentityKey(state: MateriaCastState, socketId: string): string {
+  return JSON.stringify([socketId, state.currentItemKey ?? "__singleton__", socketVisit(state, socketId)]);
 }
 
-function taskIdentityKey(state: MateriaCastState, nodeId: string): string {
-  return JSON.stringify([nodeId, state.currentItemKey ?? "__singleton__"]);
+function taskIdentityKey(state: MateriaCastState, socketId: string): string {
+  return JSON.stringify([socketId, state.currentItemKey ?? "__singleton__"]);
 }
 
-function startTaskAttempt(state: MateriaCastState, nodeId: string): number {
+function startTaskAttempt(state: MateriaCastState, socketId: string): number {
   state.taskAttempts ??= {};
-  const key = taskIdentityKey(state, nodeId);
+  const key = taskIdentityKey(state, socketId);
   const attempt = (state.taskAttempts[key] ?? 0) + 1;
   state.taskAttempts[key] = attempt;
   return attempt;
 }
 
 function currentTaskAttempt(state: MateriaCastState): number | undefined {
-  if (!state.currentNode) return undefined;
-  return state.runState.attempt ?? state.taskAttempts?.[taskIdentityKey(state, state.currentNode)];
+  const socketId = currentSocketId(state);
+  if (!socketId) return undefined;
+  return state.runState.attempt ?? state.taskAttempts?.[taskIdentityKey(state, socketId)];
 }
 
 export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | undefined {
@@ -1545,7 +1566,7 @@ export function saveCastState(pi: ExtensionAPI, state: MateriaCastState): void {
 export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason = "aborted"): MateriaCastState {
   state.active = false;
   state.awaitingResponse = false;
-  state.nodeState = "failed";
+  setCurrentSocketState(state, "failed");
   state.phase = reason === "aborted" ? "failed" : state.phase;
   state.failedReason = reason;
   state.updatedAt = Date.now();
@@ -1585,9 +1606,9 @@ function agentEndFailureMessage(event: unknown): string | undefined {
 function captureUsage(state: MateriaCastState, message: unknown): void {
   const usage = extractUsage(message);
   if (!usage) return;
-  const node = state.currentNode ?? state.phase;
+  const socket = currentSocketId(state) ?? state.phase;
   const materia = state.currentMateria ?? state.phase;
-  addUsage(state.runState.usage, usage, { node, materia, taskId: state.currentItemKey, attempt: currentTaskAttempt(state), materiaModel: state.currentMateriaModel, messageModel: extractMessageModelInfo(message) });
+  addUsage(state.runState.usage, usage, { socket: socket, materia, taskId: state.currentItemKey, attempt: currentTaskAttempt(state), materiaModel: state.currentMateriaModel, messageModel: extractMessageModelInfo(message) });
 }
 
 function updateToolScope(pi: ExtensionAPI, materia: MateriaAgentConfig): void {
@@ -1599,35 +1620,68 @@ function updateToolScope(pi: ExtensionAPI, materia: MateriaAgentConfig): void {
 }
 
 export function currentMateria(state: MateriaCastState): MateriaAgentConfig {
-  const node = currentNodeOrThrow(state);
-  if (!isAgentResolvedNode(node)) throw new Error(`Current Materia node "${node.id}" is a utility node and has no materia.`);
-  return node.materia;
+  const socket = currentSocketOrThrow(state);
+  if (!isAgentResolvedSocket(socket)) throw new Error(`Current Materia socket "${socket.id}" is a utility socket and has no materia.`);
+  return socket.materia;
 }
 
-export function materiaStatusLabel(state: MateriaCastState, node?: ResolvedMateriaNode, options: { suffix?: string; includeItem?: boolean } = {}): string {
-  const base = nodeMateriaName(node) ?? state.currentMateria ?? node?.id ?? state.currentNode ?? state.phase;
+export function materiaStatusLabel(state: MateriaCastState, socket?: ResolvedMateriaSocket, options: { suffix?: string; includeItem?: boolean } = {}): string {
+  const base = socketMateriaName(socket) ?? state.currentMateria ?? socket?.id ?? currentSocketId(state) ?? state.phase;
   const parts = [base];
   if (options.suffix) parts.push(options.suffix);
   if (options.includeItem !== false && state.currentItemLabel) parts.push(state.currentItemLabel);
   return parts.join(":");
 }
 
-function nodeMateriaName(node: ResolvedMateriaNode | undefined): string | undefined {
-  return node && isAgentResolvedNode(node) ? node.node.materia : undefined;
+function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
+  // Compatibility for legacy test/fixture helpers that still construct resolved
+  // sockets with `node`; canonical resolved pipelines now materialize `socket` only.
+  return (socket.socket ?? (socket as unknown as { node: TSocket["socket"] }).node) as TSocket["socket"];
 }
 
-function isAgentResolvedNode(node: ResolvedMateriaNode): node is ResolvedMateriaAgentNode {
-  return node.node.type === "agent";
+function socketMateriaName(socket: ResolvedMateriaSocket | undefined): string | undefined {
+  return socket && isAgentResolvedSocket(socket) ? resolvedSocketConfig(socket).materia : undefined;
 }
 
-function isMultiTurnResolvedAgentNode(node: ResolvedMateriaNode): node is ResolvedMateriaAgentNode {
-  return isAgentResolvedNode(node) && node.materia.multiTurn === true;
+function isAgentResolvedSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
+  return resolvedSocketConfig(socket).type === "agent";
 }
 
-function currentNodeOrThrow(state: MateriaCastState): ResolvedMateriaNode {
-  const node = state.currentNode ? state.pipeline.nodes[state.currentNode] : state.pipeline.entry;
-  if (!node) throw new Error(`Current Materia node "${state.currentNode}" is not in the resolved grid.`);
-  return node;
+function isMultiTurnResolvedAgentSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
+  return isAgentResolvedSocket(socket) && socket.materia.multiTurn === true;
+}
+
+function currentSocketId(state: MateriaCastState): string | undefined {
+  // Persisted/plugin DTO compatibility: the saved field is still `currentNode`,
+  // but runtime code treats the value as the current socket id.
+  return state.currentNode;
+}
+
+function setCurrentSocketId(state: MateriaCastState, socketId: string | undefined): void {
+  state.currentNode = socketId;
+}
+
+function currentSocketState(state: MateriaCastState): MateriaCastState["nodeState"] {
+  // Persisted/plugin DTO compatibility: the saved field is still `nodeState`,
+  // but runtime code treats the value as the current socket execution state.
+  return state.nodeState;
+}
+
+function setCurrentSocketState(state: MateriaCastState, socketState: MateriaCastState["nodeState"]): void {
+  state.nodeState = socketState;
+}
+
+function currentSocketOrThrow(state: MateriaCastState): ResolvedMateriaSocket {
+  const socketId = currentSocketId(state);
+  const socket = socketId ? resolvedPipelineSockets(state)[socketId] : state.pipeline.entry;
+  if (!socket) throw new Error(`Current Materia socket "${socketId}" is not in the resolved grid.`);
+  return socket;
+}
+
+function resolvedPipelineSockets(state: MateriaCastState): Record<string, ResolvedMateriaSocket> {
+  // Compatibility for persisted/fixture state snapshots that predate resolved
+  // pipeline socket materialization. Runtime-created pipelines use `sockets`.
+  return state.pipeline.sockets ?? (state.pipeline as unknown as { nodes?: Record<string, ResolvedMateriaSocket> }).nodes ?? {};
 }
 
 async function writeManifest(runDir: string, manifest: MateriaManifest): Promise<void> {

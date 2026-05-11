@@ -23,7 +23,7 @@ describe("/materia casts listing", () => {
     expect(text).toContain("↻ RECAST TARGET  failed  2026-05-05T17-26-59-323Z");
     expect(text).toContain("recast: /materia recast 2026-05-05T17-26-59-323Z");
     expect(text).toContain("request: older failed recast implementation");
-    expect(text).toContain("progress: node Auto-Eval; materia Auto-Eval; item recast-003 - Implement /materia recast; visit 3");
+    expect(text).toContain("progress: socket Auto-Eval; materia Auto-Eval; item recast-003 - Implement /materia recast; visit 3");
   });
 
   test("does not mark completed casts as recast targets", async () => {
@@ -77,7 +77,7 @@ describe("/materia casts listing", () => {
       taskAttempts: {},
       edgeTraversals: {},
       runState: { castId: id, runDir: dir, usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, byNode: {}, byTask: {}, byAttempt: {} }, attempt: 1 },
-      pipeline: { entry: { id: "Build", node: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "" } }, nodes: {} },
+      pipeline: { entry: { id: "Build", node: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "" } }, sockets: {} },
     }]);
 
     const text = lines.join("\n");

@@ -26,11 +26,11 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
-function agentConfig(overrides: Record<string, unknown> = {}, node: Record<string, unknown> = {}) {
+function agentConfig(overrides: Record<string, unknown> = {}, socket: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build", ...node } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", ...socket } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia", ...overrides } },
   };
 }
@@ -52,7 +52,7 @@ function twoAgentConfig() {
     loadouts: {
       Test: {
         entry: "Socket-1",
-        nodes: {
+        sockets: {
           "Socket-1": { type: "agent", materia: "Build", next: "Socket-2" },
           "Socket-2": { type: "agent", materia: "Review" },
         },
@@ -264,11 +264,11 @@ describe("native per-materia model settings", () => {
     expect(context).toContain('thinking source: safe thinking fallback (configured thinking "high" unsupported: unsupported_thinking)');
   });
 
-  test("utility nodes do not apply materia model settings", async () => {
+  test("utility sockets do not apply materia model settings", async () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
-      loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "utility", utility: "echo", params: { text: "done" } } } } },
+      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", utility: "echo", params: { text: "done" } } } } },
       materia: { Build: { tools: "coding", prompt: "Build materia", model: "anthropic/claude-test", thinking: "high" } },
     });
 

@@ -6,47 +6,54 @@ import {
   HANDOFF_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_FIELD,
 } from "./handoffContract.js";
-import type { MateriaPipelineNodeConfig } from "./types.js";
+import type { MateriaPipelineSocketConfig } from "./types.js";
 
 export interface HandoffValidationOptions {
-  nodeId: string;
-  node: MateriaPipelineNodeConfig;
+  socketId?: string;
+  socket?: MateriaPipelineSocketConfig;
+  /** @deprecated Compatibility DTO field; value is a socket id. */
+  nodeId?: string;
+  /** @deprecated Compatibility DTO field; value is a socket config. */
+  node?: MateriaPipelineSocketConfig;
 }
 
 export function validateHandoffJsonOutput(value: unknown, options: HandoffValidationOptions): Record<string, unknown> {
+  const socketId = options.socketId ?? options.nodeId ?? "unknown";
+  const socket = options.socket ?? options.node;
+  const socketLabel = `socket "${socketId}"`;
   if (!isPlainJsonObject(value)) {
-    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": expected a JSON object at the top level.`);
+    throw new Error(`Invalid handoff JSON output for ${socketLabel}: expected a JSON object at the top level.`);
   }
 
   const satisfied = value[HANDOFF_SATISFIED_FIELD];
   if (satisfied !== undefined && typeof satisfied !== "boolean") {
-    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": reserved control field "${HANDOFF_SATISFIED_FIELD}" must be a boolean when present.`);
+    throw new Error(`Invalid handoff JSON output for ${socketLabel}: reserved control field "${HANDOFF_SATISFIED_FIELD}" must be a boolean when present.`);
   }
 
   const feedback = value[HANDOFF_FEEDBACK_FIELD];
   if (feedback !== undefined && typeof feedback !== "string") {
-    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": reserved evaluator field "${HANDOFF_FEEDBACK_FIELD}" must be a string when present.`);
+    throw new Error(`Invalid handoff JSON output for ${socketLabel}: reserved evaluator field "${HANDOFF_FEEDBACK_FIELD}" must be a string when present.`);
   }
 
   const missing = value[HANDOFF_MISSING_FIELD];
   if (missing !== undefined && !Array.isArray(missing)) {
-    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": reserved evaluator field "${HANDOFF_MISSING_FIELD}" must be an array when present.`);
+    throw new Error(`Invalid handoff JSON output for ${socketLabel}: reserved evaluator field "${HANDOFF_MISSING_FIELD}" must be an array when present.`);
   }
 
-  if (requiresSatisfiedControl(options.node) && satisfied === undefined) {
+  if (socket && requiresSatisfiedControl(socket) && satisfied === undefined) {
     const legacyFields = HANDOFF_LEGACY_NON_CANONICAL_ALIASES.filter((field) => Object.prototype.hasOwnProperty.call(value, field));
     const legacyHint = legacyFields.length
       ? ` Legacy field ${legacyFields.map((field) => JSON.stringify(field)).join(", ")} is not canonical and is not used for routing.`
       : "";
-    throw new Error(`Invalid handoff JSON output for node "${options.nodeId}": this node has satisfied/not_satisfied control flow and must include reserved boolean field "${HANDOFF_SATISFIED_FIELD}".${legacyHint}`);
+    throw new Error(`Invalid handoff JSON output for ${socketLabel}: this socket has satisfied/not_satisfied control flow and must include reserved boolean field "${HANDOFF_SATISFIED_FIELD}".${legacyHint}`);
   }
 
   return value;
 }
 
-export function requiresSatisfiedControl(node: MateriaPipelineNodeConfig): boolean {
-  if (node.edges?.some((edge) => edge.when === HANDOFF_SATISFIED_EDGE_CONDITION || edge.when === HANDOFF_NOT_SATISFIED_EDGE_CONDITION)) return true;
-  const advanceWhen = node.advance?.when?.trim();
+export function requiresSatisfiedControl(socket: MateriaPipelineSocketConfig): boolean {
+  if (socket.edges?.some((edge) => edge.when === HANDOFF_SATISFIED_EDGE_CONDITION || edge.when === HANDOFF_NOT_SATISFIED_EDGE_CONDITION)) return true;
+  const advanceWhen = socket.advance?.when?.trim();
   return advanceWhen === HANDOFF_SATISFIED_EDGE_CONDITION || advanceWhen === HANDOFF_NOT_SATISFIED_EDGE_CONDITION;
 }
 

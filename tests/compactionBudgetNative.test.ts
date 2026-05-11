@@ -18,7 +18,7 @@ function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build", next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", next: "end" } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia prompt\n\n{{request}}" } },
   };
 }

@@ -1,6 +1,7 @@
 import { canonicalGeneratorConfigFor } from "./generator.js";
+import { loadoutSockets } from "./loadoutAccessors.js";
 import { reconcileLoadoutLoopConsumersFromGraphInPlace } from "./loadoutGraphAnalysis.js";
-import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineNodeConfig, PiMateriaConfig } from "./types.js";
+import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, PiMateriaConfig } from "./types.js";
 
 const JSON_CONTROL_CONDITIONS = new Set<MateriaEdgeCondition>(["satisfied", "not_satisfied"]);
 
@@ -32,35 +33,35 @@ export function materializeConfigLoadoutLoopSemantics(config: PiMateriaConfig): 
 
 function materializeLoopExit(materia: Record<string, MateriaConfig>, pipeline: MateriaPipelineConfig, loopId: string, loop: MateriaLoopConfig, options: LoopSemanticMaterializationOptions): void {
   if (!loop.exit || !loop.consumes) return;
-  const node = pipeline.nodes?.[loop.exit.from];
-  if (!node) return;
+  const socket = loadoutSockets(pipeline)[loop.exit.from];
+  if (!socket) return;
   const generator = generatorForLoop(materia, pipeline, loop);
   if (!generator) return;
 
   const expectedAdvance = advanceForLoopExit(loop, generator);
   const source = loopSource(options.loadoutName, loopId, loop.exit.from);
 
-  if (JSON_CONTROL_CONDITIONS.has(loop.exit.when)) materializeJsonParse(node, source, loop.exit.when);
-  materializeAdvance(node, expectedAdvance, source);
+  if (JSON_CONTROL_CONDITIONS.has(loop.exit.when)) materializeJsonParse(socket, source, loop.exit.when);
+  materializeAdvance(socket, expectedAdvance, source);
 }
 
-function materializeJsonParse(node: MateriaPipelineNodeConfig, source: string, when: MateriaEdgeCondition): void {
-  if (node.parse === "json") return;
-  if (node.parse === undefined) {
-    node.parse = "json";
+function materializeJsonParse(socket: MateriaPipelineSocketConfig, source: string, when: MateriaEdgeCondition): void {
+  if (socket.parse === "json") return;
+  if (socket.parse === undefined) {
+    socket.parse = "json";
     return;
   }
-  throw new Error(`${source} uses loop exit condition "${when}", which requires parse: "json" on the exit source so the canonical satisfied field can be read. Current parse is "${node.parse}".`);
+  throw new Error(`${source} uses loop exit condition "${when}", which requires parse: "json" on the exit source so the canonical satisfied field can be read. Current parse is "${socket.parse}".`);
 }
 
-function materializeAdvance(node: MateriaPipelineNodeConfig, expected: MateriaAdvanceConfig, source: string): void {
-  if (!node.advance) {
-    node.advance = expected;
+function materializeAdvance(socket: MateriaPipelineSocketConfig, expected: MateriaAdvanceConfig, source: string): void {
+  if (!socket.advance) {
+    socket.advance = expected;
     return;
   }
 
   const conflicts = Object.entries(expected).flatMap(([key, expectedValue]) => {
-    const actualValue = node.advance?.[key as keyof MateriaAdvanceConfig];
+    const actualValue = socket.advance?.[key as keyof MateriaAdvanceConfig];
     return actualValue === expectedValue ? [] : [`${key}: current ${JSON.stringify(actualValue)}, expected ${JSON.stringify(expectedValue)}`];
   });
   if (conflicts.length > 0) {
@@ -79,7 +80,7 @@ function advanceForLoopExit(loop: MateriaLoopConfig, generator: MateriaGenerator
 }
 
 function generatorForLoop(materia: Record<string, MateriaConfig>, pipeline: MateriaPipelineConfig, loop: MateriaLoopConfig): MateriaGeneratorConfig | undefined {
-  const source = loop.consumes ? pipeline.nodes?.[loop.consumes.from] : undefined;
+  const source = loop.consumes ? loadoutSockets(pipeline)[loop.consumes.from] : undefined;
   if (!source || source.type !== "agent") return undefined;
   const generator = canonicalGeneratorConfigFor(materia[source.materia]);
   if (!generator) return undefined;
@@ -87,6 +88,6 @@ function generatorForLoop(materia: Record<string, MateriaConfig>, pipeline: Mate
   return { ...generator, output };
 }
 
-function loopSource(loadoutName: string | undefined, loopId: string, nodeId: string): string {
-  return `${loadoutName ? `Materia loadout "${loadoutName}" ` : ""}loop "${loopId}" exit source "${nodeId}"`;
+function loopSource(loadoutName: string | undefined, loopId: string, socketId: string): string {
+  return `${loadoutName ? `Materia loadout "${loadoutName}" ` : ""}loop "${loopId}" exit source "${socketId}"`;
 }

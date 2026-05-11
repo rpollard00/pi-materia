@@ -16,7 +16,7 @@ function overlappingLoopLoadout(): MateriaPipelineConfig {
   const ambiguousWorkerId = "Socket-4";
   const sharedWorkerId = "Socket-100";
   const workerIds = Array.from({ length: 12 }, (_, index) => `Socket-${100 + index}`);
-  const nodes: MateriaPipelineConfig["nodes"] = {
+  const sockets: MateriaPipelineConfig["sockets"] = {
     [sourceId]: {
       type: "agent",
       materia: "planner",
@@ -31,21 +31,21 @@ function overlappingLoopLoadout(): MateriaPipelineConfig {
   };
 
   for (const [index, id] of workerIds.entries()) {
-    nodes[id] = { type: "agent", materia: "Build", edges: [{ when: "always", to: workerIds[(index + 1) % workerIds.length]! }] };
+    sockets[id] = { type: "agent", materia: "Build", edges: [{ when: "always", to: workerIds[(index + 1) % workerIds.length]! }] };
   }
 
   const loops: NonNullable<MateriaPipelineConfig["loops"]> = {};
   for (let index = 0; index < 24; index += 1) {
     const rotatingMembers = Array.from({ length: 8 }, (_, offset) => workerIds[(index + offset) % workerIds.length]!);
     loops[`overlap-${index.toString().padStart(2, "0")}`] = {
-      nodes: Array.from(new Set([sharedWorkerId, ...rotatingMembers])),
+      sockets: Array.from(new Set([sharedWorkerId, ...rotatingMembers])),
       consumes: { from: "Socket-999", output: "workItems" },
     };
   }
-  loops.missing = { nodes: [missingWorkerId], consumes: { from: sourceId, output: "workItems" } };
-  loops.ambiguous = { nodes: [ambiguousWorkerId], consumes: { from: sourceId, output: "workItems" } };
+  loops.missing = { sockets: [missingWorkerId], consumes: { from: sourceId, output: "workItems" } };
+  loops.ambiguous = { sockets: [ambiguousWorkerId], consumes: { from: sourceId, output: "workItems" } };
 
-  return { entry: sourceId, nodes, loops };
+  return { entry: sourceId, sockets, loops };
 }
 
 describe("loadout graph analysis under overlapping loop memberships", () => {
@@ -70,9 +70,9 @@ describe("loadout graph analysis under overlapping loop memberships", () => {
     expect(analysis.loopConsumerSources.has("missing")).toBe(false);
     expect(analysis.loopConsumerSources.has("ambiguous")).toBe(false);
     expect(analysis.workItemProducingSocketIds).toEqual(new Set(["Socket-1"]));
-    expect(analysis.workItemProducingNodeIds).toEqual(new Set(["Socket-1"]));
-    expect(prepared.nodes["Socket-1"]?.assign?.workItems).toBe("$.workItems");
-    expect(prepared.nodes["Socket-2"]?.assign?.workItems).toBeUndefined();
+    expect(analysis.workItemProducingSocketIds).toEqual(new Set(["Socket-1"]));
+    expect(prepared.sockets["Socket-1"]?.assign?.workItems).toBe("$.workItems");
+    expect(prepared.sockets["Socket-2"]?.assign?.workItems).toBeUndefined();
 
     const diagnosticKeys = analysis.diagnostics.map(({ code, loopId, from }) => `${code}:${loopId}:${from ?? ""}`).sort();
     expect(diagnosticKeys).toEqual([

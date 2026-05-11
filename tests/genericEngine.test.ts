@@ -46,7 +46,7 @@ function makeState(overrides: Partial<MateriaCastState> = {}): MateriaCastState 
       },
       budgetWarned: false,
     },
-    pipeline: { entry: undefined as never, nodes: {} },
+    pipeline: { entry: undefined as never, sockets: {} },
     ...overrides,
   };
 }
@@ -80,9 +80,9 @@ describe("generic engine helper mechanics", () => {
   test("routes canonical always/satisfied/not_satisfied edges and legacy next with one handoff contract", () => {
     const state = makeState();
     const config = { limits: { maxEdgeTraversals: 5 } } as PiMateriaConfig;
-    const node = {
+    const socket = {
       id: "Check",
-      node: {
+      socket: {
         type: "agent",
         materia: "Check",
         edges: [
@@ -94,10 +94,10 @@ describe("generic engine helper mechanics", () => {
       materia: { tools: "none", prompt: "check" },
     } satisfies ResolvedMateriaNode;
 
-    expect(nativeTestInternals.selectNextTarget(state, node, { satisfied: true }, config)).toBe("Done");
-    expect(nativeTestInternals.selectNextTarget(state, node, { satisfied: false }, config)).toBe("Build");
-    expect(nativeTestInternals.selectNextTarget(state, node, {}, config)).toBe("Fallback");
-    expect(nativeTestInternals.selectNextTarget(state, { ...node, node: { ...node.node, edges: undefined, next: "Legacy" } }, {}, config)).toBe("Legacy");
+    expect(nativeTestInternals.selectNextTarget(state, socket, { satisfied: true }, config)).toBe("Done");
+    expect(nativeTestInternals.selectNextTarget(state, socket, { satisfied: false }, config)).toBe("Build");
+    expect(nativeTestInternals.selectNextTarget(state, socket, {}, config)).toBe("Fallback");
+    expect(nativeTestInternals.selectNextTarget(state, { ...socket, socket: { ...socket.socket, edges: undefined, next: "Legacy" } }, {}, config)).toBe("Legacy");
   });
 
   test("advances loop completion through loop-owned exit routes without materialized edges", () => {
@@ -114,10 +114,10 @@ describe("generic engine helper mechanics", () => {
       cursors: { itemCursor: 0 },
       pipeline: {
         entry: "Socket-1",
-        nodes: {},
+        sockets: {},
         loops: {
           work: {
-            nodes: ["Socket-2"],
+            sockets: ["Socket-2"],
             exit: { from: "Socket-2", when: "satisfied", to: "Socket-9" },
             exits: [
               { id: "always-summary", from: "Socket-2", condition: "always", targetSocketId: "Socket-5" },
@@ -134,7 +134,7 @@ describe("generic engine helper mechanics", () => {
     expect(nativeTestInternals.applyAdvance(state, node, { satisfied: false })).toBe("Socket-4");
     state.cursors.itemCursor = 0;
     expect(nativeTestInternals.applyAdvance(state, node, {})).toBe("Socket-5");
-    expect(node.node).not.toHaveProperty("edges");
+    expect(node.socket).not.toHaveProperty("edges");
   });
 
   test("preserves existing loop completion behavior when no loop-exit route matches", () => {
@@ -151,10 +151,10 @@ describe("generic engine helper mechanics", () => {
       cursors: { itemCursor: 0 },
       pipeline: {
         entry: "Socket-1",
-        nodes: {},
+        sockets: {},
         loops: {
           work: {
-            nodes: ["Socket-2"],
+            sockets: ["Socket-2"],
             exit: { from: "Socket-2", when: "satisfied", to: "Socket-9" },
             exits: [{ id: "satisfied-only", from: "Socket-2", condition: "satisfied", targetSocketId: "Socket-3" }],
           },
@@ -291,7 +291,7 @@ describe("generic engine helper mechanics", () => {
       data: { item: workItem, workItem, guidance: { testCommand: "bun test", architecture: "materia are reusable behavior" } },
       pipeline: {
         entry: undefined as never,
-        nodes: {
+        sockets: {
           "Socket-4": {
             id: "Socket-4",
             node: { type: "agent", materia: "Build", parse: "text" },
@@ -304,7 +304,7 @@ describe("generic engine helper mechanics", () => {
     const prompt = activeMateriaSystemPrompt(state, { tools: "coding", prompt: "Build {{item.id}} with {{state.guidance.testCommand}}." });
 
     expect(prompt).toContain("Build validate-generic-handoff-flow with bun test.");
-    expect(prompt).toContain("Node/socket adapter context");
+    expect(prompt).toContain("Socket adapter context");
     expect(prompt).toContain("Current workItem JSON");
     expect(prompt).toContain("Global guidance JSON");
     expect(prompt).toContain("materia are reusable behavior");
@@ -318,31 +318,31 @@ describe("agent and utility validation", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
-      loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "planner", parse: "text" } } } },
+      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "planner", parse: "text" } } } },
       materia: { planner: { tools: "readOnly", prompt: "Plan." } },
     };
 
-    expect(resolvePipeline(config).entry.node.type).toBe("agent");
+    expect(resolvePipeline(config).entry.socket.type).toBe("agent");
     expect(() => resolvePipeline({ ...config, materia: {} })).toThrow(/unknown materia "planner"/);
   });
 
-  test("accepts utility command and alias nodes and rejects malformed utility configuration", () => {
+  test("accepts utility command and alias sockets and rejects malformed utility configuration", () => {
     expect(resolvePipeline({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
       loadouts: {
         Test: {
           entry: "Socket-1",
-          nodes: {
+          sockets: {
             "Socket-1": { type: "utility", command: ["node", "script.js"], next: "Socket-2" },
             "Socket-2": { type: "utility", utility: "project.ensureIgnored", parse: "json" },
           },
         },
       },
       materia: {},
-    }).nodes["Socket-2"].node.type).toBe("utility");
+    }).sockets["Socket-2"].socket.type).toBe("utility");
 
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "utility" } } } }, materia: {} })).toThrow(/must configure either "utility" or "command"/);
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "utility", command: [] } } } }, materia: {} })).toThrow(/Expected at least one command element/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility" } } } }, materia: {} })).toThrow(/must configure either "utility" or "command"/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", command: [] } } } }, materia: {} })).toThrow(/Expected at least one command element/);
   });
 });

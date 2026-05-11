@@ -102,10 +102,10 @@ describe("handoff contract drift regressions", () => {
       expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain(JSON.stringify(field));
     }
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { nodes?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
-      for (const [nodeName, node] of Object.entries(loadout.nodes ?? {})) {
-        for (const [index, edge] of (node.edges ?? []).entries()) {
-          expect(HANDOFF_EDGE_CONDITIONS.includes(edge.when as never), `${loadoutName}.${nodeName}.edges[${index}].when`).toBe(true);
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
+      for (const [socketName, socket] of Object.entries(loadout.sockets ?? {})) {
+        for (const [index, edge] of (socket.edges ?? []).entries()) {
+          expect(HANDOFF_EDGE_CONDITIONS.includes(edge.when as never), `${loadoutName}.${socketName}.edges[${index}].when`).toBe(true);
           expect(edge.when).not.toBe("passed");
         }
       }

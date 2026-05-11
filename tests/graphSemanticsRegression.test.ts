@@ -38,7 +38,7 @@ function regressionConfig(): PiMateriaConfig {
     loadouts: {
       Regression: {
         entry: "Socket-1",
-        nodes: {
+        sockets: {
           "Socket-1": {
             type: "utility",
             utility: "project.ensureIgnored",
@@ -97,7 +97,7 @@ function regressionConfig(): PiMateriaConfig {
         loops: {
           taskIteration: {
             label: "Build → Eval → Maintain until all tasks complete",
-            nodes: ["Socket-4", "Socket-5", "Socket-6"],
+            sockets: ["Socket-4", "Socket-5", "Socket-6"],
             iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
             exit: { from: "Socket-6", when: "satisfied", to: "end" },
           },

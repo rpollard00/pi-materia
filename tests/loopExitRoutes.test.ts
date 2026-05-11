@@ -3,7 +3,7 @@ import { resolveLoopExitRoute } from "../src/loopExitRoutes.js";
 import type { MateriaLoopConfig } from "../src/types.js";
 
 const loop = (): MateriaLoopConfig => ({
-  nodes: ["Socket-2", "Socket-3"],
+  sockets: ["Socket-2", "Socket-3"],
   exit: { from: "Socket-3", when: "satisfied", to: "end" },
   exits: [
     { id: "always-summary", from: "Socket-3", condition: "always", targetSocketId: "Socket-4" },
@@ -66,7 +66,7 @@ describe("loop-exit route resolution", () => {
 
   test("returns no route when no route matches the selected source or condition", () => {
     expect(resolveLoopExitRoute(undefined, { from: "Socket-3", satisfied: true })).toBeUndefined();
-    expect(resolveLoopExitRoute({ nodes: ["Socket-3"] }, { from: "Socket-3", satisfied: true })).toBeUndefined();
+    expect(resolveLoopExitRoute({ sockets: ["Socket-3"] }, { from: "Socket-3", satisfied: true })).toBeUndefined();
     expect(resolveLoopExitRoute(loop(), { from: "Socket-9", satisfied: true })).toBeUndefined();
   });
 });

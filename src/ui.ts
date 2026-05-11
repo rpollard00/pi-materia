@@ -1,4 +1,6 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { currentCastSocketId, currentCastSocketState, runStateCurrentSocketId, usageBySocket } from "./castStateAccessors.js";
+import { loopSockets, resolvedPipelineSockets } from "./loadoutAccessors.js";
 import type { MateriaCastState, MateriaRunState, UsageCostKind, UsageReport, UsageTotals } from "./types.js";
 
 const WIDGET_MAX_LINE_LENGTH = 78;
@@ -158,19 +160,19 @@ function createConfiguredLoadoutStatusModel(loadoutName: string): MateriaStatusR
 }
 
 function createMateriaCastStatusModel(state: MateriaCastState, now: number): MateriaStatusRenderModel {
-  const displayState = { ...state.runState, currentNode: state.currentNode ?? state.runState.currentNode, currentMateria: state.currentMateria ?? state.runState.currentMateria };
-  const nodeState = state.nodeState ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
-  const status = state.failedReason ? `failed: ${state.failedReason}` : nodeState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${displayState.currentMateria ?? state.phase}${state.active ? " active" : ""}`;
+  const currentMateria = state.currentMateria ?? state.runState.currentMateria;
+  const socketState = currentCastSocketState(state) ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
+  const status = state.failedReason ? `failed: ${state.failedReason}` : socketState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${currentMateria ?? state.phase}${state.active ? " active" : ""}`;
   const loop = activeLoopDisplay(state);
   return createMateriaStatusRenderModel({
     cast: state.active ? "active" : state.phase || "done",
-    loadout: formatLoadoutMateria(displayState.loadoutName, displayMateriaName(displayState)),
-    attempt: loop?.turn ?? String(displayState.attempt ?? "-"),
-    elapsed: formatElapsed((displayState.endedAt ?? now) - displayState.startedAt),
-    usage: `${formatCompactNumber(displayState.usage.tokens.input + displayState.usage.tokens.cacheRead)}/${formatCompactNumber(displayState.usage.tokens.output + displayState.usage.tokens.cacheWrite)}`,
-    task: displayMateriaStatusValue(displayState, state.currentItemLabel ?? displayState.currentTask ?? state.request ?? "-"),
+    loadout: formatLoadoutMateria(state.runState.loadoutName, displayMateriaName(state.runState, currentMateria ?? currentCastSocketId(state))),
+    attempt: loop?.turn ?? String(state.runState.attempt ?? "-"),
+    elapsed: formatElapsed((state.runState.endedAt ?? now) - state.runState.startedAt),
+    usage: `${formatCompactNumber(state.runState.usage.tokens.input + state.runState.usage.tokens.cacheRead)}/${formatCompactNumber(state.runState.usage.tokens.output + state.runState.usage.tokens.cacheWrite)}`,
+    task: displayMateriaStatusValue(state.runState, state.currentItemLabel ?? state.runState.currentTask ?? state.request ?? "-"),
     path: loop?.path ?? "-",
-    message: displayMateriaStatusValue(displayState, status),
+    message: displayMateriaStatusValue(state.runState, status),
   });
 }
 
@@ -219,8 +221,8 @@ export function renderUsageSummary(usage: UsageReport): string[] {
     "By materia:",
     ...renderBreakdown(usage.byMateria, usage.costKind),
     "",
-    "By node:",
-    ...renderBreakdown(usage.byNode, usage.costKind),
+    "By socket:",
+    ...renderBreakdown(usageBySocket(usage), usage.costKind),
     "",
     "By task:",
     ...renderBreakdown(usage.byTask, usage.costKind),
@@ -254,8 +256,8 @@ export function usageCostNote(costKind: UsageCostKind = "actual"): string {
   return "Cost display: billed USD cost.";
 }
 
-function displayMateriaName(state: MateriaRunState): string {
-  return state.currentMateria ?? state.currentNode ?? "-";
+function displayMateriaName(state: MateriaRunState, override?: string): string {
+  return override ?? state.currentMateria ?? runStateCurrentSocketId(state) ?? "-";
 }
 
 function formatLoadoutMateria(loadoutName: string | undefined, materiaName: string): string {
@@ -263,25 +265,25 @@ function formatLoadoutMateria(loadoutName: string | undefined, materiaName: stri
 }
 
 function activeLoopDisplay(state: MateriaCastState): { turn: string; path: string } | undefined {
-  const currentNode = state.currentNode ?? state.runState.currentNode;
-  if (!currentNode || !state.pipeline) return undefined;
-  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => candidate.nodes.includes(currentNode));
+  const currentSocketId = currentCastSocketId(state);
+  if (!currentSocketId || !state.pipeline) return undefined;
+  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => loopSockets(candidate).includes(currentSocketId));
   if (!loop) return undefined;
 
-  const cursor = loop.iterator?.cursor ?? loop.consumes?.cursor ?? `${currentNode}Index`;
+  const cursor = loop.iterator?.cursor ?? loop.consumes?.cursor ?? `${currentSocketId}Index`;
   const currentIndex = Math.max(0, state.cursors[cursor] ?? 0);
   const total = loop.iterator ? resolveLoopTotal(state, loop.iterator.items) : undefined;
   return {
     turn: total === undefined ? `${currentIndex + 1}/?` : `${Math.min(currentIndex + 1, total)}/${total}`,
-    path: loop.nodes.map((nodeId) => (nodeId === currentNode ? `[${displayPipelineNodeName(state, nodeId)}]` : displayPipelineNodeName(state, nodeId))).join(" -> "),
+    path: loopSockets(loop).map((socketId) => (socketId === currentSocketId ? `[${displayPipelineSocketName(state, socketId)}]` : displayPipelineSocketName(state, socketId))).join(" -> "),
   };
 }
 
-function displayPipelineNodeName(state: MateriaCastState, nodeId: string): string {
-  const node = state.pipeline.nodes[nodeId];
-  if (!node) return nodeId;
-  if ("materia" in node) return node.materia.label ?? node.node.materia ?? nodeId;
-  return node.node.utility ?? node.node.command?.[0] ?? nodeId;
+function displayPipelineSocketName(state: MateriaCastState, socketId: string): string {
+  const socket = resolvedPipelineSockets(state.pipeline)[socketId];
+  if (!socket) return socketId;
+  if ("materia" in socket) return socket.materia.label ?? socket.socket.materia ?? socketId;
+  return socket.socket.utility ?? socket.socket.command?.[0] ?? socketId;
 }
 
 function resolveLoopTotal(state: MateriaCastState, itemsPath: string): number | undefined {
@@ -304,16 +306,18 @@ function getDisplayPath(value: unknown, path: string): unknown {
 }
 
 function displayMateriaStatusValue(state: MateriaRunState, value: string): string {
-  const node = state.currentNode;
+  const socketId = runStateCurrentSocketId(state);
   const materia = state.currentMateria;
-  if (!node || !materia || node === materia) return value;
+  if (!socketId || !materia || socketId === materia) return value;
   const normalized = value.trim();
-  if (normalized === node) return materia;
-  const escapedNode = escapeRegExp(node);
+  if (normalized === socketId) return materia;
+  const escapedSocketId = escapeRegExp(socketId);
   return value
-    .replace(new RegExp(`node\\s+"${escapedNode}"`, "g"), materia)
-    .replace(new RegExp(`node\\s+${escapedNode}`, "g"), materia)
-    .replace(new RegExp(`\\b${escapedNode}\\b`, "g"), materia);
+    .replace(new RegExp(`socket\\s+"${escapedSocketId}"`, "g"), materia)
+    .replace(new RegExp(`socket\\s+${escapedSocketId}`, "g"), materia)
+    .replace(new RegExp(`node\\s+"${escapedSocketId}"`, "g"), materia)
+    .replace(new RegExp(`node\\s+${escapedSocketId}`, "g"), materia)
+    .replace(new RegExp(`\\b${escapedSocketId}\\b`, "g"), materia);
 }
 
 function escapeRegExp(value: string): string {

@@ -19,12 +19,12 @@ function generatorLoopLoadout(): MateriaPipelineConfig {
     layout: { sockets: { "Socket-2": { x: 20, y: 30 }, "Socket-99": { x: 99, y: 99 } } },
     loops: {
       taskIteration: {
-        nodes: ["Socket-3", "Socket-4"],
+        sockets: ["Socket-3", "Socket-4"],
         consumes: { from: "Socket-1", output: "workItems" },
         exit: { from: "Socket-4", when: "satisfied", to: "end" },
       },
     },
-    nodes: {
+    sockets: {
       "Socket-1": { type: "agent", materia: "planner", layout: { x: 1, y: 2 }, edges: [{ when: "always", to: "Socket-2" }] },
       "Socket-2": { type: "agent", materia: "refiner", layout: { x: 3, y: 4 }, edges: [{ when: "always", to: "Socket-3" }] },
       "Socket-3": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
@@ -42,8 +42,8 @@ describe("shared loadout normalization", () => {
 
     expect(JSON.stringify(previous)).toBe(before);
     expect(loadout.layout?.sockets).toEqual({ "Socket-1": { x: 1, y: 2 }, "Socket-2": { x: 20, y: 30 } });
-    expect(loadout.nodes["Socket-1"].layout).toBeUndefined();
-    expect(loadout.nodes["Socket-2"].layout).toBeUndefined();
+    expect(loadout.sockets["Socket-1"].layout).toBeUndefined();
+    expect(loadout.sockets["Socket-2"].layout).toBeUndefined();
     expect(analysis.loopConsumerSources.get("taskIteration")?.from).toBe("Socket-2");
     expect(loadout.loops?.taskIteration.consumes?.from).toBe("Socket-1");
   });
@@ -55,9 +55,9 @@ describe("shared loadout normalization", () => {
     for (const prepared of [save, runtime]) {
       expect(prepared.loops?.taskIteration.consumes?.from).toBe("Socket-2");
       expect(prepared.layout?.sockets).toEqual({ "Socket-1": { x: 1, y: 2 }, "Socket-2": { x: 20, y: 30 } });
-      expect(prepared.nodes["Socket-2"].parse).toBe("json");
-      expect(prepared.nodes["Socket-2"].assign?.workItems).toBe("$.workItems");
-      expect(prepared.nodes["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+      expect(prepared.sockets["Socket-2"].parse).toBe("json");
+      expect(prepared.sockets["Socket-2"].assign?.workItems).toBe("$.workItems");
+      expect(prepared.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
     }
     expect(JSON.stringify(prepareLoadoutForSave(save, materia).loadout)).toBe(JSON.stringify(save));
   });
@@ -70,7 +70,7 @@ describe("shared loadout normalization", () => {
     const loadout = saved.loadouts?.Loop;
     expect(loadout?.loops?.taskIteration.consumes?.from).toBe("Socket-2");
     expect(loadout?.layout?.sockets).toEqual({ "Socket-1": { x: 1, y: 2 }, "Socket-2": { x: 20, y: 30 } });
-    expect(loadout?.nodes["Socket-2"].assign?.workItems).toBe("$.workItems");
-    expect(loadout?.nodes["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(loadout?.sockets["Socket-2"].assign?.workItems).toBe("$.workItems");
+    expect(loadout?.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
   });
 });

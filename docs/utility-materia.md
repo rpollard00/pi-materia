@@ -1,12 +1,12 @@
 # Utility Materia
 
-Utility nodes are deterministic Materia pipeline nodes that run configured local utilities instead of starting a Pi agent/LLM turn. Use them for setup, discovery, code generation, checks, or other repeatable steps that should be visible in the loadout and removable by editing config.
+Utility sockets are deterministic Materia pipeline sockets that run configured local utilities instead of starting a Pi agent/LLM turn. Use them for setup, discovery, code generation, checks, or other repeatable steps that should be visible in the loadout and removable by editing config.
 
-Agent nodes still render prompts and wait for Pi assistant output. Utility nodes skip the agent turn, write artifacts, optionally parse their output, apply `assign`, choose `edges`/`next`, participate in `foreach`, and update the same manifest/event log as agent nodes.
+Agent sockets still render prompts and wait for Pi assistant output. Utility sockets skip the agent turn, write artifacts, optionally parse their output, apply `assign`, choose `edges`/`next`, participate in `foreach`, and update the same manifest/event log as agent sockets.
 
-## Utility node schema
+## Utility socket schema
 
-A pipeline node with `type: "utility"` supports:
+A pipeline socket with `type: "utility"` supports:
 
 ```ts
 {
@@ -25,7 +25,7 @@ A pipeline node with `type: "utility"` supports:
 }
 ```
 
-A utility node must configure either `command` or `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases currently include `project.ensureIgnored` and `vcs.detect`.
+A utility socket must configure either `command` or `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases currently include `project.ensureIgnored` and `vcs.detect`.
 
 Common mechanics:
 
@@ -44,7 +44,8 @@ For command utilities, pi-materia starts the configured process with cwd set to 
   "runDir": "/path/to/project/.pi/pi-materia/2026-05-01T00-00-00-000Z",
   "request": "original user request",
   "castId": "2026-05-01T00-00-00-000Z",
-  "nodeId": "hello",
+  "socketId": "hello",
+  "nodeId": "hello",  // deprecated command protocol alias; value is the socket id
   "params": { "message": "HELLO WORLD" },
   "state": {},
   "item": null,
@@ -64,17 +65,17 @@ The command writes its result to stdout. With `parse: "json"`, stdout must be va
 ## stdout, stderr, exit codes, and timeouts
 
 - Exit code `0` means stdout is the utility result.
-- Non-zero exit codes fail the utility node and cast; the diagnostic includes the command, exit code or signal, stderr summary, and artifact paths.
+- Non-zero exit codes fail the utility socket and cast; the diagnostic includes the command, exit code or signal, stderr summary, and artifact paths.
 - stderr is captured as diagnostics in a separate artifact and never replaces stdout as the result.
-- Invalid JSON fails the node when `parse` is `"json"`.
-- `timeoutMs` overrides the default 30 second timeout. Timed-out processes are terminated and the node/cast fails.
+- Invalid JSON fails the socket when `parse` is `"json"`.
+- `timeoutMs` overrides the default 30 second timeout. Timed-out processes are terminated and the utility socket/cast fails.
 - Captured stdout and stderr are bounded (currently 1 MiB each). Truncation is recorded in command metadata artifacts.
 
 ## Security and trust model
 
 Utility commands are arbitrary local code with the same practical authority as running a script in your shell from the project directory. Only enable loadouts and scripts you trust. Prefer explicit command paths checked into or reviewed with the project, inspect scripts before running casts, avoid shell wrappers unless needed, and set reasonable timeouts/output sizes for predictable behavior.
 
-pi-materia only runs commands or built-in aliases that are explicitly configured in the loadout. Removing a utility node removes that behavior.
+pi-materia only runs commands or built-in aliases that are explicitly configured in the loadout. Removing a utility socket removes that behavior.
 
 ## Complete HELLO WORLD utility loadout
 
@@ -87,7 +88,7 @@ This loadout completes without an LLM turn by using an explicit command utility.
   "loadouts": {
     "Hello Utility": {
       "entry": "hello",
-      "nodes": {
+      "sockets": {
         "hello": {
           "type": "utility",
           "command": ["python3", "-c", "import json,sys; ctx=json.load(sys.stdin); print(json.dumps({'ok': True, 'message': ctx['params']['message']}))"],
@@ -103,7 +104,7 @@ This loadout completes without an LLM turn by using an explicit command utility.
 }
 ```
 
-Expected result: the cast writes utility input/stdout/stderr/metadata under `.pi/pi-materia/<cast-id>/nodes/hello/`, assigns `state.hello`, and ends without asking a model to respond.
+Expected result: the cast writes utility input/stdout/stderr/metadata under `.pi/pi-materia/<cast-id>/nodes/hello/` (legacy-stable artifact path, keyed by socket id), assigns `state.hello`, and ends without asking a model to respond.
 
 ## Python example: add ignore patterns
 
@@ -153,7 +154,7 @@ Complete loadout using the script:
   "loadouts": {
     "Ignore Artifacts": {
       "entry": "ignoreArtifacts",
-      "nodes": {
+      "sockets": {
         "ignoreArtifacts": {
           "type": "utility",
           "command": ["python3", "scripts/ensure_ignored.py"],
@@ -187,7 +188,7 @@ The bundled built-in alias can express the same hygiene directly in config:
 
 ## Routing from JSON output
 
-Utility JSON output can choose the next node with edges:
+Utility JSON output can choose the next socket with edges:
 
 ```json
 {
@@ -209,7 +210,7 @@ Utility JSON output can choose the next node with edges:
 Utilities are easy to test without Pi because the command contract is plain JSON over stdin/stdout:
 
 ```bash
-printf '{"cwd":"%s","runDir":"%s/.pi/pi-materia/test","request":"test","castId":"test","nodeId":"ignoreArtifacts","params":{"patterns":[".pi/pi-materia/"]},"state":{},"item":null,"itemKey":null,"itemLabel":null}\n' "$PWD" "$PWD" \
+printf '{"cwd":"%s","runDir":"%s/.pi/pi-materia/test","request":"test","castId":"test","socketId":"ignoreArtifacts","nodeId":"ignoreArtifacts","params":{"patterns":[".pi/pi-materia/"]},"state":{},"item":null,"itemKey":null,"itemLabel":null}\n' "$PWD" "$PWD" \
   | python3 scripts/ensure_ignored.py
 ```
 

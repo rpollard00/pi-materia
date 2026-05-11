@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compaction.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "./graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "./loadoutNormalization.js";
+import { loadoutSockets } from "./loadoutAccessors.js";
 import { normalizePersistedConfigForApplication } from "./schema/persistence.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "./types.js";
 
@@ -303,14 +304,23 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
     }
     if (!isPlainObject(loadout)) throw new Error(`Materia loadout "${name}" is invalid. Expected a pipeline object.`);
     const baseLoadout = isPlainObject(baseLoadouts?.[name]) ? baseLoadouts[name] as MateriaPipelineConfig : undefined;
-    merged[name] = normalizePipelineGraph({
+    const rawSockets = loadoutSockets(loadout as unknown as MateriaPipelineConfig) ?? (baseLoadout ? loadoutSockets(baseLoadout) : {});
+    const mergedLoadout = {
       ...(baseLoadout ?? {}),
       ...loadout,
-      nodes: loadout.nodes ?? baseLoadout?.nodes ?? {},
-      loops: loadout.loops ?? (loadout.nodes ? undefined : baseLoadout?.loops),
-    } as MateriaPipelineConfig);
+      sockets: rawSockets,
+      loops: loadout.loops ?? (hasLoadoutSocketMap(loadout) ? undefined : baseLoadout?.loops),
+    } as MateriaPipelineConfig;
+    // Do not materialize the legacy `nodes` alias during core config merging;
+    // schema/persistence adapters remain responsible for accepting old DTOs.
+    delete mergedLoadout.nodes;
+    merged[name] = normalizePipelineGraph(mergedLoadout);
   }
   return merged as PiMateriaConfig["loadouts"];
+}
+
+function hasLoadoutSocketMap(loadout: Record<string, unknown>): boolean {
+  return loadout.sockets !== undefined || loadout.nodes !== undefined;
 }
 
 function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria: Partial<PiMateriaConfig>["materia"]): Record<string, MateriaConfig> {
@@ -434,11 +444,11 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
     if (!isPlainObject(loadout)) continue;
     if ("prompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete prompt. Define prompt on referenced materia instead.`);
     if ("systemPrompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete systemPrompt. Define prompt on referenced materia instead.`);
-    for (const [nodeName, node] of Object.entries((loadout.nodes ?? {}) as Record<string, unknown>)) {
-      if (!isPlainObject(node)) continue;
-      if ("role" in node) throw new Error(`Materia loadout "${loadoutName}" node "${nodeName}" configures obsolete role. Use materia instead.`);
-      if ("prompt" in node) throw new Error(`Materia loadout "${loadoutName}" node "${nodeName}" configures obsolete prompt. Define prompt on the referenced materia instead.`);
-      if ("systemPrompt" in node) throw new Error(`Materia loadout "${loadoutName}" node "${nodeName}" configures obsolete systemPrompt. Define prompt on the referenced materia instead.`);
+    for (const [socketName, socket] of Object.entries(loadoutSockets(loadout as unknown as MateriaPipelineConfig) as Record<string, unknown>)) {
+      if (!isPlainObject(socket)) continue;
+      if ("role" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures obsolete role. Use materia instead.`);
+      if ("prompt" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures obsolete prompt. Define prompt on the referenced materia instead.`);
+      if ("systemPrompt" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures obsolete systemPrompt. Define prompt on the referenced materia instead.`);
     }
   }
 }

@@ -4,8 +4,8 @@ import { isCanonicalSocketId } from "./socket.js";
 
 export type MateriaParseMode = "text" | "json";
 export type MateriaSocketKind = "entry" | "normal";
-export type MateriaNodeType = "agent" | "utility";
-export type MateriaCastNodeState = "awaiting_agent_response" | "awaiting_user_refinement" | "running_utility" | "idle" | "complete" | "failed";
+export type MateriaSocketType = "agent" | "utility";
+export type MateriaCastSocketState = "awaiting_agent_response" | "awaiting_user_refinement" | "running_utility" | "idle" | "complete" | "failed";
 export type MateriaRoutingOutcome = { kind: "next"; to: SocketId; condition: HandoffEdgeCondition } | { kind: "complete" } | { kind: "blocked"; reason: string };
 export type SocketId = string;
 export type MateriaId = string;
@@ -38,7 +38,7 @@ export interface Loadout {
 export type LoadoutSocket = AgentSocket | UtilitySocket;
 
 export interface LoadoutSocketCommon {
-  type: MateriaNodeType;
+  type: MateriaSocketType;
   socketKind?: MateriaSocketKind;
   parse?: MateriaParseMode;
   assign?: Record<string, string>;
@@ -112,7 +112,7 @@ export interface CastStateCore {
   currentSocketId?: SocketId;
   currentMateriaId?: MateriaId;
   currentWorkItemId?: string;
-  nodeState?: MateriaCastNodeState;
+  socketState?: MateriaCastSocketState;
   data: Record<string, unknown>;
   cursors: Record<string, number>;
   visits: Record<string, number>;

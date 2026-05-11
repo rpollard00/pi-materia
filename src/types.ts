@@ -65,6 +65,9 @@ export interface MateriaBudgetConfig {
 }
 
 export interface MateriaLimitsConfig {
+  /** Canonical socket visit cap for a cast. */
+  maxSocketVisits?: number;
+  /** @deprecated Legacy config alias. Use maxSocketVisits. */
   maxNodeVisits?: number;
   maxEdgeTraversals?: number;
 }
@@ -125,6 +128,8 @@ export interface MateriaModelSelection {
 }
 
 export interface UsageModelSelection extends MateriaModelSelection {
+  socket: string;
+  /** @deprecated Persisted/WebUI usage DTO field; value is the socket id. */
   node: string;
   materia: string;
   taskId?: string;
@@ -132,6 +137,8 @@ export interface UsageModelSelection extends MateriaModelSelection {
 }
 
 export interface UsageTurn extends UsageTotals {
+  socket: string;
+  /** @deprecated Persisted/WebUI usage DTO field; value is the socket id. */
   node: string;
   materia: string;
   taskId?: string;
@@ -159,6 +166,7 @@ export interface UsageReport extends UsageTotals {
   thinkingLevel?: string;
   costKind?: UsageCostKind;
   byMateria: Record<string, UsageTotals>;
+  /** @deprecated Persisted/WebUI usage DTO bucket keyed by socket id. Use `usageBySocket()` in core internals. */
   byNode: Record<string, UsageTotals>;
   byTask: Record<string, UsageTotals>;
   byAttempt: Record<string, UsageTotals>;
@@ -166,15 +174,27 @@ export interface UsageReport extends UsageTotals {
   modelSelections?: UsageModelSelection[];
 }
 
+export interface SocketUsageReportView extends Omit<UsageReport, "byNode"> {
+  bySocket: Record<string, UsageTotals>;
+}
+
 export type MateriaCastPhase = string;
 
-export type MateriaCastNodeState =
+export type MateriaCastSocketState =
   | "awaiting_agent_response"
   | "awaiting_user_refinement"
   | "running_utility"
   | "idle"
   | "complete"
   | "failed";
+
+/** @deprecated External/persisted casts still spell this nodeState; internal code should say socket state. */
+export type MateriaCastNodeState = MateriaCastSocketState;
+
+export interface MateriaCastRuntimeView {
+  currentSocketId?: string;
+  currentSocketState?: MateriaCastSocketState;
+}
 
 export interface MateriaCastState {
   version: 1;
@@ -187,6 +207,7 @@ export interface MateriaCastState {
   runDir: string;
   artifactRoot: string;
   phase: MateriaCastPhase;
+  /** @deprecated External/persisted cast DTO field; value is the current socket id. Use socket terminology in new internal APIs. */
   currentNode?: string;
   currentMateria?: string;
   currentItemKey?: string;
@@ -194,14 +215,15 @@ export interface MateriaCastState {
   currentMateriaModel?: MateriaModelSelection;
   /**
    * Backward-compatible boolean used by existing runtime checks.
-   * New code should prefer nodeState when it needs to distinguish active
+   * New code should prefer socket-state accessors when it needs to distinguish active
    * multi-turn refinement pauses from turns awaiting an agent response.
    */
   awaitingResponse: boolean;
-  nodeState?: MateriaCastNodeState;
+  /** @deprecated External/persisted cast DTO field; use socket terminology in new internal APIs. */
+  nodeState?: MateriaCastSocketState;
   lastProcessedEntryId?: string;
   lastAssistantText?: string;
-  /** Hidden prompt for the active in-flight agent turn; used to retry without re-running node start. */
+  /** Hidden prompt for the active in-flight agent turn; used to retry without re-running socket start. */
   activeTurnPrompt?: string;
   multiTurnFinalizing?: boolean;
   failedReason?: string;
@@ -211,11 +233,11 @@ export interface MateriaCastState {
   cursors: Record<string, number>;
   visits: Record<string, number>;
   multiTurnRefinements?: Record<string, number>;
-  /** Bounded retry counters for same-node recovery of incomplete agent turns. */
+  /** Bounded retry counters for same-socket recovery of incomplete agent turns. */
   recoveryAttempts?: Record<string, number>;
-  /** Scoped per-context same-node recovery allowance metadata, keyed like recoveryAttempts. */
+  /** Scoped per-context same-socket recovery allowance metadata, keyed like recoveryAttempts. */
   recoveryAllowances?: Record<string, MateriaRecoveryAllowance>;
-  /** Structured terminal metadata for casts failed by same-node recovery exhaustion. */
+  /** Structured terminal metadata for casts failed by same-socket recovery exhaustion. */
   recoveryExhaustion?: MateriaRecoveryExhaustion;
   taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
@@ -249,6 +271,7 @@ export interface MateriaRecoveryExhaustion {
 
 export interface MateriaManifestEntry {
   phase: MateriaCastPhase;
+  /** @deprecated Manifest/event compatibility field; value is a socket id. */
   node?: string;
   materia?: string;
   itemKey?: string;
@@ -282,6 +305,7 @@ export interface MateriaRunState {
   runDir: string;
   eventsFile: string;
   usageFile: string;
+  /** @deprecated External/persisted run-state DTO field; value is the current socket id. */
   currentNode?: string;
   currentMateria?: string;
   currentTask?: string;
@@ -300,7 +324,9 @@ export type MateriaMirrorEvent =
   | { type: "materia_end"; output: string };
 
 export interface MateriaRunContext {
-  nodeId: string;
+  socketId: string;
+  /** @deprecated Plugin/runtime callback DTO field; value is a socket id. Prefer socketId in internal code. */
+  nodeId?: string;
   materiaName: string;
   itemKey?: string;
   itemLabel?: string;
@@ -312,7 +338,10 @@ export interface MateriaRunContext {
 
 export interface MateriaPipelineConfig {
   entry: string;
-  nodes: Record<string, MateriaPipelineNodeConfig>;
+  /** Canonical socket map for core/domain/application code. */
+  sockets?: Record<string, MateriaPipelineSocketConfig>;
+  /** @deprecated Legacy persisted/WebUI DTO alias. Use sockets in core internals. */
+  nodes?: Record<string, MateriaPipelineSocketConfig>;
   /** Persisted visual metadata for this loadout. Semantic validation must ignore it. */
   layout?: MateriaPipelineLayoutConfig;
   /** Explicit loop consumer regions that group sockets and can consume a generator-provided list. */
@@ -332,34 +361,43 @@ export interface MateriaSocketLayoutConfig {
 export type MateriaParseMode = "text" | "json";
 
 export type MateriaSocketKind = "entry" | "normal";
-export type MateriaPipelineNodeConfig = MateriaAgentNodeConfig | MateriaUtilityNodeConfig;
-export type LegacyMateriaPipelineNodeConfig = MateriaPipelineNodeConfig & { next?: string };
+export type MateriaPipelineSocketConfig = MateriaAgentSocketConfig | MateriaUtilitySocketConfig;
+/** @deprecated Persisted/WebUI DTO alias. New internal APIs should use MateriaPipelineSocketConfig. */
+export type MateriaPipelineNodeConfig = MateriaPipelineSocketConfig;
+/** @deprecated Legacy migration-only shape for old next-based graph edges. */
+export type LegacyMateriaPipelineNodeConfig = MateriaPipelineSocketConfig & { next?: string };
 
-export interface MateriaPipelineNodeCommonConfig {
+export interface MateriaPipelineSocketCommonConfig {
   socketKind?: MateriaSocketKind;
   parse?: MateriaParseMode;
   assign?: Record<string, string>;
   edges?: MateriaEdgeConfig[];
   foreach?: MateriaForeachConfig;
   advance?: MateriaAdvanceConfig;
-  limits?: MateriaNodeLimitsConfig;
+  limits?: MateriaSocketLimitsConfig;
   /** @deprecated Use loadout.layout.sockets[socketId]. Kept for legacy config loading only. */
   layout?: MateriaSocketLayoutConfig;
   empty?: boolean;
 }
 
-export interface MateriaAgentNodeConfig extends MateriaPipelineNodeCommonConfig {
+export interface MateriaAgentSocketConfig extends MateriaPipelineSocketCommonConfig {
   type: "agent";
   materia: string;
 }
 
-export interface MateriaUtilityNodeConfig extends MateriaPipelineNodeCommonConfig {
+/** @deprecated Use MateriaAgentSocketConfig for internal code. */
+export type MateriaAgentNodeConfig = MateriaAgentSocketConfig;
+
+export interface MateriaUtilitySocketConfig extends MateriaPipelineSocketCommonConfig {
   type: "utility";
   utility?: string;
   command?: string[];
   params?: Record<string, unknown>;
   timeoutMs?: number;
 }
+
+/** @deprecated Use MateriaUtilitySocketConfig for internal code. */
+export type MateriaUtilityNodeConfig = MateriaUtilitySocketConfig;
 
 export type MateriaEdgeCondition = "always" | "satisfied" | "not_satisfied";
 
@@ -404,7 +442,9 @@ export interface MateriaLoopConfig {
   /** Human-readable label for graph/UI display. */
   label?: string;
   /** Socket ids contained by this loop region. */
-  nodes: string[];
+  sockets?: string[];
+  /** @deprecated Legacy persisted/WebUI DTO alias. Use sockets in core internals. */
+  nodes?: string[];
   /** Optional generator consumed by this loop region. Prefer this over directly tagging loop members as iterators. */
   consumes?: MateriaLoopConsumerConfig;
   /** Legacy/shared iterator metadata. Prefer consumes so this is derived from generator metadata. */
@@ -413,14 +453,14 @@ export interface MateriaLoopConfig {
   exit?: MateriaLoopExitConfig;
   /**
    * Canonical loop-owned routes followed after the loop exits.
-   * These are graph semantics metadata, not normal node.edges, generator edges,
+   * These are graph semantics metadata, not normal socket edges, generator edges,
    * or derived runtime/render edges.
    */
   exits?: MateriaLoopExitRouteConfig[];
 }
 
 export interface MateriaLoopConsumerConfig {
-  /** Socket id of an agent node whose referenced materia is marked `generator: true`. */
+  /** Socket id of an agent socket whose referenced materia is marked `generator: true`. */
   from: string;
   /** Generated output key to consume. Defaults to the canonical generator output (`workItems`). */
   output?: string;
@@ -452,30 +492,41 @@ export interface MateriaLoopExitRouteConfig {
   targetSocketId: string;
 }
 
-export interface MateriaNodeLimitsConfig {
+export interface MateriaSocketLimitsConfig {
   maxVisits?: number;
   maxEdgeTraversals?: number;
   maxOutputBytes?: number;
 }
 
+/** @deprecated Use MateriaSocketLimitsConfig for internal code. */
+export type MateriaNodeLimitsConfig = MateriaSocketLimitsConfig;
+
 export interface ResolvedMateriaPipeline {
-  entry: ResolvedMateriaNode;
-  nodes: Record<string, ResolvedMateriaNode>;
+  entry: ResolvedMateriaSocket;
+  sockets: Record<string, ResolvedMateriaSocket>;
   loops?: Record<string, MateriaLoopConfig>;
 }
 
-export type ResolvedMateriaNode = ResolvedMateriaAgentNode | ResolvedMateriaUtilityNode;
+export type ResolvedMateriaSocket = ResolvedMateriaAgentSocket | ResolvedMateriaUtilitySocket;
+/** @deprecated Use ResolvedMateriaSocket for internal code. */
+export type ResolvedMateriaNode = ResolvedMateriaSocket;
 
-export interface ResolvedMateriaAgentNode {
+export interface ResolvedMateriaAgentSocket {
   id: string;
-  node: MateriaAgentNodeConfig;
+  socket: MateriaAgentSocketConfig;
   materia: MateriaAgentConfig;
 }
 
-export interface ResolvedMateriaUtilityNode {
+/** @deprecated Use ResolvedMateriaAgentSocket for internal code. */
+export type ResolvedMateriaAgentNode = ResolvedMateriaAgentSocket;
+
+export interface ResolvedMateriaUtilitySocket {
   id: string;
-  node: MateriaUtilityNodeConfig;
+  socket: MateriaUtilitySocketConfig;
 }
+
+/** @deprecated Use ResolvedMateriaUtilitySocket for internal code. */
+export type ResolvedMateriaUtilityNode = ResolvedMateriaUtilitySocket;
 
 export type MateriaConfig = MateriaAgentConfig | MateriaUtilityConfig;
 
@@ -502,7 +553,7 @@ export interface MateriaAgentConfig extends MateriaDefinitionMetadata {
   prompt: string;
   model?: string;
   thinking?: string;
-  /** Keep agent nodes using this materia active for interactive refinement until finalized. */
+  /** Keep agent sockets using this materia active for interactive refinement until finalized. */
   multiTurn?: boolean;
 }
 

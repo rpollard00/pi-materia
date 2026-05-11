@@ -6,7 +6,7 @@ Scope: audit of the current codebase before migrating JSON-producing materia fro
 
 ## JSON-producing materia and current handoff shapes
 
-Current JSON nodes are selected by node/socket adapter config with `parse: "json"`; materia definitions do not inherently decide parsing unless their palette defaults are copied into a socket.
+Current JSON sockets are selected by socket/socket adapter config with `parse: "json"`; materia definitions do not inherently decide parsing unless their palette defaults are copied into a socket.
 
 ### Built-in utility JSON materia
 
@@ -19,7 +19,7 @@ Current JSON nodes are selected by node/socket adapter config with `parse: "json
 - `config/default.json` materia `GitMaintain`:
   - Prompt asks for the same maintenance-control family as `Maintain`, restricted to git: `{ "satisfied": boolean, "commitMessage": string, "reason": string, "vcs": "git" | "none", "checkpointCreated": boolean, "commands": string[] }`.
   - It is not used by the bundled default loadout sockets today, but it is a JSON-producing materia definition because the prompt explicitly requires JSON and uses `satisfied` as an evaluator/route-style control field.
-- Utility command nodes in `src/native.ts` can also be JSON parsed when a socket sets `parse: "json"`; their parsed stdout is validated as a handoff object before assignment/routing.
+- Utility command sockets in `src/native.ts` can also be JSON parsed when a socket sets `parse: "json"`; their parsed stdout is validated as a handoff object before assignment/routing.
 
 ### Built-in agent JSON materia
 
@@ -38,13 +38,13 @@ Current JSON nodes are selected by node/socket adapter config with `parse: "json
 ## Runtime handoff consumers and adapter responsibilities
 
 - `src/json.ts` extracts a fenced JSON block or first balanced JSON object/array, then parses it.
-- `src/native.ts` parses only for sockets with `node.node.parse === "json"`, validates via `validateHandoffJsonOutput()`, stores `state.lastJson`, writes a `.json` artifact, applies `assign`, applies `advance`, and selects edges.
-- `src/handoffValidation.ts` currently requires a top-level JSON object, validates `satisfied` as boolean when present, and requires `satisfied` when a node has `satisfied`/`not_satisfied` edges or `advance.when` control flow.
+- `src/native.ts` parses only for sockets with `socket.socket.parse === "json"`, validates via `validateHandoffJsonOutput()`, stores `state.lastJson`, writes a `.json` artifact, applies `assign`, applies `advance`, and selects edges.
+- `src/handoffValidation.ts` currently requires a top-level JSON object, validates `satisfied` as boolean when present, and requires `satisfied` when a socket has `satisfied`/`not_satisfied` edges or `advance.when` control flow.
 - `src/native.ts` `applyAssignments()` copies values from parsed `$`, `state.*`, `item.*`, or `lastJson.*` paths into `state.data`.
-- `src/native.ts` `setCurrentItem()` is the current work-item adapter: for node `foreach` or loop-derived iterators, it reads `loop.items`, writes `state.data.item` and the loop alias (currently usually `task`), and sets `currentItemKey` / `currentItemLabel` from item `id`/`key` and `title`/`name`.
+- `src/native.ts` `setCurrentItem()` is the current work-item adapter: for socket `foreach` or loop-derived iterators, it reads `loop.items`, writes `state.data.item` and the loop alias (currently usually `task`), and sets `currentItemKey` / `currentItemLabel` from item `id`/`key` and `title`/`name`.
 - Prompt templating in `src/native.ts` exposes `{{itemJson}}`, `{{item.*}}`, `{{state.*}}`, `{{lastOutput}}`, and `{{lastJson.*}}`; built-in Build/Eval/Maintain prompts currently consume `item` as a task-shaped object.
 - `src/pipeline.ts` resolves generator loops from materia `generates` metadata. It requires generator sockets to parse JSON and assign the declared output, then derives iterator defaults such as `items: "state.<output>"`.
-- `src/graphValidation.ts` validates endpoints for `entry`, `next`, `edges[].to`, `foreach.done`, `advance.done`, `loops.*.nodes`, `loops.*.consumes.from`, `loops.*.consumes.done`, `loops.*.iterator.done`, and `loops.*.exit`.
+- `src/graphValidation.ts` validates endpoints for `entry`, `next`, `edges[].to`, `foreach.done`, `advance.done`, `loops.*.sockets`, `loops.*.consumes.from`, `loops.*.consumes.done`, `loops.*.iterator.done`, and `loops.*.exit`.
 
 ## References to `tasks` and work-item assignment
 
@@ -104,7 +104,7 @@ Primary production references that need migration to `workItems` or generic cont
 
 ## Default loadout socket ids and placement-specific routing
 
-The bundled default loadouts currently use node ids that encode materia/utility identity rather than sequential socket ids.
+The bundled default loadouts currently use socket ids that encode materia/utility identity rather than sequential socket ids.
 
 ### `Full-Auto`
 
@@ -117,11 +117,11 @@ The bundled default loadouts currently use node ids that encode materia/utility 
   - `Auto-Eval` (`Auto-Eval`) --satisfied--> `Maintain`; --not_satisfied--> `Build` with `maxTraversals: 3`.
   - `Maintain` (`Maintain`) --not_satisfied--> `Maintain` with `maxTraversals: 3`; --always--> `Build`.
 - Advance: `Maintain.advance = { "cursor": "taskIndex", "items": "state.tasks", "done": "end", "when": "satisfied" }`.
-- Loop: `taskIteration.nodes = ["Build", "Auto-Eval", "Maintain"]`, `exit = { "from": "Maintain", "when": "satisfied", "to": "end" }`, `consumes = { "from": "planner", "output": "tasks" }`.
+- Loop: `taskIteration.sockets = ["Build", "Auto-Eval", "Maintain"]`, `exit = { "from": "Maintain", "when": "satisfied", "to": "end" }`, `consumes = { "from": "planner", "output": "tasks" }`.
 
 ### `Planning-Consult`
 
-- Same socket ids and routing as `Full-Auto`, except node `planner` uses materia `interactivePlan`.
+- Same socket ids and routing as `Full-Auto`, except socket `planner` uses materia `interactivePlan`.
 - Same `Maintain.advance` and `taskIteration` loop references.
 
 ### Sequential socket-id support already present elsewhere
@@ -145,4 +145,4 @@ The bundled default loadouts currently use node ids that encode materia/utility 
 - The largest behavioral coupling is not in materia prompts alone; it is the adapter chain `planner.assign tasks` -> loop `consumes.output tasks` -> generated iterator `state.tasks as task` -> `setCurrentItem()` -> Build/Eval/Maintain prompts using `item`/`task` -> Maintain `advance.items state.tasks`.
 - A generic envelope can be introduced without changing the runtime parser, because `validateHandoffJsonOutput()` already requires top-level JSON objects and only reserves `satisfied`.
 - To avoid a compatibility layer, defaults and tests should migrate the generator output from `tasks` to `workItems` together: prompt shapes, `generates.output`, `assign`, loop consumes, `advance.items`, docs, fixtures, and usage labels where user-visible.
-- Default loadout renumbering must update every endpoint reference at the same time: `entry`, all `edges[].to`, `advance.done` if it points at a socket, `loops.*.nodes`, `loops.*.exit.from`, `loops.*.exit.to`, and `loops.*.consumes.from`.
+- Default loadout renumbering must update every endpoint reference at the same time: `entry`, all `edges[].to`, `advance.done` if it points at a socket, `loops.*.sockets`, `loops.*.exit.from`, `loops.*.exit.to`, and `loops.*.consumes.from`.

@@ -86,14 +86,14 @@ describe("schema/persistence adapters", () => {
     }
   });
 
-  test("bridges domain sockets to the current pipeline nodes DTO without leaking nodes into the domain", () => {
+  test("bridges domain sockets to the canonical pipeline DTO without leaking nodes into the domain", () => {
     const pipeline = domainLoadoutToPipelineConfig({
       entry: "Socket-1",
       sockets: { "Socket-1": { type: "agent", materia: "Build" } },
       loops: { one: { sockets: ["Socket-1"] } },
     });
-    expect(pipeline.nodes["Socket-1"].type).toBe("agent");
-    expect(pipeline.loops?.one.nodes).toEqual(["Socket-1"]);
+    expect(pipeline.sockets["Socket-1"].type).toBe("agent");
+    expect(pipeline.loops?.one.sockets).toEqual(["Socket-1"]);
 
     const domain = pipelineConfigToDomainLoadout(pipeline);
     expect(domain.sockets["Socket-1"].type).toBe("agent");
@@ -117,8 +117,8 @@ describe("schema/persistence adapters", () => {
     }), "utf8");
 
     const loaded = await loadConfig(dir, file);
-    expect(loaded.config.loadouts?.SocketConfig.nodes["Socket-1"].materia).toBe("Build");
-    expect(loaded.config.loadouts?.SocketConfig.loops?.only.nodes).toEqual(["Socket-1"]);
+    expect(loaded.config.loadouts?.SocketConfig.sockets["Socket-1"].materia).toBe("Build");
+    expect(loaded.config.loadouts?.SocketConfig.loops?.only.sockets).toEqual(["Socket-1"]);
   });
 
   test("application compatibility adapter prefers sockets when both sockets and legacy nodes are present", () => {
@@ -126,9 +126,10 @@ describe("schema/persistence adapters", () => {
       entry: "Socket-1",
       sockets: { "Socket-1": { type: "agent", materia: "Build" } },
       nodes: { "Socket-1": { type: "agent", materia: "Check" } },
-    }) as { nodes: Record<string, { materia: string }> };
+    }) as { sockets: Record<string, { materia: string }>; nodes?: unknown };
 
-    expect(normalized.nodes["Socket-1"].materia).toBe("Build");
+    expect(normalized.sockets["Socket-1"].materia).toBe("Build");
+    expect(normalized.nodes).toBeUndefined();
   });
 
   test("round-trips saved legacy node patches through the compatibility loader", async () => {
@@ -143,9 +144,9 @@ describe("schema/persistence adapters", () => {
         activeLoadout: "Custom",
       });
       const raw = JSON.parse(await readFile(file, "utf8"));
-      expect(raw.loadouts.Custom.nodes["Socket-1"].materia).toBe("Build");
+      expect(raw.loadouts.Custom.sockets["Socket-1"].materia).toBe("Build");
       const loaded = await loadConfig(cwd);
-      expect(loaded.config.loadouts?.Custom.nodes["Socket-1"].materia).toBe("Build");
+      expect(loaded.config.loadouts?.Custom.sockets["Socket-1"].materia).toBe("Build");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

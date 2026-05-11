@@ -25,7 +25,7 @@ function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Build", next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", next: "end" } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
@@ -34,7 +34,7 @@ function multiTurnConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", nodes: { "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
     materia: { Plan: { tools: "readOnly", prompt: "Collaborative planner", multiTurn: true } },
   };
 }
@@ -46,7 +46,7 @@ function foreachConfig() {
     loadouts: {
       Test: {
         entry: "Socket-1",
-        nodes: {
+        sockets: {
           "Socket-1": {
             type: "utility",
             utility: "echo",
@@ -244,7 +244,7 @@ describe("native same-node recovery", () => {
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("Same-node recovery action compact failed");
+    expect(latestState.failedReason).toContain("Same-socket recovery action compact failed");
     expect(latestState.failedReason).toContain("compaction provider unavailable");
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "same_node_recovery_action_failed" && event.data.action === "compact")).toBe(true);
@@ -311,7 +311,7 @@ describe("native same-node recovery", () => {
 
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("Same-node recovery exhausted");
+    expect(latestState.failedReason).toContain("Same-socket recovery exhausted");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_node_recovery_exhausted", reason: "context_window", node: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
     expect(latestState.recoveryAllowances[latestState.recoveryExhaustion.key]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
@@ -363,10 +363,10 @@ describe("native same-node recovery", () => {
     await harness.emit("agent_end", { messages: [] });
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(() => extendSameNodeRecoveryAllowanceForRevive(state)).toThrow(/missing structured same-node recovery exhaustion metadata/);
+    expect(() => extendSameNodeRecoveryAllowanceForRevive(state)).toThrow(/missing structured same-socket recovery exhaustion metadata/);
 
-    const legacy = { ...state, failedReason: "Same-node recovery exhausted for node", recoveryExhaustion: undefined };
-    expect(() => extendSameNodeRecoveryAllowanceForRevive(legacy)).toThrow(/missing structured same-node recovery exhaustion metadata/);
+    const legacy = { ...state, failedReason: "Same-socket recovery exhausted for node", recoveryExhaustion: undefined };
+    expect(() => extendSameNodeRecoveryAllowanceForRevive(legacy)).toThrow(/missing structured same-socket recovery exhaustion metadata/);
   });
 
   test("multi-turn refinement context-window failures compact and regenerate a refinement retry prompt", async () => {
