@@ -401,6 +401,10 @@ describe("config loadouts", () => {
       ["Auto-Eval", "json"],
       ["Maintain", "json"],
       ["GitMaintain", "json"],
+      ["Narrate", "text"],
+      ["Auto-Plan", "json"],
+      ["Interactive-Plan", "json"],
+      ["Detect-VCS", "json"],
     ]);
 
     for (const [materiaId, materia] of Object.entries(rawDefault.materia ?? {}) as Array<[string, { color?: unknown; generator?: unknown; generates?: unknown; parse?: unknown }]>) {
@@ -412,6 +416,8 @@ describe("config loadouts", () => {
 
     expect(rawDefault.materia?.planner?.generator).toBe(true);
     expect(rawDefault.materia?.interactivePlan?.generator).toBe(true);
+    expect(rawDefault.materia?.["Auto-Plan"]?.generator).toBe(true);
+    expect(rawDefault.materia?.["Interactive-Plan"]?.generator).toBe(true);
     expect(rawDefault.materia?.["Auto-Architect"]).toMatchObject({
       type: "agent",
       tools: "readOnly",
@@ -443,17 +449,17 @@ describe("config loadouts", () => {
     }
   });
 
-  test("bundled default loadouts use sequential adapter socket ids", async () => {
+  test("bundled default loadouts use canonical adapter socket ids", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { entry?: string; sockets?: Record<string, { materia?: string; utility?: string; edges?: Array<{ to?: string }>; advance?: { done?: string } }>; loops?: Record<string, { sockets?: string[]; exit?: { from?: string; to?: string }; consumes?: { from?: string } }> }]>) {
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { entry?: string; nodes?: unknown; sockets?: Record<string, { materia?: string; utility?: string; edges?: Array<{ to?: string }>; advance?: { done?: string } }>; loops?: Record<string, { sockets?: string[]; exit?: { from?: string; to?: string }; consumes?: { from?: string } }> }]>) {
       expect(() => resolvePipeline({ ...rawDefault, activeLoadout: loadoutName })).not.toThrow();
 
       const nodeIds = Object.keys(loadout.sockets ?? {});
+      expect(loadout.nodes, `${loadoutName}.nodes`).toBeUndefined();
       expect(loadout.entry, `${loadoutName}.entry`).toBe("Socket-1");
-      expect(nodeIds, `${loadoutName}.sockets`).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
-      expect(loadout.sockets?.["Socket-4"]?.materia, `${loadoutName}.Socket-4`).toBe("Build");
-      expect(Object.values(loadout.sockets ?? {}).map((node) => node.materia), `${loadoutName}.materia`).not.toContain("Auto-Architect");
+      expect(nodeIds, `${loadoutName}.sockets`).toEqual(nodeIds.map((_, index) => `Socket-${index + 1}`));
+      expect(Object.values(loadout.sockets ?? {}).map((node) => node.materia), `${loadoutName}.materia`).toContain("Build");
 
       for (const [socketId, node] of Object.entries(loadout.sockets ?? {})) {
         expect(socketId, `${loadoutName}.${socketId}`).toMatch(/^Socket-\d+$/);
@@ -631,7 +637,7 @@ describe("config loadouts", () => {
     expect(loaded.config.activeLoadout).toBe("Full-Auto");
     const fullAutoPlanner = loaded.config.loadouts?.["Full-Auto"]?.sockets["Socket-3"];
     const planningConsultPlanner = loaded.config.loadouts?.["Planning-Consult"]?.sockets["Socket-3"];
-    expect(fullAutoPlanner).toMatchObject({ materia: "planner" });
+    expect(fullAutoPlanner).toMatchObject({ materia: "Auto-Plan" });
     expect(planningConsultPlanner).toMatchObject({
       type: "agent",
       materia: "interactivePlan",
@@ -640,7 +646,7 @@ describe("config loadouts", () => {
     expect("multiTurn" in (planningConsultPlanner ?? {})).toBe(false);
     expect(loaded.config.materia.interactivePlan.multiTurn).toBe(true);
 
-    const fullAutoPrompt = loaded.config.materia.planner.prompt;
+    const fullAutoPrompt = loaded.config.materia["Auto-Plan"].prompt;
     const planningConsultPrompt = loaded.config.materia.interactivePlan.prompt;
     expect(fullAutoPrompt).toContain("runtime-provided canonical handoff JSON contract");
     expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
@@ -659,6 +665,7 @@ describe("config loadouts", () => {
     expect(fullAuto.sockets["Socket-3"].socket.type).toBe("agent");
     expect(fullAuto.sockets["Socket-3"].materia.multiTurn).toBeUndefined();
     expect(fullAuto.sockets["Socket-3"].materia.prompt).toContain("planning materia");
+    expect(fullAuto.sockets["Socket-8"].socket).toMatchObject({ materia: "Auto-Architect", parse: "json" });
 
     loaded.config.activeLoadout = "Planning-Consult";
     const planningConsult = resolvePipeline(loaded.config);

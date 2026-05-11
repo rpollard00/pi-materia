@@ -744,7 +744,7 @@ describe("utility pipeline sockets", () => {
 
     const loadout = activeLoadout(config);
     expect(loadout.entry).toBe("Socket-1");
-    expect(Object.keys(loadout.sockets ?? {})).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6"]);
+    expect(Object.keys(loadout.sockets ?? {})).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4", "Socket-5", "Socket-6", "Socket-7", "Socket-8"]);
     expect(pipeline.entry.socket.type).toBe("utility");
     expect(loadout.sockets?.["Socket-1"]).toMatchObject({
       type: "utility",
@@ -768,21 +768,18 @@ describe("utility pipeline sockets", () => {
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
     expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
     expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
-    expect(config.materia.planner?.generator).toBe(true);
-    expect(loadout.loops?.taskIteration.sockets).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
-    expect(loadout.loops?.taskIteration.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });
-    expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "Socket-3", output: "workItems" });
-    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+    expect(config.materia["Auto-Plan"]?.generator).toBe(true);
+    expect(loadout.loops?.loopSelection.sockets).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
+    expect(loadout.loops?.loopSelection.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });
+    expect(loadout.loops?.loopSelection.consumes).toEqual({ from: "Socket-8", output: "workItems" });
+    expect(pipeline.loops?.loopSelection.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
     expect(loadout.sockets?.["Socket-6"]).toMatchObject({
       type: "agent",
       materia: "Maintain",
       parse: "json",
       assign: { lastMaintain: "$" },
       advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
-      edges: [
-        { when: "not_satisfied", to: "Socket-6", maxTraversals: 3 },
-        { when: "always", to: "Socket-4" },
-      ],
+      edges: [{ when: "always", to: "Socket-4" }],
     });
 
     const maintainPrompt = config.materia.Maintain!.prompt;
@@ -808,9 +805,11 @@ describe("utility pipeline sockets", () => {
 
       const pipeline = resolvePipeline(config);
       const loadout = activeLoadout(config);
-      expect(loadout.loops?.taskIteration.consumes).toEqual({ from: "Socket-3", output: "workItems" });
-      expect(loadout.sockets?.["Socket-3"]).toMatchObject({ parse: "json", assign: { workItems: "$.workItems" } });
-      expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+      const [loopId, loop] = Object.entries(loadout.loops ?? {})[0] ?? [];
+      expect(loop?.consumes?.output).toBe("workItems");
+      expect(typeof loop?.consumes?.from).toBe("string");
+      expect(loadout.sockets?.[loop!.consumes!.from]).toMatchObject({ parse: "json", assign: { workItems: "$.workItems" } });
+      expect(pipeline.loops?.[loopId]?.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
       expect(renderGrid(config, pipeline, "default", "/tmp/project").join("\n")).toContain("generator=workItems:array<workItem>");
     }
   });
