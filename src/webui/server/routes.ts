@@ -1,5 +1,6 @@
 import { handleActiveLoadoutRoute } from './activeLoadout.js';
 import { handleGetConfigRoute, handlePostConfigRoute } from './config.js';
+import { handleDefaultLoadoutRoute } from './defaultLoadout.js';
 import { handleHealthRoute } from './health.js';
 import { sendJson } from './http.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
@@ -9,6 +10,7 @@ import { serveStatic } from './static.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { MateriaSetActiveLoadoutCallback } from './activeLoadout.js';
 import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
+import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
@@ -21,6 +23,7 @@ export interface MateriaWebUiRouteDeps {
     getConfig?: () => Promise<unknown>;
     saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
     setActiveLoadout?: MateriaSetActiveLoadoutCallback;
+    setDefaultLoadout?: MateriaSetDefaultLoadoutCallback;
     generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
     modelCatalog?: MateriaModelCatalogSource;
   };
@@ -66,6 +69,11 @@ export async function handleMateriaWebUiRequest(req: IncomingMessage, res: Serve
 
   if (req.url?.startsWith('/api/loadout/active')) {
     await handleActiveLoadoutRoute(req, res, { setActiveLoadout: deps.session?.setActiveLoadout });
+    return;
+  }
+
+  if (req.url?.startsWith('/api/loadout/default')) {
+    await handleDefaultLoadoutRoute(req, res, { setDefaultLoadout: deps.session?.setDefaultLoadout });
     return;
   }
 

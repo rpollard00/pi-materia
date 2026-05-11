@@ -2,6 +2,7 @@ import type { MateriaConfig, PipelineConfig } from '../../loadoutModel.js';
 import type {
   ActiveLoadoutResponse,
   ConfigResponse,
+  DefaultLoadoutResponse,
   GeneratedListOutputConfig,
   ModelCatalogResponse,
   MonitorSnapshot,
@@ -37,6 +38,14 @@ export async function saveConfig(target: SaveTarget, config: SaveConfigPayload):
 
 export async function setActiveLoadout(name: string): Promise<ApiResponse<ActiveLoadoutResponse>> {
   return fetchJson<ActiveLoadoutResponse>('/api/loadout/active', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function setDefaultLoadout(name: string | null): Promise<ApiResponse<DefaultLoadoutResponse>> {
+  return fetchJson<DefaultLoadoutResponse>('/api/loadout/default', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),

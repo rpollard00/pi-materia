@@ -5,9 +5,9 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
-import { loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../config.js";
+import { clearStaleDefaultLoadoutPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch } from "../config.js";
 import { publishActiveLoadoutChange } from "../activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../roleGeneration.js";
 
@@ -118,6 +118,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   const sessionId = ctx.sessionManager.getSessionId() ?? "";
   const cwd = ctx.cwd;
   const startedAt = Date.now();
+  await initializeDefaultLoadoutPreference(ctx, configuredPath, pi);
 
   const { server } = createMateriaWebUiServer({
     host,
@@ -132,6 +133,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       getConfig: () => loadConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
+      setDefaultLoadout: createDefaultLoadoutSetter(ctx, configuredPath),
       generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
       modelCatalog: createPiModelCatalogSource(ctx, pi),
     },
@@ -147,6 +149,50 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
 
   if (autoOpenBrowser) openBrowser(url);
   return { url, reused: false, autoOpenBrowser, sessionKey };
+}
+
+async function initializeDefaultLoadoutPreference(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<void> {
+  try {
+    const loaded = await loadConfig(ctx.cwd, configuredPath);
+    const defaultLoadoutId = loaded.defaultLoadoutId;
+    if (!defaultLoadoutId) {
+      await clearStaleDefaultLoadoutPreference(ctx.cwd, configuredPath);
+      return;
+    }
+    if (loaded.config.activeLoadout === defaultLoadoutId) return;
+    const written = await saveActiveLoadout(ctx.cwd, defaultLoadoutId, configuredPath);
+    const reloaded = await loadConfig(ctx.cwd, configuredPath);
+    if (pi) {
+      publishActiveLoadoutChange(pi, ctx, {
+        source: "webui",
+        loaded: reloaded,
+        writtenPath: written,
+        notifyMessage: `pi-materia initialized active loadout from default preference: ${defaultLoadoutId} (${written})`,
+      });
+    }
+  } catch (error) {
+    const message = `Could not initialize default Materia loadout preference: ${error instanceof Error ? error.message : String(error)}`;
+    ctx.ui.notify(message, "warning");
+  }
+}
+
+function createDefaultLoadoutSetter(ctx: ExtensionContext, configuredPath?: string): MateriaSetDefaultLoadoutCallback {
+  return async (rawName: string | null): Promise<MateriaSetDefaultLoadoutResult> => {
+    try {
+      const defaultLoadoutId = await saveDefaultLoadoutPreference(ctx.cwd, rawName, configuredPath);
+      return {
+        ok: true,
+        defaultLoadoutId,
+        message: defaultLoadoutId ? `Default loadout set to ${defaultLoadoutId}.` : "Default loadout cleared.",
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        code: "unavailable",
+        message: `Could not update default loadout: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  };
 }
 
 function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): MateriaSetActiveLoadoutCallback | undefined {

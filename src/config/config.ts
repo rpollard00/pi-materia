@@ -40,11 +40,14 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   }
 
   const loadedLayers = layers.filter((layer) => layer.loaded);
+  const config = await mergeConfigLayers(partials);
+  const profile = await loadProfileConfig();
   return {
-    config: await mergeConfigLayers(partials),
+    config,
     source: loadedLayers.map((layer) => layer.path).join(" < "),
     layers,
     loadoutSources: buildLoadoutSources(partials, loadedLayers),
+    defaultLoadoutId: validateDefaultLoadoutId(profile.defaultLoadoutId, config),
   };
 }
 
@@ -70,6 +73,28 @@ export async function ensureUserProfileConfig(): Promise<string> {
   await mkdir(dir, { recursive: true });
   if (!existsSync(file)) await writeJsonAtomic(file, defaultProfileConfig());
   return file;
+}
+
+export async function saveDefaultLoadoutPreference(cwd: string, loadoutName: string | null, configuredPath?: string): Promise<string | null> {
+  const loaded = await loadConfig(cwd, configuredPath);
+  const nextDefault = loadoutName?.trim() || null;
+  if (nextDefault && !loaded.config.loadouts?.[nextDefault]) {
+    const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
+    throw new Error(loadoutNames.length
+      ? `Unknown Materia loadout "${nextDefault}". Available loadouts: ${loadoutNames.join(", ")}.`
+      : "Cannot set a default Materia loadout because this config does not define any loadouts.");
+  }
+  const profile = await loadProfileConfig();
+  await writeProfileConfig({ ...profile, defaultLoadoutId: nextDefault });
+  return nextDefault;
+}
+
+export async function clearStaleDefaultLoadoutPreference(cwd: string, configuredPath?: string): Promise<boolean> {
+  const loaded = await loadConfig(cwd, configuredPath);
+  const profile = await loadProfileConfig();
+  if (!profile.defaultLoadoutId || loaded.defaultLoadoutId) return false;
+  await writeProfileConfig({ ...profile, defaultLoadoutId: null });
+  return true;
 }
 
 export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMateriaConfig>, options: { target?: MateriaSaveTarget; configuredPath?: string } = {}): Promise<string> {
@@ -140,7 +165,7 @@ function getWritableConfigPath(cwd: string, configuredPath?: string, target: Mat
 }
 
 function defaultProfileConfig(): MateriaProfileConfig {
-  return { webui: { autoOpenBrowser: false }, defaultSaveTarget: "user", roleGeneration: defaultRoleGenerationProfileConfig() };
+  return { webui: { autoOpenBrowser: false }, defaultLoadoutId: null, defaultSaveTarget: "user", roleGeneration: defaultRoleGenerationProfileConfig() };
 }
 
 function defaultRoleGenerationProfileConfig(): MateriaRoleGenerationProfileConfig {
@@ -154,6 +179,12 @@ function normalizeProfileConfig(parsed: Record<string, unknown>, file: string): 
   if (parsed.webui !== undefined) {
     if (isPlainObject(parsed.webui)) profile.webui = parsed.webui as MateriaProfileConfig["webui"];
     else warnInvalidProfileConfig(file, "Ignoring invalid webui profile config. Expected an object.");
+  }
+
+  if (parsed.defaultLoadoutId !== undefined) {
+    if (parsed.defaultLoadoutId === null) profile.defaultLoadoutId = null;
+    else if (typeof parsed.defaultLoadoutId === "string" && parsed.defaultLoadoutId.trim()) profile.defaultLoadoutId = parsed.defaultLoadoutId.trim();
+    else warnInvalidProfileConfig(file, "Ignoring invalid defaultLoadoutId. Expected a non-empty string or null.");
   }
 
   if (parsed.defaultSaveTarget !== undefined) {
@@ -215,6 +246,17 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   await mkdir(dir, { recursive: true });
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(temp, file);
+}
+
+async function writeProfileConfig(profile: MateriaProfileConfig): Promise<string> {
+  const file = await ensureUserProfileConfig();
+  await writeJsonAtomic(file, profile);
+  return file;
+}
+
+function validateDefaultLoadoutId(defaultLoadoutId: string | null | undefined, config: PiMateriaConfig): string | null {
+  if (!defaultLoadoutId) return null;
+  return config.loadouts?.[defaultLoadoutId] ? defaultLoadoutId : null;
 }
 
 async function writeMinimalActiveLoadout(file: string, loadoutName: string): Promise<void> {

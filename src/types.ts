@@ -16,6 +16,8 @@ export interface LoadedConfig {
   source: string;
   layers?: MateriaConfigLayer[];
   loadoutSources?: Record<string, MateriaConfigLayerScope>;
+  /** Validated user preference for the default loadout. Missing or stale values are exposed as null. */
+  defaultLoadoutId?: string | null;
 }
 
 export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
@@ -36,6 +38,8 @@ export interface MateriaProfileConfig {
     port?: number;
     host?: string;
   };
+  /** Durable user preference used only to initialize the runtime active loadout. */
+  defaultLoadoutId?: string | null;
   defaultSaveTarget?: "user" | "project";
   roleGeneration?: MateriaRoleGenerationProfileConfig;
 }

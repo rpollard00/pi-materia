@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { handleMateriaWebUiRequest } from './routes.js';
 import type { MateriaSetActiveLoadoutCallback } from './activeLoadout.js';
 import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
+import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
@@ -16,6 +17,7 @@ export type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 export type { MateriaModelCatalogModel, MateriaModelCatalogResponse, MateriaModelCatalogSource } from './modelCatalog.js';
 export type { MateriaGeneratorConfig, MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 export type { MateriaSetActiveLoadoutCallback, MateriaSetActiveLoadoutFailureCode, MateriaSetActiveLoadoutResult } from './activeLoadout.js';
+export type { MateriaSetDefaultLoadoutCallback, MateriaSetDefaultLoadoutFailureCode, MateriaSetDefaultLoadoutResult } from './defaultLoadout.js';
 export type { MateriaMonitorArtifactEntry, MateriaMonitorEventEntry, MateriaWebUiSessionSnapshot } from './session.js';
 
 export interface MateriaWebUiServerOptions {
@@ -33,6 +35,8 @@ export interface MateriaWebUiServerOptions {
     saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
     /** Authoritative backend/session callback for active-loadout changes from the WebUI. */
     setActiveLoadout?: MateriaSetActiveLoadoutCallback;
+    /** User preference callback for the durable default loadout. */
+    setDefaultLoadout?: MateriaSetDefaultLoadoutCallback;
     generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
     modelCatalog?: MateriaModelCatalogSource;
   };

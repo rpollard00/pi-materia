@@ -6,7 +6,7 @@ import {
   type PipelineConfig,
 } from '../../loadoutModel.js';
 import { toast } from '../../toast/index.js';
-import { getConfig, saveConfig, setActiveLoadout } from '../api/index.js';
+import { getConfig, saveConfig, setActiveLoadout, setDefaultLoadout as persistDefaultLoadout } from '../api/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
 import { cloneConfig } from '../utils/forms.js';
 import type { ActiveLoadoutResponse, ConfigResponse, LoadedConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
@@ -31,7 +31,7 @@ function isLoadedConfigResponse(value: unknown): value is LoadedConfigResponse {
 function normalizeConfigSnapshot(
   payload: ConfigResponse | ActiveLoadoutResponse | MateriaConfig | LoadedConfigResponse | undefined,
   fallback?: MateriaConfig,
-): { config: MateriaConfig; source?: string; loadoutSources?: Record<string, LoadoutSourceScope> } {
+): { config: MateriaConfig; source?: string; loadoutSources?: Record<string, LoadoutSourceScope>; defaultLoadoutId?: string | null } {
   const wrapper = isLoadedConfigResponse(payload) ? payload : undefined;
   const response = isObjectRecord(payload) ? payload as ConfigResponse : undefined;
   const rawConfig = wrapper?.config ?? response?.config ?? payload ?? {};
@@ -45,19 +45,26 @@ function normalizeConfigSnapshot(
     config,
     source: wrapper?.source ?? response?.source,
     loadoutSources: wrapper?.loadoutSources ?? response?.loadoutSources,
+    defaultLoadoutId: wrapper?.defaultLoadoutId ?? response?.defaultLoadoutId,
   };
 }
 
-async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope> }> {
+async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope>; defaultLoadoutId: string | null }> {
   const body = await getConfig();
   const snapshot = normalizeConfigSnapshot(body);
-  return { config: snapshot.config, source: snapshot.source ?? 'unknown', loadoutSources: snapshot.loadoutSources ?? {} };
+  return { config: snapshot.config, source: snapshot.source ?? 'unknown', loadoutSources: snapshot.loadoutSources ?? {}, defaultLoadoutId: snapshot.defaultLoadoutId ?? null };
 }
 
 function activeLoadoutMessage(body: ActiveLoadoutResponse): string {
   if (typeof body.error === 'string') return body.error;
   if (body.error?.message) return body.error.message;
   return body.message ?? 'Active loadout change failed.';
+}
+
+function defaultLoadoutMessage(body: { error?: string | { message?: string }; message?: string }): string {
+  if (typeof body.error === 'string') return body.error;
+  if (body.error?.message) return body.error.message;
+  return body.message ?? 'Default loadout change failed.';
 }
 
 function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
@@ -121,6 +128,7 @@ export function useWebuiConfig() {
   const [loadoutNameInput, setLoadoutNameInput] = useState('');
   const [status, setStatus] = useState('Loading materia configuration…');
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
+  const [defaultLoadoutId, setDefaultLoadoutId] = useState<string | null>(null);
 
   useEffect(() => {
     draftConfigRef.current = draftConfig;
@@ -200,6 +208,8 @@ export function useWebuiConfig() {
     setLoadoutNameInput(nextActive);
     setSource(loaded.source);
     setLoadoutSources(loaded.loadoutSources ?? {});
+    const nextPersistedLoadouts = buildLoadouts(normalizedLoaded);
+    setDefaultLoadoutId(loaded.defaultLoadoutId && nextPersistedLoadouts[loaded.defaultLoadoutId] ? loaded.defaultLoadoutId : null);
     if (!preserveLoadoutEdits) setDeletedLoadoutNames([]);
     setStatus(readyStatus);
   }
@@ -215,6 +225,7 @@ export function useWebuiConfig() {
       setLoadoutNameInput(fallback.activeLoadout ?? '');
       setSource('demo');
       setLoadoutSources({ 'Demo Loadout': 'default' });
+      setDefaultLoadoutId(null);
     });
     return () => {
       cancelled = true;
@@ -227,6 +238,48 @@ export function useWebuiConfig() {
     });
     setLoadoutNameInput(name);
     setStatus(`Viewing loadout: ${name}`);
+  }
+
+  async function setDefaultLoadout(name: string | null) {
+    const nextDefault = name?.trim() || null;
+    setStatus(nextDefault ? `Setting default loadout to ${nextDefault}…` : 'Clearing default loadout…');
+    let result: Awaited<ReturnType<typeof persistDefaultLoadout>>;
+    try {
+      result = await persistDefaultLoadout(nextDefault);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(`Default loadout change failed: ${message}`);
+      toast({
+        id: 'default-loadout-error',
+        title: 'Could not update default loadout',
+        description: `The default loadout preference was not changed. Try again or check the WebUI server: ${message}`,
+        variant: 'error',
+      });
+      throw error;
+    }
+    const { response, body } = result;
+    if (!response.ok || body.ok === false) {
+      const message = defaultLoadoutMessage(body);
+      setStatus(`Default loadout change failed: ${message}`);
+      toast({
+        id: 'default-loadout-error',
+        title: 'Could not update default loadout',
+        description: `The default loadout preference was not changed. ${message}`,
+        variant: 'error',
+      });
+      throw new Error(message);
+    }
+    const savedDefault = body.defaultLoadoutId ?? null;
+    setDefaultLoadoutId(savedDefault);
+    const readyStatus = body.message ?? (savedDefault ? `Default loadout set to ${savedDefault}.` : 'Default loadout cleared.');
+    setStatus(readyStatus);
+    toast({
+      id: `default-loadout-success:${savedDefault ?? 'none'}`,
+      title: savedDefault ? 'Default loadout updated' : 'Default loadout cleared',
+      description: readyStatus,
+      variant: 'success',
+    });
+    return savedDefault;
   }
 
   async function setRuntimeActiveLoadout(name: string) {
@@ -414,6 +467,7 @@ export function useWebuiConfig() {
     commitActiveLoadoutRename: commitEditingLoadoutRename,
     commitEditingLoadoutRename,
     createLoadout,
+    defaultLoadoutId,
     deleteLoadout,
     draftConfig,
     isDirty,
@@ -427,6 +481,7 @@ export function useWebuiConfig() {
     revertDraft,
     saveDraft,
     saveTarget,
+    setDefaultLoadout,
     setLoadoutNameInput,
     setPersistedActiveLoadout: setRuntimeActiveLoadout,
     setRuntimeActiveLoadout,
