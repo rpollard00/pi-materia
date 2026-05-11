@@ -4,6 +4,7 @@ import path from "node:path";
 import { safeTimestamp } from "./artifacts.js";
 import { resolveArtifactRoot } from "./config.js";
 import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
+import { getResolvedPipelineSocket } from "./loadoutAccessors.js";
 import { parseJson } from "./json.js";
 import { applyGenericHandoffEnvelope } from "./application/handoff.js";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "./application/promptAssembly.js";
@@ -332,7 +333,7 @@ async function recordMultiTurnRefinement(state: MateriaCastState, socket: Resolv
 async function advanceToSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string): Promise<void> {
   const target = targetId ?? "end";
   if (target === "end") return await finishCast(pi, ctx, state, entryId, "Cast complete.");
-  const socket = resolvedPipelineSockets(state)[target];
+  const socket = getResolvedPipelineSocket(state.pipeline, target);
   if (!socket) throw new Error(`Unknown graph target "${target}"`);
   await startSocket(pi, ctx, state, socket);
 }
@@ -672,7 +673,7 @@ function currentSocketVisit(state: MateriaCastState, fallback = 0): number {
 
 function activeResolvedSocket(state: MateriaCastState): ResolvedMateriaSocket | undefined {
   const socketId = currentSocketId(state);
-  return socketId ? resolvedPipelineSockets(state)[socketId] : undefined;
+  return socketId ? getResolvedPipelineSocket(state.pipeline, socketId) : undefined;
 }
 
 function currentRefinementTurn(state: MateriaCastState, socketId: string): number {
@@ -807,14 +808,11 @@ function setCurrentSocketState(state: MateriaCastState, socketState: MateriaCast
 
 function currentSocketOrThrow(state: MateriaCastState): ResolvedMateriaSocket {
   const socketId = currentSocketId(state);
-  const socket = socketId ? resolvedPipelineSockets(state)[socketId] : state.pipeline.entry;
+  const socket = socketId ? getResolvedPipelineSocket(state.pipeline, socketId) : state.pipeline.entry;
   if (!socket) throw new Error(`Current Materia socket "${socketId}" is not in the resolved grid.`);
   return socket;
 }
 
-function resolvedPipelineSockets(state: MateriaCastState): Record<string, ResolvedMateriaSocket> {
-  return state.pipeline.sockets ?? {};
-}
 
 async function loadConfigFromState(state: MateriaCastState): Promise<PiMateriaConfig> {
   return JSON.parse(await readFile(path.join(state.runDir, "config.resolved.json"), "utf8")) as PiMateriaConfig;

@@ -1,5 +1,5 @@
 import { canonicalGeneratorConfigFor } from "./generator.js";
-import { loadoutSockets } from "./loadoutAccessors.js";
+import { getLoadoutSocket } from "./loadoutAccessors.js";
 import { reconcileLoadoutLoopConsumersFromGraphInPlace } from "./loadoutGraphAnalysis.js";
 import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, PiMateriaConfig } from "./types.js";
 
@@ -33,7 +33,7 @@ export function materializeConfigLoadoutLoopSemantics(config: PiMateriaConfig): 
 
 function materializeLoopExit(materia: Record<string, MateriaConfig>, pipeline: MateriaPipelineConfig, loopId: string, loop: MateriaLoopConfig, options: LoopSemanticMaterializationOptions): void {
   if (!loop.exit || !loop.consumes) return;
-  const socket = loadoutSockets(pipeline)[loop.exit.from];
+  const socket = getLoadoutSocket(pipeline, loop.exit.from);
   if (!socket) return;
   const generator = generatorForLoop(materia, pipeline, loop);
   if (!generator) return;
@@ -80,7 +80,7 @@ function advanceForLoopExit(loop: MateriaLoopConfig, generator: MateriaGenerator
 }
 
 function generatorForLoop(materia: Record<string, MateriaConfig>, pipeline: MateriaPipelineConfig, loop: MateriaLoopConfig): MateriaGeneratorConfig | undefined {
-  const source = loop.consumes ? loadoutSockets(pipeline)[loop.consumes.from] : undefined;
+  const source = loop.consumes ? getLoadoutSocket(pipeline, loop.consumes.from) : undefined;
   if (!source || source.type !== "agent") return undefined;
   const generator = canonicalGeneratorConfigFor(materia[source.materia]);
   if (!generator) return undefined;

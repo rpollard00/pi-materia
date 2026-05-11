@@ -1,5 +1,5 @@
 import { HANDOFF_EDGE_CONDITIONS } from "./handoffContract.js";
-import { loadoutSockets, loopSockets, materializeCanonicalSockets } from "./loadoutAccessors.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "./loadoutAccessors.js";
 import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "./socketIds.js";
 import type { LegacyMateriaPipelineSocketConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "./types.js";
 
@@ -32,7 +32,7 @@ export interface ValidatedGraphChangeResult<TGraph extends MateriaPipelineConfig
 
 export function normalizePipelineGraph<TGraph extends MateriaPipelineConfig>(graph: TGraph): TGraph {
   const normalized = materializeCanonicalSockets(cloneGraph(graph));
-  for (const socket of Object.values(loadoutSockets(normalized)) as LegacyMateriaPipelineSocketConfig[]) {
+  for (const [, socket] of loadoutSocketEntries(normalized) as [string, LegacyMateriaPipelineSocketConfig][]) {
     const edges = (socket.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeCondition(edge.when) }));
     if (socket.next) edges.push({ when: "always", to: socket.next });
     socket.edges = edges.length > 0 ? edges : undefined;
@@ -57,12 +57,12 @@ export function canonicalOutgoingEdges(socket: MateriaPipelineSocketConfig): Mat
 export function validatePipelineGraph(graph: MateriaPipelineConfig, options: MateriaGraphValidationOptions = {}): MateriaGraphValidationResult {
   const normalized = normalizePipelineGraph(graph);
   const errors: MateriaGraphValidationError[] = [];
-  const socketIds = new Set(Object.keys(loadoutSockets(normalized)));
+  const socketIds = loadoutSocketIdSet(normalized);
 
   for (const id of socketIds) validateSocketId(errors, id, `sockets.${id}`);
   validateSocketReference(errors, socketIds, graph.entry, "entry");
 
-  for (const [id, socket] of Object.entries(loadoutSockets(normalized))) {
+  for (const [id, socket] of loadoutSocketEntries(normalized)) {
     const errorCountBeforeSocket = errors.length;
     validateSocketLinks(id, socket, errors, socketIds);
     if (errors.length === errorCountBeforeSocket) validateOutgoingEdgeConditions(id, socket.edges ?? [], errors);
@@ -174,7 +174,7 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
 function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopMemberSockets: string[], consumes: NonNullable<MateriaLoopConfig["consumes"]>, exit: MateriaLoopExitConfig | undefined): void {
   if (!exit) return;
 
-  const socket = loadoutSockets(graph)[exit.from];
+  const socket = getLoadoutSocket(graph, exit.from);
   if (!socket) return;
   const sourceLabel = `Loop "${loopId}" exit source "${exit.from}"`;
   if ((exit.when === "satisfied" || exit.when === "not_satisfied") && socket.parse !== undefined && socket.parse !== "json") {
@@ -315,7 +315,7 @@ function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraph
   const isGeneratorSocket = options.isGeneratorSocket ?? options.isGeneratorNode;
   if (!isGeneratorSocket) return;
 
-  const inboundGeneratorEdges = Object.entries(loadoutSockets(graph)).flatMap(([from, socket]) => {
+  const inboundGeneratorEdges = loadoutSocketEntries(graph).flatMap(([from, socket]) => {
     if (loopSet.has(from) || !isGeneratorSocket(from)) return [];
     return (socket.edges ?? []).filter((edge) => loopSet.has(edge.to)).map((edge) => ({ from, to: edge.to }));
   });
@@ -337,7 +337,7 @@ function containsDirectedCycle(graph: MateriaPipelineConfig, loopSet: Set<string
     if (visiting.has(socketId)) return true;
     if (visited.has(socketId)) return false;
     visiting.add(socketId);
-    for (const edge of loadoutSockets(graph)[socketId]?.edges ?? []) {
+    for (const edge of getLoadoutSocket(graph, socketId)?.edges ?? []) {
       if (loopSet.has(edge.to) && visit(edge.to)) return true;
     }
     visiting.delete(socketId);

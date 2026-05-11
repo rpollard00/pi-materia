@@ -1,7 +1,7 @@
 import { resolveArtifactRoot } from "./config.js";
 import { assertValidPipelineGraph } from "./graphValidation.js";
 import { canonicalGeneratorConfigFor, isGeneratorMateria } from "./generator.js";
-import { loadoutSockets, loopSockets } from "./loadoutAccessors.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, loopSockets, resolvedPipelineSockets } from "./loadoutAccessors.js";
 import { prepareLoadoutForRuntime } from "./loadoutNormalization.js";
 import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline } from "./types.js";
 
@@ -37,7 +37,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   validateLoadout(effective.loadoutName, effective.pipeline);
   assertValidPipelineGraph(effective.pipeline, { isGeneratorSocket: (socketId) => isGeneratorPipelineSocket(config, effective.pipeline, socketId) });
   const sockets = Object.fromEntries(
-    Object.keys(loadoutSockets(effective.pipeline)).map((id) => [id, resolveSocket(config, effective, id, `${pipelineSource(effective)}.sockets.${id}`)]),
+    loadoutSocketIds(effective.pipeline).map((id) => [id, resolveSocket(config, effective, id, `${pipelineSource(effective)}.sockets.${id}`)]),
   );
   validateGeneratorSocketContracts(config, effective);
   const entry = sockets[effective.pipeline.entry];
@@ -46,7 +46,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
 }
 
 function resolveSocket(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig, id: string, source: string): ResolvedMateriaSocket {
-  const socket = loadoutSockets(effective.pipeline)[id];
+  const socket = getLoadoutSocket(effective.pipeline, id);
   if (!socket) throw new Error(`Unknown pipeline slot "${id}" referenced by ${source}`);
   validateSocket(id, socket);
 
@@ -162,7 +162,7 @@ function validateLegacyGeneratorDeclaration(name: string, generates: unknown): v
 }
 
 function isGeneratorPipelineSocket(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, socketId: string): boolean {
-  const socket = loadoutSockets(pipeline)[socketId];
+  const socket = getLoadoutSocket(pipeline, socketId);
   return Boolean(socket?.type === "agent" && isGeneratorMateria(config.materia[socket.materia]));
 }
 
@@ -170,14 +170,14 @@ function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPi
   for (const [loopId, loop] of Object.entries(pipeline.loops ?? {})) {
     if (loop.consumes || !loop.iterator) continue;
     const loopSet = new Set(loopSockets(loop));
-    const inboundGeneratorEdges = Object.entries(loadoutSockets(pipeline)).flatMap(([from, socket]) => {
+    const inboundGeneratorEdges = loadoutSocketEntries(pipeline).flatMap(([from, socket]) => {
       if (loopSet.has(from) || !isGeneratorPipelineSocket(config, pipeline, from)) return [];
       return (socket.edges ?? []).filter((edge) => loopSet.has(edge.to)).map(() => from);
     });
     const uniqueGeneratorIds = Array.from(new Set(inboundGeneratorEdges));
     if (uniqueGeneratorIds.length === 1) {
       const from = uniqueGeneratorIds[0];
-      const source = loadoutSockets(pipeline)[from];
+      const source = getLoadoutSocket(pipeline, from);
       if (source?.type !== "agent") continue;
       const output = canonicalGeneratorConfigFor(config.materia[source.materia])?.output;
       if (output) loop.consumes = { from, output };
@@ -189,7 +189,7 @@ function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPi
 
 function normalizeGeneratorPipelineSlots(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
   for (const id of generatorPipelineSocketIds(config, pipeline)) {
-    const socket = loadoutSockets(pipeline)[id];
+    const socket = getLoadoutSocket(pipeline, id);
     if (!socket || socket.type !== "agent") continue;
     const generator = canonicalGeneratorConfigFor(config.materia[socket.materia]);
     if (!generator) continue;
@@ -201,7 +201,7 @@ function normalizeGeneratorPipelineSlots(config: PiMateriaConfig, pipeline: Mate
 function validateGeneratorSocketContracts(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): void {
   const generatorPipelineIds = generatorPipelineSocketIds(config, effective.pipeline);
   for (const id of generatorPipelineIds) {
-    const socket = loadoutSockets(effective.pipeline)[id];
+    const socket = getLoadoutSocket(effective.pipeline, id);
     if (!socket || socket.type !== "agent") continue;
     const generator = canonicalGeneratorConfigFor(config.materia[socket.materia]);
     if (!generator) continue;
@@ -217,7 +217,7 @@ function validateGeneratorSocketContracts(config: PiMateriaConfig, effective: Ef
 
 function generatorPipelineSocketIds(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): Set<string> {
   const ids = new Set(Object.values(pipeline.loops ?? {}).map((loop) => loop.consumes?.from).filter((id): id is string => typeof id === "string"));
-  for (const [from, socket] of Object.entries(loadoutSockets(pipeline))) {
+  for (const [from, socket] of loadoutSocketEntries(pipeline)) {
     if (!isGeneratorPipelineSocket(config, pipeline, from)) continue;
     for (const edge of socket.edges ?? []) {
       if (!isGeneratorPipelineSocket(config, pipeline, edge.to)) continue;
@@ -268,7 +268,7 @@ export function renderGrid(config: PiMateriaConfig, pipeline: ResolvedMateriaPip
     "Slots:",
   ];
 
-  for (const [id, socket] of Object.entries(loadoutSockets(effective.pipeline))) {
+  for (const [id, socket] of loadoutSocketEntries(effective.pipeline)) {
     lines.push(`- ${id}: ${formatSocketSlot(config, socket)}`);
   }
   return lines;
@@ -336,7 +336,7 @@ function formatSocketLimits(limits: NonNullable<MateriaPipelineSocketConfig["lim
 
 function renderGraph(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): string[] {
   const lines: string[] = [];
-  for (const [id, socket] of Object.entries(loadoutSockets(pipeline))) {
+  for (const [id, socket] of loadoutSocketEntries(pipeline)) {
     for (const edge of socket.edges ?? []) lines.push(`${id} --${edgeLabel(edge)}--> ${edge.to}`);
     if (!socket.edges?.length) lines.push(`${id}`);
   }
@@ -372,7 +372,7 @@ function generatedIteratorForLoop(config: PiMateriaConfig, pipeline: MateriaPipe
 function generatorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, loopId: string): MateriaGeneratorConfig {
   const consumer = pipeline.loops?.[loopId]?.consumes;
   if (!consumer) throw new Error(`Loop "${loopId}" does not declare a generator consumer.`);
-  const source = loadoutSockets(pipeline)[consumer.from];
+  const source = getLoadoutSocket(pipeline, consumer.from);
   if (!source) throw new Error(`Loop "${loopId}" consumes unknown generator socket "${consumer.from}".`);
   if (source.type !== "agent") throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but only agent materia can declare generated outputs.`);
   const generator = canonicalGeneratorConfigFor(config.materia[source.materia]);
@@ -380,10 +380,10 @@ function generatorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConf
   return generator;
 }
 
-export function loopIteratorForSocket(pipeline: Pick<MateriaPipelineConfig, "sockets" | "nodes" | "loops"> | Pick<ResolvedMateriaPipeline, "sockets" | "loops">, socketId: string): MateriaForeachConfig | undefined {
-  const sockets = "sockets" in pipeline && pipeline.sockets ? pipeline.sockets : loadoutSockets(pipeline as MateriaPipelineConfig);
-  const entry = sockets[socketId] as (MateriaPipelineSocketConfig | ResolvedMateriaSocket | undefined);
-  const socket = entry && "socket" in entry ? entry.socket : entry;
+export function loopIteratorForSocket(pipeline: Pick<MateriaPipelineConfig, "sockets" | "loops"> | Pick<ResolvedMateriaPipeline, "sockets" | "loops">, socketId: string): MateriaForeachConfig | undefined {
+  const resolved = resolvedPipelineSockets(pipeline as Partial<Pick<ResolvedMateriaPipeline, "sockets">>);
+  const entry = resolved[socketId] as ResolvedMateriaSocket | undefined;
+  const socket = entry?.socket ?? getLoadoutSocket(pipeline as Pick<MateriaPipelineConfig, "sockets">, socketId);
   const direct = socket?.foreach;
   if (direct) return direct;
   for (const loop of Object.values(pipeline.loops ?? {})) {

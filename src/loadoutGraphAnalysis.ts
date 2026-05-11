@@ -1,5 +1,5 @@
 import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "./generator.js";
-import { loadoutSockets, loopSockets } from "./loadoutAccessors.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSockets, loopSocketSet } from "./loadoutAccessors.js";
 import type { MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopConsumerConfig, MateriaPipelineConfig } from "./types.js";
 
 export type LoadoutGraphDiagnosticCode =
@@ -34,16 +34,12 @@ interface AnalyzeableSocket {
 
 interface AnalyzeableLoop {
   sockets?: string[];
-  /** @deprecated Legacy persisted/WebUI DTO alias. */
-  nodes?: string[];
   consumes?: Partial<MateriaLoopConsumerConfig> & { from?: string };
   iterator?: unknown;
 }
 
 interface AnalyzeableLoadout {
   sockets?: Record<string, AnalyzeableSocket | undefined>;
-  /** @deprecated Legacy persisted/WebUI DTO alias. */
-  nodes?: Record<string, AnalyzeableSocket | undefined>;
   loops?: Record<string, AnalyzeableLoop | undefined>;
 }
 
@@ -64,7 +60,7 @@ export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record
 
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
     if (!loop) continue;
-    const loopSet = new Set(loopSockets(loop as MateriaLoopConfig));
+    const loopSet = loopSocketSet(loop as MateriaLoopConfig);
     loopSocketSets.set(loopId, loopSet);
     loopConsumerFlags.set(loopId, Boolean(loop.consumes || loop.iterator));
     inboundGeneratorSourcesByLoop.set(loopId, new Set());
@@ -75,7 +71,7 @@ export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record
     }
   }
 
-  for (const [from, socket] of Object.entries(sockets)) {
+  for (const [from, socket] of loadoutSocketEntries(loadout as MateriaPipelineConfig) as [string, AnalyzeableSocket | undefined][]) {
     if (!socket || !isWorkItemsGeneratorSocket(socket, materia)) continue;
     for (const edge of socket.edges ?? []) {
       const targetLoopIds = socketLoopIds.get(edge.to);
@@ -125,10 +121,10 @@ export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record
     }
   }
 
-  for (const [from, socket] of Object.entries(sockets)) {
+  for (const [from, socket] of loadoutSocketEntries(loadout as MateriaPipelineConfig) as [string, AnalyzeableSocket | undefined][]) {
     if (!socket || !isWorkItemsGeneratorSocket(socket, materia)) continue;
     for (const edge of socket.edges ?? []) {
-      if (!isWorkItemsGeneratorSocket(sockets[edge.to], materia)) continue;
+      if (!isWorkItemsGeneratorSocket(getLoadoutSocket(loadout as MateriaPipelineConfig, edge.to) as AnalyzeableSocket | undefined, materia)) continue;
       workItemProducingSocketIds.add(from);
       workItemProducingSocketIds.add(edge.to);
     }

@@ -1,3 +1,4 @@
+import { loadoutSockets, loopSockets } from "../loadoutAccessors.js";
 import type { MateriaLoopConfig, MateriaPipelineConfig, PiMateriaConfig } from "../types.js";
 
 /**
@@ -22,7 +23,7 @@ export type WebUiConfigDto<TConfig extends Partial<PiMateriaConfig> = Partial<Pi
 
 export function toWebUiLoadoutDto(loadout: MateriaPipelineConfig): WebUiLoadoutDto {
   const cloned = clone(loadout) as WebUiLoadoutDto & { sockets?: MateriaPipelineConfig["sockets"] };
-  const nodes = clone(cloned.nodes ?? cloned.sockets ?? {});
+  const nodes = clone(cloned.sockets ? loadoutSockets(loadout) : cloned.nodes ?? {});
   delete cloned.sockets;
   cloned.nodes = nodes;
   if (cloned.loops) {
@@ -60,7 +61,7 @@ export function fromWebUiConfigDto<TConfig extends WebUiConfigDto>(config: TConf
 
 function toWebUiLoopDto(loop: MateriaLoopConfig): WebUiLoopDto {
   const cloned = clone(loop) as WebUiLoopDto & { sockets?: string[] };
-  const nodes = [...(cloned.nodes ?? cloned.sockets ?? [])];
+  const nodes = [...(cloned.sockets ? loopSockets(loop) : cloned.nodes ?? [])];
   delete cloned.sockets;
   cloned.nodes = nodes;
   return cloned;

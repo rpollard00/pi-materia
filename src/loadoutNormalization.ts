@@ -1,6 +1,6 @@
 import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "./generator.js";
 import { normalizePipelineGraph } from "./graphValidation.js";
-import { loadoutSockets, materializeCanonicalSockets } from "./loadoutAccessors.js";
+import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, materializeCanonicalSockets } from "./loadoutAccessors.js";
 import { analyzeLoadoutGraph, type LoadoutGraphAnalysis } from "./loadoutGraphAnalysis.js";
 import { materializeLoadoutLoopSemantics } from "./loopSemantics.js";
 import type { MateriaConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaSocketLayoutConfig, PiMateriaConfig } from "./types.js";
@@ -63,20 +63,18 @@ function normalizeConfigLoadouts(config: PiMateriaConfig, normalize: (loadout: M
 }
 
 function normalizeLoadoutSocketKinds(loadout: MateriaPipelineConfig): void {
-  const sockets = loadoutSockets(loadout);
-  const entryId = loadout.entry && sockets[loadout.entry] ? loadout.entry : Object.keys(sockets)[0];
+  const entryId = loadout.entry && getLoadoutSocket(loadout, loadout.entry) ? loadout.entry : loadoutSocketIds(loadout)[0];
   if (entryId && !loadout.entry) loadout.entry = entryId;
-  for (const [id, socket] of Object.entries(sockets)) socket.socketKind = id === entryId ? "entry" : "normal";
+  for (const [id, socket] of loadoutSocketEntries(loadout)) socket.socketKind = id === entryId ? "entry" : "normal";
 }
 
 function normalizeLoadoutLayout(loadout: MateriaPipelineConfig): void {
-  const sockets = loadoutSockets(loadout);
   const existing = isPlainObject(loadout.layout) ? loadout.layout : {};
   const existingSockets = isPlainObject(existing.sockets) ? existing.sockets : {};
   const socketLayouts: Record<string, MateriaSocketLayoutConfig> = {};
 
-  for (const id of Object.keys(sockets).sort((a, b) => a.localeCompare(b))) {
-    const socket = sockets[id];
+  for (const id of loadoutSocketIds(loadout).sort((a, b) => a.localeCompare(b))) {
+    const socket = getLoadoutSocket(loadout, id);
     const authoritative = existingSockets[id];
     const fallback = socket?.layout;
     const source = isSocketLayout(authoritative) ? authoritative : isSocketLayout(fallback) ? fallback : undefined;
@@ -106,7 +104,7 @@ function reconcileLoopConsumers(loadout: MateriaPipelineConfig, materia: Record<
 
 function normalizeGeneratorPipelineSockets(loadout: MateriaPipelineConfig, materia: Record<string, GeneratorMateriaLike>): void {
   for (const id of analyzeLoadoutGraph(loadout, materia).workItemProducingSocketIds) {
-    const socket = loadoutSockets(loadout)[id];
+    const socket = getLoadoutSocket(loadout, id);
     if (!socket || socket.type !== "agent") continue;
     const generator = canonicalGeneratorConfigFor(materia[socket.materia]);
     if (!generator) continue;
