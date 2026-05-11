@@ -13,8 +13,8 @@ import {
 const config = {
   activeLoadout: 'Alpha',
   loadouts: {
-    Alpha: { entry: 'Socket-1', nodes: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-    Beta: { entry: 'Socket-1', nodes: { 'Socket-1': { type: 'agent', materia: 'Test' } } },
+    Alpha: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+    Beta: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Test' } } },
   },
 } satisfies MateriaConfig;
 
@@ -42,7 +42,7 @@ describe('loadout draft mutations', () => {
 
     expect(created.activeLoadout).toBe('New Loadout 3');
     expect(created.loadouts?.['New Loadout 3']?.entry).toBeTruthy();
-    expect(Object.keys(created.loadouts?.['New Loadout 3']?.nodes ?? {})).toHaveLength(1);
+    expect(Object.keys(created.loadouts?.['New Loadout 3']?.sockets ?? {})).toHaveLength(1);
     expect((config.loadouts as Record<string, unknown>)['New Loadout 3']).toBeUndefined();
   });
 
@@ -72,7 +72,7 @@ describe('loadout draft mutations', () => {
     const payload = buildConfigToSave(frozen, ['Beta']);
 
     expect(payload.loadouts?.Beta).toBeNull();
-    expect(payload.loadouts?.Alpha).toMatchObject({ entry: 'Socket-1', sockets: config.loadouts.Alpha.nodes });
+    expect(payload.loadouts?.Alpha).toMatchObject({ entry: 'Socket-1', sockets: config.loadouts.Alpha.sockets });
     expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
     expect(config.loadouts.Beta).toMatchObject({ entry: 'Socket-1' });
   });
@@ -83,7 +83,7 @@ describe('loadout draft mutations', () => {
         Alpha: {
           entry: 'Socket-1',
           layout: { sockets: { 'Socket-2': { x: 9, y: 9 }, Missing: { x: 99, y: 99 } } },
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Build', layout: { x: 1, y: 2 } },
             'Socket-2': { type: 'agent', materia: 'Test', layout: { x: 3, y: 4 } },
           },
@@ -97,18 +97,18 @@ describe('loadout draft mutations', () => {
     expect(payload.loadouts?.Alpha).not.toHaveProperty('nodes');
   });
 
-  it('round-trips WebUI nodes to canonical sockets for save payloads', () => {
+  it('round-trips WebUI sockets to canonical sockets for save payloads', () => {
     const payload = buildConfigToSave({
       activeLoadout: 'Alpha',
       materia: { planner: { prompt: 'plan', generator: true }, Build: { prompt: 'build' } },
       loadouts: {
         Alpha: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
           },
-          loops: { work: { nodes: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+          loops: { work: { sockets: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
         },
       },
     }, []);

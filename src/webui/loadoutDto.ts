@@ -1,20 +1,16 @@
-import { loadoutSockets, loopSockets } from "../loadoutAccessors.js";
 import type { MateriaLoopConfig, MateriaPipelineConfig, PiMateriaConfig } from "../types.js";
 
 /**
- * Explicit compatibility adapter for the WebUI editor DTO.
- *
- * Core/domain/application loadouts are socket-first (`sockets`, loop `sockets`).
- * The current WebUI graph editor still edits a legacy nodes-shaped DTO. Keep
- * that shape at this boundary only and convert saves back to canonical sockets.
+ * WebUI loadout DTOs are socket-first at the API boundary.
+ * Legacy `nodes` payloads are rejected instead of being adapted.
  */
-export type WebUiLoadoutDto = Omit<MateriaPipelineConfig, "sockets" | "loops"> & {
-  nodes?: MateriaPipelineConfig["sockets"];
+export type WebUiLoadoutDto = Omit<MateriaPipelineConfig, "nodes" | "loops"> & {
+  sockets?: MateriaPipelineConfig["sockets"];
   loops?: Record<string, WebUiLoopDto>;
 };
 
-export type WebUiLoopDto = Omit<MateriaLoopConfig, "sockets"> & {
-  nodes?: string[];
+export type WebUiLoopDto = Omit<MateriaLoopConfig, "nodes"> & {
+  sockets?: string[];
 };
 
 export type WebUiConfigDto<TConfig extends Partial<PiMateriaConfig> = Partial<PiMateriaConfig>> = Omit<TConfig, "loadouts"> & {
@@ -22,21 +18,17 @@ export type WebUiConfigDto<TConfig extends Partial<PiMateriaConfig> = Partial<Pi
 };
 
 export function toWebUiLoadoutDto(loadout: MateriaPipelineConfig): WebUiLoadoutDto {
-  const cloned = clone(loadout) as WebUiLoadoutDto & { sockets?: MateriaPipelineConfig["sockets"] };
-  const nodes = clone(cloned.sockets ? loadoutSockets(loadout) : cloned.nodes ?? {});
-  delete cloned.sockets;
-  cloned.nodes = nodes;
+  rejectLegacyNodes(loadout, "loadout");
+  const cloned = clone(loadout) as WebUiLoadoutDto;
   if (cloned.loops) {
     cloned.loops = Object.fromEntries(Object.entries(cloned.loops).map(([id, loop]) => [id, toWebUiLoopDto(loop)]));
   }
   return cloned;
 }
 
-export function fromWebUiLoadoutDto(loadout: WebUiLoadoutDto | MateriaPipelineConfig): MateriaPipelineConfig {
+export function fromWebUiLoadoutDto(loadout: WebUiLoadoutDto): MateriaPipelineConfig {
+  rejectLegacyNodes(loadout, "loadout");
   const cloned = clone(loadout) as MateriaPipelineConfig;
-  const sockets = clone(cloned.sockets ?? cloned.nodes ?? {});
-  delete cloned.nodes;
-  cloned.sockets = sockets;
   if (cloned.loops) {
     cloned.loops = Object.fromEntries(Object.entries(cloned.loops).map(([id, loop]) => [id, fromWebUiLoopDto(loop)]));
   }
@@ -60,19 +52,19 @@ export function fromWebUiConfigDto<TConfig extends WebUiConfigDto>(config: TConf
 }
 
 function toWebUiLoopDto(loop: MateriaLoopConfig): WebUiLoopDto {
-  const cloned = clone(loop) as WebUiLoopDto & { sockets?: string[] };
-  const nodes = [...(cloned.sockets ? loopSockets(loop) : cloned.nodes ?? [])];
-  delete cloned.sockets;
-  cloned.nodes = nodes;
-  return cloned;
+  rejectLegacyNodes(loop, "loop");
+  return clone(loop) as WebUiLoopDto;
 }
 
-function fromWebUiLoopDto(loop: WebUiLoopDto | MateriaLoopConfig): MateriaLoopConfig {
-  const cloned = clone(loop) as MateriaLoopConfig;
-  const sockets = [...(cloned.sockets ?? cloned.nodes ?? [])];
-  delete cloned.nodes;
-  cloned.sockets = sockets;
-  return cloned;
+function fromWebUiLoopDto(loop: WebUiLoopDto): MateriaLoopConfig {
+  rejectLegacyNodes(loop, "loop");
+  return clone(loop) as MateriaLoopConfig;
+}
+
+function rejectLegacyNodes(value: unknown, label: string): void {
+  if (value && typeof value === "object" && "nodes" in value) {
+    throw new Error(`Legacy WebUI ${label} nodes are not supported; use sockets instead.`);
+  }
 }
 
 function clone<T>(value: T): T {

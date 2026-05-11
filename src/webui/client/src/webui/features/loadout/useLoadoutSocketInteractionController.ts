@@ -81,14 +81,14 @@ export function useLoadoutSocketInteractionController({
   function putMateria(socketId: string, materiaId: string, fromSocket?: string) {
     if (!activeLoadoutName || !draftConfig) return false;
     const currentLoadout = loadouts[activeLoadoutName];
-    const currentTarget = currentLoadout?.nodes?.[socketId];
-    if (!currentLoadout?.nodes || !currentTarget) {
+    const currentTarget = currentLoadout?.sockets?.[socketId];
+    if (!currentLoadout?.sockets || !currentTarget) {
       setStatus(`Ignored drop: socket ${socketId} is not available in the active loadout.`);
       return false;
     }
 
     if (fromSocket && fromSocket !== socketId) {
-      const currentSource = currentLoadout.nodes[fromSocket];
+      const currentSource = currentLoadout.sockets[fromSocket];
       if (isEmptySocket(currentSource)) {
         setStatus('Ignored drop: dragged socket materia is no longer available.');
         return false;
@@ -102,7 +102,7 @@ export function useLoadoutSocketInteractionController({
     }
 
     updateLoadoutDraft(activeLoadoutName, (loadout) => {
-      if (!loadout.nodes) return loadout;
+      if (!loadout.sockets) return loadout;
       if (fromSocket && fromSocket !== socketId) return swapSocketMateria(loadout, fromSocket, socketId);
       const sourceNode = palette.find(([id]) => id === materiaId)?.[1];
       return sourceNode ? setSocketMateria(loadout, socketId, sourceNode) : loadout;
@@ -114,7 +114,7 @@ export function useLoadoutSocketInteractionController({
 
   function removeMateria(socketId: string) {
     if (!activeLoadoutName) return false;
-    const currentNode = loadouts[activeLoadoutName]?.nodes?.[socketId];
+    const currentNode = loadouts[activeLoadoutName]?.sockets?.[socketId];
     if (!currentNode) {
       setStatus(`Ignored unsocket: socket ${socketId} is not available in the active loadout.`);
       return false;
@@ -123,7 +123,7 @@ export function useLoadoutSocketInteractionController({
       setStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
       return false;
     }
-    updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.nodes?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout);
+    updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout);
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
@@ -198,11 +198,11 @@ export function useLoadoutSocketInteractionController({
     const layoutX = layoutValueForPosition(finalX, socketLayoutOffsetX, socketLayoutUnitX);
     const layoutY = layoutValueForPosition(finalY, socketLayoutOffsetY, socketLayoutUnitY);
     updateLoadoutLayout(activeLoadoutName, (loadout) => {
-      const nodes = loadout.nodes;
-      if (!nodes?.[socketId]) return loadout;
+      const sockets = loadout.sockets;
+      if (!sockets?.[socketId]) return loadout;
       const layouts: Parameters<typeof setSocketLayouts>[1] = { [socketId]: { x: layoutX, y: layoutY } };
       for (const socket of loadoutGraph.sockets) {
-        if (!nodes[socket.id] || socket.id === socketId || getSocketLayout(loadout, socket.id)) continue;
+        if (!sockets[socket.id] || socket.id === socketId || getSocketLayout(loadout, socket.id)) continue;
         layouts[socket.id] = {
           x: layoutValueForPosition(socket.x, socketLayoutOffsetX, socketLayoutUnitX),
           y: layoutValueForPosition(socket.y, socketLayoutOffsetY, socketLayoutUnitY),

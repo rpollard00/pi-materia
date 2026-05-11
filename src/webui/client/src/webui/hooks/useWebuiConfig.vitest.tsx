@@ -9,7 +9,7 @@ const initialConfig = {
   loadouts: {
     Alpha: {
       entry: 'Socket-1',
-      nodes: { 'Socket-1': { type: 'agent', materia: 'Build' } },
+      sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } },
     },
   },
 } satisfies MateriaConfig;
@@ -20,7 +20,7 @@ const reloadedConfig = {
   loadouts: {
     Alpha: {
       entry: 'Socket-1',
-      nodes: { 'Socket-1': { type: 'agent', materia: 'Reloaded' } },
+      sockets: { 'Socket-1': { type: 'agent', materia: 'Reloaded' } },
     },
   },
 } satisfies MateriaConfig;
@@ -34,14 +34,14 @@ const reportedLayeredConfig = {
   loadouts: {
     'Full-Auto': {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
       },
     },
     'Hojo-Consult': {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', label: 'Hojo profile consult' },
       },
     },
@@ -62,7 +62,7 @@ function ConfigProbe() {
       <button
         type="button"
         onClick={() => config.updateDraft((draft) => {
-          const node = draft.loadouts?.Alpha?.nodes?.['Socket-1'] ?? draft.loadouts?.['Full-Auto']?.nodes?.['Socket-1'];
+          const node = draft.loadouts?.Alpha?.sockets?.['Socket-1'] ?? draft.loadouts?.['Full-Auto']?.sockets?.['Socket-1'];
           if (node) node.materia = 'LocalEdit';
         })}
       >
@@ -116,7 +116,7 @@ describe('dirty config comparison', () => {
       },
       loadouts: {
         'Full-Auto': {
-          nodes: {
+          sockets: {
             'Socket-1': { next: 'Socket-2', materia: 'Build', type: 'agent' },
             'Socket-2': { materia: 'Build', type: 'agent' },
           },
@@ -128,7 +128,7 @@ describe('dirty config comparison', () => {
       loadouts: {
         'Full-Auto': {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-2': { type: 'agent', materia: 'Build' },
             'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
           },
@@ -148,7 +148,7 @@ describe('dirty config comparison', () => {
       loadouts: {
         Layout: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Build', layout: { x: 1, y: 2 } },
             'Socket-2': { type: 'agent', materia: 'Build', layout: { x: 3, y: 4 } },
           },
@@ -161,7 +161,7 @@ describe('dirty config comparison', () => {
         Layout: {
           entry: 'Socket-1',
           layout: { sockets: { 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 3, y: 4 } } },
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Build' },
             'Socket-2': { type: 'agent', materia: 'Build' },
           },
@@ -176,7 +176,7 @@ describe('dirty config comparison', () => {
   it('detects real persisted config additions, deletions, renames, and socket/materia/profile/loadout edits', () => {
     const baseline = reportedLayeredConfig;
     const editedSocket = cloneConfigForTest(baseline);
-    editedSocket.loadouts!['Full-Auto']!.nodes!['Socket-1']!.materia = 'Auto-Eval';
+    editedSocket.loadouts!['Full-Auto']!.sockets!['Socket-1']!.materia = 'Auto-Eval';
     expect(dirtyConfigKey(editedSocket)).not.toBe(dirtyConfigKey(baseline));
 
     const editedMateria = cloneConfigForTest(baseline);
@@ -188,7 +188,7 @@ describe('dirty config comparison', () => {
     expect(dirtyConfigKey(editedProfile)).not.toBe(dirtyConfigKey(baseline));
 
     const addedLoadout = cloneConfigForTest(baseline);
-    addedLoadout.loadouts!.Added = { entry: 'Socket-1', nodes: { 'Socket-1': { type: 'agent', materia: 'Build' } } };
+    addedLoadout.loadouts!.Added = { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } };
     expect(dirtyConfigKey(addedLoadout)).not.toBe(dirtyConfigKey(baseline));
 
     const deletedLoadout = cloneConfigForTest(baseline);
@@ -276,7 +276,7 @@ describe('useWebuiConfig', () => {
       loadouts: {
         Alpha: {
           entry: 'Socket-1',
-          nodes: { 'Socket-1': { type: 'agent', materia: 'Build' } },
+          sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } },
         },
       },
     } satisfies MateriaConfig;
@@ -289,8 +289,8 @@ describe('useWebuiConfig', () => {
     await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
     const draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
     expect(draft.loadouts?.Alpha?.layout?.sockets?.['Socket-1']).toEqual({ x: 7, y: 9 });
-    expect(draft.loadouts?.Alpha?.nodes?.['Socket-1']?.parse).toBeUndefined();
-    expect(draft.loadouts?.Alpha?.nodes?.['Socket-1']?.assign).toBeUndefined();
+    expect(draft.loadouts?.Alpha?.sockets?.['Socket-1']?.parse).toBeUndefined();
+    expect(draft.loadouts?.Alpha?.sockets?.['Socket-1']?.assign).toBeUndefined();
   });
 
   it('can reload reusable materia definitions while preserving staged loadout edits', async () => {
@@ -310,7 +310,7 @@ describe('useWebuiConfig', () => {
     await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('reloaded with preserved loadout edits'));
     const draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
     expect(draft.materia?.Build?.prompt).toBe('new prompt');
-    expect(draft.loadouts?.Alpha?.nodes?.['Socket-1']?.materia).toBe('LocalEdit');
+    expect(draft.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('LocalEdit');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

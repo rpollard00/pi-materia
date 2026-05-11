@@ -28,19 +28,19 @@ export function useLoadoutGraphViewModel({
   monitor,
 }: LoadoutGraphViewModelOptions) {
   const materia = draftConfig?.materia ?? {};
-  const semanticEdges = useMemo(() => getLoadoutEdges(activeLoadout), [activeLoadout?.nodes, activeLoadout?.loops]);
+  const semanticEdges = useMemo(() => getLoadoutEdges(activeLoadout), [activeLoadout?.sockets, activeLoadout?.loops]);
   const loadoutGraph = useMemo(
     () => layoutSockets(activeLoadout, semanticEdges, materia),
-    [activeLoadout?.entry, activeLoadout?.nodes, activeLoadout?.loops, activeLoadout?.layout, semanticEdges, materia],
+    [activeLoadout?.entry, activeLoadout?.sockets, activeLoadout?.loops, activeLoadout?.layout, semanticEdges, materia],
   );
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
-  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions, materia), [activeLoadout?.loops, activeLoadout?.nodes, socketPositions, materia]);
+  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions, materia), [activeLoadout?.loops, activeLoadout?.sockets, socketPositions, materia]);
   const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout?.loops]);
   const loopExitBadges = useMemo(() => getLoopExitBadges(activeLoadout), [activeLoadout?.loops]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
   const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
-  const socketLabel = useCallback((id: string) => formatSocketLabel(id, activeLoadout?.nodes?.[id]), [activeLoadout?.nodes]);
+  const socketLabel = useCallback((id: string) => formatSocketLabel(id, activeLoadout?.sockets?.[id]), [activeLoadout?.sockets]);
   const socketDisplayLabel = useCallback((id: string) => resolveSocketDisplayLabel(activeLoadout, id), [activeLoadout]);
   const loopSelectionRectangle = socketRegionSelectionDrag ? {
     x: Math.min(socketRegionSelectionDrag.startX, socketRegionSelectionDrag.currentX),

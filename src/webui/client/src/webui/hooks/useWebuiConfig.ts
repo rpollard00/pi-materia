@@ -100,7 +100,7 @@ function demoConfig(): MateriaConfig {
     loadouts: {
       'Demo Loadout': {
         entry: 'Socket-1',
-        nodes: {
+        sockets: {
           'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
           'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
           'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Socket-4' }] },

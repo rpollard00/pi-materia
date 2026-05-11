@@ -120,14 +120,14 @@ function loopConsumerSummary(loadout: PipelineConfig | undefined, loopId: string
 }
 
 function loopConsumerForSocket(loadout: PipelineConfig | undefined, socketId: string, definitions?: MateriaConfig['materia']): string | undefined {
-  const match = Object.entries(loadout?.loops ?? {}).find(([, candidate]) => candidate.nodes.includes(socketId));
+  const match = Object.entries(loadout?.loops ?? {}).find(([, candidate]) => candidate.sockets.includes(socketId));
   return match ? loopConsumerSummary(loadout, match[0], match[1], definitions) : undefined;
 }
 
 function formatLoopExitSummary(loadout: PipelineConfig | undefined, loopId: string, loop: NonNullable<PipelineConfig['loops']>[string]): string | undefined {
   if (!loop.exit) return undefined;
-  const label = formatLoopDisplayLabel(loadout, loopId, loop.nodes, loop.label);
-  const target = loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to]);
+  const label = formatLoopDisplayLabel(loadout, loopId, loop.sockets, loop.label);
+  const target = loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.sockets?.[loop.exit.to]);
   return `Loop exit for ${label}: ${edgeConditionLabel(loop.exit.when)} → ${target}`;
 }
 
@@ -140,9 +140,9 @@ function loopExitSummariesForSocket(loadout: PipelineConfig | undefined, socketI
 }
 
 function generatorLoopOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
-  const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.nodes.includes(edge.to));
+  const loop = Object.values(loadout?.loops ?? {}).find((candidate) => candidate.sockets.includes(edge.to));
   if (!loop) return undefined;
-  const fromNode = loadout?.nodes?.[edge.from];
+  const fromNode = loadout?.sockets?.[edge.from];
   const referenced = extractMateriaReference(fromNode);
   const output = referenced ? materiaGeneratorOutput(definitions?.[referenced.materia]) : undefined;
   if (output) return output;
@@ -154,8 +154,8 @@ function generatorEdgeOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: Pi
 }
 
 function generatorToGeneratorOutput(edge: Pick<LoadoutEdge, 'from' | 'to'>, loadout: PipelineConfig | undefined, definitions?: MateriaConfig['materia']): string | undefined {
-  const fromNode = loadout?.nodes?.[edge.from];
-  const toNode = loadout?.nodes?.[edge.to];
+  const fromNode = loadout?.sockets?.[edge.from];
+  const toNode = loadout?.sockets?.[edge.to];
   return isGeneratorSocket(fromNode, definitions) && isGeneratorSocket(toNode, definitions) ? 'workItems' : undefined;
 }
 
@@ -220,11 +220,11 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
     if (node.command?.length) lines.push(`Command: ${node.command.join(' ')}`);
   }
   if (node?.edges?.length) {
-    lines.push(`Edges: ${node.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when, kind: 'normal' }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.nodes?.[edge.to])}`).join(', ')}`);
+    lines.push(`Edges: ${node.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when, kind: 'normal' }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.sockets?.[edge.to])}`).join(', ')}`);
   }
-  const loopExitRoutes = Object.entries(loadout?.loops ?? {}).flatMap(([, loop]) => (loop.exits ?? []).filter((route) => route.from === id && loadout?.nodes?.[route.targetSocketId]));
+  const loopExitRoutes = Object.entries(loadout?.loops ?? {}).flatMap(([, loop]) => (loop.exits ?? []).filter((route) => route.from === id && loadout?.sockets?.[route.targetSocketId]));
   if (loopExitRoutes.length) {
-    lines.push(`Loop-exit routes: ${loopExitRoutes.map((route) => `${loopExitEdgeLabel(route.condition)} → ${formatSocketLabel(route.targetSocketId, loadout?.nodes?.[route.targetSocketId])}`).join(', ')}`);
+    lines.push(`Loop-exit routes: ${loopExitRoutes.map((route) => `${loopExitEdgeLabel(route.condition)} → ${formatSocketLabel(route.targetSocketId, loadout?.sockets?.[route.targetSocketId])}`).join(', ')}`);
   }
   const legacyNext = (node as LegacyPipelineNode | undefined)?.next;
   if (legacyNext) lines.push(`Legacy flow: Always → ${legacyNext}`);
@@ -244,20 +244,20 @@ export function buildSocketHoverDetails(id: string, node?: PipelineNode, definit
 }
 
 export function getLoadoutEdges(loadout: PipelineConfig | undefined): LoadoutEdge[] {
-  const nodes = loadout?.nodes ?? {};
+  const sockets = loadout?.sockets ?? {};
   const edges: LoadoutEdge[] = [];
-  for (const [from, node] of Object.entries(nodes)) {
+  for (const [from, node] of Object.entries(sockets)) {
     for (const [index, edge] of (node.edges ?? []).entries()) {
-      if (nodes[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when}`, from, to: edge.to, when: edge.when, kind: 'normal', edgeIndex: index });
+      if (sockets[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when}`, from, to: edge.to, when: edge.when, kind: 'normal', edgeIndex: index });
     }
     const legacyNext = (node as LegacyPipelineNode).next;
-    if (typeof legacyNext === 'string' && nodes[legacyNext]) {
+    if (typeof legacyNext === 'string' && sockets[legacyNext]) {
       edges.push({ id: `${from}:legacy-next:${legacyNext}`, from, to: legacyNext, when: 'always', kind: 'legacy-next' });
     }
   }
   for (const [loopId, loop] of Object.entries(loadout?.loops ?? {})) {
     for (const route of loop.exits ?? []) {
-      if (nodes[route.from] && nodes[route.targetSocketId]) {
+      if (sockets[route.from] && sockets[route.targetSocketId]) {
         edges.push({
           id: `loop-exit:${loopId}:${route.id}`,
           from: route.from,
@@ -478,7 +478,7 @@ function selfLoopRoute(socket: PositionedSocket, lane: number) {
 export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, PositionedSocket>): RoutedLoadoutEdge[] {
   // Keep routing deterministic and local instead of adding a physics/layout dependency:
   // the WebUI preserves user-authored socket positions, so force solvers would move
-  // nodes unpredictably and make saved layouts harder to reason about. Edges are
+  // sockets unpredictably and make saved layouts harder to reason about. Edges are
   // separated by stable lanes and attached to the nearest sensible side of each
   // socket so arrowheads follow the final segment into the target edge.
   const laneGroups = routeLaneGroups(edges, positions);
@@ -581,15 +581,15 @@ export function formatLoopDisplayLabel(loadout: PipelineConfig | undefined, loop
 
 export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>, definitions?: MateriaConfig['materia']): LoopRegion[] {
   return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop], index) => {
-    const sockets = loop.nodes.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
+    const sockets = loop.sockets.map((nodeId) => positions.get(nodeId)).filter(Boolean) as PositionedSocket[];
     if (sockets.length === 0) return [];
     const minX = Math.min(...sockets.map((socket) => socket.x));
     const minY = Math.min(...sockets.map((socket) => socket.y));
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
     const consumer = loopConsumerSummary(loadout, id, loop, definitions);
-    const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.nodes?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.nodes?.[loop.exit.to])}` : undefined;
+    const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.sockets?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.sockets?.[loop.exit.to])}` : undefined;
     const summary = [consumer, exit].filter(Boolean).join(' • ');
-    const label = formatLoopDisplayLabel(loadout, id, loop.nodes, loop.label);
+    const label = formatLoopDisplayLabel(loadout, id, loop.sockets, loop.label);
     const socketSpanWidth = maxX - minX;
     const headerWidth = Math.min(loopHeaderMaxWidth, Math.max(estimateLoopHeaderWidth(label, summary), socketSpanWidth + 48));
     const headerX = rounded(minX + socketSpanWidth / 2 - headerWidth / 2);
@@ -602,7 +602,7 @@ export function getLoopMemberships(loadout: PipelineConfig | undefined): Map<str
   const memberships = new Map<string, LoopMembership>();
   Object.entries(loadout?.loops ?? {}).forEach(([loopId, loop], index) => {
     const accent = loopAccent(index);
-    for (const socketId of loop.nodes) {
+    for (const socketId of loop.sockets) {
       const existing = memberships.get(socketId);
       memberships.set(socketId, existing
         ? { ...existing, loopIds: [...existing.loopIds, loopId] }
@@ -628,10 +628,10 @@ export function getLoopExitBadges(loadout: PipelineConfig | undefined): Map<stri
 }
 
 export function layoutSockets(loadout?: PipelineConfig, semanticEdges?: LoadoutEdge[], definitions?: MateriaConfig['materia']): LayoutSocketsResult {
-  const nodes = loadout?.nodes ?? {};
-  const entries = Object.entries(nodes);
+  const socketMap = loadout?.sockets ?? {};
+  const entries = Object.entries(socketMap);
   const edges = semanticEdges ?? getLoadoutEdges(loadout);
-  const entryId = loadout?.entry && nodes[loadout.entry] ? loadout.entry : entries[0]?.[0];
+  const entryId = loadout?.entry && socketMap[loadout.entry] ? loadout.entry : entries[0]?.[0];
   const orderedAutoIds = getAutomaticSocketOrder(entries, edges, entryId).filter((id) => {
     const layout = getSocketLayout(loadout, id);
     return typeof layout?.x !== 'number' || typeof layout?.y !== 'number';
@@ -643,7 +643,7 @@ export function layoutSockets(loadout?: PipelineConfig, semanticEdges?: LoadoutE
     return typeof layout?.x === 'number' || typeof layout?.y === 'number';
   });
   const autoRowGap = hasExplicitLayout ? socketLayoutUnitY + 8 : socketLayoutRowGap;
-  let sockets = entries.map(([id, node], index) => {
+  let sockets: PositionedSocket[] = entries.map(([id, node], index) => {
     const autoPosition = serpentineAutoPosition(autoIndexById.get(id) ?? index, autoRowGap);
     const layout = getSocketLayout(loadout, id);
     const explicitX = typeof layout?.x === 'number' ? layoutUnit(layout.x, socketLayoutUnitX) : undefined;

@@ -31,7 +31,7 @@ function deepFreeze<T>(value: T): T {
 function baseLoadout(): PipelineConfig {
   return {
     entry: 'Socket-1',
-    nodes: {
+    sockets: {
       'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
       'Socket-2': { socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }] },
       'Socket-3': { socketKind: 'normal', type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
@@ -41,7 +41,7 @@ function baseLoadout(): PipelineConfig {
     loops: {
       work: {
         label: 'Work loop',
-        nodes: ['Socket-3', 'Socket-4'],
+        sockets: ['Socket-3', 'Socket-4'],
         consumes: { from: 'Socket-1', output: 'workItems' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
         exits: [{ id: 'exit:Socket-4:always', from: 'Socket-4', condition: 'always', targetSocketId: 'Socket-2' }],
@@ -57,55 +57,55 @@ describe('immutable loadout transforms', () => {
     const next = createConnectedEmptySocket(previous, 'Socket-1');
 
     expect(next).not.toBe(previous);
-    expect(next.nodes).not.toBe(previous.nodes);
-    expect(next.nodes?.['Socket-2']).toBe(previous.nodes?.['Socket-2']);
-    expect(next.nodes?.['Socket-1']).not.toBe(previous.nodes?.['Socket-1']);
-    expect(next.nodes?.['Socket-5']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(next.sockets).not.toBe(previous.sockets);
+    expect(next.sockets?.['Socket-2']).toBe(previous.sockets?.['Socket-2']);
+    expect(next.sockets?.['Socket-1']).not.toBe(previous.sockets?.['Socket-1']);
+    expect(next.sockets?.['Socket-5']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-2' }] });
     expect(next.layout?.sockets?.['Socket-5']).toEqual({ x: 1, y: 0 });
-    expect(previous.nodes?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(previous.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
   });
 
   it('places, swaps, and clears materia by cloning only affected sockets', () => {
     const previous = deepFreeze(baseLoadout());
     const placed = setSocketMateria(previous, 'Socket-2', { type: 'agent', materia: 'Review', parse: 'json' });
-    expect(placed.nodes?.['Socket-2']).toMatchObject({ type: 'agent', materia: 'Review', parse: 'json', empty: false });
-    expect(placed.nodes?.['Socket-1']).toBe(previous.nodes?.['Socket-1']);
-    expect(previous.nodes?.['Socket-2']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }] });
+    expect(placed.sockets?.['Socket-2']).toMatchObject({ type: 'agent', materia: 'Review', parse: 'json', empty: false });
+    expect(placed.sockets?.['Socket-1']).toBe(previous.sockets?.['Socket-1']);
+    expect(previous.sockets?.['Socket-2']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }] });
     expect(previous.layout?.sockets?.['Socket-2']).toEqual({ x: 1, y: 0 });
 
     const swapped = swapSocketMateria(placed, 'Socket-1', 'Socket-2');
-    expect(swapped.nodes?.['Socket-1']).toMatchObject({ materia: 'Review', socketKind: 'entry' });
-    expect(swapped.nodes?.['Socket-2']).toMatchObject({ materia: 'planner', socketKind: 'normal' });
+    expect(swapped.sockets?.['Socket-1']).toMatchObject({ materia: 'Review', socketKind: 'entry' });
+    expect(swapped.sockets?.['Socket-2']).toMatchObject({ materia: 'planner', socketKind: 'normal' });
 
     const cleared = clearMateriaFromSocket(swapped, 'Socket-1');
-    expect(cleared.nodes?.['Socket-1']).toMatchObject({ empty: true, socketKind: 'entry' });
-    expect(swapped.nodes?.['Socket-1']).toMatchObject({ materia: 'Review' });
+    expect(cleared.sockets?.['Socket-1']).toMatchObject({ empty: true, socketKind: 'entry' });
+    expect(swapped.sockets?.['Socket-1']).toMatchObject({ materia: 'Review' });
   });
 
   it('adds and removes graph edges and legacy next links immutably', () => {
     const withLegacy: PipelineConfig = baseLoadout();
-    withLegacy.nodes = { ...withLegacy.nodes!, 'Socket-5': { socketKind: 'normal' }, Legacy: { socketKind: 'normal', next: 'Socket-1' } };
+    withLegacy.sockets = { ...withLegacy.sockets!, 'Socket-5': { socketKind: 'normal' }, Legacy: { socketKind: 'normal', next: 'Socket-1' } };
     const previous = deepFreeze(withLegacy);
     const added = addEdgeToLoadout(previous, 'Socket-2', 'Socket-5', 'satisfied');
-    expect(added.nodes?.['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }, { when: 'satisfied', to: 'Socket-5' }]);
-    expect(previous.nodes?.['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+    expect(added.sockets?.['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }, { when: 'satisfied', to: 'Socket-5' }]);
+    expect(previous.sockets?.['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
 
     const removed = removeEdgeFromLoadout(added, 'Socket-2', 0);
-    expect(removed.nodes?.['Socket-2'].edges).toEqual([{ when: 'satisfied', to: 'Socket-5' }]);
+    expect(removed.sockets?.['Socket-2'].edges).toEqual([{ when: 'satisfied', to: 'Socket-5' }]);
 
     const withoutNext = removeLegacyNextFromLoadout(previous, 'Legacy');
-    expect(withoutNext.nodes?.Legacy).not.toHaveProperty('next');
-    expect(previous.nodes?.Legacy).toHaveProperty('next', 'Socket-1');
+    expect(withoutNext.sockets?.Legacy).not.toHaveProperty('next');
+    expect(previous.sockets?.Legacy).toHaveProperty('next', 'Socket-1');
 
     const toggled = toggleEdgeConditionInLoadout(previous, 'Socket-1', 'Socket-2', 'always', 'satisfied', 0);
-    expect(toggled.nodes?.['Socket-1'].edges).toEqual([{ when: 'satisfied', to: 'Socket-2' }]);
+    expect(toggled.sockets?.['Socket-1'].edges).toEqual([{ when: 'satisfied', to: 'Socket-2' }]);
   });
 
   it('creates, edits, clears, deletes loops and loop-exit routes without mutating inputs', () => {
     const previous = deepFreeze(baseLoadout());
     const created = createTaskLoop(previous, 'single', 'Single', ['Socket-2'], { from: 'Socket-1', output: 'workItems' }, { from: 'Socket-2', when: 'always', to: 'end' });
     expect(created.loops?.single).toBeDefined();
-    expect(created.nodes?.['Socket-2'].edges).toContainEqual({ when: 'always', to: 'Socket-2' });
+    expect(created.sockets?.['Socket-2'].edges).toContainEqual({ when: 'always', to: 'Socket-2' });
     expect(previous.loops?.single).toBeUndefined();
 
     const updated = updateLoopExitInLoadout(previous, 'work', { from: 'Socket-3', when: 'always', to: 'Socket-2' });
@@ -136,9 +136,9 @@ describe('immutable loadout transforms', () => {
     const previous = deepFreeze(baseLoadout());
     const next = deleteSocketImmutable(previous, 'Socket-2');
 
-    expect(next.nodes?.['Socket-2']).toBeUndefined();
-    expect(next.nodes?.['Socket-1'].edges).toBeUndefined();
-    expect(previous.nodes?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(next.sockets?.['Socket-2']).toBeUndefined();
+    expect(next.sockets?.['Socket-1'].edges).toBeUndefined();
+    expect(previous.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
     expect(next.loops?.work.exits).toBeUndefined();
   });
 
@@ -152,15 +152,15 @@ describe('immutable loadout transforms', () => {
   it('returns changed semantic references so graph analysis sees generator insertion before a loop', () => {
     const definitions = { planner: { generator: true }, refiner: { generator: true }, Build: {}, Maintain: {} };
     const directToLoop = baseLoadout();
-    directToLoop.nodes!['Socket-1'].edges = [{ when: 'always', to: 'Socket-3' }];
+    directToLoop.sockets!['Socket-1'].edges = [{ when: 'always', to: 'Socket-3' }];
     const previous = deepFreeze(directToLoop);
     const inserted = setSocketMateria(createConnectedEmptySocket(previous, 'Socket-1'), 'Socket-5', { type: 'agent', materia: 'refiner' });
 
     expect(inserted).not.toBe(previous);
-    expect(inserted.nodes).not.toBe(previous.nodes);
+    expect(inserted.sockets).not.toBe(previous.sockets);
     const analysis = analyzeLoadoutGraph(fromWebUiLoadoutDto(inserted as never), definitions);
     expect(analysis.workItemProducingSocketIds.has('Socket-5')).toBe(true);
     expect(analysis.loopConsumerSources.get('work')?.from).toBe('Socket-5');
-    expect(previous.nodes?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+    expect(previous.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
   });
 });

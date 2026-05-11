@@ -19,8 +19,8 @@ import {
 
 export type LoadoutTransform = (loadout: PipelineConfig) => PipelineConfig;
 
-function replaceNodes(loadout: PipelineConfig, nodes: Record<string, PipelineNode>): PipelineConfig {
-  return { ...loadout, nodes };
+function replaceNodes(loadout: PipelineConfig, sockets: Record<string, PipelineNode>): PipelineConfig {
+  return { ...loadout, sockets };
 }
 
 function replaceLoops(loadout: PipelineConfig, loops: Record<string, PipelineLoop> | undefined): PipelineConfig {
@@ -44,10 +44,10 @@ function deleteOptionalDone<T extends { done?: string }>(container: T | undefine
   return next;
 }
 
-function removeLoopRuntimeControls(loadout: PipelineConfig, nodes: Record<string, PipelineNode>, loop: PipelineLoop): Record<string, PipelineNode> {
+function removeLoopRuntimeControls(loadout: PipelineConfig, sockets: Record<string, PipelineNode>, loop: PipelineLoop): Record<string, PipelineNode> {
   const exitSource = loop.exit?.from;
-  const sourceNode = exitSource ? nodes[exitSource] : undefined;
-  if (!exitSource || !sourceNode) return nodes;
+  const sourceNode = exitSource ? sockets[exitSource] : undefined;
+  if (!exitSource || !sourceNode) return sockets;
 
   const loopExitTargets = new Set((loop.exits ?? []).map((route) => route.targetSocketId));
   const advanceDoneTarget = loop.exit?.to;
@@ -62,8 +62,8 @@ function removeLoopRuntimeControls(loadout: PipelineConfig, nodes: Record<string
     const edges = sourceNode.edges.filter((edge) => !loopExitTargets.has(edge.to));
     nextSource = withoutUndefinedEdges({ ...nextSource, edges });
   }
-  if (nextSource === sourceNode) return nodes;
-  return { ...nodes, [exitSource]: nextSource };
+  if (nextSource === sourceNode) return sockets;
+  return { ...sockets, [exitSource]: nextSource };
 }
 
 export function applyLoadoutTransform(loadout: PipelineConfig, transform: LoadoutTransform): PipelineConfig {
@@ -85,67 +85,67 @@ function socketLimitsEqual(left: PipelineNode['limits'] | undefined, right: Pipe
 }
 
 export function setSocketLimits(loadout: PipelineConfig, socketId: string, limits: PipelineNode['limits'] | undefined): PipelineConfig {
-  const node = loadout.nodes?.[socketId];
-  if (!loadout.nodes || !node) return loadout;
+  const node = loadout.sockets?.[socketId];
+  if (!loadout.sockets || !node) return loadout;
   const nextLimits = limits && Object.keys(limits).length > 0 ? limits : undefined;
   if (socketLimitsEqual(node.limits, nextLimits)) return loadout;
   const nextNode = { ...node };
   if (nextLimits) nextNode.limits = { ...nextLimits };
   else delete nextNode.limits;
-  return replaceNodes(loadout, { ...loadout.nodes, [socketId]: nextNode });
+  return replaceNodes(loadout, { ...loadout.sockets, [socketId]: nextNode });
 }
 
 export function setSocketMateria(loadout: PipelineConfig, socketId: string, materia: PipelineNode): PipelineConfig {
-  const target = loadout.nodes?.[socketId];
-  if (!loadout.nodes || !target || isEmptySocket(materia)) return loadout;
+  const target = loadout.sockets?.[socketId];
+  if (!loadout.sockets || !target || isEmptySocket(materia)) return loadout;
   const nextNode = placeMateriaInSocket(target, materia);
   if (nextNode === target) return loadout;
-  return replaceNodes(loadout, { ...loadout.nodes, [socketId]: nextNode });
+  return replaceNodes(loadout, { ...loadout.sockets, [socketId]: nextNode });
 }
 
 export function swapSocketMateria(loadout: PipelineConfig, a: string, b: string): PipelineConfig {
-  const nodes = loadout.nodes;
-  const source = nodes?.[a];
-  const target = nodes?.[b];
-  if (!nodes || !source || !target || a === b || isEmptySocket(source)) return loadout;
+  const sockets = loadout.sockets;
+  const source = sockets?.[a];
+  const target = sockets?.[b];
+  if (!sockets || !source || !target || a === b || isEmptySocket(source)) return loadout;
   return replaceNodes(loadout, {
-    ...nodes,
+    ...sockets,
     [b]: placeMateriaInSocket(target, source),
     [a]: placeMateriaInSocket(source, target),
   });
 }
 
 export function clearMateriaFromSocket(loadout: PipelineConfig, socketId: string): PipelineConfig {
-  const node = loadout.nodes?.[socketId];
-  if (!loadout.nodes || !node || isEmptySocket(node)) return loadout;
-  return replaceNodes(loadout, { ...loadout.nodes, [socketId]: clearSocketMateria(node) });
+  const node = loadout.sockets?.[socketId];
+  if (!loadout.sockets || !node || isEmptySocket(node)) return loadout;
+  return replaceNodes(loadout, { ...loadout.sockets, [socketId]: clearSocketMateria(node) });
 }
 
 export function createConnectedEmptySocket(loadout: PipelineConfig, afterSocketId: string): PipelineConfig {
-  const source = loadout.nodes?.[afterSocketId];
-  if (!loadout.nodes || !source) return loadout;
-  const newId = makeNewSocketId(loadout.nodes);
+  const source = loadout.sockets?.[afterSocketId];
+  if (!loadout.sockets || !source) return loadout;
+  const newId = makeNewSocketId(loadout.sockets);
   const sourceLayout = getSocketLayout(loadout, afterSocketId);
   const newNode = makeEmptySocket();
   const loopExitContext = findLoopExitConnectionContext(loadout, afterSocketId);
-  const nodes = { ...loadout.nodes, [newId]: newNode };
+  const sockets = { ...loadout.sockets, [newId]: newNode };
   const withLayout = (next: PipelineConfig) => sourceLayout ? setLoadoutSocketLayout(next, newId, { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 }) : next;
-  if (loopExitContext) return withLayout(upsertLoopExitRouteInLoadout({ ...loadout, nodes }, loopExitContext.loopId, afterSocketId, 'always', newId));
+  if (loopExitContext) return withLayout(upsertLoopExitRouteInLoadout({ ...loadout, sockets }, loopExitContext.loopId, afterSocketId, 'always', newId));
 
   const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
   const inserted = priorAlways ? { ...newNode, edges: [{ when: 'always' as const, to: priorAlways }] } : newNode;
-  nodes[newId] = inserted;
-  nodes[afterSocketId] = { ...source, edges: [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }] };
-  return withLayout(replaceNodes(loadout, nodes));
+  sockets[newId] = inserted;
+  sockets[afterSocketId] = { ...source, edges: [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }] };
+  return withLayout(replaceNodes(loadout, sockets));
 }
 
 export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string): PipelineConfig {
-  const node = loadout.nodes?.[socketId];
-  if (!loadout.nodes || !canDeleteSocket(node)) return loadout;
+  const node = loadout.sockets?.[socketId];
+  if (!loadout.sockets || !canDeleteSocket(node)) return loadout;
 
-  let nodes: Record<string, PipelineNode> = { ...loadout.nodes };
-  delete nodes[socketId];
-  for (const [id, current] of Object.entries(nodes)) {
+  let sockets: Record<string, PipelineNode> = { ...loadout.sockets };
+  delete sockets[socketId];
+  for (const [id, current] of Object.entries(sockets)) {
     let next = current as LegacyPipelineNode;
     const edges = current.edges?.filter((edge) => edge.to !== socketId);
     if (edges && edges.length !== (current.edges ?? []).length) next = withoutUndefinedEdges({ ...next, edges }) as LegacyPipelineNode;
@@ -158,13 +158,13 @@ export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string)
     if (foreach !== next.foreach || advance !== next.advance) next = { ...next, foreach, advance };
     if (foreach === undefined && 'foreach' in next) delete next.foreach;
     if (advance === undefined && 'advance' in next) delete next.advance;
-    if (next !== current) nodes[id] = next;
+    if (next !== current) sockets[id] = next;
   }
 
   let loops = loadout.loops ? { ...loadout.loops } : undefined;
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
-    if (loop.nodes.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId || loop.exits?.some((route) => route.from === socketId)) {
-      nodes = removeLoopRuntimeControls(loadout, nodes, loop);
+    if (loop.sockets.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId || loop.exits?.some((route) => route.from === socketId)) {
+      sockets = removeLoopRuntimeControls(loadout, sockets, loop);
       delete loops?.[loopId];
       continue;
     }
@@ -181,29 +181,29 @@ export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string)
     if (nextLoop !== loop && loops) loops[loopId] = nextLoop;
   }
 
-  return setLoadoutSocketLayout(replaceLoops(replaceNodes(loadout, nodes), loops), socketId, undefined);
+  return setLoadoutSocketLayout(replaceLoops(replaceNodes(loadout, sockets), loops), socketId, undefined);
 }
 
-export function createTaskLoop(loadout: PipelineConfig, loopId: string, label: string, nodes: string[], consumes: { from: string; output: string }, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
-  if (nodes.length === 0) return loadout;
+export function createTaskLoop(loadout: PipelineConfig, loopId: string, label: string, sockets: string[], consumes: { from: string; output: string }, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
+  if (sockets.length === 0) return loadout;
   let nextLoadout = loadout;
-  if (nodes.length === 1) {
-    const socketId = nodes[0];
-    const node = loadout.nodes?.[socketId];
-    if (loadout.nodes && node && !(node.edges ?? []).some((edge) => edge.to === socketId)) {
-      nextLoadout = replaceNodes(loadout, { ...loadout.nodes, [socketId]: { ...node, edges: [{ when: 'always', to: socketId }] } });
+  if (sockets.length === 1) {
+    const socketId = sockets[0];
+    const node = loadout.sockets?.[socketId];
+    if (loadout.sockets && node && !(node.edges ?? []).some((edge) => edge.to === socketId)) {
+      nextLoadout = replaceNodes(loadout, { ...loadout.sockets, [socketId]: { ...node, edges: [{ when: 'always', to: socketId }] } });
     }
   }
-  return { ...nextLoadout, loops: { ...(nextLoadout.loops ?? {}), [loopId]: { label, nodes, consumes, exit } } };
+  return { ...nextLoadout, loops: { ...(nextLoadout.loops ?? {}), [loopId]: { label, sockets, consumes, exit } } };
 }
 
 export function updateLoopExitInLoadout(loadout: PipelineConfig, loopId: string, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
   const loop = loadout.loops?.[loopId];
   if (!loadout.loops || !loop) return loadout;
-  const nodes = loadout.nodes ? removeLoopRuntimeControls(loadout, loadout.nodes, loop) : loadout.nodes;
+  const sockets = loadout.sockets ? removeLoopRuntimeControls(loadout, loadout.sockets, loop) : loadout.sockets;
   const nextLoop: PipelineLoop = { ...loop, exit };
   if (loop.exit?.from && loop.exit.from !== exit.from) delete nextLoop.exits;
-  return { ...loadout, ...(nodes && nodes !== loadout.nodes ? { nodes } : {}), loops: { ...loadout.loops, [loopId]: nextLoop } };
+  return { ...loadout, ...(sockets && sockets !== loadout.sockets ? { sockets } : {}), loops: { ...loadout.loops, [loopId]: nextLoop } };
 }
 
 export function clearLoopExitInLoadout(loadout: PipelineConfig, loopId: string): PipelineConfig {
@@ -224,7 +224,7 @@ export function deleteLoopFromLoadout(loadout: PipelineConfig, loopId: string): 
 
 export function upsertLoopExitRouteInLoadout(loadout: PipelineConfig, loopId: string, from: string, condition: MateriaEdgeCondition, targetSocketId: string): PipelineConfig {
   const loop = loadout.loops?.[loopId];
-  if (!loadout.loops || !loop || loop.exit?.from !== from || !loadout.nodes?.[targetSocketId]) return loadout;
+  if (!loadout.loops || !loop || loop.exit?.from !== from || !loadout.sockets?.[targetSocketId]) return loadout;
   const route = { id: loopExitRouteId(from, condition), from, condition, targetSocketId };
   const exits = [...(loop.exits ?? []).filter((candidate) => !(candidate.from === from && candidate.condition === condition)), route];
   return { ...loadout, loops: { ...loadout.loops, [loopId]: { ...loop, exits } } };
@@ -249,36 +249,36 @@ export function toggleLoopExitRouteCondition(loadout: PipelineConfig, loopId: st
 }
 
 export function addEdgeToLoadout(loadout: PipelineConfig, from: string, to: string, when: MateriaEdgeCondition): PipelineConfig {
-  const node = loadout.nodes?.[from];
-  if (!loadout.nodes || !node || !loadout.nodes[to]) return loadout;
-  return replaceNodes(loadout, { ...loadout.nodes, [from]: { ...node, edges: [...(node.edges ?? []), { to, when }] } });
+  const node = loadout.sockets?.[from];
+  if (!loadout.sockets || !node || !loadout.sockets[to]) return loadout;
+  return replaceNodes(loadout, { ...loadout.sockets, [from]: { ...node, edges: [...(node.edges ?? []), { to, when }] } });
 }
 
 export function removeEdgeFromLoadout(loadout: PipelineConfig, from: string, edgeIndex: number): PipelineConfig {
-  const node = loadout.nodes?.[from];
-  if (!loadout.nodes || !node?.edges?.[edgeIndex]) return loadout;
+  const node = loadout.sockets?.[from];
+  if (!loadout.sockets || !node?.edges?.[edgeIndex]) return loadout;
   const edges = node.edges.filter((_, index) => index !== edgeIndex);
-  return replaceNodes(loadout, { ...loadout.nodes, [from]: withoutUndefinedEdges({ ...node, edges }) });
+  return replaceNodes(loadout, { ...loadout.sockets, [from]: withoutUndefinedEdges({ ...node, edges }) });
 }
 
 export function removeLegacyNextFromLoadout(loadout: PipelineConfig, from: string): PipelineConfig {
-  const node = loadout.nodes?.[from] as LegacyPipelineNode | undefined;
-  if (!loadout.nodes || !node?.next) return loadout;
+  const node = loadout.sockets?.[from] as LegacyPipelineNode | undefined;
+  if (!loadout.sockets || !node?.next) return loadout;
   const next = { ...node };
   delete next.next;
-  return replaceNodes(loadout, { ...loadout.nodes, [from]: next });
+  return replaceNodes(loadout, { ...loadout.sockets, [from]: next });
 }
 
 export function toggleEdgeConditionInLoadout(loadout: PipelineConfig, from: string, to: string, when: MateriaEdgeCondition, nextWhen: MateriaEdgeCondition, edgeIndex?: number): PipelineConfig {
-  const node = loadout.nodes?.[from] as LegacyPipelineNode | undefined;
-  if (!loadout.nodes || !node) return loadout;
+  const node = loadout.sockets?.[from] as LegacyPipelineNode | undefined;
+  if (!loadout.sockets || !node) return loadout;
   if (edgeIndex === undefined) {
     const next = { ...node, edges: [...(node.edges ?? []), { to, when: nextWhen }] };
     delete next.next;
-    return replaceNodes(loadout, { ...loadout.nodes, [from]: next });
+    return replaceNodes(loadout, { ...loadout.sockets, [from]: next });
   }
   const candidate = node.edges?.[edgeIndex];
   if (!candidate) return loadout;
   const edges = node.edges!.map((edge, index) => index === edgeIndex ? { ...edge, when: nextWhen } : edge);
-  return replaceNodes(loadout, { ...loadout.nodes, [from]: { ...node, edges } });
+  return replaceNodes(loadout, { ...loadout.sockets, [from]: { ...node, edges } });
 }

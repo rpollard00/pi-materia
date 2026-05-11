@@ -100,7 +100,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function deleteSocket(socketId: string) {
-    const node = activeLoadout?.nodes?.[socketId];
+    const node = activeLoadout?.sockets?.[socketId];
     if (!node || !activeLoadoutName) return false;
     if (!canDeleteSocket(node)) {
       setStatus(`Cannot delete ${socketId}: entry sockets are protected.`);
@@ -139,14 +139,14 @@ export function useLoadoutGraphMutationController({
   }
 
   function openSocketPropertyEditor(socketId: string) {
-    setSocketPropertyForm(socketPropertyFormFromNode(activeLoadout?.nodes?.[socketId], getSocketLayout(activeLoadout, socketId)));
+    setSocketPropertyForm(socketPropertyFormFromNode(activeLoadout?.sockets?.[socketId], getSocketLayout(activeLoadout, socketId)));
     setSocketPropertyError('');
     setEdgeMutationError('');
     openSocketActionModal(socketId, 'edit');
   }
 
   function openEdgeConnector(socketId: string) {
-    const firstOtherSocket = Object.keys(activeLoadout?.nodes ?? {}).find((id) => id !== socketId) ?? '';
+    const firstOtherSocket = Object.keys(activeLoadout?.sockets ?? {}).find((id) => id !== socketId) ?? '';
     setEdgeTargetId(firstOtherSocket);
     setEdgeCondition(findLoopExitConnectionContext(activeLoadout, socketId) ? 'always' : 'satisfied');
     setEdgeMutationError('');
@@ -157,7 +157,7 @@ export function useLoadoutGraphMutationController({
     if (!activeLoadoutName || !activeLoadout) return false;
     const result = stageValidatedWebUiLoadoutTransform(activeLoadout, transform, {
       isGeneratorNode: (nodeId) => {
-        const referenced = extractMateriaReference(activeLoadout.nodes?.[nodeId]);
+        const referenced = extractMateriaReference(activeLoadout.sockets?.[nodeId]);
         return Boolean(referenced && materiaGeneratorOutput(materia[referenced.materia]));
       },
     });
@@ -174,7 +174,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function createTaskIteratorLoop() {
-    if (!activeLoadout?.nodes || selectedLoopSockets.length === 0) {
+    if (!activeLoadout?.sockets || selectedLoopSockets.length === 0) {
       setStatus('Cannot create loop; select the cycle sockets first with shift-click or a drag box.');
       return;
     }
@@ -182,7 +182,7 @@ export function useLoadoutGraphMutationController({
     const selected = new Set(selectedIds);
     const generatorInputs = loadoutGraph.edges.flatMap((edge) => {
       if (selected.has(edge.from) || !selected.has(edge.to)) return [];
-      const referenced = extractMateriaReference(activeLoadout.nodes?.[edge.from]);
+      const referenced = extractMateriaReference(activeLoadout.sockets?.[edge.from]);
       const output = referenced ? materiaGeneratorOutput(materia[referenced.materia]) : undefined;
       return output ? [{ from: edge.from, output }] : [];
     });
@@ -216,7 +216,7 @@ export function useLoadoutGraphMutationController({
   function updateLoopExit(loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) {
     const loop = activeLoadout?.loops?.[loopId];
     if (!loop) return;
-    const currentExit = loop.exit ?? { from: loop.nodes[loop.nodes.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
+    const currentExit = loop.exit ?? { from: loop.sockets[loop.sockets.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
     const nextExit = { ...currentExit, ...patch };
     commitGraphMutation(
       `Updated loop ${loopId} exit.`,
@@ -238,7 +238,7 @@ export function useLoadoutGraphMutationController({
   function breakLoop(loopId: string) {
     const loop = activeLoadout?.loops?.[loopId];
     if (!loop) return;
-    const label = formatLoopDisplayLabel(activeLoadout, loopId, loop.nodes, loop.label);
+    const label = formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets, loop.label);
     commitGraphMutation(
       `Broke loop ${loopId}.`,
       (loadout) => deleteLoopFromLoadout(loadout, loopId),
@@ -249,10 +249,10 @@ export function useLoadoutGraphMutationController({
 
   function validateLoopExitRouteRequest(from: string, to: string, condition: MateriaEdgeCondition, loopExitContext: ReturnType<typeof findLoopExitConnectionContext>): string | undefined {
     if (!loopExitContext) return undefined;
-    if (!activeLoadout?.nodes?.[from]) return `Loop-exit source ${from} is no longer available.`;
-    if (!activeLoadout.nodes?.[to]) return `Choose an existing target socket for the loop-exit route.`;
+    if (!activeLoadout?.sockets?.[from]) return `Loop-exit source ${from} is no longer available.`;
+    if (!activeLoadout.sockets?.[to]) return `Choose an existing target socket for the loop-exit route.`;
     if (loopExitContext.loop.exit?.from !== from) return `Socket ${socketLabel(from)} is no longer the configured exit source for loop ${loopExitContext.loopId}.`;
-    const parseMode = activeLoadout.nodes[from]?.parse;
+    const parseMode = activeLoadout.sockets[from]?.parse;
     if ((condition === 'satisfied' || condition === 'not_satisfied') && parseMode !== 'json') {
       return `Loop-exit ${edgeConditionLabel(condition)} routes require ${socketLabel(from)} to parse JSON so runtime can read the canonical satisfied field. Set parse to "json" or choose Always.`;
     }
@@ -322,7 +322,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function removeEdge(from: string, edgeIndex: number) {
-    const edge = activeLoadout?.nodes?.[from]?.edges?.[edgeIndex];
+    const edge = activeLoadout?.sockets?.[from]?.edges?.[edgeIndex];
     if (!edge) return;
     const removed = commitGraphMutation(
       `Removed edge ${from} → ${edge.to}.`,
@@ -334,7 +334,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function removeLegacyNextEdge(from: string) {
-    const to = (activeLoadout?.nodes?.[from] as LegacyPipelineNode | undefined)?.next;
+    const to = (activeLoadout?.sockets?.[from] as LegacyPipelineNode | undefined)?.next;
     if (!to) return;
     const removed = commitGraphMutation(
       `Removed legacy flow ${from} → ${to}.`,
@@ -346,7 +346,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function saveSocketProperties(socketId: string) {
-    if (!activeLoadoutName || !activeLoadout?.nodes?.[socketId]) return;
+    if (!activeLoadoutName || !activeLoadout?.sockets?.[socketId]) return;
     const errors: string[] = [];
     const maxVisits = parseOptionalPositiveInteger('Max visits', socketPropertyForm.maxVisits, errors);
     const maxEdgeTraversals = parseOptionalPositiveInteger('Retry / edge traversal limit', socketPropertyForm.maxEdgeTraversals, errors);
@@ -369,7 +369,7 @@ export function useLoadoutGraphMutationController({
     if (layoutX !== undefined) layout.x = layoutX;
     if (layoutY !== undefined) layout.y = layoutY;
     const nextLayout = Object.keys(layout).length > 0 ? layout : undefined;
-    const currentNode = activeLoadout.nodes[socketId];
+    const currentNode = activeLoadout.sockets[socketId];
     const limitsChanged = (currentNode.limits?.maxVisits ?? undefined) !== (nextLimits?.maxVisits ?? undefined)
       || (currentNode.limits?.maxEdgeTraversals ?? undefined) !== (nextLimits?.maxEdgeTraversals ?? undefined)
       || (currentNode.limits?.maxOutputBytes ?? undefined) !== (nextLimits?.maxOutputBytes ?? undefined);
@@ -377,7 +377,7 @@ export function useLoadoutGraphMutationController({
     const layoutChanged = (currentLayout?.x ?? undefined) !== (nextLayout?.x ?? undefined) || (currentLayout?.y ?? undefined) !== (nextLayout?.y ?? undefined);
 
     if (limitsChanged) {
-      updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.nodes?.[socketId] ? setSocketLimits(loadout, socketId, nextLimits) : loadout);
+      updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? setSocketLimits(loadout, socketId, nextLimits) : loadout);
     }
     if (layoutChanged) {
       updateLoadoutLayout(activeLoadoutName, (loadout) => setSocketLayouts(loadout, { [socketId]: nextLayout }));
@@ -398,7 +398,7 @@ export function useLoadoutGraphMutationController({
     const webUiGraph = toWebUiLoadoutDto(result.graph as never) as PipelineConfig;
     updateLoadoutDraft(activeLoadoutName, () => webUiGraph);
     const updatedGraph = webUiGraph;
-    const updatedEdge = edge.edgeIndex === undefined ? updatedGraph.nodes?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : updatedGraph.nodes?.[edge.from]?.edges?.[edge.edgeIndex];
+    const updatedEdge = edge.edgeIndex === undefined ? updatedGraph.sockets?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : updatedGraph.sockets?.[edge.from]?.edges?.[edge.edgeIndex];
     setStatus(`Staged edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)} as ${edgeConditionLabel(updatedEdge?.when)}.`);
   }
 

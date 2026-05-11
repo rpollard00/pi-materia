@@ -62,7 +62,7 @@ export function LoadoutListPanel({ loadouts, activeLoadoutName, persistedActiveL
             <div key={name} className={`loadout-card ${name === activeLoadoutName ? 'loadout-card-active' : ''}`}>
               <button type="button" onClick={() => onSwitchLoadout(name)} className="loadout-card-select">
                 <span>{name}</span>
-                <small>{Object.keys(loadouts[name].nodes ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
+                <small>{Object.keys(loadouts[name].sockets ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
               </button>
               <button
                 type="button"

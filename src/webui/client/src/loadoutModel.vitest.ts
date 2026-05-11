@@ -29,13 +29,13 @@ describe('loadout socket display model', () => {
     const loadout = makeEmptyEntryLoadout();
 
     expect(loadout.entry).toBe('Socket-1');
-    expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1']);
-    expect(loadout.nodes!['Socket-1'].socketKind).toBe('entry');
-    expect(getNodeLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Empty');
-    expect(formatSocketLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('Socket-1 (Empty)');
+    expect(Object.keys(loadout.sockets!)).toEqual(['Socket-1']);
+    expect(loadout.sockets!['Socket-1'].socketKind).toBe('entry');
+    expect(getNodeLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('Empty');
+    expect(formatSocketLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('Socket-1 (Empty)');
   });
 
-  it('adapts socket-first loadouts to the WebUI nodes DTO during normalization', () => {
+  it('keeps socket-first loadouts in the WebUI DTO during normalization', () => {
     const config = normalizeMateriaConfigEdges({
       activeLoadout: 'Canonical',
       materia: { planner: { prompt: 'plan', generator: true }, Build: { prompt: 'build' } },
@@ -51,10 +51,10 @@ describe('loadout socket display model', () => {
       },
     } as any);
 
-    expect(config.loadouts?.Canonical.nodes?.['Socket-1'].materia).toBe('planner');
-    expect(config.loadouts?.Canonical.nodes?.['Socket-1'].socketKind).toBe('entry');
-    expect(config.loadouts?.Canonical.loops?.work.nodes).toEqual(['Socket-2']);
-    expect(config.loadouts?.Canonical).not.toHaveProperty('sockets');
+    expect(config.loadouts?.Canonical.sockets?.['Socket-1'].materia).toBe('planner');
+    expect(config.loadouts?.Canonical.sockets?.['Socket-1'].socketKind).toBe('entry');
+    expect(config.loadouts?.Canonical.loops?.work.sockets).toEqual(['Socket-2']);
+    expect(config.loadouts?.Canonical).not.toHaveProperty('nodes');
     expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
   });
 
@@ -65,11 +65,11 @@ describe('loadout socket display model', () => {
 
   it('labels newly added compatible empty sockets as Empty while preserving semantic socket structure', () => {
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
-    loadout.nodes!['Socket-2'] = makeEmptySocket({ edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
+    loadout.sockets!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
+    loadout.sockets!['Socket-2'] = makeEmptySocket({ edges: [{ when: 'always', to: 'After' }], layout: { x: 1, y: 0 }, limits: { maxVisits: 2 } });
 
-    expect(getNodeLabel('Socket-2', loadout.nodes!['Socket-2'])).toBe('Empty');
-    expect(loadout.nodes!['Socket-2']).toEqual({ empty: true, socketKind: 'normal', edges: [{ when: 'always', to: 'After' }], limits: { maxVisits: 2 } });
+    expect(getNodeLabel('Socket-2', loadout.sockets!['Socket-2'])).toBe('Empty');
+    expect(loadout.sockets!['Socket-2']).toEqual({ empty: true, socketKind: 'normal', edges: [{ when: 'always', to: 'After' }], limits: { maxVisits: 2 } });
   });
 
   it('formats contextual socket labels without renaming the socket id', () => {
@@ -85,7 +85,7 @@ describe('loadout normalization model', () => {
       loadouts: {
         Legacy: {
           entry: 'Socket-2',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Build', socketKind: 'entry' as never },
             'Socket-2': { type: 'agent', materia: 'Plan' },
             'Socket-3': { type: 'agent', materia: 'Check', socketKind: 'invalid' as never },
@@ -94,20 +94,20 @@ describe('loadout normalization model', () => {
       },
     });
 
-    expect(config.loadouts?.Legacy.nodes?.['Socket-1'].socketKind).toBe('normal');
-    expect(config.loadouts?.Legacy.nodes?.['Socket-2'].socketKind).toBe('entry');
-    expect(config.loadouts?.Legacy.nodes?.['Socket-3'].socketKind).toBe('normal');
-    expect(canDeleteSocket(config.loadouts?.Legacy.nodes?.['Socket-2'])).toBe(false);
-    expect(canDeleteSocket(config.loadouts?.Legacy.nodes?.['Socket-3'])).toBe(true);
+    expect(config.loadouts?.Legacy.sockets?.['Socket-1'].socketKind).toBe('normal');
+    expect(config.loadouts?.Legacy.sockets?.['Socket-2'].socketKind).toBe('entry');
+    expect(config.loadouts?.Legacy.sockets?.['Socket-3'].socketKind).toBe('normal');
+    expect(canDeleteSocket(config.loadouts?.Legacy.sockets?.['Socket-2'])).toBe(false);
+    expect(canDeleteSocket(config.loadouts?.Legacy.sockets?.['Socket-3'])).toBe(true);
   });
 
-  it('migrates legacy node layout into loadout-level socket layout and strips semantic nodes', () => {
+  it('migrates legacy socket layout into loadout-level socket layout and strips semantic socket layout', () => {
     const config = normalizeMateriaConfigEdges({
       loadouts: {
         Legacy: {
           entry: 'Socket-1',
           layout: { sockets: { 'Socket-2': { x: 20, y: 30 }, Missing: { x: 99, y: 99 } } },
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Build', layout: { x: 1, y: 2 } },
             'Socket-2': { type: 'agent', materia: 'Check', layout: { x: 3, y: 4 } },
             'Socket-3': { type: 'agent', materia: 'Ship' },
@@ -118,16 +118,16 @@ describe('loadout normalization model', () => {
 
     const loadout = config.loadouts?.Legacy;
     expect(loadout?.layout?.sockets).toEqual({ 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 20, y: 30 } });
-    expect(loadout?.nodes?.['Socket-1'].layout).toBeUndefined();
-    expect(loadout?.nodes?.['Socket-2'].layout).toBeUndefined();
-    expect(loadout?.nodes?.['Socket-3'].layout).toBeUndefined();
+    expect(loadout?.sockets?.['Socket-1'].layout).toBeUndefined();
+    expect(loadout?.sockets?.['Socket-2'].layout).toBeUndefined();
+    expect(loadout?.sockets?.['Socket-3'].layout).toBeUndefined();
   });
 
   it('keeps loadouts without layout valid during normalization', () => {
-    const config = normalizeMateriaConfigEdges({ loadouts: { Bare: { entry: 'Socket-1', nodes: { 'Socket-1': { empty: true } } } } });
+    const config = normalizeMateriaConfigEdges({ loadouts: { Bare: { entry: 'Socket-1', sockets: { 'Socket-1': { empty: true } } } } });
 
     expect(config.loadouts?.Bare.layout).toBeUndefined();
-    expect(config.loadouts?.Bare.nodes?.['Socket-1'].socketKind).toBe('entry');
+    expect(config.loadouts?.Bare.sockets?.['Socket-1'].socketKind).toBe('entry');
   });
 
   it('normalizes generator-to-generator sockets to canonical JSON workItems assignment before save', () => {
@@ -136,7 +136,7 @@ describe('loadout normalization model', () => {
       loadouts: {
         Yolo: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { type: 'agent', materia: 'refiner', assign: { tasks: '$.tasks' }, edges: [{ when: 'always', to: 'end' }] },
           },
@@ -148,10 +148,10 @@ describe('loadout normalization model', () => {
       },
     });
 
-    expect(config.loadouts?.Yolo.nodes?.['Socket-1'].parse).toBe('json');
-    expect(config.loadouts?.Yolo.nodes?.['Socket-1'].assign?.workItems).toBe('$.workItems');
-    expect(config.loadouts?.Yolo.nodes?.['Socket-2'].parse).toBe('json');
-    expect(config.loadouts?.Yolo.nodes?.['Socket-2'].assign?.workItems).toBe('$.workItems');
+    expect(config.loadouts?.Yolo.sockets?.['Socket-1'].parse).toBe('json');
+    expect(config.loadouts?.Yolo.sockets?.['Socket-1'].assign?.workItems).toBe('$.workItems');
+    expect(config.loadouts?.Yolo.sockets?.['Socket-2'].parse).toBe('json');
+    expect(config.loadouts?.Yolo.sockets?.['Socket-2'].assign?.workItems).toBe('$.workItems');
   });
 
   it('normalizes generator-to-loop source sockets to canonical JSON workItems assignment before save', () => {
@@ -159,8 +159,8 @@ describe('loadout normalization model', () => {
       loadouts: {
         Loop: {
           entry: 'Socket-1',
-          loops: { taskIteration: { nodes: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
-          nodes: {
+          loops: { taskIteration: { sockets: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'planner', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { type: 'agent', materia: 'Build' },
           },
@@ -172,9 +172,9 @@ describe('loadout normalization model', () => {
       },
     });
 
-    expect(config.loadouts?.Loop.nodes?.['Socket-1'].parse).toBe('json');
-    expect(config.loadouts?.Loop.nodes?.['Socket-1'].assign?.workItems).toBe('$.workItems');
-    expect(config.loadouts?.Loop.nodes?.['Socket-2'].parse).toBeUndefined();
+    expect(config.loadouts?.Loop.sockets?.['Socket-1'].parse).toBe('json');
+    expect(config.loadouts?.Loop.sockets?.['Socket-1'].assign?.workItems).toBe('$.workItems');
+    expect(config.loadouts?.Loop.sockets?.['Socket-2'].parse).toBeUndefined();
   });
 
   it('reconciles stale loop consumer metadata when a generator is inserted before an existing loop', () => {
@@ -184,12 +184,12 @@ describe('loadout normalization model', () => {
           entry: 'Socket-1',
           loops: {
             taskIteration: {
-              nodes: ['Socket-3', 'Socket-4'],
+              sockets: ['Socket-3', 'Socket-4'],
               consumes: { from: 'Socket-1', output: 'workItems' },
               exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
             },
           },
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
             'Socket-3': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
@@ -207,9 +207,9 @@ describe('loadout normalization model', () => {
 
     const loadout = config.loadouts?.Loop;
     expect(loadout?.loops?.taskIteration.consumes?.from).toBe('Socket-2');
-    expect(loadout?.nodes?.['Socket-2'].parse).toBe('json');
-    expect(loadout?.nodes?.['Socket-2'].assign?.workItems).toBe('$.workItems');
-    expect(loadout?.nodes?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
+    expect(loadout?.sockets?.['Socket-2'].parse).toBe('json');
+    expect(loadout?.sockets?.['Socket-2'].assign?.workItems).toBe('$.workItems');
+    expect(loadout?.sockets?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
   });
 
   it('analyzes loop consumer sources from graph topology without mutating input', () => {
@@ -280,7 +280,7 @@ describe('loadout normalization model', () => {
       loadouts: {
         Draft: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Critique', outputFormat: 'json' } as PipelineNode,
           },
         },
@@ -289,8 +289,8 @@ describe('loadout normalization model', () => {
 
     expect(config.materia?.Critique.parse).toBe('json');
     expect(config.materia?.Critique).not.toHaveProperty('outputFormat');
-    expect(config.loadouts?.Draft.nodes?.['Socket-1'].parse).toBe('json');
-    expect(config.loadouts?.Draft.nodes?.['Socket-1']).not.toHaveProperty('outputFormat');
+    expect(config.loadouts?.Draft.sockets?.['Socket-1'].parse).toBe('json');
+    expect(config.loadouts?.Draft.sockets?.['Socket-1']).not.toHaveProperty('outputFormat');
   });
 
   it('rejects text-output sockets with satisfied/not_satisfied routes before save', () => {
@@ -298,7 +298,7 @@ describe('loadout normalization model', () => {
       loadouts: {
         HojoLike: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Build', parse: 'text', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
             'Socket-2': { type: 'agent', materia: 'Maintain' },
           },
@@ -314,7 +314,7 @@ describe('loadout normalization model', () => {
       loadouts: {
         TextFlow: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Build', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { type: 'agent', materia: 'Maintain' },
           },
@@ -330,7 +330,7 @@ describe('loadout normalization model', () => {
       loadouts: {
         JsonControl: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Auto-Eval', parse: 'json', edges: [{ when: 'satisfied', to: 'Socket-2' }, { when: 'not_satisfied', to: 'Socket-3' }] },
             'Socket-2': { type: 'agent', materia: 'Maintain' },
             'Socket-3': { type: 'agent', materia: 'Build' },
@@ -348,21 +348,21 @@ describe('loadout normalization model', () => {
       loadouts: {
         LegacyEditorState: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'Generate', next: 'Socket-2' } as PipelineNode,
             'Socket-2': { type: 'agent', materia: 'Build', layout: { x: 10, y: 20 } },
           },
           loops: {
-            work: { nodes: ['Socket-2'], consumes: { from: 'Stale', output: 'workItems' } },
+            work: { sockets: ['Socket-2'], consumes: { from: 'Stale', output: 'workItems' } },
           },
         },
       },
     };
 
     expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
-    expect(config.loadouts?.LegacyEditorState.nodes?.['Socket-1']).not.toHaveProperty('edges');
-    expect(config.loadouts?.LegacyEditorState.nodes?.['Socket-1']).toHaveProperty('next', 'Socket-2');
-    expect(config.loadouts?.LegacyEditorState.nodes?.['Socket-2']).toHaveProperty('layout');
+    expect(config.loadouts?.LegacyEditorState.sockets?.['Socket-1']).not.toHaveProperty('edges');
+    expect(config.loadouts?.LegacyEditorState.sockets?.['Socket-1']).toHaveProperty('next', 'Socket-2');
+    expect(config.loadouts?.LegacyEditorState.sockets?.['Socket-2']).toHaveProperty('layout');
     expect(config.loadouts?.LegacyEditorState.loops?.work.consumes?.from).toBe('Stale');
   });
 
@@ -373,12 +373,12 @@ describe('loadout normalization model', () => {
           entry: 'Socket-1',
           loops: {
             loopSelection: {
-              nodes: ['Socket-3', 'Socket-4'],
+              sockets: ['Socket-3', 'Socket-4'],
               consumes: { from: 'Socket-1', output: 'workItems' },
               exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
             },
           },
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
             'Socket-3': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
             'Socket-4': { type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
@@ -392,21 +392,21 @@ describe('loadout normalization model', () => {
       },
     });
 
-    expect(config.loadouts?.Yolo.nodes?.['Socket-4'].parse).toBe('json');
-    expect(config.loadouts?.Yolo.nodes?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
-    expect(config.loadouts?.Yolo.nodes?.['Socket-4'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
+    expect(config.loadouts?.Yolo.sockets?.['Socket-4'].parse).toBe('json');
+    expect(config.loadouts?.Yolo.sockets?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
+    expect(config.loadouts?.Yolo.sockets?.['Socket-4'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
   });
 });
 
 describe('loadout socket deletion model', () => {
   it('blocks entry socket deletion while allowing normal sockets', () => {
     const loadout = normalizeMateriaConfigEdges({ loadouts: { Active: makeEmptyEntryLoadout() } }).loadouts!.Active;
-    loadout.nodes!['Socket-2'] = makeEmptySocket();
+    loadout.sockets!['Socket-2'] = makeEmptySocket();
 
     expect(deleteSocketFromLoadout(loadout, 'Socket-1')).toBe(false);
-    expect(loadout.nodes!['Socket-1']).toBeTruthy();
+    expect(loadout.sockets!['Socket-1']).toBeTruthy();
     expect(deleteSocketFromLoadout(loadout, 'Socket-2')).toBe(true);
-    expect(loadout.nodes!['Socket-2']).toBeUndefined();
+    expect(loadout.sockets!['Socket-2']).toBeUndefined();
   });
 
   it('removes incoming and outgoing socket references when deleting a normal socket', () => {
@@ -414,7 +414,7 @@ describe('loadout socket deletion model', () => {
       loadouts: {
         Active: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }], foreach: { items: 'state.items', done: 'Socket-2' } },
             'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }], advance: { cursor: 'i', items: 'state.items', done: 'Socket-3' } },
             'Socket-3': { socketKind: 'normal', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
@@ -425,10 +425,10 @@ describe('loadout socket deletion model', () => {
 
     expect(deleteSocketFromLoadout(loadout, 'Socket-2')).toBe(true);
 
-    expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1', 'Socket-3']);
-    expect(loadout.nodes!['Socket-1'].edges).toBeUndefined();
-    expect(loadout.nodes!['Socket-1'].foreach?.done).toBeUndefined();
-    expect(loadout.nodes!['Socket-3'].edges).toBeUndefined();
+    expect(Object.keys(loadout.sockets!)).toEqual(['Socket-1', 'Socket-3']);
+    expect(loadout.sockets!['Socket-1'].edges).toBeUndefined();
+    expect(loadout.sockets!['Socket-1'].foreach?.done).toBeUndefined();
+    expect(loadout.sockets!['Socket-3'].edges).toBeUndefined();
   });
 
   it('cleans loop metadata and control targets referencing a deleted socket', () => {
@@ -438,13 +438,13 @@ describe('loadout socket deletion model', () => {
           entry: 'Socket-1',
           loops: {
             selected: {
-              nodes: ['Socket-2', 'Socket-3'],
+              sockets: ['Socket-2', 'Socket-3'],
               consumes: { from: 'Socket-1', output: 'workItems' },
               exit: { from: 'Socket-3', when: 'satisfied', to: 'Socket-4' },
               exits: [{ id: 'selected-exit', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-4' }],
             },
             targetOnly: {
-              nodes: ['Socket-3'],
+              sockets: ['Socket-3'],
               consumes: { from: 'Socket-1', output: 'workItems', done: 'Socket-4' },
               iterator: { items: 'state.workItems', done: 'Socket-4' },
               exit: { from: 'Socket-3', when: 'always', to: 'Socket-4' },
@@ -454,7 +454,7 @@ describe('loadout socket deletion model', () => {
               ],
             },
           },
-          nodes: {
+          sockets: {
             'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }] },
             'Socket-3': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-2' }] },
@@ -482,13 +482,13 @@ describe('loadout socket deletion model', () => {
           entry: 'Socket-1',
           loops: {
             selected: {
-              nodes: ['Socket-2', 'Socket-3'],
+              sockets: ['Socket-2', 'Socket-3'],
               consumes: { from: 'Socket-1', output: 'workItems' },
               exit: { from: 'Socket-3', when: 'satisfied', to: 'Socket-4' },
               exits: [{ id: 'after-selected', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-5' }],
             },
           },
-          nodes: {
+          sockets: {
             'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }] },
             'Socket-3': {
@@ -509,9 +509,9 @@ describe('loadout socket deletion model', () => {
     expect(deleteSocketFromLoadout(loadout, 'Socket-2')).toBe(true);
 
     expect(loadout.loops?.selected).toBeUndefined();
-    expect(loadout.nodes!['Socket-3'].advance).toBeUndefined();
-    expect(loadout.nodes!['Socket-3'].edges).toBeUndefined();
-    expect(Object.values(loadout.nodes!).flatMap((node) => node.edges ?? [])).not.toContainEqual(expect.objectContaining({ to: 'Socket-5' }));
+    expect(loadout.sockets!['Socket-3'].advance).toBeUndefined();
+    expect(loadout.sockets!['Socket-3'].edges).toBeUndefined();
+    expect(Object.values(loadout.sockets!).flatMap((node) => node.edges ?? [])).not.toContainEqual(expect.objectContaining({ to: 'Socket-5' }));
   });
 });
 
@@ -519,13 +519,13 @@ describe('loop-exit connection mutation model', () => {
   it('finds loop-exit sockets and upserts routes without creating normal edges', () => {
     const loadout: PipelineConfig = {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { socketKind: 'entry' },
         'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-3': { socketKind: 'normal' },
       },
       loops: {
-        work: { nodes: ['Socket-2'], exit: { from: 'Socket-2', when: 'always', to: 'end' } },
+        work: { sockets: ['Socket-2'], exit: { from: 'Socket-2', when: 'always', to: 'end' } },
       },
     };
 
@@ -537,21 +537,21 @@ describe('loop-exit connection mutation model', () => {
       targetSocketId: 'Socket-3',
     });
 
-    expect(loadout.nodes!['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
+    expect(loadout.sockets!['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
     expect(loadout.loops?.work.exits).toEqual([{ id: 'exit:Socket-2:always', from: 'Socket-2', condition: 'always', targetSocketId: 'Socket-3' }]);
   });
 
   it('replaces duplicate condition routes and removes loop-exit route metadata', () => {
     const loadout: PipelineConfig = {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { socketKind: 'entry' },
         'Socket-2': { socketKind: 'normal' },
         'Socket-3': { socketKind: 'normal' },
         'Socket-4': { socketKind: 'normal' },
       },
       loops: {
-        work: { nodes: ['Socket-2'], exit: { from: 'Socket-2', when: 'always', to: 'end' } },
+        work: { sockets: ['Socket-2'], exit: { from: 'Socket-2', when: 'always', to: 'end' } },
       },
     };
 
@@ -568,14 +568,14 @@ describe('loop-exit connection mutation model', () => {
       loadouts: {
         Active: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { socketKind: 'entry' },
             'Socket-2': { socketKind: 'normal', type: 'agent', materia: 'Maintain', parse: 'text' },
             'Socket-3': { socketKind: 'normal' },
           },
           loops: {
             work: {
-              nodes: ['Socket-2'],
+              sockets: ['Socket-2'],
               exit: { from: 'Socket-2', when: 'always', to: 'end' },
               exits: [{ id: 'exit:Socket-2:satisfied', from: 'Socket-2', condition: 'satisfied', targetSocketId: 'Socket-3' }],
             },
@@ -585,7 +585,7 @@ describe('loop-exit connection mutation model', () => {
     };
 
     expect(() => assertValidLoadoutSaveSemantics(config)).toThrow(/loops\.work\.exits\[0\]\.condition/);
-    config.loadouts!.Active.nodes!['Socket-2'].parse = 'json';
+    config.loadouts!.Active.sockets!['Socket-2'].parse = 'json';
     expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
   });
 });
@@ -620,7 +620,7 @@ describe('loadout materia palette model', () => {
     const loadouts: Record<string, PipelineConfig> = {
       Active: {
         entry: 'Socket-1',
-        nodes: {
+        sockets: {
           'Socket-1': { type: 'agent', materia: 'Build' },
           'Socket-only': { type: 'agent', materia: 'AdHoc' },
         },
@@ -628,7 +628,7 @@ describe('loadout materia palette model', () => {
     };
 
     expect(buildMateriaPalette(materia).map(([id]) => id)).toEqual(['Build', 'Check']);
-    expect(Object.values(loadouts.Active.nodes ?? {}).some((node) => node.materia === 'AdHoc')).toBe(true);
+    expect(Object.values(loadouts.Active.sockets ?? {}).some((node) => node.materia === 'AdHoc')).toBe(true);
   });
 
   it('includes first-class utility materia in the palette with executable bindings', () => {
@@ -667,17 +667,17 @@ describe('loadout materia palette model', () => {
     expect(materia.ensureArtifactsIgnored.group).toBe('Utility');
   });
 
-  it('places palette-created utility materia as normal executable utility nodes', () => {
+  it('places palette-created utility materia as normal executable utility sockets', () => {
     const materia = {
       detectVcs: { type: 'utility', label: 'Detect VCS', group: 'Utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' } },
     } satisfies Record<string, MateriaBehaviorConfig>;
     const loadout = makeEmptyEntryLoadout();
     const utilityMateria = buildMateriaPalette(materia)[0][1];
 
-    loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], utilityMateria);
+    loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], utilityMateria);
 
-    expect(loadout.nodes!['Socket-1']).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false, socketKind: 'entry' });
-    expect(getNodeLabel('Socket-1', loadout.nodes!['Socket-1'])).toBe('vcs.detect');
+    expect(loadout.sockets!['Socket-1']).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false, socketKind: 'entry' });
+    expect(getNodeLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('vcs.detect');
   });
 
   it('keeps palette contents stable when palette materia is placed into a new loadout socket', () => {
@@ -689,9 +689,9 @@ describe('loadout materia palette model', () => {
     const loadout = makeEmptyEntryLoadout();
     const buildMateria = buildMateriaPalette(materia).find(([id]) => id === 'Build')?.[1];
 
-    loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], buildMateria);
+    loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], buildMateria);
 
-    expect(loadout.nodes!['Socket-1']).toMatchObject({ type: 'agent', materia: 'Build', parse: 'json', assign: { satisfied: '$.satisfied' }, empty: false });
+    expect(loadout.sockets!['Socket-1']).toMatchObject({ type: 'agent', materia: 'Build', parse: 'json', assign: { satisfied: '$.satisfied' }, empty: false });
     expect(paletteSignature(materia)).toBe(before);
   });
 
@@ -702,10 +702,10 @@ describe('loadout materia palette model', () => {
     } satisfies Record<string, MateriaBehaviorConfig>;
     const before = paletteSignature(materia);
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
-    loadout.nodes!['Socket-2'] = makeEmptySocket({ layout: { x: 1, y: 0 } });
+    loadout.sockets!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
+    loadout.sockets!['Socket-2'] = makeEmptySocket({ layout: { x: 1, y: 0 } });
 
-    expect(Object.keys(loadout.nodes!)).toEqual(['Socket-1', 'Socket-2']);
+    expect(Object.keys(loadout.sockets!)).toEqual(['Socket-1', 'Socket-2']);
     expect(paletteSignature(materia)).toBe(before);
   });
 
@@ -743,8 +743,8 @@ describe('loadout materia palette model', () => {
       Build: { prompt: 'build' },
     } satisfies Record<string, MateriaBehaviorConfig>;
     const loadout = makeEmptyEntryLoadout();
-    loadout.nodes!['Socket-1'] = placeMateriaInSocket(loadout.nodes!['Socket-1'], buildMateriaPalette(materia)[0][1]);
-    loadout.nodes!['Socket-2'] = { type: 'agent', materia: 'SocketOnly' };
+    loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], buildMateriaPalette(materia)[0][1]);
+    loadout.sockets!['Socket-2'] = { type: 'agent', materia: 'SocketOnly' };
     const savePayload: MateriaConfig = {
       activeLoadout: 'Draft',
       materia,
@@ -752,7 +752,7 @@ describe('loadout materia palette model', () => {
     };
 
     expect(Object.keys(savePayload.materia ?? {})).toEqual(['Build']);
-    expect(savePayload.loadouts!.Draft.nodes!['Socket-2'].materia).toBe('SocketOnly');
+    expect(savePayload.loadouts!.Draft.sockets!['Socket-2'].materia).toBe('SocketOnly');
   });
 
   it('finds the next unused static Socket-N id independent of predecessor names', () => {

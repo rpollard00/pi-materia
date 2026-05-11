@@ -19,7 +19,7 @@ const testConfig = {
   loadouts: {
     'Full-Auto': {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
         'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 }, insertedBy: 'node-shift' },
         'Socket-3': { type: 'agent', materia: 'Auto-Eval', parse: 'json', edges: [{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }], layout: { x: 2, y: 0 } },
@@ -28,7 +28,7 @@ const testConfig = {
     },
     'Planning-Consult': {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'interactivePlan', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-2': { type: 'agent', materia: 'Build' },
       },
@@ -41,7 +41,7 @@ const edgeEditorConfig = {
   loadouts: {
     Edges: {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Start', parse: 'json', layout: { x: 0, y: 0 }, edges: [] as Array<{ to: string; when?: string }> },
         'Socket-2': { type: 'agent', materia: 'Review', layout: { x: 1, y: 0 } },
         'Socket-3': { type: 'agent', materia: 'Ship', layout: { x: 2, y: 0 } },
@@ -56,7 +56,7 @@ const legacyPipelineConfig = {
   },
   pipeline: {
     entry: 'Socket-1',
-    nodes: {
+    sockets: {
       'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
       'Socket-2': { type: 'agent', materia: 'Build', parse: 'json', edges: [{ when: 'always', to: 'Socket-3' }, { when: 'not_satisfied', to: 'Socket-1' }], layout: { x: 1, y: 0 } },
       'Socket-3': { type: 'utility', utility: 'finish', command: ['echo', 'done'], layout: { x: 2, y: 0 } },
@@ -331,7 +331,7 @@ describe('Materia loadout grid editor', () => {
 
   it('blocks invalid control-route saves before posting config', async () => {
     const invalidConfig = JSON.parse(JSON.stringify(testConfig));
-    delete invalidConfig.loadouts['Full-Auto'].nodes['Socket-3'].parse;
+    delete invalidConfig.loadouts['Full-Auto'].sockets['Socket-3'].parse;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === '/api/config' && init?.method === 'POST') throw new Error('invalid config was posted');
       return new Response(JSON.stringify({ ok: true, source: 'test', config: invalidConfig, loadoutSources: { 'Full-Auto': 'user', 'Planning-Consult': 'user' } }));
@@ -525,7 +525,7 @@ describe('Materia loadout grid editor', () => {
   it('marks generator materia and generator edges distinctly without tagging loop members as iterators', async () => {
     const config = structuredClone(testConfig);
     (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };
-    (config.loadouts['Full-Auto'].nodes['Socket-1'] as any).assign = { workItems: '$.workItems' };
+    (config.loadouts['Full-Auto'].sockets['Socket-1'] as any).assign = { workItems: '$.workItems' };
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all work items complete',
@@ -567,12 +567,12 @@ describe('Materia loadout grid editor', () => {
     const config = structuredClone(testConfig);
     (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };
     (config.materia.Build as any) = { tools: 'coding', prompt: 'Build generated work', generator: true };
-    config.loadouts['Full-Auto'].nodes['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
-    config.loadouts['Full-Auto'].nodes['Socket-2'].edges = [{ when: 'always', to: 'Socket-3' }];
+    config.loadouts['Full-Auto'].sockets['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
+    config.loadouts['Full-Auto'].sockets['Socket-2'].edges = [{ when: 'always', to: 'Socket-3' }];
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all work items complete',
-        nodes: ['Socket-3', 'Socket-4'],
+        sockets: ['Socket-3', 'Socket-4'],
         consumes: { from: 'Socket-1', output: 'workItems' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
       },
@@ -594,9 +594,9 @@ describe('Materia loadout grid editor', () => {
     const config = structuredClone(testConfig);
     (config.materia.planner as any) = { tools: 'none', prompt: 'Plan the work', generator: true };
     (config.materia.Build as any) = { tools: 'coding', prompt: 'Build generated work', generator: true };
-    (config.loadouts['Full-Auto'].nodes['Socket-1'] as any).assign = { workItems: '$.workItems' };
-    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).parse = 'json';
-    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).assign = { workItems: '$.workItems' };
+    (config.loadouts['Full-Auto'].sockets['Socket-1'] as any).assign = { workItems: '$.workItems' };
+    (config.loadouts['Full-Auto'].sockets['Socket-2'] as any).parse = 'json';
+    (config.loadouts['Full-Auto'].sockets['Socket-2'] as any).assign = { workItems: '$.workItems' };
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
 
     render(<App />);
@@ -640,10 +640,10 @@ describe('Materia loadout grid editor', () => {
 
   it('tracks overlapping loop memberships without collapsing loop identities', () => {
     const memberships = getLoopMemberships({
-      nodes: {},
+      sockets: {},
       loops: {
-        first: { nodes: ['Socket-2', 'Socket-3'], iterator: { items: 'state.first' } },
-        second: { nodes: ['Socket-3', 'Socket-4'], iterator: { items: 'state.second' } },
+        first: { sockets: ['Socket-2', 'Socket-3'], iterator: { items: 'state.first' } },
+        second: { sockets: ['Socket-3', 'Socket-4'], iterator: { items: 'state.second' } },
       },
     } as never);
 
@@ -655,12 +655,12 @@ describe('Materia loadout grid editor', () => {
 
   it('derives loop exit badges from loop exit metadata only', () => {
     const badges = getLoopExitBadges({
-      nodes: {
+      sockets: {
         'Socket-2': { type: 'agent', materia: 'Build' },
         'Socket-3': { type: 'agent', materia: 'Auto-Eval' },
       },
       loops: {
-        review: { label: 'Review loop', nodes: ['Socket-2', 'Socket-3'], exit: { from: 'Socket-3', when: 'satisfied', to: 'end' } },
+        review: { label: 'Review loop', sockets: ['Socket-2', 'Socket-3'], exit: { from: 'Socket-3', when: 'satisfied', to: 'end' } },
       },
     } as never);
 
@@ -671,7 +671,7 @@ describe('Materia loadout grid editor', () => {
 
   it('derives stable visual edges for loop-exit route metadata without normal edges', () => {
     const graph = layoutSockets({
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-2': { type: 'agent', materia: 'Build', parse: 'json' },
         'Socket-3': { type: 'agent', materia: 'Maintain' },
@@ -679,7 +679,7 @@ describe('Materia loadout grid editor', () => {
       },
       loops: {
         work: {
-          nodes: ['Socket-2', 'Socket-3'],
+          sockets: ['Socket-2', 'Socket-3'],
           exit: { from: 'Socket-3', when: 'satisfied', to: 'end' },
           exits: [
             { id: 'exit:Socket-3:always', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-4' },
@@ -699,14 +699,14 @@ describe('Materia loadout grid editor', () => {
 
   it('renders loop-exit route metadata without requiring legacy loop.exit metadata', () => {
     const graph = layoutSockets({
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build' },
         'Socket-2': { type: 'agent', materia: 'Maintain' },
         'Socket-3': { type: 'agent', materia: 'Summarize' },
       },
       loops: {
         work: {
-          nodes: ['Socket-1', 'Socket-2'],
+          sockets: ['Socket-1', 'Socket-2'],
           exits: [{ id: 'exit:Socket-2:always', from: 'Socket-2', condition: 'always', targetSocketId: 'Socket-3' }],
         },
       },
@@ -719,7 +719,7 @@ describe('Materia loadout grid editor', () => {
 
   it('renders canonical loop-exit routes from member sources even when legacy loop.exit points elsewhere', () => {
     const graph = layoutSockets({
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build' },
         'Socket-2': { type: 'agent', materia: 'Eval' },
         'Socket-3': { type: 'agent', materia: 'Maintain' },
@@ -727,7 +727,7 @@ describe('Materia loadout grid editor', () => {
       },
       loops: {
         work: {
-          nodes: ['Socket-1', 'Socket-2', 'Socket-3'],
+          sockets: ['Socket-1', 'Socket-2', 'Socket-3'],
           exit: { from: 'Socket-3', when: 'satisfied', to: 'end' },
           exits: [{ id: 'exit:Socket-2:not_satisfied', from: 'Socket-2', condition: 'not_satisfied', targetSocketId: 'Socket-4' }],
         },
@@ -741,7 +741,7 @@ describe('Materia loadout grid editor', () => {
 
   it('toggles loop-exit route edge conditions without removing metadata from the edge hit target', async () => {
     const config = structuredClone(testConfig);
-    (config.loadouts['Full-Auto'].nodes['Socket-4'] as { parse?: string }).parse = 'json';
+    (config.loadouts['Full-Auto'].sockets['Socket-4'] as { parse?: string }).parse = 'json';
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval → Maintain until all tasks complete',
@@ -852,7 +852,7 @@ describe('Materia loadout grid editor', () => {
 
   it('formats loop labels from member materia without changing socket-id storage', () => {
     const loadout = {
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build' },
         'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
         'Socket-3': { empty: true },
@@ -900,7 +900,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Full-Auto'] as { loops?: unknown }).loops = {
       taskIteration: {
         label: 'Build → Eval task loop',
-        nodes: ['Socket-2', 'Socket-3'],
+        sockets: ['Socket-2', 'Socket-3'],
         consumes: { from: 'Socket-1', output: 'workItems' },
         exit: { from: 'Socket-3', when: 'not_satisfied', to: 'Socket-4' },
       },
@@ -939,7 +939,7 @@ describe('Materia loadout grid editor', () => {
   it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
-    (config.loadouts['Full-Auto'].nodes['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
+    (config.loadouts['Full-Auto'].sockets['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -1014,8 +1014,8 @@ describe('Materia loadout grid editor', () => {
   it('does not duplicate an existing self-edge when creating a single-socket loop', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
-    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).parse = 'json';
-    (config.loadouts['Full-Auto'].nodes['Socket-2'] as any).edges = [{ when: 'not_satisfied', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }];
+    (config.loadouts['Full-Auto'].sockets['Socket-2'] as any).parse = 'json';
+    (config.loadouts['Full-Auto'].sockets['Socket-2'] as any).edges = [{ when: 'not_satisfied', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -1043,7 +1043,7 @@ describe('Materia loadout grid editor', () => {
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
       },
     };
-    (config.loadouts['Full-Auto'].nodes['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
+    (config.loadouts['Full-Auto'].sockets['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -1115,7 +1115,7 @@ describe('Materia loadout grid editor', () => {
       loadouts: {
         'Fresh Loop': {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
             'Socket-2': { type: 'agent', materia: 'worker', edges: [{ when: 'always', to: 'Socket-3' }], layout: { x: 1, y: 0 } },
             'Socket-3': { type: 'agent', materia: 'checker', edges: [{ when: 'not_satisfied', to: 'Socket-2' }], layout: { x: 2, y: 0 } },
@@ -1138,7 +1138,7 @@ describe('Materia loadout grid editor', () => {
   it('selects loop sockets by dragging a region box before creating a loop', async () => {
     const config = structuredClone(testConfig);
     delete (config.loadouts['Full-Auto'] as { loops?: unknown }).loops;
-    (config.loadouts['Full-Auto'].nodes['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
+    (config.loadouts['Full-Auto'].sockets['Socket-4'] as any).edges = [{ when: 'always', to: 'Socket-2' }];
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config }))));
 
     render(<App />);
@@ -1194,7 +1194,7 @@ describe('Materia loadout grid editor', () => {
     wideConfig.activeLoadout = 'Wide';
     wideConfig.loadouts.Wide = {
       entry: 'Socket-1',
-      nodes: Object.fromEntries(Array.from({ length: 8 }, (_, index) => [
+      sockets: Object.fromEntries(Array.from({ length: 8 }, (_, index) => [
         `Socket-${index + 1}`,
         { type: 'agent', materia: 'Build', layout: { x: index, y: index % 2 }, edges: index < 7 ? [{ when: 'always', to: `Socket-${index + 2}` }] : undefined },
       ])),
@@ -1216,7 +1216,7 @@ describe('Materia loadout grid editor', () => {
     (config.loadouts['Planning-Consult'] as { loops?: unknown }).loops = {
       consultLoop: {
         label: 'Consultation loop header should not collide',
-        nodes: ['Socket-1', 'Socket-2'],
+        sockets: ['Socket-1', 'Socket-2'],
         iterator: { items: 'state.questions', as: 'question' },
       },
     } as never;
@@ -1235,7 +1235,7 @@ describe('Materia loadout grid editor', () => {
 
   it('sizes long loop labels and summaries wide enough to remain readable', () => {
     const loadout = {
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Consult', label: 'Consult' },
         'Socket-2': { type: 'agent', materia: 'Build', label: 'Build' },
         'Socket-3': { type: 'agent', materia: 'Maintain', label: 'Maintain' },
@@ -1244,7 +1244,7 @@ describe('Materia loadout grid editor', () => {
       loops: {
         readableLoop: {
           label: 'Loop: Consult → Build → Maintain',
-          nodes: ['Socket-1', 'Socket-2', 'Socket-3'],
+          sockets: ['Socket-1', 'Socket-2', 'Socket-3'],
           consumes: { from: 'Socket-1', output: 'detailed_task_backlog' },
           exit: { from: 'Socket-3', when: 'not_satisfied', to: 'Socket-4' },
         },
@@ -1269,14 +1269,14 @@ describe('Materia loadout grid editor', () => {
 
   it('builds fitted virtual cycle paths for three-of-four corner membership', () => {
     const loadout = {
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', label: 'A' },
         'Socket-2': { type: 'agent', materia: 'Build', label: 'B' },
         'Socket-3': { type: 'agent', materia: 'Build', label: 'C' },
         'Socket-4': { type: 'agent', materia: 'Build', label: 'Excluded' },
       },
       loops: {
-        cornerLoop: { label: 'Three corners', nodes: ['Socket-1', 'Socket-2', 'Socket-3'], iterator: { items: 'state.items' } },
+        cornerLoop: { label: 'Three corners', sockets: ['Socket-1', 'Socket-2', 'Socket-3'], iterator: { items: 'state.items' } },
       },
     } as never;
     const positions = new Map<string, never>([
@@ -1295,7 +1295,7 @@ describe('Materia loadout grid editor', () => {
 
   it('routes parallel edges between the same sockets on separate visual lanes', async () => {
     const parallelConfig = structuredClone(edgeEditorConfig);
-    parallelConfig.loadouts.Edges.nodes['Socket-1'].edges = [
+    parallelConfig.loadouts.Edges.sockets['Socket-1'].edges = [
       { when: 'satisfied', to: 'Socket-2' },
       { when: 'not_satisfied', to: 'Socket-2' },
     ];
@@ -1375,7 +1375,7 @@ describe('Materia loadout grid editor', () => {
 
   it('renders loaded edge labels from canonical values without raw predicates', async () => {
     const config = structuredClone(edgeEditorConfig);
-    config.loadouts.Edges.nodes['Socket-1'].edges = [
+    config.loadouts.Edges.sockets['Socket-1'].edges = [
       { when: 'always', to: 'Socket-2' },
       { when: 'satisfied', to: 'Socket-3' },
       { when: 'not_satisfied', to: 'Socket-1' },
@@ -1394,7 +1394,7 @@ describe('Materia loadout grid editor', () => {
 
   it('toggles a clickable edge condition through the canonical cycle and saves canonical values', async () => {
     const singleEdgeConfig = structuredClone(testConfig);
-    singleEdgeConfig.loadouts['Full-Auto'].nodes['Socket-3'].edges = [{ when: 'always', to: 'Socket-4' }];
+    singleEdgeConfig.loadouts['Full-Auto'].sockets['Socket-3'].edges = [{ when: 'always', to: 'Socket-4' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: singleEdgeConfig }));
@@ -1430,11 +1430,11 @@ describe('Materia loadout grid editor', () => {
 
   it('stages iterative retry edge toggles without rejecting looped satisfied routes', async () => {
     const iterativeConfig = structuredClone(testConfig);
-    iterativeConfig.loadouts['Full-Auto'].nodes['Socket-3'].edges = [
+    iterativeConfig.loadouts['Full-Auto'].sockets['Socket-3'].edges = [
       { when: 'satisfied', to: 'Socket-4' },
       { when: 'not_satisfied', to: 'Socket-2' },
     ];
-    (iterativeConfig.loadouts['Full-Auto'].nodes['Socket-4'] as { edges?: Array<{ when: 'always'; to: string }> }).edges = [{ when: 'always', to: 'Socket-2' }];
+    (iterativeConfig.loadouts['Full-Auto'].sockets['Socket-4'] as { edges?: Array<{ when: 'always'; to: string }> }).edges = [{ when: 'always', to: 'Socket-2' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config: iterativeConfig }));
@@ -1463,7 +1463,7 @@ describe('Materia loadout grid editor', () => {
 
   it('shows validation failures from unreachable edge toggles without mutating draft state', async () => {
     const config = structuredClone(testConfig);
-    config.loadouts['Full-Auto'].nodes['Socket-3'].edges = [{ when: 'always', to: 'Socket-4' }, { when: 'satisfied', to: 'Socket-2' }] as never;
+    config.loadouts['Full-Auto'].sockets['Socket-3'].edges = [{ when: 'always', to: 'Socket-4' }, { when: 'satisfied', to: 'Socket-2' }] as never;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -1995,7 +1995,7 @@ describe('Materia loadout grid editor', () => {
     const config = structuredClone(edgeEditorConfig);
     (config.loadouts.Edges as any).loops = {
       reviewLoop: {
-        nodes: ['Socket-1', 'Socket-2'],
+        sockets: ['Socket-1', 'Socket-2'],
         exit: { from: 'Socket-1', when: 'always', to: 'end' },
       },
     };
@@ -2039,10 +2039,10 @@ describe('Materia loadout grid editor', () => {
 
   it('prevents invalid conditional loop-exit routes with immediate feedback', async () => {
     const config = structuredClone(edgeEditorConfig);
-    (config.loadouts.Edges.nodes['Socket-1'] as any).parse = 'text';
+    (config.loadouts.Edges.sockets['Socket-1'] as any).parse = 'text';
     (config.loadouts.Edges as any).loops = {
       reviewLoop: {
-        nodes: ['Socket-1', 'Socket-2'],
+        sockets: ['Socket-1', 'Socket-2'],
         exit: { from: 'Socket-1', when: 'always', to: 'end' },
       },
     };
@@ -2068,10 +2068,10 @@ describe('Materia loadout grid editor', () => {
 
   it('prevents conditional loop-exit routes from sockets with omitted parse mode', async () => {
     const config = structuredClone(edgeEditorConfig);
-    delete (config.loadouts.Edges.nodes['Socket-1'] as any).parse;
+    delete (config.loadouts.Edges.sockets['Socket-1'] as any).parse;
     (config.loadouts.Edges as any).loops = {
       reviewLoop: {
-        nodes: ['Socket-1', 'Socket-2'],
+        sockets: ['Socket-1', 'Socket-2'],
         exit: { from: 'Socket-1', when: 'always', to: 'end' },
       },
     };
@@ -2099,7 +2099,7 @@ describe('Materia loadout grid editor', () => {
     const config = structuredClone(edgeEditorConfig);
     (config.loadouts.Edges as any).loops = {
       reviewLoop: {
-        nodes: ['Socket-1', 'Socket-2'],
+        sockets: ['Socket-1', 'Socket-2'],
         exit: { from: 'Socket-1', when: 'always', to: 'end' },
       },
     };
@@ -2130,7 +2130,7 @@ describe('Materia loadout grid editor', () => {
     const config = structuredClone(edgeEditorConfig);
     (config.loadouts.Edges as any).loops = {
       reviewLoop: {
-        nodes: ['Socket-1', 'Socket-2'],
+        sockets: ['Socket-1', 'Socket-2'],
         exit: { from: 'Socket-1', when: 'always', to: 'end' },
         exits: [{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-2' }],
       },
@@ -2153,7 +2153,7 @@ describe('Materia loadout grid editor', () => {
 
   it('removes a conditional edge without deleting either socket', async () => {
     const config = structuredClone(edgeEditorConfig);
-    config.loadouts.Edges.nodes['Socket-1'].edges = [{ to: 'Socket-2', when: 'satisfied' }];
+    config.loadouts.Edges.sockets['Socket-1'].edges = [{ to: 'Socket-2', when: 'satisfied' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -2178,7 +2178,7 @@ describe('Materia loadout grid editor', () => {
 
   it('surfaces invalid edge creation without mutating draft state', async () => {
     const config = structuredClone(edgeEditorConfig);
-    config.loadouts.Edges.nodes['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
+    config.loadouts.Edges.sockets['Socket-1'].edges = [{ when: 'always', to: 'Socket-2' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
       return new Response(JSON.stringify({ ok: true, source: 'test', config }));
@@ -2202,7 +2202,7 @@ describe('Materia loadout grid editor', () => {
 
   it('removes a legacy default flow without dropping conditional edges or sockets', async () => {
     const config = structuredClone(edgeEditorConfig);
-    const startNode = config.loadouts.Edges.nodes['Socket-1'] as typeof config.loadouts.Edges.nodes['Socket-1'] & { next?: string };
+    const startNode = config.loadouts.Edges.sockets['Socket-1'] as typeof config.loadouts.Edges.sockets['Socket-1'] & { next?: string };
     startNode.next = 'Socket-2';
     startNode.edges = [{ to: 'Socket-3', when: 'satisfied' }];
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -2268,7 +2268,7 @@ describe('Materia loadout grid editor', () => {
     config.activeLoadout = 'Drag-Stability';
     config.loadouts['Drag-Stability'] = {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
         'Socket-3': { type: 'agent', materia: 'Build' },
@@ -2319,7 +2319,7 @@ describe('Materia loadout grid editor', () => {
     snakeConfig.activeLoadout = 'Snake';
     snakeConfig.loadouts.Snake = {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
         'Socket-3': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
@@ -2355,7 +2355,7 @@ describe('Materia loadout grid editor', () => {
     mixedConfig.activeLoadout = 'Mixed';
     mixedConfig.loadouts.Mixed = {
       entry: 'Socket-1',
-      nodes: {
+      sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
         'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
         'Socket-3': { type: 'agent', materia: 'Build', layout: { x: 7, y: 3 }, edges: [{ when: 'always', to: 'Socket-4' }] },
@@ -2796,14 +2796,14 @@ describe('Materia loadout grid editor', () => {
       loadouts: {
         'Full-Auto': {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'agent', materia: 'SocketOnly' },
             'Socket-2': { type: 'agent', materia: 'Build' },
           },
         },
         Alternate: {
           entry: 'Socket-1',
-          nodes: {
+          sockets: {
             'Socket-1': { type: 'utility', utility: 'other' },
           },
         },

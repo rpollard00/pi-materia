@@ -41,8 +41,7 @@ export interface PipelineLoopExitRoute {
 
 export interface PipelineLoop {
   label?: string;
-  sockets?: string[];
-  nodes: string[];
+  sockets: string[];
   consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
   exit?: { from: string; when: MateriaEdgeCondition; to: string };
@@ -57,10 +56,7 @@ export interface PipelineLayout {
 
 export interface PipelineConfig {
   entry?: string;
-  /** Canonical core shape. WebUI normalizes this to nodes at its DTO boundary. */
   sockets?: Record<string, PipelineNode>;
-  /** Legacy WebUI editor DTO shape. */
-  nodes?: Record<string, PipelineNode>;
   loops?: Record<string, PipelineLoop>;
   layout?: PipelineLayout;
   [key: string]: unknown;
@@ -85,7 +81,7 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig, options: Norm
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
     normalizeLoadoutSocketKinds(loadout);
     normalizeLoadoutLayout(loadout);
-    for (const node of Object.values(loadout.nodes ?? {}) as LegacyPipelineNode[]) {
+    for (const node of Object.values(loadout.sockets ?? {}) as LegacyPipelineNode[]) {
       normalizeCanonicalParseSemantics(node);
       const edges = (node.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
       if (typeof node.next === 'string' && node.next) edges.push({ when: 'always', to: node.next });
@@ -115,7 +111,7 @@ function normalizeCanonicalParseSemantics(container: { parse?: unknown; outputFo
 
 function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
   for (const id of generatorPipelineSocketIds(loadout, definitions)) {
-    const node = loadout.nodes?.[id];
+    const node = loadout.sockets?.[id];
     if (node?.type !== 'agent' || typeof node.materia !== 'string') continue;
     if (!canonicalMateriaGeneratorOutput(definitions[node.materia])) continue;
     node.parse = 'json';
@@ -225,7 +221,7 @@ function deleteOptionalTarget(container: { done?: string } | undefined, deletedS
 
 function removeLoopOwnedRuntimeControls(loadout: PipelineConfig, loop: PipelineLoop): void {
   const exitSource = loop.exit?.from;
-  const sourceNode = exitSource ? loadout.nodes?.[exitSource] : undefined;
+  const sourceNode = exitSource ? loadout.sockets?.[exitSource] : undefined;
   if (!sourceNode) return;
 
   const loopExitTargets = new Set((loop.exits ?? []).map((route) => route.targetSocketId));
@@ -240,11 +236,11 @@ function removeLoopOwnedRuntimeControls(loadout: PipelineConfig, loop: PipelineL
 }
 
 export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: string): boolean {
-  const node = loadout.nodes?.[socketId];
-  if (!loadout.nodes || !canDeleteSocket(node)) return false;
+  const node = loadout.sockets?.[socketId];
+  if (!loadout.sockets || !canDeleteSocket(node)) return false;
 
-  delete loadout.nodes[socketId];
-  for (const current of Object.values(loadout.nodes) as LegacyPipelineNode[]) {
+  delete loadout.sockets[socketId];
+  for (const current of Object.values(loadout.sockets) as LegacyPipelineNode[]) {
     if (current.edges) {
       current.edges = current.edges.filter((edge) => edge.to !== socketId);
       if (current.edges.length === 0) delete current.edges;
@@ -255,7 +251,7 @@ export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: strin
   }
 
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
-    if (loop.nodes.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId || loop.exits?.some((route) => route.from === socketId)) {
+    if (loop.sockets.includes(socketId) || loop.consumes?.from === socketId || loop.exit?.from === socketId || loop.exits?.some((route) => route.from === socketId)) {
       removeLoopOwnedRuntimeControls(loadout, loop);
       delete loadout.loops?.[loopId];
       continue;
@@ -273,10 +269,10 @@ export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: strin
 }
 
 export function normalizeLoadoutSocketKinds(loadout: PipelineConfig): PipelineConfig {
-  const nodes = loadout.nodes ?? {};
-  const entryId = loadout.entry && nodes[loadout.entry] ? loadout.entry : Object.keys(nodes)[0];
+  const sockets = loadout.sockets ?? {};
+  const entryId = loadout.entry && sockets[loadout.entry] ? loadout.entry : Object.keys(sockets)[0];
   if (entryId && !loadout.entry) loadout.entry = entryId;
-  for (const [id, node] of Object.entries(nodes)) {
+  for (const [id, node] of Object.entries(sockets)) {
     node.socketKind = id === entryId ? 'entry' : 'normal';
   }
   return loadout;
@@ -291,7 +287,7 @@ function isSocketLayout(value: unknown): value is SocketLayout {
 export function getSocketLayout(loadout: PipelineConfig | undefined, socketId: string): SocketLayout | undefined {
   const explicit = loadout?.layout?.sockets?.[socketId];
   if (isSocketLayout(explicit)) return explicit;
-  const legacy = loadout?.nodes?.[socketId]?.layout;
+  const legacy = loadout?.sockets?.[socketId]?.layout;
   return isSocketLayout(legacy) ? legacy : undefined;
 }
 
@@ -310,17 +306,17 @@ export function setLoadoutSocketLayout(loadout: PipelineConfig, socketId: string
 }
 
 export function normalizeLoadoutLayout(loadout: PipelineConfig): PipelineConfig {
-  const nodes = loadout.nodes ?? {};
+  const sockets = loadout.sockets ?? {};
   const existing = loadout.layout && typeof loadout.layout === 'object' && !Array.isArray(loadout.layout) ? loadout.layout : {};
   const existingSockets = existing.sockets && typeof existing.sockets === 'object' && !Array.isArray(existing.sockets) ? existing.sockets : {};
   const socketLayouts: Record<string, SocketLayout> = {};
 
-  for (const id of Object.keys(nodes).sort((a, b) => a.localeCompare(b))) {
+  for (const id of Object.keys(sockets).sort((a, b) => a.localeCompare(b))) {
     const authoritative = existingSockets[id];
-    const fallback = nodes[id]?.layout;
+    const fallback = sockets[id]?.layout;
     const source = isSocketLayout(authoritative) ? authoritative : isSocketLayout(fallback) ? fallback : undefined;
     if (source) socketLayouts[id] = { ...(typeof source.x === 'number' ? { x: source.x } : {}), ...(typeof source.y === 'number' ? { y: source.y } : {}) };
-    if (nodes[id] && 'layout' in nodes[id]) delete nodes[id].layout;
+    if (sockets[id] && 'layout' in sockets[id]) delete sockets[id].layout;
   }
 
   const nextLayout: PipelineLayout = { ...existing };
@@ -341,17 +337,17 @@ export function makeEmptySocket(structure: PipelineNode = {}): PipelineNode {
 
 export function makeEmptyEntryLoadout(entry = 'Socket-1'): PipelineConfig {
   assertCanonicalSocketId(entry, 'new loadout entry');
-  return { entry, nodes: { [entry]: makeEmptySocket({ socketKind: 'entry' }) } };
+  return { entry, sockets: { [entry]: makeEmptySocket({ socketKind: 'entry' }) } };
 }
 
-export function makeNewSocketId(nodes: Record<string, PipelineNode>): string {
+export function makeNewSocketId(sockets: Record<string, PipelineNode>): string {
   const usedNumbers = new Set<number>();
-  for (const id of Object.keys(nodes)) {
+  for (const id of Object.keys(sockets)) {
     const parsed = parseCanonicalSocketId(id);
     if (parsed) usedNumbers.add(parsed.ordinal);
   }
   let index = 1;
-  while (usedNumbers.has(index) || nodes[`Socket-${index}`]) index += 1;
+  while (usedNumbers.has(index) || sockets[`Socket-${index}`]) index += 1;
   return `Socket-${index}`;
 }
 
@@ -373,7 +369,7 @@ export function loopExitRouteId(from: string, condition: MateriaEdgeCondition): 
 
 export function upsertLoopExitRoute(loadout: PipelineConfig, loopId: string, from: string, condition: MateriaEdgeCondition, targetSocketId: string): PipelineLoopExitRoute | undefined {
   const loop = loadout.loops?.[loopId];
-  if (!loop || loop.exit?.from !== from || !loadout.nodes?.[targetSocketId]) return undefined;
+  if (!loop || loop.exit?.from !== from || !loadout.sockets?.[targetSocketId]) return undefined;
   const route = { id: loopExitRouteId(from, condition), from, condition, targetSocketId };
   const routes = (loop.exits ?? []).filter((candidate) => !(candidate.from === from && candidate.condition === condition));
   loop.exits = [...routes, route];
@@ -488,7 +484,7 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
     // validation remains a non-mutating read from editor state.
     const { loadout: sharedLoadout, analysis } = normalizeLoadedLoadout(fromWebUiLoadoutDto(cloneValue(rawLoadout) as never), config.materia ?? {});
     const loadout = toWebUiLoadoutDto(sharedLoadout) as PipelineConfig;
-    for (const [socketId, node] of Object.entries(loadout.nodes ?? {})) {
+    for (const [socketId, node] of Object.entries(loadout.sockets ?? {})) {
       for (const [index, edge] of (node.edges ?? []).entries()) {
         if (!jsonControlConditions.has(edge.when)) continue;
         if (node.parse !== 'json') errors.push(controlParseError(loadoutName, socketId, node, `${socketId}.edges[${index}]`, edge.when));
@@ -503,7 +499,7 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
     }
     for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
       for (const [index, route] of (loop.exits ?? []).entries()) {
-        const source = loadout.nodes?.[route.from];
+        const source = loadout.sockets?.[route.from];
         if (source && isJsonControlCondition(route.condition) && source.parse !== 'json') {
           errors.push(controlParseError(loadoutName, route.from, source, `loops.${loopId}.exits[${index}].condition`, route.condition));
         }
@@ -519,8 +515,8 @@ export function assertValidLoadoutSaveSemantics(config: MateriaConfig): void {
 }
 
 export function resolveSocketDisplayLabel(loadout: PipelineConfig | undefined, socketId: string): string {
-  if (loadout?.nodes && !loadout.nodes[socketId]) return socketId;
-  return getNodeLabel(socketId, loadout?.nodes?.[socketId]);
+  if (loadout?.sockets && !loadout.sockets[socketId]) return socketId;
+  return getNodeLabel(socketId, loadout?.sockets?.[socketId]);
 }
 
 function fallbackColorIndex(materiaId: string): number {

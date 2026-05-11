@@ -4,7 +4,7 @@ import { formatLoopDisplayLabel, getLoopRegions } from './graphLayout.js';
 
 const loopLoadout = {
   entry: 'Socket-1',
-  nodes: {
+  sockets: {
     'Socket-1': { type: 'agent', materia: 'Build' },
     'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
     'Socket-3': { type: 'agent', materia: 'Maintain' },
@@ -13,7 +13,7 @@ const loopLoadout = {
   loops: {
     taskIteration: {
       label: 'Loop: Socket-1 → Socket-2 → Socket-3',
-      nodes: ['Socket-1', 'Socket-2', 'Socket-3'],
+      sockets: ['Socket-1', 'Socket-2', 'Socket-3'],
       consumes: { from: 'Socket-1', output: 'workItems' },
     },
   },
@@ -24,7 +24,7 @@ describe('loop display labels', () => {
     expect(formatLoopDisplayLabel(
       loopLoadout,
       'taskIteration',
-      loopLoadout.loops!.taskIteration.nodes,
+      loopLoadout.loops!.taskIteration.sockets,
       loopLoadout.loops!.taskIteration.label,
     )).toBe('Loop: Build → Auto-Eval → Maintain');
   });
@@ -42,10 +42,10 @@ describe('loop display labels', () => {
   it('falls back safely for unassigned loop members without changing stored socket ids', () => {
     const loadout = {
       ...loopLoadout,
-      loops: { taskIteration: { nodes: ['Socket-1', 'Socket-4', 'Socket-99'] } },
+      loops: { taskIteration: { sockets: ['Socket-1', 'Socket-4', 'Socket-99'] } },
     } satisfies PipelineConfig;
 
-    expect(formatLoopDisplayLabel(loadout, 'taskIteration', loadout.loops.taskIteration.nodes)).toBe('Build → Empty → Socket-99');
-    expect(loadout.loops.taskIteration.nodes).toEqual(['Socket-1', 'Socket-4', 'Socket-99']);
+    expect(formatLoopDisplayLabel(loadout, 'taskIteration', loadout.loops.taskIteration.sockets)).toBe('Build → Empty → Socket-99');
+    expect(loadout.loops.taskIteration.sockets).toEqual(['Socket-1', 'Socket-4', 'Socket-99']);
   });
 });
