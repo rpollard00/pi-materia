@@ -312,7 +312,8 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
       loops: loadout.loops ?? (hasLoadoutSocketMap(loadout) ? undefined : baseLoadout?.loops),
     } as MateriaPipelineConfig;
     // Do not materialize the legacy `nodes` alias during core config merging;
-    // schema/persistence adapters remain responsible for accepting old DTOs.
+    // schema/persistence and WebUI boundaries reject old loadout DTOs with
+    // actionable guidance to use `sockets` instead.
     delete mergedLoadout.nodes;
     merged[name] = normalizePipelineGraph(mergedLoadout);
   }

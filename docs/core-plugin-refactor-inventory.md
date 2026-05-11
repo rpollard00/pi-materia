@@ -225,19 +225,19 @@ No obvious import cycle was observed from the current source import map, but sev
 
 ## Legacy `nodes` compatibility and socket migration points
 
-The canonical core model is now socket-first. Remaining `node`/`nodes` spellings are compatibility seams for saved casts, WebUI/plugin DTOs, artifact paths, and event names:
+The canonical core model is now socket-first. Remaining `node`/`nodes` spellings are compatibility seams for saved casts, WebUI monitor/plugin status DTOs, artifact paths, and event names:
 
-- `MateriaPipelineConfig.sockets` is the canonical graph map in config/defaults and user/project configs; legacy `nodes` input is normalized at schema/config edges.
+- `MateriaPipelineConfig.sockets` is the canonical graph map in config/defaults and user/project configs; legacy loadout-level `nodes` input is rejected at schema/config/WebUI save edges with guidance to use `sockets`.
 - `ResolvedMateriaPipeline.sockets`, socket ids, visits, edge traversals, task attempts, and loop membership are canonical runtime concepts.
 - Persisted compatibility DTO fields such as `MateriaCastState.currentNode`, `nodeState`, `UsageReport.byNode`, manifest `node`, and stable event names like `node_start`/`node_complete` remain legacy-only surfaces whose values are socket ids.
 - Artifact layout still uses `nodes/<socket-id>/...` for saved-tooling compatibility.
-- WebUI/server monitor DTOs may continue to expose legacy field names until a separate WebUI contract migration is planned.
+- WebUI/server monitor DTOs may continue to expose legacy field names until a separate monitor contract migration is planned; WebUI config/loadout DTOs are socket-only.
 
 Migration intent:
 
 - New domain/application APIs use socket terminology (`socketId`, `sockets`, socket state).
-- Legacy `nodes` persisted fields remain readable through schema adapters and are mapped to domain sockets.
-- Public DTOs consumed by WebUI or saved cast artifacts are bridged rather than mechanically renamed in this core refactor stage.
+- Legacy loadout `nodes` persisted fields are no longer readable through schema adapters; update saved loadouts to `sockets`.
+- Public DTOs consumed by WebUI config save/load paths are socket-only; saved cast artifacts and monitor surfaces still use legacy field names where compatibility is intentionally preserved.
 - Artifact directory/event field renames, if any, require explicit compatibility strategy and fixture tests.
 
 ## Target dependency direction

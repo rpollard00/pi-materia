@@ -15,15 +15,15 @@ Dependency direction should remain:
 
 `plugin composition -> native runtime/infrastructure adapters -> application ports/use cases -> domain`
 
-Schema compatibility is an edge concern: external JSON and legacy `nodes` payloads are normalized before reaching canonical application/domain workflows. WebUI contracts should be preserved unless a tested migration changes them.
+Schema compatibility is an edge concern: external JSON loadouts must use `sockets`; legacy loadout or loop `nodes` payloads are rejected before reaching canonical application/domain workflows. Stable saved-cast, artifact, event, usage, and monitor DTO seams may still use historical node terminology.
 
 ## Compatibility policy
 
 - `sockets` is canonical for new core/domain/application code and newly written loadout JSON.
-- Legacy `node`/`nodes` names remain only for persisted saved casts, artifact/event/usage fields, historical test filenames, and WebUI DTOs that still expose those names. Treat their values as socket ids.
+- Legacy `node`/`nodes` names remain only for persisted saved casts, artifact/event/usage fields, historical test filenames, and WebUI monitor DTOs that still expose those names. Loadout topology in config, saved loadouts, and WebUI config DTOs must use `sockets`; old `nodes` payloads fail validation with a `use sockets instead` error.
 - `maxSocketVisits` is canonical. `maxNodeVisits` is read only as a legacy config fallback.
 - Generated units of work are `workItems`. Legacy `tasks` wording in prompts or adapter metadata must not become a runtime output alias.
-- Do not add new public domain/application APIs with node terminology. If old data must be accepted, normalize it in schema/accessor/DTO compatibility modules.
+- Do not add new public domain/application APIs with node terminology. Do not accept legacy loadout `nodes` at schema/accessor/WebUI DTO boundaries; reject it with actionable `sockets` guidance.
 
 ## Where new code should go
 
@@ -44,7 +44,7 @@ Schema compatibility is an edge concern: external JSON and legacy `nodes` payloa
 - schema compatibility imports application, infrastructure, WebUI, or plugin composition;
 - `src/native.ts` stops being a thin compatibility module.
 
-Run it with the normal suite (`npm test`). For review, also check that new legacy-terminology support is limited to schema/accessor/DTO compatibility modules, persisted DTO types, tests/fixtures, or explicit external compatibility notes.
+Run it with the normal suite (`npm test`). For review, also check that legacy terminology remains limited to rejection checks for old loadout payloads, persisted DTO types, tests/fixtures, or explicit external compatibility notes for saved casts/artifacts/events/usage/monitor data.
 
 ## Validation and follow-up debt
 
@@ -52,6 +52,12 @@ Validation for refactor-followup-08 (2026-05-11):
 
 - `npm run typecheck` passed.
 - `npm test` passed.
+
+Validation for the socket-only loadout migration (2026-05-11):
+
+- `bun test` passed.
+- `npm run test:webui` passed.
+- `npm run typecheck` passed.
 
 Known compatibility seams that remain intentional:
 
