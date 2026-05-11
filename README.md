@@ -356,7 +356,7 @@ Each cast writes enough information to debug the run after the fact:
   events.jsonl
   usage.json       # token totals and USD cost totals/breakdowns from Pi usage metadata
   manifest.json
-  sockets/<socket-id>/<visit>.md       # legacy-stable artifact directory name
+  sockets/<socket-id>/<visit>.md       # canonical socket output artifact
   sockets/<socket-id>/<visit>.json
   contexts/<socket-id>-<visit>.md
 ```
@@ -371,3 +371,7 @@ The bundled defaults live at `config/default.json` and set `activeLoadout` to `F
 When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured generic envelope (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing`), and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 
 Both loadouts are defined entirely as config using top-level reusable materia prompts plus socket adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-8`); materia identity stays in socket fields such as `materia` or `utility`, while displays can add context like `Socket-4 (Build)`. Loadout config and WebUI save payloads use canonical `sockets` collections for loadout membership and loop membership. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
+
+### Socket terminology and compatibility
+
+Socket terminology is now canonical across config, runtime state, monitor payloads, events, manifests, and artifacts. Current configs must use `sockets` for loadout and loop membership, runtime state uses fields such as `currentSocketId`, `socketState`, `bySocket`, and `socketId`, events use `socket_start`/`socket_complete`, same-socket recovery uses `same_socket_recovery_exhausted`, and new output artifacts are written under `sockets/` with `socket_output`/`socket_refinement` manifest kinds. Pre-socket aliases and old artifact directory names are intentionally no longer part of the active contract; migrate old configs and tooling to these socket field/path names before running current pi-materia.

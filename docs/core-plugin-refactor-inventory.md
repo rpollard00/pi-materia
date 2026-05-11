@@ -95,7 +95,7 @@ Cast/session persistence:
 - Assignment is configured per socket with `assign` paths and executed by `applyAssignments` using JSON/path helpers in `native.ts`.
 - Generic handoff envelope fields are captured into `state.data.envelope`, `state.data.workItems`, `state.data.guidance`, `state.data.summary`, `state.data.decisions`, and `state.data.risks`.
 - Routing uses ordered canonical outgoing edges from `graphValidation.canonicalOutgoingEdges`; `always`, `satisfied`, and `not_satisfied` are evaluated against the canonical JSON `satisfied` field.
-- Loop advancement uses `advance` and `loops` metadata; `loopIteratorForNode`, `resolveLoopExitRoute`, and current cursor state determine current work item and exit targets.
+- Loop advancement uses `advance` and `loops` metadata; `loopIteratorForSocket`, `resolveLoopExitRoute`, and current cursor state determine current work item and exit targets.
 - Visit and edge traversal limits are enforced at runtime from loadout/global limits.
 
 ## Materia/loadout concepts currently represented
@@ -106,7 +106,7 @@ Primary types in `src/types.ts`:
 - `MateriaConfig`: reusable agent or utility behavior definition.
 - `MateriaPipelineConfig`: active loadout graph with `entry`, `sockets`, `layout`, and `loops`.
 - `MateriaPipelineSocketConfig`: agent/utility socket config with parse, assign, edges, foreach, advance, limits, and legacy layout.
-- `ResolvedMateriaPipeline` / `ResolvedMateriaNode`: runtime graph after resolving socket references to reusable materia.
+- `ResolvedMateriaPipeline` / `ResolvedMateriaSocket`: runtime graph after resolving socket references to reusable materia.
 - `MateriaCastState`: persisted runtime cast state, including current socket/socket, data, cursors, visits, recovery state, usage run state, and resolved pipeline.
 - `HandoffEnvelope`/`HandoffWorkItem` in `handoffContract.ts`: canonical inter-socket payload.
 

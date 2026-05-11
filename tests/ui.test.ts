@@ -556,10 +556,10 @@ describe("usage UI formatting", () => {
 
     const total = costFromLine(lines.find((line) => line.startsWith("total:")) ?? "");
     const materiaLines = lines.slice(lines.indexOf("By materia:") + 1, lines.indexOf("By socket:"));
-    const nodeLines = lines.slice(lines.indexOf("By socket:") + 1, lines.indexOf("By task:"));
+    const socketLines = lines.slice(lines.indexOf("By socket:") + 1, lines.indexOf("By task:"));
     const taskLines = lines.slice(lines.indexOf("By task:") + 1);
     expect(materiaLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
-    expect(nodeLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
+    expect(socketLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
     expect(taskLines.filter((line) => line.startsWith("-")).reduce((sum, line) => sum + costFromLine(line), 0)).toBeCloseTo(total, 10);
   });
 

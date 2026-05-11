@@ -571,10 +571,10 @@ describe("native multi-turn runtime", () => {
     expect(JSON.parse(await readFile(path.join(castDir, "sockets", "Socket-1", "1.json"), "utf8"))).toEqual({ tasks: [{ id: "1", title: "Ship it" }] });
 
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
-    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "socket_output" && entry.socket === "Socket-1");
-    expect(nodeOutput.artifact).toBe(path.join("sockets", "Socket-1", "1.md"));
-    expect(nodeOutput.finalized).toBe(true);
-    expect(nodeOutput.refinementTurn).toBe(2);
+    const socketOutput = manifest.entries.find((entry: any) => entry.kind === "socket_output" && entry.socket === "Socket-1");
+    expect(socketOutput.artifact).toBe(path.join("sockets", "Socket-1", "1.md"));
+    expect(socketOutput.finalized).toBe(true);
+    expect(socketOutput.refinementTurn).toBe(2);
 
     const events = (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     const completeEvent = events.find((event: any) => event.type === "socket_complete" && event.data.socket === "Socket-1");
@@ -610,10 +610,10 @@ describe("native multi-turn runtime", () => {
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", state.castId);
     expect(await readFile(path.join(castDir, "sockets", "Socket-1", "1.md"), "utf8")).toBe(finalText);
     const manifest = JSON.parse(await readFile(path.join(castDir, "manifest.json"), "utf8"));
-    const nodeOutput = manifest.entries.find((entry: any) => entry.kind === "socket_output" && entry.socket === "Socket-1");
-    expect(nodeOutput.artifact).toBe(path.join("sockets", "Socket-1", "1.md"));
-    expect(nodeOutput.finalized).toBe(true);
-    expect(nodeOutput.kind).toBe("socket_output");
+    const socketOutput = manifest.entries.find((entry: any) => entry.kind === "socket_output" && entry.socket === "Socket-1");
+    expect(socketOutput.artifact).toBe(path.join("sockets", "Socket-1", "1.md"));
+    expect(socketOutput.finalized).toBe(true);
+    expect(socketOutput.kind).toBe("socket_output");
 
     const buildPrompt = harness.sentMessages.at(-1)?.message as any;
     expect(buildPrompt.content).toContain("Summary=Final text plan");

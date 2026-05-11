@@ -40,8 +40,8 @@ Important TypeScript interfaces are in `src/types.ts`:
 - `PiMateriaConfig`: `artifactDir`, `budget`, `limits`, `compaction`, named `loadouts`, `activeLoadout`, and top-level `materia`.
 - `MateriaPipelineConfig`: `{ entry, sockets }`.
 - `MateriaPipelineSocketConfig`: agent or utility socket.
-- `MateriaAgentNodeConfig`: `type: "agent"`, `materia`, plus common routing fields.
-- `MateriaUtilityNodeConfig`: `type: "utility"`, `utility` or `command`, optional `params` and `timeoutMs`, plus common routing fields.
+- `MateriaAgentSocketConfig`: `type: "agent"`, `materia`, plus common routing fields.
+- `MateriaUtilitySocketConfig`: `type: "utility"`, `utility` or `command`, optional `params` and `timeoutMs`, plus common routing fields.
 - Common routing/editable graph fields: `parse`, `assign`, `next`, `edges`, `foreach`, `advance`, and `limits`.
 - `MateriaEdgeConfig`: `when`, `to`, `maxTraversals`.
 - `MateriaConfig`: `tools`, `prompt`, optional `model`, optional `thinking`, and optional `multiTurn`.

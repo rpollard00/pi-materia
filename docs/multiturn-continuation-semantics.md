@@ -35,7 +35,7 @@ If `awaitingResponse` is already true, no refinement preparation runs; the runti
 
 Command-triggered finalization reuses the same completion path that single-turn sockets use. Until `/materia continue` is run, the assistant output is only a refinement draft: JSON-parsed sockets must not request or emit final structured JSON, and the runtime must not call `completeSocket()` or attempt `parseJson()` for that plaintext refinement output. After `/materia continue`, the paused multi-turn branch asks the agent for the socket's final format and then calls `completeSocket(pi, ctx, state, finalAssistantText, entryId)` so behavior remains identical to normal orchestration:
 
-- Text sockets write the normal `socket_output` artifact via `recordNodeOutput()`.
+- Text sockets write the normal `socket_output` artifact via `recordSocketOutput()`.
 - JSON sockets parse with `parseJson()`, write the parsed JSON sidecar, and set `state.lastJson`.
 - `assign` updates `state.data` through `applyAssignments()`.
 - `advance` and edge/`next` selection use `applyAdvance()` and `selectNextTarget()`.

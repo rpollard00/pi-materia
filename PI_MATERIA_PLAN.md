@@ -1,12 +1,12 @@
 # pi-materia Next Features Plan
 
-> Historical implementation plan. Examples and terminology in this file document older designs or migration history; active configuration now uses top-level `materia` entries and socket `materia` assignments. Historical `node`/`nodes` wording below refers to pre-socket-era design notes only and is not part of the current contract.
+> Historical implementation plan. Examples and terminology in this file document older designs or migration history. Historical examples below have been updated to socket terminology where they describe pi-materia graph concepts; active configuration uses top-level `materia` entries and socket `materia` assignments.
 
 This plan turns the first test feedback into a staged roadmap for pi-materia, a Pi extension for configurable agent pipelines.
 
 ## Goals
 
-pi-materia should become a configurable, observable Pi-native workflow runtime where each pipeline node drives an isolated role turn in the active Pi conversation, reports progress/cost, exposes its work, and hands off to maintainer checkpoints safely.
+pi-materia should become a configurable, observable Pi-native workflow runtime where each pipeline socket drives an isolated role turn in the active Pi conversation, reports progress/cost, exposes its work, and hands off to maintainer checkpoints safely.
 
 ## Naming and Metaphor Architecture
 
@@ -14,7 +14,7 @@ pi-materia uses a materia-inspired metaphor for pluggable agent pipelines:
 
 - **pi-materia**: the overall Pi extension/framework and npm package.
 - **Materia Grid**: the configured pipeline graph visualization.
-- **Slot**: a graph position/node where an agent can be plugged in.
+- **Slot**: a graph position/socket where an agent can be plugged in.
 - **Materia**: a reusable role/capability package that can be slotted into the grid.
 - **Link**: an edge/handoff between slots.
 - **Loadout**: the full resolved configuration for a run.
@@ -75,7 +75,7 @@ Tasks:
   {
     "pipeline": {
       "entry": "planner",
-      "nodes": {
+      "sockets": {
         "planner": {
           "type": "agent",
           "role": "planner",
@@ -114,13 +114,13 @@ Acceptance:
 - Pipeline can be modified by editing JSON only.
 
 Implementation notes:
-- Added `pipeline.entry` and `pipeline.nodes` to the default loadout.
+- Added `pipeline.entry` and `pipeline.sockets` to the default loadout.
 - Slots now reference roles by name instead of the runtime directly calling hardcoded role keys.
 - Removed `commitCommand` from the config schema; VCS behavior now belongs in maintainer role prompts.
 - Added separate `jjMaintainer` and `gitMaintainer` roles.
 - The bundled default currently uses `jjMaintainer` for faster local iteration.
 - Added pipeline validation with friendly errors for missing slots, missing roles, and unsupported links.
-- Runtime traverses configured Materia Grid links. Built-in node kinds (`planner`, `builder`, `evaluator`, `maintainer`) provide structured behavior, and `generic` nodes can be inserted for custom handoffs.
+- Runtime traverses configured Materia Grid links. Built-in socket kinds (`planner`, `builder`, `evaluator`, `maintainer`) provide structured behavior, and `generic` sockets can be inserted for custom handoffs.
 - Added `config/default.json` as the bundled default loadout that is used when no explicit or project config exists.
 
 ## Phase 2: Observability, Token Budgeting, and Visual Feedback
@@ -136,9 +136,9 @@ Tasks:
   - Needs real-run verification against provider/message shapes.
 - [x] Aggregate per:
   - run
-  - node/role
+  - socket/role
   - task
-  - attempt (per exact node plus foreach item key, not raw node visit count)
+  - attempt (per exact socket plus foreach item key, not raw socket visit count)
 - [x] Show live totals in the pi-materia widget.
 - [x] Write incremental totals to `usage.json` after every observed role-turn usage event.
 - [x] Include model/provider/api/thinking level in usage report when available from Pi/model metadata.
@@ -157,7 +157,7 @@ Tasks:
 - [x] Stop or ask for confirmation when the limit is reached, depending on config.
 - [ ] Verify token/cost capture with real casts and multiple providers.
 - [x] Add a richer final usage breakdown display, not just totals notification + `usage.json`.
-  - Current implementation renders a `materia-usage` widget with total, by-role, by-node, and by-task usage.
+  - Current implementation renders a `materia-usage` widget with total, by-role, by-socket, and by-task usage.
 
 Acceptance:
 - [x] Live widget shows token/cost totals during a run.
@@ -423,7 +423,7 @@ Acceptance:
   - `tasks/<task-id>/build-<attempt>.md`
   - `tasks/<task-id>/eval-<attempt>.json`
   - `maintenance/final.md`
-  - Attempt numbers are user-facing task attempts for the same exact node/item retry; node visit counts remain separate for generic node artifact paths and limits.
+  - Attempt numbers are user-facing task attempts for the same exact socket/item retry; socket visit counts remain separate for generic socket artifact paths and limits.
 - [x] Store references to Pi session entries/message ids for each artifact.
 - [x] Add a `manifest.json` mapping Materia phases/tasks to Pi entries.
 
@@ -434,11 +434,11 @@ Acceptance:
 
 - [x] Add `/materia status` to show active cast state.
 - [x] Add `/materia abort` to stop/clear active cast state.
-- [x] Support command-only multi-turn continuation/finalization from paused refinement nodes via `/materia continue`.
+- [x] Support command-only multi-turn continuation/finalization from paused refinement sockets via `/materia continue`.
 - [x] Add `/materia casts` for artifact discovery.
 
 Acceptance:
-- User can inspect, stop, and advance Materia's state machine explicitly; paused multi-turn nodes finalize only via `/materia continue`.
+- User can inspect, stop, and advance Materia's state machine explicitly; paused multi-turn sockets finalize only via `/materia continue`.
 
 #### 7.8 Native runtime cleanup
 
@@ -452,34 +452,34 @@ Acceptance:
 Phase 3 implementation notes:
 - Added `src/native.ts` as the Pi-native orchestration runtime.
 - `/materia cast` now initializes a persisted cast state and sends the planner prompt into the active Pi session.
-- `agent_end` transitions the state machine by following configured Materia Grid links and sends the next node prompt through a shared node-start path.
+- `agent_end` transitions the state machine by following configured Materia Grid links and sends the next socket prompt through a shared socket-start path.
 - `before_agent_start` augments the active system prompt with the current Materia role instructions.
 - `context` replaces the model-visible conversation for active Materia turns with an isolated per-role context plus the current role turn/tool-loop messages.
 - Role tool scopes are approximated with `pi.setActiveTools()`.
 - Artifacts now include `manifest.json` linking phases/tasks to native Pi session entry ids and context artifacts.
 - Each role turn writes the exact isolated model-visible context/prompt under `contexts/` before triggering the turn.
 
-## Phase 3.5: Utility Materia Nodes and Test Foundation — Complete
+## Phase 3.5: Utility Materia Sockets and Test Foundation — Complete
 
-Strategic correction from follow-up design discussion: deterministic project setup, artifact ignore hygiene, VCS detection, and future checkpoint mechanics should not be hardcoded into the Materia engine. They should be represented as configured Materia nodes just like agent slots, but executed by deterministic utilities instead of LLM turns.
+Strategic correction from follow-up design discussion: deterministic project setup, artifact ignore hygiene, VCS detection, and future checkpoint mechanics should not be hardcoded into the Materia engine. They should be represented as configured Materia sockets just like agent slots, but executed by deterministic utilities instead of LLM turns.
 
 Core principle:
 
 ```text
 Config owns workflow meaning.
-Agent nodes ask Pi/LLMs to reason or edit.
-Utility nodes run deterministic configured programs.
-The engine only traverses nodes and records outputs.
+Agent sockets ask Pi/LLMs to reason or edit.
+Utility sockets run deterministic configured programs.
+The engine only traverses sockets and records outputs.
 ```
 
 This phase should happen before deeper Maintenance/VCS Policy work so that VCS and bootstrap behavior can be implemented as data-driven utility Materia rather than framework-specific branches.
 
-### 7.9 Add generic utility node support
+### 7.9 Add generic utility socket support
 
 Tasks:
-- Extend pipeline node schema to support non-agent utility nodes:
+- Extend pipeline socket schema to support non-agent utility sockets:
   ```ts
-  interface MateriaUtilityNodeConfig {
+  interface MateriaUtilitySocketConfig {
     type: "utility";
     utility?: string;
     command?: string[];
@@ -490,26 +490,26 @@ Tasks:
     edges?: MateriaEdgeConfig[];
     foreach?: MateriaForeachConfig;
     advance?: MateriaAdvanceConfig;
-    limits?: MateriaNodeLimitsConfig;
+    limits?: MateriaSocketLimitsConfig;
     timeoutMs?: number;
   }
   ```
-- Keep `agent` and `utility` nodes on the same generic completion path:
+- Keep `agent` and `utility` sockets on the same generic completion path:
   - write raw output artifact
   - optionally parse JSON
   - apply `assign`
   - evaluate configured `edges`/`next`
   - enforce visit/traversal limits
   - write manifest and event metadata
-- Update `/materia grid` rendering and validation to show utility nodes and validate `command`/`utility` fields.
-- Ensure utility nodes can participate in `foreach` just like agent nodes.
+- Update `/materia grid` rendering and validation to show utility sockets and validate `command`/`utility` fields.
+- Ensure utility sockets can participate in `foreach` just like agent sockets.
 
 Acceptance:
-- A single-node utility grid can run and complete without starting a Pi agent turn.
+- A single-socket utility grid can run and complete without starting a Pi agent turn.
 - Utility output can be assigned into generic cast state and routed with edge conditions.
 - No utility implementation contains planner/builder/evaluator/maintainer assumptions.
 
-### 7.10 Make utility nodes language-agnostic with a JSON process protocol
+### 7.10 Make utility sockets language-agnostic with a JSON process protocol
 
 Primary primitive: run an explicitly configured command and exchange JSON over stdin/stdout. This allows users to write utility Materia in Python, Bash, Go, Rust, Node, Bun, or any other language.
 
@@ -519,7 +519,7 @@ Example config:
 {
   "pipeline": {
     "entry": "bootstrap",
-    "nodes": {
+    "sockets": {
       "bootstrap": {
         "type": "utility",
         "command": ["python3", ".pi/materia/ensure_ignored.py"],
@@ -569,8 +569,8 @@ Protocol rules:
 - `stdout` is the utility result.
 - `stderr` is diagnostic log output and should be artifacted.
 - Exit code `0` means success.
-- Non-zero exit code fails the node/cast with a clear diagnostic unless later config adds recoverable errors.
-- JSON parse failures fail the node when `parse: "json"`.
+- Non-zero exit code fails the socket/cast with a clear diagnostic unless later config adds recoverable errors.
+- JSON parse failures fail the socket when `parse: "json"`.
 - Utility commands are explicit config only; never auto-load arbitrary project files.
 - Add timeouts and maximum captured output sizes to avoid hung or noisy utilities.
 
@@ -585,7 +585,7 @@ Tasks:
   - `project.ensureIgnored`
   - `vcs.detect`
   - future `vcs.checkpoint`
-- Treat named utilities as plugins/commands behind the same generic utility-node interface.
+- Treat named utilities as plugins/commands behind the same generic utility-socket interface.
 - Keep command-based utilities as the lowest-level, language-agnostic primitive.
 - Do not implicitly insert bootstrap/VCS behavior into casts. If the default loadout uses these utilities, it should do so explicitly in `config/default.json`.
 
@@ -595,14 +595,14 @@ Initial candidate utility behavior:
 
 Acceptance:
 - Built-in utilities can be used from config, but removing them from the grid removes the behavior.
-- The engine remains a generic node executor rather than a VCS/bootstrap policy engine.
+- The engine remains a generic socket executor rather than a VCS/bootstrap policy engine.
 
 ### 7.12 Document Utility Materia
 
 Tasks:
 - Add a simple markdown guide at `docs/utility-materia.md` covering:
-  - when to use utility nodes vs agent nodes
-  - utility node schema
+  - when to use utility sockets vs agent sockets
+  - utility socket schema
   - JSON stdin/stdout protocol
   - Python example for `.gitignore`/artifact ignore hygiene
   - edge routing from utility JSON output
@@ -612,7 +612,7 @@ Tasks:
 - Include at least one minimal complete loadout example that says/runs `HELLO WORLD` without an LLM turn.
 
 Acceptance:
-- A user can write a utility node in an arbitrary language by following the docs.
+- A user can write a utility socket in an arbitrary language by following the docs.
 - Docs make clear that utility commands execute local code and must be explicitly trusted/configured.
 
 ### 7.13 Establish a test framework, likely with Bun
@@ -640,11 +640,11 @@ Acceptance:
 - Existing `npm run typecheck` remains available.
 - Test setup is documented in README or contributor notes.
 
-### 7.14 Add test coverage for generic engine and utility nodes
+### 7.14 Add test coverage for generic engine and utility sockets
 
 Initial test targets:
 - Template rendering and minimal path/expression helpers.
-- Pipeline validation for `agent` and `utility` nodes.
+- Pipeline validation for `agent` and `utility` sockets.
 - Utility command runner success with JSON output.
 - Utility command runner text mode.
 - Non-zero utility exit code failure diagnostics.
@@ -653,18 +653,18 @@ Initial test targets:
 - `foreach` utility execution and current item metadata.
 - `assign` from utility output into generic state.
 - Edge routing from utility JSON output.
-- Manifest/events/artifacts for utility nodes, including short item labels.
+- Manifest/events/artifacts for utility sockets, including short item labels.
 - Fake-session smoke test for an all-utility `HELLO WORLD` grid.
 
 Acceptance:
-- Core utility node behavior is covered before changing the bundled default loadout to rely on utilities.
+- Core utility socket behavior is covered before changing the bundled default loadout to rely on utilities.
 - Tests protect the data-driven engine from regressing into semantic planner/builder/evaluator branches.
 
 ## Phase 4: Maintenance and VCS Policy — Complete
 
-Note: after Phase 3.5, Maintenance/VCS Policy should be implemented as configured Materia behavior where possible. Deterministic pieces such as VCS detection, ignore hygiene, and commits should be utility Materia nodes or named utilities, not hidden engine branches.
+Note: after Phase 3.5, Maintenance/VCS Policy should be implemented as configured Materia behavior where possible. Deterministic pieces such as VCS detection, ignore hygiene, and commits should be utility Materia sockets or named utilities, not hidden engine branches.
 
-Status: implemented in the bundled loadout as configured `Build`, `Auto-Eval`, and `Maintain` Materia rather than hardcoded engine policy. `Auto-Eval` routes passed work to `Maintain` after each task. `Maintain` autonomously checkpoints and now returns structured JSON with `satisfied`, `commitMessage`, `reason`, `vcs`, `checkpointCreated`, and `commands`, assigned to `state.lastMaintain`. If `satisfied == false`, the node routes back to `Maintain` with a configured traversal limit; task cursor advancement is conditional on `satisfied == true`. VCS detection is explicit via the `vcs.detect` utility node.
+Status: implemented in the bundled loadout as configured `Build`, `Auto-Eval`, and `Maintain` Materia rather than hardcoded engine policy. `Auto-Eval` routes passed work to `Maintain` after each task. `Maintain` autonomously checkpoints and now returns structured JSON with `satisfied`, `commitMessage`, `reason`, `vcs`, `checkpointCreated`, and `commands`, assigned to `state.lastMaintain`. If `satisfied == false`, the socket routes back to `Maintain` with a configured traversal limit; task cursor advancement is conditional on `satisfied == true`. VCS detection is explicit via the `vcs.detect` utility socket.
 
 ### 8. Maintain more frequently
 
@@ -702,11 +702,11 @@ Tasks:
   { "satisfied": true, "commitMessage": "...", "reason": "..." }
   ```
 - [x] If satisfied, the configured `Maintain` Materia autonomously executes the checkpoint/commit through Pi tools.
-- [x] If not satisfied, maintainer explains why in structured output and the configured node edges retry `Maintain` up to the traversal limit.
+- [x] If not satisfied, maintainer explains why in structured output and the configured socket edges retry `Maintain` up to the traversal limit.
 
 Acceptance:
 - [x] No confirmation prompt is required by default.
-- [x] User can opt into confirmation by replacing `Maintain` with a manual/custom Materia node in the loadout.
+- [x] User can opt into confirmation by replacing `Maintain` with a manual/custom Materia socket in the loadout.
 
 ### 10. Detect jj and use jj instead of git
 
@@ -736,7 +736,7 @@ Acceptance:
 
 Tasks:
 - Move evaluator pass/fail logic into graph edge conditions.
-- Add per-edge and per-node max loop counts.
+- Add per-edge and per-socket max loop counts.
 - Detect infinite loops and stop with a clear error.
 
 Acceptance:
@@ -769,10 +769,10 @@ Acceptance:
 6. Active-session orchestration and isolated role context artifacts. — implemented
 7. Fully data-driven generic engine. — implemented
 8. Bun-based test foundation and fake Pi runtime harness.
-9. Language-agnostic utility node schema and command runner.
+9. Language-agnostic utility socket schema and command runner.
 10. Utility Materia documentation and examples.
 11. Optional named utility registry, starting with artifact ignore/VCS detection utilities.
-12. Update bundled default loadout to use utility nodes explicitly for deterministic bootstrap hygiene.
+12. Update bundled default loadout to use utility sockets explicitly for deterministic bootstrap hygiene.
 13. Maintainer/checkpoint policy as configured sockets/utilities, not engine branches.
 14. Per-role model/thinking/tool settings.
 15. Advanced graph edge conditions/parallelism if needed.
@@ -793,16 +793,16 @@ Acceptance:
 - Should failed maintenance send control back to builder, evaluator, or stop? Back to maintenance. This is already solved.
 - Should pi-materia support parallel branches later, or stay sequential initially? Stay sequential for now, we may add support for "Multi-" materia, but its a secondary concern.
 - Should built-in utility aliases live in pi-materia core, separate packages, or both? Both - we can provide some core utils but it should be extensible.
-- What command sandbox/confirmation model is appropriate for utility nodes that execute arbitrary local programs? YOLO, our utils will be safe. Disclaimer when adding external.
+- What command sandbox/confirmation model is appropriate for utility sockets that execute arbitrary local programs? YOLO, our utils will be safe. Disclaimer when adding external.
 - Should Bun become the primary package manager, or should Bun only provide the test runner while npm remains the publishing baseline? Primary package manager.
 
 ## Phase 6: Fully Data-Driven Materia Engine [Complete]
 
-Strategic correction: the Materia engine must not know about planner/builder/evaluator/maintainer semantics. Those are default loadout concepts only. The framework source should contain no references to `plan`, `build`, `evaluate`, `maintain`, or node kinds as runtime behavior. The engine should only traverse configured nodes, render configured prompts, parse configured outputs, assign configured state, evaluate configured edges, and enforce generic safety limits.
+Strategic correction: the Materia engine must not know about planner/builder/evaluator/maintainer semantics. Those are default loadout concepts only. The framework source should contain no references to `plan`, `build`, `evaluate`, `maintain`, or socket kinds as runtime behavior. The engine should only traverse configured sockets, render configured prompts, parse configured outputs, assign configured state, evaluate configured edges, and enforce generic safety limits.
 
-Status: implemented. `src/native.ts` now uses one generic node start path and one generic node completion path. Runtime semantics are configured through `prompt`, `parse`, `assign`, `edges`, `foreach`, `advance`, and limits. The bundled software-development loadout is data in `config/default.json`; `src/` no longer contains runtime branches for planner/builder/evaluator/maintainer, plan/build/evaluation/maintain modes, or node kinds.
+Status: implemented. `src/native.ts` now uses one generic socket start path and one generic socket completion path. Runtime semantics are configured through `prompt`, `parse`, `assign`, `edges`, `foreach`, `advance`, and limits. The bundled software-development loadout is data in `config/default.json`; `src/` no longer contains runtime branches for planner/builder/evaluator/maintainer, plan/build/evaluation/maintain modes, or socket kinds.
 
-### 13. Remove semantic node behavior from framework source — Done
+### 13. Remove semantic socket behavior from framework source — Done
 
 Problem: current code still has framework-level concepts like socket output modes (`plan`, `evaluation`) and phase-specific branches. That prevents users from defining arbitrary Materia Grids such as a single socket that says `HELLO WORLD` and exits.
 
@@ -815,7 +815,7 @@ LLM + role prompt own task behavior.
 ```
 
 The engine may know generic concepts:
-- nodes
+- sockets
 - roles
 - prompts
 - tools
@@ -837,23 +837,23 @@ The engine must not know domain concepts:
 - checkpoint/commit
 
 Acceptance:
-- A config with one node that prompts `Say exactly: HELLO WORLD` and `next: "end"` works without framework code changes.
+- A config with one socket that prompts `Say exactly: HELLO WORLD` and `next: "end"` works without framework code changes.
 - Searching `src/` for planner/builder/evaluator/maintainer/plan/build/evaluation/maintain should find only docs/examples/default config compatibility comments if any, not runtime branches.
 
-### 14. Replace semantic node schema with generic node schema — Done
+### 14. Replace semantic socket schema with generic socket schema — Done
 
 Remove or stop using runtime-semantic fields:
 
 ```ts
-MateriaNodeKind
-MateriaNodeOutputMode
+MateriaSocketKind
+MateriaSocketOutputMode
 output: "plan" | "evaluation"
 taskScoped
 attemptScoped
 advanceTaskOnSuccess
 ```
 
-Introduce generic node fields:
+Introduce generic socket fields:
 
 ```ts
 interface MateriaPipelineSocketConfig {
@@ -916,7 +916,7 @@ Examples:
 ```
 
 Acceptance:
-- Node schema describes mechanics only.
+- Socket schema describes mechanics only.
 - Default planner/builder/evaluator/maintainer behavior is represented entirely as config using these generic fields.
 
 ### 15. Replace semantic cast state with generic state — Done
@@ -964,7 +964,7 @@ Acceptance:
 - Engine state is workflow-agnostic.
 - Task iteration is a generic cursor over a configured collection, not a hardcoded task loop.
 
-### 16. Implement generic node start path — Done
+### 16. Implement generic socket start path — Done
 
 Replace all start functions/branches with one path:
 
@@ -973,8 +973,8 @@ startSocket(socketId)
 ```
 
 Responsibilities:
-- resolve node by id
-- increment/check node visit counter
+- resolve socket by id
+- increment/check socket visit counter
 - resolve role
 - set active tools from role
 - render prompt template from generic state
@@ -995,21 +995,21 @@ Prompt rendering should support generic variables:
 ```
 
 Acceptance:
-- Every node, including entry node, starts through the same function.
-- There are no node-id/name/kind-specific start functions.
+- Every socket, including entry socket, starts through the same function.
+- There are no socket-id/name/kind-specific start functions.
 
-### 17. Implement generic node completion path — Done
+### 17. Implement generic socket completion path — Done
 
 Replace phase branches with one path:
 
 ```ts
-completeNode(outputText)
+completeSocket(outputText)
 ```
 
 Responsibilities:
 - write raw output artifact under `sockets/<socket-id>/...`
 - set `state.lastOutput`
-- parse JSON only when `node.parse === "json"`
+- parse JSON only when `socket.parse === "json"`
 - set `state.lastJson` when parsed
 - apply `assign` mappings
 - apply cursor advancement when configured
@@ -1028,7 +1028,7 @@ Generic assignment examples:
 
 Acceptance:
 - No `if planning`, `if building`, `if evaluating`, `if maintaining` runtime branches.
-- JSON parsing is opt-in and configured per node.
+- JSON parsing is opt-in and configured per socket.
 - Raw output is always artifacted regardless of parse mode.
 
 ### 18. Implement small JSONPath/template/expression helpers — Done
@@ -1132,10 +1132,10 @@ Acceptance:
 
 The bundled default config should define the familiar Materia Grid entirely as data:
 
-- planner node creates JSON `{ tasks: [...] }`
-- `Build` node works on current task item
-- `Auto-Eval` node returns JSON `{ satisfied, feedback, missing }`
-- `Maintain` node records jj/git description/commit
+- planner socket creates JSON `{ tasks: [...] }`
+- `Build` socket works on current task item
+- `Auto-Eval` socket returns JSON `{ satisfied, feedback, missing }`
+- `Maintain` socket records jj/git description/commit
 - satisfied/not-satisfied routing is configured via canonical edge conditions
 - task advancement is configured on `Maintain` success with `advance.when`
 
@@ -1143,7 +1143,7 @@ The framework source should not contain those names or behaviors.
 
 Acceptance:
 - Editing only `config/default.json` can substantially change the workflow.
-- A user can replace the whole grid with unrelated nodes and the engine still works.
+- A user can replace the whole grid with unrelated sockets and the engine still works.
 
 ### 22. Update docs around generic Materia Grids — Done
 
@@ -1155,7 +1155,7 @@ Minimal hello-world grid:
 {
   "pipeline": {
     "entry": "hello",
-    "nodes": {
+    "sockets": {
       "hello": {
         "type": "agent",
         "role": "echoer",
