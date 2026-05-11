@@ -128,11 +128,20 @@ export function useWebuiConfig() {
 
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const persistedLoadouts = useMemo(() => buildLoadouts(baselineConfig ?? draftConfig ?? {}), [baselineConfig, draftConfig]);
-  const activeLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
-  const persistedActiveLoadoutName = baselineConfig?.activeLoadout && persistedLoadouts[baselineConfig.activeLoadout]
+  // The current config model stores the loadout being viewed/edited in
+  // draftConfig.activeLoadout. Keep this staged editor selection separate from
+  // the persisted runtime active loadout and from the upcoming durable default
+  // preference (defaultLoadoutId). Selecting cards or creating/duplicating
+  // drafts should update only these editing* values unless an explicit runtime
+  // or default action is invoked.
+  const editingLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
+  const runtimeActiveLoadoutName = baselineConfig?.activeLoadout && persistedLoadouts[baselineConfig.activeLoadout]
     ? baselineConfig.activeLoadout
     : Object.keys(persistedLoadouts)[0];
-  const activeLoadout = activeLoadoutName ? loadouts[activeLoadoutName] : undefined;
+  const editingLoadout = editingLoadoutName ? loadouts[editingLoadoutName] : undefined;
+  const activeLoadoutName = editingLoadoutName;
+  const persistedActiveLoadoutName = runtimeActiveLoadoutName;
+  const activeLoadout = editingLoadout;
   const isDirty = dirtyConfigKey(baselineConfig) !== dirtyConfigKey(draftConfig);
 
   /**
@@ -212,7 +221,7 @@ export function useWebuiConfig() {
     };
   }, []);
 
-  function switchLoadout(name: string) {
+  function switchEditingLoadoutDraft(name: string) {
     updateDraft((config) => {
       config.activeLoadout = name;
     });
@@ -220,7 +229,7 @@ export function useWebuiConfig() {
     setStatus(`Viewing loadout: ${name}`);
   }
 
-  async function setPersistedActiveLoadout(name: string) {
+  async function setRuntimeActiveLoadout(name: string) {
     setStatus(`Changing active loadout to ${name}…`);
     let result: Awaited<ReturnType<typeof setActiveLoadout>>;
     try {
@@ -269,22 +278,22 @@ export function useWebuiConfig() {
     return activeName;
   }
 
-  function commitActiveLoadoutRename(rawName = loadoutNameInput) {
-    if (!activeLoadoutName) return false;
+  function commitEditingLoadoutRename(rawName = loadoutNameInput) {
+    if (!editingLoadoutName) return false;
     const nextName = rawName.trim();
     if (!nextName) {
       setStatus('Cannot rename loadout: name cannot be empty.');
       return false;
     }
-    if (nextName === activeLoadoutName) {
-      setLoadoutNameInput(activeLoadoutName);
+    if (nextName === editingLoadoutName) {
+      setLoadoutNameInput(editingLoadoutName);
       return true;
     }
     if (loadouts[nextName]) {
       setStatus(`Cannot rename loadout: ${nextName} already exists.`);
       return false;
     }
-    const previousName = activeLoadoutName;
+    const previousName = editingLoadoutName;
     setDraftConfig((current) => renameLoadoutDraft({ config: current ?? {}, activeLoadoutName: previousName, nextName }));
     setDeletedLoadoutNames((current) => deletedLoadoutNamesAfterRename({ current, baselineConfig, previousName, nextName }));
     if (baselineConfig?.loadouts?.[previousName]) setSaveTarget((current) => saveTargetForSource(current, loadoutSources[previousName]));
@@ -315,7 +324,7 @@ export function useWebuiConfig() {
       setStatus('Cannot delete the only loadout; create another loadout first.');
       return false;
     }
-    const { config, fallbackName } = deleteLoadoutDraft({ config: draftConfig ?? {}, name, activeLoadoutName });
+    const { config, fallbackName } = deleteLoadoutDraft({ config: draftConfig ?? {}, name, activeLoadoutName: editingLoadoutName });
     setDraftConfig(config);
     setLoadoutNameInput(fallbackName ?? '');
     if (baselineConfig?.loadouts?.[name]) {
@@ -398,9 +407,12 @@ export function useWebuiConfig() {
     activeLoadout,
     activeLoadoutName,
     baselineConfig,
+    editingLoadout,
+    editingLoadoutName,
     canDeleteLoadout,
     canRevert: Boolean(baselineConfig),
-    commitActiveLoadoutRename,
+    commitActiveLoadoutRename: commitEditingLoadoutRename,
+    commitEditingLoadoutRename,
     createLoadout,
     deleteLoadout,
     draftConfig,
@@ -410,17 +422,20 @@ export function useWebuiConfig() {
     loadouts,
     persistedActiveLoadoutName,
     persistedLoadouts,
+    runtimeActiveLoadoutName,
     reloadConfig,
     revertDraft,
     saveDraft,
     saveTarget,
     setLoadoutNameInput,
-    setPersistedActiveLoadout,
+    setPersistedActiveLoadout: setRuntimeActiveLoadout,
+    setRuntimeActiveLoadout,
     setSaveTarget,
     setStatus,
     source,
     status,
-    switchLoadout,
+    switchEditingLoadoutDraft,
+    switchLoadout: switchEditingLoadoutDraft,
     updateDraft,
     updateLoadoutDraft,
     updateLoadoutLayout,

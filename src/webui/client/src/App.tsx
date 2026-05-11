@@ -19,11 +19,11 @@ import { useLoadoutGraphMutationController } from './webui/features/loadout/useL
 export function App() {
   const { selectedTab, selectTab } = useAppNavigation();
   const {
-    activeLoadout,
-    activeLoadoutName,
+    editingLoadout,
+    editingLoadoutName,
     canDeleteLoadout,
     canRevert,
-    commitActiveLoadoutRename,
+    commitEditingLoadoutRename,
     createLoadout,
     deleteLoadout: deleteLoadoutDraft,
     draftConfig,
@@ -31,19 +31,19 @@ export function App() {
     loadoutNameInput,
     loadoutSources,
     loadouts,
-    persistedActiveLoadoutName,
     persistedLoadouts,
+    runtimeActiveLoadoutName,
     reloadConfig,
     revertDraft,
     saveDraft,
     saveTarget,
     setLoadoutNameInput,
-    setPersistedActiveLoadout,
+    setRuntimeActiveLoadout,
     setSaveTarget,
     setStatus,
     source,
     status,
-    switchLoadout: switchLoadoutDraft,
+    switchEditingLoadoutDraft,
     updateLoadoutDraft,
     updateLoadoutLayout,
   } = useWebuiConfig();
@@ -53,14 +53,14 @@ export function App() {
   useCastCompletionToasts(monitor);
 
   const socketInteractions = useLoadoutSocketInteractionController({
-    activeLoadout,
-    activeLoadoutName,
+    activeLoadout: editingLoadout,
+    activeLoadoutName: editingLoadoutName,
     deleteLoadoutDraft,
     draftConfig,
     loadouts,
     monitor,
     setStatus,
-    switchLoadoutDraft,
+    switchLoadoutDraft: switchEditingLoadoutDraft,
     updateLoadoutDraft,
     updateLoadoutLayout,
     onModalErrorReset: () => modalErrorResetRef.current(),
@@ -114,8 +114,8 @@ export function App() {
   const materiaEditorController = useMateriaEditorController({ materia, selectedTab, status, setStatus, reloadConfig });
 
   const graphMutation = useLoadoutGraphMutationController({
-    activeLoadout,
-    activeLoadoutName,
+    activeLoadout: editingLoadout,
+    activeLoadoutName: editingLoadoutName,
     loadoutGraph,
     materia,
     selectedLoopSockets,
@@ -174,21 +174,21 @@ export function App() {
         <div className="loadout-workspace grid gap-6 xl:grid-cols-[16rem_minmax(0,1fr)_18rem]">
           <LoadoutListPanel
             loadouts={loadouts}
-            activeLoadoutName={activeLoadoutName}
-            persistedActiveLoadoutName={persistedActiveLoadoutName}
+            editingLoadoutName={editingLoadoutName}
+            runtimeActiveLoadoutName={runtimeActiveLoadoutName}
             persistedLoadouts={persistedLoadouts}
             loadoutSources={loadoutSources}
             canDeleteLoadout={canDeleteLoadout}
             onCreateLoadout={createLoadout}
-            onSwitchLoadout={switchLoadout}
+            onSwitchEditingLoadout={switchLoadout}
             onDeleteLoadout={deleteLoadout}
-            onSetActiveLoadout={setPersistedActiveLoadout}
+            onSetRuntimeActiveLoadout={setRuntimeActiveLoadout}
           />
 
           <LoadoutGraphPanel
             viewModel={{
-              activeLoadout,
-              activeLoadoutName,
+              activeLoadout: editingLoadout,
+              activeLoadoutName: editingLoadoutName,
               currentMonitorSocket,
               loadoutGraph,
               loopExitBadges,
@@ -209,7 +209,7 @@ export function App() {
             toolbar={{
               loadoutNameInput,
               setLoadoutNameInput,
-              commitActiveLoadoutRename,
+              commitActiveLoadoutRename: commitEditingLoadoutRename,
             }}
             canvasActions={{
               beginSocketLayoutDrag,

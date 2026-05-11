@@ -4,28 +4,30 @@ import type { LoadoutSourceScope } from '../../types.js';
 
 export interface LoadoutListPanelProps {
   loadouts: Record<string, PipelineConfig>;
-  activeLoadoutName: string | undefined;
-  persistedActiveLoadoutName: string | undefined;
+  editingLoadoutName: string | undefined;
+  runtimeActiveLoadoutName: string | undefined;
   persistedLoadouts: Record<string, PipelineConfig>;
   loadoutSources: Record<string, LoadoutSourceScope>;
   canDeleteLoadout: (name: string) => boolean;
   onCreateLoadout: () => void;
-  onSwitchLoadout: (name: string) => void;
+  onSwitchEditingLoadout: (name: string) => void;
   onDeleteLoadout: (name: string) => void;
-  onSetActiveLoadout: (name: string) => Promise<string>;
+  onSetRuntimeActiveLoadout: (name: string) => Promise<string>;
 }
 
-export function LoadoutListPanel({ loadouts, activeLoadoutName, persistedActiveLoadoutName, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchLoadout, onDeleteLoadout, onSetActiveLoadout }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutName, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onSetRuntimeActiveLoadout }: LoadoutListPanelProps) {
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const persistedNames = Object.keys(persistedLoadouts);
 
-  async function changePersistedActiveLoadout(name: string) {
-    if (!name || name === persistedActiveLoadoutName || activeChangePending) return;
+  async function changeRuntimeActiveLoadout(name: string) {
+    // This quick selector changes only the runtime/session active loadout. It
+    // intentionally does not update the durable defaultLoadoutId preference.
+    if (!name || name === runtimeActiveLoadoutName || activeChangePending) return;
     setActiveChangePending(true);
     setActiveChangeMessage(`Changing active loadout to ${name}…`);
     try {
-      const activeName = await onSetActiveLoadout(name);
+      const activeName = await onSetRuntimeActiveLoadout(name);
       setActiveChangeMessage(`Active loadout is now ${activeName}.`);
     } catch (error) {
       setActiveChangeMessage(error instanceof Error ? error.message : String(error));
@@ -44,9 +46,9 @@ export function LoadoutListPanel({ loadouts, activeLoadoutName, persistedActiveL
         Active loadout
         <select
           className="mt-1 w-full rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-sm normal-case tracking-normal text-cyan-100 disabled:opacity-60"
-          value={persistedActiveLoadoutName ?? ''}
+          value={runtimeActiveLoadoutName ?? ''}
           disabled={activeChangePending || persistedNames.length === 0}
-          onChange={(event) => void changePersistedActiveLoadout(event.target.value)}
+          onChange={(event) => void changeRuntimeActiveLoadout(event.target.value)}
           aria-label="Active loadout"
         >
           {persistedNames.map((name) => <option key={name} value={name}>{name}</option>)}
@@ -59,8 +61,8 @@ export function LoadoutListPanel({ loadouts, activeLoadoutName, persistedActiveL
           const defaultLoadout = sourceScope === 'default';
           const deleteDisabled = !canDeleteLoadout(name);
           return (
-            <div key={name} className={`loadout-card ${name === activeLoadoutName ? 'loadout-card-active' : ''}`}>
-              <button type="button" onClick={() => onSwitchLoadout(name)} className="loadout-card-select">
+            <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
+              <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select">
                 <span>{name}</span>
                 <small>{Object.keys(loadouts[name].sockets ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
               </button>
