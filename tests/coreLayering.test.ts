@@ -67,9 +67,9 @@ function layeringViolations(): ImportViolation[] {
         if (!specifier.startsWith(".") || NODE_BUILTIN_PATTERN.test(specifier)) record("domain must stay pure: no package, node builtin, filesystem, process, network, plugin, or persistence imports");
         else if (targetLayer !== "domain") record(`domain may only import domain modules, got ${targetRel}`);
       } else if (layer === "application") {
-        if (targetLayer === "infrastructure" || targetRel.startsWith("webui/") || targetRel === "index.ts" || NODE_BUILTIN_PATTERN.test(specifier)) record(`application may depend on domain/core DTOs and ports only, got ${targetRel}`);
+        if (targetLayer === "infrastructure" || targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts" || targetRel === "castRuntime.ts" || NODE_BUILTIN_PATTERN.test(specifier)) record(`application may depend on domain/core DTOs and ports only, got ${targetRel}`);
       } else if (layer === "infrastructure") {
-        if (targetRel.startsWith("webui/") || targetRel === "index.ts") record(`infrastructure must not depend on WebUI or plugin composition, got ${targetRel}`);
+        if (targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts" || targetRel === "castRuntime.ts" || targetRel === "pluginAdapters.ts") record(`infrastructure must not depend on WebUI, native runtime, or plugin composition, got ${targetRel}`);
       } else if (layer === "schema") {
         if (targetLayer === "application" || targetLayer === "infrastructure" || targetRel.startsWith("webui/") || targetRel === "index.ts") record(`schema compatibility must not depend on application, infrastructure, WebUI, or plugin composition, got ${targetRel}`);
       }
@@ -81,5 +81,10 @@ function layeringViolations(): ImportViolation[] {
 describe("core layering boundaries", () => {
   test("domain, application, infrastructure, and schema imports follow documented dependency direction", () => {
     expect(layeringViolations()).toEqual([]);
+  });
+
+  test("native compatibility module remains a thin barrel", () => {
+    const nativeLines = readFileSync(path.join(SRC_ROOT, "native.ts"), "utf8").trim().split(/\r?\n/);
+    expect(nativeLines.length).toBeLessThanOrEqual(12);
   });
 });

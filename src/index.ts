@@ -6,7 +6,7 @@ import { publishActiveLoadoutChange } from "./activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./renderer.js";
 import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./ui.js";
-import { createMateriaPluginAdapters } from "./infrastructure/index.js";
+import { createMateriaPluginAdapters } from "./pluginAdapters.js";
 export { renderCastList } from "./infrastructure/index.js";
 
 export default function piMateria(pi: ExtensionAPI) {
@@ -16,7 +16,7 @@ export default function piMateria(pi: ExtensionAPI) {
   const getConfiguredConfigPath = () => configuredConfigPath(pi, adapters.environment);
   const loadoutUseCases = new LoadoutUseCases({ configs: adapters.configs, pipeline: adapters.pipeline, logger: adapters.logger });
   const castCatalogUseCases = new CastCatalogUseCases({ configs: adapters.configs, states: adapters.states, artifacts: adapters.artifacts });
-  const castExecutionUseCases = new CastExecutionUseCases({ states: adapters.states, runtime: adapters.runtime, loadouts: loadoutUseCases });
+  const castExecutionUseCases = new CastExecutionUseCases({ states: adapters.states, context: adapters.context, agentTurns: adapters.agentTurns, lifecycle: adapters.lifecycle, statusPresenter: adapters.statusPresenter, loadouts: loadoutUseCases });
 
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
@@ -46,7 +46,7 @@ export default function piMateria(pi: ExtensionAPI) {
     activeContext = ctx;
     const state = adapters.states.loadActive(ctx);
     if (!state?.active) return;
-    ctx.ui.setStatus("materia", adapters.runtime.statusLabel(state));
+    ctx.ui.setStatus("materia", adapters.statusPresenter.statusLabel(state));
     ctx.ui.notify(`pi-materia cast ${state.castId} restored in ${state.phase}. Use /materia status for details.`, "info");
   });
 

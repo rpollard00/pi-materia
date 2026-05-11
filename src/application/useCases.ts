@@ -1,6 +1,5 @@
-import { currentCastSocketId, currentCastSocketState } from "../castStateAccessors.js";
-import type { LoadedConfig, MateriaCastSocketState, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
-import type { ArtifactCatalog, CastRuntime, CastStateRepository, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "./ports.js";
+import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
+import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "./ports.js";
 
 export interface LoadoutUseCasesDeps {
   configs: ConfigRepository;
@@ -63,7 +62,10 @@ export class CastCatalogUseCases<TSession = unknown> {
 
 export interface CastExecutionUseCasesDeps<TSession = unknown, TPi = unknown, TAgentEvent = unknown> {
   states: CastStateRepository<TSession>;
-  runtime: CastRuntime<TSession, TPi, TAgentEvent>;
+  context: CastContextPort;
+  agentTurns: CastAgentTurnPort<TSession, TPi, TAgentEvent>;
+  lifecycle: CastLifecyclePort<TSession, TPi>;
+  statusPresenter: CastStatusPort;
   loadouts: LoadoutUseCases;
 }
 
@@ -73,55 +75,51 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   buildIsolatedContext(messages: unknown, session: TSession): unknown | undefined {
     const state = this.deps.states.loadActive(session);
     if (!state?.active) return undefined;
-    return this.deps.runtime.buildIsolatedContext(messages, state);
+    return this.deps.context.buildIsolatedContext(messages, state);
   }
 
   async prepareAgentStart(input: { pi: TPi; session: TSession; systemPrompt: string }): Promise<string | undefined> {
     const state = this.deps.states.loadActive(input.session);
     if (!state?.active) return undefined;
-    if (currentSocketState(state) === "awaiting_user_refinement") await this.deps.runtime.prepareMultiTurnRefinementTurn(input.pi, input.session, state);
-    if (!state.awaitingResponse) return undefined;
-    const materia = this.deps.runtime.currentMateria(state);
-    if (!materia) return undefined;
-    return `${input.systemPrompt}\n\nMateria active materia (${currentSocketId(state) ?? state.phase}):\n${this.deps.runtime.activeSystemPrompt(state, materia)}`;
+    return this.deps.agentTurns.prepareAgentStartSystemPrompt({ ...input, state });
   }
 
   handleAgentEnd(pi: TPi, event: TAgentEvent, session: TSession): Promise<void> {
-    return this.deps.runtime.handleAgentEnd(pi, event, session);
+    return this.deps.agentTurns.handleAgentEnd(pi, event, session);
   }
 
   async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline }> {
     const active = this.deps.states.loadActive(input.session);
     if (active?.active) throw new ActiveCastConflictError(active.castId);
     const prepared = await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath);
-    await this.deps.runtime.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request);
+    await this.deps.lifecycle.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request);
     return prepared;
   }
 
   async continueCast(pi: TPi, session: TSession): Promise<void> {
     const state = this.deps.states.loadActive(session);
     if (!state) throw new Error("No pi-materia cast state in this session.");
-    await this.deps.runtime.continue(pi, session, state);
+    await this.deps.lifecycle.continue(pi, session, state);
   }
 
   async resumeLatestOrRequested(pi: TPi, session: TSession, requestedCastId?: string): Promise<string | undefined> {
     const castId = requestedCastId || this.deps.states.listResumable(session)[0]?.castId;
     if (!castId) return undefined;
-    await this.deps.runtime.resume(pi, session, castId);
+    await this.deps.lifecycle.resume(pi, session, castId);
     return castId;
   }
 
   async reviveLatestOrRequested(pi: TPi, session: TSession, requestedCastId?: string): Promise<string | undefined> {
     const castId = requestedCastId || this.deps.states.listRevivable(session)[0]?.castId;
     if (!castId) return undefined;
-    await this.deps.runtime.revive(pi, session, castId);
+    await this.deps.lifecycle.revive(pi, session, castId);
     return castId;
   }
 
   abortActive(pi: TPi, session: TSession, reason = "aborted by user"): MateriaCastState | undefined {
     const state = this.deps.states.loadActive(session);
     if (!state?.active) return undefined;
-    this.deps.runtime.clear(pi, state, reason);
+    this.deps.lifecycle.clear(pi, state, reason);
     return state;
   }
 
@@ -130,16 +128,8 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   }
 
   statusLabel(state: MateriaCastState): string {
-    return this.deps.runtime.statusLabel(state);
+    return this.deps.statusPresenter.statusLabel(state);
   }
-}
-
-function currentSocketId(state: MateriaCastState): string | undefined {
-  return currentCastSocketId(state);
-}
-
-function currentSocketState(state: MateriaCastState): MateriaCastSocketState | undefined {
-  return currentCastSocketState(state);
 }
 
 export function configuredConfigPath(flags: { getFlag(name: string): unknown }, env: EnvironmentLookup): string | undefined {

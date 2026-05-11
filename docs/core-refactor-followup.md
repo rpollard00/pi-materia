@@ -31,10 +31,12 @@ Passing tests are useful regression evidence, but they do not prove the architec
 - **Native/plugin runtime**: wires dependencies and registers plugin commands/events. It should not own prompt wording, routing decisions, handoff application, persistence details, utility execution, or recovery policy.
 - **WebUI**: may keep legacy node-shaped DTOs only behind an explicit adapter boundary. Sockets remain canonical internally.
 
-## Recommended next steps
+## Follow-up completion update (refactor-followup-08)
 
-1. Repair the WebUI socket-first compatibility seam with a focused sockets-to-nodes DTO adapter and round-trip coverage.
-2. Add `src/domain/materia.ts` with pure, data-oriented materia definitions and validation/normalization helpers.
-3. Extract deterministic handoff, assignment, routing, loop advancement, and current-work-item selection from `src/native.ts` behind characterization tests.
-4. Then extract prompt/synthetic-context assembly, persistence/artifact/event/usage IO, and utility/recovery/compaction workflows in separate slices.
-5. Finally collapse `src/native.ts` into a thin runtime/composition module and replace the temporary `CastRuntime` facade with narrower use-case-specific ports.
+The planned extraction sequence has now been carried through the final cleanup slice:
+
+- `src/native.ts` is a tiny compatibility barrel; the remaining Pi-facing lifecycle implementation is in `src/castRuntime.ts` and delegates prompt, handoff/routing, persistence/artifact, utility, recovery, and compaction behavior to focused modules.
+- The temporary `CastRuntime` application facade was removed. Cast execution use cases now depend on narrow ports: `CastContextPort`, `CastAgentTurnPort`, `CastLifecyclePort`, and `CastStatusPort`.
+- Runtime/plugin composition moved to `src/pluginAdapters.ts`; infrastructure adapters no longer import native runtime code.
+- `docs/core-layering.md` and `tests/coreLayering.test.ts` document/enforce that domain stays pure, application avoids native/WebUI/infrastructure, infrastructure avoids native/WebUI/plugin composition, and `src/native.ts` remains thin.
+- Remaining `node`/`nodes` names are intentional external compatibility surfaces for persisted data, event/artifact/usage fields, WebUI DTOs, or historical tests. Canonical internal terminology remains sockets.

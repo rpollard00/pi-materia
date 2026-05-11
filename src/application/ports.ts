@@ -23,19 +23,24 @@ export interface ArtifactCatalog {
   renderCastList(artifactRoot: string, sessionStates?: MateriaCastState[]): Promise<string[]>;
 }
 
-// Temporary workflow facade around the existing native/plugin runtime. Keep this
-// constrained to cast-execution operations until the native runtime is split.
-export interface CastRuntime<TSession = unknown, TPi = unknown, TAgentEvent = unknown> {
+export interface CastContextPort {
   buildIsolatedContext(eventMessages: unknown, state: MateriaCastState): unknown;
-  activeSystemPrompt(state: MateriaCastState, materia: unknown): string;
-  currentMateria(state: MateriaCastState): unknown;
-  prepareMultiTurnRefinementTurn(pi: TPi, session: TSession, state: MateriaCastState): Promise<void>;
+}
+
+export interface CastAgentTurnPort<TSession = unknown, TPi = unknown, TAgentEvent = unknown> {
+  prepareAgentStartSystemPrompt(input: { pi: TPi; session: TSession; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined>;
   handleAgentEnd(pi: TPi, event: TAgentEvent, session: TSession): Promise<void>;
+}
+
+export interface CastLifecyclePort<TSession = unknown, TPi = unknown> {
   start(pi: TPi, session: TSession, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void>;
   continue(pi: TPi, session: TSession, state: MateriaCastState): Promise<void>;
   resume(pi: TPi, session: TSession, castId: string): Promise<void>;
   revive(pi: TPi, session: TSession, castId: string): Promise<void>;
   clear(pi: TPi, state: MateriaCastState, reason: string): void;
+}
+
+export interface CastStatusPort {
   statusLabel(state: MateriaCastState): string;
 }
 

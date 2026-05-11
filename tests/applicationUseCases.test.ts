@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type ArtifactCatalog, type CastRuntime, type CastStateRepository, type ConfigRepository, type PipelinePresenter } from "../src/application/index.js";
+import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter } from "../src/application/index.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../src/types.js";
 
 function loaded(activeLoadout = "default"): LoadedConfig {
@@ -79,21 +79,21 @@ describe("application use cases", () => {
     const active = state({ awaitingResponse: true, nodeState: "awaiting_agent_response", currentNode: "Socket-1" });
     const events: string[] = [];
     const states: CastStateRepository<string> = { loadActive: () => active, listLatest: () => [], listResumable: () => [state({ castId: "resume-me" })], listRevivable: () => [state({ castId: "revive-me" })] };
-    const runtime: CastRuntime<string, string, string> = {
-      buildIsolatedContext: (messages) => ({ messages }),
-      currentMateria: () => ({ id: "builder" }),
-      activeSystemPrompt: () => "domain prompt",
-      prepareMultiTurnRefinementTurn: async () => { events.push("refine"); },
+    const context: CastContextPort = { buildIsolatedContext: (messages) => ({ messages }) };
+    const agentTurns: CastAgentTurnPort<string, string, string> = {
+      prepareAgentStartSystemPrompt: async ({ systemPrompt }) => `${systemPrompt}\n\ndomain prompt`,
       handleAgentEnd: async () => { events.push("end"); },
+    };
+    const lifecycle: CastLifecyclePort<string, string> = {
       start: async (_pi, _session, _loaded, _pipeline, request) => { events.push(`start:${request}`); },
       continue: async () => { events.push("continue"); },
       resume: async (_pi, _session, castId) => { events.push(`resume:${castId}`); },
       revive: async (_pi, _session, castId) => { events.push(`revive:${castId}`); },
       clear: () => { events.push("clear"); },
-      statusLabel: () => "running",
     };
+    const statusPresenter: CastStatusPort = { statusLabel: () => "running" };
     const loadouts = new LoadoutUseCases({ configs: { async load() { return loaded(); }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: () => "" }, pipeline: { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] } });
-    const useCases = new CastExecutionUseCases({ states, runtime, loadouts });
+    const useCases = new CastExecutionUseCases({ states, context, agentTurns, lifecycle, statusPresenter, loadouts });
 
     expect(useCases.buildIsolatedContext(["hello"], "session")).toEqual({ messages: ["hello"] });
     await expect(useCases.prepareAgentStart({ pi: "pi", session: "session", systemPrompt: "base" })).resolves.toContain("domain prompt");

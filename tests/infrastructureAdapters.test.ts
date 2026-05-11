@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { createArtifactCatalog, createConfigRepository, createConsoleLogger, createMateriaPluginAdapters, createPipelinePresenter, createProcessEnvironmentLookup } from "../src/infrastructure/index.js";
+import { createArtifactCatalog, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../src/infrastructure/index.js";
+import { createMateriaPluginAdapters } from "../src/pluginAdapters.js";
 
 // These tests keep plugin composition honest without invoking the expensive native Pi runtime.
 describe("infrastructure adapters", () => {
@@ -9,7 +10,10 @@ describe("infrastructure adapters", () => {
     expect(Object.keys(adapters.pipeline).sort()).toEqual(["renderGrid", "renderLoadoutList", "resolve"]);
     expect(Object.keys(adapters.states).sort()).toEqual(["listLatest", "listResumable", "listRevivable", "loadActive"]);
     expect(Object.keys(adapters.artifacts)).toEqual(["renderCastList"]);
-    expect(Object.keys(adapters.runtime).sort()).toEqual(["activeSystemPrompt", "buildIsolatedContext", "clear", "continue", "currentMateria", "handleAgentEnd", "prepareMultiTurnRefinementTurn", "resume", "revive", "start", "statusLabel"]);
+    expect(Object.keys(adapters.context)).toEqual(["buildIsolatedContext"]);
+    expect(Object.keys(adapters.agentTurns).sort()).toEqual(["handleAgentEnd", "prepareAgentStartSystemPrompt"]);
+    expect(Object.keys(adapters.lifecycle).sort()).toEqual(["clear", "continue", "resume", "revive", "start"]);
+    expect(Object.keys(adapters.statusPresenter)).toEqual(["statusLabel"]);
     expect(adapters.environment.get("MATERIA_CONFIG")).toBe("custom.json");
     expect(adapters.logger.info).toBeFunction();
   });
