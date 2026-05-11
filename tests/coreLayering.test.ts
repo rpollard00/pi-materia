@@ -4,10 +4,12 @@ import path from "node:path";
 
 const SRC_ROOT = path.resolve(import.meta.dir, "../src");
 const CORE_LAYERS = ["domain", "application", "infrastructure", "schema"] as const;
+const FEATURE_DIRS = ["config", "graph", "handoff", "loadout", "presentation", "runtime", "telemetry", "utilities"] as const;
 const NODE_BUILTIN_PATTERN = /^(node:|fs$|path$|os$|child_process$|crypto$|process$|url$|stream$)/;
 const IMPORT_PATTERN = /(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g;
 
 type CoreLayer = (typeof CORE_LAYERS)[number];
+type FeatureDir = (typeof FEATURE_DIRS)[number];
 
 interface ImportViolation {
   file: string;
@@ -27,10 +29,12 @@ function relativeFile(file: string): string {
   return path.relative(path.resolve(import.meta.dir, ".."), file).replaceAll(path.sep, "/");
 }
 
-function layerFor(file: string): CoreLayer | "plugin" | "core" {
+function layerFor(file: string): CoreLayer | FeatureDir | "plugin" | "core" {
   const rel = path.relative(SRC_ROOT, file).replaceAll(path.sep, "/");
   const first = rel.split("/")[0];
-  return CORE_LAYERS.includes(first as CoreLayer) ? (first as CoreLayer) : rel === "index.ts" ? "plugin" : "core";
+  if (CORE_LAYERS.includes(first as CoreLayer)) return first as CoreLayer;
+  if (FEATURE_DIRS.includes(first as FeatureDir)) return first as FeatureDir;
+  return rel === "index.ts" ? "plugin" : "core";
 }
 
 function resolveRelativeImport(fromFile: string, specifier: string): string | undefined {
@@ -72,6 +76,8 @@ function layeringViolations(): ImportViolation[] {
         if (targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts" || targetRel === "castRuntime.ts" || targetRel === "pluginAdapters.ts") record(`infrastructure must not depend on WebUI, native runtime, or plugin composition, got ${targetRel}`);
       } else if (layer === "schema") {
         if (targetLayer === "application" || targetLayer === "infrastructure" || targetRel.startsWith("webui/") || targetRel === "index.ts") record(`schema compatibility must not depend on application, infrastructure, WebUI, or plugin composition, got ${targetRel}`);
+      } else if (FEATURE_DIRS.includes(layer as FeatureDir)) {
+        if (targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts") record(`feature directories must not depend on WebUI, native compatibility, or plugin composition, got ${targetRel}`);
       }
     }
   }

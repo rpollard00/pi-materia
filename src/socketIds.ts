@@ -1,1 +1,1 @@
-export * from "./domain/socket.js";
+export * from "./graph/socketIds.js";
