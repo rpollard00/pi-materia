@@ -11,7 +11,8 @@
 - `--from <castId>` is optional. When present, the new cast records lineage to a previous cast and exposes bounded previous-cast context as structured state for materia/loadouts that opt in to consume it.
 - `<target>` is one materia or one loadout reference. At least one target is required.
 - `--` is required and separates the target list from the user prompt.
-- `<prompt>` is required and is passed as the prompt for the linked cast.
+- `<prompt>` is required and is passed as the prompt for the linked cast. Prompt text may contain `--` after the first delimiter.
+- Target names with whitespace may be quoted with single or double quotes in the target section, for example `"loadout:Hojo Consult"`.
 
 ## Target references and resolution
 
@@ -63,7 +64,7 @@ Previous-cast continuation without `Chain-Context`:
 /materia link --from <castId> loadout:Full-Auto -- Continue the implementation.
 ```
 
-The second form still records lineage and exposes previous-cast state, but no previous context is injected into every prompt automatically. Downstream materia/loadouts must explicitly consume that state.
+The form without `Chain-Context` still records lineage and exposes previous-cast state, but no previous context is injected into every prompt automatically. Downstream materia/loadouts must explicitly consume that state.
 
 ## Immediate-run behavior
 
@@ -98,16 +99,26 @@ Previous-cast context is not automatically prepended to every prompt. Context tr
 
 If `Chain-Context` is used without available previous-cast context, it degrades with a clear canonical handoff diagnostic: `satisfied: false`, `feedback` explaining that `state.previousCastContext` is unavailable, and `missing` listing `state.previousCastContext`. It must not invent lineage.
 
-## User-visible error cases
+## User-visible error cases and troubleshooting
+
+All parse, resolution, previous-cast loading, and graph-compilation failures abort before cast creation. Common cases:
 
 - **Missing target sequence**: `/materia link -- <prompt>` fails because at least one materia or loadout target is required.
 - **Missing prompt delimiter**: `/materia link Build implement this` fails because `--` is required between targets and prompt text.
 - **Missing prompt text**: `/materia link Build --` fails because prompt text after `--` is required.
-- **Ambiguous target name**: `/materia link Build -- <prompt>` fails when both a materia and a loadout named `Build` exist; use `materia:Build` or `loadout:Build`.
-- **Unknown target**: prefixed or unprefixed targets that cannot be found fail before cast creation.
-- **Missing previous cast id**: `/materia link --from <missingCastId> Build -- <prompt>` fails before cast creation and reports that the referenced cast could not be found.
-- **Ambiguous terminal stitching**: adjacent targets with multiple compatible terminal/entry socket pairs fail before cast creation; v1 does not guess.
+- **Ambiguous target name**: `/materia link Build -- <prompt>` fails when both a materia and a loadout named `Build` exist. Retry with `materia:Build` or `loadout:Build`.
+- **Unknown target**: prefixed or unprefixed targets that cannot be found fail before cast creation. Check spelling and whether the target exists in the effective config source.
+- **Missing previous cast id**: `/materia link --from <missingCastId> Build -- <prompt>` fails before cast creation and reports that the referenced cast could not be found under the artifact root. Use `/materia casts` to find recent cast ids, and do not pass paths or ids containing `/`, `\\`, or `..`.
+- **Chain-Context without input**: `Chain-Context` can be run without `--from`, but it will report a clear `satisfied: false` handoff because `state.previousCastContext` is missing. Either add `--from <castId>` or remove `Chain-Context` when no prior context is intended.
+- **Unexpectedly large previous-cast context**: previous artifacts are bounded before being placed in structured state. If downstream output seems incomplete, inspect the prior cast artifacts directly or run a targeted follow-up that asks `Chain-Context` or another consumer to focus on named artifacts/decisions rather than expecting every byte to be forwarded.
+- **Ambiguous terminal stitching**: adjacent targets with multiple terminal outputs or multiple entry inputs fail before cast creation; v1 does not guess. Split the chain into smaller commands, simplify the loadout graph, or wait for future explicit socket mapping syntax.
 - **Invalid composed graph**: unsupported cycles, invalid socket shapes, or remapping conflicts introduced by composition fail before cast creation.
+
+## Handoff compatibility and migration notes
+
+Canonical linked handoff/context envelopes should use `summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing` where those fields apply. `workItems` is the canonical generated-unit field; do not author new link examples, materia prompts, or loadouts that use `tasks` for generated work.
+
+Legacy aliases from older configs or tests, such as `passed` for satisfaction or `tasks` for generated work, are migration-only compatibility if encountered. They are not part of the canonical `/materia link` contract, and `Chain-Context` should preserve or emit canonical fields rather than redefining reserved evaluator/route fields.
 
 ## v1 non-goals
 
