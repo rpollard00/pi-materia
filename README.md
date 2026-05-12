@@ -62,6 +62,7 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 /materia loadout Planning-Consult
 /materia ui
 /materia cast implement the next small feature
+/materia link [--from <cast-id>] <target> [<target> ...] -- <prompt>
 /materia recast [cast-id]
 /materia revive [cast-id]
 /materia casts
@@ -70,6 +71,8 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 ```
 
 pi-materia reports the config source, artifact directory, active loadout, resolved grid, live status, and end-of-run token/cost totals when available. The visible transcript stays native, but full materia prompts are hidden behind compact Materia cast messages, and each materia turn receives a curated Materia context instead of the full previous conversation.
+
+Use `/materia link [--from <cast-id>] <target> [<target> ...] -- <prompt>` to immediately run an ephemeral virtual loadout composed from materia and/or loadout targets without mutating the active loadout. Previous-cast context supplied with `--from` is structured state for opt-in materia/loadouts; it is not automatic prompt injection and does not require `Chain-Context` unless you want explicit context transformation. See [link semantics](docs/link-semantics.md) for the v1 contract, examples, ambiguity rules, and non-goals.
 
 Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current socket. Use `/materia revive [cast-id]` only when a cast failed because same-socket recovery exhausted its structured attempt allowance (for example, repeated context-window recovery failures). Revive first increases the exhausted recovery context's effective allowance by the original max-attempt value, then delegates to the normal recast path; repeated revives are additive (`original + original` each time), not exponential, and the bump is scoped to that one exhausted socket/item context. Other terminal failures are not revivable; use `/materia recast` for general failed or aborted casts.
 
