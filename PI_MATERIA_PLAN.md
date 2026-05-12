@@ -1,6 +1,6 @@
 # pi-materia Next Features Plan
 
-> Historical implementation plan. Examples and terminology in this file document older designs or migration history. Historical examples below have been updated to socket terminology where they describe pi-materia graph concepts; active configuration uses top-level `materia` entries and socket `materia` assignments.
+> Historical implementation plan. Examples, module paths, and terminology in this file document older designs or migration history and are not current import guidance. Historical examples below have been updated to socket terminology where they describe pi-materia graph concepts; active configuration uses top-level `materia` entries and socket `materia` assignments. Use `docs/core-layering.md` for the current root surface and import policy.
 
 This plan turns the first test feedback into a staged roadmap for pi-materia, a Pi extension for configurable agent pipelines.
 

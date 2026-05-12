@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const SRC_ROOT = path.resolve(import.meta.dir, "../src");
@@ -55,6 +55,24 @@ function importedSpecifiers(file: string): string[] {
   return Array.from(text.matchAll(IMPORT_PATTERN), (match) => match[1]);
 }
 
+function rootSourceFiles(): string[] {
+  return readdirSync(SRC_ROOT)
+    .map((entry) => path.join(SRC_ROOT, entry))
+    .filter((file) => statSync(file).isFile() && file.endsWith(".ts"));
+}
+
+function meaningfulLines(file: string): string[] {
+  return readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("//"));
+}
+
+function isExportStarCompatibilityShim(file: string): boolean {
+  const lines = meaningfulLines(file);
+  return lines.length > 0 && lines.every((line) => /^export\s+\*\s+from\s+["'][.][^"']+["'];?$/.test(line));
+}
+
 function layeringViolations(): ImportViolation[] {
   const violations: ImportViolation[] = [];
   for (const file of walk(SRC_ROOT)) {
@@ -73,11 +91,11 @@ function layeringViolations(): ImportViolation[] {
       } else if (layer === "application") {
         if (targetLayer === "infrastructure" || targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts" || targetRel === "castRuntime.ts" || NODE_BUILTIN_PATTERN.test(specifier)) record(`application may depend on domain/core DTOs and ports only, got ${targetRel}`);
       } else if (layer === "infrastructure") {
-        if (targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts" || targetRel === "castRuntime.ts" || targetRel === "pluginAdapters.ts") record(`infrastructure must not depend on WebUI, native runtime, or plugin composition, got ${targetRel}`);
+        if (targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts" || targetRel === "castRuntime.ts" || targetRel === "pluginAdapters.ts") record(`infrastructure must not depend on WebUI, runtime facades, or plugin composition, got ${targetRel}`);
       } else if (layer === "schema") {
         if (targetLayer === "application" || targetLayer === "infrastructure" || targetRel.startsWith("webui/") || targetRel === "index.ts") record(`schema compatibility must not depend on application, infrastructure, WebUI, or plugin composition, got ${targetRel}`);
       } else if (FEATURE_DIRS.includes(layer as FeatureDir)) {
-        if (targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts") record(`feature directories must not depend on WebUI, native compatibility, or plugin composition, got ${targetRel}`);
+        if (targetRel.startsWith("webui/") || targetRel === "index.ts" || targetRel === "native.ts") record(`feature directories must not depend on WebUI, removed compatibility shims, or plugin composition, got ${targetRel}`);
       }
     }
   }
@@ -89,8 +107,15 @@ describe("core layering boundaries", () => {
     expect(layeringViolations()).toEqual([]);
   });
 
-  test("native compatibility module remains a thin barrel", () => {
-    const nativeLines = readFileSync(path.join(SRC_ROOT, "native.ts"), "utf8").trim().split(/\r?\n/);
-    expect(nativeLines.length).toBeLessThanOrEqual(12);
+  test("removed root native compatibility shim stays deleted", () => {
+    expect(existsSync(path.join(SRC_ROOT, "native.ts"))).toBe(false);
+  });
+
+  test("base src directory does not regain export-star compatibility shims", () => {
+    const shims = rootSourceFiles()
+      .filter(isExportStarCompatibilityShim)
+      .map(relativeFile);
+
+    expect(shims).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 # Core plugin refactor inventory
 
-Status: inventory only; no production behavior moved in this stage.
+Status: historical inventory only; no production behavior moved in this stage. Module paths in this audit reflect the pre-cleanup layout and are not current import guidance; use `docs/core-layering.md` for canonical root surfaces and nested module imports.
 
 Baseline validation recorded on 2026-05-10:
 
