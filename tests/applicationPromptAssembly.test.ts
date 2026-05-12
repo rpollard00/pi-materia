@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
@@ -11,6 +13,13 @@ function agentSocket(overrides: Partial<ResolvedMateriaAgentSocket> = {}): Resol
     edges: [],
     ...overrides,
   } as ResolvedMateriaAgentSocket;
+}
+
+function defaultMateriaPrompt(name: string): string {
+  const raw = JSON.parse(readFileSync(path.resolve("config", "default.json"), "utf8")) as { materia?: Record<string, { prompt?: string }> };
+  const prompt = raw.materia?.[name]?.prompt;
+  if (!prompt) throw new Error(`missing bundled materia prompt: ${name}`);
+  return prompt;
 }
 
 function state(socket: ResolvedMateriaAgentSocket, overrides: Partial<MateriaCastState> = {}): MateriaCastState {
@@ -100,6 +109,46 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Canonical handoff contract context:");
     expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).toContain("Final output format: Return only JSON for this socket");
+  });
+
+  test("Chain-Context prompt renders useful structured previous-cast context when available", () => {
+    const socket = agentSocket({
+      socket: { type: "agent", materia: "Chain-Context", parse: "json" },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Chain-Context"), parse: "json" },
+    });
+    const prompt = buildSocketPrompt(state(socket, {
+      request: "continue implementation",
+      data: {
+        previousCastContext: {
+          castId: "cast-prev",
+          request: "original feature request",
+          handoff: { summary: "implemented parser", workItems: [{ id: "WI-2", title: "Next" }], decisions: ["Use /materia link"], risks: ["Ambiguous stitching"], satisfied: true, feedback: "ready", missing: [] },
+          artifacts: [{ path: "sockets/Socket-1/1.md", kind: "socket_output", content: "bounded preview", maxBytes: 100, truncated: false }],
+          loadedAt: 1,
+        },
+      },
+    }), socket);
+
+    expect(prompt).toContain("Transform structured previous-cast state");
+    expect(prompt).toContain('"castId": "cast-prev"');
+    expect(prompt).toContain("original feature request");
+    expect(prompt).toContain("implemented parser");
+    expect(prompt).toContain("bounded preview");
+    expect(prompt).toContain("workItems");
+    expect(prompt).toContain("never use tasks");
+  });
+
+  test("Chain-Context prompt gives clear behavior when previous-cast context is missing", () => {
+    const socket = agentSocket({
+      socket: { type: "agent", materia: "Chain-Context", parse: "json" },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Chain-Context"), parse: "json" },
+    });
+    const prompt = buildSocketPrompt(state(socket, { data: {} }), socket);
+
+    expect(prompt).toContain("If state.previousCastContext is missing or empty");
+    expect(prompt).toContain("satisfied false");
+    expect(prompt).toContain('missing containing "state.previousCastContext"');
+    expect(prompt).toContain("Do not invent lineage");
   });
 
   test("active system prompts and synthetic context use explicit state inputs", () => {

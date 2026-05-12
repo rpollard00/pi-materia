@@ -208,6 +208,28 @@ describe("FakePiHarness", () => {
     expect(await readFile(configFile, "utf8")).toContain('"activeLoadout":"ReviewOnly"');
   });
 
+  test("reports /materia link validation errors without starting a partial cast", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-link-invalid-command-"));
+    const configFile = path.join(dir, ".pi", "pi-materia.json");
+    await mkdir(path.dirname(configFile), { recursive: true });
+    await writeFile(configFile, JSON.stringify({
+      activeLoadout: "Default",
+      materia: { Build: { prompt: "Build." } },
+      loadouts: { Default: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
+    }), "utf8");
+    const before = await readFile(configFile, "utf8");
+    const harness = new FakePiHarness(dir);
+    piMateria(harness.pi);
+
+    await harness.runCommand("materia", "link Build without delimiter");
+
+    expect(harness.notifications.at(-1)?.type).toBe("error");
+    expect(harness.notifications.at(-1)?.message).toContain("missing prompt delimiter");
+    expect(harness.operationLog).not.toContain("triggerTurn");
+    expect(harness.appendedEntries.find((entry) => entry.customType === "pi-materia-cast-state")).toBeUndefined();
+    expect(await readFile(configFile, "utf8")).toBe(before);
+  });
+
   test("loads pi-materia and runs /materia grid locally", async () => {
     const harness = new FakePiHarness(process.cwd());
     piMateria(harness.pi);

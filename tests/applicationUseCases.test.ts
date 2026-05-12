@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter } from "../src/application/index.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../src/types.js";
 
@@ -154,6 +157,67 @@ describe("application use cases", () => {
     expect(started?.options?.initialData?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "Review" }] } });
     expect(started?.options?.startEventDetails?.link).toMatchObject({ invocation: { command: "/materia link" }, virtualLoadout: { id: result.link.virtualLoadout.id } });
     expect(events).toEqual([`resolve:${started?.loaded.config.activeLoadout}`]);
+  });
+
+  test("linked cast use case loads previous cast context and records lineage metadata", async () => {
+    const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "pi-materia-link-usecase-"));
+    const runDir = path.join(artifactRoot, "cast-prev");
+    await mkdir(path.join(runDir, "sockets", "Socket-1"), { recursive: true });
+    await writeFile(path.join(runDir, "manifest.json"), JSON.stringify({ castId: "cast-prev", request: "prior request", entries: [{ artifact: "sockets/Socket-1/output.json", kind: "socket_output" }] }));
+    await writeFile(path.join(runDir, "sockets", "Socket-1", "output.json"), JSON.stringify({ summary: "prior summary", satisfied: true, feedback: "ready", missing: [] }));
+    let started: { options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> } } | undefined;
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      config: {
+        activeLoadout: "Review",
+        artifactDir: artifactRoot,
+        materia: { Build: { prompt: "build" }, Review: { prompt: "review" } },
+        loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Review" } } } },
+      },
+    };
+    const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: (_cwd, artifactDir) => artifactDir ?? artifactRoot };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async (_pi, _session, _loaded, _pipeline, _request, options) => { started = { options }; }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    const result = await useCases.startLinkedCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: "--from cast-prev materia:Build loadout:Review -- continue" });
+
+    expect(result.link.fromCastId).toBe("cast-prev");
+    expect(result.link.plan.lineage.fromCastId).toBe("cast-prev");
+    expect(started?.options?.initialData?.previousCastContext).toMatchObject({ castId: "cast-prev", request: "prior request", handoff: { summary: "prior summary", satisfied: true } });
+    expect(started?.options?.startEventDetails?.link).toMatchObject({ fromCastId: "cast-prev", virtualLoadout: { id: result.link.virtualLoadout.id } });
+  });
+
+  test("linked cast use case rejects missing previous casts before lifecycle start", async () => {
+    let started = false;
+    const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "pi-materia-link-missing-"));
+    const configs: ConfigRepository = {
+      async load() { return { source: "/repo/materia.json", config: { activeLoadout: "Review", artifactDir: artifactRoot, materia: { Build: { prompt: "build" } }, loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } } } }; },
+      async saveActiveLoadout() { return ""; },
+      resolveArtifactRoot: (_cwd, artifactDir) => artifactDir ?? artifactRoot,
+    };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async () => { started = true; }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    await expect(useCases.startLinkedCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: "--from absent materia:Build -- continue" })).rejects.toThrow("unknown previous cast id");
+    expect(started).toBe(false);
   });
 
   test("linked cast use case rejects invalid commands before lifecycle start", async () => {

@@ -41,13 +41,22 @@ describe("/materia link parser", () => {
     expect(result.value.prompt).toBe("prompt with -- inside text");
   });
 
-  test("rejects missing delimiter, missing prompt, and empty targets", () => {
-    expect(parseLinkCommandArguments("Build continue").ok).toBe(false);
-    expect(parseLinkCommandArguments("Build --   ").ok).toBe(false);
+  test("rejects missing delimiter, missing prompt, empty targets, and malformed --from", () => {
+    const missingDelimiter = parseLinkCommandArguments("Build continue");
+    expect(missingDelimiter.ok).toBe(false);
+    if (!missingDelimiter.ok) expect(missingDelimiter.issues[0]?.message).toContain("missing prompt delimiter");
+
+    const missingPrompt = parseLinkCommandArguments("Build --   ");
+    expect(missingPrompt.ok).toBe(false);
+    if (!missingPrompt.ok) expect(missingPrompt.issues[0]?.message).toContain("missing prompt text");
 
     const empty = parseLinkCommandArguments("-- prompt");
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.issues[0]?.message).toContain("at least one link target");
+
+    const missingFrom = parseLinkCommandArguments("--from -- prompt");
+    expect(missingFrom.ok).toBe(false);
+    if (!missingFrom.ok) expect(missingFrom.issues[0]?.message).toContain("missing cast id");
   });
 });
 

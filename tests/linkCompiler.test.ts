@@ -24,6 +24,45 @@ function plan(targets: ResolvedLinkTarget[]): LinkPlan {
 }
 
 describe("/materia link compiler", () => {
+  test("composes materia-to-materia targets with deterministic stitching", () => {
+    const inputPlan = plan([target(0, "materia", "Build"), target(1, "materia", "Eval")]);
+
+    const result = compileLinkPlan({ plan: inputPlan }, createConfigLinkGraphSource({ materia }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.virtualLoadout.loadout).toMatchObject({
+      id: "virtual-link-materia-Build-materia-Eval",
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { type: "agent", materia: "Build", parse: "json", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { type: "agent", materia: "Eval" },
+      },
+    });
+    expect(result.value.virtualLoadout.metadata.stitching).toEqual([
+      { fromTargetOrder: 0, toTargetOrder: 1, fromSocketId: "Socket-1", toSocketId: "Socket-2", mode: "implicit-single-compatible" },
+    ]);
+  });
+
+  test("composes loadout-to-loadout targets while remapping colliding socket ids", () => {
+    const first: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { type: "agent", materia: "Eval", socketKind: "entry" } } };
+    const second: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Eval", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { type: "agent", materia: "Build" } } };
+
+    const result = compileLinkPlan({ plan: plan([target(0, "loadout", "First"), target(1, "loadout", "Second")]) }, createConfigLinkGraphSource({ materia, loadouts: { First: first, Second: second } }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.keys(result.value.virtualLoadout.loadout.sockets).sort()).toEqual(["Socket-1", "Socket-2", "Socket-3", "Socket-4"]);
+    expect(result.value.virtualLoadout.loadout.sockets["Socket-1"]?.edges).toEqual([{ when: "satisfied", to: "Socket-2" }]);
+    expect(result.value.virtualLoadout.loadout.sockets["Socket-2"]?.edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    expect(result.value.virtualLoadout.metadata.remappings).toEqual([
+      { targetOrder: 0, fromSocketId: "Socket-1", toSocketId: "Socket-1" },
+      { targetOrder: 0, fromSocketId: "Socket-2", toSocketId: "Socket-2" },
+      { targetOrder: 1, fromSocketId: "Socket-1", toSocketId: "Socket-3" },
+      { targetOrder: 1, fromSocketId: "Socket-2", toSocketId: "Socket-4" },
+    ]);
+  });
+
   test("composes materia and loadout targets into an ephemeral stitched virtual loadout", () => {
     const consult: Loadout = {
       id: "Consult",
