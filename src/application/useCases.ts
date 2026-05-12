@@ -1,5 +1,12 @@
-import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
+import type { LoadedConfig, MateriaCastState, MateriaPipelineConfig, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "./ports.js";
+import { compileLinkPlan, createConfigLinkGraphSource } from "../link/compiler.js";
+import { loadPreviousCastContext } from "../link/contextLoader.js";
+import { parseLinkCommandArguments } from "../link/parser.js";
+import { createLinkCastStateData, createLinkPlan, createLinkRuntimeState } from "../link/planner.js";
+import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/resolver.js";
+import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData } from "../link/types.js";
+import type { DomainIssue } from "../domain/result.js";
 
 export interface LoadoutUseCasesDeps {
   configs: ConfigRepository;
@@ -67,6 +74,8 @@ export interface CastExecutionUseCasesDeps<TSession = unknown, TPi = unknown, TA
   lifecycle: CastLifecyclePort<TSession, TPi>;
   statusPresenter: CastStatusPort;
   loadouts: LoadoutUseCases;
+  configs: Pick<ConfigRepository, "load" | "resolveArtifactRoot">;
+  pipeline: PipelinePresenter;
 }
 
 export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEvent = unknown> {
@@ -94,6 +103,42 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     const prepared = await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath);
     await this.deps.lifecycle.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request);
     return prepared;
+  }
+
+  async startLinkedCast(input: { pi: TPi; session: TSession; cwd: string; argumentsText: string; rawCommand?: string; configuredPath?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; link: LinkCastStateData }> {
+    const active = this.deps.states.loadActive(input.session);
+    if (active?.active) throw new ActiveCastConflictError(active.castId);
+
+    const loaded = await this.deps.configs.load(input.cwd, input.configuredPath);
+    const parsed = parseLinkCommandArguments(input.argumentsText, input.rawCommand);
+    if (!parsed.ok) throw new LinkCommandValidationError(parsed.issues);
+
+    const resolved = resolveLinkTargets({ targets: parsed.value.targets }, createConfigLinkTargetRegistry(loaded.config));
+    if (!resolved.ok) throw new LinkCommandValidationError(resolved.issues);
+
+    const planResult = createLinkPlan({ invocation: parsed.value.invocation, prompt: parsed.value.prompt, ...(parsed.value.fromCastId ? { fromCastId: parsed.value.fromCastId } : {}), targets: resolved.value.targets });
+    if (!planResult.ok) throw new LinkCommandValidationError(planResult.issues);
+
+    const previousContextResult = parsed.value.fromCastId
+      ? await loadPreviousCastContext({ fromCastId: parsed.value.fromCastId, artifactRoot: this.deps.configs.resolveArtifactRoot(input.cwd, loaded.config.artifactDir) })
+      : undefined;
+    if (previousContextResult && !previousContextResult.ok) throw new LinkCommandValidationError(previousContextResult.issues);
+
+    const compiled = compileLinkPlan({ plan: planResult.value }, createConfigLinkGraphSource({ materia: loaded.config.materia, loadouts: loaded.config.loadouts }));
+    if (!compiled.ok) throw new LinkCommandValidationError(compiled.issues);
+
+    const runtime = createLinkRuntimeState(compiled.value.virtualLoadout, previousContextResult?.ok ? previousContextResult.value : undefined);
+    const link = createLinkCastStateData(planResult.value, runtime.virtualLoadout);
+    const linkedLoaded = createLinkedLoadedConfig(loaded, compiled.value.virtualLoadout.metadata.id, compiled.value.virtualLoadout.loadout as MateriaPipelineConfig);
+    const pipeline = this.deps.pipeline.resolve(linkedLoaded.config);
+    const initialData: Record<string, unknown> = { link };
+    if (runtime.previousCastContext) initialData[PREVIOUS_CAST_CONTEXT_STATE_KEY] = runtime.previousCastContext;
+
+    await this.deps.lifecycle.start(input.pi, input.session, linkedLoaded, pipeline, parsed.value.prompt, {
+      initialData,
+      startEventDetails: { link: { invocation: link.plan.invocation, targets: link.plan.targets, virtualLoadout: link.virtualLoadout, ...(link.fromCastId ? { fromCastId: link.fromCastId } : {}) } },
+    });
+    return { loaded: linkedLoaded, pipeline, link };
   }
 
   async continueCast(pi: TPi, session: TSession): Promise<void> {
@@ -130,6 +175,26 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   statusLabel(state: MateriaCastState): string {
     return this.deps.statusPresenter.statusLabel(state);
   }
+}
+
+export class LinkCommandValidationError extends Error {
+  readonly code = "link_command_validation";
+  constructor(readonly issues: DomainIssue[]) {
+    super(`Invalid /materia link command: ${formatDomainIssues(issues)}`);
+  }
+}
+
+function createLinkedLoadedConfig(loaded: LoadedConfig, virtualLoadoutId: string, virtualLoadout: MateriaPipelineConfig): LoadedConfig {
+  const config: PiMateriaConfig = {
+    ...loaded.config,
+    activeLoadout: virtualLoadoutId,
+    loadouts: { ...(loaded.config.loadouts ?? {}), [virtualLoadoutId]: virtualLoadout },
+  };
+  return { ...loaded, source: `${loaded.source}#${virtualLoadoutId}`, config };
+}
+
+function formatDomainIssues(issues: DomainIssue[]): string {
+  return issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ");
 }
 
 export function configuredConfigPath(flags: { getFlag(name: string): unknown }, env: EnvironmentLookup): string | undefined {

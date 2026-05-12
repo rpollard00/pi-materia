@@ -37,7 +37,7 @@ export { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 const DEFAULT_MAX_SOCKET_VISITS = 25;
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
-export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void> {
+export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> }): Promise<void> {
   const config = loaded.config;
   const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
   const castId = safeTimestamp();
@@ -50,7 +50,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   runState.lastMessage = pipeline.entry.id;
   await initializeRun(runDir, config, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
   await writeUsage(runState);
-  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedMateriaContext: true });
+  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedMateriaContext: true, ...(options?.startEventDetails ?? {}) });
 
   const state: MateriaCastState = {
     version: 2,
@@ -69,7 +69,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     socketState: "awaiting_agent_response",
     startedAt: Date.now(),
     updatedAt: Date.now(),
-    data: {},
+    data: { ...(options?.initialData ?? {}) },
     cursors: {},
     visits: {},
     multiTurnRefinements: {},

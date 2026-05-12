@@ -32,8 +32,15 @@ export interface CastAgentTurnPort<TSession = unknown, TPi = unknown, TAgentEven
   handleAgentEnd(pi: TPi, event: TAgentEvent, session: TSession): Promise<void>;
 }
 
+export interface CastStartOptions {
+  /** Optional shared cast data to seed before the first socket starts. */
+  initialData?: Record<string, unknown>;
+  /** Optional extra details recorded on the normal cast_start event. */
+  startEventDetails?: Record<string, unknown>;
+}
+
 export interface CastLifecyclePort<TSession = unknown, TPi = unknown> {
-  start(pi: TPi, session: TSession, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string): Promise<void>;
+  start(pi: TPi, session: TSession, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: CastStartOptions): Promise<void>;
   continue(pi: TPi, session: TSession, state: MateriaCastState): Promise<void>;
   resume(pi: TPi, session: TSession, castId: string): Promise<void>;
   revive(pi: TPi, session: TSession, castId: string): Promise<void>;

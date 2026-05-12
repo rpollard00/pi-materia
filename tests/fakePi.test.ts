@@ -175,6 +175,39 @@ describe("FakePiHarness", () => {
     await harness.emit("session_shutdown");
   });
 
+  test("starts /materia link through the registered command using a virtual loadout", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-link-command-"));
+    const configFile = path.join(dir, ".pi", "pi-materia.json");
+    await mkdir(path.dirname(configFile), { recursive: true });
+    await writeFile(configFile, JSON.stringify({
+      activeLoadout: "ReviewOnly",
+      materia: {
+        Build: { prompt: "Build the requested change.", tools: "coding" },
+        Review: { prompt: "Review the prior output.", tools: "coding" },
+      },
+      loadouts: {
+        ReviewOnly: {
+          entry: "Socket-1",
+          sockets: { "Socket-1": { type: "agent", materia: "Review" } },
+        },
+      },
+    }), "utf8");
+    const harness = new FakePiHarness(dir);
+    piMateria(harness.pi);
+
+    expect(harness.commands.get("materia")?.description).toContain("link");
+    await harness.runCommand("materia", "link materia:Build loadout:ReviewOnly -- implement chained build");
+
+    expect(harness.operationLog).toContain("triggerTurn");
+    expect(harness.sessionName).toContain("materia: implement chained build");
+    expect(harness.notifications.some((entry) => entry.message.includes("pi-materia linked virtual loadout"))).toBe(true);
+    const stateEntry = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-cast-state")?.data as { data?: Record<string, unknown>; request?: string; pipeline?: { entry?: { id?: string } } } | undefined;
+    expect(stateEntry?.request).toBe("implement chained build");
+    expect(stateEntry?.data?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "ReviewOnly" }] }, virtualLoadout: { name: "Linked virtual loadout: Build → ReviewOnly" } });
+    expect(stateEntry?.pipeline?.entry?.id).toBe("Socket-1");
+    expect(await readFile(configFile, "utf8")).toContain('"activeLoadout":"ReviewOnly"');
+  });
+
   test("loads pi-materia and runs /materia grid locally", async () => {
     const harness = new FakePiHarness(process.cwd());
     piMateria(harness.pi);

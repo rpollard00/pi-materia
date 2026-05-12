@@ -92,8 +92,10 @@ describe("application use cases", () => {
       clear: () => { events.push("clear"); },
     };
     const statusPresenter: CastStatusPort = { statusLabel: () => "running" };
-    const loadouts = new LoadoutUseCases({ configs: { async load() { return loaded(); }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: () => "" }, pipeline: { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] } });
-    const useCases = new CastExecutionUseCases({ states, context, agentTurns, lifecycle, statusPresenter, loadouts });
+    const configs: ConfigRepository = { async load() { return loaded(); }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: () => "" };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const loadouts = new LoadoutUseCases({ configs, pipeline: presenter });
+    const useCases = new CastExecutionUseCases({ states, context, agentTurns, lifecycle, statusPresenter, loadouts, configs, pipeline: presenter });
 
     expect(useCases.buildIsolatedContext(["hello"], "session")).toEqual({ messages: ["hello"] });
     await expect(useCases.prepareAgentStart({ pi: "pi", session: "session", systemPrompt: "base" })).resolves.toContain("domain prompt");
@@ -102,6 +104,75 @@ describe("application use cases", () => {
     await expect(useCases.reviveLatestOrRequested("pi", "session", "explicit")).resolves.toBe("explicit");
     expect(useCases.abortActive("pi", "session")?.castId).toBe("cast-1");
     expect(events).toEqual(["resume:resume-me", "revive:explicit", "clear"]);
+  });
+
+  test("linked cast use case composes a virtual loadout and starts normal lifecycle with metadata", async () => {
+    const events: string[] = [];
+    let started: { loaded: LoadedConfig; request: string; options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> } } | undefined;
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      config: {
+        activeLoadout: "Review",
+        materia: {
+          Build: { prompt: "build" },
+          Review: { prompt: "review" },
+        },
+        loadouts: {
+          Review: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Review" } } },
+        },
+      },
+    };
+    const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: (cwd) => `${cwd}/.pi/pi-materia` };
+    const presenter: PipelinePresenter = {
+      resolve(config) { events.push(`resolve:${config.activeLoadout}`); return pipeline(); },
+      renderGrid: () => [],
+      renderLoadoutList: () => [],
+    };
+    const lifecycle: CastLifecyclePort<string, string> = {
+      start: async (_pi, _session, loadedArg, _pipeline, request, options) => { started = { loaded: loadedArg, request, options }; },
+      continue: async () => undefined,
+      resume: async () => undefined,
+      revive: async () => undefined,
+      clear: () => undefined,
+    };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle,
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    const result = await useCases.startLinkedCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: "materia:Build loadout:Review -- implement it", rawCommand: "/materia link materia:Build loadout:Review -- implement it" });
+
+    expect(started?.request).toBe("implement it");
+    expect(started?.loaded.config.activeLoadout).toStartWith("virtual-link-");
+    expect(started?.loaded.config.loadouts?.[started.loaded.config.activeLoadout!]?.entry).toBe("Socket-1");
+    expect(started?.options?.initialData?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "Review" }] } });
+    expect(started?.options?.startEventDetails?.link).toMatchObject({ invocation: { command: "/materia link" }, virtualLoadout: { id: result.link.virtualLoadout.id } });
+    expect(events).toEqual([`resolve:${started?.loaded.config.activeLoadout}`]);
+  });
+
+  test("linked cast use case rejects invalid commands before lifecycle start", async () => {
+    let started = false;
+    const configs: ConfigRepository = { async load() { return loaded(); }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: () => "" };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async () => { started = true; }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    await expect(useCases.startLinkedCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: "Build without delimiter" })).rejects.toThrow("missing prompt delimiter");
+    expect(started).toBe(false);
   });
 
   test("configuredConfigPath prefers flag over environment", () => {

@@ -16,7 +16,7 @@ export default function piMateria(pi: ExtensionAPI) {
   const getConfiguredConfigPath = () => configuredConfigPath(pi, adapters.environment);
   const loadoutUseCases = new LoadoutUseCases({ configs: adapters.configs, pipeline: adapters.pipeline, logger: adapters.logger });
   const castCatalogUseCases = new CastCatalogUseCases({ configs: adapters.configs, states: adapters.states, artifacts: adapters.artifacts });
-  const castExecutionUseCases = new CastExecutionUseCases({ states: adapters.states, context: adapters.context, agentTurns: adapters.agentTurns, lifecycle: adapters.lifecycle, statusPresenter: adapters.statusPresenter, loadouts: loadoutUseCases });
+  const castExecutionUseCases = new CastExecutionUseCases({ states: adapters.states, context: adapters.context, agentTurns: adapters.agentTurns, lifecycle: adapters.lifecycle, statusPresenter: adapters.statusPresenter, loadouts: loadoutUseCases, configs: adapters.configs, pipeline: adapters.pipeline });
 
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
@@ -56,11 +56,12 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, recast, revive, casts, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: cast, link, recast, revive, casts, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states),
     handler: async (args, ctx) => {
       activeContext = ctx;
-      const [subcommand, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+      const trimmedArgs = args.trimStart();
+      const [subcommand, ...rest] = trimmedArgs.trim().split(/\s+/).filter(Boolean);
 
       if (subcommand === "ui") {
         try {
@@ -77,6 +78,28 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       await ctx.waitForIdle();
+
+      if (subcommand === "link") {
+        const argumentsText = trimmedArgs.replace(/^link(?:\s+|$)/, "");
+        if (!argumentsText.trim()) {
+          ctx.ui.notify("Usage: /materia link [--from <castId>] <target> [<target> ...] -- <prompt>", "error");
+          return;
+        }
+        try {
+          const { loaded, pipeline, link } = await castExecutionUseCases.startLinkedCast({ pi, session: ctx, cwd: ctx.cwd, argumentsText, rawCommand: `/materia ${trimmedArgs.trim()}`, configuredPath: getConfiguredConfigPath() });
+          ctx.ui.notify(`pi-materia link config: ${loaded.source}`, "info");
+          ctx.ui.notify(`pi-materia linked virtual loadout: ${link.virtualLoadout.name}`, "info");
+          ctx.ui.notify(`pi-materia grid entry: ${pipeline.entry.id}`, "info");
+        } catch (error) {
+          if (error instanceof ActiveCastConflictError) {
+            ctx.ui.notify(`A pi-materia cast is already active (${error.castId}). Use /materia status or /materia abort.`, "error");
+            return;
+          }
+          ctx.ui.setStatus("materia", "failed");
+          ctx.ui.notify(`pi-materia link failed to start: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
 
       if (subcommand === "grid") {
         try {
@@ -195,7 +218,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia recast [cast-id], /materia revive [cast-id] (only after same-socket recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (only after same-socket recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -252,7 +275,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
 }
 
 function materiaSubcommands(): string[] {
-  return ["cast", "recast", "revive", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
+  return ["cast", "link", "recast", "revive", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
 }
 
 function recastStatusLabel(state: MateriaCastState): string {
