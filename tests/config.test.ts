@@ -397,6 +397,7 @@ describe("config loadouts", () => {
       ["planner", "json"],
       ["interactivePlan", "json"],
       ["Auto-Architect", "json"],
+      ["Chain-Context", "json"],
       ["Build", "text"],
       ["Auto-Eval", "json"],
       ["Maintain", "json"],
@@ -427,6 +428,15 @@ describe("config loadouts", () => {
       color: "materia-color-cyan",
     });
     expect(rawDefault.materia?.["Auto-Architect"]?.prompt).toContain("software architect materia");
+    expect(rawDefault.materia?.["Chain-Context"]).toMatchObject({
+      type: "agent",
+      tools: "readOnly",
+      parse: "json",
+      color: "materia-color-cyan",
+    });
+    expect(rawDefault.materia?.["Chain-Context"]?.prompt).toContain("state.previousCastContext");
+    expect(rawDefault.materia?.["Chain-Context"]?.prompt).toContain("workItems");
+    expect(rawDefault.materia?.["Chain-Context"]?.prompt).toContain("never use tasks");
   });
 
   test("bundled default loadout edges use explicit canonical conditions", async () => {

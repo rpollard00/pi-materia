@@ -45,10 +45,16 @@ Mixed materia and loadout chain:
 /materia link materia:Context-Check loadout:Planning-Consult Build -- Audit the request, plan, then implement.
 ```
 
-Previous-cast continuation with explicit context transformation:
+Previous-cast continuation with explicit context transformation followed by another materia:
 
 ```text
-/materia link --from <castId> Chain-Context Hojo-Consult -- Continue from the previous cast and refine the design.
+/materia link --from <castId> Chain-Context Build -- Continue from the previous cast and implement the next step.
+```
+
+Previous-cast continuation with explicit context transformation followed by a loadout:
+
+```text
+/materia link --from <castId> Chain-Context loadout:Hojo-Consult -- Continue from the previous cast and refine the design.
 ```
 
 Previous-cast continuation without `Chain-Context`:
@@ -90,7 +96,7 @@ This rule protects users from silent misrouting. `/materia link` does not guess 
 
 Previous-cast context is not automatically prepended to every prompt. Context transformation belongs to ordinary materia or loadouts that opt in. The stock `Chain-Context` materia is intended to summarize previous-cast state for downstream targets, but `/materia link --from` does not require it.
 
-If `Chain-Context` is used without available previous-cast context, it should fail or degrade with a clear diagnostic rather than inventing lineage.
+If `Chain-Context` is used without available previous-cast context, it degrades with a clear canonical handoff diagnostic: `satisfied: false`, `feedback` explaining that `state.previousCastContext` is unavailable, and `missing` listing `state.previousCastContext`. It must not invent lineage.
 
 ## User-visible error cases
 
