@@ -7,6 +7,11 @@ const CANONICAL_SOCKET_ID_PATTERN = /^Socket-([1-9]\d*)$/;
 
 export const CANONICAL_SOCKET_ID_DESCRIPTION = "Socket-N, where N is a positive integer without leading zeroes";
 export const SOCKET_ID_METADATA_GUIDANCE = "Socket IDs are structural graph identifiers; store human-readable labels or materia names in metadata fields such as label, materia, loop label, or utility label.";
+export const TERMINAL_ADVANCE_TARGET = "end";
+
+export function isTerminalAdvanceTarget(value: unknown): value is typeof TERMINAL_ADVANCE_TARGET {
+  return value === TERMINAL_ADVANCE_TARGET;
+}
 
 export function parseCanonicalSocketId(value: string): ParsedSocketId | undefined {
   const match = CANONICAL_SOCKET_ID_PATTERN.exec(value);

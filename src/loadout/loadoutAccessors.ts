@@ -1,3 +1,4 @@
+import { isTerminalAdvanceTarget } from "../domain/socket.js";
 import type { MateriaForeachConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, ResolvedMateriaPipeline, ResolvedMateriaSocket } from "../types.js";
 
 export class LoadoutTopologyError extends Error {
@@ -121,6 +122,6 @@ export function materializeCanonicalSockets<TLoadout extends MateriaPipelineConf
 }
 
 function addMissingReferenceIssue(issues: SocketReferenceIssue[], socketIds: Set<string>, socketId: string | undefined, path: string, label: string): void {
-  if (!socketId || socketId === "end") return;
+  if (!socketId || isTerminalAdvanceTarget(socketId)) return;
   if (!socketIds.has(socketId)) issues.push({ path, message: `${label} must reference an existing socket ${JSON.stringify(socketId)}` });
 }

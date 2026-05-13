@@ -25,7 +25,7 @@ function plan(targets: ResolvedLinkTarget[]): LinkPlan {
 }
 
 describe("/materia link compiler", () => {
-  test("reproduces reported loadout validation failure at link-time advance.done validation", () => {
+  test("accepts terminal advance.done end sentinel during link-time loadout validation", () => {
     const hojoConsult: Loadout = {
       id: "Hojo-Consult",
       entry: "Socket-7",
@@ -39,14 +39,30 @@ describe("/materia link compiler", () => {
       createConfigLinkGraphSource({ materia, loadouts: { "Hojo-Consult": hojoConsult } }),
     );
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.virtualLoadout.loadout.sockets["Socket-2"]?.advance?.done).toBe("end");
+  });
+
+  test("rejects unknown non-sentinel advance.done targets during link-time loadout validation", () => {
+    const broken: Loadout = {
+      id: "Broken",
+      entry: "Socket-7",
+      sockets: {
+        "Socket-7": { type: "agent", materia: "Build", advance: { cursor: "items", items: "$.items", done: "missing" } },
+      },
+    };
+
+    const result = compileLinkPlan(
+      { plan: plan([target(0, "loadout", "Broken")]) },
+      createConfigLinkGraphSource({ materia, loadouts: { Broken: broken } }),
+    );
+
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    // This isolates the reported bug to compiler/loadout graph validation after
-    // target resolution: validateLoadout treats terminal advance.done "end" as
-    // a missing socket instead of a terminal sentinel accepted by runtime graph semantics.
     expect(result.issues).toEqual([
       {
-        path: "link.targets.1.loadout.sockets.Socket-7.advance.done",
+        path: "link.targets.0.loadout.sockets.Socket-7.advance.done",
         message: "advance done target must reference an existing socket",
       },
     ]);

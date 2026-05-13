@@ -1,6 +1,6 @@
 import { HANDOFF_EDGE_CONDITIONS, isHandoffEdgeCondition, type HandoffEdgeCondition } from "./handoff.js";
 import { err, ok, type DomainIssue, type DomainResult } from "./result.js";
-import { isCanonicalSocketId } from "./socket.js";
+import { isCanonicalSocketId, isTerminalAdvanceTarget } from "./socket.js";
 
 export type MateriaParseMode = "text" | "json";
 export type MateriaSocketKind = "entry" | "normal";
@@ -141,7 +141,7 @@ export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
     for (const [index, edge] of (socket.edges ?? []).entries()) validateEdge(edge, sockets, `${socketPath}.edges.${index}`, issues);
     if (socket.advance?.when !== undefined && !isHandoffEdgeCondition(socket.advance.when)) issues.push({ path: `${socketPath}.advance.when`, message: `advance condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
     if (socket.foreach?.done !== undefined && !Object.prototype.hasOwnProperty.call(sockets, socket.foreach.done)) issues.push({ path: `${socketPath}.foreach.done`, message: "foreach done target must reference an existing socket" });
-    if (socket.advance?.done !== undefined && !Object.prototype.hasOwnProperty.call(sockets, socket.advance.done)) issues.push({ path: `${socketPath}.advance.done`, message: "advance done target must reference an existing socket" });
+    if (socket.advance?.done !== undefined && !isTerminalAdvanceTarget(socket.advance.done) && !Object.prototype.hasOwnProperty.call(sockets, socket.advance.done)) issues.push({ path: `${socketPath}.advance.done`, message: "advance done target must reference an existing socket" });
   }
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
     const loopPath = `loadout.loops.${loopId}`;

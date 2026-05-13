@@ -1,6 +1,6 @@
 import { HANDOFF_EDGE_CONDITIONS } from "../handoff/handoffContract.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "../loadout/loadoutAccessors.js";
-import { formatInvalidSocketIdMessage, isCanonicalSocketId } from "../domain/socket.js";
+import { formatInvalidSocketIdMessage, isCanonicalSocketId, isTerminalAdvanceTarget } from "../domain/socket.js";
 import type { LegacyMateriaPipelineSocketConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "../types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
@@ -350,7 +350,7 @@ function validateOptionalTarget(errors: MateriaGraphValidationError[], socketIds
     if (source.includes(".edges[")) errors.push({ code: "missing-endpoint", source, from, message: `Missing graph endpoint referenced by ${source}.` });
     return;
   }
-  if (to === "end") return;
+  if (isTerminalAdvanceTarget(to)) return;
   if (!validateSocketId(errors, to, source, { from, to })) return;
   if (!socketIds.has(to)) errors.push({ code: "unknown-endpoint", source, from, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
 }
