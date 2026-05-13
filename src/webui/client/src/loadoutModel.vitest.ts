@@ -208,7 +208,8 @@ describe('loadout normalization model', () => {
     expect(loadout?.loops?.taskIteration.consumes?.from).toBe('Socket-2');
     expect(loadout?.sockets?.['Socket-2'].parse).toBe('json');
     expect(loadout?.sockets?.['Socket-2'].assign?.workItems).toBe('$.workItems');
-    expect(loadout?.sockets?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
+    expect(loadout?.sockets?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', when: 'satisfied' });
+    expect(loadout?.loops?.taskIteration.exits).toBeUndefined();
   });
 
   it('analyzes loop consumer sources from graph topology without mutating input', () => {
@@ -392,7 +393,8 @@ describe('loadout normalization model', () => {
     });
 
     expect(config.loadouts?.Yolo.sockets?.['Socket-4'].parse).toBe('json');
-    expect(config.loadouts?.Yolo.sockets?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', done: 'end', when: 'satisfied' });
+    expect(config.loadouts?.Yolo.sockets?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', when: 'satisfied' });
+    expect(config.loadouts?.Yolo.loops?.loopSelection.exits).toBeUndefined();
     expect(config.loadouts?.Yolo.sockets?.['Socket-4'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
   });
 });

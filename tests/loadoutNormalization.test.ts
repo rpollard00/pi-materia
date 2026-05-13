@@ -3,6 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { saveMateriaConfigPatch } from "../src/config/config.js";
+import { isCanonicalOrNormalizedLoopRouting, normalizeLegacyLoopRoutingCompatibilityInPlace } from "../src/loadout/loopCompatibility.js";
 import { prepareLoadoutForRuntime, prepareLoadoutForSave, normalizeLoadedLoadout } from "../src/loadout/loadoutNormalization.js";
 import type { MateriaPipelineConfig, PiMateriaConfig } from "../src/types.js";
 
@@ -57,7 +58,8 @@ describe("shared loadout normalization", () => {
       expect(prepared.layout?.sockets).toEqual({ "Socket-1": { x: 1, y: 2 }, "Socket-2": { x: 20, y: 30 } });
       expect(prepared.sockets["Socket-2"].parse).toBe("json");
       expect(prepared.sockets["Socket-2"].assign?.workItems).toBe("$.workItems");
-      expect(prepared.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+      expect(prepared.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
+      expect(prepared.loops?.taskIteration.exits).toBeUndefined();
     }
     expect(JSON.stringify(prepareLoadoutForSave(save, materia).loadout)).toBe(JSON.stringify(save));
   });
@@ -71,6 +73,39 @@ describe("shared loadout normalization", () => {
     expect(loadout?.loops?.taskIteration.consumes?.from).toBe("Socket-2");
     expect(loadout?.layout?.sockets).toEqual({ "Socket-1": { x: 1, y: 2 }, "Socket-2": { x: 20, y: 30 } });
     expect(loadout?.sockets["Socket-2"].assign?.workItems).toBe("$.workItems");
-    expect(loadout?.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(loadout?.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
+    expect(loadout?.loops?.taskIteration.exits).toBeUndefined();
+  });
+
+  test("normalizes legacy advance.done routing into canonical loop exits without rewriting normal edges", () => {
+    const legacy: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      loops: {
+        work: { sockets: ["Socket-2", "Socket-3"] },
+      },
+      sockets: {
+        "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "not_satisfied", to: "Socket-2" }, { when: "satisfied", to: "Socket-3" }] },
+        "Socket-3": { type: "agent", materia: "Maintain", edges: [{ when: "always", to: "Socket-2" }], advance: { cursor: "workItemIndex", items: "state.workItems", done: "Socket-4", when: "satisfied" } },
+        "Socket-4": { type: "agent", materia: "Build" },
+      },
+    };
+
+    expect(isCanonicalOrNormalizedLoopRouting(legacy)).toBe(false);
+    const { loadout } = normalizeLoadedLoadout(legacy, materia);
+
+    expect(isCanonicalOrNormalizedLoopRouting(loadout)).toBe(true);
+    expect(loadout.loops?.work.exits).toEqual([{ id: "exit:Socket-3:satisfied", from: "Socket-3", condition: "satisfied", targetSocketId: "Socket-4" }]);
+    expect(loadout.sockets["Socket-2"].edges).toEqual([{ when: "not_satisfied", to: "Socket-2" }, { when: "satisfied", to: "Socket-3" }]);
+    expect(loadout.sockets["Socket-3"].edges).toEqual([{ when: "always", to: "Socket-2" }]);
+    expect(loadout.sockets["Socket-3"].advance?.done).toBe("Socket-4");
+  });
+
+  test("compatibility detection identifies legacy terminal back-edges without treating them as exit routes", () => {
+    const loadout = generatorLoopLoadout();
+    const result = normalizeLegacyLoopRoutingCompatibilityInPlace(loadout);
+
+    expect(result.detections).toContainEqual(expect.objectContaining({ kind: "legacy-terminal-back-edge", loopId: "taskIteration", socketId: "Socket-4", targetSocketId: "Socket-3", condition: "always" }));
+    expect(loadout.loops?.taskIteration.exits).toBeUndefined();
   });
 });

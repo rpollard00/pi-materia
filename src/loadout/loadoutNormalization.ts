@@ -3,6 +3,7 @@ import { normalizePipelineGraph } from "../graph/graphValidation.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, materializeCanonicalSockets } from "./loadoutAccessors.js";
 import { analyzeLoadoutGraph, type LoadoutGraphAnalysis } from "../graph/loadoutGraphAnalysis.js";
 import { materializeLoadoutLoopSemantics } from "../graph/loopSemantics.js";
+import { normalizeLegacyLoopRoutingCompatibilityInPlace } from "./loopCompatibility.js";
 import type { MateriaConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaSocketLayoutConfig, PiMateriaConfig } from "../types.js";
 
 export interface NormalizedLoadoutResult<TLoadout extends MateriaPipelineConfig = MateriaPipelineConfig> {
@@ -25,6 +26,7 @@ export function normalizeLoadedLoadout<TLoadout extends MateriaPipelineConfig>(l
   const normalized = materializeCanonicalSockets(normalizePipelineGraph(loadout) as TLoadout);
   normalizeLoadoutSocketKinds(normalized);
   normalizeLoadoutLayout(normalized);
+  normalizeLegacyLoopRoutingCompatibilityInPlace(normalized);
   const analysis = analyzeLoadoutGraph(normalized, materia);
   return { loadout: normalized, analysis };
 }

@@ -1,4 +1,5 @@
 import { canonicalGeneratorConfigFor } from "./generator.js";
+import { TERMINAL_GRAPH_TARGET } from "./graphSemantics.js";
 import { getLoadoutSocket } from "../loadout/loadoutAccessors.js";
 import { reconcileLoadoutLoopConsumersFromGraphInPlace } from "./loadoutGraphAnalysis.js";
 import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, PiMateriaConfig } from "../types.js";
@@ -11,12 +12,13 @@ export interface LoopSemanticMaterializationOptions {
 
 /**
  * Compile declarative loop intent into the canonical runtime fields used by
- * native execution: parse, advance, and existing ordered edges.
+ * native execution: parse, advance, and canonical loop exit routes.
  *
- * This intentionally does not add a second loop router and does not delete
- * unconditional back-edges. applyAdvance() runs before edge selection, so an
- * unconditional back-edge remains the correct continuation route for non-final
- * consumed items while advance.done controls final completion.
+ * New materialization treats advance as cursor movement/exhaustion detection
+ * only. Post-loop routing is encoded in loops.<id>.exits; when no canonical exit
+ * route exists, runtime falls through to the terminal `end` sentinel. Existing
+ * socket edges, including satisfied/not_satisfied retry or forward edges and UI
+ * descriptive graph decorations, are preserved as normal control-flow edges.
  */
 export function materializeLoadoutLoopSemantics(config: Pick<PiMateriaConfig, "materia">, pipeline: MateriaPipelineConfig, options: LoopSemanticMaterializationOptions = {}): void {
   reconcileLoadoutLoopConsumersFromGraphInPlace(pipeline, config.materia ?? {});
@@ -42,6 +44,7 @@ function materializeLoopExit(materia: Record<string, MateriaConfig>, pipeline: M
   const source = loopSource(options.loadoutName, loopId, loop.exit.from);
 
   if (JSON_CONTROL_CONDITIONS.has(loop.exit.when)) materializeJsonParse(socket, source, loop.exit.when);
+  materializeCanonicalLoopExitRoute(loop);
   materializeAdvance(socket, expectedAdvance, source);
 }
 
@@ -69,12 +72,19 @@ function materializeAdvance(socket: MateriaPipelineSocketConfig, expected: Mater
   }
 }
 
+function materializeCanonicalLoopExitRoute(loop: MateriaLoopConfig): void {
+  const exit = loop.exit;
+  if (!exit || exit.to === TERMINAL_GRAPH_TARGET) return;
+  const route = { id: `exit:${exit.from}:${exit.when}`, from: exit.from, condition: exit.when, targetSocketId: exit.to };
+  const routes = (loop.exits ?? []).filter((candidate) => !(candidate.from === route.from && candidate.condition === route.condition));
+  loop.exits = [...routes, route];
+}
+
 function advanceForLoopExit(loop: MateriaLoopConfig, generator: MateriaGeneratorConfig): MateriaAdvanceConfig {
   const output = loop.consumes?.output ?? generator.output;
   return {
     cursor: loop.consumes?.cursor ?? generator.cursor ?? `${output}Index`,
     items: generator.items ?? `state.${output}`,
-    done: loop.exit?.to,
     when: loop.exit?.when,
   };
 }
