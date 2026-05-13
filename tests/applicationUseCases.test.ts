@@ -159,6 +159,81 @@ describe("application use cases", () => {
     expect(events).toEqual([`resolve:${started?.loaded.config.activeLoadout}`]);
   });
 
+  test("linked cast use case starts reported Chain-Context to UI-authored Hojo-Consult loadout past linked-loadout validation", async () => {
+    const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "pi-materia-reported-link-"));
+    const previousCastId = "2026-05-12T19-40-40-605Z";
+    const runDir = path.join(artifactRoot, previousCastId);
+    await mkdir(runDir, { recursive: true });
+    await writeFile(path.join(runDir, "manifest.json"), JSON.stringify({ castId: previousCastId, request: "prior Chain-Context request", entries: [] }));
+
+    const hojoConsult = {
+      id: "Hojo-Consult",
+      entry: "Socket-7",
+      sockets: {
+        "Socket-7": { socketKind: "entry", type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
+        "Socket-8": { socketKind: "normal", type: "agent", materia: "Review", advance: { cursor: "items", items: "$.items", done: "end" }, edges: [{ when: "satisfied", to: "Socket-9" }] },
+        "Socket-9": { socketKind: "normal", type: "agent", materia: "Build" },
+      },
+      loops: {
+        consult: {
+          sockets: ["Socket-7", "Socket-8"],
+          consumes: { from: "Socket-7", done: "Socket-8" },
+          iterator: { items: "$.items", done: "Socket-9" },
+          exit: { from: "Socket-8", when: "satisfied", to: "Socket-9" },
+          exits: [{ id: "route", from: "Socket-8", condition: "not_satisfied", targetSocketId: "Socket-9" }],
+        },
+      },
+      layout: { sockets: { "Socket-7": { x: 0, y: 0 }, "Socket-8": { x: 1, y: 0 } } },
+    };
+    const before = JSON.stringify(hojoConsult);
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      config: {
+        activeLoadout: "Hojo-Consult",
+        artifactDir: artifactRoot,
+        materia: { "Chain-Context": { prompt: "context" }, Build: { prompt: "build" }, Review: { prompt: "review" } },
+        loadouts: { "Hojo-Consult": hojoConsult },
+      },
+    };
+    const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: (_cwd, artifactDir) => artifactDir ?? artifactRoot };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const starts: Array<{ loaded: LoadedConfig; request: string; options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> } }> = [];
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async (_pi, _session, loadedArg, _pipeline, request, options) => { starts.push({ loaded: loadedArg, request, options }); }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    const reported = await useCases.startLinkedCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: `--from ${previousCastId} Chain-Context loadout:Hojo-Consult -- This is a test cast`, rawCommand: `/materia link --from ${previousCastId} Chain-Context loadout:Hojo-Consult -- This is a test cast` });
+    const prefixed = await useCases.startLinkedCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: `--from ${previousCastId} materia:Chain-Context loadout:Hojo-Consult -- This is a test cast` });
+
+    expect(starts).toHaveLength(2);
+    expect(starts[0]?.request).toBe("This is a test cast");
+    expect(reported.link.fromCastId).toBe(previousCastId);
+    expect(reported.link.plan.targets.map((target) => ({ kind: target.kind, id: target.id, raw: target.requested.raw }))).toEqual([
+      { kind: "materia", id: "Chain-Context", raw: "Chain-Context" },
+      { kind: "loadout", id: "Hojo-Consult", raw: "loadout:Hojo-Consult" },
+    ]);
+    expect(prefixed.link.plan.targets[0]).toMatchObject({ kind: "materia", id: "Chain-Context", requested: { raw: "materia:Chain-Context", prefix: "materia" } });
+    expect(JSON.stringify(hojoConsult)).toBe(before);
+
+    const linkedLoadout = starts[0]?.loaded.config.loadouts?.[starts[0].loaded.config.activeLoadout!];
+    expect(linkedLoadout?.sockets?.["Socket-3"]?.advance?.done).toBe("end");
+    expect(linkedLoadout?.loops?.["t1-consult"]).toMatchObject({
+      sockets: ["Socket-2", "Socket-3"],
+      consumes: { from: "Socket-2", done: "Socket-3" },
+      iterator: { done: "Socket-4" },
+      exit: { from: "Socket-3", when: "satisfied", to: "Socket-4" },
+      exits: [{ id: "route", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-4" }],
+    });
+    expect(starts[0]?.options?.initialData?.previousCastContext).toMatchObject({ castId: previousCastId, request: "prior Chain-Context request" });
+  });
+
   test("linked cast use case loads previous cast context and records lineage metadata", async () => {
     const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "pi-materia-link-usecase-"));
     const runDir = path.join(artifactRoot, "cast-prev");
