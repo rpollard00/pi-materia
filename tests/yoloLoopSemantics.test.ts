@@ -106,7 +106,7 @@ async function runYolo(config: YoloTestConfig) {
 describe("Yolo loop semantics regression", () => {
   test("single-item UI-created Yolo exits after satisfied instead of following the unconditional back-edge forever", async () => {
     const config = yoloConfig([{ id: "one", title: "One" }]);
-    expect(resolvePipeline(config).sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(resolvePipeline(config).sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
 
     const { state } = await runYolo(config);
 
@@ -117,15 +117,14 @@ describe("Yolo loop semantics regression", () => {
     expect(state.data?.maintainAttempts).toEqual({ one: 1 });
   });
 
-  test("multi-item UI-created Yolo advances through consumed items then falls through to end without loop.exits", async () => {
+  test("multi-item UI-created Yolo advances through consumed items then routes through canonical loop exits", async () => {
     const config = yoloConfig([{ id: "alpha", title: "Alpha" }, { id: "beta", title: "Beta" }], { exitTo: "Socket-2" });
 
     const { state } = await runYolo(config);
 
     expect(state.phase).toBe("complete");
-    expect(state.data?.done).toBeUndefined();
-    expect(state.visits).toMatchObject({ "Socket-3": 2, "Socket-4": 2 });
-    expect(state.visits?.["Socket-2"]).toBeUndefined();
+    expect(state.data?.done).toBe(true);
+    expect(state.visits).toMatchObject({ "Socket-3": 2, "Socket-4": 2, "Socket-2": 1 });
     expect(state.edgeTraversals).toMatchObject({ "Socket-4->Socket-3": 1 });
     expect(state.cursors?.workItemIndex).toBe(2);
     expect(state.data?.maintainAttempts).toEqual({ alpha: 1, beta: 1 });
@@ -177,11 +176,12 @@ describe("Yolo loop semantics regression", () => {
   });
 
   test("loop-exit route can enter another loop and no-match exhaustion falls through to end", async () => {
-    const config = yoloConfig([{ id: "one", title: "One" }], { exitTo: "Socket-2" });
+    const config = yoloConfig([{ id: "one", title: "One" }]);
     testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", utility: "echo", params: { output: { fallbackDone: true } }, parse: "json", assign: { fallbackDone: "$.fallbackDone" } };
     testSockets(config.loadouts!.Yolo)["Socket-6"] = { type: "utility", utility: "echo", params: { text: "second build" }, foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
     testSockets(config.loadouts!.Yolo)["Socket-7"] = { type: "utility", utility: "echo", params: { output: { satisfied: true, secondLoopDone: true } }, parse: "json", assign: { secondLoopDone: "$.secondLoopDone" }, advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
-    config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-first-loop", from: "Socket-4", condition: "always", targetSocketId: "Socket-6" }];
+    config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-first-loop", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-6" }];
+    config.loadouts!.Yolo.loops!.secondLoop = { sockets: ["Socket-6", "Socket-7"] };
 
     const { state } = await runYolo(config);
 
@@ -191,7 +191,7 @@ describe("Yolo loop semantics regression", () => {
     expect(state.visits).toMatchObject({ "Socket-4": 1, "Socket-6": 1, "Socket-7": 1 });
     expect(state.cursors).toMatchObject({ workItemIndex: 1, secondIndex: 1 });
 
-    const noMatch = yoloConfig([{ id: "one", title: "One" }], { exitTo: "Socket-2" });
+    const noMatch = yoloConfig([{ id: "one", title: "One" }]);
     noMatch.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "not-selected", from: "Socket-4", condition: "not_satisfied", targetSocketId: "Socket-3" }];
     const { state: noMatchState } = await runYolo(noMatch);
     expect(noMatchState.data?.done).toBeUndefined();
@@ -202,12 +202,12 @@ describe("Yolo loop semantics regression", () => {
     const uiAuthored = yoloConfig([{ id: "one", title: "One" }]);
     const defaultStyle = structuredClone(uiAuthored) as PiMateriaConfig;
     testSockets(defaultStyle.loadouts!.Yolo)["Socket-4"].parse = "json";
-    testSockets(defaultStyle.loadouts!.Yolo)["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" };
+    testSockets(defaultStyle.loadouts!.Yolo)["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" };
 
     const normalizedUiConfig = normalizeMateriaConfigEdges(uiAuthored as never) as PiMateriaConfig;
     expect(testSockets(normalizedUiConfig.loadouts!.Yolo)["Socket-4"]).toMatchObject({
       parse: "json",
-      advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
+      advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" },
       edges: [{ when: "always", to: "Socket-3" }],
     });
 

@@ -175,8 +175,9 @@ describe("loadout-aware pipeline resolution", () => {
     const pipeline = resolvePipeline(config);
 
     expect(pipeline.sockets["Socket-4"].socket.parse).toBe("json");
-    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "Socket-2", when: "satisfied" });
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
     expect(pipeline.sockets["Socket-4"].socket.edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    expect(pipeline.loops?.loopSelection.exits).toEqual([{ id: "exit:Socket-4:satisfied", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-2" }]);
     expect(pipeline.loops?.loopSelection.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
   });
 
@@ -354,7 +355,7 @@ describe("loadout-aware pipeline resolution", () => {
     expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-2", output: "workItems" });
     expect(pipeline.sockets["Socket-2"].socket.parse).toBe("json");
     expect(pipeline.sockets["Socket-2"].socket.assign?.workItems).toBe("$.workItems");
-    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
   });
 
   test("resolvePipeline normalizes generator-to-generator pipeline sockets without a loop consumer", () => {

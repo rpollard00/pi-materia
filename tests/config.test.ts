@@ -322,12 +322,12 @@ describe("config loadouts", () => {
     const loaded = await loadConfig(saved.dir, saved.file);
 
     expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].parse).toBe("json");
-    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
     expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].edges).toEqual([{ when: "always", to: "Socket-3" }]);
     const pipeline = resolvePipeline(loaded.config);
     expect(pipeline.sockets["Socket-1"].socket.parse).toBe("json");
     expect(pipeline.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
-    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
   });
 
   test("loadConfig reports loop materialization conflicts instead of overwriting authored semantics", async () => {
