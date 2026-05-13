@@ -59,7 +59,8 @@ describe("graph semantics helpers", () => {
     expect(resolveIndexedLoopExitRouteTarget(index, "Socket-2", { reason: "post-final-item" })).toBeUndefined();
     expect(resolveIndexedLoopExhaustionTarget(index, "Socket-2", { reason: "empty-loop" })).toBe("end");
     expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Socket-3", "Socket-9", { reason: "post-final-item" })).toBe("Socket-4");
-    expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Socket-2", "Socket-9", { reason: "post-final-item" })).toBe("Socket-9");
+    expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Socket-2", "Socket-9", { reason: "post-final-item" })).toBe("end");
+    expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Legacy-Socket", "Socket-9", { reason: "post-final-item" })).toBe("Socket-9");
   });
 
   test("isolates legacy advance.done compatibility fallback behind a named helper", () => {

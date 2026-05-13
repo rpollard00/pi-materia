@@ -26,6 +26,10 @@ export function applyAdvance(state: MateriaCastState, socket: ResolvedMateriaSoc
   return resolveRuntimeLoopExhaustionTargetWithLegacyAdvanceDoneFallback(state, socket.id, advance.done, parsed);
 }
 
+export function resolveEmptyLoopExhaustionTarget(state: MateriaCastState, socket: ResolvedMateriaSocket, legacyDone: string | undefined): string {
+  return resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(loopExitIndexForPipeline(state.pipeline), socket.id, legacyDone, { reason: "empty-loop" });
+}
+
 function resolveRuntimeLoopExhaustionTargetWithLegacyAdvanceDoneFallback(state: MateriaCastState, from: string, legacyAdvanceDone: string | undefined, parsed: unknown): string {
   return resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(loopExitIndexForPipeline(state.pipeline), from, legacyAdvanceDone, { reason: "post-final-item", satisfied: canonicalSatisfiedOutcome(state, parsed) });
 }

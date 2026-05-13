@@ -48,6 +48,7 @@ export function buildLoopExitIndex(loops: Record<string, MateriaLoopConfig> | un
   const index = new Map<string, LoopExitIndexEntry[]>();
   for (const [loopId, loop] of Object.entries(loops ?? {})) {
     const sources = new Set<string>();
+    for (const socketId of loop.sockets ?? []) sources.add(socketId);
     if (loop.exit?.from) sources.add(loop.exit.from);
     for (const route of loop.exits ?? []) sources.add(route.from);
     for (const from of sources) {
@@ -75,7 +76,9 @@ export function resolveIndexedLoopExhaustionTarget(index: LoopExitIndex, from: s
  * boundary instead of inlining `canonicalRoute ?? advance.done`.
  */
 export function resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index: LoopExitIndex, from: string, legacyAdvanceDone: string | undefined, options: Omit<LoopExhaustionResolutionOptions, "from">): string {
-  return resolveIndexedLoopExitRouteTarget(index, from, options) ?? legacyAdvanceDone ?? TERMINAL_GRAPH_TARGET;
+  const loopEntries = index.get(from) ?? [];
+  if (loopEntries.length === 0) return legacyAdvanceDone ?? TERMINAL_GRAPH_TARGET;
+  return resolveIndexedLoopExitRouteTarget(index, from, options) ?? TERMINAL_GRAPH_TARGET;
 }
 
 /** Return only a canonical loop-exit route target from the index, if one exists. */

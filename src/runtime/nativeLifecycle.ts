@@ -10,7 +10,7 @@ import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocke
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
-import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
+import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
 import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
@@ -334,7 +334,7 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   const config = await loadConfigFromState(state);
   const hasItem = setCurrentItem(state, socket);
   const loop = loopIteratorForSocket(state.pipeline, socket.id);
-  if (loop && !hasItem) return await advanceToSocket(pi, ctx, state, loop.done ?? "end", "foreach-empty");
+  if (loop && !hasItem) return await advanceToSocket(pi, ctx, state, resolveEmptyLoopExhaustionTarget(state, socket, loop.done), "foreach-empty");
   enforceSocketVisitLimit(state, socket, config);
   const attempt = startTaskAttempt(state, socket.id);
 
@@ -583,6 +583,7 @@ export const nativeTestInternals = {
   renderTemplate,
   resolveValue,
   selectNextTarget,
+  resolveEmptyLoopExhaustionTarget,
   setCurrentItem,
   setPath,
 };

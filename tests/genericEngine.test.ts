@@ -139,7 +139,7 @@ describe("generic engine helper mechanics", () => {
     expect(socket.socket).not.toHaveProperty("edges");
   });
 
-  test("preserves existing loop completion behavior when no loop-exit route matches", () => {
+  test("canonical loop completion falls through to end when no loop-exit route matches", () => {
     const socket = {
       id: "Socket-2",
       socket: {
@@ -164,7 +164,7 @@ describe("generic engine helper mechanics", () => {
       },
     });
 
-    expect(applyAdvance(state, socket, { satisfied: false })).toBe("Socket-9");
+    expect(applyAdvance(state, socket, { satisfied: false })).toBe("end");
   });
 
   test("sets nested assignment paths", () => {

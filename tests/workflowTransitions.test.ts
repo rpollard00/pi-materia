@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { applyGenericHandoffEnvelope } from "../src/application/handoff.js";
-import { applyAdvance, selectNextTarget } from "../src/application/workflowTransitions.js";
+import { applyAdvance, resolveEmptyLoopExhaustionTarget, selectNextTarget } from "../src/application/workflowTransitions.js";
 import { evaluateHandoffRouteCondition, selectMatchingEdge } from "../src/domain/routing.js";
 import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket } from "../src/types.js";
 
@@ -69,11 +69,78 @@ describe("workflow transitions", () => {
     expect(() => selectNextTarget(cast, current, { satisfied: true }, config)).toThrow(/edge traversal limit exceeded/);
   });
 
-  test("advance increments cursor and returns done only after the final item", () => {
-    const cast = state({ data: { workItems: [{ id: "one" }, { id: "two" }] }, cursors: { workItemIndex: 0 } });
-    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" } });
+  test("advance increments cursor and routes final-item exhaustion through canonical loop exits", () => {
+    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "Legacy-Done", when: "satisfied" } });
+    const cast = state({
+      data: { workItems: [{ id: "one" }, { id: "two" }] },
+      cursors: { workItemIndex: 0 },
+      pipeline: {
+        entry: socket("Socket-1"),
+        sockets: { "Socket-2": current, "Socket-3": socket("Socket-3") },
+        loops: { work: { sockets: ["Socket-2"], exits: [{ id: "after-work", from: "Socket-2", condition: "satisfied", targetSocketId: "Socket-3" }] } },
+      },
+    });
+
     expect(applyAdvance(cast, current, { satisfied: true })).toBeUndefined();
     expect(cast.cursors.workItemIndex).toBe(1);
+    expect(applyAdvance(cast, current, { satisfied: true })).toBe("Socket-3");
+    expect(cast.cursors.workItemIndex).toBe(2);
+  });
+
+  test("loop exhaustion without a matching canonical exit falls through to terminal end", () => {
+    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "Legacy-Done", when: "satisfied" } });
+    const cast = state({
+      data: { workItems: [{ id: "one" }] },
+      pipeline: {
+        entry: socket("Socket-1"),
+        sockets: { "Socket-2": current, "Socket-3": socket("Socket-3") },
+        loops: { work: { sockets: ["Socket-2"], exits: [{ id: "after-work", from: "Socket-2", condition: "not_satisfied", targetSocketId: "Socket-3" }] } },
+      },
+    });
+
     expect(applyAdvance(cast, current, { satisfied: true })).toBe("end");
+    expect(cast.cursors.workItemIndex).toBe(1);
+  });
+
+  test("empty-loop entry uses canonical exit-or-terminal semantics", () => {
+    const current = socket("Socket-2");
+    const cast = state({
+      data: { workItems: [] },
+      pipeline: {
+        entry: socket("Socket-1"),
+        sockets: { "Socket-2": current, "Socket-3": socket("Socket-3") },
+        loops: { work: { sockets: ["Socket-2"], exits: [{ id: "empty", from: "Socket-2", condition: "always", targetSocketId: "Socket-3" }] } },
+      },
+    });
+
+    expect(resolveEmptyLoopExhaustionTarget(cast, current, "Legacy-Done")).toBe("Socket-3");
+
+    const noExitCast = state({
+      data: { workItems: [] },
+      pipeline: { entry: socket("Socket-1"), sockets: { "Socket-2": current }, loops: { work: { sockets: ["Socket-2"] } } },
+    });
+    expect(resolveEmptyLoopExhaustionTarget(noExitCast, current, "Legacy-Done")).toBe("end");
+  });
+
+  test("legacy advance.done fallback is migration-only when no loop metadata owns the socket", () => {
+    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "Legacy-Done", when: "satisfied" } });
+    const cast = state({ data: { workItems: [{ id: "one" }] }, pipeline: { entry: socket("Socket-1"), sockets: { "Socket-2": current }, loops: {} } });
+
+    expect(applyAdvance(cast, current, { satisfied: true })).toBe("Legacy-Done");
+  });
+
+  test("same-item satisfied and not_satisfied edges continue routing when advance does not exhaust", () => {
+    const current = socket("Socket-2", {
+      advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
+      edges: [{ when: "not_satisfied", to: "Socket-2" }, { when: "satisfied", to: "Socket-3" }],
+    });
+    const cast = state({ data: { workItems: [{ id: "one" }, { id: "two" }] }, pipeline: { entry: socket("Socket-1"), sockets: { "Socket-2": current, "Socket-3": socket("Socket-3") }, loops: { work: { sockets: ["Socket-2"] } } } });
+
+    expect(applyAdvance(cast, current, { satisfied: false })).toBeUndefined();
+    expect(cast.cursors.workItemIndex).toBeUndefined();
+    expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("Socket-2");
+    expect(applyAdvance(cast, current, { satisfied: true })).toBeUndefined();
+    expect(cast.cursors.workItemIndex).toBe(1);
+    expect(selectNextTarget(cast, current, { satisfied: true }, config)).toBe("Socket-3");
   });
 });
