@@ -17,6 +17,26 @@ async function tempArtifactRoot(): Promise<string> {
 }
 
 describe("previous-cast context loader", () => {
+  test("loads deterministic fixture for reported timestamp-style --from cast id", async () => {
+    const root = await tempArtifactRoot();
+    const castId = "2026-05-12T19-40-40-605Z";
+    const runDir = path.join(root, castId);
+    await mkdir(runDir, { recursive: true });
+    await writeFile(path.join(runDir, "manifest.json"), JSON.stringify({
+      castId,
+      request: "linked context source",
+      configSource: "fixture",
+      entries: [],
+    }, null, 2));
+
+    const result = await loadPreviousCastContext({ fromCastId: castId, artifactRoot: root });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.castId).toBe(castId);
+    expect(result.value.request).toBe("linked context source");
+  });
+
   test("validates missing previous cast ids with a helpful link error", async () => {
     const root = await tempArtifactRoot();
 

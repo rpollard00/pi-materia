@@ -13,6 +13,7 @@ const loadouts = {
   Consult: { id: "Consult", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
   Build: { id: "BuildLoadout", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
   "Hojo Consult": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
+  "Hojo-Consult": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
 } satisfies Record<string, Loadout>;
 
 describe("/materia link parser", () => {
@@ -27,6 +28,26 @@ describe("/materia link parser", () => {
       { order: 0, raw: "materia:Chain-Context", prefix: "materia", name: "Chain-Context" },
       { order: 1, raw: "loadout:Consult", prefix: "loadout", name: "Consult" },
     ]);
+  });
+
+  test("parses reported Chain-Context to loadout command shape before graph compilation", () => {
+    const result = parseLinkCommandArguments("--from 2026-05-12T19-40-40-605Z Chain-Context loadout:Hojo-Consult -- This is a test cast", "/materia link --from 2026-05-12T19-40-40-605Z Chain-Context loadout:Hojo-Consult -- This is a test cast");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.fromCastId).toBe("2026-05-12T19-40-40-605Z");
+    expect(result.value.targets).toEqual([
+      { order: 0, raw: "Chain-Context", name: "Chain-Context" },
+      { order: 1, raw: "loadout:Hojo-Consult", prefix: "loadout", name: "Hojo-Consult" },
+    ]);
+  });
+
+  test("parses materia-prefixed Chain-Context as valid target syntax", () => {
+    const result = parseLinkCommandArguments("--from cast-1 materia:Chain-Context loadout:Hojo-Consult -- prompt");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.targets[0]).toEqual({ order: 0, raw: "materia:Chain-Context", prefix: "materia", name: "Chain-Context" });
   });
 
   test("supports quoted targets without making Chain-Context special", () => {
@@ -61,6 +82,36 @@ describe("/materia link parser", () => {
 });
 
 describe("/materia link target resolver", () => {
+  test("resolves reported command targets before linked-loadout graph validation", () => {
+    const parsed = parseLinkCommandArguments("--from 2026-05-12T19-40-40-605Z Chain-Context loadout:Hojo-Consult -- prompt");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const result = resolveLinkTargets({ targets: parsed.value.targets }, createConfigLinkTargetRegistry({ materia, loadouts }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.targets.map((target) => ({ order: target.order, kind: target.kind, id: target.id }))).toEqual([
+      { order: 0, kind: "materia", id: "Chain-Context" },
+      { order: 1, kind: "loadout", id: "Hojo-Consult" },
+    ]);
+  });
+
+  test("resolves materia-prefixed Chain-Context through the same target-resolution path", () => {
+    const parsed = parseLinkCommandArguments("materia:Chain-Context loadout:Hojo-Consult -- prompt");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const result = resolveLinkTargets({ targets: parsed.value.targets }, createConfigLinkTargetRegistry({ materia, loadouts }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.targets.map((target) => ({ order: target.order, kind: target.kind, id: target.id }))).toEqual([
+      { order: 0, kind: "materia", id: "Chain-Context" },
+      { order: 1, kind: "loadout", id: "Hojo-Consult" },
+    ]);
+  });
+
   test("resolves prefixed and unambiguous unprefixed targets in order", () => {
     const parsed = parseLinkCommandArguments("materia:Build Consult -- prompt");
     expect(parsed.ok).toBe(true);

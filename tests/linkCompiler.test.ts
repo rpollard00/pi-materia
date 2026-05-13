@@ -7,6 +7,7 @@ import type { MateriaCatalog } from "../src/domain/materia.js";
 const materia = {
   Build: { id: "Build", type: "agent", behavior: { id: "Build" }, tools: "coding", prompt: "build", parse: "json" },
   Eval: { id: "Eval", type: "agent", behavior: { id: "Eval" }, tools: "none", prompt: "eval" },
+  "Chain-Context": { id: "Chain-Context", type: "agent", behavior: { id: "Chain-Context" }, tools: "none", prompt: "context" },
 } satisfies MateriaCatalog;
 
 function target(order: number, kind: "materia" | "loadout", id: string): ResolvedLinkTarget {
@@ -24,6 +25,33 @@ function plan(targets: ResolvedLinkTarget[]): LinkPlan {
 }
 
 describe("/materia link compiler", () => {
+  test("reproduces reported loadout validation failure at link-time advance.done validation", () => {
+    const hojoConsult: Loadout = {
+      id: "Hojo-Consult",
+      entry: "Socket-7",
+      sockets: {
+        "Socket-7": { type: "agent", materia: "Build", advance: { cursor: "items", items: "$.items", done: "end" } },
+      },
+    };
+
+    const result = compileLinkPlan(
+      { plan: plan([target(0, "materia", "Chain-Context"), target(1, "loadout", "Hojo-Consult")]) },
+      createConfigLinkGraphSource({ materia, loadouts: { "Hojo-Consult": hojoConsult } }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // This isolates the reported bug to compiler/loadout graph validation after
+    // target resolution: validateLoadout treats terminal advance.done "end" as
+    // a missing socket instead of a terminal sentinel accepted by runtime graph semantics.
+    expect(result.issues).toEqual([
+      {
+        path: "link.targets.1.loadout.sockets.Socket-7.advance.done",
+        message: "advance done target must reference an existing socket",
+      },
+    ]);
+  });
+
   test("composes materia-to-materia targets with deterministic stitching", () => {
     const inputPlan = plan([target(0, "materia", "Build"), target(1, "materia", "Eval")]);
 
