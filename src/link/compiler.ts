@@ -1,6 +1,6 @@
 import { ok, type DomainIssue, type DomainResult } from "../domain/result.js";
 import { validateLoadout, type Loadout, type LoadoutSocket, type SocketId } from "../domain/loadout.js";
-import { isTerminalAdvanceTarget } from "../domain/socket.js";
+import { remapGraphTargetPreservingTerminal } from "../domain/socket.js";
 import type { MateriaConfig, MateriaPipelineConfig } from "../types.js";
 import type { MateriaDefinition } from "../domain/materia.js";
 import { LINK_METADATA_VERSION, type LinkPlan, type LinkStitchingDecision, type LinkTargetRemapping, type ResolvedLinkTarget, type VirtualLoadoutSpec } from "./types.js";
@@ -211,8 +211,7 @@ function remapSocket(socket: LoadoutSocket, socketMap: Map<SocketId, SocketId>):
 }
 
 function remapGraphTarget(socketId: SocketId, socketMap: Map<SocketId, SocketId>): SocketId {
-  if (isTerminalAdvanceTarget(socketId)) return socketId;
-  return socketMap.get(socketId) ?? socketId;
+  return remapGraphTargetPreservingTerminal(socketId, socketMap);
 }
 
 function selectSingleTerminal(fragment: CompiledFragment, issues: DomainIssue[]): SocketId | undefined {

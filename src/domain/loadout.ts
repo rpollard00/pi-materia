@@ -1,6 +1,6 @@
 import { HANDOFF_EDGE_CONDITIONS, isHandoffEdgeCondition, type HandoffEdgeCondition } from "./handoff.js";
 import { err, ok, type DomainIssue, type DomainResult } from "./result.js";
-import { isCanonicalSocketId, isTerminalAdvanceTarget } from "./socket.js";
+import { classifyGraphTarget, isCanonicalSocketId } from "./socket.js";
 
 export type MateriaParseMode = "text" | "json";
 export type MateriaSocketKind = "entry" | "normal";
@@ -147,8 +147,8 @@ export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
     if (socket.parse !== undefined && socket.parse !== "text" && socket.parse !== "json") issues.push({ path: `${socketPath}.parse`, message: "parse must be text or json" });
     for (const [index, edge] of (socket.edges ?? []).entries()) validateEdge(edge, sockets, `${socketPath}.edges.${index}`, issues);
     if (socket.advance?.when !== undefined && !isHandoffEdgeCondition(socket.advance.when)) issues.push({ path: `${socketPath}.advance.when`, message: `advance condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
-    if (socket.foreach?.done !== undefined && !Object.prototype.hasOwnProperty.call(sockets, socket.foreach.done)) issues.push({ path: `${socketPath}.foreach.done`, message: "foreach done target must reference an existing socket" });
-    if (socket.advance?.done !== undefined && !isTerminalAdvanceTarget(socket.advance.done) && !Object.prototype.hasOwnProperty.call(sockets, socket.advance.done)) issues.push({ path: `${socketPath}.advance.done`, message: "advance done target must reference an existing socket" });
+    validateSocketOrTerminalTarget(socket.foreach?.done, sockets, `${socketPath}.foreach.done`, "foreach done target", issues);
+    validateSocketOrTerminalTarget(socket.advance?.done, sockets, `${socketPath}.advance.done`, "advance exhaustion target", issues);
   }
   for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
     const loopPath = `loadout.loops.${loopId}`;
@@ -157,18 +157,18 @@ export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
       if (!Object.prototype.hasOwnProperty.call(sockets, socketId)) issues.push({ path: `${loopPath}.sockets.${index}`, message: "loop socket must reference an existing socket" });
     }
     if (loop.consumes && !Object.prototype.hasOwnProperty.call(sockets, loop.consumes.from)) issues.push({ path: `${loopPath}.consumes.from`, message: "loop consumer source must reference an existing socket" });
-    if (loop.consumes?.done !== undefined && !isTerminalAdvanceTarget(loop.consumes.done) && !Object.prototype.hasOwnProperty.call(sockets, loop.consumes.done)) issues.push({ path: `${loopPath}.consumes.done`, message: "loop consumer done target must reference an existing socket" });
-    if (loop.iterator?.done !== undefined && !isTerminalAdvanceTarget(loop.iterator.done) && !Object.prototype.hasOwnProperty.call(sockets, loop.iterator.done)) issues.push({ path: `${loopPath}.iterator.done`, message: "loop iterator done target must reference an existing socket" });
+    validateSocketOrTerminalTarget(loop.consumes?.done, sockets, `${loopPath}.consumes.done`, "loop consumer done target", issues);
+    validateSocketOrTerminalTarget(loop.iterator?.done, sockets, `${loopPath}.iterator.done`, "loop iterator done target", issues);
     if (loop.exit) {
       if (!Object.prototype.hasOwnProperty.call(sockets, loop.exit.from)) issues.push({ path: `${loopPath}.exit.from`, message: "loop exit source must reference an existing socket" });
       if (!isHandoffEdgeCondition(loop.exit.when)) issues.push({ path: `${loopPath}.exit.when`, message: `loop exit condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
-      if (!isTerminalAdvanceTarget(loop.exit.to) && !Object.prototype.hasOwnProperty.call(sockets, loop.exit.to)) issues.push({ path: `${loopPath}.exit.to`, message: "loop exit target must reference an existing socket" });
+      validateSocketOrTerminalTarget(loop.exit.to, sockets, `${loopPath}.exit.to`, "loop exit target", issues);
     }
     for (const [index, route] of (loop.exits ?? []).entries()) {
       if (!isNonEmptyString(route.id)) issues.push({ path: `${loopPath}.exits.${index}.id`, message: "route id is required" });
       if (!Object.prototype.hasOwnProperty.call(sockets, route.from)) issues.push({ path: `${loopPath}.exits.${index}.from`, message: "route source must reference an existing socket" });
       if (!isHandoffEdgeCondition(route.condition)) issues.push({ path: `${loopPath}.exits.${index}.condition`, message: `route condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
-      if (!Object.prototype.hasOwnProperty.call(sockets, route.targetSocketId)) issues.push({ path: `${loopPath}.exits.${index}.targetSocketId`, message: "route target must reference an existing socket" });
+      validateSocketOrTerminalTarget(route.targetSocketId, sockets, `${loopPath}.exits.${index}.targetSocketId`, "loop-exit route target", issues);
     }
   }
   return issues.length > 0 ? { ok: false, issues } : ok(copyLoadout(loadout));
@@ -189,8 +189,17 @@ export function recordSocketVisit<TState extends Pick<CastStateCore, "visits">>(
 
 function validateEdge(edge: LoadoutEdge, sockets: Record<SocketId, LoadoutSocket>, path: string, issues: DomainIssue[]): void {
   if (!isHandoffEdgeCondition(edge.when)) issues.push({ path: `${path}.when`, message: `edge condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
-  if (!isCanonicalSocketId(edge.to)) issues.push({ path: `${path}.to`, message: "edge target must be a canonical Socket-N id" });
-  else if (!Object.prototype.hasOwnProperty.call(sockets, edge.to)) issues.push({ path: `${path}.to`, message: "edge target must reference an existing socket" });
+  const classification = classifyGraphTarget(edge.to, sockets);
+  if (classification.kind === "unknown") {
+    if (!isCanonicalSocketId(edge.to)) issues.push({ path: `${path}.to`, message: "edge target must be a canonical Socket-N id or terminal end" });
+    else issues.push({ path: `${path}.to`, message: "edge target must reference an existing socket or terminal end" });
+  }
+}
+
+function validateSocketOrTerminalTarget(target: SocketId | undefined, sockets: Record<SocketId, LoadoutSocket>, path: string, label: string, issues: DomainIssue[]): void {
+  if (target === undefined) return;
+  const classification = classifyGraphTarget(target, sockets);
+  if (classification.kind === "unknown") issues.push({ path, message: `${label} must reference an existing socket or terminal end` });
 }
 
 function copyLoadout(loadout: Loadout): Loadout {

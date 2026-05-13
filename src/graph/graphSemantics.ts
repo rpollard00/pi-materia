@@ -1,15 +1,10 @@
-import { TERMINAL_ADVANCE_TARGET } from "../domain/socket.js";
+import { classifyGraphTarget, remapGraphTargetPreservingTerminal, TERMINAL_ADVANCE_TARGET, type GraphTargetClassification, type SocketTargetSet } from "../domain/socket.js";
 import { resolveLoopExitRoute, type LoopExitRouteResolutionOptions } from "./loopExitRoutes.js";
 import type { MateriaLoopConfig, ResolvedMateriaPipeline } from "../types.js";
 
 export const TERMINAL_GRAPH_TARGET = TERMINAL_ADVANCE_TARGET;
 
-export type GraphTargetClassification =
-  | { kind: "socket"; target: string }
-  | { kind: "terminal"; target: typeof TERMINAL_GRAPH_TARGET }
-  | { kind: "unknown"; target: string };
-
-export type SocketTargetSet = ReadonlySet<string> | readonly string[] | Record<string, unknown>;
+export { classifyGraphTarget, remapGraphTargetPreservingTerminal, type GraphTargetClassification, type SocketTargetSet };
 
 export interface LoopExhaustionResolutionOptions extends LoopExitRouteResolutionOptions {
   /**
@@ -26,19 +21,6 @@ export interface LoopExitIndexEntry {
 }
 
 export type LoopExitIndex = ReadonlyMap<string, readonly LoopExitIndexEntry[]>;
-
-/** Classify a graph target without treating arbitrary strings as valid targets. */
-export function classifyGraphTarget(target: string, socketTargets: SocketTargetSet): GraphTargetClassification {
-  if (target === TERMINAL_GRAPH_TARGET) return { kind: "terminal", target: TERMINAL_GRAPH_TARGET };
-  if (hasSocketTarget(socketTargets, target)) return { kind: "socket", target };
-  return { kind: "unknown", target };
-}
-
-/** Remap a graph target while preserving the terminal `end` sentinel unchanged. */
-export function remapGraphTargetPreservingTerminal(target: string, socketIdMap: ReadonlyMap<string, string> | Record<string, string>): string {
-  if (target === TERMINAL_GRAPH_TARGET) return TERMINAL_GRAPH_TARGET;
-  return isReadonlyMap(socketIdMap) ? socketIdMap.get(target) ?? target : socketIdMap[target] ?? target;
-}
 
 /**
  * Build a socket-id index for loop-exit metadata so runtime callers do not scan
@@ -114,12 +96,3 @@ function cachedLoopExitIndexFor(pipeline: Pick<ResolvedMateriaPipeline, "loops">
   return index;
 }
 
-function hasSocketTarget(socketTargets: SocketTargetSet, target: string): boolean {
-  if (socketTargets instanceof Set) return socketTargets.has(target);
-  if (Array.isArray(socketTargets)) return socketTargets.includes(target);
-  return Object.prototype.hasOwnProperty.call(socketTargets, target);
-}
-
-function isReadonlyMap(value: ReadonlyMap<string, string> | Record<string, string>): value is ReadonlyMap<string, string> {
-  return typeof (value as ReadonlyMap<string, string>).get === "function";
-}

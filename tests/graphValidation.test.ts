@@ -252,7 +252,7 @@ describe("graph validation foundation", () => {
           { id: "dup", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-4" },
           { id: "unknown-target", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-9" },
           { id: "duplicate-condition", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-4" },
-          { id: "terminal", from: "Socket-3", condition: "always", targetSocketId: "end" },
+          { id: "terminal", from: "Socket-3", condition: "satisfied", targetSocketId: "end" },
         ],
       },
     };
@@ -267,7 +267,6 @@ describe("graph validation foundation", () => {
       expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exits[2].from" }),
       expect.objectContaining({ code: "unknown-endpoint", source: "loops.bad.exits[3].targetSocketId" }),
       expect.objectContaining({ code: "invalid-loop", source: "loops.bad.exits[4].condition" }),
-      expect.objectContaining({ code: "invalid-socket-id", source: "loops.bad.exits[5].targetSocketId" }),
     ]));
     expect(formatGraphValidationErrors(result.errors)).toContain("Only one route per condition per loop exit source is allowed");
   });
@@ -313,12 +312,40 @@ describe("graph validation foundation", () => {
     expect(result.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: "Socket-4.advance.cursor" }),
       expect.objectContaining({ source: "Socket-4.advance.items" }),
-      expect.objectContaining({ source: "Socket-4.advance.done" }),
       expect.objectContaining({ source: "Socket-4.advance.when" }),
       expect.objectContaining({ source: "Socket-4.edges" }),
     ]));
+    expect(result.errors).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "Socket-4.advance.done" }),
+    ]));
     expect(message).toContain('field advance.cursor has current value "taskIndex", expected "workItemIndex"');
     expect(message).toContain("has no outgoing route back into loop members");
+  });
+
+  test("accepts consumed loop advance without route-bearing advance.done", () => {
+    const graph = validGraph();
+    graph.sockets["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.sockets["Socket-2"] = { type: "agent", materia: "summary" };
+    graph.sockets["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.sockets["Socket-4"] = {
+      type: "agent",
+      materia: "Maintain",
+      parse: "json",
+      advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" },
+      edges: [{ when: "not_satisfied", to: "Socket-3" }],
+    };
+    graph.loops = {
+      loopSelection: {
+        sockets: ["Socket-3", "Socket-4"],
+        consumes: { from: "Socket-1", output: "workItems" },
+        exit: { from: "Socket-4", when: "satisfied", to: "end" },
+        exits: [{ id: "post-loop", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-2" }],
+      },
+    };
+
+    const result = validatePipelineGraph(graph, { isGeneratorSocket: (socketId) => socketId === "Socket-1" });
+
+    expect(result).toEqual({ ok: true, errors: [] });
   });
 
   test("validates opposite-condition retry routes for conditional loop continuations", () => {

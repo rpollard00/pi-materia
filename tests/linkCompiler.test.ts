@@ -63,7 +63,7 @@ describe("/materia link compiler", () => {
     expect(result.issues).toEqual([
       {
         path: "link.targets.0.loadout.sockets.Socket-7.advance.done",
-        message: "advance done target must reference an existing socket",
+        message: "advance exhaustion target must reference an existing socket or terminal end",
       },
     ]);
   });
@@ -104,7 +104,10 @@ describe("/materia link compiler", () => {
           consumes: { from: "Socket-7", done: "Socket-8" },
           iterator: { items: "$.items", done: "Socket-10" },
           exit: { from: "Socket-9", when: "satisfied", to: "Socket-10" },
-          exits: [{ id: "route", from: "Socket-9", condition: "not_satisfied", targetSocketId: "Socket-10" }],
+          exits: [
+            { id: "route", from: "Socket-9", condition: "not_satisfied", targetSocketId: "Socket-10" },
+            { id: "terminal", from: "Socket-9", condition: "always", targetSocketId: "end" },
+          ],
         },
       },
     };
@@ -123,7 +126,10 @@ describe("/materia link compiler", () => {
       consumes: { from: "Socket-2", done: "Socket-3" },
       iterator: { done: "Socket-5" },
       exit: { from: "Socket-4", when: "satisfied", to: "Socket-5" },
-      exits: [{ id: "route", from: "Socket-4", condition: "not_satisfied", targetSocketId: "Socket-5" }],
+      exits: [
+        { id: "route", from: "Socket-4", condition: "not_satisfied", targetSocketId: "Socket-5" },
+        { id: "terminal", from: "Socket-4", condition: "always", targetSocketId: "end" },
+      ],
     });
   });
 

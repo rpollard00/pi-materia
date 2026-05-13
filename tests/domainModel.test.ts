@@ -106,6 +106,27 @@ describe("pure materia/loadout domain", () => {
     }
   });
 
+  test("validates terminal end for graph terminal-capable loadout targets", () => {
+    const loadout: Loadout = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "end" }], foreach: { items: "state.items", done: "end" }, advance: { cursor: "itemIndex", items: "state.items", done: "end" } },
+      },
+      loops: {
+        LoopA: {
+          sockets: ["Socket-1"],
+          consumes: { from: "Socket-1", done: "end" },
+          iterator: { items: "state.items", done: "end" },
+          exit: { from: "Socket-1", when: "always", to: "end" },
+          exits: [{ id: "terminal", from: "Socket-1", condition: "always", targetSocketId: "end" }],
+        },
+      },
+    };
+
+    expect(validateLoadout(loadout).ok).toBe(true);
+
+  });
+
   test("chooses deterministic routing outcomes from reserved satisfied control state", () => {
     const socket = {
       edges: [

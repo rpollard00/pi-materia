@@ -1,6 +1,6 @@
 import { HANDOFF_EDGE_CONDITIONS } from "../handoff/handoffContract.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "../loadout/loadoutAccessors.js";
-import { formatInvalidSocketIdMessage, isCanonicalSocketId, isTerminalAdvanceTarget } from "../domain/socket.js";
+import { classifyGraphTarget, formatInvalidSocketIdMessage, isCanonicalSocketId } from "../domain/socket.js";
 import type { LegacyMateriaPipelineSocketConfig, MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "../types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
@@ -185,21 +185,20 @@ function validateExecutableLoopSemantics(graph: MateriaPipelineConfig, errors: M
   }
 
   const output = consumes.output ?? "workItems";
-  const expectedAdvance: MateriaAdvanceConfig = {
+  const expectedAdvance: Pick<MateriaAdvanceConfig, "cursor" | "items" | "when"> = {
     cursor: consumes.cursor ?? defaultLoopCursor(output),
     items: `state.${output}`,
-    done: exit.to,
     when: exit.when,
   };
   if (socket.advance) {
     for (const [field, expectedValue] of Object.entries(expectedAdvance)) {
-      const currentValue = socket.advance[field as keyof MateriaAdvanceConfig];
+      const currentValue = socket.advance[field as keyof typeof expectedAdvance];
       if (currentValue !== expectedValue) {
         errors.push({
           code: "invalid-loop",
           source: `${exit.from}.advance.${field}`,
           from: exit.from,
-          message: `${sourceLabel} field advance.${field} has current value ${JSON.stringify(currentValue)}, expected ${JSON.stringify(expectedValue)} so loops.${loopId}.exit plus consumes can compile to canonical runtime control flow. Suggested fix: align ${exit.from}.advance.${field} with loops.${loopId}.consumes/exit or remove the advance block so it can be materialized.`,
+          message: `${sourceLabel} field advance.${field} has current value ${JSON.stringify(currentValue)}, expected ${JSON.stringify(expectedValue)} so advance only tracks cursor movement/exhaustion for loops.${loopId}.consumes. Suggested fix: align ${exit.from}.advance.${field} with loops.${loopId}.consumes/exit condition or remove the advance block so it can be materialized.`,
         });
       }
     }
@@ -301,7 +300,7 @@ function validateLoopExitRoutes(errors: MateriaGraphValidationError[], socketIds
       }
     }
 
-    validateSocketReference(errors, socketIds, route.targetSocketId, `${routeSource}.targetSocketId`, { from: route.from, to: route.targetSocketId });
+    validateOptionalTarget(errors, socketIds, route.from, route.targetSocketId, `${routeSource}.targetSocketId`);
   }
 }
 
@@ -345,14 +344,18 @@ function containsDirectedCycle(graph: MateriaPipelineConfig, loopSet: Set<string
   return Array.from(loopSet).some((socketId) => visit(socketId));
 }
 
-function validateOptionalTarget(errors: MateriaGraphValidationError[], socketIds: Set<string>, from: string, to: string | undefined, source: string): void {
+function validateOptionalTarget(errors: MateriaGraphValidationError[], socketIds: Set<string>, from: string, to: string | undefined, source: string, options: { allowTerminal?: boolean } = {}): void {
   if (!to) {
     if (source.includes(".edges[")) errors.push({ code: "missing-endpoint", source, from, message: `Missing graph endpoint referenced by ${source}.` });
     return;
   }
-  if (isTerminalAdvanceTarget(to)) return;
+  const classification = classifyGraphTarget(to, socketIds);
+  if (classification.kind === "terminal") {
+    if (options.allowTerminal === false) errors.push({ code: "invalid-socket-id", source, from, to, message: `Terminal graph target "${to}" is not valid for ${source}; expected an existing socket id.` });
+    return;
+  }
   if (!validateSocketId(errors, to, source, { from, to })) return;
-  if (!socketIds.has(to)) errors.push({ code: "unknown-endpoint", source, from, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
+  if (classification.kind === "unknown") errors.push({ code: "unknown-endpoint", source, from, to, message: `Unknown graph endpoint "${to}" referenced by ${source}.` });
 }
 
 function validateSocketReference(errors: MateriaGraphValidationError[], socketIds: Set<string>, to: string | undefined, source: string, endpoint: Pick<MateriaGraphValidationError, "from" | "to"> = { to }): boolean {

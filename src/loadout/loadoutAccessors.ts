@@ -1,4 +1,4 @@
-import { isTerminalAdvanceTarget } from "../domain/socket.js";
+import { classifyGraphTarget } from "../domain/socket.js";
 import type { MateriaForeachConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, ResolvedMateriaPipeline, ResolvedMateriaSocket } from "../types.js";
 
 export class LoadoutTopologyError extends Error {
@@ -89,18 +89,18 @@ export function validateLoadoutSocketReferences(loadout: Pick<MateriaPipelineCon
   for (const [socketId, socket] of loadoutSocketEntries(loadout)) {
     for (const [index, edge] of (socket.edges ?? []).entries()) addMissingReferenceIssue(issues, socketIds, edge.to, `sockets.${socketId}.edges.${index}.to`, "edge target");
     addMissingReferenceIssue(issues, socketIds, socket.foreach?.done, `sockets.${socketId}.foreach.done`, "foreach done target");
-    addMissingReferenceIssue(issues, socketIds, socket.advance?.done, `sockets.${socketId}.advance.done`, "advance done target");
+    addMissingReferenceIssue(issues, socketIds, socket.advance?.done, `sockets.${socketId}.advance.done`, "advance exhaustion target");
   }
 
   for (const [loopId, loop] of loadoutLoopEntries(loadout)) {
-    for (const [index, socketId] of loopSockets(loop).entries()) addMissingReferenceIssue(issues, socketIds, socketId, `loops.${loopId}.sockets.${index}`, "loop socket");
-    addMissingReferenceIssue(issues, socketIds, loop.consumes?.from, `loops.${loopId}.consumes.from`, "loop consumer source");
+    for (const [index, socketId] of loopSockets(loop).entries()) addMissingReferenceIssue(issues, socketIds, socketId, `loops.${loopId}.sockets.${index}`, "loop socket", { allowTerminal: false });
+    addMissingReferenceIssue(issues, socketIds, loop.consumes?.from, `loops.${loopId}.consumes.from`, "loop consumer source", { allowTerminal: false });
     addMissingReferenceIssue(issues, socketIds, loop.consumes?.done, `loops.${loopId}.consumes.done`, "loop consumer done target");
     addMissingReferenceIssue(issues, socketIds, loop.iterator?.done, `loops.${loopId}.iterator.done`, "loop iterator done target");
-    addMissingReferenceIssue(issues, socketIds, loop.exit?.from, `loops.${loopId}.exit.from`, "loop exit source");
+    addMissingReferenceIssue(issues, socketIds, loop.exit?.from, `loops.${loopId}.exit.from`, "loop exit source", { allowTerminal: false });
     addMissingReferenceIssue(issues, socketIds, loop.exit?.to, `loops.${loopId}.exit.to`, "loop exit target");
     for (const [index, route] of (loop.exits ?? []).entries()) {
-      addMissingReferenceIssue(issues, socketIds, route.from, `loops.${loopId}.exits.${index}.from`, "loop-exit route source");
+      addMissingReferenceIssue(issues, socketIds, route.from, `loops.${loopId}.exits.${index}.from`, "loop-exit route source", { allowTerminal: false });
       addMissingReferenceIssue(issues, socketIds, route.targetSocketId, `loops.${loopId}.exits.${index}.targetSocketId`, "loop-exit route target");
     }
   }
@@ -121,7 +121,9 @@ export function materializeCanonicalSockets<TLoadout extends MateriaPipelineConf
   return loadout;
 }
 
-function addMissingReferenceIssue(issues: SocketReferenceIssue[], socketIds: Set<string>, socketId: string | undefined, path: string, label: string): void {
-  if (!socketId || isTerminalAdvanceTarget(socketId)) return;
-  if (!socketIds.has(socketId)) issues.push({ path, message: `${label} must reference an existing socket ${JSON.stringify(socketId)}` });
+function addMissingReferenceIssue(issues: SocketReferenceIssue[], socketIds: Set<string>, socketId: string | undefined, path: string, label: string, options: { allowTerminal?: boolean } = {}): void {
+  if (!socketId) return;
+  const target = classifyGraphTarget(socketId, socketIds);
+  if (target.kind === "terminal" && options.allowTerminal === false) issues.push({ path, message: `${label} must reference an existing socket ${JSON.stringify(socketId)}` });
+  if (target.kind === "unknown") issues.push({ path, message: `${label} must reference an existing socket${options.allowTerminal === false ? "" : " or terminal end"} ${JSON.stringify(socketId)}` });
 }
