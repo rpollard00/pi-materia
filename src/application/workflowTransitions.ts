@@ -1,9 +1,8 @@
 import { selectMatchingEdge } from "../domain/routing.js";
 import { HANDOFF_SATISFIED_FIELD } from "../handoff/handoffContract.js";
 import { canonicalOutgoingEdges } from "../graph/graphValidation.js";
-import { loopSockets } from "../loadout/loadoutAccessors.js";
-import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
 import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
+import { loopExitIndexForPipeline, resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback } from "../graph/graphSemantics.js";
 import type { MateriaCastState, MateriaEdgeCondition, MateriaEdgeConfig, PiMateriaConfig, ResolvedMateriaSocket } from "../types.js";
 
 export const DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS = 25;
@@ -24,13 +23,11 @@ export function applyAdvance(state: MateriaCastState, socket: ResolvedMateriaSoc
   state.currentItemKey = undefined;
   state.currentItemLabel = undefined;
   if (next < items.length) return undefined;
-  return resolveRuntimeLoopExitTarget(state, socket.id, parsed) ?? advance.done;
+  return resolveRuntimeLoopExhaustionTargetWithLegacyAdvanceDoneFallback(state, socket.id, advance.done, parsed);
 }
 
-function resolveRuntimeLoopExitTarget(state: MateriaCastState, from: string, parsed: unknown): string | undefined {
-  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => loopSockets(candidate).includes(from) && candidate.exits?.some((route) => route.from === from));
-  if (!loop) return undefined;
-  return resolveLoopExitRoute(loop, { from, satisfied: canonicalSatisfiedOutcome(state, parsed) })?.targetSocketId;
+function resolveRuntimeLoopExhaustionTargetWithLegacyAdvanceDoneFallback(state: MateriaCastState, from: string, legacyAdvanceDone: string | undefined, parsed: unknown): string {
+  return resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(loopExitIndexForPipeline(state.pipeline), from, legacyAdvanceDone, { reason: "post-final-item", satisfied: canonicalSatisfiedOutcome(state, parsed) });
 }
 
 export function canonicalSatisfiedOutcome(state: MateriaCastState, parsed: unknown): boolean | undefined {
