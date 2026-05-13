@@ -1,5 +1,6 @@
 import { ok, type DomainIssue, type DomainResult } from "../domain/result.js";
 import { validateLoadout, type Loadout, type LoadoutSocket, type SocketId } from "../domain/loadout.js";
+import { isTerminalAdvanceTarget } from "../domain/socket.js";
 import type { MateriaConfig, MateriaPipelineConfig } from "../types.js";
 import type { MateriaDefinition } from "../domain/materia.js";
 import { LINK_METADATA_VERSION, type LinkPlan, type LinkStitchingDecision, type LinkTargetRemapping, type ResolvedLinkTarget, type VirtualLoadoutSpec } from "./types.js";
@@ -180,10 +181,11 @@ function remapFragment(target: ResolvedLinkTarget, loadout: Loadout, socketStart
   const loops = loadout.loops
     ? Object.fromEntries(Object.entries(loadout.loops).map(([loopId, loop]) => [`t${target.order}-${loopId}`, {
         ...loop,
-        sockets: loop.sockets.map((socketId) => socketMap.get(socketId) ?? socketId),
-        ...(loop.consumes ? { consumes: { ...loop.consumes, from: socketMap.get(loop.consumes.from) ?? loop.consumes.from, ...(loop.consumes.done ? { done: socketMap.get(loop.consumes.done) ?? loop.consumes.done } : {}) } } : {}),
-        ...(loop.iterator ? { iterator: { ...loop.iterator, ...(loop.iterator.done ? { done: socketMap.get(loop.iterator.done) ?? loop.iterator.done } : {}) } } : {}),
-        ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit, from: socketMap.get(exit.from) ?? exit.from, targetSocketId: socketMap.get(exit.targetSocketId) ?? exit.targetSocketId })) } : {}),
+        sockets: loop.sockets.map((socketId) => remapGraphTarget(socketId, socketMap)),
+        ...(loop.consumes ? { consumes: { ...loop.consumes, from: remapGraphTarget(loop.consumes.from, socketMap), ...(loop.consumes.done ? { done: remapGraphTarget(loop.consumes.done, socketMap) } : {}) } } : {}),
+        ...(loop.iterator ? { iterator: { ...loop.iterator, ...(loop.iterator.done ? { done: remapGraphTarget(loop.iterator.done, socketMap) } : {}) } } : {}),
+        ...(loop.exit ? { exit: { ...loop.exit, from: remapGraphTarget(loop.exit.from, socketMap), to: remapGraphTarget(loop.exit.to, socketMap) } } : {}),
+        ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit, from: remapGraphTarget(exit.from, socketMap), targetSocketId: remapGraphTarget(exit.targetSocketId, socketMap) })) } : {}),
       }]))
     : undefined;
 
@@ -199,13 +201,18 @@ function remapFragment(target: ResolvedLinkTarget, loadout: Loadout, socketStart
 function remapSocket(socket: LoadoutSocket, socketMap: Map<SocketId, SocketId>): LoadoutSocket {
   return {
     ...socket,
-    ...(socket.edges ? { edges: socket.edges.map((edge) => ({ ...edge, to: socketMap.get(edge.to) ?? edge.to })) } : {}),
-    ...(socket.foreach ? { foreach: { ...socket.foreach, ...(socket.foreach.done ? { done: socketMap.get(socket.foreach.done) ?? socket.foreach.done } : {}) } } : {}),
-    ...(socket.advance ? { advance: { ...socket.advance, ...(socket.advance.done ? { done: socketMap.get(socket.advance.done) ?? socket.advance.done } : {}) } } : {}),
+    ...(socket.edges ? { edges: socket.edges.map((edge) => ({ ...edge, to: remapGraphTarget(edge.to, socketMap) })) } : {}),
+    ...(socket.foreach ? { foreach: { ...socket.foreach, ...(socket.foreach.done ? { done: remapGraphTarget(socket.foreach.done, socketMap) } : {}) } } : {}),
+    ...(socket.advance ? { advance: { ...socket.advance, ...(socket.advance.done ? { done: remapGraphTarget(socket.advance.done, socketMap) } : {}) } } : {}),
     ...(socket.type === "utility" && socket.command ? { command: [...socket.command] } : {}),
     ...(socket.type === "utility" && socket.params ? { params: { ...socket.params } } : {}),
     ...(socket.assign ? { assign: { ...socket.assign } } : {}),
   };
+}
+
+function remapGraphTarget(socketId: SocketId, socketMap: Map<SocketId, SocketId>): SocketId {
+  if (isTerminalAdvanceTarget(socketId)) return socketId;
+  return socketMap.get(socketId) ?? socketId;
 }
 
 function selectSingleTerminal(fragment: CompiledFragment, issues: DomainIssue[]): SocketId | undefined {

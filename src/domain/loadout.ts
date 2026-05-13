@@ -86,7 +86,14 @@ export interface LoadoutLoop {
   sockets: SocketId[];
   consumes?: LoadoutLoopConsumer;
   iterator?: ForeachConfig;
+  exit?: LoadoutLoopExit;
   exits?: LoadoutLoopExitRoute[];
+}
+
+export interface LoadoutLoopExit {
+  from: SocketId;
+  when: HandoffEdgeCondition;
+  to: SocketId;
 }
 
 export interface LoadoutLoopConsumer {
@@ -150,6 +157,13 @@ export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
       if (!Object.prototype.hasOwnProperty.call(sockets, socketId)) issues.push({ path: `${loopPath}.sockets.${index}`, message: "loop socket must reference an existing socket" });
     }
     if (loop.consumes && !Object.prototype.hasOwnProperty.call(sockets, loop.consumes.from)) issues.push({ path: `${loopPath}.consumes.from`, message: "loop consumer source must reference an existing socket" });
+    if (loop.consumes?.done !== undefined && !isTerminalAdvanceTarget(loop.consumes.done) && !Object.prototype.hasOwnProperty.call(sockets, loop.consumes.done)) issues.push({ path: `${loopPath}.consumes.done`, message: "loop consumer done target must reference an existing socket" });
+    if (loop.iterator?.done !== undefined && !isTerminalAdvanceTarget(loop.iterator.done) && !Object.prototype.hasOwnProperty.call(sockets, loop.iterator.done)) issues.push({ path: `${loopPath}.iterator.done`, message: "loop iterator done target must reference an existing socket" });
+    if (loop.exit) {
+      if (!Object.prototype.hasOwnProperty.call(sockets, loop.exit.from)) issues.push({ path: `${loopPath}.exit.from`, message: "loop exit source must reference an existing socket" });
+      if (!isHandoffEdgeCondition(loop.exit.when)) issues.push({ path: `${loopPath}.exit.when`, message: `loop exit condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });
+      if (!isTerminalAdvanceTarget(loop.exit.to) && !Object.prototype.hasOwnProperty.call(sockets, loop.exit.to)) issues.push({ path: `${loopPath}.exit.to`, message: "loop exit target must reference an existing socket" });
+    }
     for (const [index, route] of (loop.exits ?? []).entries()) {
       if (!isNonEmptyString(route.id)) issues.push({ path: `${loopPath}.exits.${index}.id`, message: "route id is required" });
       if (!Object.prototype.hasOwnProperty.call(sockets, route.from)) issues.push({ path: `${loopPath}.exits.${index}.from`, message: "route source must reference an existing socket" });
@@ -183,7 +197,7 @@ function copyLoadout(loadout: Loadout): Loadout {
   return {
     ...loadout,
     sockets: Object.fromEntries(Object.entries(loadout.sockets).map(([id, socket]) => [id, { ...socket, edges: socket.edges?.map((edge) => ({ ...edge })) }])),
-    ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, { ...loop, sockets: [...loop.sockets], exits: loop.exits?.map((exit) => ({ ...exit })) }])) } : {}),
+    ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, { ...loop, sockets: [...loop.sockets], ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}), ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}), ...(loop.exit ? { exit: { ...loop.exit } } : {}), ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}) }])) } : {}),
   };
 }
 

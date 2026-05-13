@@ -88,6 +88,45 @@ describe("/materia link compiler", () => {
     ]);
   });
 
+  test("remaps linked loadout loop metadata and preserves terminal targets without mutating source", () => {
+    const iterative: Loadout = {
+      id: "Iterative",
+      entry: "Socket-7",
+      sockets: {
+        "Socket-7": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
+        "Socket-8": { type: "agent", materia: "Eval", foreach: { items: "$.items", done: "Socket-10" } },
+        "Socket-9": { type: "agent", materia: "Build", advance: { cursor: "items", items: "$.items", done: "end" } },
+        "Socket-10": { type: "agent", materia: "Eval" },
+      },
+      loops: {
+        work: {
+          sockets: ["Socket-7", "Socket-8", "Socket-9"],
+          consumes: { from: "Socket-7", done: "Socket-8" },
+          iterator: { items: "$.items", done: "Socket-10" },
+          exit: { from: "Socket-9", when: "satisfied", to: "Socket-10" },
+          exits: [{ id: "route", from: "Socket-9", condition: "not_satisfied", targetSocketId: "Socket-10" }],
+        },
+      },
+    };
+    const before = JSON.stringify(iterative);
+
+    const result = compileLinkPlan({ plan: plan([target(0, "materia", "Chain-Context"), target(1, "loadout", "Iterative")]) }, createConfigLinkGraphSource({ materia, loadouts: { Iterative: iterative } }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(JSON.stringify(iterative)).toBe(before);
+    expect(result.value.virtualLoadout.loadout.sockets["Socket-2"]?.edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    expect(result.value.virtualLoadout.loadout.sockets["Socket-3"]?.foreach?.done).toBe("Socket-5");
+    expect(result.value.virtualLoadout.loadout.sockets["Socket-4"]?.advance?.done).toBe("end");
+    expect(result.value.virtualLoadout.loadout.loops?.["t1-work"]).toMatchObject({
+      sockets: ["Socket-2", "Socket-3", "Socket-4"],
+      consumes: { from: "Socket-2", done: "Socket-3" },
+      iterator: { done: "Socket-5" },
+      exit: { from: "Socket-4", when: "satisfied", to: "Socket-5" },
+      exits: [{ id: "route", from: "Socket-4", condition: "not_satisfied", targetSocketId: "Socket-5" }],
+    });
+  });
+
   test("composes loadout-to-loadout targets while remapping colliding socket ids", () => {
     const first: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { type: "agent", materia: "Eval", socketKind: "entry" } } };
     const second: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Eval", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { type: "agent", materia: "Build" } } };
