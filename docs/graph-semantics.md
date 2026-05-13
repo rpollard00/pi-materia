@@ -2,6 +2,8 @@
 
 Materia graphs are ordered workflow state machines. They may branch, loop, and run deterministic utility sockets before or between agent turns.
 
+For the normative structured loop contract that future runtime, validation, link compilation, and materialization work must follow, see [Structured loop semantics](structured-loop-semantics.md). In short: normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is only the graph/loadout terminal sentinel.
+
 ## Canonical edge conditions
 
 All graph links use the same canonical edge model:
@@ -72,7 +74,7 @@ The loop consumes the planner generator's `workItems` output, which derives an i
 
 ## Loop-owned exit routes
 
-Loops may also declare explicit post-completion routes in `loops.<id>.exits`. These records are canonical graph semantics owned by the loop, not normal socket `edges`, not generator edges, and not persisted derived render/runtime edges:
+Loops declare explicit post-completion routes in `loops.<id>.exits`. These records are canonical graph semantics owned by the loop, not normal socket `edges`, not generator edges, and not persisted derived render/runtime edges:
 
 ```json
 "loops": {
@@ -90,7 +92,7 @@ Loops may also declare explicit post-completion routes in `loops.<id>.exits`. Th
 
 Each route id is stable and unique within the owning loop. `from` is the loop member socket that acts as the loop exit, `targetSocketId` must be an existing socket (not `end`), and there may be at most one route for each `condition` per `from` socket. Breaking or deleting a loop removes its `exits` metadata; pi-materia must not convert those routes into normal outgoing edges or leave stale materialized `advance.done` routes behind.
 
-Route resolution is centralized and deterministic. When the loop finishes with canonical `{ "satisfied": true }`, a `satisfied` route wins, then `always`, then existing loop completion behavior such as `loops.exit.to` / `advance.done`. When it finishes with `{ "satisfied": false }`, a `not_satisfied` route wins, then `always`, then existing behavior. When the satisfaction outcome is unavailable, only `always` may be selected before falling back to existing behavior. The resolver reads only the canonical boolean `satisfied` field. `passed` is not a canonical loop-exit field; any compatibility handling for `passed` belongs only to explicit migrations or negative compatibility tests, not to authored loadouts or new prompts.
+Route resolution is centralized and deterministic. When the loop finishes with canonical `{ "satisfied": true }`, a `satisfied` route wins, then `always`, then terminal `end` if no route exists. When it finishes with `{ "satisfied": false }`, a `not_satisfied` route wins, then `always`, then terminal `end` if no route exists. When the satisfaction outcome is unavailable, only `always` may be selected before falling back to `end`. The resolver reads only the canonical boolean `satisfied` field. `passed` is not a canonical loop-exit field; any compatibility handling for `passed` belongs only to explicit migrations or negative compatibility tests, not to authored loadouts or new prompts. Legacy `loops.exit.to` / `advance.done` routing is migration compatibility, not the future authoring model.
 
 The WebUI derives special visual edges for these routes with stable ids like `loop-exit:<loopId>:<routeId>` and labels such as **Upon Loop Exit**, **Upon Loop Exit: Satisfied**, and **Upon Loop Exit: Not Satisfied**. Editing or deleting those visual edges mutates `loops.<id>.exits`, not normal socket edges.
 

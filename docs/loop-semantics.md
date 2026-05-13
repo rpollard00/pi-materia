@@ -1,14 +1,14 @@
 # Loop semantics and migration
 
-This is the canonical developer reference for generator-driven loop exits.
+This is the developer reference for current generator-driven loop exits and migration behavior. The normative target contract for the structured loop refactor is [Structured loop semantics](structured-loop-semantics.md). That contract makes `advance` cursor advancement/exhaustion detection only, makes `loops.<id>.exits` the canonical post-exhaustion route owner, and keeps `end` as the only graph/loadout terminal sentinel.
 
-## Canonical runtime model
+## Current runtime model
 
-Runtime executes only the socket-level control fields:
+Current runtime executes only the socket-level control fields:
 
 1. `parse` decides whether the socket output is parsed as JSON.
 2. `assign` copies parsed values into state.
-3. `advance` may advance a cursor and return its `done` target.
+3. `advance` may advance a cursor and, in legacy/current materialized runtime data, return its `done` target.
 4. ordered `edges` choose the next socket when `advance` did not finish the consumed list.
 
 `loops.<id>.exit` is declarative loadout intent, not a second router. For generator-consumer loops, pi-materia compiles this intent into the runtime model by materializing the loop exit source socket. A loop with both:
@@ -32,7 +32,9 @@ materializes the exit source (`Socket-4`) to the equivalent canonical runtime fi
 }
 ```
 
-The normal outgoing `edges` remain in place. This is intentional: `advance` runs before edge selection. For non-final items it increments the cursor and falls through to the loop's normal continuation edge; after the final consumed item it returns `advance.done` and bypasses the back-edge.
+The normal outgoing `edges` remain in place. This is intentional in the current runtime: `advance` runs before edge selection. For non-final items it increments the cursor and falls through to the loop's normal continuation edge; after the final consumed item current legacy-compatible materialization returns `advance.done` and bypasses the back-edge.
+
+New structured-loop work must not treat `advance.done` as the canonical post-loop route. Future authoring should express post-exhaustion routing through `loops.<id>.exits`; a loop with no matching exit route falls through to terminal `end`.
 
 ## Control field
 
@@ -71,7 +73,7 @@ A UI-authored loop may be saved with only the declarative region and an uncondit
 }
 ```
 
-At load/save/run time, `Socket-1` is normalized as a generator socket (`parse: "json"`, `assign.workItems: "$.workItems"`) and `Socket-4` is materialized with JSON parsing and `advance` over `state.workItems`. If Maintain returns `{ "satisfied": false }`, `advance.when` does not run and the `always` edge retries the current item. If Maintain returns `{ "satisfied": true }`, the cursor advances; non-final items continue to `Socket-3`, and the final item exits to `end`.
+At load/save/run time, `Socket-1` is normalized as a generator socket (`parse: "json"`, `assign.workItems: "$.workItems"`) and `Socket-4` is materialized with JSON parsing and `advance` over `state.workItems`. If Maintain returns `{ "satisfied": false }`, `advance.when` does not run and the `always` edge retries the current item. If Maintain returns `{ "satisfied": true }`, the cursor advances; non-final items continue to `Socket-3`, and the final item exits to `end`. In the structured-loop target model, this terminal result is the default no-exit fallback, not a requirement to author post-loop routing in `advance.done`.
 
 ## Rich Build → Auto-Eval → Maintain loop
 
