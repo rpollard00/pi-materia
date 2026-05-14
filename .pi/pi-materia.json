@@ -1,3 +1,20 @@
 {
-  "activeLoadout": "Hojo-Consult"
+  "activeLoadout": "Hojo-Consult",
+  "piMateria": {
+    "schemaVersion": 3,
+    "migrations": [
+      {
+        "id": "001-rename-non-default-loadout-collisions",
+        "appliedAt": "2026-05-14T15:05:47.493Z"
+      },
+      {
+        "id": "002-stamp-stable-loadout-ids",
+        "appliedAt": "2026-05-14T15:05:47.493Z"
+      },
+      {
+        "id": "003-stamp-loadout-ownership-and-locks",
+        "appliedAt": "2026-05-14T15:05:47.493Z"
+      }
+    ]
+  }
 }
