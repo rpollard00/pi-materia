@@ -168,7 +168,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
   }
 
   return (
-    <aside className="fantasy-panel loadout-side-panel p-5">
+    <aside className="fantasy-panel loadout-side-panel p-4">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-bold">Loadouts</h2>
         <button className="materia-button" onClick={onCreateLoadout}>New</button>

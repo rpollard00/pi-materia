@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { ComponentProps } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -249,6 +250,44 @@ describe('LoadoutListPanel', () => {
     expect(gammaCard.querySelector('.loadout-card-meta')).toBeNull();
     expect(gammaCard.textContent).not.toMatch(/\d+ sockets?/i);
     expect(gammaCard.textContent).not.toContain('Built-In');
+  });
+
+  it('protects medium loadout names from premature truncation while preserving ellipsis contracts', () => {
+    const mediumName = 'Planning-Consult';
+    const longName = 'Extremely-Long-Loadout-Name-With-A-Deeply-Nested-Execution-Strategy';
+    renderPanel({
+      loadouts: {
+        [mediumName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
+        [longName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
+      },
+      editingLoadoutName: mediumName,
+      runtimeActiveLoadoutName: mediumName,
+      defaultLoadoutId: mediumName,
+      persistedLoadouts: {
+        [mediumName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
+        [longName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
+      },
+      loadoutSources: { [mediumName]: 'user', [longName]: 'user' },
+    });
+
+    const mediumCard = cardFor(mediumName);
+    expect(within(mediumCard).getByText(mediumName).classList.contains('loadout-card-name')).toBe(true);
+    expect(within(mediumCard).getByLabelText('Default loadout')).toBeTruthy();
+    expect(within(mediumCard).getByLabelText('Unlock edits')).toBeTruthy();
+    expect(within(mediumCard).getByLabelText('Loadout actions')).toBeTruthy();
+    expect(mediumCard.querySelector('.loadout-card-select')?.getAttribute('title')).toContain(mediumName);
+    expect(mediumCard.querySelector('.loadout-card-meta')).toBeNull();
+    expect(mediumCard.textContent).not.toMatch(/Built-In|user loadout|\d+ sockets?/i);
+
+    const longCard = cardFor(longName);
+    expect(within(longCard).getByText(longName).classList.contains('loadout-card-name')).toBe(true);
+    expect(longCard.querySelector('.loadout-card-select')?.getAttribute('title')).toContain(longName);
+
+    const css = readFileSync('src/webui/client/src/styles.css', 'utf8');
+    expect(css).toMatch(/\.loadout-card\s*{[^}]*gap: 0\.25rem;[^}]*padding: 0\.55rem 0\.45rem;/s);
+    expect(css).toMatch(/\.loadout-card-select\s*{[^}]*flex: 1 1 auto;[^}]*overflow: hidden;[^}]*white-space: nowrap;/s);
+    expect(css).toMatch(/\.loadout-card-select \.loadout-card-title\s*{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto auto;[^}]*column-gap: 0\.25rem;/s);
+    expect(css).toMatch(/\.loadout-card-name\s*{[^}]*min-width: 0;[^}]*max-width: none;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   });
 
   it('uses Lucide SVG icons instead of emoji or text glyphs for touched selector indicators', () => {
