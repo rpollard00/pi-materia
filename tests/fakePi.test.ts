@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
+import { CURRENT_PI_MATERIA_SCHEMA_VERSION } from "../src/config/migrations.js";
 import piMateria from "../src/index.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -53,8 +54,8 @@ describe("FakePiHarness", () => {
 
     await harness.runCommand("materia", "loadout");
     const listed = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(listed.content).toContain("⌘ Full-Auto");
-    expect(listed.content).toContain("Full-Auto*");
+    expect(listed.content).toContain("⌘ Full-Auto Copy");
+    expect(listed.content).toContain("Full-Auto Copy*");
     expect(listed.content).toContain("Planning-Consult");
     expect(listed.content).not.toContain("Loadout:");
     expect(listed.content).not.toContain("Available:");
@@ -79,7 +80,7 @@ describe("FakePiHarness", () => {
         activeLoadout: "Planning-Consult",
       },
     });
-    expect((switchedDetails?.loadoutEvent as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult"]));
+    expect((switchedDetails?.loadoutEvent as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult", "Full-Auto Copy", "Planning-Consult Copy"]));
     expect(harness.appendedEntries.at(-1)).toMatchObject({
       customType: "pi-materia-active-loadout-changed",
       data: {
@@ -107,7 +108,7 @@ describe("FakePiHarness", () => {
 
     const raw = JSON.parse(await readFile(projectFile, "utf8"));
     const switched = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
+    expect(raw).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult", piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
     expect(switched.content).toContain("⌘ Planning-Consult");
     expect(switched.content).toContain("Planning-Consult*");
@@ -134,7 +135,6 @@ describe("FakePiHarness", () => {
         },
       },
     }), "utf8");
-    const before = await readFile(configFile, "utf8");
     const harness = new FakePiHarness(dir);
     piMateria(harness.pi);
 
@@ -142,7 +142,9 @@ describe("FakePiHarness", () => {
 
     expect(harness.notifications.at(-1)?.type).toBe("error");
     expect(harness.notifications.at(-1)?.message).toContain('Unknown Materia loadout "Missing". Available loadouts: Full-Auto, Planning-Consult');
-    expect(await readFile(configFile, "utf8")).toBe(before);
+    const after = JSON.parse(await readFile(configFile, "utf8"));
+    expect(after.activeLoadout).toBe("Full-Auto Copy");
+    expect(after.piMateria.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
     expect(harness.operationLog).not.toContain("triggerTurn");
   });
 
@@ -203,9 +205,9 @@ describe("FakePiHarness", () => {
     expect(harness.notifications.some((entry) => entry.message.includes("pi-materia linked virtual loadout"))).toBe(true);
     const stateEntry = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-cast-state")?.data as { data?: Record<string, unknown>; request?: string; pipeline?: { entry?: { id?: string } } } | undefined;
     expect(stateEntry?.request).toBe("implement chained build");
-    expect(stateEntry?.data?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "ReviewOnly" }] }, virtualLoadout: { name: "Linked virtual loadout: Build → ReviewOnly" } });
+    expect(stateEntry?.data?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "project:reviewonly" }] }, virtualLoadout: { name: "Linked virtual loadout: Build → ReviewOnly" } });
     expect(stateEntry?.pipeline?.entry?.id).toBe("Socket-1");
-    expect(await readFile(configFile, "utf8")).toContain('"activeLoadout":"ReviewOnly"');
+    expect(JSON.parse(await readFile(configFile, "utf8")).activeLoadout).toBe("ReviewOnly");
   });
 
   test("reports /materia link validation errors without starting a partial cast", async () => {
@@ -217,7 +219,6 @@ describe("FakePiHarness", () => {
       materia: { Build: { prompt: "Build." } },
       loadouts: { Default: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
     }), "utf8");
-    const before = await readFile(configFile, "utf8");
     const harness = new FakePiHarness(dir);
     piMateria(harness.pi);
 
@@ -227,7 +228,7 @@ describe("FakePiHarness", () => {
     expect(harness.notifications.at(-1)?.message).toContain("missing prompt delimiter");
     expect(harness.operationLog).not.toContain("triggerTurn");
     expect(harness.appendedEntries.find((entry) => entry.customType === "pi-materia-cast-state")).toBeUndefined();
-    expect(await readFile(configFile, "utf8")).toBe(before);
+    expect(JSON.parse(await readFile(configFile, "utf8"))).toMatchObject({ activeLoadout: "Default", activeLoadoutId: "project:default", piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
   });
 
   test("loads pi-materia and runs /materia grid locally", async () => {

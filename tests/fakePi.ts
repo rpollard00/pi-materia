@@ -1,3 +1,5 @@
+import path from "node:path";
+import { tmpdir } from "node:os";
 import type { ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry } from "@mariozechner/pi-coding-agent";
 
 export type FakeEventName = Parameters<ExtensionAPI["on"]>[0];
@@ -93,6 +95,7 @@ export class FakePiHarness {
   idle = true;
 
   constructor(cwd = process.cwd()) {
+    process.env.PI_MATERIA_PROFILE_DIR ??= path.join(tmpdir(), `pi-materia-fake-profile-${process.pid}`);
     this.cwd = cwd;
     this.sessionManager = new FakeSessionManager(cwd);
     this.pi = this.createPi();

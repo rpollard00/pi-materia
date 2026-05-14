@@ -1,10 +1,24 @@
+export interface PiMateriaSchemaMigrationAudit {
+  id: string;
+  appliedAt: string;
+  changes?: string[];
+}
+
+export interface PiMateriaSchemaMetadata {
+  schemaVersion?: number;
+  migrations?: PiMateriaSchemaMigrationAudit[];
+}
+
 export interface PiMateriaConfig {
+  piMateria?: PiMateriaSchemaMetadata;
   artifactDir?: string;
   budget?: MateriaBudgetConfig;
   limits?: MateriaLimitsConfig;
   compaction?: MateriaCompactionConfig;
   /** Named graph configs that share the top-level materia, limits, budget, and artifactDir. */
   loadouts?: Record<string, MateriaPipelineConfig>;
+  /** Stable id of the loadout to use when available. Names are legacy/display references. */
+  activeLoadoutId?: string;
   /** Name of the loadout to use. */
   activeLoadout?: string;
   /** Top-level reusable materia behavior definitions. */
@@ -31,6 +45,7 @@ export interface MateriaConfigLayer {
 export type MateriaSaveTarget = "user" | "project" | "explicit";
 
 export interface MateriaProfileConfig {
+  piMateria?: PiMateriaSchemaMetadata;
   webui?: {
     autoOpenBrowser?: boolean;
     openBrowser?: boolean;
@@ -323,6 +338,8 @@ export interface MateriaRunContext {
 }
 
 export interface MateriaPipelineConfig {
+  /** Stable loadout identity; display names are map keys and may change. */
+  id?: string;
   entry: string;
   /** Canonical socket map for core/domain/application code. */
   sockets?: Record<string, MateriaPipelineSocketConfig>;

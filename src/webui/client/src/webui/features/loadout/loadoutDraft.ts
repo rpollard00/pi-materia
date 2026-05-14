@@ -8,6 +8,7 @@ import {
 import { buildLoadouts } from '../../utils/graphLayout.js';
 import { cloneConfig } from '../../utils/forms.js';
 import { fromWebUiConfigDto } from '../../../../../loadoutDto.js';
+import { makeDuplicateLoadoutName as makeSharedDuplicateLoadoutName } from '../../../../../../loadout/loadoutNames.js';
 import type { LoadoutSourceScope, SaveTarget } from '../../types.js';
 
 export function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
@@ -46,11 +47,7 @@ export function createLoadoutDraft(config: MateriaConfig, name: string) {
 }
 
 export function makeDuplicateLoadoutName(loadouts: Record<string, PipelineConfig>, name: string) {
-  const baseName = `${name} Copy`;
-  if (!loadouts[baseName]) return baseName;
-  let suffix = 2;
-  while (loadouts[`${baseName} ${suffix}`]) suffix += 1;
-  return `${baseName} ${suffix}`;
+  return makeSharedDuplicateLoadoutName(loadouts, name);
 }
 
 export function duplicateLoadoutDraft({

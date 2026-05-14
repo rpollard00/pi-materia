@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config/config.js";
+import { CURRENT_PI_MATERIA_SCHEMA_VERSION } from "../src/config/migrations.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import { getEffectivePipelineConfig, resolvePipeline } from "../src/runtime/pipeline.js";
 import { paletteColors } from "../src/webui/client/src/loadoutModel.js";
@@ -623,8 +624,10 @@ describe("config loadouts", () => {
     const loaded = await loadConfig(dir, file);
     const pipeline = resolvePipeline(loaded.config);
 
-    expect(loaded.config.activeLoadout).toBe("Planning-Consult");
-    expect(Object.keys(loaded.config.loadouts ?? {})).toContain("Full-Auto");
+    expect(loaded.config.activeLoadout).toMatch(/^Planning-Consult Copy/);
+    expect(Object.keys(loaded.config.loadouts ?? {})).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult"]));
+    expect(Object.keys(loaded.config.loadouts ?? {}).some((name) => /^Full-Auto Copy/.test(name))).toBe(true);
+    expect(Object.keys(loaded.config.loadouts ?? {}).some((name) => /^Planning-Consult Copy/.test(name))).toBe(true);
     expect(loaded.config.materia.planner.prompt).toContain("planning materia");
     expect(loaded.config.materia.interactivePlan.prompt).toContain("interactive");
     expect(pipeline.entry.id).toBe("Socket-1");
@@ -726,7 +729,7 @@ describe("active loadout persistence", () => {
     const reloaded = await loadConfig(dir);
 
     expect(written).toBe(projectFile);
-    expect(raw).toEqual({ activeLoadout: "Planning-Consult" });
+    expect(raw).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult", piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
     expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
     expect(resolvePipeline(reloaded.config).sockets["Socket-3"].materia.prompt).toContain("interactive planning materia");
@@ -746,7 +749,10 @@ describe("active loadout persistence", () => {
 
     await expect(saveActiveLoadout(dir, "Missing", file)).rejects.toThrow(/Unknown Materia loadout "Missing"/);
 
-    expect(await readFile(file, "utf8")).toBe(before);
+    const after = JSON.parse(await readFile(file, "utf8"));
+    expect(after.activeLoadout).toMatch(/^Full-Auto Copy/);
+    expect(after).toMatchObject({ piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
+    expect(Object.keys(after.loadouts).some((name) => /^Full-Auto Copy/.test(name))).toBe(true);
   });
 });
 
