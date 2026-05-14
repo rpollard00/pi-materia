@@ -496,6 +496,35 @@
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 42px rgb(250 204 21 / 0.26), 0 0 90px rgb(34 211 238 / 0.16);
 }
 
+.materia-socket-active-indicator {
+  position: absolute;
+  inset: 0.1rem;
+  z-index: 3;
+  border-radius: 9999px;
+  border: 2px solid rgb(250 204 21 / 0.78);
+  box-shadow: 0 0 22px rgb(250 204 21 / 0.5), 0 0 48px rgb(34 211 238 / 0.24);
+  pointer-events: none;
+  animation: materia-active-socket-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes materia-active-socket-pulse {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .materia-socket-active-indicator {
+    animation: none;
+    opacity: 0.92;
+  }
+}
+
 .materia-socket-loop-member {
   isolation: isolate;
 }

@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import type { MateriaConfig, PipelineConfig } from '../../../loadoutModel.js';
+import { resolveMonitoringSocketIndicator } from './monitoringSocketAdapter.js';
 import { buildMateriaPalette, formatSocketLabel, resolveSocketDisplayLabel } from '../../../loadoutModel.js';
 import type { MonitorSnapshot, SocketRegionSelectionDragState } from '../../types.js';
 import { formatElapsed } from '../../utils/display.js';
@@ -50,7 +51,12 @@ export function useLoadoutGraphViewModel({
   } : undefined;
   const createLoopDisabled = selectedLoopSocketIds.length === 0;
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
+  const monitoringSocket = useMemo(
+    () => resolveMonitoringSocketIndicator(monitor, socketPositions.keys()),
+    [monitor?.activeCast?.active, monitor?.activeCast?.currentSocketId, socketPositions],
+  );
   const currentMonitorSocket = monitor?.activeCast?.currentSocketId;
+  const activeMonitorSocketId = monitoringSocket.graphSocketId;
   const elapsed = formatElapsed(monitor?.activeCast?.startedAt ?? monitor?.uiStartedAt, monitor?.now);
 
   return {
@@ -70,6 +76,8 @@ export function useLoadoutGraphViewModel({
     socketLabel,
     socketDisplayLabel,
     currentMonitorSocket,
+    activeMonitorSocketId,
+    monitoringSocket,
     elapsed,
   };
 }

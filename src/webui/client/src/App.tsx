@@ -88,6 +88,7 @@ export function App() {
       socketLabel,
       socketDisplayLabel,
       currentMonitorSocket,
+      activeMonitorSocketId,
       elapsed,
     },
     selectedMateriaId,
@@ -199,7 +200,7 @@ export function App() {
             viewModel={{
               activeLoadout: editingLoadout,
               activeLoadoutName: editingLoadoutName,
-              currentMonitorSocket,
+              currentMonitorSocket: activeMonitorSocketId,
               loadoutGraph,
               loopExitBadges,
               loopMemberships,

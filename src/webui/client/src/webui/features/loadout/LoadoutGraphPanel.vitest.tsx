@@ -172,6 +172,28 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(unlocked.props.toolbar.setActiveLoadoutLockState).toHaveBeenCalledWith('locked');
   });
 
+  it('renders the active session socket indicator without enabling locked edits', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const { getByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        currentMonitorSocket: 'Socket-2',
+        editPolicy: lockedUserPolicy,
+      },
+    });
+
+    const activeSocket = getByTestId('socket-Socket-2');
+    const inactiveSocket = getByTestId('socket-Socket-1');
+    expect(activeSocket.className).toContain('materia-socket-active');
+    expect(activeSocket.getAttribute('aria-current')).toBe('step');
+    expect(activeSocket.getAttribute('aria-label')).toContain('active session socket');
+    expect(activeSocket.getAttribute('aria-readonly')).toBe('true');
+    expect(activeSocket.querySelector('.materia-socket-active-indicator')).not.toBeNull();
+    expect(inactiveSocket.className).not.toContain('materia-socket-active');
+  });
+
   it('marks socket cards readonly and disables socket action mutations', () => {
     const baseActions = {
       closeSocketActionModal: vi.fn(),
