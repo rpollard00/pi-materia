@@ -62,14 +62,16 @@ describe('LoadoutListPanel', () => {
     });
 
     const betaCard = cardFor('Beta');
+    expect(within(betaCard).getByText('Beta')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
-    expect(betaCard.textContent).toContain('user loadout');
+    expect(betaCard.textContent).not.toContain('user loadout');
 
     const gammaCard = cardFor('Gamma');
+    expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).queryByLabelText('Default loadout')).toBeNull();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
-    expect(gammaCard.textContent).toContain('Built-In');
+    expect(gammaCard.textContent).not.toContain('Built-In');
   });
 
   it('shows the default star for a Built-In read-only default loadout', () => {
@@ -80,9 +82,10 @@ describe('LoadoutListPanel', () => {
     });
 
     const gammaCard = cardFor('Gamma');
+    expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
-    expect(gammaCard.textContent).toContain('Built-In');
+    expect(gammaCard.textContent).not.toContain('Built-In');
     expect(screen.queryByText(/Shipped default/i)).toBeNull();
   });
 
@@ -201,23 +204,38 @@ describe('LoadoutListPanel', () => {
     expect(onDeleteLoadout).toHaveBeenCalledWith('Gamma');
   });
 
-  it('renders compact row indicators for active, lock, default, scope, and menu affordances', () => {
+  it('renders compact row indicators while keeping the loadout name as the only visible text', () => {
     renderPanel({
       defaultLoadoutId: 'Beta',
-      loadouts: { ...loadouts, Beta: { ...loadouts.Beta, lockState: 'locked' } },
+      loadouts: {
+        ...loadouts,
+        Beta: { ...loadouts.Beta, lockState: 'locked' },
+        Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'locked' },
+      },
+      loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
       runtimeActiveLoadoutName: 'Beta',
     });
 
     const betaCard = cardFor('Beta');
+    expect(within(betaCard).getByText('Beta')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Runtime active loadout')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Loadout actions')).toBeTruthy();
     expect(betaCard.querySelector('.loadout-card-select')?.className).toContain('loadout-card-select');
     expect(betaCard.querySelector('.loadout-card-name')?.textContent).toBe('Beta');
-    expect(betaCard.querySelector('.loadout-card-meta')?.textContent).toContain('user loadout');
+    expect(betaCard.querySelector('.loadout-card-meta')).toBeNull();
     expect(betaCard.querySelector('.loadout-lock-indicator')?.className).toContain('loadout-lock-indicator');
     expect(betaCard.querySelector('.loadout-actions-menu')).toBeTruthy();
+    expect(betaCard.textContent).not.toMatch(/\d+ sockets?/i);
+    expect(betaCard.textContent).not.toContain('user loadout');
+
+    const gammaCard = cardFor('Gamma');
+    expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
+    expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
+    expect(gammaCard.querySelector('.loadout-card-meta')).toBeNull();
+    expect(gammaCard.textContent).not.toMatch(/\d+ sockets?/i);
+    expect(gammaCard.textContent).not.toContain('Built-In');
   });
 
   it('keeps the existing active-loadout quick selector and does not call the default preference setter', async () => {

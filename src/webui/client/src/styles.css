@@ -66,10 +66,6 @@
   transition: 160ms ease;
 }
 
-.loadout-card small {
-  color: rgb(125 211 252 / 0.78);
-}
-
 .loadout-card-select {
   display: flex;
   min-width: 0;
@@ -84,6 +80,7 @@
 .loadout-card-select .loadout-card-title {
   display: inline-flex;
   min-width: 0;
+  max-width: 100%;
   flex: 1 1 auto;
   align-items: center;
   gap: 0.35rem;
@@ -91,15 +88,7 @@
 
 .loadout-card-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.loadout-card-meta {
-  display: inline-block;
-  max-width: 7.25rem;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

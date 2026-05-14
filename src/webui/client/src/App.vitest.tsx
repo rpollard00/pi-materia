@@ -305,7 +305,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await screen.findByRole('button', { name: /Full-Auto/ });
-    expect(loadoutCard('Full-Auto').textContent).toContain('Built-In');
+    expect(loadoutCard('Full-Auto').textContent).not.toContain('Built-In');
     expect(screen.queryByText(/shipped default/i)).toBeNull();
 
     openLoadoutActions('Full-Auto');

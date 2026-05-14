@@ -41,8 +41,8 @@ function stopMenuEvent(event: ReactMouseEvent | KeyboardEvent) {
   event.stopPropagation();
 }
 
-function loadoutScopeLabel(scope: LoadoutSourceScope): string {
-  if (scope === 'default') return 'Built-In';
+function loadoutScopeDescription(scope: LoadoutSourceScope): string {
+  if (scope === 'default') return 'Built-In read-only loadout';
   return `${scope} loadout`;
 }
 
@@ -190,7 +190,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const lockAction = loadoutLockAction(loadout, sourceScope);
           return (
             <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
-              <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select">
+              <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select" title={`${name} — ${loadoutScopeDescription(sourceScope)}`}>
                 <span className="loadout-card-title">
                   <span className="loadout-card-name">{name}</span>
                   {isDefaultLoadout && (
@@ -200,7 +200,6 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                   )}
                   {isRuntimeActive && <span className="loadout-active-indicator" aria-label="Runtime active loadout" title="Active loadout" />}
                 </span>
-                <small className="loadout-card-meta">{Object.keys(loadout.sockets ?? {}).length} sockets · {loadoutScopeLabel(sourceScope)}</small>
               </button>
               <button
                 type="button"
