@@ -10,6 +10,18 @@ export type MateriaRoutingOutcome = { kind: "next"; to: SocketId; condition: Han
 export type SocketId = string;
 export type MateriaId = string;
 export type LoadoutId = string;
+export type LoadoutSource = "default" | "user" | "project" | "explicit";
+export type LoadoutUserLockState = "locked" | "unlocked";
+export type LoadoutPolicyLockState = LoadoutUserLockState | "policy-locked";
+export type LoadoutEditPolicyReason = "editable" | "user_locked" | "shipped_default_readonly" | "invalid_source_readonly";
+
+export interface LoadoutEditPolicy {
+  canEdit: boolean;
+  readonly: boolean;
+  lockState: LoadoutPolicyLockState;
+  reason: string;
+  reasonCode: LoadoutEditPolicyReason;
+}
 
 export interface ArtifactMetadata {
   phase: string;
@@ -30,6 +42,9 @@ export interface PromptIntent {
 
 export interface Loadout {
   id?: LoadoutId;
+  source?: LoadoutSource;
+  lockState?: LoadoutUserLockState;
+  originDefaultId?: LoadoutId;
   entry: SocketId;
   sockets: Record<SocketId, LoadoutSocket>;
   loops?: Record<string, LoadoutLoop>;
@@ -134,8 +149,43 @@ export function createPromptIntent(init: PromptIntent): DomainResult<PromptInten
   return issues.length > 0 ? { ok: false, issues } : ok({ ...init });
 }
 
+export function getLoadoutEditPolicy(loadout: Pick<Loadout, "source" | "lockState">): LoadoutEditPolicy {
+  if (loadout.source === "default") {
+    return {
+      canEdit: false,
+      readonly: true,
+      lockState: "policy-locked",
+      reasonCode: "shipped_default_readonly",
+      reason: "Shipped default loadouts are read-only. Duplicate this loadout before editing.",
+    };
+  }
+  if (loadout.source !== "user" && loadout.source !== "project" && loadout.source !== "explicit") {
+    return {
+      canEdit: false,
+      readonly: true,
+      lockState: "policy-locked",
+      reasonCode: "invalid_source_readonly",
+      reason: "This loadout has unknown ownership metadata and is read-only until it is migrated or duplicated.",
+    };
+  }
+  if (loadout.lockState === "locked") {
+    return {
+      canEdit: false,
+      readonly: false,
+      lockState: "locked",
+      reasonCode: "user_locked",
+      reason: "This loadout is locked. Unlock edit mode before making changes.",
+    };
+  }
+  return { canEdit: true, readonly: false, lockState: "unlocked", reasonCode: "editable", reason: "This loadout is editable." };
+}
+
 export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
   const issues: DomainIssue[] = [];
+  if (loadout.id !== undefined && !isNonEmptyString(loadout.id)) issues.push({ path: "loadout.id", message: "id must be a non-empty stable loadout id" });
+  if (loadout.source !== undefined && !isLoadoutSource(loadout.source)) issues.push({ path: "loadout.source", message: "source must be default, user, project, or explicit" });
+  if (loadout.lockState !== undefined && loadout.lockState !== "locked" && loadout.lockState !== "unlocked") issues.push({ path: "loadout.lockState", message: "lockState must be locked or unlocked" });
+  if (loadout.originDefaultId !== undefined && !isNonEmptyString(loadout.originDefaultId)) issues.push({ path: "loadout.originDefaultId", message: "originDefaultId must be a non-empty stable loadout id" });
   if (!isCanonicalSocketId(loadout.entry)) issues.push({ path: "loadout.entry", message: "entry must be a canonical Socket-N id" });
   const sockets = loadout.sockets ?? {};
   if (!Object.prototype.hasOwnProperty.call(sockets, loadout.entry)) issues.push({ path: "loadout.entry", message: "entry must reference an existing socket" });
@@ -208,6 +258,10 @@ function copyLoadout(loadout: Loadout): Loadout {
     sockets: Object.fromEntries(Object.entries(loadout.sockets).map(([id, socket]) => [id, { ...socket, edges: socket.edges?.map((edge) => ({ ...edge })) }])),
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, { ...loop, sockets: [...loop.sockets], ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}), ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}), ...(loop.exit ? { exit: { ...loop.exit } } : {}), ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}) }])) } : {}),
   };
+}
+
+function isLoadoutSource(value: unknown): value is LoadoutSource {
+  return value === "default" || value === "user" || value === "project" || value === "explicit";
 }
 
 function isNonEmptyString(value: unknown): value is string {

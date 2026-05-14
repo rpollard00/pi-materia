@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createPromptIntent,
+  getLoadoutEditPolicy,
   parseCanonicalSocketId,
   parseHandoffWorkItem,
   recordSocketVisit,
@@ -104,6 +105,28 @@ describe("pure materia/loadout domain", () => {
       expect(missingMateria.ok).toBe(false);
       if (!missingMateria.ok) expect(missingMateria.issues[0]?.path).toBe("loadout.sockets.Socket-1.materia");
     }
+  });
+
+  test("derives loadout edit policy from ownership and user lock state", () => {
+    expect(getLoadoutEditPolicy({ source: "default" })).toEqual({
+      canEdit: false,
+      readonly: true,
+      lockState: "policy-locked",
+      reasonCode: "shipped_default_readonly",
+      reason: "Shipped default loadouts are read-only. Duplicate this loadout before editing.",
+    });
+    expect(getLoadoutEditPolicy({ source: "user", lockState: "locked" })).toMatchObject({ canEdit: false, readonly: false, lockState: "locked", reasonCode: "user_locked" });
+    expect(getLoadoutEditPolicy({ source: "user", lockState: "unlocked" })).toMatchObject({ canEdit: true, readonly: false, lockState: "unlocked", reasonCode: "editable" });
+    expect(getLoadoutEditPolicy({ source: "project", lockState: "unlocked" })).toMatchObject({ canEdit: true, readonly: false });
+    expect(getLoadoutEditPolicy({ source: "explicit", lockState: "unlocked" })).toMatchObject({ canEdit: true, readonly: false });
+    expect(getLoadoutEditPolicy({})).toMatchObject({ canEdit: false, readonly: true, reasonCode: "invalid_source_readonly" });
+  });
+
+  test("validates loadout ownership and lock metadata", () => {
+    expect(validateLoadout({ id: "user:alpha", source: "user", lockState: "locked", originDefaultId: "default:alpha", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } }).ok).toBe(true);
+    const invalid = validateLoadout({ id: "", source: "mystery" as never, lockState: "readonly" as never, originDefaultId: "", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["loadout.id", "loadout.source", "loadout.lockState", "loadout.originDefaultId"]));
   });
 
   test("validates terminal end for graph terminal-capable loadout targets", () => {

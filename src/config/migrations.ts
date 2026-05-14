@@ -1,9 +1,10 @@
 import { makeDuplicateLoadoutName } from "../loadout/loadoutNames.js";
-import type { MateriaConfigLayerScope, MateriaProfileConfig, PiMateriaConfig, PiMateriaSchemaMigrationAudit } from "../types.js";
+import type { LoadoutSource, LoadoutUserLockState, MateriaConfigLayerScope, MateriaProfileConfig, PiMateriaConfig, PiMateriaSchemaMigrationAudit } from "../types.js";
 
 export const LOADOUT_CONFIG_MIGRATIONS = [
   { id: "001-rename-non-default-loadout-collisions", migrate: renameNonDefaultLoadoutCollisions },
   { id: "002-stamp-stable-loadout-ids", migrate: stampStableLoadoutIds },
+  { id: "003-stamp-loadout-ownership-and-locks", migrate: stampLoadoutOwnershipAndLocks },
 ] as const satisfies readonly ConfigMigration[];
 
 export type LoadoutConfigMigrationId = (typeof LOADOUT_CONFIG_MIGRATIONS)[number]["id"];
@@ -86,6 +87,16 @@ export function ensureStableLoadoutIds(config: Partial<PiMateriaConfig>, scope: 
   if (typeof activeName === "string" && typeof config.activeLoadoutId !== "string") {
     const active = (config.loadouts as Record<string, unknown>)[activeName];
     if (isPlainObject(active) && typeof active.id === "string" && active.id.trim()) config.activeLoadoutId = active.id;
+  }
+}
+
+export function ensureLoadoutOwnershipAndLocks(config: Partial<PiMateriaConfig>, scope: MateriaConfigLayerScope): void {
+  if (!isPlainObject(config.loadouts)) return;
+  for (const loadout of Object.values(config.loadouts as Record<string, unknown>)) {
+    if (!isPlainObject(loadout)) continue;
+    loadout.source = scope;
+    if (scope === "default") delete loadout.lockState;
+    else if (!isLoadoutLockState(loadout.lockState)) loadout.lockState = "unlocked";
   }
 }
 
@@ -205,6 +216,32 @@ function stampStableLoadoutIds(context: ConfigMigrationContext): void {
   }
 }
 
+function stampLoadoutOwnershipAndLocks(context: ConfigMigrationContext): void {
+  for (const layer of context.layers) {
+    if (!layer.loaded || !isPlainObject(layer.config.loadouts)) continue;
+    for (const [displayName, loadout] of Object.entries(layer.config.loadouts as Record<string, unknown>)) {
+      if (!isPlainObject(loadout)) continue;
+      const changes: string[] = [];
+      if (!isLoadoutSource(loadout.source)) {
+        loadout.source = layer.scope;
+        changes.push(`assigned ${layer.scope} ownership to ${displayName}`);
+      }
+      if (layer.scope !== "default" && !isLoadoutLockState(loadout.lockState)) {
+        loadout.lockState = "unlocked";
+        changes.push(`initialized ${displayName} lockState to unlocked`);
+      }
+      if (layer.scope === "default" && loadout.lockState !== undefined) {
+        delete loadout.lockState;
+        changes.push(`removed persisted lockState from readonly default ${displayName}`);
+      }
+      if (changes.length > 0) {
+        layer.changed = true;
+        context.audit[layer.path] = [...(context.audit[layer.path] ?? []), ...changes];
+      }
+    }
+  }
+}
+
 function findLoadoutByDisplayName(layers: MigratableConfigLayer[], displayName: string): { scope: MateriaConfigLayerScope; loadout: Record<string, unknown> } | undefined {
   for (const layer of layers) {
     const loadout = isPlainObject(layer.config.loadouts) ? (layer.config.loadouts as Record<string, unknown>)[displayName] : undefined;
@@ -229,6 +266,14 @@ function findLoadoutIdCandidates(layers: MigratableConfigLayer[], reference: str
 function loadoutStableId(scope: MateriaConfigLayerScope, displayName: string, loadout: Record<string, unknown>): string {
   const id = typeof loadout.id === "string" ? loadout.id.trim() : "";
   return id || stableLoadoutId(scope, displayName);
+}
+
+function isLoadoutSource(value: unknown): value is LoadoutSource {
+  return value === "default" || value === "user" || value === "project" || value === "explicit";
+}
+
+function isLoadoutLockState(value: unknown): value is LoadoutUserLockState {
+  return value === "locked" || value === "unlocked";
 }
 
 function stableLoadoutId(scope: MateriaConfigLayerScope, displayName: string): string {

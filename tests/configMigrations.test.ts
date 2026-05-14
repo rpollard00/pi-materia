@@ -16,7 +16,7 @@ const minimalLoadout = (materia = "Build") => ({
 describe("pi-materia config migrations", () => {
   it("keeps migration ids unique, sorted, stable, and derives the current schema version", () => {
     expect(() => assertValidMigrationRegistry()).not.toThrow();
-    expect(LOADOUT_CONFIG_MIGRATIONS.map((migration) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids"]);
+    expect(LOADOUT_CONFIG_MIGRATIONS.map((migration) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids", "003-stamp-loadout-ownership-and-locks"]);
     expect(CURRENT_PI_MATERIA_SCHEMA_VERSION).toBe(LOADOUT_CONFIG_MIGRATIONS.length);
   });
 
@@ -29,13 +29,34 @@ describe("pi-materia config migrations", () => {
     const first = migrateConfigLayers(layers);
     expect(first.layers[1].changed).toBe(true);
     expect(first.layers[1].config.piMateria?.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
-    expect(first.layers[1].config.piMateria?.migrations?.map((migration) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids"]);
+    expect(first.layers[1].config.piMateria?.migrations?.map((migration) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids", "003-stamp-loadout-ownership-and-locks"]);
     expect(first.layers[1].config.loadouts?.Beta?.id).toBe("user:beta");
+    expect(first.layers[1].config.loadouts?.Beta?.source).toBe("user");
+    expect(first.layers[1].config.loadouts?.Beta?.lockState).toBe("unlocked");
+    expect(first.layers[0].config.loadouts?.Alpha?.source).toBe("default");
+    expect(first.layers[0].config.loadouts?.Alpha?.lockState).toBeUndefined();
 
     first.layers.forEach((layer) => { layer.changed = false; });
     const second = migrateConfigLayers(first.layers);
     expect(second.layers[1].changed).toBe(false);
     expect(second.layers[1].config.loadouts).toHaveProperty("Beta");
+  });
+
+  it("preserves explicit ownership and user lock metadata across user, project, and explicit loadouts", () => {
+    const layers = [
+      { scope: "default" as const, path: "/default.json", loaded: true, config: { loadouts: { Alpha: { ...minimalLoadout(), lockState: "locked" as const } } } as Partial<PiMateriaConfig> },
+      { scope: "user" as const, path: "/user.json", loaded: true, config: { loadouts: { Beta: { ...minimalLoadout(), lockState: "locked" as const, originDefaultId: "default:alpha" } } } as Partial<PiMateriaConfig> },
+      { scope: "project" as const, path: "/project.json", loaded: true, config: { loadouts: { Gamma: minimalLoadout() } } as Partial<PiMateriaConfig> },
+      { scope: "explicit" as const, path: "/imported.json", loaded: true, config: { loadouts: { Delta: { ...minimalLoadout(), lockState: "unlocked" as const } } } as Partial<PiMateriaConfig> },
+    ];
+
+    migrateConfigLayers(layers);
+
+    expect(layers[0].config.loadouts?.Alpha).toMatchObject({ id: "default:alpha", source: "default" });
+    expect(layers[0].config.loadouts?.Alpha?.lockState).toBeUndefined();
+    expect(layers[1].config.loadouts?.Beta).toMatchObject({ id: "user:beta", source: "user", lockState: "locked", originDefaultId: "default:alpha" });
+    expect(layers[2].config.loadouts?.Gamma).toMatchObject({ id: "project:gamma", source: "project", lockState: "unlocked" });
+    expect(layers[3].config.loadouts?.Delta).toMatchObject({ id: "explicit:delta", source: "explicit", lockState: "unlocked" });
   });
 
   it("renames non-default display-name collisions while preserving default names and repointing unambiguous references", () => {
@@ -106,7 +127,7 @@ describe("pi-materia config migrations", () => {
       const writtenProfile = JSON.parse(await readFile(path.join(profileDir, "config.json"), "utf8"));
       expect(writtenProfile.piMateria.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
       expect(writtenProfile.piMateria.migrations[0]).toEqual({ id: "001-rename-non-default-loadout-collisions", appliedAt: "2020-01-01T00:00:00.000Z", changes: ["kept"] });
-      expect(writtenProfile.piMateria.migrations.map((migration: { id: string }) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids"]);
+      expect(writtenProfile.piMateria.migrations.map((migration: { id: string }) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids", "003-stamp-loadout-ownership-and-locks"]);
     } finally {
       if (previousProfile === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previousProfile;
@@ -165,6 +186,8 @@ describe("pi-materia config migrations", () => {
       expect(writtenUserConfig.piMateria.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
       expect(writtenUserConfig.loadouts).toHaveProperty("Full-Auto Copy");
       expect(writtenUserConfig.loadouts["Full-Auto Copy"].id).toBe("user:full-auto-copy");
+      expect(writtenUserConfig.loadouts["Full-Auto Copy"].source).toBe("user");
+      expect(writtenUserConfig.loadouts["Full-Auto Copy"].lockState).toBe("unlocked");
       expect(writtenUserConfig.loadouts).not.toHaveProperty("Full-Auto");
 
       await expect(saveMateriaConfigPatch(cwd, { loadouts: { "Full-Auto": minimalLoadout() } }, { target: "user" })).rejects.toThrow(/already owned by default scope/);
@@ -172,6 +195,8 @@ describe("pi-materia config migrations", () => {
       const regeneratedUserConfig = JSON.parse(await readFile(path.join(profileDir, "materia.json"), "utf8"));
       expect(regeneratedUserConfig.piMateria.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
       expect(regeneratedUserConfig.loadouts.UserOnly.id).toBe("user:useronly");
+      expect(regeneratedUserConfig.loadouts.UserOnly.source).toBe("user");
+      expect(regeneratedUserConfig.loadouts.UserOnly.lockState).toBe("unlocked");
       await saveActiveLoadout(cwd, "user:useronly");
       const projectConfig = JSON.parse(await readFile(path.join(cwd, ".pi", "pi-materia.json"), "utf8"));
       expect(projectConfig.activeLoadout).toBe("UserOnly");

@@ -35,6 +35,8 @@ export interface LoadedConfig {
 }
 
 export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
+export type LoadoutSource = MateriaConfigLayerScope;
+export type LoadoutUserLockState = "locked" | "unlocked";
 
 export interface MateriaConfigLayer {
   scope: MateriaConfigLayerScope;
@@ -340,6 +342,12 @@ export interface MateriaRunContext {
 export interface MateriaPipelineConfig {
   /** Stable loadout identity; display names are map keys and may change. */
   id?: string;
+  /** Persisted ownership/source metadata. Names are display labels and must not define ownership. */
+  source?: LoadoutSource;
+  /** User-controlled lock state for editable loadout sources. Policy may still force readonly. */
+  lockState?: LoadoutUserLockState;
+  /** Optional provenance for duplicates or migrated local copies derived from a shipped default. */
+  originDefaultId?: string;
   entry: string;
   /** Canonical socket map for core/domain/application code. */
   sockets?: Record<string, MateriaPipelineSocketConfig>;

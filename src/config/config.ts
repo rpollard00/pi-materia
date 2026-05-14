@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compactionConfig.js";
-import { ensureCurrentSchemaMetadata, ensureStableLoadoutIds, migrateConfigLayers, validateNoDuplicateLoadoutOwnership, type MigratableConfigLayer } from "./migrations.js";
+import { ensureCurrentSchemaMetadata, ensureLoadoutOwnershipAndLocks, ensureStableLoadoutIds, migrateConfigLayers, validateNoDuplicateLoadoutOwnership, type MigratableConfigLayer } from "./migrations.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
@@ -118,6 +118,8 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   const materialized = withoutDeletedLoadoutMarkers(next);
   ensureStableLoadoutIds(materialized, target);
   ensureStableLoadoutIds(next, target);
+  ensureLoadoutOwnershipAndLocks(materialized, target);
+  ensureLoadoutOwnershipAndLocks(next, target);
   await validateSaveLoadoutOwnership(cwd, options.configuredPath, target, materialized);
   validateLoadoutGraphs(materialized.loadouts);
   await writeJsonAtomic(file, ensureCurrentSchemaMetadata(next));
@@ -357,17 +359,13 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMater
 
 function buildLoadoutSources(partials: Partial<PiMateriaConfig>[], layers: MateriaConfigLayer[]): Record<string, MateriaConfigLayerScope> {
   const sources: Record<string, MateriaConfigLayerScope> = {};
-  const defaultLoadoutNames = new Set(Object.keys(partials[0]?.loadouts ?? {}));
   partials.forEach((partial, index) => {
     const scope = layers[index]?.scope;
     if (!scope || !isPlainObject(partial.loadouts)) return;
     for (const [name, loadout] of Object.entries(partial.loadouts as Record<string, unknown>)) {
-      if (defaultLoadoutNames.has(name)) {
-        sources[name] = "default";
-        continue;
-      }
-      if (loadout === null) delete sources[name];
-      else if (isPlainObject(loadout)) sources[name] = scope;
+      if (loadout === null) {
+        if (sources[name] !== "default") delete sources[name];
+      } else if (isPlainObject(loadout)) sources[name] = isLoadoutSource(loadout.source) ? loadout.source : scope;
     }
   });
   return sources;
@@ -543,6 +541,10 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
       if ("systemPrompt" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures obsolete systemPrompt. Define prompt on the referenced materia instead.`);
     }
   }
+}
+
+function isLoadoutSource(value: unknown): value is MateriaConfigLayerScope {
+  return value === "default" || value === "user" || value === "project" || value === "explicit";
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
