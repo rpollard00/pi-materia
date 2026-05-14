@@ -1,6 +1,6 @@
 # Graph and loop semantics boundary audit
 
-Implementation-facing inventory for the planned graph-semantics cleanup. This is descriptive only: it records current behavior and compatibility surfaces without changing runtime, validation, schema, or UI behavior.
+Implementation-facing inventory from the graph-semantics cleanup planning pass. This is historical/descriptive and may mention pre-refactor behavior. For normative current behavior use [Structured loop semantics](structured-loop-semantics.md); for compatibility shim ownership, removal conditions, warning-to-error timing, and tests to convert use [Loop compatibility and sunset plan](loop-compatibility-sunset.md).
 
 ## Target concepts being audited
 
@@ -102,7 +102,7 @@ Implementation-facing inventory for the planned graph-semantics cleanup. This is
 - It may set `parse: "json"` when `loop.exit.when` is `satisfied` / `not_satisfied`.
 - It materializes `socket.advance` on `loop.exit.from` with `cursor` from `loop.consumes.cursor` or generator cursor, `items` from generator items or `state.<output>`, `done: loop.exit.to`, and `when: loop.exit.when`.
 - It preserves existing compatible advance blocks and errors on conflicts.
-- The materializer still treats `loop.exit.to` as the source of the materialized `advance.done`; it does not materialize `loops.<id>.exits[]` into `advance.done`.
+- Historical note: the old materializer treated `loop.exit.to` as the source of materialized `advance.done`. New-model docs must not present that as canonical routing; socket-valued legacy routes are normalized into `loops.<id>.exits`, and `advance.done` is compatibility-only.
 
 ### Graph analysis: `src/graph/loadoutGraphAnalysis.ts`
 

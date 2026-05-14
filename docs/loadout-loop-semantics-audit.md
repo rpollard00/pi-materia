@@ -1,6 +1,6 @@
 # Loadout loop semantics audit
 
-This note audits how loadouts, loops, cursor consumption, parsing, advancement, and routing are represented and executed today. It is intentionally descriptive: no runtime behavior is changed here.
+This note audits how loadouts, loops, cursor consumption, parsing, advancement, and routing were represented during the loop-semantics cleanup. It is intentionally historical/descriptive: for normative current semantics use [Structured loop semantics](structured-loop-semantics.md), and for compatibility ownership/removal conditions use [Loop compatibility and sunset plan](loop-compatibility-sunset.md). Older observations below that describe `advance.done` as the executable post-loop route are legacy-context notes, not new authoring guidance.
 
 ## Authoritative load/save/normalize paths
 
@@ -25,9 +25,9 @@ When a socket completes (`src/castRuntime.ts#completeSocket`):
 2. If `socket.parse === "json"`, the output is parsed, handoff JSON is validated by `validateHandoffJsonOutput()`, `state.lastJson` is set, and a JSON artifact is written. If parse is omitted or `"text"`, `parsed` remains raw text.
 3. Generic handoff envelope fields are copied into state.
 4. Socket `assign` mappings are applied.
-5. `applyAdvance()` runs before edge selection. If `socket.advance` is absent, or `advance.when` evaluates false, it returns no target. If it runs, it increments `state.cursors[advance.cursor]`; only when the next cursor is at/past the item list length does it return `advance.done`.
+5. `applyAdvance()` runs before edge selection. If `socket.advance` is absent, or `advance.when` evaluates false, it returns no target. If it runs, it increments `state.cursors[advance.cursor]`; only when the next cursor is at/past the item list length does it resolve loop exhaustion through canonical `loops.<id>.exits`, then terminal `end`, with any legacy `advance.done` fallback isolated behind named compatibility helpers.
 6. Runtime appends completion events and checks budget.
-7. `advanceTarget ?? selectNextTarget(...)` decides the next socket. This means `advance.done` wins only on final consumption; non-final consumed items fall through to normal edges.
+7. `advanceTarget ?? selectNextTarget(...)` decides the next socket. This means exhaustion bypasses normal back-edges; non-final consumed items fall through to normal edges.
 8. `selectNextTarget()` iterates `canonicalOutgoingEdges(socket.socket)` in order and chooses the first edge whose condition evaluates true; otherwise it returns `"end"`.
 
 Condition evaluation is canonical: `always` is true; `satisfied` and `not_satisfied` read the reserved JSON field `$.satisfied` from the parsed socket output. Therefore satisfied/not_satisfied control flow requires JSON parsing on that socket. `validateHandoffJsonOutput()` enforces a boolean `satisfied` when a JSON-parsed socket has satisfied/not_satisfied edges or `advance.when`.
@@ -47,7 +47,7 @@ Current runtime use of loop metadata is limited to iterator derivation and item 
 - `src/runtime/pipeline.ts#loopIteratorForSocket` returns that iterator for any member socket.
 - `src/castRuntime.ts#setCurrentItem` uses the iterator to expose the current item.
 
-There is no runtime lookup of `loop.exit` in `completeSocket()`, `applyAdvance()`, `selectNextTarget()`, or `advanceToSocket()`. `loop.exit` is currently validated and rendered, but not executable routing.
+Runtime no longer treats legacy `loop.exit` as the canonical router. Prepared loadouts normalize socket-valued legacy `loop.exit.to` into `loops.<id>.exits`, and exhaustion routing reads canonical exit routes before terminal fallback. `loop.exit` remains compatibility/descriptive input.
 
 ## Why default loadouts work
 
@@ -57,18 +57,18 @@ The bundled default loadouts in `config/default.json` do not rely on `loop.exit`
 - `advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" }` so completed items advance and final completion routes to `end`.
 - Edges such as `not_satisfied -> retry` and `always -> Build` so non-final successful items continue through the loop after `applyAdvance()` increments the cursor.
 
-The default loop metadata (`loops.taskIteration.exit` and `loops.taskIteration.consumes`) matches this behavior for display/validation, but the executable behavior comes from socket-level `parse`, `advance`, `assign`, and `edges`.
+The default loop metadata (`loops.taskIteration.exit` / `loops.taskIteration.exits` and `loops.taskIteration.consumes`) matches this behavior for display/validation. In the structured model, executable post-exhaustion routing comes from loop-owned `exits`; socket-level `parse`, `advance`, `assign`, and normal `edges` still handle parsing, cursor advancement, state updates, and same-item routing.
 
-## Where UI-created loadouts omit semantics
+## Historical UI-created loadout gap
 
-The UI creates and edits loops in `src/webui/client/src/App.tsx`:
+Earlier UI-created loops in `src/webui/client/src/App.tsx` primarily authored descriptive `loops.<id>.exit` metadata plus normal cycle edges:
 
-- `createTaskIteratorLoop()` writes `loops[loopId] = { label, sockets, consumes: { from, output }, exit: { from: lastSelectedSocket, when: "satisfied", to: "end" } }`.
-- `updateLoopExit()` and `clearLoopExit()` mutate only `loop.exit`.
-- The loop editor copy currently says loop exits "use the same canonical edge model as graph edges", which is structurally true for validation but misleading because runtime does not execute `loop.exit`.
-- UI save calls `normalizeMateriaConfigEdges()`, whose generator normalization sets generator sockets to `parse: "json"` and assigns `workItems`, but it does not set the loop exit-source socket to `parse: "json"`, does not add `advance`, and does not rewrite edges.
+- `createTaskIteratorLoop()` wrote `loops[loopId] = { label, sockets, consumes: { from, output }, exit: { from: lastSelectedSocket, when: "satisfied", to: "end" } }`.
+- `updateLoopExit()` and `clearLoopExit()` mutated only legacy/descriptive `loop.exit`.
+- The loop editor copy said loop exits "use the same canonical edge model as graph edges", which was structurally true for validation but misleading before the structured `loops.<id>.exits` route model was introduced.
+- UI save normalization handled generator sockets, but older paths did not consistently materialize loop exit-source parsing/advance or canonical exit route metadata.
 
-Thus a UI-authored Build → Maintain loop can save `loops.exit` and `loops.consumes` while leaving Maintain as `parse: "text"` with an unconditional back-edge. Runtime then sees only the unconditional edge and loops until traversal/socket limits are hit.
+This was the historical bug: a UI-authored Build → Maintain loop could save `loops.exit` and `loops.consumes` while leaving Maintain as `parse: "text"` with an unconditional back-edge. Current load/save/runtime preparation materializes/normalizes compatible loop semantics or reports conflicts, so the back-edge remains normal same-item continuation rather than the only executable behavior.
 
 ## Validation coverage and gap
 
@@ -79,7 +79,7 @@ Thus a UI-authored Build → Maintain loop can save `loops.exit` and `loops.cons
 - No edges after an unconditional `always` edge.
 - Loop structural topology: selected sockets must contain a directed cycle and, for generator loops, exactly one inbound generator edge matching `loops.consumes.from`.
 
-It does not validate that a loop exit can be materialized/executed. In particular, it does not require the exit source to parse JSON, does not require/derive `advance`, and does not check that `loop.exit` and `loop.consumes` correspond to socket-level runtime fields.
+The cleanup added shared preparation/normalization boundaries for executable loop semantics. Validation should continue to reject unknown non-sentinel targets and incompatible parse/advance conflicts while treating legacy `advance.done` and `loop.exit` as migration compatibility, not preferred new-model routing.
 
 ## Implementation note
 
@@ -92,4 +92,4 @@ Recommended placement:
 3. Have UI validation/save call the same analyzer/materializer or its dry-run diagnostics, so users see the same conflicts before saving.
 4. Materialize only missing, safe canonical fields: set JSON parsing where satisfied/not_satisfied control is required, add compatible `advance` derived from `loop.consumes` and `loop.exit`, and preserve existing compatible explicit semantics. Report conflicts rather than overwriting explicit incompatible fields.
 
-This preserves working hand-authored defaults while making UI-authored loadouts executable in the same way.
+This preserves working hand-authored defaults while making UI-authored loadouts executable in the same way. The compatibility layer must remain named, documented, test-covered, and sunsettable; see `docs/loop-compatibility-sunset.md` for the current inventory.

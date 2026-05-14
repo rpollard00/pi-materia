@@ -10,7 +10,7 @@ Core persistence adapters live in `src/schema/persistence.ts` so external JSON c
 
 ## Loop routing compatibility boundary
 
-Newly materialized loop loadouts encode post-loop routing in canonical `loops.<id>.exits` route metadata. `advance` remains cursor/exhaustion detection; new materialization does not rely on `advance.done` as the post-loop route.
+Newly materialized loop loadouts encode post-loop routing in canonical `loops.<id>.exits` route metadata. `advance` remains cursor/exhaustion detection; new materialization does not rely on `advance.done` as the post-loop route. The detailed shim inventory, warning-to-error policy, detection rules, and test sunset plan live in [Loop compatibility and sunset plan](loop-compatibility-sunset.md).
 
 Existing persisted or UI-authored loadouts may still contain old-model routing scaffolding:
 
@@ -20,5 +20,7 @@ Existing persisted or UI-authored loadouts may still contain old-model routing s
 - Existing `satisfied` and `not_satisfied` socket edges remain normal control-flow edges. UI descriptive graph metadata is preserved unless it is explicitly represented in `loops.<id>.exits`.
 
 This compatibility boundary is non-destructive: it preserves legacy fields and UI metadata while adding canonical route metadata on cloned/normalized loadout values. Persisted user-authored loadouts are not destructively rewritten unless a save or future explicit migration path writes a prepared config.
+
+A prepared config can be treated as new-model or normalized when socket-valued legacy `loop.exit.to` and loop-member `advance.done` routes have equivalent `loops.<id>.exits` entries, `advance.done: "end"` is understood only as terminal compatibility, and loop back-edges/descriptive UI runes are preserved without being inferred as exits. Unknown non-sentinel targets and incompatible parse/advance conflicts should remain errors; mirrorable legacy route fields can become warnings after a migration command or save rewrite exists, and errors after a documented warning release.
 
 Do not add new domain, application, config, persistence, or WebUI APIs that accept loadout topology under any non-`sockets` field.

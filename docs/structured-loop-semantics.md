@@ -1,6 +1,6 @@
 # Structured loop semantics
 
-Status: accepted design contract for the next graph-semantics refactor. This document is normative for new runtime, validation, link compilation, materialization, and documentation work. Existing persisted loadouts remain supported through explicit compatibility or normalization paths.
+Status: accepted design contract for structured loop routing. This document is normative for new runtime, validation, link compilation, materialization, and documentation work. Existing persisted loadouts remain supported through explicit compatibility or normalization paths; those paths and their removal conditions are inventoried in [Loop compatibility and sunset plan](loop-compatibility-sunset.md).
 
 ## Terms
 
@@ -137,4 +137,4 @@ Compatibility rules:
 - Unknown non-sentinel targets remain invalid and must not be treated as terminal fallback.
 - Compatibility shims must be named, documented, test-covered, and sunsettable.
 
-New loadouts should omit `advance.done` for post-loop routing and use `loops.<id>.exits` plus the default no-route fallback to `end`.
+New loadouts should omit `advance.done` for post-loop routing and use `loops.<id>.exits` plus the default no-route fallback to `end`. A loadout is considered new-model or normalized when socket-valued legacy `loop.exit.to` and loop-member `advance.done` routes have equivalent `loops.<id>.exits` entries, normal loop back-edges remain ordinary same-item edges, and UI descriptive edges/runes are not treated as routing unless backed by canonical exit metadata.

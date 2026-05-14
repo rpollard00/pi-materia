@@ -1,6 +1,6 @@
 # Loop semantics and migration
 
-This is the developer reference for current generator-driven loop exits and migration behavior. The normative target contract for the structured loop refactor is [Structured loop semantics](structured-loop-semantics.md). That contract makes `advance` cursor advancement/exhaustion detection only, makes `loops.<id>.exits` the canonical post-exhaustion route owner, and keeps `end` as the only graph/loadout terminal sentinel.
+This is the developer reference for current generator-driven loop exits and migration behavior. The normative structured loop contract is [Structured loop semantics](structured-loop-semantics.md). The compatibility shim inventory and removal plan are in [Loop compatibility and sunset plan](loop-compatibility-sunset.md). The structured contract makes `advance` cursor advancement/exhaustion detection only, makes `loops.<id>.exits` the canonical post-exhaustion route owner, and keeps `end` as the only graph/loadout terminal sentinel.
 
 ## Current runtime model
 
@@ -8,17 +8,17 @@ Current runtime executes only the socket-level control fields:
 
 1. `parse` decides whether the socket output is parsed as JSON.
 2. `assign` copies parsed values into state.
-3. `advance` may advance a cursor and, in legacy/current materialized runtime data, return its `done` target.
-4. ordered `edges` choose the next socket when `advance` did not finish the consumed list.
+3. `advance` may advance a cursor and detect exhaustion. When exhaustion occurs, runtime resolves loop-owned post-exhaustion routing before considering any named legacy fallback.
+4. ordered `edges` choose the next socket for same-item/non-exhausted control flow.
 
-`loops.<id>.exit` is declarative loadout intent, not a second router. For generator-consumer loops, pi-materia compiles this intent into the runtime model by materializing the loop exit source socket. A loop with both:
+`loops.<id>.exits` is canonical post-exhaustion routing metadata. Legacy `loops.<id>.exit` is declarative/descriptive compatibility input that may be normalized into `loops.<id>.exits` when it points at a socket. For generator-consumer loops, pi-materia also materializes compatible cursor-advance fields on the loop exit source socket. A legacy loop with both:
 
 ```json
 "consumes": { "from": "Socket-1", "output": "workItems" },
 "exit": { "from": "Socket-4", "when": "satisfied", "to": "end" }
 ```
 
-materializes the exit source (`Socket-4`) to the equivalent canonical runtime fields:
+materializes the exit source (`Socket-4`) to compatible runtime fields:
 
 ```json
 {
@@ -32,9 +32,9 @@ materializes the exit source (`Socket-4`) to the equivalent canonical runtime fi
 }
 ```
 
-The normal outgoing `edges` remain in place. This is intentional in the current runtime: `advance` runs before edge selection. For non-final items it increments the cursor and falls through to the loop's normal continuation edge; after the final consumed item current legacy-compatible materialization returns `advance.done` and bypasses the back-edge.
+The normal outgoing `edges` remain in place. This is intentional: `advance` runs before edge selection. For non-final items it increments the cursor and falls through to the loop's normal continuation edge; after the final consumed item runtime resolves `loops.<id>.exits` and falls back to terminal `end` when no route matches. Any legacy `advance.done` fallback is isolated behind named compatibility helpers and is not the canonical post-loop route.
 
-New structured-loop work must not treat `advance.done` as the canonical post-loop route. Future authoring should express post-exhaustion routing through `loops.<id>.exits`; a loop with no matching exit route falls through to terminal `end`.
+New authoring should express socket-valued post-exhaustion routing through `loops.<id>.exits`; a loop with no matching exit route falls through to terminal `end`.
 
 ## Control field
 
@@ -49,7 +49,7 @@ Existing saved UI loadouts such as the historical Yolo loop may contain declarat
 - `resolvePipeline()` materializes the active loadout again before validation and runtime resolution, so direct in-memory configs and older files loaded by other paths receive the same behavior.
 - the WebUI save normalization calls the same materializer, keeping editor output, saved config, and runtime behavior aligned.
 
-Materialization is defensive and idempotent. It fills only missing compatible fields. It preserves hand-authored `parse: "json"` and matching `advance` definitions. It reports conflicts instead of silently overwriting authored behavior, for example when an exit source explicitly has `parse: "text"` while `exit.when: "satisfied"` requires JSON, or when an existing `advance.cursor`, `items`, `done`, or `when` differs from the value derived from `loops.consumes` plus `loops.exit`.
+Materialization and compatibility normalization are defensive and idempotent. They fill only missing compatible fields and mirror socket-valued legacy `loop.exit.to` / loop-member `advance.done` routes into `loops.<id>.exits` on prepared clones. They preserve hand-authored `parse: "json"` and matching `advance` definitions. They report conflicts instead of silently overwriting authored behavior, for example when an exit source explicitly has `parse: "text"` while `exit.when: "satisfied"` requires JSON, or when existing cursor/items/when fields conflict with the consumed iterator. Terminal `advance.done: "end"` is accepted as migration compatibility but new-model configs use the default no-route fallback to `end`.
 
 ## Simple Build → Maintain loop
 
@@ -73,7 +73,7 @@ A UI-authored loop may be saved with only the declarative region and an uncondit
 }
 ```
 
-At load/save/run time, `Socket-1` is normalized as a generator socket (`parse: "json"`, `assign.workItems: "$.workItems"`) and `Socket-4` is materialized with JSON parsing and `advance` over `state.workItems`. If Maintain returns `{ "satisfied": false }`, `advance.when` does not run and the `always` edge retries the current item. If Maintain returns `{ "satisfied": true }`, the cursor advances; non-final items continue to `Socket-3`, and the final item exits to `end`. In the structured-loop target model, this terminal result is the default no-exit fallback, not a requirement to author post-loop routing in `advance.done`.
+At load/save/run time, `Socket-1` is normalized as a generator socket (`parse: "json"`, `assign.workItems: "$.workItems"`) and `Socket-4` is materialized with JSON parsing and `advance` over `state.workItems`. If Maintain returns `{ "satisfied": false }`, `advance.when` does not run and the `always` edge retries the current item. If Maintain returns `{ "satisfied": true }`, the cursor advances; non-final items continue to `Socket-3`, and final-item exhaustion resolves loop exits before falling back to `end`. This terminal result is the default no-exit fallback, not a requirement to author post-loop routing in `advance.done`.
 
 ## Rich Build → Auto-Eval → Maintain loop
 

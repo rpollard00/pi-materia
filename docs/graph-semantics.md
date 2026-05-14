@@ -2,7 +2,7 @@
 
 Materia graphs are ordered workflow state machines. They may branch, loop, and run deterministic utility sockets before or between agent turns.
 
-For the normative structured loop contract that future runtime, validation, link compilation, and materialization work must follow, see [Structured loop semantics](structured-loop-semantics.md). In short: normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is only the graph/loadout terminal sentinel.
+For the normative structured loop contract that runtime, validation, link compilation, and materialization work must follow, see [Structured loop semantics](structured-loop-semantics.md). For the named migration shims and removal plan, see [Loop compatibility and sunset plan](loop-compatibility-sunset.md). In short: normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is only the graph/loadout terminal sentinel.
 
 ## Canonical edge conditions
 
@@ -130,7 +130,7 @@ Generator materia are marked with a **Generator** badge. Sockets inside loop reg
 
 `satisfied` is the canonical boolean route/control field for `satisfied` / `not_satisfied` edges and `advance.when`. Legacy aliases are migration-only when they are mentioned by old notes or negative tests; do not author new loadouts that depend on aliases such as `passed`.
 
-Saved UI loadouts that already declare `loops.exit` and generator `consumes` but are missing executable socket-level fields are normalized through the shared materializer in `loadConfig()`, `saveMateriaConfigPatch()`, WebUI save normalization, and `resolvePipeline()`. Compatible hand-authored fields are preserved. Conflicts, such as `parse: "text"` on a `satisfied` exit source or an existing `advance` whose cursor/items/done/when do not match the loop declaration, fail with remediation messages instead of being silently rewritten.
+Saved UI loadouts that already declare legacy `loops.exit` and generator `consumes` but are missing executable socket-level fields are normalized through the shared materializer in `loadConfig()`, `saveMateriaConfigPatch()`, WebUI save normalization, and `resolvePipeline()`. Compatible hand-authored fields are preserved. Socket-valued legacy `loop.exit.to` and loop-member `advance.done` inputs are mirrored into canonical `loops.<id>.exits` on prepared/normalized loadout values; terminal `end` remains the no-route fallback. Conflicts, such as `parse: "text"` on a `satisfied` exit source or incompatible cursor/items/when fields, fail with remediation messages instead of being silently rewritten. See [Loop compatibility and sunset plan](loop-compatibility-sunset.md) for owner locations, warning-to-error timing, and tests to convert when compatibility is removed.
 
 Older layouts may have loop regions with direct `iterator` metadata but no `consumes` generator declaration. pi-materia preserves explicit iterator-only loops for non-generator workflows. When a legacy iterator loop has exactly one inbound edge from a generator materia, `resolvePipeline` migrates the resolved loop by adding `consumes: { from, output }` from that generator while preserving the original iterator fields for runtime compatibility.
 
