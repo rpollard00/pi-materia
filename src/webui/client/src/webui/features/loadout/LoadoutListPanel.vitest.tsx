@@ -3,12 +3,12 @@ import type { ComponentProps } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineConfig } from '../../../loadoutModel.js';
-import { LoadoutListPanel } from './LoadoutListPanel.js';
+import { buildLoadoutSelectorViewModels, LoadoutListPanel } from './LoadoutListPanel.js';
 
 const loadouts = {
-  Alpha: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-  Beta: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Test' } } },
-  Gamma: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+  Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+  Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Test' } } },
+  Gamma: { id: 'Gamma', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
 } satisfies Record<string, PipelineConfig>;
 
 function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutListPanel>> = {}) {
@@ -107,6 +107,50 @@ describe('LoadoutListPanel', () => {
     renderPanel({ defaultLoadoutId: 'Missing' });
 
     expect(screen.queryByLabelText('Default loadout')).toBeNull();
+  });
+
+  it('matches the default star by stable loadout id instead of display name', () => {
+    renderPanel({
+      defaultLoadoutId: 'user:hojo',
+      loadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      persistedLoadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      loadoutSources: { Hojo: 'user' },
+    });
+
+    expect(within(cardFor('Hojo')).getByLabelText('Default loadout').querySelector('svg')).toBeTruthy();
+  });
+
+  it('does not fall back to the display name for default star matching', () => {
+    renderPanel({
+      defaultLoadoutId: 'Hojo',
+      loadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      persistedLoadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      loadoutSources: { Hojo: 'user' },
+    });
+
+    expect(within(cardFor('Hojo')).queryByLabelText('Default loadout')).toBeNull();
+  });
+
+  it('derives selector default state from normalized loadout records', () => {
+    const rows = buildLoadoutSelectorViewModels({
+      Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} },
+      Stale: { id: 'user:stale', entry: 'Socket-1', sockets: {} },
+    }, 'user:hojo');
+
+    expect(rows.map(({ name, isDefault }) => [name, isDefault])).toEqual([
+      ['Hojo', true],
+      ['Stale', false],
+    ]);
+    expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'Hojo')[0]?.isDefault).toBe(false);
+    expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'missing')[0]?.isDefault).toBe(false);
   });
 
   it('keeps menu interactions from selecting the card and separates active from default actions', async () => {
@@ -257,15 +301,15 @@ describe('LoadoutListPanel', () => {
     const longName = 'Extremely-Long-Loadout-Name-With-A-Deeply-Nested-Execution-Strategy';
     renderPanel({
       loadouts: {
-        [mediumName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
-        [longName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
+        [mediumName]: { id: mediumName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
+        [longName]: { id: longName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
       },
       editingLoadoutName: mediumName,
       runtimeActiveLoadoutName: mediumName,
       defaultLoadoutId: mediumName,
       persistedLoadouts: {
-        [mediumName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
-        [longName]: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
+        [mediumName]: { id: mediumName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
+        [longName]: { id: longName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
       },
       loadoutSources: { [mediumName]: 'user', [longName]: 'user' },
     });

@@ -22,6 +22,23 @@ export interface LoadoutListPanelProps {
   onToggleLoadoutLock: (name: string, lockState: LoadoutLockState) => boolean;
 }
 
+export interface LoadoutSelectorViewModel {
+  name: string;
+  loadout: PipelineConfig;
+  isDefault: boolean;
+}
+
+export function buildLoadoutSelectorViewModels(loadouts: Record<string, PipelineConfig>, defaultLoadoutId: string | null): LoadoutSelectorViewModel[] {
+  return Object.keys(loadouts).map((name) => {
+    const loadout = loadouts[name];
+    return {
+      name,
+      loadout,
+      isDefault: Boolean(defaultLoadoutId) && loadout.id === defaultLoadoutId,
+    };
+  });
+}
+
 interface LoadoutActionsMenuProps {
   name: string;
   isRuntimeActive: boolean;
@@ -149,7 +166,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const persistedNames = Object.keys(persistedLoadouts);
-  const validatedDefaultLoadoutId = defaultLoadoutId && loadouts[defaultLoadoutId] ? defaultLoadoutId : null;
+  const loadoutRows = buildLoadoutSelectorViewModels(loadouts, defaultLoadoutId);
 
   async function changeRuntimeActiveLoadout(name: string) {
     // This quick selector changes only the runtime/session active loadout. It
@@ -187,14 +204,13 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
       </label>
       {activeChangeMessage && <p className="mb-3 text-xs text-slate-300" role="status">{activeChangeMessage}</p>}
       <div className="space-y-2" role="list" aria-label="Available loadouts">
-        {Object.keys(loadouts).map((name) => {
-          const loadout = loadouts[name];
+        {loadoutRows.map(({ name, loadout, isDefault }) => {
           const sourceScope = loadoutSources[name] ?? 'user';
           const defaultLoadout = sourceScope === 'default';
           const deleteDisabled = !canDeleteLoadout(name);
           const isRuntimeActive = name === runtimeActiveLoadoutName;
           const persisted = Boolean(persistedLoadouts[name]);
-          const isDefaultLoadout = name === validatedDefaultLoadoutId;
+          const isDefaultLoadout = isDefault;
           const lockAction = loadoutLockAction(loadout, sourceScope);
           const LockIcon = loadoutLockIcons[lockAction.iconKey];
           return (
