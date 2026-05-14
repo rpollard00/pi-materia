@@ -30,6 +30,8 @@ export interface LoadoutSelectorViewModel {
 }
 
 export function buildLoadoutSelectorViewModels(loadouts: Record<string, PipelineConfig>, defaultLoadoutId: string | null, activeLoadoutId?: string): LoadoutSelectorViewModel[] {
+  // Config load/migration stamps stable loadout.id values; selector state must
+  // not fall back to display names or object keys when IDs are stale/unknown.
   return Object.keys(loadouts).map((name) => {
     const loadout = loadouts[name];
     return {

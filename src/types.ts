@@ -17,9 +17,9 @@ export interface PiMateriaConfig {
   compaction?: MateriaCompactionConfig;
   /** Named graph configs that share the top-level materia, limits, budget, and artifactDir. */
   loadouts?: Record<string, MateriaPipelineConfig>;
-  /** Stable id of the loadout to use when available. Names are legacy/display references. */
+  /** Stable id of the loadout to use. Current-format runtime/UI identity must compare against loadout.id only. */
   activeLoadoutId?: string;
-  /** Name of the loadout to use. */
+  /** Legacy/display name used for compatibility and editor selection; migration/load code translates it to activeLoadoutId when possible. */
   activeLoadout?: string;
   /** Top-level reusable materia behavior definitions. */
   materia: Record<string, MateriaConfig>;

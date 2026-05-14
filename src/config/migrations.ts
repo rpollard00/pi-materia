@@ -180,6 +180,9 @@ function renameNonDefaultLoadoutCollisions(context: ConfigMigrationContext): voi
 }
 
 function stampStableLoadoutIds(context: ConfigMigrationContext): void {
+  // This is the load-time identity boundary for legacy configs: after this
+  // migration, current-format code should treat loadout.id as canonical and
+  // avoid falling back to display names or object keys for active/default state.
   for (const layer of context.layers) {
     if (!layer.loaded || !isPlainObject(layer.config.loadouts)) continue;
     for (const [displayName, loadout] of Object.entries(layer.config.loadouts as Record<string, unknown>)) {
