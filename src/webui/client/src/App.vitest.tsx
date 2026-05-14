@@ -372,11 +372,13 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(screen.getAllByText(/Socket-3 \(Auto-Eval\).*satisfied\/not_satisfied routing requires JSON output parsing/i).length).toBeGreaterThan(0));
-    expect(screen.getByText('Cannot save loadout')).toBeTruthy();
     const validationToast = screen.getByRole('alert');
     expect(validationToast.getAttribute('data-toast-variant')).toBe('validation');
     expect(validationToast.textContent).toContain('Cannot save loadout');
     expect(validationToast.textContent).toContain('satisfied/not_satisfied routing requires JSON output parsing');
+    const stageApplyPanel = screen.getByRole('heading', { name: 'Stage & apply' }).closest('section') as HTMLElement;
+    expect(within(stageApplyPanel).queryByText('Cannot save loadout')).toBeNull();
+    expect(within(stageApplyPanel).queryByText(/satisfied\/not_satisfied routing requires JSON output parsing/i)).toBeNull();
     expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
@@ -978,6 +980,11 @@ describe('Materia loadout grid editor', () => {
     expect(notification.textContent).toContain(validationMessage);
     const stageApplyPanel = screen.getByRole('heading', { name: 'Stage & apply' }).closest('section') as HTMLElement;
     expect(within(stageApplyPanel).queryByText(validationMessage)).toBeNull();
+    expect(within(stageApplyPanel).queryByText(/Nothing is persisted until Save is pressed/i)).toBeNull();
+
+    fireEvent.click(screen.getByTestId('create-task-loop'));
+    await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
+    expect(screen.getByRole('alert').textContent).toContain(validationMessage);
   });
 
   it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
