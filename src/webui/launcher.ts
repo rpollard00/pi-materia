@@ -159,7 +159,7 @@ async function initializeDefaultLoadoutPreference(ctx: ExtensionContext, configu
       await clearStaleDefaultLoadoutPreference(ctx.cwd, configuredPath);
       return;
     }
-    if (loaded.config.activeLoadout === defaultLoadoutId) return;
+    if (loaded.config.activeLoadoutId === defaultLoadoutId) return;
     const written = await saveActiveLoadout(ctx.cwd, defaultLoadoutId, configuredPath);
     const reloaded = await loadConfig(ctx.cwd, configuredPath);
     if (pi) {
@@ -220,7 +220,8 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
     try {
       let loaded = await loadConfig(ctx.cwd, configuredPath);
       const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
-      if (!loaded.config.loadouts?.[name]) {
+      const loadoutIdKnown = Object.values(loaded.config.loadouts ?? {}).some((loadout) => loadout.id === name);
+      if (!loadoutIdKnown) {
         return {
           ok: false,
           code: "unknown_loadout",

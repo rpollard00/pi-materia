@@ -8,7 +8,7 @@ type LoadoutLockState = 'locked' | 'unlocked';
 export interface LoadoutListPanelProps {
   loadouts: Record<string, PipelineConfig>;
   editingLoadoutName: string | undefined;
-  runtimeActiveLoadoutName: string | undefined;
+  runtimeActiveLoadoutId: string | undefined;
   defaultLoadoutId: string | null;
   persistedLoadouts: Record<string, PipelineConfig>;
   loadoutSources: Record<string, LoadoutSourceScope>;
@@ -17,8 +17,8 @@ export interface LoadoutListPanelProps {
   onSwitchEditingLoadout: (name: string) => void;
   onDeleteLoadout: (name: string) => void;
   onDuplicateLoadout: (name: string) => void;
-  onSetDefaultLoadout: (name: string) => Promise<string | null>;
-  onSetRuntimeActiveLoadout: (name: string) => Promise<string>;
+  onSetDefaultLoadout: (loadoutId: string) => Promise<string | null>;
+  onSetRuntimeActiveLoadout: (loadoutId: string) => Promise<string>;
   onToggleLoadoutLock: (name: string, lockState: LoadoutLockState) => boolean;
 }
 
@@ -26,15 +26,17 @@ export interface LoadoutSelectorViewModel {
   name: string;
   loadout: PipelineConfig;
   isDefault: boolean;
+  isRuntimeActive: boolean;
 }
 
-export function buildLoadoutSelectorViewModels(loadouts: Record<string, PipelineConfig>, defaultLoadoutId: string | null): LoadoutSelectorViewModel[] {
+export function buildLoadoutSelectorViewModels(loadouts: Record<string, PipelineConfig>, defaultLoadoutId: string | null, activeLoadoutId?: string): LoadoutSelectorViewModel[] {
   return Object.keys(loadouts).map((name) => {
     const loadout = loadouts[name];
     return {
       name,
       loadout,
       isDefault: Boolean(defaultLoadoutId) && loadout.id === defaultLoadoutId,
+      isRuntimeActive: Boolean(activeLoadoutId) && loadout.id === activeLoadoutId,
     };
   });
 }
@@ -162,20 +164,20 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRun
   );
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutName, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout, onToggleLoadoutLock }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout, onToggleLoadoutLock }: LoadoutListPanelProps) {
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
-  const persistedNames = Object.keys(persistedLoadouts);
-  const loadoutRows = buildLoadoutSelectorViewModels(loadouts, defaultLoadoutId);
+  const persistedRows = buildLoadoutSelectorViewModels(persistedLoadouts, defaultLoadoutId, runtimeActiveLoadoutId).filter(({ loadout }) => Boolean(loadout.id));
+  const loadoutRows = buildLoadoutSelectorViewModels(loadouts, defaultLoadoutId, runtimeActiveLoadoutId);
 
-  async function changeRuntimeActiveLoadout(name: string) {
+  async function changeRuntimeActiveLoadout(loadoutId: string, displayName?: string) {
     // This quick selector changes only the runtime/session active loadout. It
     // intentionally does not update the durable defaultLoadoutId preference.
-    if (!name || name === runtimeActiveLoadoutName || activeChangePending) return;
+    if (!loadoutId || loadoutId === runtimeActiveLoadoutId || activeChangePending) return;
     setActiveChangePending(true);
-    setActiveChangeMessage(`Changing active loadout to ${name}…`);
+    setActiveChangeMessage(`Changing active loadout to ${displayName ?? loadoutId}…`);
     try {
-      const activeName = await onSetRuntimeActiveLoadout(name);
+      const activeName = await onSetRuntimeActiveLoadout(loadoutId);
       setActiveChangeMessage(`Active loadout is now ${activeName}.`);
     } catch (error) {
       setActiveChangeMessage(error instanceof Error ? error.message : String(error));
@@ -194,22 +196,21 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
         Active loadout
         <select
           className="mt-1 w-full rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-sm normal-case tracking-normal text-cyan-100 disabled:opacity-60"
-          value={runtimeActiveLoadoutName ?? ''}
-          disabled={activeChangePending || persistedNames.length === 0}
-          onChange={(event) => void changeRuntimeActiveLoadout(event.target.value)}
+          value={runtimeActiveLoadoutId ?? ''}
+          disabled={activeChangePending || persistedRows.length === 0}
+          onChange={(event) => void changeRuntimeActiveLoadout(event.target.value, event.currentTarget.selectedOptions[0]?.textContent ?? undefined)}
           aria-label="Active loadout"
         >
-          {persistedNames.map((name) => <option key={name} value={name}>{name}</option>)}
+          {persistedRows.map(({ name, loadout }) => <option key={loadout.id} value={loadout.id}>{name}</option>)}
         </select>
       </label>
       {activeChangeMessage && <p className="mb-3 text-xs text-slate-300" role="status">{activeChangeMessage}</p>}
       <div className="space-y-2" role="list" aria-label="Available loadouts">
-        {loadoutRows.map(({ name, loadout, isDefault }) => {
+        {loadoutRows.map(({ name, loadout, isDefault, isRuntimeActive }) => {
           const sourceScope = loadoutSources[name] ?? 'user';
           const defaultLoadout = sourceScope === 'default';
           const deleteDisabled = !canDeleteLoadout(name);
-          const isRuntimeActive = name === runtimeActiveLoadoutName;
-          const persisted = Boolean(persistedLoadouts[name]);
+          const persisted = Boolean(persistedLoadouts[name]?.id);
           const isDefaultLoadout = isDefault;
           const lockAction = loadoutLockAction(loadout, sourceScope);
           const LockIcon = loadoutLockIcons[lockAction.iconKey];
@@ -248,8 +249,8 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                 deleteDisabled={deleteDisabled}
                 deleteTitle={defaultLoadout ? 'Built-In loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
                 lockAction={lockAction}
-                onSetRuntimeActive={(loadoutName) => void changeRuntimeActiveLoadout(loadoutName)}
-                onSetDefault={(loadoutName) => void onSetDefaultLoadout(loadoutName).catch(() => undefined)}
+                onSetRuntimeActive={() => void changeRuntimeActiveLoadout(loadout.id ?? '', name)}
+                onSetDefault={() => void onSetDefaultLoadout(loadout.id ?? '').catch(() => undefined)}
                 onToggleLock={onToggleLoadoutLock}
                 onDuplicate={onDuplicateLoadout}
                 onDelete={onDeleteLoadout}

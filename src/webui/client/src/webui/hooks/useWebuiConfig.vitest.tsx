@@ -5,9 +5,11 @@ import { dirtyConfigKey, useWebuiConfig } from './useWebuiConfig.js';
 
 const initialConfig = {
   activeLoadout: 'Alpha',
+  activeLoadoutId: 'Alpha',
   materia: { Build: { tools: 'coding', prompt: 'old prompt' } },
   loadouts: {
     Alpha: {
+      id: 'Alpha',
       entry: 'Socket-1',
       sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } },
     },
@@ -16,9 +18,11 @@ const initialConfig = {
 
 const reloadedConfig = {
   activeLoadout: 'Alpha',
+  activeLoadoutId: 'Alpha',
   materia: { Build: { tools: 'coding', prompt: 'new prompt' } },
   loadouts: {
     Alpha: {
+      id: 'Alpha',
       entry: 'Socket-1',
       sockets: { 'Socket-1': { type: 'agent', materia: 'Reloaded' } },
     },
@@ -27,12 +31,14 @@ const reloadedConfig = {
 
 const reportedLayeredConfig = {
   activeLoadout: 'Full-Auto',
+  activeLoadoutId: 'Full-Auto',
   materia: {
     Build: { tools: 'coding', prompt: 'Build the assigned work.' },
     'Auto-Eval': { tools: 'readOnly', prompt: 'Evaluate the work.' },
   },
   loadouts: {
     'Full-Auto': {
+      id: 'Full-Auto',
       entry: 'Socket-1',
       sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
@@ -40,6 +46,7 @@ const reportedLayeredConfig = {
       },
     },
     'Hojo-Consult': {
+      id: 'Hojo-Consult',
       entry: 'Socket-1',
       sockets: {
         'Socket-1': { type: 'agent', materia: 'Build', label: 'Hojo profile consult' },
@@ -386,7 +393,7 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -431,7 +438,7 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -464,6 +471,7 @@ describe('useWebuiConfig', () => {
       materia: { Build: { type: 'agent', generator: true, prompt: 'Build.' } },
       loadouts: {
         Alpha: {
+          id: 'Alpha',
           entry: 'Socket-1',
           sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } },
         },
@@ -508,8 +516,8 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-        Beta: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -544,8 +552,8 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-        Beta: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -70,6 +70,14 @@ function defaultLoadoutMessage(body: { error?: string | { message?: string }; me
   return body.message ?? 'Default loadout change failed.';
 }
 
+function hasLoadoutId(loadouts: Record<string, PipelineConfig>, loadoutId: string | null | undefined): boolean {
+  return Boolean(loadoutId) && Object.values(loadouts).some((loadout) => loadout.id === loadoutId);
+}
+
+function loadoutIdForName(loadouts: Record<string, PipelineConfig>, name: string | undefined): string | undefined {
+  return name ? loadouts[name]?.id : undefined;
+}
+
 function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
   if (!preserveLoadoutEdits || !current) return normalizeMateriaConfigEdges(reloaded);
   return normalizeMateriaConfigEdges({
@@ -217,9 +225,8 @@ export function useWebuiConfig() {
   // drafts should update only these editing* values unless an explicit runtime
   // or default action is invoked.
   const editingLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
-  const runtimeActiveLoadoutName = baselineConfig?.activeLoadout && persistedLoadouts[baselineConfig.activeLoadout]
-    ? baselineConfig.activeLoadout
-    : Object.keys(persistedLoadouts)[0];
+  const runtimeActiveLoadoutId = hasLoadoutId(persistedLoadouts, baselineConfig?.activeLoadoutId) ? baselineConfig?.activeLoadoutId : undefined;
+  const runtimeActiveLoadoutName = Object.entries(persistedLoadouts).find(([, loadout]) => Boolean(runtimeActiveLoadoutId) && loadout.id === runtimeActiveLoadoutId)?.[0];
   const editingLoadout = editingLoadoutName ? loadouts[editingLoadoutName] : undefined;
   const activeLoadoutName = editingLoadoutName;
   const persistedActiveLoadoutName = runtimeActiveLoadoutName;
@@ -320,7 +327,7 @@ export function useWebuiConfig() {
     setSource(loaded.source);
     setLoadoutSources(loaded.loadoutSources ?? {});
     const nextPersistedLoadouts = buildLoadouts(normalizedLoaded);
-    setDefaultLoadoutId(loaded.defaultLoadoutId && nextPersistedLoadouts[loaded.defaultLoadoutId] ? loaded.defaultLoadoutId : null);
+    setDefaultLoadoutId(hasLoadoutId(nextPersistedLoadouts, loaded.defaultLoadoutId) ? loaded.defaultLoadoutId : null);
     if (!preserveLoadoutEdits) setDeletedLoadoutNames([]);
     setStatus(readyStatus);
   }
@@ -351,8 +358,8 @@ export function useWebuiConfig() {
     setStatus(`Viewing loadout: ${name}`);
   }
 
-  async function setDefaultLoadout(name: string | null) {
-    const nextDefault = name?.trim() || null;
+  async function setDefaultLoadout(loadoutId: string | null) {
+    const nextDefault = loadoutId?.trim() || null;
     setStatus(nextDefault ? `Setting default loadout to ${nextDefault}…` : 'Clearing default loadout…');
     let result: Awaited<ReturnType<typeof persistDefaultLoadout>>;
     try {
@@ -393,11 +400,12 @@ export function useWebuiConfig() {
     return savedDefault;
   }
 
-  async function setRuntimeActiveLoadout(name: string) {
+  async function setRuntimeActiveLoadout(loadoutId: string) {
+    const name = Object.entries(persistedLoadouts).find(([, loadout]) => loadout.id === loadoutId)?.[0] ?? loadoutId;
     setStatus(`Changing active loadout to ${name}…`);
     let result: Awaited<ReturnType<typeof setActiveLoadout>>;
     try {
-      result = await setActiveLoadout(name);
+      result = await setActiveLoadout(loadoutId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setStatus(`Active loadout change failed: ${message}`);
@@ -425,7 +433,7 @@ export function useWebuiConfig() {
     const readyStatus = body.message ?? `Active loadout changed to ${activeName}.`;
     if (body.config) {
       const snapshot = normalizeConfigSnapshot(body, baselineConfig ?? draftConfigRef.current);
-      const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: activeName ?? snapshot.config.activeLoadout ?? name });
+      const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: activeName ?? snapshot.config.activeLoadout ?? name, activeLoadoutId: snapshot.config.activeLoadoutId ?? loadoutId });
       setBaselineConfig(nextConfig);
       if (snapshot.source) setSource(snapshot.source);
       if (snapshot.loadoutSources) setLoadoutSources(snapshot.loadoutSources);
@@ -622,7 +630,8 @@ export function useWebuiConfig() {
       for (const name of Object.keys(normalizedDraft.loadouts ?? {})) if (!next[name]) next[name] = body.target ?? saveTarget;
       return next;
     });
-    const deletedDefaultLoadoutId = defaultLoadoutId && deletedLoadoutNames.includes(defaultLoadoutId) ? defaultLoadoutId : null;
+    const deletedLoadoutIds = new Set(deletedLoadoutNames.map((name) => loadoutIdForName(baselineConfig?.loadouts ?? {}, name)).filter((id): id is string => Boolean(id)));
+    const deletedDefaultLoadoutId = defaultLoadoutId && deletedLoadoutIds.has(defaultLoadoutId) ? defaultLoadoutId : null;
     const readyStatus = `Saved staged loadout edits to ${body.target ?? saveTarget} scope.`;
     setStatus(readyStatus);
     toast({
@@ -665,7 +674,7 @@ export function useWebuiConfig() {
     loadouts,
     persistedActiveLoadoutName,
     persistedLoadouts,
-    runtimeActiveLoadoutName,
+    runtimeActiveLoadoutId,
     reloadConfig,
     revertDraft,
     saveDraft,

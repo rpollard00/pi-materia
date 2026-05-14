@@ -86,7 +86,7 @@ export async function ensureUserProfileConfig(): Promise<string> {
 export async function saveDefaultLoadoutPreference(cwd: string, loadoutName: string | null, configuredPath?: string): Promise<string | null> {
   const loaded = await loadConfig(cwd, configuredPath);
   const requestedDefault = loadoutName?.trim() || null;
-  const nextDefault = requestedDefault ? resolveLoadoutIdReference(loaded.config.loadouts, requestedDefault) : null;
+  const nextDefault = requestedDefault && findLoadoutNameById(loaded.config.loadouts, requestedDefault) ? requestedDefault : null;
   if (requestedDefault && !nextDefault) {
     const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
     throw new Error(loadoutNames.length
@@ -133,7 +133,8 @@ export async function saveActiveLoadout(cwd: string, loadoutName: string, config
   if (loadoutNames.length === 0) {
     throw new Error(`Cannot change Materia loadout because this config does not define any loadouts.`);
   }
-  const resolvedLoadoutName = resolveLoadoutReference(loaded.config.loadouts, loadoutName);
+  const requestedLoadoutId = findLoadoutNameById(loaded.config.loadouts, loadoutName) ? loadoutName : findLoadoutId(loaded.config.loadouts, loadoutName);
+  const resolvedLoadoutName = requestedLoadoutId ? findLoadoutNameById(loaded.config.loadouts, requestedLoadoutId) : null;
   if (!resolvedLoadoutName) {
     throw new Error(`Unknown Materia loadout "${loadoutName}". Available loadouts: ${loadoutNames.join(", ")}.`);
   }
@@ -290,21 +291,14 @@ async function writeProfileConfig(profile: MateriaProfileConfig): Promise<string
 
 function validateDefaultLoadoutId(defaultLoadoutId: string | null | undefined, config: PiMateriaConfig): string | null {
   if (!defaultLoadoutId) return null;
-  return resolveLoadoutIdReference(config.loadouts, defaultLoadoutId);
+  return findLoadoutNameById(config.loadouts, defaultLoadoutId) ? defaultLoadoutId : null;
 }
 
-function resolveLoadoutReference(loadouts: PiMateriaConfig["loadouts"] | undefined, reference: string): string | null {
-  if (loadouts?.[reference]) return reference;
+function findLoadoutNameById(loadouts: PiMateriaConfig["loadouts"] | undefined, loadoutId: string): string | null {
   for (const [name, loadout] of Object.entries(loadouts ?? {})) {
-    if (loadout && typeof loadout === "object" && !Array.isArray(loadout) && (loadout as { id?: unknown }).id === reference) return name;
+    if (loadout && typeof loadout === "object" && !Array.isArray(loadout) && (loadout as { id?: unknown }).id === loadoutId) return name;
   }
   return null;
-}
-
-function resolveLoadoutIdReference(loadouts: PiMateriaConfig["loadouts"] | undefined, reference: string): string | null {
-  const name = resolveLoadoutReference(loadouts, reference);
-  if (!name) return null;
-  return findLoadoutId(loadouts, name) ?? reference;
 }
 
 function findLoadoutId(loadouts: PiMateriaConfig["loadouts"] | undefined, name: string): string | undefined {

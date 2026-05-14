@@ -35,7 +35,7 @@ export function App() {
     loadoutSources,
     loadouts,
     persistedLoadouts,
-    runtimeActiveLoadoutName,
+    runtimeActiveLoadoutId,
     reloadConfig,
     revertDraft,
     saveDraft,
@@ -183,7 +183,7 @@ export function App() {
           <LoadoutListPanel
             loadouts={loadouts}
             editingLoadoutName={editingLoadoutName}
-            runtimeActiveLoadoutName={runtimeActiveLoadoutName}
+            runtimeActiveLoadoutId={runtimeActiveLoadoutId}
             defaultLoadoutId={defaultLoadoutId}
             persistedLoadouts={persistedLoadouts}
             loadoutSources={loadoutSources}

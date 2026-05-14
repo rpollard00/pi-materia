@@ -55,6 +55,7 @@ export interface PipelineLayout {
 }
 
 export interface PipelineConfig {
+  id?: string;
   entry?: string;
   sockets?: Record<string, PipelineSocket>;
   loops?: Record<string, PipelineLoop>;
@@ -151,6 +152,7 @@ export interface MateriaBehaviorConfig {
 }
 
 export interface MateriaConfig {
+  activeLoadoutId?: string;
   activeLoadout?: string;
   loadouts?: Record<string, PipelineConfig>;
   materia?: Record<string, MateriaBehaviorConfig>;

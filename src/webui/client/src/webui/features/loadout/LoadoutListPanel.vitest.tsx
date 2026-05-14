@@ -15,7 +15,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutListPanel>>
   const props: ComponentProps<typeof LoadoutListPanel> = {
     loadouts,
     editingLoadoutName: 'Alpha',
-    runtimeActiveLoadoutName: 'Alpha',
+    runtimeActiveLoadoutId: 'Alpha',
     defaultLoadoutId: 'Beta',
     persistedLoadouts: loadouts,
     loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'user' },
@@ -139,18 +139,20 @@ describe('LoadoutListPanel', () => {
     expect(within(cardFor('Hojo')).queryByLabelText('Default loadout')).toBeNull();
   });
 
-  it('derives selector default state from normalized loadout records', () => {
+  it('derives selector default and active state from normalized loadout records', () => {
     const rows = buildLoadoutSelectorViewModels({
       Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} },
       Stale: { id: 'user:stale', entry: 'Socket-1', sockets: {} },
-    }, 'user:hojo');
+    }, 'user:hojo', 'user:hojo');
 
-    expect(rows.map(({ name, isDefault }) => [name, isDefault])).toEqual([
-      ['Hojo', true],
-      ['Stale', false],
+    expect(rows.map(({ name, isDefault, isRuntimeActive }) => [name, isDefault, isRuntimeActive])).toEqual([
+      ['Hojo', true, true],
+      ['Stale', false, false],
     ]);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'Hojo')[0]?.isDefault).toBe(false);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'missing')[0]?.isDefault).toBe(false);
+    expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, null, 'Hojo')[0]?.isRuntimeActive).toBe(false);
+    expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, null, 'missing')[0]?.isRuntimeActive).toBe(false);
   });
 
   it('keeps menu interactions from selecting the card and separates active from default actions', async () => {
@@ -178,6 +180,34 @@ describe('LoadoutListPanel', () => {
 
     await waitFor(() => expect(onSetDefaultLoadout).toHaveBeenCalledWith('Gamma'));
     expect(onSetRuntimeActiveLoadout).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes stable loadout ids for runtime and default actions when display names differ', async () => {
+    const onSetRuntimeActiveLoadout = vi.fn(async (id: string) => id);
+    const onSetDefaultLoadout = vi.fn(async (id: string) => id);
+    renderPanel({
+      runtimeActiveLoadoutId: 'user:alpha',
+      defaultLoadoutId: null,
+      loadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+      persistedLoadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+      loadoutSources: { Hojo: 'user', Alpha: 'user' },
+      onSetRuntimeActiveLoadout,
+      onSetDefaultLoadout,
+    });
+
+    fireEvent.click(within(cardFor('Hojo')).getByLabelText('Loadout actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Set Active' }));
+    await waitFor(() => expect(onSetRuntimeActiveLoadout).toHaveBeenCalledWith('user:hojo'));
+
+    fireEvent.click(within(cardFor('Hojo')).getByLabelText('Loadout actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Set as Default' }));
+    await waitFor(() => expect(onSetDefaultLoadout).toHaveBeenCalledWith('user:hojo'));
   });
 
   it('toggles owned loadout locks from the row icon without selecting the card', () => {
@@ -271,7 +301,7 @@ describe('LoadoutListPanel', () => {
         Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'locked' },
       },
       loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
-      runtimeActiveLoadoutName: 'Beta',
+      runtimeActiveLoadoutId: 'Beta',
     });
 
     const betaCard = cardFor('Beta');
@@ -305,7 +335,7 @@ describe('LoadoutListPanel', () => {
         [longName]: { id: longName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
       },
       editingLoadoutName: mediumName,
-      runtimeActiveLoadoutName: mediumName,
+      runtimeActiveLoadoutId: mediumName,
       defaultLoadoutId: mediumName,
       persistedLoadouts: {
         [mediumName]: { id: mediumName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },

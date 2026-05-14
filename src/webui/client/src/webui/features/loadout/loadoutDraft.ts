@@ -112,9 +112,19 @@ export function deleteLoadoutDraft({
   activeLoadoutName: string | undefined;
 }) {
   const draftLoadouts = buildLoadouts(config);
+  const deletedLoadoutId = loadoutId(draftLoadouts[name]);
   const fallbackName = fallbackNameAfterDelete(draftLoadouts, name, activeLoadoutName);
   const remainingLoadouts = Object.fromEntries(Object.entries(draftLoadouts).filter(([candidate]) => candidate !== name));
-  return { config: normalizeMateriaConfigEdges({ ...config, loadouts: remainingLoadouts, activeLoadout: fallbackName }), fallbackName };
+  const fallbackLoadoutId = loadoutId(remainingLoadouts[fallbackName ?? '']);
+  return {
+    config: normalizeMateriaConfigEdges({
+      ...config,
+      loadouts: remainingLoadouts,
+      activeLoadout: fallbackName,
+      ...(deletedLoadoutId && config.activeLoadoutId === deletedLoadoutId ? (fallbackLoadoutId ? { activeLoadoutId: fallbackLoadoutId } : { activeLoadoutId: undefined }) : {}),
+    }),
+    fallbackName,
+  };
 }
 
 export function deletedLoadoutNamesAfterRename({

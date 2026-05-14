@@ -52,7 +52,7 @@ describe("WebUI active loadout launcher callback", () => {
     const { harness, configuredPath } = await harnessWithConfig("pi-materia-webui-active-success-");
     const setActiveLoadout = webUiLauncherTestInternals.createActiveLoadoutSetter(harness.ctx, configuredPath, harness.pi);
 
-    const result = await setActiveLoadout?.("Web-Test-B");
+    const result = await setActiveLoadout?.("explicit:web-test-b");
 
     expect(result).toMatchObject({ ok: true, activeLoadout: "Web-Test-B", message: "Active loadout changed to Web-Test-B." });
     const persisted = JSON.parse(await readFile(configuredPath, "utf8")) as { activeLoadout?: string };
