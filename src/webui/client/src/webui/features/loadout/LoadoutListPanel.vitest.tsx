@@ -72,6 +72,20 @@ describe('LoadoutListPanel', () => {
     expect(gammaCard.textContent).toContain('Built-In');
   });
 
+  it('shows the default star for a Built-In read-only default loadout', () => {
+    renderPanel({
+      defaultLoadoutId: 'Gamma',
+      loadouts: { ...loadouts, Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'locked' } },
+      loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
+    });
+
+    const gammaCard = cardFor('Gamma');
+    expect(within(gammaCard).getByLabelText('Default loadout')).toBeTruthy();
+    expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
+    expect(gammaCard.textContent).toContain('Built-In');
+    expect(screen.queryByText(/Shipped default/i)).toBeNull();
+  });
+
   it('does not render a stale star when the default preference points at a missing loadout', () => {
     renderPanel({ defaultLoadoutId: 'Missing' });
 
@@ -116,11 +130,31 @@ describe('LoadoutListPanel', () => {
     expect(onSwitchEditingLoadout).not.toHaveBeenCalled();
   });
 
+  it('uses the same toggle handler for owned lock and unlock icon/menu actions', () => {
+    const onToggleLoadoutLock = vi.fn(() => true);
+    renderPanel({
+      loadouts: { ...loadouts, Beta: { ...loadouts.Beta, lockState: 'locked' } },
+      onToggleLoadoutLock,
+    });
+
+    fireEvent.click(within(cardFor('Beta')).getByLabelText('Unlock edits'));
+    expect(onToggleLoadoutLock).toHaveBeenLastCalledWith('Beta', 'unlocked');
+
+    fireEvent.click(within(cardFor('Beta')).getByLabelText('Loadout actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Unlock edits' }));
+    expect(onToggleLoadoutLock).toHaveBeenLastCalledWith('Beta', 'unlocked');
+
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Lock edits' }));
+    expect(onToggleLoadoutLock).toHaveBeenLastCalledWith('Gamma', 'locked');
+  });
+
   it('keeps Built-In lock controls disabled with duplicate-to-edit tooltip copy', () => {
     const onToggleLoadoutLock = vi.fn(() => true);
     renderPanel({
       loadouts: { ...loadouts, Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'unlocked' } },
       loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
+      canDeleteLoadout: (name) => name !== 'Gamma',
       onToggleLoadoutLock,
     });
 
@@ -131,9 +165,14 @@ describe('LoadoutListPanel', () => {
     expect(onToggleLoadoutLock).not.toHaveBeenCalled();
 
     fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
-    const lockMenuItem = screen.getByRole('menuitem', { name: 'Lock edits' });
+    const menu = screen.getByRole('menu', { name: 'Actions for Gamma' });
+    const lockMenuItem = within(menu).getByRole('menuitem', { name: 'Lock edits' });
     expect(lockMenuItem).toHaveProperty('disabled', true);
     expect(lockMenuItem.getAttribute('title')).toBe('Built-In read-only. Duplicate to edit.');
+
+    const deleteMenuItem = within(menu).getByRole('menuitem', { name: 'Delete' });
+    expect(deleteMenuItem).toHaveProperty('disabled', true);
+    expect(deleteMenuItem.getAttribute('title')).toBe('Built-In loadouts cannot be deleted.');
   });
 
   it('routes Lock, Duplicate, and Delete through accessible context menu actions', () => {
@@ -175,7 +214,10 @@ describe('LoadoutListPanel', () => {
     expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Loadout actions')).toBeTruthy();
     expect(betaCard.querySelector('.loadout-card-select')?.className).toContain('loadout-card-select');
+    expect(betaCard.querySelector('.loadout-card-name')?.textContent).toBe('Beta');
     expect(betaCard.querySelector('.loadout-card-meta')?.textContent).toContain('user loadout');
+    expect(betaCard.querySelector('.loadout-lock-indicator')?.className).toContain('loadout-lock-indicator');
+    expect(betaCard.querySelector('.loadout-actions-menu')).toBeTruthy();
   });
 
   it('keeps the existing active-loadout quick selector and does not call the default preference setter', async () => {

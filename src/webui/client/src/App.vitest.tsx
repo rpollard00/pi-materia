@@ -294,7 +294,7 @@ describe('Materia loadout grid editor', () => {
     expectHeaderStatus(source, 'clean');
   });
 
-  it('visibly protects shipped default loadouts from deletion', async () => {
+  it('visibly protects Built-In loadouts from deletion', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       ok: true,
       source: 'test',
@@ -305,10 +305,12 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await screen.findByRole('button', { name: /Full-Auto/ });
+    expect(loadoutCard('Full-Auto').textContent).toContain('Built-In');
+    expect(screen.queryByText(/shipped default/i)).toBeNull();
+
     openLoadoutActions('Full-Auto');
-    const protectedDelete = screen.getByTitle('Shipped default loadouts cannot be deleted.');
+    const protectedDelete = screen.getByTitle('Built-In loadouts cannot be deleted.');
     expect(protectedDelete.hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/shipped default/i)).toBeTruthy();
   });
 
   it('deletes a user loadout, falls back when it was active, and persists a deletion marker', async () => {
