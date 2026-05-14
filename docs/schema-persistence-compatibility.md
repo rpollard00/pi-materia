@@ -24,3 +24,7 @@ This compatibility boundary is non-destructive: it preserves legacy fields and U
 A prepared config can be treated as new-model or normalized when socket-valued legacy `loop.exit.to` and loop-member `advance.done` routes have equivalent `loops.<id>.exits` entries, `advance.done: "end"` is understood only as terminal compatibility, and loop back-edges/descriptive UI runes are preserved without being inferred as exits. Unknown non-sentinel targets and incompatible parse/advance conflicts should remain errors; mirrorable legacy route fields can become warnings after a migration command or save rewrite exists, and errors after a documented warning release.
 
 Do not add new domain, application, config, persistence, or WebUI APIs that accept loadout topology under any non-`sockets` field.
+
+## Loadout ownership and migrations
+
+Loadout ownership, default immutability, lock/edit mode, duplicate-name collision handling, migration registry rules, and command-layer mutation guard expectations are documented in [Loadout ownership, locking, and migration](loadout-ownership-locking.md). Keep persistence compatibility changes aligned with that contract: stable loadout ids are canonical, display names are not ownership, shipped default names are preserved, and migration metadata is audit-only.
