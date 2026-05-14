@@ -5,6 +5,7 @@ import {
   type MateriaConfig,
   type PipelineConfig,
 } from '../../loadoutModel.js';
+import { getLoadoutEditPolicy } from '../../../../../domain/loadout.js';
 import { toast } from '../../toast/index.js';
 import { getConfig, saveConfig, setActiveLoadout, setDefaultLoadout as persistDefaultLoadout } from '../api/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
@@ -152,7 +153,14 @@ export function useWebuiConfig() {
   const activeLoadoutName = editingLoadoutName;
   const persistedActiveLoadoutName = runtimeActiveLoadoutName;
   const activeLoadout = editingLoadout;
+  const editingLoadoutPolicy = getLoadoutEditPolicy({ source: (editingLoadout?.source ?? (editingLoadoutName ? loadoutSources[editingLoadoutName] : undefined)) as never, lockState: editingLoadout?.lockState as never });
   const isDirty = dirtyConfigKey(baselineConfig) !== dirtyConfigKey(draftConfig);
+
+  function readonlyStatus(action: string) {
+    const message = `${action} blocked: ${editingLoadoutPolicy.reason}`;
+    setStatus(message);
+    return message;
+  }
 
   /**
    * Compatibility builder boundary for non-loadout config edits and tests.
@@ -169,6 +177,13 @@ export function useWebuiConfig() {
   }
 
   function updateLoadoutDraft(loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) {
+    const loadout = loadouts[loadoutName];
+    const policy = getLoadoutEditPolicy({ source: (loadout?.source ?? loadoutSources[loadoutName]) as never, lockState: loadout?.lockState as never });
+    if (!policy.canEdit) {
+      setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
+      return false;
+    }
+    let changed = false;
     setDraftConfig((current) => {
       const config = current ?? {};
       const currentLoadouts = buildLoadouts(config);
@@ -176,14 +191,23 @@ export function useWebuiConfig() {
       if (!loadout) return current;
       const nextLoadout = updater(loadout);
       if (nextLoadout === loadout) return current;
+      changed = true;
       return normalizeMateriaConfigEdges({
         ...config,
         loadouts: { ...currentLoadouts, [loadoutName]: nextLoadout },
       });
     });
+    return changed;
   }
 
   function updateLoadoutLayout(loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) {
+    const loadout = loadouts[loadoutName];
+    const policy = getLoadoutEditPolicy({ source: (loadout?.source ?? loadoutSources[loadoutName]) as never, lockState: loadout?.lockState as never });
+    if (!policy.canEdit) {
+      setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
+      return false;
+    }
+    let changed = false;
     setDraftConfig((current) => {
       const config = current ?? {};
       const currentLoadouts = buildLoadouts(config);
@@ -191,11 +215,13 @@ export function useWebuiConfig() {
       if (!loadout) return current;
       const nextLoadout = updater(loadout);
       if (nextLoadout === loadout) return current;
+      changed = true;
       return {
         ...config,
         loadouts: { ...currentLoadouts, [loadoutName]: nextLoadout },
       };
     });
+    return changed;
   }
 
   async function reloadConfig({ preserveLoadoutEdits = false, readyStatus = 'Draft ready. Changes are staged until you save.', cancelled = () => false }: { preserveLoadoutEdits?: boolean; readyStatus?: string; cancelled?: () => boolean } = {}) {
@@ -335,6 +361,11 @@ export function useWebuiConfig() {
 
   function commitEditingLoadoutRename(rawName = loadoutNameInput) {
     if (!editingLoadoutName) return false;
+    if (!editingLoadoutPolicy.canEdit) {
+      readonlyStatus('Rename');
+      setLoadoutNameInput(editingLoadoutName);
+      return false;
+    }
     const nextName = rawName.trim();
     if (!nextName) {
       setStatus('Cannot rename loadout: name cannot be empty.');
@@ -417,6 +448,17 @@ export function useWebuiConfig() {
 
   async function saveDraft() {
     if (!draftConfig) return;
+    if (editingLoadout && !editingLoadoutPolicy.canEdit && isDirty) {
+      const message = `Cannot save staged loadout edits: ${editingLoadoutPolicy.reason}`;
+      setStatus(message);
+      toast({
+        id: 'readonly-loadout-save',
+        title: 'Duplicate before editing',
+        description: message,
+        variant: 'validation',
+      });
+      throw new Error(message);
+    }
     setStatus('Saving staged loadout edits…');
     const normalizedDraft = normalizeMateriaConfigEdges(draftConfig);
     const validationErrors = validateLoadoutSaveSemantics(normalizedDraft);
@@ -491,6 +533,7 @@ export function useWebuiConfig() {
 
   return {
     activeLoadout,
+    activeLoadoutPolicy: editingLoadoutPolicy,
     activeLoadoutName,
     baselineConfig,
     editingLoadout,

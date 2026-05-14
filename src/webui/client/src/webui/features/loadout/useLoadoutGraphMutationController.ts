@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../../../../graph/graphValidation.js';
 import { fromWebUiLoadoutDto, toWebUiLoadoutDto } from '../../../../../loadoutDto.js';
@@ -56,13 +57,14 @@ function stageValidatedWebUiLoadoutTransform(loadout: PipelineConfig, transform:
 export interface LoadoutGraphMutationControllerOptions {
   activeLoadout: PipelineConfig | undefined;
   activeLoadoutName: string;
+  editPolicy: LoadoutEditPolicy;
   loadoutGraph: { edges: LoadoutEdge[] };
   materia: Record<string, PipelineSocket>;
   selectedLoopSockets: Array<{ id: string }>;
   setSelectedLoopSocketIds: Dispatch<SetStateAction<string[]>>;
   setStatus: (status: string) => void;
-  updateLoadoutDraft: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => void;
-  updateLoadoutLayout: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => void;
+  updateLoadoutDraft: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
+  updateLoadoutLayout: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
   closeSocketActionModal: () => void;
   openSocketActionModal: (socketId: string, mode?: 'actions' | 'replace' | 'edit' | 'connect') => void;
   socketLabel: (socketId: string) => string;
@@ -72,6 +74,7 @@ export interface LoadoutGraphMutationControllerOptions {
 export function useLoadoutGraphMutationController({
   activeLoadout,
   activeLoadoutName,
+  editPolicy,
   loadoutGraph,
   materia,
   selectedLoopSockets,
@@ -99,7 +102,16 @@ export function useLoadoutGraphMutationController({
     setSocketPropertyError('');
   }
 
+  function readonlyBlocked(action: string) {
+    if (editPolicy.canEdit) return false;
+    setEdgeMutationError(editPolicy.reason);
+    setSocketPropertyError(editPolicy.reason);
+    setStatus(`${action} blocked: ${editPolicy.reason}`);
+    return true;
+  }
+
   function deleteSocket(socketId: string) {
+    if (readonlyBlocked(`Delete socket ${socketId}`)) return false;
     const socket = activeLoadout?.sockets?.[socketId];
     if (!socket || !activeLoadoutName) return false;
     if (!canDeleteSocket(socket)) {
@@ -120,6 +132,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function createConnectedSocket(afterSocketId: string) {
+    if (readonlyBlocked(`Create socket after ${socketLabel(afterSocketId)}`)) return;
     if (!activeLoadoutName || !activeLoadout) return;
     const loopExitContext = findLoopExitConnectionContext(activeLoadout, afterSocketId);
     if (loopExitContext?.loop.exits?.some((route) => route.from === afterSocketId && route.condition === 'always')) {
@@ -133,12 +146,14 @@ export function useLoadoutGraphMutationController({
       setStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${formatGraphValidationErrors(result.errors)}`);
       return;
     }
-    updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig);
-    closeSocketActionModal();
-    setStatus(loopExitContext ? `Created a socket and loop-exit route from ${afterSocketId}.` : `Created a connected empty socket after ${afterSocketId}.`);
+    if (updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig)) {
+      closeSocketActionModal();
+      setStatus(loopExitContext ? `Created a socket and loop-exit route from ${afterSocketId}.` : `Created a connected empty socket after ${afterSocketId}.`);
+    }
   }
 
   function openSocketPropertyEditor(socketId: string) {
+    if (readonlyBlocked(`Edit socket ${socketLabel(socketId)}`)) return;
     setSocketPropertyForm(socketPropertyFormFromSocket(activeLoadout?.sockets?.[socketId], getSocketLayout(activeLoadout, socketId)));
     setSocketPropertyError('');
     setEdgeMutationError('');
@@ -146,6 +161,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function openEdgeConnector(socketId: string) {
+    if (readonlyBlocked(`Connect edge from ${socketLabel(socketId)}`)) return;
     const firstOtherSocket = Object.keys(activeLoadout?.sockets ?? {}).find((id) => id !== socketId) ?? '';
     setEdgeTargetId(firstOtherSocket);
     setEdgeCondition(findLoopExitConnectionContext(activeLoadout, socketId) ? 'always' : 'satisfied');
@@ -154,6 +170,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function commitGraphMutation(description: string, transform: LoadoutTransform, onSuccess: string, onError: (message: string) => string) {
+    if (readonlyBlocked(description)) return false;
     if (!activeLoadoutName || !activeLoadout) return false;
     const result = stageValidatedWebUiLoadoutTransform(activeLoadout, transform, {
       isGeneratorSocket: (socketId) => {
@@ -167,13 +184,14 @@ export function useLoadoutGraphMutationController({
       setStatus(onError(message));
       return false;
     }
-    updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig);
+    if (!updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig)) return false;
     setEdgeMutationError('');
     setStatus(onSuccess || description);
     return true;
   }
 
   function createTaskIteratorLoop() {
+    if (readonlyBlocked('Create loop')) return;
     if (!activeLoadout?.sockets || selectedLoopSockets.length === 0) {
       setStatus('Cannot create loop; select the cycle sockets first with shift-click or a drag box.');
       return;
@@ -260,6 +278,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function createEdge(from: string) {
+    if (readonlyBlocked(`Create edge from ${socketLabel(from)}`)) return;
     const to = edgeTargetId;
     if (!to) {
       const message = 'Choose a target socket.';
@@ -346,6 +365,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function saveSocketProperties(socketId: string) {
+    if (readonlyBlocked(`Save socket properties for ${socketLabel(socketId)}`)) return;
     if (!activeLoadoutName || !activeLoadout?.sockets?.[socketId]) return;
     const errors: string[] = [];
     const maxVisits = parseOptionalPositiveInteger('Max visits', socketPropertyForm.maxVisits, errors);
@@ -376,11 +396,10 @@ export function useLoadoutGraphMutationController({
     const currentLayout = getSocketLayout(activeLoadout, socketId);
     const layoutChanged = (currentLayout?.x ?? undefined) !== (nextLayout?.x ?? undefined) || (currentLayout?.y ?? undefined) !== (nextLayout?.y ?? undefined);
 
-    if (limitsChanged) {
-      updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? setSocketLimits(loadout, socketId, nextLimits) : loadout);
-    }
-    if (layoutChanged) {
-      updateLoadoutLayout(activeLoadoutName, (loadout) => setSocketLayouts(loadout, { [socketId]: nextLayout }));
+    const limitsSaved = limitsChanged ? updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? setSocketLimits(loadout, socketId, nextLimits) : loadout) : false;
+    const layoutSaved = layoutChanged ? updateLoadoutLayout(activeLoadoutName, (loadout) => setSocketLayouts(loadout, { [socketId]: nextLayout })) : false;
+    if (limitsChanged || layoutChanged) {
+      if (!limitsSaved && !layoutSaved) return;
     }
     closeSocketActionModal();
     setSocketPropertyError('');
@@ -388,6 +407,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function toggleEdgeCondition(edge: LoadoutEdge) {
+    if (readonlyBlocked(`Toggle edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)}`)) return;
     if (!activeLoadoutName || !activeLoadout) return;
     const edgeIndex = edge.edgeIndex;
     const result = stageValidatedWebUiLoadoutTransform(activeLoadout, (loadout) => toggleEdgeConditionInLoadout(loadout, edge.from, edge.to, edge.when, toggledEdgeCondition(edge.when), edgeIndex));
@@ -396,7 +416,7 @@ export function useLoadoutGraphMutationController({
       return;
     }
     const webUiGraph = toWebUiLoadoutDto(result.graph as never) as PipelineConfig;
-    updateLoadoutDraft(activeLoadoutName, () => webUiGraph);
+    if (!updateLoadoutDraft(activeLoadoutName, () => webUiGraph)) return;
     const updatedGraph = webUiGraph;
     const updatedEdge = edge.edgeIndex === undefined ? updatedGraph.sockets?.[edge.from]?.edges?.find((candidate) => candidate.to === edge.to) : updatedGraph.sockets?.[edge.from]?.edges?.[edge.edgeIndex];
     setStatus(`Staged edge ${socketLabel(edge.from)} → ${socketLabel(edge.to)} as ${edgeConditionLabel(updatedEdge?.when)}.`);

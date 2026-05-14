@@ -20,6 +20,7 @@ export function App() {
   const { selectedTab, selectTab } = useAppNavigation();
   const {
     editingLoadout,
+    activeLoadoutPolicy,
     editingLoadoutName,
     canDeleteLoadout,
     canRevert,
@@ -58,6 +59,7 @@ export function App() {
   const socketInteractions = useLoadoutSocketInteractionController({
     activeLoadout: editingLoadout,
     activeLoadoutName: editingLoadoutName,
+    editPolicy: activeLoadoutPolicy,
     deleteLoadoutDraft,
     draftConfig,
     loadouts,
@@ -119,6 +121,7 @@ export function App() {
   const graphMutation = useLoadoutGraphMutationController({
     activeLoadout: editingLoadout,
     activeLoadoutName: editingLoadoutName,
+    editPolicy: activeLoadoutPolicy,
     loadoutGraph,
     materia,
     selectedLoopSockets,
@@ -208,7 +211,8 @@ export function App() {
               selectedLoopSocketSet,
               selectedMateriaId,
               socketLayoutDrag,
-              createLoopDisabled,
+              createLoopDisabled: createLoopDisabled || !activeLoadoutPolicy.canEdit,
+              editPolicy: activeLoadoutPolicy,
               socketDisplayLabel,
               socketLabel,
             }}
@@ -216,6 +220,7 @@ export function App() {
               loadoutNameInput,
               setLoadoutNameInput,
               commitActiveLoadoutRename: commitEditingLoadoutRename,
+              duplicateActiveLoadout: () => editingLoadoutName ? duplicateLoadout(editingLoadoutName) : false,
             }}
             canvasActions={{
               beginSocketLayoutDrag,

@@ -48,12 +48,21 @@ describe('loadout draft mutations', () => {
     expect((config.loadouts as Record<string, unknown>)['New Loadout 3']).toBeUndefined();
   });
 
-  it('duplicates a loadout as an independent staged copy and makes it active', () => {
-    const frozen = deepFreeze(config);
-    const duplicated = duplicateLoadoutDraft({ config: frozen, name: 'Alpha', nextName: 'Alpha Copy' });
+  it('duplicates a loadout as an independent user-owned staged copy and makes it active', () => {
+    const frozen = deepFreeze({
+      ...config,
+      loadouts: { ...config.loadouts, Alpha: { ...config.loadouts.Alpha, id: 'default:alpha', source: 'default' } },
+    } satisfies MateriaConfig);
+    const duplicated = duplicateLoadoutDraft({ config: frozen, name: 'Alpha', nextName: 'Alpha Copy', makeId: () => 'user:alpha-copy:test' });
 
     expect(duplicated.activeLoadout).toBe('Alpha Copy');
-    expect(duplicated.loadouts?.['Alpha Copy']).toMatchObject(config.loadouts.Alpha);
+    expect(duplicated.loadouts?.['Alpha Copy']).toMatchObject({
+      ...config.loadouts.Alpha,
+      id: 'user:alpha-copy:test',
+      source: 'user',
+      lockState: 'unlocked',
+      originDefaultId: 'default:alpha',
+    });
     expect(duplicated.loadouts?.['Alpha Copy']).not.toBe(config.loadouts.Alpha);
     expect(duplicated.loadouts?.['Alpha Copy']?.sockets).not.toBe(config.loadouts.Alpha.sockets);
     expect(config.loadouts.Alpha).toBeTruthy();
@@ -78,6 +87,26 @@ describe('loadout draft mutations', () => {
     expect(config.loadouts.Alpha).toBeTruthy();
   });
 
+  it('falls back to the shipped default when deleting a duplicate of that default', () => {
+    const deleted = deleteLoadoutDraft({
+      config: {
+        activeLoadout: 'Alpha Copy',
+        loadouts: {
+          Alpha: { ...config.loadouts.Alpha, id: 'default:alpha', source: 'default' },
+          'Alpha Copy': { ...config.loadouts.Alpha, id: 'user:alpha-copy', source: 'user', originDefaultId: 'default:alpha' },
+          Beta: config.loadouts.Beta,
+        },
+      },
+      name: 'Alpha Copy',
+      activeLoadoutName: 'Alpha Copy',
+    });
+
+    expect(deleted.fallbackName).toBe('Alpha');
+    expect(deleted.config.activeLoadout).toBe('Alpha');
+    expect(deleted.config.loadouts?.['Alpha Copy']).toBeUndefined();
+    expect(deleted.config.loadouts?.Alpha).toBeDefined();
+  });
+
   it('tracks persisted rename deletion markers while removing reverted target markers', () => {
     const next = deletedLoadoutNamesAfterRename({
       current: ['Gamma'],
@@ -89,12 +118,15 @@ describe('loadout draft mutations', () => {
     expect(next).toEqual(['Alpha']);
   });
 
-  it('adds null deletion markers to saved config payloads without mutating the draft', () => {
-    const frozen = deepFreeze(config);
+  it('adds null deletion markers and omits readonly defaults from saved config payloads without mutating the draft', () => {
+    const frozen = deepFreeze({
+      ...config,
+      loadouts: { ...config.loadouts, Alpha: { ...config.loadouts.Alpha, source: 'default' } },
+    } satisfies MateriaConfig);
     const payload = buildConfigToSave(frozen, ['Beta']);
 
     expect(payload.loadouts?.Beta).toBeNull();
-    expect(payload.loadouts?.Alpha).toMatchObject({ entry: 'Socket-1', sockets: config.loadouts.Alpha.sockets });
+    expect(payload.loadouts?.Alpha).toBeUndefined();
     expect(config.loadouts.Beta).toMatchObject({ entry: 'Socket-1' });
   });
 

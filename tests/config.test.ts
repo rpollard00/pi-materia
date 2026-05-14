@@ -210,6 +210,23 @@ describe("layered config loading and persistence", () => {
     }
   });
 
+  test("rejects programmatic attempts to save a shipped default loadout shadow copy", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-default-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: {
+          "Full-Auto": { id: "default:full-auto", source: "default", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
+        },
+      } as never)).rejects.toThrow('Cannot save shipped default Materia loadout "Full-Auto". Duplicate it before editing.');
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("WebUI-style saves default to user profile and only touch project when explicitly targeted", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));

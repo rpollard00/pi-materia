@@ -11,6 +11,29 @@ import { fromWebUiConfigDto } from '../../../../../loadoutDto.js';
 import { makeDuplicateLoadoutName as makeSharedDuplicateLoadoutName } from '../../../../../../loadout/loadoutNames.js';
 import type { LoadoutSourceScope, SaveTarget } from '../../types.js';
 
+export type LoadoutIdFactory = (name: string) => string;
+
+function randomLoadoutId(name: string): string {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'loadout';
+  const uuid = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `user:${slug}:${uuid}`;
+}
+
+function loadoutId(loadout: PipelineConfig | undefined): string | undefined {
+  return typeof loadout?.id === 'string' && loadout.id.trim() ? loadout.id.trim() : undefined;
+}
+
+function fallbackNameAfterDelete(draftLoadouts: Record<string, PipelineConfig>, name: string, activeLoadoutName: string | undefined): string | undefined {
+  if (activeLoadoutName !== name) return activeLoadoutName;
+  const deleted = draftLoadouts[name];
+  const originDefaultId = typeof deleted?.originDefaultId === 'string' ? deleted.originDefaultId : undefined;
+  if (originDefaultId) {
+    const defaultFallback = Object.entries(draftLoadouts).find(([candidate, loadout]) => candidate !== name && loadoutId(loadout) === originDefaultId);
+    if (defaultFallback) return defaultFallback[0];
+  }
+  return Object.keys(draftLoadouts).find((candidate) => candidate !== name);
+}
+
 export function makeNewLoadoutName(loadouts: Record<string, PipelineConfig>) {
   let index = Object.keys(loadouts).length + 1;
   let name = `New Loadout ${index}`;
@@ -37,11 +60,11 @@ export function renameLoadoutDraft({
   });
 }
 
-export function createLoadoutDraft(config: MateriaConfig, name: string) {
+export function createLoadoutDraft(config: MateriaConfig, name: string, makeId: LoadoutIdFactory = randomLoadoutId) {
   const draftLoadouts = buildLoadouts(config);
   return normalizeMateriaConfigEdges({
     ...config,
-    loadouts: { ...draftLoadouts, [name]: makeEmptyEntryLoadout() },
+    loadouts: { ...draftLoadouts, [name]: { ...makeEmptyEntryLoadout(), id: makeId(name), source: 'user', lockState: 'unlocked' } },
     activeLoadout: name,
   });
 }
@@ -54,17 +77,27 @@ export function duplicateLoadoutDraft({
   config,
   name,
   nextName = makeDuplicateLoadoutName(buildLoadouts(config), name),
+  makeId = randomLoadoutId,
 }: {
   config: MateriaConfig;
   name: string;
   nextName?: string;
+  makeId?: LoadoutIdFactory;
 }) {
   const draftLoadouts = buildLoadouts(config);
   const loadout = draftLoadouts[name];
   if (!loadout || draftLoadouts[nextName]) return normalizeMateriaConfigEdges(config);
+  const sourceId = loadoutId(loadout);
+  const duplicated = {
+    ...cloneConfig(loadout),
+    id: makeId(nextName),
+    source: 'user',
+    lockState: 'unlocked',
+    ...(loadout.source === 'default' && sourceId ? { originDefaultId: sourceId } : {}),
+  };
   return normalizeMateriaConfigEdges({
     ...config,
-    loadouts: { ...draftLoadouts, [nextName]: cloneConfig(loadout) },
+    loadouts: { ...draftLoadouts, [nextName]: duplicated },
     activeLoadout: nextName,
   });
 }
@@ -79,8 +112,7 @@ export function deleteLoadoutDraft({
   activeLoadoutName: string | undefined;
 }) {
   const draftLoadouts = buildLoadouts(config);
-  const remainingNames = Object.keys(draftLoadouts).filter((candidate) => candidate !== name);
-  const fallbackName = activeLoadoutName === name ? remainingNames[0] : activeLoadoutName;
+  const fallbackName = fallbackNameAfterDelete(draftLoadouts, name, activeLoadoutName);
   const remainingLoadouts = Object.fromEntries(Object.entries(draftLoadouts).filter(([candidate]) => candidate !== name));
   return { config: normalizeMateriaConfigEdges({ ...config, loadouts: remainingLoadouts, activeLoadout: fallbackName }), fallbackName };
 }
@@ -104,7 +136,9 @@ export function deletedLoadoutNamesAfterRename({
 export function buildConfigToSave(normalizedDraft: MateriaConfig, deletedLoadoutNames: string[]) {
   const preparedDraft = normalizeMateriaConfigEdges(normalizedDraft);
   assertValidLoadoutSaveSemantics(preparedDraft);
-  const loadouts: Record<string, PipelineConfig | null> = { ...(preparedDraft.loadouts ?? {}) };
+  const loadouts: Record<string, PipelineConfig | null> = Object.fromEntries(
+    Object.entries(preparedDraft.loadouts ?? {}).filter(([, loadout]) => loadout?.source !== 'default'),
+  );
   for (const name of deletedLoadoutNames) loadouts[name] = null;
   return fromWebUiConfigDto({ ...preparedDraft, loadouts } as never) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
 }

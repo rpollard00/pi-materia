@@ -111,6 +111,7 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   const target = options.target ?? "user";
   const file = getWritableConfigPath(cwd, options.configuredPath, target);
   rejectDefaultLoadoutDeletes(patch);
+  rejectReadonlyDefaultLoadoutSaves(patch);
   const existing = existsSync(file) ? await readConfigPartial(file) : {};
   const next = mergeConfigPatch(existing, patch);
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
@@ -447,6 +448,14 @@ function rejectDefaultLoadoutDeletes(patch: Partial<PiMateriaConfig>): void {
   const defaultLoadoutNames = new Set(Object.keys(JSON.parse(readFileSync(getBundledDefaultConfigPath(), "utf8")).loadouts ?? {}));
   for (const [name, loadout] of Object.entries(patch.loadouts as Record<string, unknown>)) {
     if (loadout === null && defaultLoadoutNames.has(name)) throw new Error(`Cannot delete shipped default Materia loadout "${name}".`);
+  }
+}
+
+function rejectReadonlyDefaultLoadoutSaves(patch: Partial<PiMateriaConfig>): void {
+  if (!patch.loadouts) return;
+  for (const [name, loadout] of Object.entries(patch.loadouts as Record<string, unknown>)) {
+    if (!isPlainObject(loadout)) continue;
+    if (loadout.source === "default") throw new Error(`Cannot save shipped default Materia loadout "${name}". Duplicate it before editing.`);
   }
 }
 

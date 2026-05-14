@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
 import type { MateriaConfig, PipelineConfig } from '../../../loadoutModel.js';
 import { getSocketLayout, isEmptySocket } from '../../../loadoutModel.js';
 import { clearMateriaFromSocket, setSocketLayouts, setSocketMateria, swapSocketMateria } from '../../../loadoutTransforms.js';
@@ -12,14 +13,15 @@ import { useLoadoutGraphViewModel } from './useLoadoutGraphViewModel.js';
 export interface LoadoutSocketInteractionControllerOptions {
   activeLoadout: PipelineConfig | undefined;
   activeLoadoutName: string;
+  editPolicy: LoadoutEditPolicy;
   deleteLoadoutDraft: (name: string) => boolean;
   draftConfig: MateriaConfig | undefined;
   loadouts: Record<string, PipelineConfig>;
   monitor: MonitorSnapshot | undefined;
   setStatus: (status: string) => void;
   switchLoadoutDraft: (name: string) => void;
-  updateLoadoutDraft: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => void;
-  updateLoadoutLayout: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => void;
+  updateLoadoutDraft: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
+  updateLoadoutLayout: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
   onModalErrorReset?: () => void;
   onSocketPropertyErrorReset?: () => void;
 }
@@ -27,6 +29,7 @@ export interface LoadoutSocketInteractionControllerOptions {
 export function useLoadoutSocketInteractionController({
   activeLoadout,
   activeLoadoutName,
+  editPolicy,
   deleteLoadoutDraft,
   draftConfig,
   loadouts,
@@ -78,7 +81,14 @@ export function useLoadoutSocketInteractionController({
     onModalErrorReset?.();
   }
 
+  function readonlyBlocked(action: string) {
+    if (editPolicy.canEdit) return false;
+    setStatus(`${action} blocked: ${editPolicy.reason}`);
+    return true;
+  }
+
   function putMateria(socketId: string, materiaId: string, fromSocket?: string) {
+    if (readonlyBlocked(`Edit socket ${socketId}`)) return false;
     if (!activeLoadoutName || !draftConfig) return false;
     const currentLoadout = loadouts[activeLoadoutName];
     const currentTarget = currentLoadout?.sockets?.[socketId];
@@ -101,18 +111,20 @@ export function useLoadoutSocketInteractionController({
       }
     }
 
-    updateLoadoutDraft(activeLoadoutName, (loadout) => {
+    const updated = updateLoadoutDraft(activeLoadoutName, (loadout) => {
       if (!loadout.sockets) return loadout;
       if (fromSocket && fromSocket !== socketId) return swapSocketMateria(loadout, fromSocket, socketId);
       const sourceSocket = palette.find(([id]) => id === materiaId)?.[1];
       return sourceSocket ? setSocketMateria(loadout, socketId, sourceSocket) : loadout;
     });
+    if (!updated) return false;
     setSelectedMateriaId(undefined);
     setStatus(`Staged ${materiaId} in socket ${socketId}; socket graph links and layout were preserved.`);
     return true;
   }
 
   function removeMateria(socketId: string) {
+    if (readonlyBlocked(`Clear socket ${socketId}`)) return false;
     if (!activeLoadoutName) return false;
     const currentSocket = loadouts[activeLoadoutName]?.sockets?.[socketId];
     if (!currentSocket) {
@@ -123,7 +135,7 @@ export function useLoadoutSocketInteractionController({
       setStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
       return false;
     }
-    updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout);
+    if (!updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout)) return false;
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
@@ -155,6 +167,7 @@ export function useLoadoutSocketInteractionController({
   }
 
   function beginSocketLayoutDrag(socket: PositionedSocket, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!editPolicy.canEdit) return;
     if (event.shiftKey) return;
     if (event.button !== 0 || selectedMateriaId) return;
     const target = event.target as HTMLElement;
@@ -197,7 +210,7 @@ export function useLoadoutSocketInteractionController({
     const finalY = Math.max(0, current.originY + deltaY);
     const layoutX = layoutValueForPosition(finalX, socketLayoutOffsetX, socketLayoutUnitX);
     const layoutY = layoutValueForPosition(finalY, socketLayoutOffsetY, socketLayoutUnitY);
-    updateLoadoutLayout(activeLoadoutName, (loadout) => {
+    if (updateLoadoutLayout(activeLoadoutName, (loadout) => {
       const sockets = loadout.sockets;
       if (!sockets?.[socketId]) return loadout;
       const layouts: Parameters<typeof setSocketLayouts>[1] = { [socketId]: { x: layoutX, y: layoutY } };
@@ -209,8 +222,9 @@ export function useLoadoutSocketInteractionController({
         };
       }
       return setSocketLayouts(loadout, layouts);
-    });
-    setStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);
+    })) {
+      setStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);
+    }
   }
 
   function cancelSocketLayoutDrag(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -266,6 +280,7 @@ export function useLoadoutSocketInteractionController({
 
   function handleDrop(socketId: string, event: DragEvent) {
     event.preventDefault();
+    if (readonlyBlocked(`Drop materia on socket ${socketId}`)) return;
     event.stopPropagation();
     const raw = event.dataTransfer.getData('application/json');
     if (!raw) return;
@@ -279,6 +294,7 @@ export function useLoadoutSocketInteractionController({
 
   function handleGraphDrop(event: DragEvent) {
     event.preventDefault();
+    if (readonlyBlocked('Unsocket materia')) return;
     const raw = event.dataTransfer.getData('application/json');
     if (!raw) return;
     const payload = parseDragPayload(raw);
@@ -298,6 +314,11 @@ export function useLoadoutSocketInteractionController({
   }
 
   function dragMateria(payload: DragPayload, event: DragEvent) {
+    if (!editPolicy.canEdit) {
+      event.preventDefault();
+      readonlyBlocked('Drag materia');
+      return;
+    }
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('application/json', JSON.stringify(payload));
   }
