@@ -86,7 +86,9 @@ export async function ensureUserProfileConfig(): Promise<string> {
 export async function saveDefaultLoadoutPreference(cwd: string, loadoutName: string | null, configuredPath?: string): Promise<string | null> {
   const loaded = await loadConfig(cwd, configuredPath);
   const requestedDefault = loadoutName?.trim() || null;
-  const nextDefault = requestedDefault && findLoadoutNameById(loaded.config.loadouts, requestedDefault) ? requestedDefault : null;
+  const nextDefault = requestedDefault
+    ? (findLoadoutNameById(loaded.config.loadouts, requestedDefault) ? requestedDefault : findLoadoutId(loaded.config.loadouts, requestedDefault) ?? null)
+    : null;
   if (requestedDefault && !nextDefault) {
     const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
     throw new Error(loadoutNames.length
