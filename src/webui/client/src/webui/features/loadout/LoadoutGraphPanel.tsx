@@ -1,5 +1,5 @@
 import type { CSSProperties, Dispatch, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from 'react';
-import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
+import type { LoadoutEditPolicy, LoadoutUserLockState } from '../../../../../../domain/loadout.js';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
 import {
   canDeleteSocket,
@@ -75,6 +75,7 @@ interface LoadoutGraphToolbarState {
   setLoadoutNameInput: Dispatch<SetStateAction<string>>;
   commitActiveLoadoutRename: () => void;
   duplicateActiveLoadout: () => boolean;
+  setActiveLoadoutLockState: (lockState: LoadoutUserLockState) => boolean;
 }
 
 interface LoadoutGraphCanvasActions {
@@ -150,6 +151,7 @@ export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActio
         duplicateActiveLoadout={toolbar.duplicateActiveLoadout}
         editPolicy={viewModel.editPolicy}
         loadoutNameInput={toolbar.loadoutNameInput}
+        setActiveLoadoutLockState={toolbar.setActiveLoadoutLockState}
         selectedLoopSocketIds={viewModel.selectedLoopSocketIds}
         setLoadoutNameInput={toolbar.setLoadoutNameInput}
         commitActiveLoadoutRename={toolbar.commitActiveLoadoutRename}
@@ -240,10 +242,13 @@ interface GraphToolbarProps {
   commitActiveLoadoutRename: () => void;
   duplicateActiveLoadout: () => boolean;
   editPolicy: LoadoutEditPolicy;
+  setActiveLoadoutLockState: (lockState: LoadoutUserLockState) => boolean;
   socketLabel: (socketId: string) => string;
 }
 
-function GraphToolbar({ createLoopDisabled, createTaskIteratorLoop, duplicateActiveLoadout, editPolicy, loadoutNameInput, selectedLoopSocketIds, setLoadoutNameInput, commitActiveLoadoutRename, socketLabel }: GraphToolbarProps) {
+function GraphToolbar({ createLoopDisabled, createTaskIteratorLoop, duplicateActiveLoadout, editPolicy, loadoutNameInput, selectedLoopSocketIds, setLoadoutNameInput, setActiveLoadoutLockState, commitActiveLoadoutRename, socketLabel }: GraphToolbarProps) {
+  const lockStatus = editPolicy.readonly ? 'Read-only' : editPolicy.lockState === 'locked' ? 'Locked' : 'Edit mode';
+  const canToggleLock = !editPolicy.readonly;
   return (
     <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div>
@@ -258,7 +263,16 @@ function GraphToolbar({ createLoopDisabled, createTaskIteratorLoop, duplicateAct
         ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? 'Select loop sockets with shift-click or a drag box first.' : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>
+        <div className="rounded-xl border border-cyan-200/15 bg-slate-950/70 px-3 py-2 text-sm text-cyan-100" role="group" aria-label="Loadout edit status" title={editPolicy.reason}>
+          <span className="font-semibold">{lockStatus}</span>
+          <span className="ml-2 text-xs text-slate-400">{editPolicy.reason}</span>
+        </div>
+        {canToggleLock ? (
+          <button type="button" className="materia-button-secondary" data-testid="loadout-lock-toggle" aria-pressed={editPolicy.lockState === 'locked'} title={editPolicy.lockState === 'locked' ? 'Unlock edit mode for this loadout' : 'Lock this loadout for monitoring and inspection'} onClick={() => setActiveLoadoutLockState(editPolicy.lockState === 'locked' ? 'unlocked' : 'locked')}>
+            {editPolicy.lockState === 'locked' ? 'Unlock edits' : 'Lock edits'}
+          </button>
+        ) : null}
+        <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? (!editPolicy.canEdit ? editPolicy.reason : 'Select loop sockets with shift-click or a drag box first.') : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>
         <label className="text-sm text-slate-300">Edit name
           <input
             className="ml-3 rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100"

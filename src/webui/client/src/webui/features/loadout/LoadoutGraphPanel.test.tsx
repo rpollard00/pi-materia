@@ -21,6 +21,22 @@ const readonlyDefaultPolicy: LoadoutEditPolicy = {
   reasonCode: 'shipped_default_readonly',
 };
 
+const lockedUserPolicy: LoadoutEditPolicy = {
+  canEdit: false,
+  readonly: false,
+  lockState: 'locked',
+  reason: 'This loadout is locked. Unlock edit mode before making changes.',
+  reasonCode: 'user_locked',
+};
+
+const unlockedUserPolicy: LoadoutEditPolicy = {
+  canEdit: true,
+  readonly: false,
+  lockState: 'unlocked',
+  reason: 'This loadout is editable.',
+  reasonCode: 'editable',
+};
+
 function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutGraphPanel>> = {}) {
   const activeLoadout = {
     id: 'default:alpha',
@@ -62,6 +78,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutGraphPanel>
       setLoadoutNameInput: vi.fn(),
       commitActiveLoadoutRename: vi.fn(),
       duplicateActiveLoadout: vi.fn(() => true),
+      setActiveLoadoutLockState: vi.fn(() => true),
     },
     canvasActions: {
       beginSocketLayoutDrag: vi.fn(),
@@ -129,10 +146,30 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     const { props, getByRole, getByLabelText, getByTestId } = renderPanel();
 
     expect(getByRole('status').textContent).toContain('read-only');
+    expect(getByRole('group', { name: 'Loadout edit status' }).textContent).toContain('Read-only');
     fireEvent.click(getByRole('button', { name: 'Duplicate to edit' }));
     expect(props.toolbar.duplicateActiveLoadout).toHaveBeenCalledOnce();
     expect(getByLabelText('Edit name')).toHaveProperty('disabled', true);
     expect(getByTestId('create-task-loop')).toHaveProperty('disabled', true);
+    expect(() => getByRole('button', { name: /Unlock edits|Lock edits/ })).toThrow();
+  });
+
+  it('exposes a persisted lock toggle for locked and unlocked user loadouts', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    const baseToolbar = base.props.toolbar;
+    base.unmount();
+
+    const locked = renderPanel({ viewModel: { ...baseViewModel, editPolicy: lockedUserPolicy }, toolbar: { ...baseToolbar, setActiveLoadoutLockState: vi.fn(() => true) } });
+    expect(locked.getByRole('group', { name: 'Loadout edit status' }).textContent).toContain('Locked');
+    fireEvent.click(locked.getByRole('button', { name: 'Unlock edits' }));
+    expect(locked.props.toolbar.setActiveLoadoutLockState).toHaveBeenCalledWith('unlocked');
+    locked.unmount();
+
+    const unlocked = renderPanel({ viewModel: { ...baseViewModel, editPolicy: unlockedUserPolicy }, toolbar: { ...baseToolbar, setActiveLoadoutLockState: vi.fn(() => true) } });
+    expect(unlocked.getByRole('group', { name: 'Loadout edit status' }).textContent).toContain('Edit mode');
+    fireEvent.click(unlocked.getByRole('button', { name: 'Lock edits' }));
+    expect(unlocked.props.toolbar.setActiveLoadoutLockState).toHaveBeenCalledWith('locked');
   });
 
   it('marks socket cards readonly and disables socket action mutations', () => {

@@ -5,7 +5,7 @@ import {
   type MateriaConfig,
   type PipelineConfig,
 } from '../../loadoutModel.js';
-import { getLoadoutEditPolicy } from '../../../../../domain/loadout.js';
+import { getLoadoutEditPolicy, type LoadoutUserLockState } from '../../../../../domain/loadout.js';
 import { toast } from '../../toast/index.js';
 import { getConfig, saveConfig, setActiveLoadout, setDefaultLoadout as persistDefaultLoadout } from '../api/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
@@ -104,6 +104,77 @@ export function dirtyConfigKey(config: MateriaConfig | undefined): string {
   return JSON.stringify(configForDirtyComparison(config));
 }
 
+function comparableLoadoutGraph(loadout: PipelineConfig | undefined): unknown {
+  if (!loadout) return undefined;
+  const comparable = cloneConfig(loadout);
+  delete comparable.lockState;
+  return sortObjectKeys(normalizeMateriaConfigEdges({ loadouts: { Current: comparable } }, { semantic: false }).loadouts?.Current ?? comparable);
+}
+
+function loadoutGraphKey(loadout: PipelineConfig | undefined): string {
+  return JSON.stringify(comparableLoadoutGraph(loadout));
+}
+
+function validUserLockState(value: unknown): value is LoadoutUserLockState {
+  return value === 'locked' || value === 'unlocked';
+}
+
+function policyForLoadout(loadout: PipelineConfig | undefined, source: LoadoutSourceScope | undefined) {
+  return getLoadoutEditPolicy({ source: (loadout?.source ?? source) as never, lockState: loadout?.lockState as never });
+}
+
+function guardedDraftLoadoutsAfterUpdate({
+  before,
+  after,
+  loadoutSources,
+}: {
+  before: Record<string, PipelineConfig>;
+  after: Record<string, PipelineConfig>;
+  loadoutSources: Record<string, LoadoutSourceScope>;
+}): { loadouts: Record<string, PipelineConfig>; blocked: string[] } {
+  let nextLoadouts = after;
+  const blocked: string[] = [];
+  for (const [name, previousLoadout] of Object.entries(before)) {
+    const policy = policyForLoadout(previousLoadout, loadoutSources[name]);
+    if (policy.canEdit) continue;
+    const nextLoadout = nextLoadouts[name];
+    if (loadoutGraphKey(previousLoadout) === loadoutGraphKey(nextLoadout)) continue;
+    if (nextLoadouts === after) nextLoadouts = { ...after };
+    const restored = cloneConfig(previousLoadout);
+    if (!policy.readonly && validUserLockState(nextLoadout?.lockState)) restored.lockState = nextLoadout.lockState;
+    nextLoadouts[name] = restored;
+    blocked.push(`${name}: ${policy.reason}`);
+  }
+  return { loadouts: nextLoadouts, blocked };
+}
+
+function blockedProtectedLoadoutSaveChanges({
+  baseline,
+  draft,
+  loadoutSources,
+}: {
+  baseline: MateriaConfig | undefined;
+  draft: MateriaConfig;
+  loadoutSources: Record<string, LoadoutSourceScope>;
+}): string[] {
+  const baselineLoadouts = buildLoadouts(baseline ?? {});
+  const draftLoadouts = buildLoadouts(draft);
+  const blocked: string[] = [];
+  for (const [name, loadout] of Object.entries(draftLoadouts)) {
+    const baselineLoadout = baselineLoadouts[name];
+    if (!baselineLoadout) continue;
+    const policy = policyForLoadout(loadout, loadoutSources[name]);
+    if (policy.canEdit) continue;
+    if (loadoutGraphKey(loadout) !== loadoutGraphKey(baselineLoadout)) blocked.push(`${name}: ${policy.reason}`);
+  }
+  for (const [name, loadout] of Object.entries(baselineLoadouts)) {
+    if (draftLoadouts[name]) continue;
+    const policy = policyForLoadout(loadout, loadoutSources[name]);
+    if (!policy.canEdit) blocked.push(`${name}: ${policy.reason}`);
+  }
+  return blocked;
+}
+
 function demoConfig(): MateriaConfig {
   return normalizeMateriaConfigEdges({
     activeLoadout: 'Demo Loadout',
@@ -153,7 +224,7 @@ export function useWebuiConfig() {
   const activeLoadoutName = editingLoadoutName;
   const persistedActiveLoadoutName = runtimeActiveLoadoutName;
   const activeLoadout = editingLoadout;
-  const editingLoadoutPolicy = getLoadoutEditPolicy({ source: (editingLoadout?.source ?? (editingLoadoutName ? loadoutSources[editingLoadoutName] : undefined)) as never, lockState: editingLoadout?.lockState as never });
+  const editingLoadoutPolicy = policyForLoadout(editingLoadout, editingLoadoutName ? loadoutSources[editingLoadoutName] : undefined);
   const isDirty = dirtyConfigKey(baselineConfig) !== dirtyConfigKey(draftConfig);
 
   function readonlyStatus(action: string) {
@@ -169,16 +240,28 @@ export function useWebuiConfig() {
    */
   function updateDraft(updater: (config: MateriaConfig) => void) {
     setDraftConfig((current) => {
-      const next = cloneConfig(current ?? {});
+      const previous = current ?? {};
+      const beforeLoadouts = buildLoadouts(previous);
+      const next = cloneConfig(previous);
       if (!next.loadouts) next.loadouts = buildLoadouts(next);
       updater(next);
-      return normalizeMateriaConfigEdges(next);
+      const normalizedNext = normalizeMateriaConfigEdges(next);
+      const { loadouts: guardedLoadouts, blocked } = guardedDraftLoadoutsAfterUpdate({
+        before: beforeLoadouts,
+        after: buildLoadouts(normalizedNext),
+        loadoutSources,
+      });
+      if (blocked.length > 0) {
+        setStatus(`Blocked read-only loadout mutation. ${blocked.join(' ')}`);
+        return normalizeMateriaConfigEdges({ ...normalizedNext, loadouts: guardedLoadouts });
+      }
+      return normalizedNext;
     });
   }
 
   function updateLoadoutDraft(loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) {
     const loadout = loadouts[loadoutName];
-    const policy = getLoadoutEditPolicy({ source: (loadout?.source ?? loadoutSources[loadoutName]) as never, lockState: loadout?.lockState as never });
+    const policy = policyForLoadout(loadout, loadoutSources[loadoutName]);
     if (!policy.canEdit) {
       setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
       return false;
@@ -202,7 +285,7 @@ export function useWebuiConfig() {
 
   function updateLoadoutLayout(loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) {
     const loadout = loadouts[loadoutName];
-    const policy = getLoadoutEditPolicy({ source: (loadout?.source ?? loadoutSources[loadoutName]) as never, lockState: loadout?.lockState as never });
+    const policy = policyForLoadout(loadout, loadoutSources[loadoutName]);
     if (!policy.canEdit) {
       setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
       return false;
@@ -415,6 +498,27 @@ export function useWebuiConfig() {
     return true;
   }
 
+  function setActiveLoadoutLockState(lockState: LoadoutUserLockState) {
+    if (!editingLoadoutName || !editingLoadout) return false;
+    if (editingLoadoutPolicy.readonly) {
+      readonlyStatus(lockState === 'locked' ? 'Lock edit mode' : 'Unlock edit mode');
+      return false;
+    }
+    if (editingLoadout.lockState === lockState) return true;
+    setDraftConfig((current) => {
+      const config = current ?? {};
+      const currentLoadouts = buildLoadouts(config);
+      const loadout = currentLoadouts[editingLoadoutName];
+      if (!loadout) return current;
+      return normalizeMateriaConfigEdges({
+        ...config,
+        loadouts: { ...currentLoadouts, [editingLoadoutName]: { ...loadout, lockState } },
+      });
+    });
+    setStatus(lockState === 'locked' ? `Locked ${editingLoadoutName}. Save to persist edit mode.` : `Unlocked ${editingLoadoutName}. Save to persist edit mode.`);
+    return true;
+  }
+
   function canDeleteLoadout(name: string) {
     return Boolean(name && loadouts[name] && loadoutSources[name] !== 'default' && Object.keys(loadouts).length > 1);
   }
@@ -448,19 +552,20 @@ export function useWebuiConfig() {
 
   async function saveDraft() {
     if (!draftConfig) return;
-    if (editingLoadout && !editingLoadoutPolicy.canEdit && isDirty) {
-      const message = `Cannot save staged loadout edits: ${editingLoadoutPolicy.reason}`;
+    const normalizedDraft = normalizeMateriaConfigEdges(draftConfig);
+    const blockedSaveChanges = blockedProtectedLoadoutSaveChanges({ baseline: baselineConfig, draft: normalizedDraft, loadoutSources });
+    if (blockedSaveChanges.length > 0) {
+      const message = `Cannot save staged loadout edits: ${blockedSaveChanges.join(' ')}`;
       setStatus(message);
       toast({
         id: 'readonly-loadout-save',
-        title: 'Duplicate before editing',
+        title: 'Duplicate or unlock before editing',
         description: message,
         variant: 'validation',
       });
       throw new Error(message);
     }
     setStatus('Saving staged loadout edits…');
-    const normalizedDraft = normalizeMateriaConfigEdges(draftConfig);
     const validationErrors = validateLoadoutSaveSemantics(normalizedDraft);
     if (validationErrors.length > 0) {
       const description = validationErrors.join('\n');
@@ -564,6 +669,7 @@ export function useWebuiConfig() {
     setRuntimeActiveLoadout,
     setSaveTarget,
     setStatus,
+    setActiveLoadoutLockState,
     source,
     status,
     switchEditingLoadoutDraft,

@@ -45,6 +45,7 @@ export function App() {
     setRuntimeActiveLoadout,
     setSaveTarget,
     setStatus,
+    setActiveLoadoutLockState,
     source,
     status,
     switchEditingLoadoutDraft,
@@ -221,6 +222,7 @@ export function App() {
               setLoadoutNameInput,
               commitActiveLoadoutRename: commitEditingLoadoutRename,
               duplicateActiveLoadout: () => editingLoadoutName ? duplicateLoadout(editingLoadoutName) : false,
+              setActiveLoadoutLockState,
             }}
             canvasActions={{
               beginSocketLayoutDrag,

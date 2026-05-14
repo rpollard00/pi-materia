@@ -64,10 +64,15 @@ function ConfigProbe() {
       <button type="button" onClick={() => void config.setDefaultLoadout('Hojo-Consult')}>set default Hojo-Consult</button>
       <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
       <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
+      <button type="button" onClick={() => config.setActiveLoadoutLockState('locked')}>lock active loadout</button>
+      <button type="button" onClick={() => config.setActiveLoadoutLockState('unlocked')}>unlock active loadout</button>
       <button
         type="button"
         onClick={() => config.updateDraft((draft) => {
-          const socket = draft.loadouts?.Alpha?.sockets?.['Socket-1'] ?? draft.loadouts?.['Full-Auto']?.sockets?.['Socket-1'];
+          const activeName = config.activeLoadoutName ?? draft.activeLoadout;
+          const socket = (activeName ? draft.loadouts?.[activeName]?.sockets?.['Socket-1'] : undefined)
+            ?? draft.loadouts?.Alpha?.sockets?.['Socket-1']
+            ?? draft.loadouts?.['Full-Auto']?.sockets?.['Socket-1'];
           if (socket) socket.materia = 'LocalEdit';
         })}
       >
@@ -83,6 +88,19 @@ function ConfigProbe() {
       </button>
       <button
         type="button"
+        onClick={() => config.updateDraft((draft) => {
+          const activeName = config.activeLoadoutName ?? draft.activeLoadout;
+          const loadout = activeName ? draft.loadouts?.[activeName] : undefined;
+          if (!loadout) return;
+          loadout.lockState = 'locked';
+          const socket = loadout.sockets?.['Socket-1'];
+          if (socket) socket.materia = 'LocalEdit';
+        })}
+      >
+        lock and edit loadout directly
+      </button>
+      <button
+        type="button"
         onClick={() => config.updateLoadoutLayout(config.activeLoadoutName ?? '', (loadout) => ({
           ...loadout,
           layout: { ...(loadout.layout ?? {}), sockets: { ...(loadout.layout?.sockets ?? {}), 'Socket-1': { x: 7, y: 9 } } },
@@ -90,7 +108,7 @@ function ConfigProbe() {
       >
         edit layout locally
       </button>
-      <button type="button" onClick={() => void config.saveDraft()}>save draft</button>
+      <button type="button" onClick={() => { void config.saveDraft().catch(() => undefined); }}>save draft</button>
       <button
         type="button"
         onClick={() => void config.reloadConfig({ preserveLoadoutEdits: true, readyStatus: 'reloaded with preserved loadout edits' })}
@@ -326,6 +344,8 @@ describe('useWebuiConfig', () => {
     await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto'));
     expect(screen.getByLabelText('dirty').textContent).toBe('false');
 
+    fireEvent.click(screen.getByRole('button', { name: 'view Hojo-Consult' }));
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult'));
     fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
     await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
   });
@@ -344,6 +364,8 @@ describe('useWebuiConfig', () => {
     render(<ConfigProbe />);
 
     await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'view Hojo-Consult' }));
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult'));
     fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
     await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
 
@@ -357,6 +379,83 @@ describe('useWebuiConfig', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'edit profile locally' }));
     await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+  });
+
+  it('persists user lock state and centrally blocks graph mutations while locked', async () => {
+    let responseConfig: MateriaConfig = {
+      activeLoadout: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        responseConfig = JSON.parse(String(init.body)).config as MateriaConfig;
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: responseConfig, loadoutSources: { Alpha: 'user' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'lock active loadout' }));
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+    let draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
+    expect(draft.loadouts?.Alpha?.lockState).toBe('locked');
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit layout locally' }));
+    expect(screen.getByLabelText('status').textContent).toContain('This loadout is locked');
+    draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
+    expect(draft.loadouts?.Alpha?.layout).toBeUndefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
+    expect(screen.getByLabelText('status').textContent).toContain('Blocked read-only loadout mutation');
+    draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
+    expect(draft.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('Build');
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit profile locally' }));
+    await waitFor(() => expect(screen.getByLabelText('draft').textContent).toContain('real profile edit'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Saved staged loadout edits to user scope.'));
+    expect(responseConfig.loadouts?.Alpha?.lockState).toBe('locked');
+    expect(responseConfig.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('Build');
+    expect(responseConfig.profile).toEqual({ note: 'real profile edit' });
+  });
+
+  it('blocks saving graph changes that arrive together with a direct lock-state update', async () => {
+    let responseConfig: MateriaConfig = {
+      activeLoadout: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+    };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        responseConfig = JSON.parse(String(init.body)).config as MateriaConfig;
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: responseConfig, loadoutSources: { Alpha: 'user' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'lock and edit loadout directly' }));
+    await waitFor(() => expect(screen.getByLabelText('draft').textContent).toContain('LocalEdit'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toContain('Cannot save staged loadout edits'));
+    expect(screen.getByLabelText('status').textContent).toContain('This loadout is locked');
+    expect(responseConfig.loadouts?.Alpha?.lockState).toBe('unlocked');
+    expect(responseConfig.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('Build');
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
   });
 
   it('keeps layout-only edits out of semantic normalization while still marking the draft dirty', async () => {
