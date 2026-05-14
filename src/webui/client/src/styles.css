@@ -106,8 +106,19 @@
 
 .loadout-default-indicator {
   color: rgb(250 204 21);
-  font-size: 0.9rem;
-  text-shadow: 0 0 10px rgb(250 204 21 / 0.42);
+  filter: drop-shadow(0 0 5px rgb(250 204 21 / 0.42));
+}
+
+.loadout-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-width: 2.25;
+}
+
+.loadout-icon-filled {
+  fill: currentColor;
 }
 
 .loadout-lock-indicator {
@@ -118,7 +129,6 @@
   background: transparent;
   color: rgb(165 243 252 / 0.92);
   cursor: pointer;
-  font-size: 0.78rem;
 }
 
 .loadout-lock-indicator:hover:not([aria-disabled="true"]),
@@ -154,8 +164,6 @@
   border-radius: 0.375rem;
   border: 1px solid transparent;
   color: rgb(207 250 254);
-  font-size: 1.2rem;
-  font-weight: 800;
   line-height: 1;
   transition: 160ms ease;
 }

@@ -238,6 +238,33 @@ describe('LoadoutListPanel', () => {
     expect(gammaCard.textContent).not.toContain('Built-In');
   });
 
+  it('uses Lucide SVG icons instead of emoji or text glyphs for touched selector indicators', () => {
+    renderPanel({
+      defaultLoadoutId: 'Beta',
+      loadouts: {
+        ...loadouts,
+        Alpha: { ...loadouts.Alpha, lockState: 'unlocked' },
+        Beta: { ...loadouts.Beta, lockState: 'locked' },
+        Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'locked' },
+      },
+      loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
+    });
+
+    expect(document.body.textContent).not.toContain('🔒');
+    expect(document.body.textContent).not.toContain('🔓');
+    expect(document.body.textContent).not.toContain('★');
+    expect(document.body.textContent).not.toContain('…');
+
+    const alphaLock = within(cardFor('Alpha')).getByLabelText('Lock edits');
+    const betaLock = within(cardFor('Beta')).getByLabelText('Unlock edits');
+    const gammaLock = within(cardFor('Gamma')).getByLabelText('Built-In read-only');
+    expect(alphaLock.querySelector('svg')).toBeTruthy();
+    expect(betaLock.querySelector('svg')).toBeTruthy();
+    expect(gammaLock.querySelector('svg')).toBeTruthy();
+    expect(within(cardFor('Beta')).getByLabelText('Default loadout').querySelector('svg')).toBeTruthy();
+    expect(within(cardFor('Alpha')).getByLabelText('Loadout actions').querySelector('svg')).toBeTruthy();
+  });
+
   it('keeps the existing active-loadout quick selector and does not call the default preference setter', async () => {
     const onSetRuntimeActiveLoadout = vi.fn(async (name: string) => name);
     const onSetDefaultLoadout = vi.fn(async (name: string) => name);

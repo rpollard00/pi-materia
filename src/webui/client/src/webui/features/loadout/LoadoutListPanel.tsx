@@ -1,3 +1,4 @@
+import { EllipsisVertical, Lock, Star, Unlock, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { LoadoutSourceScope } from '../../types.js';
@@ -46,8 +47,15 @@ function loadoutScopeDescription(scope: LoadoutSourceScope): string {
   return `${scope} loadout`;
 }
 
+type LoadoutLockIconKey = 'lock' | 'unlock';
+
+const loadoutLockIcons: Record<LoadoutLockIconKey, LucideIcon> = {
+  lock: Lock,
+  unlock: Unlock,
+};
+
 interface LoadoutLockAction {
-  icon: string;
+  iconKey: LoadoutLockIconKey;
   label: string;
   title: string;
   menuLabel: string;
@@ -57,12 +65,12 @@ interface LoadoutLockAction {
 
 function loadoutLockAction(loadout: PipelineConfig, scope: LoadoutSourceScope): LoadoutLockAction {
   if (scope === 'default') {
-    return { icon: '🔒', label: 'Built-In read-only', title: 'Built-In read-only. Duplicate to edit.', menuLabel: 'Lock edits', nextState: 'locked', disabled: true };
+    return { iconKey: 'lock', label: 'Built-In read-only', title: 'Built-In read-only. Duplicate to edit.', menuLabel: 'Lock edits', nextState: 'locked', disabled: true };
   }
   if (loadout.lockState === 'locked') {
-    return { icon: '🔒', label: 'Unlock edits', title: 'Unlock edits', menuLabel: 'Unlock edits', nextState: 'unlocked', disabled: false };
+    return { iconKey: 'lock', label: 'Unlock edits', title: 'Unlock edits', menuLabel: 'Unlock edits', nextState: 'unlocked', disabled: false };
   }
-  return { icon: '🔓', label: 'Lock edits', title: 'Lock edits', menuLabel: 'Lock edits', nextState: 'locked', disabled: false };
+  return { iconKey: 'unlock', label: 'Lock edits', title: 'Lock edits', menuLabel: 'Lock edits', nextState: 'locked', disabled: false };
 }
 
 function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRuntimeActive, canSetDefault, deleteDisabled, deleteTitle, lockAction, onSetRuntimeActive, onSetDefault, onToggleLock, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
@@ -112,7 +120,7 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRun
           setOpen((current) => !current);
         }}
       >
-        …
+        <EllipsisVertical className="loadout-icon" aria-hidden="true" focusable="false" />
       </button>
       {open && (
         <div id={menuId} className="loadout-actions-popover" role="menu" aria-label={`Actions for ${name}`}>
@@ -188,6 +196,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const persisted = Boolean(persistedLoadouts[name]);
           const isDefaultLoadout = persisted && name === validatedDefaultLoadoutId;
           const lockAction = loadoutLockAction(loadout, sourceScope);
+          const LockIcon = loadoutLockIcons[lockAction.iconKey];
           return (
             <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
               <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select" title={`${name} — ${loadoutScopeDescription(sourceScope)}`}>
@@ -195,7 +204,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                   <span className="loadout-card-name">{name}</span>
                   {isDefaultLoadout && (
                     <span className="loadout-default-indicator" role="img" aria-label="Default loadout" title="Default loadout">
-                      ★
+                      <Star className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
                     </span>
                   )}
                   {isRuntimeActive && <span className="loadout-active-indicator" aria-label="Runtime active loadout" title="Active loadout" />}
@@ -212,7 +221,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                   if (!lockAction.disabled) onToggleLoadoutLock(name, lockAction.nextState);
                 }}
               >
-                {lockAction.icon}
+                <LockIcon className="loadout-icon" aria-hidden="true" focusable="false" />
               </button>
               <LoadoutActionsMenu
                 name={name}
