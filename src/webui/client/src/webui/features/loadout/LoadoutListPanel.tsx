@@ -149,7 +149,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const persistedNames = Object.keys(persistedLoadouts);
-  const validatedDefaultLoadoutId = defaultLoadoutId && persistedLoadouts[defaultLoadoutId] ? defaultLoadoutId : null;
+  const validatedDefaultLoadoutId = defaultLoadoutId && loadouts[defaultLoadoutId] ? defaultLoadoutId : null;
 
   async function changeRuntimeActiveLoadout(name: string) {
     // This quick selector changes only the runtime/session active loadout. It
@@ -194,7 +194,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const deleteDisabled = !canDeleteLoadout(name);
           const isRuntimeActive = name === runtimeActiveLoadoutName;
           const persisted = Boolean(persistedLoadouts[name]);
-          const isDefaultLoadout = persisted && name === validatedDefaultLoadoutId;
+          const isDefaultLoadout = name === validatedDefaultLoadoutId;
           const lockAction = loadoutLockAction(loadout, sourceScope);
           const LockIcon = loadoutLockIcons[lockAction.iconKey];
           return (

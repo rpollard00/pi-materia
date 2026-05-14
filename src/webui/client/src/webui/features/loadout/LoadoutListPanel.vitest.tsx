@@ -42,12 +42,25 @@ afterEach(() => {
 });
 
 describe('LoadoutListPanel', () => {
-  it('renders a labelled star only for the validated persisted default loadout', () => {
+  it('renders a labelled star only for the validated default loadout without empty slots', () => {
     renderPanel({ defaultLoadoutId: 'Beta' });
 
-    expect(within(cardFor('Beta')).getByLabelText('Default loadout')).toBeTruthy();
+    expect(within(cardFor('Beta')).getByLabelText('Default loadout').querySelector('svg')).toBeTruthy();
     expect(within(cardFor('Alpha')).queryByLabelText('Default loadout')).toBeNull();
     expect(within(cardFor('Gamma')).queryByLabelText('Default loadout')).toBeNull();
+    expect(cardFor('Alpha').querySelector('.loadout-default-indicator')).toBeNull();
+    expect(cardFor('Gamma').querySelector('.loadout-default-indicator')).toBeNull();
+  });
+
+  it('uses the available loadout set to validate the canonical default id', () => {
+    renderPanel({
+      defaultLoadoutId: 'Gamma',
+      persistedLoadouts: { Alpha: loadouts.Alpha, Beta: loadouts.Beta },
+    });
+
+    expect(within(cardFor('Gamma')).getByLabelText('Default loadout').querySelector('svg')).toBeTruthy();
+    expect(within(cardFor('Alpha')).queryByLabelText('Default loadout')).toBeNull();
+    expect(within(cardFor('Beta')).queryByLabelText('Default loadout')).toBeNull();
   });
 
   it('keeps default status separate from Built-In provenance and lock state', () => {
