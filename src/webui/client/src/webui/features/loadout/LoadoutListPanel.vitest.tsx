@@ -139,20 +139,59 @@ describe('LoadoutListPanel', () => {
     expect(within(cardFor('Hojo')).queryByLabelText('Default loadout')).toBeNull();
   });
 
+  it('matches the active green dot by stable loadout id instead of display name', () => {
+    renderPanel({
+      runtimeActiveLoadoutId: 'user:hojo',
+      defaultLoadoutId: null,
+      loadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      persistedLoadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      loadoutSources: { Hojo: 'user' },
+    });
+
+    expect(within(cardFor('Hojo')).getByLabelText('Runtime active loadout')).toBeTruthy();
+  });
+
+  it('does not fall back to legacy activeLoadout display names for the active green dot', () => {
+    renderPanel({
+      runtimeActiveLoadoutId: undefined,
+      defaultLoadoutId: null,
+      loadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      persistedLoadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+      },
+      loadoutSources: { Hojo: 'user' },
+      activeLoadout: 'Hojo',
+    } as Partial<ComponentProps<typeof LoadoutListPanel>> & { activeLoadout: string });
+
+    expect(within(cardFor('Hojo')).queryByLabelText('Runtime active loadout')).toBeNull();
+  });
+
   it('derives selector default and active state from normalized loadout records', () => {
     const rows = buildLoadoutSelectorViewModels({
-      Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} },
+      'Hojo Display': { id: 'user:hojo', entry: 'Socket-1', sockets: {} },
       Stale: { id: 'user:stale', entry: 'Socket-1', sockets: {} },
     }, 'user:hojo', 'user:hojo');
 
     expect(rows.map(({ name, isDefault, isRuntimeActive }) => [name, isDefault, isRuntimeActive])).toEqual([
-      ['Hojo', true, true],
+      ['Hojo Display', true, true],
       ['Stale', false, false],
     ]);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'Hojo')[0]?.isDefault).toBe(false);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'missing')[0]?.isDefault).toBe(false);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, null, 'Hojo')[0]?.isRuntimeActive).toBe(false);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, null, 'missing')[0]?.isRuntimeActive).toBe(false);
+
+    const staleRows = buildLoadoutSelectorViewModels({
+      Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} },
+    }, 'user:missing-default', 'user:missing-active');
+    expect(staleRows[0]?.isDefault).toBe(false);
+    expect(staleRows[0]?.isRuntimeActive).toBe(false);
   });
 
   it('keeps menu interactions from selecting the card and separates active from default actions', async () => {
