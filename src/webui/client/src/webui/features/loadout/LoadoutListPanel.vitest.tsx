@@ -25,6 +25,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutListPanel>>
     onDuplicateLoadout: vi.fn(),
     onSetDefaultLoadout: vi.fn(async (name: string) => name),
     onSetRuntimeActiveLoadout: vi.fn(async (name: string) => name),
+    onToggleLoadoutLock: vi.fn(() => true),
     ...overrides,
   };
   render(<LoadoutListPanel {...props} />);
@@ -62,7 +63,7 @@ describe('LoadoutListPanel', () => {
 
     const betaCard = cardFor('Beta');
     expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
-    expect(within(betaCard).getByLabelText('Loadout locked')).toBeTruthy();
+    expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
     expect(betaCard.textContent).toContain('user loadout');
 
     const gammaCard = cardFor('Gamma');
@@ -104,17 +105,55 @@ describe('LoadoutListPanel', () => {
     expect(onSetRuntimeActiveLoadout).toHaveBeenCalledTimes(1);
   });
 
-  it('routes Duplicate and Delete through accessible context menu actions', () => {
+  it('toggles owned loadout locks from the row icon without selecting the card', () => {
+    const onSwitchEditingLoadout = vi.fn();
+    const onToggleLoadoutLock = vi.fn(() => true);
+    renderPanel({ onSwitchEditingLoadout, onToggleLoadoutLock });
+
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Lock edits'));
+
+    expect(onToggleLoadoutLock).toHaveBeenCalledWith('Gamma', 'locked');
+    expect(onSwitchEditingLoadout).not.toHaveBeenCalled();
+  });
+
+  it('keeps Built-In lock controls disabled with duplicate-to-edit tooltip copy', () => {
+    const onToggleLoadoutLock = vi.fn(() => true);
+    renderPanel({
+      loadouts: { ...loadouts, Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'unlocked' } },
+      loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
+      onToggleLoadoutLock,
+    });
+
+    const lockIcon = within(cardFor('Gamma')).getByLabelText('Built-In read-only');
+    expect(lockIcon.getAttribute('aria-disabled')).toBe('true');
+    expect(lockIcon.getAttribute('title')).toBe('Built-In read-only. Duplicate to edit.');
+    fireEvent.click(lockIcon);
+    expect(onToggleLoadoutLock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
+    const lockMenuItem = screen.getByRole('menuitem', { name: 'Lock edits' });
+    expect(lockMenuItem).toHaveProperty('disabled', true);
+    expect(lockMenuItem.getAttribute('title')).toBe('Built-In read-only. Duplicate to edit.');
+  });
+
+  it('routes Lock, Duplicate, and Delete through accessible context menu actions', () => {
     const onDuplicateLoadout = vi.fn();
     const onDeleteLoadout = vi.fn();
-    renderPanel({ onDuplicateLoadout, onDeleteLoadout });
+    const onToggleLoadoutLock = vi.fn(() => true);
+    renderPanel({ onDuplicateLoadout, onDeleteLoadout, onToggleLoadoutLock });
 
     fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
     const menu = screen.getByRole('menu', { name: 'Actions for Gamma' });
+    expect(within(menu).getByRole('menuitem', { name: 'Lock edits' })).toBeTruthy();
     expect(within(menu).getByRole('menuitem', { name: 'Duplicate' })).toBeTruthy();
     expect(within(menu).getByRole('menuitem', { name: 'Delete' }).classList.contains('loadout-actions-destructive')).toBe(true);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Duplicate' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Lock edits' }));
+    expect(onToggleLoadoutLock).toHaveBeenCalledWith('Gamma', 'locked');
+    expect(screen.queryByRole('menu', { name: 'Actions for Gamma' })).toBeNull();
+
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
     expect(onDuplicateLoadout).toHaveBeenCalledWith('Gamma');
     expect(screen.queryByRole('menu', { name: 'Actions for Gamma' })).toBeNull();
 
@@ -133,7 +172,7 @@ describe('LoadoutListPanel', () => {
     const betaCard = cardFor('Beta');
     expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Runtime active loadout')).toBeTruthy();
-    expect(within(betaCard).getByLabelText('Loadout locked')).toBeTruthy();
+    expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Loadout actions')).toBeTruthy();
     expect(betaCard.querySelector('.loadout-card-select')?.className).toContain('loadout-card-select');
     expect(betaCard.querySelector('.loadout-card-meta')?.textContent).toContain('user loadout');

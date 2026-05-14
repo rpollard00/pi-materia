@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as Rea
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { LoadoutSourceScope } from '../../types.js';
 
+type LoadoutLockState = 'locked' | 'unlocked';
+
 export interface LoadoutListPanelProps {
   loadouts: Record<string, PipelineConfig>;
   editingLoadoutName: string | undefined;
@@ -16,6 +18,7 @@ export interface LoadoutListPanelProps {
   onDuplicateLoadout: (name: string) => void;
   onSetDefaultLoadout: (name: string) => Promise<string | null>;
   onSetRuntimeActiveLoadout: (name: string) => Promise<string>;
+  onToggleLoadoutLock: (name: string, lockState: LoadoutLockState) => boolean;
 }
 
 interface LoadoutActionsMenuProps {
@@ -26,8 +29,10 @@ interface LoadoutActionsMenuProps {
   canSetDefault: boolean;
   deleteDisabled: boolean;
   deleteTitle: string;
+  lockAction: LoadoutLockAction;
   onSetRuntimeActive: (name: string) => void;
   onSetDefault: (name: string) => void;
+  onToggleLock: (name: string, lockState: LoadoutLockState) => void;
   onDuplicate: (name: string) => void;
   onDelete: (name: string) => void;
 }
@@ -41,17 +46,26 @@ function loadoutScopeLabel(scope: LoadoutSourceScope): string {
   return `${scope} loadout`;
 }
 
-function loadoutLockIndicator(loadout: PipelineConfig, scope: LoadoutSourceScope) {
-  if (scope === 'default') {
-    return { icon: '🔒', label: 'Built-In read-only', title: 'Built-In read-only. Duplicate to edit.' };
-  }
-  if (loadout.lockState === 'locked') {
-    return { icon: '🔒', label: 'Loadout locked', title: 'Unlock edits' };
-  }
-  return { icon: '🔓', label: 'Loadout unlocked', title: 'Lock edits' };
+interface LoadoutLockAction {
+  icon: string;
+  label: string;
+  title: string;
+  menuLabel: string;
+  nextState: LoadoutLockState;
+  disabled: boolean;
 }
 
-function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRuntimeActive, canSetDefault, deleteDisabled, deleteTitle, onSetRuntimeActive, onSetDefault, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
+function loadoutLockAction(loadout: PipelineConfig, scope: LoadoutSourceScope): LoadoutLockAction {
+  if (scope === 'default') {
+    return { icon: '🔒', label: 'Built-In read-only', title: 'Built-In read-only. Duplicate to edit.', menuLabel: 'Lock edits', nextState: 'locked', disabled: true };
+  }
+  if (loadout.lockState === 'locked') {
+    return { icon: '🔒', label: 'Unlock edits', title: 'Unlock edits', menuLabel: 'Unlock edits', nextState: 'unlocked', disabled: false };
+  }
+  return { icon: '🔓', label: 'Lock edits', title: 'Lock edits', menuLabel: 'Lock edits', nextState: 'locked', disabled: false };
+}
+
+function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRuntimeActive, canSetDefault, deleteDisabled, deleteTitle, lockAction, onSetRuntimeActive, onSetDefault, onToggleLock, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -108,6 +122,9 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRun
           <button type="button" role="menuitem" disabled={!canSetDefault} title={isDefaultLoadout ? 'This loadout is already the default.' : undefined} onClick={() => runAction(onSetDefault)}>
             {isDefaultLoadout ? 'Default loadout' : 'Set as Default'}
           </button>
+          <button type="button" role="menuitem" disabled={lockAction.disabled} title={lockAction.title} onClick={() => runAction((loadoutName) => onToggleLock(loadoutName, lockAction.nextState))}>
+            {lockAction.menuLabel}
+          </button>
           <button type="button" role="menuitem" onClick={() => runAction(onDuplicate)}>
             Duplicate
           </button>
@@ -120,7 +137,7 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRun
   );
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutName, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutName, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout, onToggleLoadoutLock }: LoadoutListPanelProps) {
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const persistedNames = Object.keys(persistedLoadouts);
@@ -170,7 +187,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const isRuntimeActive = name === runtimeActiveLoadoutName;
           const persisted = Boolean(persistedLoadouts[name]);
           const isDefaultLoadout = persisted && name === validatedDefaultLoadoutId;
-          const lockIndicator = loadoutLockIndicator(loadout, sourceScope);
+          const lockAction = loadoutLockAction(loadout, sourceScope);
           return (
             <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
               <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select">
@@ -182,9 +199,21 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                     </span>
                   )}
                   {isRuntimeActive && <span className="loadout-active-indicator" aria-label="Runtime active loadout" title="Active loadout" />}
-                  <span className="loadout-lock-indicator" role="img" aria-label={lockIndicator.label} title={lockIndicator.title}>{lockIndicator.icon}</span>
                 </span>
                 <small className="loadout-card-meta">{Object.keys(loadout.sockets ?? {}).length} sockets · {loadoutScopeLabel(sourceScope)}</small>
+              </button>
+              <button
+                type="button"
+                className="loadout-lock-indicator"
+                aria-label={lockAction.label}
+                aria-disabled={lockAction.disabled}
+                title={lockAction.title}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (!lockAction.disabled) onToggleLoadoutLock(name, lockAction.nextState);
+                }}
+              >
+                {lockAction.icon}
               </button>
               <LoadoutActionsMenu
                 name={name}
@@ -194,8 +223,10 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                 canSetDefault={persisted && !isDefaultLoadout}
                 deleteDisabled={deleteDisabled}
                 deleteTitle={defaultLoadout ? 'Built-In loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
+                lockAction={lockAction}
                 onSetRuntimeActive={(loadoutName) => void changeRuntimeActiveLoadout(loadoutName)}
                 onSetDefault={(loadoutName) => void onSetDefaultLoadout(loadoutName).catch(() => undefined)}
+                onToggleLock={onToggleLoadoutLock}
                 onDuplicate={onDuplicateLoadout}
                 onDelete={onDeleteLoadout}
               />

@@ -498,25 +498,32 @@ export function useWebuiConfig() {
     return true;
   }
 
-  function setActiveLoadoutLockState(lockState: LoadoutUserLockState) {
-    if (!editingLoadoutName || !editingLoadout) return false;
-    if (editingLoadoutPolicy.readonly) {
-      readonlyStatus(lockState === 'locked' ? 'Lock edit mode' : 'Unlock edit mode');
+  function setLoadoutLockState(name: string, lockState: LoadoutUserLockState) {
+    const loadout = loadouts[name];
+    if (!name || !loadout) return false;
+    const policy = getLoadoutEditPolicy({ source: (loadoutSources[name] ?? loadout.source ?? 'user') as never, lockState: loadout.lockState as never });
+    if (policy.readonly) {
+      setStatus(`${lockState === 'locked' ? 'Lock edit mode' : 'Unlock edit mode'} blocked: ${policy.reason}`);
       return false;
     }
-    if (editingLoadout.lockState === lockState) return true;
+    if (loadout.lockState === lockState) return true;
     setDraftConfig((current) => {
       const config = current ?? {};
       const currentLoadouts = buildLoadouts(config);
-      const loadout = currentLoadouts[editingLoadoutName];
-      if (!loadout) return current;
+      const currentLoadout = currentLoadouts[name];
+      if (!currentLoadout) return current;
       return normalizeMateriaConfigEdges({
         ...config,
-        loadouts: { ...currentLoadouts, [editingLoadoutName]: { ...loadout, lockState } },
+        loadouts: { ...currentLoadouts, [name]: { ...currentLoadout, lockState } },
       });
     });
-    setStatus(lockState === 'locked' ? `Locked ${editingLoadoutName}. Save to persist edit mode.` : `Unlocked ${editingLoadoutName}. Save to persist edit mode.`);
+    setStatus(lockState === 'locked' ? `Locked ${name}. Save to persist edit mode.` : `Unlocked ${name}. Save to persist edit mode.`);
     return true;
+  }
+
+  function setActiveLoadoutLockState(lockState: LoadoutUserLockState) {
+    if (!editingLoadoutName) return false;
+    return setLoadoutLockState(editingLoadoutName, lockState);
   }
 
   function canDeleteLoadout(name: string) {
@@ -670,6 +677,7 @@ export function useWebuiConfig() {
     setSaveTarget,
     setStatus,
     setActiveLoadoutLockState,
+    setLoadoutLockState,
     source,
     status,
     switchEditingLoadoutDraft,

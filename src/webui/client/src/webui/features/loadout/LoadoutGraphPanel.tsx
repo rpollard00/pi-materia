@@ -1,5 +1,5 @@
 import type { CSSProperties, Dispatch, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from 'react';
-import type { LoadoutEditPolicy, LoadoutUserLockState } from '../../../../../../domain/loadout.js';
+import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
 import {
   canDeleteSocket,
@@ -74,8 +74,6 @@ interface LoadoutGraphToolbarState {
   loadoutNameInput: string;
   setLoadoutNameInput: Dispatch<SetStateAction<string>>;
   commitActiveLoadoutRename: () => void;
-  duplicateActiveLoadout: () => boolean;
-  setActiveLoadoutLockState: (lockState: LoadoutUserLockState) => boolean;
 }
 
 interface LoadoutGraphCanvasActions {
@@ -148,10 +146,8 @@ export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActio
       <GraphToolbar
         createLoopDisabled={viewModel.createLoopDisabled}
         createTaskIteratorLoop={loopActions.createTaskIteratorLoop}
-        duplicateActiveLoadout={toolbar.duplicateActiveLoadout}
         editPolicy={viewModel.editPolicy}
         loadoutNameInput={toolbar.loadoutNameInput}
-        setActiveLoadoutLockState={toolbar.setActiveLoadoutLockState}
         selectedLoopSocketIds={viewModel.selectedLoopSocketIds}
         setLoadoutNameInput={toolbar.setLoadoutNameInput}
         commitActiveLoadoutRename={toolbar.commitActiveLoadoutRename}
@@ -240,38 +236,19 @@ interface GraphToolbarProps {
   selectedLoopSocketIds: string[];
   setLoadoutNameInput: Dispatch<SetStateAction<string>>;
   commitActiveLoadoutRename: () => void;
-  duplicateActiveLoadout: () => boolean;
   editPolicy: LoadoutEditPolicy;
-  setActiveLoadoutLockState: (lockState: LoadoutUserLockState) => boolean;
   socketLabel: (socketId: string) => string;
 }
 
-function GraphToolbar({ createLoopDisabled, createTaskIteratorLoop, duplicateActiveLoadout, editPolicy, loadoutNameInput, selectedLoopSocketIds, setLoadoutNameInput, setActiveLoadoutLockState, commitActiveLoadoutRename, socketLabel }: GraphToolbarProps) {
-  const lockStatus = editPolicy.readonly ? 'Read-only' : editPolicy.lockState === 'locked' ? 'Locked' : 'Edit mode';
-  const canToggleLock = !editPolicy.readonly;
+function GraphToolbar({ createLoopDisabled, createTaskIteratorLoop, editPolicy, loadoutNameInput, selectedLoopSocketIds, setLoadoutNameInput, commitActiveLoadoutRename, socketLabel }: GraphToolbarProps) {
   return (
     <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <h2 className="text-2xl font-bold">Visual materia grid</h2>
         <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
         <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.</p>
-        {!editPolicy.canEdit ? (
-          <div className="mt-3 rounded-xl border border-amber-300/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="status">
-            <span>{editPolicy.reason}</span>
-            {editPolicy.reasonCode === 'shipped_default_readonly' ? <button type="button" className="materia-button-secondary ml-3" onClick={duplicateActiveLoadout}>Duplicate to edit</button> : null}
-          </div>
-        ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <div className="rounded-xl border border-cyan-200/15 bg-slate-950/70 px-3 py-2 text-sm text-cyan-100" role="group" aria-label="Loadout edit status" title={editPolicy.reason}>
-          <span className="font-semibold">{lockStatus}</span>
-          <span className="ml-2 text-xs text-slate-400">{editPolicy.reason}</span>
-        </div>
-        {canToggleLock ? (
-          <button type="button" className="materia-button-secondary" data-testid="loadout-lock-toggle" aria-pressed={editPolicy.lockState === 'locked'} title={editPolicy.lockState === 'locked' ? 'Unlock edit mode for this loadout' : 'Lock this loadout for monitoring and inspection'} onClick={() => setActiveLoadoutLockState(editPolicy.lockState === 'locked' ? 'unlocked' : 'locked')}>
-            {editPolicy.lockState === 'locked' ? 'Unlock edits' : 'Lock edits'}
-          </button>
-        ) : null}
         <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? (!editPolicy.canEdit ? editPolicy.reason : 'Select loop sockets with shift-click or a drag box first.') : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>
         <label className="text-sm text-slate-300">Edit name
           <input

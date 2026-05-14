@@ -42,10 +42,10 @@ export function App() {
     saveTarget,
     setDefaultLoadout,
     setLoadoutNameInput,
+    setLoadoutLockState,
     setRuntimeActiveLoadout,
     setSaveTarget,
     setStatus,
-    setActiveLoadoutLockState,
     source,
     status,
     switchEditingLoadoutDraft,
@@ -194,6 +194,7 @@ export function App() {
             onDuplicateLoadout={duplicateLoadout}
             onSetDefaultLoadout={setDefaultLoadout}
             onSetRuntimeActiveLoadout={setRuntimeActiveLoadout}
+            onToggleLoadoutLock={setLoadoutLockState}
           />
 
           <LoadoutGraphPanel
@@ -222,8 +223,6 @@ export function App() {
               loadoutNameInput,
               setLoadoutNameInput,
               commitActiveLoadoutRename: commitEditingLoadoutRename,
-              duplicateActiveLoadout: () => editingLoadoutName ? duplicateLoadout(editingLoadoutName) : false,
-              setActiveLoadoutLockState,
             }}
             canvasActions={{
               beginSocketLayoutDrag,

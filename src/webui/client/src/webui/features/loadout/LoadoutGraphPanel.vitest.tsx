@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import type { ComponentProps } from 'react';
-import { cleanup, fireEvent, render, within } from '@testing-library/react';
+import { cleanup, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
 import { LoadoutGraphPanel } from './LoadoutGraphPanel.js';
@@ -77,8 +77,6 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutGraphPanel>
       loadoutNameInput: 'Alpha',
       setLoadoutNameInput: vi.fn(),
       commitActiveLoadoutRename: vi.fn(),
-      duplicateActiveLoadout: vi.fn(() => true),
-      setActiveLoadoutLockState: vi.fn(() => true),
     },
     canvasActions: {
       beginSocketLayoutDrag: vi.fn(),
@@ -142,34 +140,33 @@ afterEach(() => {
 });
 
 describe('LoadoutGraphPanel readonly defaults', () => {
-  it('surfaces readonly shipped defaults with a duplicate CTA and disables toolbar edits', () => {
-    const { props, getByRole, getByLabelText, getByTestId } = renderPanel();
+  it('omits persistent readonly copy and toolbar lock controls while keeping edits disabled', () => {
+    const { queryByRole, getByLabelText, getByTestId } = renderPanel();
 
-    expect(getByRole('status').textContent).toContain('read-only');
-    expect(getByRole('group', { name: 'Loadout edit status' }).textContent).toContain('Read-only');
-    fireEvent.click(getByRole('button', { name: 'Duplicate to edit' }));
-    expect(props.toolbar.duplicateActiveLoadout).toHaveBeenCalledOnce();
+    expect(queryByRole('status')).toBeNull();
+    expect(queryByRole('group', { name: 'Loadout edit status' })).toBeNull();
+    expect(queryByRole('button', { name: 'Duplicate to edit' })).toBeNull();
+    expect(queryByRole('button', { name: /Unlock edits|Lock edits/ })).toBeNull();
     expect(getByLabelText('Edit name')).toHaveProperty('disabled', true);
     expect(getByTestId('create-task-loop')).toHaveProperty('disabled', true);
-    expect(() => getByRole('button', { name: /Unlock edits|Lock edits/ })).toThrow();
   });
 
-  it('exposes a persisted lock toggle for locked and unlocked user loadouts', () => {
+  it('does not render a graph-toolbar lock toggle for locked or unlocked user loadouts', () => {
     const base = renderPanel();
     const baseViewModel = base.props.viewModel;
     const baseToolbar = base.props.toolbar;
     base.unmount();
 
-    const locked = renderPanel({ viewModel: { ...baseViewModel, editPolicy: lockedUserPolicy }, toolbar: { ...baseToolbar, setActiveLoadoutLockState: vi.fn(() => true) } });
-    expect(locked.getByRole('group', { name: 'Loadout edit status' }).textContent).toContain('Locked');
-    fireEvent.click(locked.getByRole('button', { name: 'Unlock edits' }));
-    expect(locked.props.toolbar.setActiveLoadoutLockState).toHaveBeenCalledWith('unlocked');
+    const locked = renderPanel({ viewModel: { ...baseViewModel, editPolicy: lockedUserPolicy }, toolbar: baseToolbar });
+    expect(locked.queryByRole('group', { name: 'Loadout edit status' })).toBeNull();
+    expect(locked.queryByRole('button', { name: /Unlock edits|Lock edits/ })).toBeNull();
+    expect(locked.getByLabelText('Edit name')).toHaveProperty('disabled', true);
     locked.unmount();
 
-    const unlocked = renderPanel({ viewModel: { ...baseViewModel, editPolicy: unlockedUserPolicy }, toolbar: { ...baseToolbar, setActiveLoadoutLockState: vi.fn(() => true) } });
-    expect(unlocked.getByRole('group', { name: 'Loadout edit status' }).textContent).toContain('Edit mode');
-    fireEvent.click(unlocked.getByRole('button', { name: 'Lock edits' }));
-    expect(unlocked.props.toolbar.setActiveLoadoutLockState).toHaveBeenCalledWith('locked');
+    const unlocked = renderPanel({ viewModel: { ...baseViewModel, editPolicy: unlockedUserPolicy }, toolbar: baseToolbar });
+    expect(unlocked.queryByRole('group', { name: 'Loadout edit status' })).toBeNull();
+    expect(unlocked.queryByRole('button', { name: /Unlock edits|Lock edits/ })).toBeNull();
+    expect(unlocked.getByLabelText('Edit name')).toHaveProperty('disabled', false);
   });
 
   it('renders the active session socket indicator without enabling locked edits', () => {
