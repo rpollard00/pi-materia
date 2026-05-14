@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { AppShell } from './webui/components/AppShell.js';
 import { LoadoutListPanel } from './webui/features/loadout/LoadoutListPanel.js';
 import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePanel.js';
@@ -7,6 +7,7 @@ import { LoadoutGraphPanel } from './webui/features/loadout/LoadoutGraphPanel.js
 import { MateriaEditorPanel } from './webui/features/materia-editor/MateriaEditorPanel.js';
 import { MonitorPanel } from './webui/features/monitor/MonitorPanel.js';
 import { useAppNavigation } from './webui/hooks/useAppNavigation.js';
+import { toast, type ToastVariant } from './toast/index.js';
 import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
@@ -57,6 +58,31 @@ export function App() {
   const monitor = useMonitorSnapshot();
   useCastCompletionToasts(monitor);
 
+  const lastStatusToastRef = useRef('');
+  useEffect(() => {
+    if (!status || status === lastStatusToastRef.current || /^Loading materia configuration|^Draft ready\.|^Saving staged loadout edits|^Cannot save staged loadout edits|^Save failed:|^Saved staged loadout edits|^Reverted staged edits\./.test(status)) return;
+    lastStatusToastRef.current = status;
+    const variant: ToastVariant = /^(Cannot|Blocked\b|.*\bblocked:|.*\bfailed:)/i.test(status) ? 'validation' : 'success';
+    toast({
+      id: `loadout-status:${variant}:${status}`,
+      title: variant === 'validation' ? 'Cannot stage loadout change' : 'Loadout update',
+      description: status,
+      variant,
+    });
+  }, [status]);
+
+  const setLoadoutStatus = (message: string, variantOverride?: ToastVariant) => {
+    const variant: ToastVariant = variantOverride ?? (/^(Cannot|Blocked\b|.*\bblocked:|.*\bfailed:|Ignored\b)/i.test(message) ? 'validation' : 'success');
+    lastStatusToastRef.current = message;
+    toast({
+      id: `loadout-status:${variant}:${message}`,
+      title: variant === 'validation' ? 'Cannot stage loadout change' : 'Loadout update',
+      description: message,
+      variant,
+    });
+    setStatus(message);
+  };
+
   const socketInteractions = useLoadoutSocketInteractionController({
     activeLoadout: editingLoadout,
     activeLoadoutName: editingLoadoutName,
@@ -65,7 +91,7 @@ export function App() {
     draftConfig,
     loadouts,
     monitor,
-    setStatus,
+    setStatus: setLoadoutStatus,
     switchLoadoutDraft: switchEditingLoadoutDraft,
     updateLoadoutDraft,
     updateLoadoutLayout,
@@ -128,7 +154,7 @@ export function App() {
     materia,
     selectedLoopSockets,
     setSelectedLoopSocketIds,
-    setStatus,
+    setStatus: setLoadoutStatus,
     updateLoadoutDraft,
     updateLoadoutLayout,
     closeSocketActionModal,
@@ -290,7 +316,6 @@ export function App() {
               saveTarget={saveTarget}
               isDirty={isDirty}
               canRevert={canRevert}
-              status={status}
               onSaveTargetChange={setSaveTarget}
               onSave={() => saveDraft().catch(() => undefined)}
               onRevert={revertDraft}

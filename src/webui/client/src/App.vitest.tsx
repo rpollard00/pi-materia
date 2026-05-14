@@ -9,6 +9,7 @@ import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopR
 
 const testConfig = {
   activeLoadout: 'Full-Auto',
+  activeLoadoutId: 'Full-Auto',
   materia: {
     planner: { tools: 'none', prompt: 'Plan the work', generator: true },
     Build: { tools: 'coding', prompt: 'Build the work', model: 'openai/gpt-test' },
@@ -18,6 +19,7 @@ const testConfig = {
   },
   loadouts: {
     'Full-Auto': {
+      id: 'Full-Auto',
       entry: 'Socket-1',
       sockets: {
         'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
@@ -27,6 +29,7 @@ const testConfig = {
       },
     },
     'Planning-Consult': {
+      id: 'Planning-Consult',
       entry: 'Socket-1',
       sockets: {
         'Socket-1': { type: 'agent', materia: 'interactivePlan', edges: [{ when: 'always', to: 'Socket-2' }] },
@@ -38,8 +41,10 @@ const testConfig = {
 
 const edgeEditorConfig = {
   activeLoadout: 'Edges',
+  activeLoadoutId: 'Edges',
   loadouts: {
     Edges: {
+      id: 'Edges',
       entry: 'Socket-1',
       sockets: {
         'Socket-1': { type: 'agent', materia: 'Start', parse: 'json', layout: { x: 0, y: 0 }, edges: [] as Array<{ to: string; when?: string }> },
@@ -55,6 +60,7 @@ const legacyPipelineConfig = {
     planner: { tools: 'none', prompt: 'Plan the work' },
   },
   pipeline: {
+    id: 'Legacy',
     entry: 'Socket-1',
     sockets: {
       'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
@@ -126,6 +132,11 @@ function openLoadoutActions(name: string) {
   fireEvent.click(within(loadoutCard(name)).getByLabelText('Loadout actions'));
 }
 
+async function findToastAlert() {
+  const alerts = await screen.findAllByRole('alert');
+  return alerts.find((alert) => alert.getAttribute('data-toast-variant')) ?? alerts[0];
+}
+
 describe('Materia loadout grid editor', () => {
   it('renders active and available loadouts with staged save controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
@@ -136,7 +147,9 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByRole('button', { name: /Full-Auto/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Planning-Consult/ })).toBeTruthy();
     expect(screen.getByTestId('socket-Socket-1')).toBeTruthy();
-    expect(screen.getByText(/Changes are staged until you save/i)).toBeTruthy();
+    const stageApplyPanel = screen.getByRole('heading', { name: 'Stage & apply' }).closest('section') as HTMLElement;
+    expect(stageApplyPanel).toBeTruthy();
+    expect(within(stageApplyPanel).queryByText(/Nothing is persisted until Save is pressed/i)).toBeNull();
     expect(screen.queryByTestId('trash-socket')).toBeNull();
     expect(screen.queryByText(/Drag socket here or onto the graph background to unsocket materia/i)).toBeNull();
   });
@@ -157,7 +170,7 @@ describe('Materia loadout grid editor', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (input === '/api/loadout/active' && init?.method === 'POST') {
         activeLoadout = JSON.parse(String(init.body)).name;
-        const updatedConfig = { ...structuredClone(testConfig), activeLoadout };
+        const updatedConfig = { ...structuredClone(testConfig), activeLoadout, activeLoadoutId: activeLoadout };
         return new Response(JSON.stringify({
           ok: true,
           activeLoadout,
@@ -165,7 +178,7 @@ describe('Materia loadout grid editor', () => {
           message: `Active loadout changed to ${activeLoadout}.`,
         }));
       }
-      return new Response(JSON.stringify({ ok: true, source: 'test', config: { ...testConfig, activeLoadout } }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: { ...testConfig, activeLoadout, activeLoadoutId: activeLoadout } }));
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -897,15 +910,15 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.change(await screen.findByTestId('loop-exit-source-taskIteration'), { target: { value: 'Socket-3' } });
     await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Socket-3 (Auto-Eval).Satisfied → end'));
-    fireEvent.change(screen.getByTestId('loop-exit-condition-taskIteration'), { target: { value: 'not_satisfied' } });
-    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Socket-3 (Auto-Eval).Not Satisfied → end'));
+    fireEvent.change(screen.getByTestId('loop-exit-condition-taskIteration'), { target: { value: 'satisfied' } });
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Socket-3 (Auto-Eval).Satisfied → end'));
     fireEvent.change(screen.getByTestId('loop-exit-target-taskIteration'), { target: { value: 'Socket-4' } });
-    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Socket-3 (Auto-Eval).Not Satisfied → Socket-4 (Maintain)'));
+    await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Socket-3 (Auto-Eval).Satisfied → Socket-4 (Maintain)'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Full-Auto'];
-    expect(saved.loops.taskIteration.exit).toEqual({ from: 'Socket-3', when: 'not_satisfied', to: 'Socket-4' });
+    expect(saved.loops.taskIteration.exit).toEqual({ from: 'Socket-3', when: 'satisfied', to: 'Socket-4' });
   });
 
   it('breaks loop metadata without removing sockets or graph edges', async () => {
@@ -947,6 +960,24 @@ describe('Materia loadout grid editor', () => {
     expect(saved.sockets['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
     expect(saved.sockets['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(saved.sockets['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }]);
+  });
+
+  it('shows invalid loop creation feedback as a validation toast outside Stage & apply', async () => {
+    const config = structuredClone(testConfig);
+    (config.loadouts['Full-Auto'].sockets as any)['Socket-5'] = { type: 'agent', materia: 'Maintain', layout: { x: 4, y: 0 } };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config, loadoutSources: { 'Full-Auto': 'user', 'Planning-Consult': 'user' } }))));
+
+    render(<App />);
+
+    const validationMessage = 'Cannot create loop; selected sockets need exactly one inbound Generator edge, found 0.';
+    fireEvent.click(await screen.findByTestId('socket-Socket-5'), { shiftKey: true });
+    fireEvent.click(screen.getByTestId('create-task-loop'));
+
+    const notification = await screen.findByRole('alert');
+    expect(notification.getAttribute('data-toast-variant')).toBe('validation');
+    expect(notification.textContent).toContain(validationMessage);
+    const stageApplyPanel = screen.getByRole('heading', { name: 'Stage & apply' }).closest('section') as HTMLElement;
+    expect(within(stageApplyPanel).queryByText(validationMessage)).toBeNull();
   });
 
   it('creates and saves an explicit loop from shift-selected sockets on a fresh layout', async () => {
@@ -1120,6 +1151,7 @@ describe('Materia loadout grid editor', () => {
   it('creates a loop from selected sockets on a fresh non-Build layout', async () => {
     const config = {
       activeLoadout: 'Fresh Loop',
+      activeLoadoutId: 'Fresh Loop',
       materia: {
         planner: { tools: 'none', prompt: 'Plan', generator: true },
         worker: { tools: 'coding', prompt: 'Work' },
@@ -1127,6 +1159,7 @@ describe('Materia loadout grid editor', () => {
       },
       loadouts: {
         'Fresh Loop': {
+          id: 'Fresh Loop',
           entry: 'Socket-1',
           sockets: {
             'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }], layout: { x: 0, y: 0 } },
@@ -1891,8 +1924,9 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('socket-layout-x'), { target: { value: 'NaN' } });
     fireEvent.click(screen.getByTestId('save-socket-properties'));
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Max visits must be a positive whole number.');
-    expect(screen.getByRole('alert').textContent).toContain('Layout X must be a finite number.');
+    const validationToast = await findToastAlert();
+    expect(validationToast.textContent).toContain('Max visits must be a positive whole number.');
+    expect(validationToast.textContent).toContain('Layout X must be a finite number.');
     expect(screen.getByTestId('socket-property-editor')).toBeTruthy();
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -2073,7 +2107,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'satisfied' } });
     fireEvent.click(screen.getByTestId('create-edge'));
 
-    expect((await screen.findByRole('alert')).textContent).toContain('require Socket-1 (Start) to parse JSON');
+    expect((await findToastAlert()).textContent).toContain('require Socket-1 (Start) to parse JSON');
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -2102,7 +2136,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'not_satisfied' } });
     fireEvent.click(screen.getByTestId('create-edge'));
 
-    expect((await screen.findByRole('alert')).textContent).toContain('require Socket-1 (Start) to parse JSON');
+    expect((await findToastAlert()).textContent).toContain('require Socket-1 (Start) to parse JSON');
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -2206,7 +2240,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('edge-condition'), { target: { value: 'satisfied' } });
     fireEvent.click(screen.getByTestId('create-edge'));
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Socket "Socket-1" has an unreachable outgoing edge at Socket-1.edges[1]');
+    expect((await findToastAlert()).textContent).toContain('Socket "Socket-1" has an unreachable outgoing edge at Socket-1.edges[1]');
     expect(screen.queryByTestId('edge-Socket-1-Socket-3-1')).toBeNull();
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

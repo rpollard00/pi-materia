@@ -128,7 +128,7 @@ function validUserLockState(value: unknown): value is LoadoutUserLockState {
 }
 
 function policyForLoadout(loadout: PipelineConfig | undefined, source: LoadoutSourceScope | undefined) {
-  return getLoadoutEditPolicy({ source: (loadout?.source ?? source) as never, lockState: loadout?.lockState as never });
+  return getLoadoutEditPolicy({ source: (loadout?.source ?? source ?? 'user') as never, lockState: loadout?.lockState as never });
 }
 
 function guardedDraftLoadoutsAfterUpdate({
@@ -273,21 +273,20 @@ export function useWebuiConfig() {
       setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
       return false;
     }
-    let changed = false;
+    if (!loadout) return false;
     setDraftConfig((current) => {
       const config = current ?? {};
       const currentLoadouts = buildLoadouts(config);
-      const loadout = currentLoadouts[loadoutName];
-      if (!loadout) return current;
-      const nextLoadout = updater(loadout);
-      if (nextLoadout === loadout) return current;
-      changed = true;
+      const currentLoadout = currentLoadouts[loadoutName];
+      if (!currentLoadout) return current;
+      const nextLoadout = updater(currentLoadout);
+      if (nextLoadout === currentLoadout) return current;
       return normalizeMateriaConfigEdges({
         ...config,
         loadouts: { ...currentLoadouts, [loadoutName]: nextLoadout },
       });
     });
-    return changed;
+    return true;
   }
 
   function updateLoadoutLayout(loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) {
@@ -297,21 +296,20 @@ export function useWebuiConfig() {
       setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
       return false;
     }
-    let changed = false;
+    if (!loadout) return false;
     setDraftConfig((current) => {
       const config = current ?? {};
       const currentLoadouts = buildLoadouts(config);
-      const loadout = currentLoadouts[loadoutName];
-      if (!loadout) return current;
-      const nextLoadout = updater(loadout);
-      if (nextLoadout === loadout) return current;
-      changed = true;
+      const currentLoadout = currentLoadouts[loadoutName];
+      if (!currentLoadout) return current;
+      const nextLoadout = updater(currentLoadout);
+      if (nextLoadout === currentLoadout) return current;
       return {
         ...config,
         loadouts: { ...currentLoadouts, [loadoutName]: nextLoadout },
       };
     });
-    return changed;
+    return true;
   }
 
   async function reloadConfig({ preserveLoadoutEdits = false, readyStatus = 'Draft ready. Changes are staged until you save.', cancelled = () => false }: { preserveLoadoutEdits?: boolean; readyStatus?: string; cancelled?: () => boolean } = {}) {
@@ -562,7 +560,14 @@ export function useWebuiConfig() {
 
   function revertDraft() {
     setDraftConfig(cloneConfig(baselineConfig ?? {}));
-    setStatus('Reverted staged edits.');
+    const readyStatus = 'Reverted staged edits.';
+    setStatus(readyStatus);
+    toast({
+      id: 'loadout-revert-success',
+      title: 'Staged edits reverted',
+      description: readyStatus,
+      variant: 'success',
+    });
   }
 
   async function saveDraft() {

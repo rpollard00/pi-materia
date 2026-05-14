@@ -18,7 +18,7 @@ export interface LoadoutSocketInteractionControllerOptions {
   draftConfig: MateriaConfig | undefined;
   loadouts: Record<string, PipelineConfig>;
   monitor: MonitorSnapshot | undefined;
-  setStatus: (status: string) => void;
+  setStatus: (status: string, variant?: 'success' | 'validation') => void;
   switchLoadoutDraft: (name: string) => void;
   updateLoadoutDraft: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
   updateLoadoutLayout: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
@@ -41,6 +41,9 @@ export function useLoadoutSocketInteractionController({
   onModalErrorReset,
   onSocketPropertyErrorReset,
 }: LoadoutSocketInteractionControllerOptions) {
+  const notifyStatus = (message: string) => {
+    setStatus(message);
+  };
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
   const [socketActionMode, setSocketActionMode] = useState<'actions' | 'replace' | 'edit' | 'connect'>('actions');
@@ -83,7 +86,7 @@ export function useLoadoutSocketInteractionController({
 
   function readonlyBlocked(action: string) {
     if (editPolicy.canEdit) return false;
-    setStatus(`${action} blocked: ${editPolicy.reason}`);
+    notifyStatus(`${action} blocked: ${editPolicy.reason}`);
     return true;
   }
 
@@ -93,20 +96,20 @@ export function useLoadoutSocketInteractionController({
     const currentLoadout = loadouts[activeLoadoutName];
     const currentTarget = currentLoadout?.sockets?.[socketId];
     if (!currentLoadout?.sockets || !currentTarget) {
-      setStatus(`Ignored drop: socket ${socketId} is not available in the active loadout.`);
+      notifyStatus(`Ignored drop: socket ${socketId} is not available in the active loadout.`);
       return false;
     }
 
     if (fromSocket && fromSocket !== socketId) {
       const currentSource = currentLoadout.sockets[fromSocket];
       if (isEmptySocket(currentSource)) {
-        setStatus('Ignored drop: dragged socket materia is no longer available.');
+        notifyStatus('Ignored drop: dragged socket materia is no longer available.');
         return false;
       }
     } else {
       const currentSource = palette.find(([id]) => id === materiaId)?.[1];
       if (!currentSource || isEmptySocket(currentSource)) {
-        setStatus(`Ignored drop: materia ${materiaId} is not available.`);
+        notifyStatus(`Ignored drop: materia ${materiaId} is not available.`);
         return false;
       }
     }
@@ -119,7 +122,7 @@ export function useLoadoutSocketInteractionController({
     });
     if (!updated) return false;
     setSelectedMateriaId(undefined);
-    setStatus(`Staged ${materiaId} in socket ${socketId}; socket graph links and layout were preserved.`);
+    notifyStatus(`Staged ${materiaId} in socket ${socketId}; socket graph links and layout were preserved.`);
     return true;
   }
 
@@ -128,17 +131,17 @@ export function useLoadoutSocketInteractionController({
     if (!activeLoadoutName) return false;
     const currentSocket = loadouts[activeLoadoutName]?.sockets?.[socketId];
     if (!currentSocket) {
-      setStatus(`Ignored unsocket: socket ${socketId} is not available in the active loadout.`);
+      notifyStatus(`Ignored unsocket: socket ${socketId} is not available in the active loadout.`);
       return false;
     }
     if (isEmptySocket(currentSocket)) {
-      setStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
+      notifyStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
       return false;
     }
     if (!updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout)) return false;
     setSocketActionId(undefined);
     setSocketActionMode('actions');
-    setStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
+    notifyStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
     return true;
   }
 
@@ -223,7 +226,7 @@ export function useLoadoutSocketInteractionController({
       }
       return setSocketLayouts(loadout, layouts);
     })) {
-      setStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);
+      notifyStatus(`Moved socket ${socketId}; explicit layout will be saved with the loadout.`);
     }
   }
 
@@ -263,7 +266,7 @@ export function useLoadoutSocketInteractionController({
     const selected = loadoutGraph.sockets.filter((socket) => rectanglesIntersect(rect, { x: socket.x, y: socket.y, width: socketCardWidth, height: socketStageHeight })).map((socket) => socket.id);
     setSocketRegionSelectionDrag(undefined);
     setSelectedLoopSocketIds(selected);
-    if (selected.length > 0) setStatus(`Selected loop sockets: ${selected.join(', ')}.`);
+    if (selected.length > 0) notifyStatus(`Selected loop sockets: ${selected.join(', ')}.`);
   }
 
   function cancelSocketRegionSelection(event: ReactPointerEvent<HTMLDivElement>) {
@@ -286,7 +289,7 @@ export function useLoadoutSocketInteractionController({
     if (!raw) return;
     const payload = parseDragPayload(raw);
     if (!payload) {
-      setStatus('Ignored drop: unsupported drag payload.');
+      notifyStatus('Ignored drop: unsupported drag payload.');
       return;
     }
     putMateria(socketId, payload.materiaId, payload.kind === 'socket' ? payload.fromSocket : undefined);
@@ -299,15 +302,15 @@ export function useLoadoutSocketInteractionController({
     if (!raw) return;
     const payload = parseDragPayload(raw);
     if (!payload) {
-      setStatus('Ignored drop: unsupported drag payload.');
+      notifyStatus('Ignored drop: unsupported drag payload.');
       return;
     }
     if (payload.kind !== 'socket' || !payload.fromSocket) {
-      setStatus('Ignored drop: drag palette materia onto a socket to place it.');
+      notifyStatus('Ignored drop: drag palette materia onto a socket to place it.');
       return;
     }
     if (payload.fromLoadout && payload.fromLoadout !== activeLoadoutName) {
-      setStatus('Ignored unsocket: dragged materia belongs to a different loadout.');
+      notifyStatus('Ignored unsocket: dragged materia belongs to a different loadout.');
       return;
     }
     removeMateria(payload.fromSocket);
