@@ -49,6 +49,28 @@ describe('LoadoutListPanel', () => {
     expect(within(cardFor('Gamma')).queryByLabelText('Default loadout')).toBeNull();
   });
 
+  it('keeps default status separate from Built-In provenance and lock state', () => {
+    renderPanel({
+      defaultLoadoutId: 'Beta',
+      loadouts: {
+        ...loadouts,
+        Beta: { ...loadouts.Beta, source: 'user', lockState: 'locked' },
+        Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'unlocked' },
+      },
+      loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
+    });
+
+    const betaCard = cardFor('Beta');
+    expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
+    expect(within(betaCard).getByLabelText('Loadout locked')).toBeTruthy();
+    expect(betaCard.textContent).toContain('user loadout');
+
+    const gammaCard = cardFor('Gamma');
+    expect(within(gammaCard).queryByLabelText('Default loadout')).toBeNull();
+    expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
+    expect(gammaCard.textContent).toContain('Built-In');
+  });
+
   it('does not render a stale star when the default preference points at a missing loadout', () => {
     renderPanel({ defaultLoadoutId: 'Missing' });
 
@@ -99,6 +121,22 @@ describe('LoadoutListPanel', () => {
     fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
     expect(onDeleteLoadout).toHaveBeenCalledWith('Gamma');
+  });
+
+  it('renders compact row indicators for active, lock, default, scope, and menu affordances', () => {
+    renderPanel({
+      defaultLoadoutId: 'Beta',
+      loadouts: { ...loadouts, Beta: { ...loadouts.Beta, lockState: 'locked' } },
+      runtimeActiveLoadoutName: 'Beta',
+    });
+
+    const betaCard = cardFor('Beta');
+    expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
+    expect(within(betaCard).getByLabelText('Runtime active loadout')).toBeTruthy();
+    expect(within(betaCard).getByLabelText('Loadout locked')).toBeTruthy();
+    expect(within(betaCard).getByLabelText('Loadout actions')).toBeTruthy();
+    expect(betaCard.querySelector('.loadout-card-select')?.className).toContain('loadout-card-select');
+    expect(betaCard.querySelector('.loadout-card-meta')?.textContent).toContain('user loadout');
   });
 
   it('keeps the existing active-loadout quick selector and does not call the default preference setter', async () => {

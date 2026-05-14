@@ -36,6 +36,21 @@ function stopMenuEvent(event: ReactMouseEvent | KeyboardEvent) {
   event.stopPropagation();
 }
 
+function loadoutScopeLabel(scope: LoadoutSourceScope): string {
+  if (scope === 'default') return 'Built-In';
+  return `${scope} loadout`;
+}
+
+function loadoutLockIndicator(loadout: PipelineConfig, scope: LoadoutSourceScope) {
+  if (scope === 'default') {
+    return { icon: '🔒', label: 'Built-In read-only', title: 'Built-In read-only. Duplicate to edit.' };
+  }
+  if (loadout.lockState === 'locked') {
+    return { icon: '🔒', label: 'Loadout locked', title: 'Unlock edits' };
+  }
+  return { icon: '🔓', label: 'Loadout unlocked', title: 'Lock edits' };
+}
+
 function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRuntimeActive, canSetDefault, deleteDisabled, deleteTitle, onSetRuntimeActive, onSetDefault, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -148,12 +163,14 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
       {activeChangeMessage && <p className="mb-3 text-xs text-slate-300" role="status">{activeChangeMessage}</p>}
       <div className="space-y-2" role="list" aria-label="Available loadouts">
         {Object.keys(loadouts).map((name) => {
+          const loadout = loadouts[name];
           const sourceScope = loadoutSources[name] ?? 'user';
           const defaultLoadout = sourceScope === 'default';
           const deleteDisabled = !canDeleteLoadout(name);
           const isRuntimeActive = name === runtimeActiveLoadoutName;
           const persisted = Boolean(persistedLoadouts[name]);
           const isDefaultLoadout = persisted && name === validatedDefaultLoadoutId;
+          const lockIndicator = loadoutLockIndicator(loadout, sourceScope);
           return (
             <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
               <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select">
@@ -164,8 +181,10 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                       ★
                     </span>
                   )}
+                  {isRuntimeActive && <span className="loadout-active-indicator" aria-label="Runtime active loadout" title="Active loadout" />}
+                  <span className="loadout-lock-indicator" role="img" aria-label={lockIndicator.label} title={lockIndicator.title}>{lockIndicator.icon}</span>
                 </span>
-                <small>{Object.keys(loadouts[name].sockets ?? {}).length} sockets · {defaultLoadout ? 'shipped default' : `${sourceScope} loadout`}</small>
+                <small className="loadout-card-meta">{Object.keys(loadout.sockets ?? {}).length} sockets · {loadoutScopeLabel(sourceScope)}</small>
               </button>
               <LoadoutActionsMenu
                 name={name}
@@ -174,7 +193,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                 canSetRuntimeActive={persisted && !isRuntimeActive && !activeChangePending}
                 canSetDefault={persisted && !isDefaultLoadout}
                 deleteDisabled={deleteDisabled}
-                deleteTitle={defaultLoadout ? 'Shipped default loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
+                deleteTitle={defaultLoadout ? 'Built-In loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
                 onSetRuntimeActive={(loadoutName) => void changeRuntimeActiveLoadout(loadoutName)}
                 onSetDefault={(loadoutName) => void onSetDefaultLoadout(loadoutName).catch(() => undefined)}
                 onDuplicate={onDuplicateLoadout}

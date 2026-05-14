@@ -53,13 +53,14 @@
 .loadout-card {
   display: flex;
   width: 100%;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.55rem;
   border-radius: 1rem;
   border: 1px solid rgb(255 255 255 / 0.08);
   background: rgb(15 23 42 / 0.72);
-  padding: 0.875rem;
+  padding: 0.65rem 0.7rem;
   text-align: left;
   color: rgb(226 232 240);
   transition: 160ms ease;
@@ -70,20 +71,22 @@
 }
 
 .loadout-card-select {
+  display: flex;
   min-width: 0;
   flex: 1;
+  align-items: center;
+  gap: 0.45rem;
+  overflow: hidden;
   text-align: left;
-}
-
-.loadout-card-select span,
-.loadout-card-select small {
-  display: block;
+  white-space: nowrap;
 }
 
 .loadout-card-select .loadout-card-title {
-  display: flex;
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 auto;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .loadout-card-name {
@@ -93,14 +96,43 @@
   white-space: nowrap;
 }
 
-.loadout-default-indicator {
+.loadout-card-meta {
+  display: inline-block;
+  max-width: 7.25rem;
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loadout-default-indicator,
+.loadout-lock-indicator,
+.loadout-active-indicator {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.loadout-default-indicator {
   color: rgb(250 204 21);
   font-size: 0.9rem;
-  line-height: 1;
   text-shadow: 0 0 10px rgb(250 204 21 / 0.42);
+}
+
+.loadout-lock-indicator {
+  width: 1rem;
+  color: rgb(165 243 252 / 0.92);
+  font-size: 0.78rem;
+}
+
+.loadout-active-indicator {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: rgb(34 197 94);
+  box-shadow: 0 0 10px rgb(34 197 94 / 0.72);
 }
 
 .loadout-actions-menu {
