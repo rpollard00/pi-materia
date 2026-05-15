@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -282,7 +283,7 @@ function warnInvalidProfileConfig(file: string, message: string): void {
 
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   const dir = path.dirname(file);
-  const temp = path.join(dir, `.pi-materia.${process.pid}.${Date.now()}.tmp`);
+  const temp = path.join(dir, `.pi-materia.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   await mkdir(dir, { recursive: true });
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(temp, file);

@@ -82,11 +82,12 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
-      if (shouldAutoStartWebUi(subcommand)) {
+      const autoStartsWebUi = shouldAutoStartWebUi(subcommand);
+      if (autoStartsWebUi) {
         autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath() });
       }
 
-      await ctx.waitForIdle();
+      if (!autoStartsWebUi) await ctx.waitForIdle();
 
       if (subcommand === "link") {
         const argumentsText = trimmedArgs.replace(/^link(?:\s+|$)/, "");

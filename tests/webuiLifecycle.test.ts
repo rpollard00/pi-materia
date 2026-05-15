@@ -169,8 +169,10 @@ describe("/materia ui lifecycle", () => {
       expect(secondResult.url).toBe(firstResult.url);
       expect(secondResult.sessionKey).toBe(firstResult.sessionKey);
       expect(harness.waitForIdleCalls).toBe(0);
+      expect(harness.operationLog).not.toContain("waitForIdle");
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
+      expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "custom_message")).toHaveLength(0);
     } finally {
       await harness.emit("session_shutdown");
     }
@@ -185,6 +187,8 @@ describe("/materia ui lifecycle", () => {
     try {
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
+      expect(harness.waitForIdleCalls).toBe(0);
+      expect(harness.operationLog).not.toContain("waitForIdle");
       const started = harness.notifications.find((notification) => notification.message.includes("Materia WebUI started:"));
       expect(started?.message).toContain("http://127.0.0.1:");
       const startedWidget = harness.widgets.get("materia-webui")?.content;
@@ -201,6 +205,8 @@ describe("/materia ui lifecycle", () => {
       expect(readyWidget?.[1]).toContain("http://127.0.0.1:");
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
+      expect(harness.waitForIdleCalls).toBe(0);
+      expect(harness.operationLog).not.toContain("waitForIdle");
     } finally {
       await harness.emit("session_shutdown");
     }
@@ -218,6 +224,8 @@ describe("/materia ui lifecycle", () => {
 
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
+      expect(harness.waitForIdleCalls).toBe(0);
+      expect(harness.operationLog).not.toContain("waitForIdle");
     } finally {
       await harness.emit("session_shutdown");
     }
