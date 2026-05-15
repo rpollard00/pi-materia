@@ -191,6 +191,26 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(inactiveSocket.className).not.toContain('materia-socket-active');
   });
 
+  it('keeps active monitor hooks on loop-member sockets', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const { getByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        currentMonitorSocket: 'Socket-2',
+        loopMemberships: new Map([['Socket-2', { loopIds: ['reviewLoop'], borderColor: '#22d3ee', background: 'rgba(34, 211, 238, 0.12)', textColor: '#cffafe', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }]]),
+      },
+    });
+
+    const activeLoopSocket = getByTestId('socket-Socket-2');
+    expect(activeLoopSocket.className).toContain('materia-socket-loop-member');
+    expect(activeLoopSocket.className).toContain('materia-socket-active');
+    expect(activeLoopSocket.getAttribute('aria-current')).toBe('step');
+    expect(activeLoopSocket.getAttribute('aria-label')).toContain('active session socket');
+    expect(activeLoopSocket.querySelector('.materia-socket-active-indicator')).not.toBeNull();
+  });
+
   it('marks socket cards readonly and disables socket action mutations', () => {
     const baseActions = {
       closeSocketActionModal: vi.fn(),

@@ -54,9 +54,10 @@ describe("WebUI active loadout launcher callback", () => {
 
     const result = await setActiveLoadout?.("explicit:web-test-b");
 
-    expect(result).toMatchObject({ ok: true, activeLoadout: "Web-Test-B", message: "Active loadout changed to Web-Test-B." });
-    const persisted = JSON.parse(await readFile(configuredPath, "utf8")) as { activeLoadout?: string };
+    expect(result).toMatchObject({ ok: true, activeLoadout: "Web-Test-B", activeLoadoutId: "explicit:web-test-b", message: "Active loadout changed to Web-Test-B." });
+    const persisted = JSON.parse(await readFile(configuredPath, "utf8")) as { activeLoadout?: string; activeLoadoutId?: string };
     expect(persisted.activeLoadout).toBe("Web-Test-B");
+    expect(persisted.activeLoadoutId).toBe("explicit:web-test-b");
 
     const widget = harness.widgets.get("materia-loadouts");
     expect(widget?.options).toEqual({ placement: "belowEditor" });
@@ -82,6 +83,7 @@ describe("WebUI active loadout launcher callback", () => {
         eventType: "active-loadout-changed",
         source: "webui",
         activeLoadout: "Web-Test-B",
+        activeLoadoutId: "explicit:web-test-b",
       },
     });
     expect((sent.details?.loadoutEvent as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Web-Test-A", "Web-Test-B"]));
@@ -91,6 +93,7 @@ describe("WebUI active loadout launcher callback", () => {
         eventType: "active-loadout-changed",
         source: "webui",
         activeLoadout: "Web-Test-B",
+        activeLoadoutId: "explicit:web-test-b",
       },
     });
     expect((harness.appendedEntries.at(-1)?.data as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Web-Test-A", "Web-Test-B"]));

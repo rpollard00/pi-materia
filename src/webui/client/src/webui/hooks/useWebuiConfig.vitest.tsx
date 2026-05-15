@@ -67,12 +67,16 @@ function ConfigProbe() {
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
       <button type="button" onClick={() => config.switchLoadout('Full-Auto')}>view Full-Auto</button>
       <button type="button" onClick={() => config.switchLoadout('Hojo-Consult')}>view Hojo-Consult</button>
+      <button type="button" onClick={() => config.switchLoadout('Alpha')}>view Alpha</button>
+      <button type="button" onClick={() => config.switchLoadout('Beta')}>view Beta</button>
       <button type="button" onClick={() => void config.setRuntimeActiveLoadout('Hojo-Consult')}>set active Hojo-Consult</button>
       <button type="button" onClick={() => void config.setDefaultLoadout('Hojo-Consult')}>set default Hojo-Consult</button>
       <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
       <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
+      <button type="button" onClick={() => config.createLoadout()}>create loadout</button>
       <button type="button" onClick={() => config.setActiveLoadoutLockState('locked')}>lock active loadout</button>
       <button type="button" onClick={() => config.setActiveLoadoutLockState('unlocked')}>unlock active loadout</button>
+      <button type="button" onClick={() => config.setLoadoutLockState('Beta', 'locked')}>lock Beta loadout</button>
       <button
         type="button"
         onClick={() => config.updateDraft((draft) => {
@@ -463,6 +467,74 @@ describe('useWebuiConfig', () => {
     expect(responseConfig.loadouts?.Alpha?.lockState).toBe('unlocked');
     expect(responseConfig.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('Build');
     expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('allows locking persisted clean and unlocking persisted locked loadouts', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: {
+      activeLoadout: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Beta: { id: 'Beta', source: 'user', lockState: 'locked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+    }, loadoutSources: { Alpha: 'user', Beta: 'user' } }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'lock active loadout' }));
+    await waitFor(() => expect(JSON.parse(screen.getByLabelText('draft').textContent ?? '{}').loadouts.Alpha.lockState).toBe('locked'));
+    fireEvent.click(screen.getByRole('button', { name: 'view Beta' }));
+    fireEvent.click(screen.getByRole('button', { name: 'unlock active loadout' }));
+    await waitFor(() => expect(JSON.parse(screen.getByLabelText('draft').textContent ?? '{}').loadouts.Beta.lockState).toBe('unlocked'));
+  });
+
+  it('rejects locking new draft loadouts and persisted loadouts with pending target edits', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: {
+      activeLoadout: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Beta: { id: 'Beta', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+    }, loadoutSources: { Alpha: 'user', Beta: 'user' } }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'create loadout' }));
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toMatch(/New Loadout/));
+    fireEvent.click(screen.getByRole('button', { name: 'lock active loadout' }));
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toMatch(/save or revert pending edits before locking/i));
+    let draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
+    expect(draft.loadouts?.[screen.getByLabelText('active-loadout').textContent ?? '']?.lockState).not.toBe('locked');
+
+    fireEvent.click(screen.getByRole('button', { name: 'view Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
+    fireEvent.click(screen.getByRole('button', { name: 'lock active loadout' }));
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toMatch(/save or revert pending edits before locking/i));
+    draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
+    expect(draft.loadouts?.Alpha?.lockState).toBe('unlocked');
+
+    fireEvent.click(screen.getByRole('button', { name: 'lock Beta loadout' }));
+    await waitFor(() => expect(JSON.parse(screen.getByLabelText('draft').textContent ?? '{}').loadouts.Beta.lockState).toBe('locked'));
+  });
+
+  it('keeps readonly default loadouts non-toggleable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: {
+      activeLoadout: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { id: 'Alpha', source: 'default', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+      },
+    }, loadoutSources: { Alpha: 'default' } }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'lock active loadout' }));
+    expect(screen.getByLabelText('status').textContent).toContain('read-only');
+    expect(JSON.parse(screen.getByLabelText('draft').textContent ?? '{}').loadouts.Alpha.lockState).toBe('unlocked');
   });
 
   it('keeps layout-only edits out of semantic normalization while still marking the draft dirty', async () => {

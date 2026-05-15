@@ -1144,6 +1144,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New Socket' }));
 
     expect(await screen.findByTestId('socket-Socket-5')).toBeTruthy();
+    expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -2036,6 +2037,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('create-edge'));
 
     expect(await screen.findByText(/Staged edge Socket-1 \(Start\) → Socket-2 \(Review\) as Not Satisfied\./)).toBeTruthy();
+    expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     expect(screen.getByTestId('edge-Socket-1-Socket-2-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -2079,10 +2081,12 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('create-edge'));
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Replace the existing Always loop-exit route'));
     expect((await screen.findByRole('alert')).textContent).toContain('Kept existing Always loop-exit route to Socket-2 (Review).');
+    expect(screen.getByTestId('socket-action-modal')).toBeTruthy();
 
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getByTestId('create-edge'));
     expect(await screen.findByText(/Replaced loop-exit route Socket-1 \(Start\) → Socket-3 \(Ship\) as Always\./)).toBeTruthy();
+    expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -2169,6 +2173,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
 
     expect(await screen.findByText(/Created a socket and loop-exit route from Socket-1\./)).toBeTruthy();
+    expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     expect(await screen.findByTestId('socket-Socket-4')).toBeTruthy();
     expect(screen.getByTestId('loop-exit-edge-reviewLoop-exit:Socket-1:always').dataset.edgeKind).toBe('loop-exit');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -2201,6 +2206,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'New Socket' }));
 
     expect(await screen.findByText(/already has an Always route/)).toBeTruthy();
+    expect(screen.getByTestId('socket-action-modal')).toBeTruthy();
     expect(screen.queryByTestId('socket-Socket-4')).toBeNull();
     expect(screen.queryByText('staged edits')).toBeNull();
   });
@@ -2248,6 +2254,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('create-edge'));
 
     expect((await findToastAlert()).textContent).toContain('Socket "Socket-1" has an unreachable outgoing edge at Socket-1.edges[1]');
+    expect(screen.getByTestId('socket-action-modal')).toBeTruthy();
     expect(screen.queryByTestId('edge-Socket-1-Socket-3-1')).toBeNull();
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -2965,6 +2972,36 @@ describe('Materia loadout grid editor', () => {
     await openTab('Monitoring');
     expect(await screen.findByText('awaiting_agent_response')).toBeTruthy();
     expect(screen.getByText('Completed sockets: planner')).toBeTruthy();
+  });
+
+  it('applies external active-loadout monitor events without overwriting staged loadout edits', async () => {
+    const listeners = new Map<string, (event: MessageEvent) => void>();
+    class MockEventSource {
+      url: string;
+      constructor(url: string) { this.url = url; }
+      addEventListener(type: string, listener: (event: MessageEvent) => void) { listeners.set(type, listener); }
+      close() {}
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/monitor') return new Response(JSON.stringify({ ok: true }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: structuredClone(testConfig), loadoutSources: { 'Full-Auto': 'user', 'Planning-Consult': 'user' } }));
+    });
+    vi.stubGlobal('EventSource', MockEventSource);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    expect(activeSelect.value).toBe('Full-Auto');
+    fireEvent.click(await screen.findByTestId('socket-Socket-2'));
+    fireEvent.click(screen.getByRole('button', { name: 'New Socket' }));
+    expect(await screen.findByTestId('socket-Socket-5')).toBeTruthy();
+    listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({ ok: true, activeLoadoutId: 'Planning-Consult', activeLoadout: 'Planning-Consult', now: 61_000 }) }));
+
+    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    expect(screen.getByTestId('socket-Socket-5')).toBeTruthy();
+    expect(screen.getByText('staged edits')).toBeTruthy();
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(0);
   });
 
   it('raises one deduped toast when an observed active cast completes', async () => {
