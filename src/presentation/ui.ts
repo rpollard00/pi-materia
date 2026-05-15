@@ -198,8 +198,20 @@ function renderMateriaStatusLine(segments: MateriaStatusSegment[]): string {
   return truncateLine(joinCells(cells));
 }
 
+export function updateMateriaWebUiStatusWidget(ctx: ExtensionContext, input: { url: string; status: "started" | "reused" }): void {
+  ctx.ui.setWidget("materia-webui", renderMateriaWebUiStatusWidget(input), { placement: "belowEditor" });
+}
+
+export function renderMateriaWebUiStatusWidget(input: { url: string; status: "started" | "reused" }): string[] {
+  const state = input.status === "reused" ? "ready (reused)" : "started";
+  return [
+    `WebUI ${state}`,
+    truncateLine(input.url),
+  ];
+}
+
 export function clearMateriaAuxiliaryWidgets(ctx: ExtensionContext): void {
-  for (const key of ["materia-webui", "materia-loadouts", "materia-status", "materia-casts", "materia-usage", "materia-grid"] as const) {
+  for (const key of ["materia-loadouts", "materia-status", "materia-casts", "materia-usage", "materia-grid"] as const) {
     ctx.ui.setWidget(key, undefined, { placement: "belowEditor" });
   }
 }

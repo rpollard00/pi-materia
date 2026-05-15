@@ -135,6 +135,7 @@ describe("/materia ui lifecycle", () => {
     const first = harness.appendedEntries.at(-1)?.data as { url: string; reused: boolean; sessionKey: string };
     expect(first.reused).toBe(false);
     expect(first.url).toStartWith("http://127.0.0.1:");
+    expect(harness.widgets.get("materia-webui")?.content).toEqual(["WebUI started", first.url]);
 
     const health = await fetch(new URL('/api/health', first.url));
     expect(health.status).toBe(200);
@@ -147,6 +148,7 @@ describe("/materia ui lifecycle", () => {
     expect(second.reused).toBe(true);
     expect(second.url).toBe(first.url);
     expect(second.sessionKey).toBe(first.sessionKey);
+    expect(harness.widgets.get("materia-webui")?.content).toEqual(["WebUI ready (reused)", first.url]);
     expect(harness.waitForIdleCalls).toBe(0);
 
     await harness.emit("session_shutdown");
@@ -185,12 +187,18 @@ describe("/materia ui lifecycle", () => {
       expect(harness.appendedEntries).toHaveLength(0);
       const started = harness.notifications.find((notification) => notification.message.includes("Materia WebUI started:"));
       expect(started?.message).toContain("http://127.0.0.1:");
+      const startedWidget = harness.widgets.get("materia-webui")?.content;
+      expect(startedWidget?.[0]).toBe("WebUI started");
+      expect(startedWidget?.[1]).toContain("http://127.0.0.1:");
 
       await harness.runCommand("materia", "link");
       await waitForNotification(harness, "Materia WebUI ready:");
 
       const ready = harness.notifications.find((notification) => notification.message.includes("Materia WebUI ready:"));
       expect(ready?.message).toContain("http://127.0.0.1:");
+      const readyWidget = harness.widgets.get("materia-webui")?.content;
+      expect(readyWidget?.[0]).toBe("WebUI ready (reused)");
+      expect(readyWidget?.[1]).toContain("http://127.0.0.1:");
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
     } finally {
@@ -210,6 +218,29 @@ describe("/materia ui lifecycle", () => {
 
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("unrelated command cleanup does not clear the persistent WebUI status widget", async () => {
+    const { harness } = await harnessWithProfile("pi-materia-webui-widget-cleanup-");
+
+    await harness.runCommand("materia", "cast");
+    await waitForNotification(harness, "Materia WebUI started:");
+    const webuiWidget = harness.widgets.get("materia-webui")?.content;
+    expect(webuiWidget?.[0]).toBe("WebUI started");
+    expect(webuiWidget?.[1]).toContain("http://127.0.0.1:");
+
+    try {
+      await harness.runCommand("materia", "grid");
+      expect(harness.widgets.get("materia-webui")?.content).toEqual(webuiWidget);
+
+      await harness.runCommand("materia", "loadout");
+      expect(harness.widgets.get("materia-webui")?.content).toEqual(webuiWidget);
+
+      await harness.runCommand("materia", "status");
+      expect(harness.widgets.get("materia-webui")?.content).toEqual(webuiWidget);
     } finally {
       await harness.emit("session_shutdown");
     }

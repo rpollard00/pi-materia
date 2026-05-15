@@ -6,7 +6,7 @@ import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.j
 import { registerMateriaRenderer } from "./presentation/renderer.js";
 import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference } from "./webui/launcher.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
-import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./presentation/ui.js";
+import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 export { renderCastList } from "./infrastructure/index.js";
 
@@ -72,6 +72,7 @@ export default function piMateria(pi: ExtensionAPI) {
           const reused = result.status === "reused";
           const lines = [`WebUI ${reused ? "ready" : "started"}: ${truncateLine(result.url, 110)}`];
           clearMateriaAuxiliaryWidgets(ctx);
+          updateMateriaWebUiStatusWidget(ctx, { url: result.url, status: result.status });
           ctx.ui.notify(`Materia WebUI ${reused ? "ready" : "started"}: ${result.url}`, "info");
           pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "ui", materiaName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey } });
           pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused, startedAt: Date.now() });
@@ -299,6 +300,7 @@ function autoStartMateriaWebUi(input: { ctx: ExtensionContext; pi: ExtensionAPI;
     notify: (message, type) => input.ctx.ui.notify(message, type),
   }).then((result) => {
     if (!result.ok) return;
+    updateMateriaWebUiStatusWidget(input.ctx, { url: result.url, status: result.status });
     input.ctx.ui.notify(`Materia WebUI ${result.status === "reused" ? "ready" : "started"}: ${result.url}`, "info");
   }).catch((error) => {
     input.ctx.ui.notify(`pi-materia WebUI failed to start: ${error instanceof Error ? error.message : String(error)}`, "error");
