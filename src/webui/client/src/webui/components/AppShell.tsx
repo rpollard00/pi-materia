@@ -6,6 +6,7 @@ import { AppHeader, TabNav } from './AppChrome.js';
 export interface AppShellProps {
   source: string;
   isDirty: boolean;
+  status: string;
   selectedTab: MateriaTabId;
   onSelectTab: (tab: MateriaTabId) => void;
   loadoutWorkspace: ReactNode;
@@ -16,6 +17,7 @@ export interface AppShellProps {
 export function AppShell({
   source,
   isDirty,
+  status,
   selectedTab,
   onSelectTab,
   loadoutWorkspace,
@@ -26,7 +28,7 @@ export function AppShell({
     <>
       <main className="min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top,#14304a,#020617_58%)] text-slate-100">
         <section className="mx-auto flex min-h-screen w-full max-w-screen-2xl flex-col gap-6 px-6 py-8">
-          <AppHeader source={source} isDirty={isDirty} />
+          <AppHeader source={source} isDirty={isDirty} status={status} />
 
           <TabNav selectedTab={selectedTab} onSelectTab={onSelectTab} />
 

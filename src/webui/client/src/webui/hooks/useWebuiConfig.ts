@@ -7,6 +7,7 @@ import {
 } from '../../loadoutModel.js';
 import { getLoadoutEditPolicy, type LoadoutUserLockState } from '../../../../../domain/loadout.js';
 import { toast } from '../../toast/index.js';
+import { emitLoadoutStatusToast, type LoadoutStatusOptions, type LoadoutStatusToastIntent } from '../utils/loadoutNotifications.js';
 import { getConfig, saveConfig, setActiveLoadout, setDefaultLoadout as persistDefaultLoadout } from '../api/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
 import { cloneConfig } from '../utils/forms.js';
@@ -218,6 +219,10 @@ export function useWebuiConfig() {
   const [viewedLoadoutName, setViewedLoadoutName] = useState<string | undefined>();
   const [status, setStatus] = useState('Loading materia configuration…');
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
+  const setLoadoutStatus = (message: string, options?: LoadoutStatusOptions | LoadoutStatusToastIntent) => {
+    emitLoadoutStatusToast(message, options);
+    setStatus(message);
+  };
   const [defaultLoadoutId, setDefaultLoadoutId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -245,7 +250,7 @@ export function useWebuiConfig() {
 
   function readonlyStatus(action: string) {
     const message = `${action} blocked: ${editingLoadoutPolicy.reason}`;
-    setStatus(message);
+    setLoadoutStatus(message, 'validation');
     return message;
   }
 
@@ -268,7 +273,7 @@ export function useWebuiConfig() {
         loadoutSources,
       });
       if (blocked.length > 0) {
-        setStatus(`Blocked read-only loadout mutation. ${blocked.join(' ')}`);
+        setLoadoutStatus(`Blocked read-only loadout mutation. ${blocked.join(' ')}`, 'validation');
         return normalizeMateriaConfigEdges({ ...normalizedNext, loadouts: guardedLoadouts });
       }
       return normalizedNext;
@@ -279,7 +284,7 @@ export function useWebuiConfig() {
     const loadout = loadouts[loadoutName];
     const policy = policyForLoadout(loadout, loadoutSources[loadoutName]);
     if (!policy.canEdit) {
-      setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
+      setLoadoutStatus(`Cannot edit ${loadoutName}: ${policy.reason}`, 'validation');
       return false;
     }
     if (!loadout) return false;
@@ -302,7 +307,7 @@ export function useWebuiConfig() {
     const loadout = loadouts[loadoutName];
     const policy = policyForLoadout(loadout, loadoutSources[loadoutName]);
     if (!policy.canEdit) {
-      setStatus(`Cannot edit ${loadoutName}: ${policy.reason}`);
+      setLoadoutStatus(`Cannot edit ${loadoutName}: ${policy.reason}`, 'validation');
       return false;
     }
     if (!loadout) return false;
@@ -481,7 +486,7 @@ export function useWebuiConfig() {
     }
     const nextName = rawName.trim();
     if (!nextName) {
-      setStatus('Cannot rename loadout: name cannot be empty.');
+      setLoadoutStatus('Cannot rename loadout: name cannot be empty.', 'validation');
       return false;
     }
     if (nextName === editingLoadoutName) {
@@ -489,7 +494,7 @@ export function useWebuiConfig() {
       return true;
     }
     if (loadouts[nextName]) {
-      setStatus(`Cannot rename loadout: ${nextName} already exists.`);
+      setLoadoutStatus(`Cannot rename loadout: ${nextName} already exists.`, 'validation');
       return false;
     }
     const previousName = editingLoadoutName;
@@ -513,7 +518,7 @@ export function useWebuiConfig() {
   function duplicateLoadout(name: string) {
     const loadout = loadouts[name];
     if (!loadout) {
-      setStatus(`Cannot duplicate ${name}: loadout was not found.`);
+      setLoadoutStatus(`Cannot duplicate ${name}: loadout was not found.`, 'validation');
       return false;
     }
     const nextName = makeDuplicateLoadoutName(loadouts, name);
@@ -522,12 +527,6 @@ export function useWebuiConfig() {
     setLoadoutNameInput(nextName);
     const readyStatus = `Duplicated ${name} as ${nextName}. Save to persist.`;
     setStatus(readyStatus);
-    toast({
-      id: `loadout-duplicate:${nextName}`,
-      title: 'Loadout duplicated',
-      description: readyStatus,
-      variant: 'success',
-    });
     return true;
   }
 
@@ -577,12 +576,12 @@ export function useWebuiConfig() {
   function deleteLoadout(name: string) {
     if (!loadouts[name]) return false;
     if (loadoutSources[name] === 'default') {
-      setStatus(`Cannot delete ${name}: shipped default loadouts are protected.`);
+      setLoadoutStatus(`Cannot delete ${name}: shipped default loadouts are protected.`, 'validation');
       return false;
     }
     const remainingNames = Object.keys(loadouts).filter((candidate) => candidate !== name);
     if (remainingNames.length === 0) {
-      setStatus('Cannot delete the only loadout; create another loadout first.');
+      setLoadoutStatus('Cannot delete the only loadout; create another loadout first.', 'validation');
       return false;
     }
     const { config, fallbackName } = deleteLoadoutDraft({ config: draftConfig ?? {}, name, activeLoadoutName: editingLoadoutName });
@@ -605,12 +604,6 @@ export function useWebuiConfig() {
     setLoadoutNameInput(nextViewedName ?? '');
     const readyStatus = 'Reverted staged edits.';
     setStatus(readyStatus);
-    toast({
-      id: 'loadout-revert-success',
-      title: 'Staged edits reverted',
-      description: readyStatus,
-      variant: 'success',
-    });
   }
 
   async function saveDraft() {

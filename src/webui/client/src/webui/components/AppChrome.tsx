@@ -4,9 +4,10 @@ import type { MateriaTabId } from '../types.js';
 export interface AppHeaderProps {
   source: string;
   isDirty: boolean;
+  status: string;
 }
 
-export function AppHeader({ source, isDirty }: AppHeaderProps) {
+export function AppHeader({ source, isDirty, status }: AppHeaderProps) {
   return (
     <header className="rounded-3xl border border-cyan-200/30 bg-slate-950/75 p-7 shadow-[0_0_55px_rgba(34,211,238,0.16)] backdrop-blur">
       <p className="text-sm uppercase tracking-[0.45em] text-cyan-200">pi-materia loadout editor</p>
@@ -18,6 +19,7 @@ export function AppHeader({ source, isDirty }: AppHeaderProps) {
         <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-slate-300">
           <div>Source: <span className="text-cyan-100">{source}</span></div>
           <div>Status: <span className={isDirty ? 'text-amber-200' : 'text-emerald-200'}>{isDirty ? 'staged edits' : 'clean'}</span></div>
+          {status ? <div aria-live="polite">Latest: <span className="text-cyan-100">{status}</span></div> : null}
         </div>
       </div>
     </header>

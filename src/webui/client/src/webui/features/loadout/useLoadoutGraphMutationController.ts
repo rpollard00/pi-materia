@@ -32,6 +32,7 @@ import {
   type LoadoutTransform,
 } from '../../../loadoutTransforms.js';
 import type { LoadoutEdge, SocketPropertyFormState } from '../../types.js';
+import type { SetLoadoutStatus } from '../../utils/loadoutNotifications.js';
 import {
   emptySocketPropertyForm,
   parseOptionalFiniteNumber,
@@ -62,7 +63,7 @@ export interface LoadoutGraphMutationControllerOptions {
   materia: Record<string, PipelineSocket>;
   selectedLoopSockets: Array<{ id: string }>;
   setSelectedLoopSocketIds: Dispatch<SetStateAction<string[]>>;
-  setStatus: (status: string, variant?: 'info' | 'success' | 'validation') => void;
+  setStatus: SetLoadoutStatus;
   updateLoadoutDraft: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
   updateLoadoutLayout: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
   closeSocketActionModal: () => void;
@@ -103,7 +104,7 @@ export function useLoadoutGraphMutationController({
   }
 
   function notifyStatus(message: string, variant: 'info' | 'success' | 'validation') {
-    setStatus(message, variant);
+    setStatus(message, variant === 'validation' ? 'validation' : 'none');
   }
 
   function closeModalAfterCommitted(committed: boolean) {

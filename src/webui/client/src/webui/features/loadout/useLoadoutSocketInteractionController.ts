@@ -6,6 +6,7 @@ import { getSocketLayout, isEmptySocket } from '../../../loadoutModel.js';
 import { clearMateriaFromSocket, setSocketLayouts, setSocketMateria, swapSocketMateria } from '../../../loadoutTransforms.js';
 import { socketCardWidth, socketLayoutOffsetX, socketLayoutOffsetY, socketLayoutUnitX, socketLayoutUnitY, socketStageHeight } from '../../constants.js';
 import type { DragPayload, MonitorSnapshot, PositionedSocket, SocketLayoutDragState, SocketRegionSelectionDragState } from '../../types.js';
+import type { LoadoutStatusToastIntent, SetLoadoutStatus } from '../../utils/loadoutNotifications.js';
 import { layoutValueForPosition, rectanglesIntersect } from '../../utils/graphLayout.js';
 import { parseDragPayload } from '../../utils/forms.js';
 import { useLoadoutGraphViewModel } from './useLoadoutGraphViewModel.js';
@@ -18,7 +19,7 @@ export interface LoadoutSocketInteractionControllerOptions {
   draftConfig: MateriaConfig | undefined;
   loadouts: Record<string, PipelineConfig>;
   monitor: MonitorSnapshot | undefined;
-  setStatus: (status: string, variant?: 'success' | 'validation') => void;
+  setStatus: SetLoadoutStatus;
   switchLoadoutDraft: (name: string) => void;
   updateLoadoutDraft: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
   updateLoadoutLayout: (loadoutName: string, updater: (loadout: PipelineConfig) => PipelineConfig) => boolean;
@@ -41,8 +42,8 @@ export function useLoadoutSocketInteractionController({
   onModalErrorReset,
   onSocketPropertyErrorReset,
 }: LoadoutSocketInteractionControllerOptions) {
-  const notifyStatus = (message: string) => {
-    setStatus(message);
+  const notifyStatus = (message: string, toast: LoadoutStatusToastIntent = 'none') => {
+    setStatus(message, toast);
   };
   const [selectedMateriaId, setSelectedMateriaId] = useState<string | undefined>();
   const [socketActionId, setSocketActionId] = useState<string | undefined>();
@@ -87,7 +88,7 @@ export function useLoadoutSocketInteractionController({
 
   function readonlyBlocked(action: string) {
     if (editPolicy.canEdit) return false;
-    notifyStatus(`${action} blocked: ${editPolicy.reason}`);
+    notifyStatus(`${action} blocked: ${editPolicy.reason}`, 'validation');
     return true;
   }
 
@@ -97,20 +98,20 @@ export function useLoadoutSocketInteractionController({
     const currentLoadout = loadouts[activeLoadoutName];
     const currentTarget = currentLoadout?.sockets?.[socketId];
     if (!currentLoadout?.sockets || !currentTarget) {
-      notifyStatus(`Ignored drop: socket ${socketId} is not available in the active loadout.`);
+      notifyStatus(`Ignored drop: socket ${socketId} is not available in the active loadout.`, 'validation');
       return false;
     }
 
     if (fromSocket && fromSocket !== socketId) {
       const currentSource = currentLoadout.sockets[fromSocket];
       if (isEmptySocket(currentSource)) {
-        notifyStatus('Ignored drop: dragged socket materia is no longer available.');
+        notifyStatus('Ignored drop: dragged socket materia is no longer available.', 'validation');
         return false;
       }
     } else {
       const currentSource = palette.find(([id]) => id === materiaId)?.[1];
       if (!currentSource || isEmptySocket(currentSource)) {
-        notifyStatus(`Ignored drop: materia ${materiaId} is not available.`);
+        notifyStatus(`Ignored drop: materia ${materiaId} is not available.`, 'validation');
         return false;
       }
     }
@@ -132,11 +133,11 @@ export function useLoadoutSocketInteractionController({
     if (!activeLoadoutName) return false;
     const currentSocket = loadouts[activeLoadoutName]?.sockets?.[socketId];
     if (!currentSocket) {
-      notifyStatus(`Ignored unsocket: socket ${socketId} is not available in the active loadout.`);
+      notifyStatus(`Ignored unsocket: socket ${socketId} is not available in the active loadout.`, 'validation');
       return false;
     }
     if (isEmptySocket(currentSocket)) {
-      notifyStatus(`Ignored unsocket: socket ${socketId} is already empty.`);
+      notifyStatus(`Ignored unsocket: socket ${socketId} is already empty.`, 'validation');
       return false;
     }
     if (!updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout)) return false;
@@ -285,7 +286,7 @@ export function useLoadoutSocketInteractionController({
     if (!raw) return;
     const payload = parseDragPayload(raw);
     if (!payload) {
-      notifyStatus('Ignored drop: unsupported drag payload.');
+      notifyStatus('Ignored drop: unsupported drag payload.', 'validation');
       return;
     }
     putMateria(socketId, payload.materiaId, payload.kind === 'socket' ? payload.fromSocket : undefined);
@@ -298,15 +299,15 @@ export function useLoadoutSocketInteractionController({
     if (!raw) return;
     const payload = parseDragPayload(raw);
     if (!payload) {
-      notifyStatus('Ignored drop: unsupported drag payload.');
+      notifyStatus('Ignored drop: unsupported drag payload.', 'validation');
       return;
     }
     if (payload.kind !== 'socket' || !payload.fromSocket) {
-      notifyStatus('Ignored drop: drag palette materia onto a socket to place it.');
+      notifyStatus('Ignored drop: drag palette materia onto a socket to place it.', 'validation');
       return;
     }
     if (payload.fromLoadout && payload.fromLoadout !== activeLoadoutName) {
-      notifyStatus('Ignored unsocket: dragged materia belongs to a different loadout.');
+      notifyStatus('Ignored unsocket: dragged materia belongs to a different loadout.', 'validation');
       return;
     }
     removeMateria(payload.fromSocket);

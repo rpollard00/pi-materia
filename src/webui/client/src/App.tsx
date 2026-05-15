@@ -7,7 +7,7 @@ import { LoadoutGraphPanel } from './webui/features/loadout/LoadoutGraphPanel.js
 import { MateriaEditorPanel } from './webui/features/materia-editor/MateriaEditorPanel.js';
 import { MonitorPanel } from './webui/features/monitor/MonitorPanel.js';
 import { useAppNavigation } from './webui/hooks/useAppNavigation.js';
-import { toast, type ToastVariant } from './toast/index.js';
+import { emitLoadoutStatusToast, type LoadoutStatusOptions, type LoadoutStatusToastIntent } from './webui/utils/loadoutNotifications.js';
 import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
@@ -15,8 +15,7 @@ import { useMateriaEditorController } from './webui/features/materia-editor/useM
 import { useLoadoutSocketInteractionController } from './webui/features/loadout/useLoadoutSocketInteractionController.js';
 import { useLoadoutGraphMutationController } from './webui/features/loadout/useLoadoutGraphMutationController.js';
 
-const shouldSuppressGenericLoadoutStatusToast = (status: string) =>
-  /^Loading materia configuration|^Draft ready\.|^Saving staged loadout edits|^Cannot save staged loadout edits|^Save failed:|^Saved staged loadout edits|^Reverted staged edits\./.test(status);
+const isStatusAlsoShownAsValidationToast = (message: string) => /^(Cannot|Blocked\b|.*\bblocked:|Ignored\b)/i.test(message);
 
 // Compatibility entry point for the browser bundle and tests. Keep feature
 // logic in hooks/controllers; App composes those boundaries into the shell.
@@ -68,28 +67,8 @@ export function App() {
     applyExternalRuntimeActiveLoadout(monitor.activeLoadoutId, monitor.activeLoadout);
   }, [applyExternalRuntimeActiveLoadout, monitor?.activeLoadout, monitor?.activeLoadoutId]);
 
-  const lastStatusToastRef = useRef('');
-  useEffect(() => {
-    if (!status || status === lastStatusToastRef.current || shouldSuppressGenericLoadoutStatusToast(status)) return;
-    lastStatusToastRef.current = status;
-    const variant: ToastVariant = /^(Cannot|Blocked\b|.*\bblocked:|.*\bfailed:)/i.test(status) ? 'validation' : 'success';
-    toast({
-      id: `loadout-status:${variant}:${status}`,
-      title: variant === 'validation' ? 'Cannot stage loadout change' : 'Loadout update',
-      description: status,
-      variant,
-    });
-  }, [status]);
-
-  const setLoadoutStatus = (message: string, variantOverride?: ToastVariant) => {
-    const variant: ToastVariant = variantOverride ?? (/^(Cannot|Blocked\b|.*\bblocked:|.*\bfailed:|Ignored\b)/i.test(message) ? 'validation' : 'success');
-    lastStatusToastRef.current = message;
-    toast({
-      id: `loadout-status:${variant}:${message}`,
-      title: variant === 'validation' ? 'Cannot stage loadout change' : 'Loadout update',
-      description: message,
-      variant,
-    });
+  const setLoadoutStatus = (message: string, options?: LoadoutStatusOptions | LoadoutStatusToastIntent) => {
+    emitLoadoutStatusToast(message, options);
     setStatus(message);
   };
 
@@ -212,6 +191,7 @@ export function App() {
     <AppShell
       source={source}
       isDirty={isDirty}
+      status={isStatusAlsoShownAsValidationToast(status) ? '' : status}
       selectedTab={selectedTab}
       onSelectTab={selectTab}
       loadoutWorkspace={(
