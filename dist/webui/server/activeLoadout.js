@@ -30,6 +30,7 @@ export async function handleActiveLoadoutRoute(req, res, deps) {
         if (!result.ok) {
             sendActiveLoadoutError(res, activeLoadoutFailureStatus(result.code), result.code, result.message, {
                 ...(result.activeLoadout ? { activeLoadout: result.activeLoadout } : {}),
+                ...(result.activeLoadoutId ? { activeLoadoutId: result.activeLoadoutId } : {}),
                 ...(result.config !== undefined ? { config: result.config } : {}),
             });
             return;
@@ -37,6 +38,7 @@ export async function handleActiveLoadoutRoute(req, res, deps) {
         sendJson(res, 200, {
             ok: true,
             activeLoadout: result.activeLoadout,
+            ...(result.activeLoadoutId ? { activeLoadoutId: result.activeLoadoutId } : {}),
             ...(result.config !== undefined ? { config: result.config } : {}),
             message: result.message ?? `Active loadout changed to ${result.activeLoadout}.`,
         });
