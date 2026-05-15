@@ -4,7 +4,7 @@ import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
-import { closeMateriaWebUiForSession, launchMateriaWebUi } from "./webui/launcher.js";
+import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference, launchMateriaWebUi } from "./webui/launcher.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 export { renderCastList } from "./infrastructure/index.js";
@@ -42,8 +42,9 @@ export default function piMateria(pi: ExtensionAPI) {
     await castExecutionUseCases.handleAgentEnd(pi, event, ctx);
   });
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     activeContext = ctx;
+    await initializeDefaultLoadoutPreference(ctx, getConfiguredConfigPath(), pi);
     const state = adapters.states.loadActive(ctx);
     if (!state?.active) return;
     ctx.ui.setStatus("materia", adapters.statusPresenter.statusLabel(state));

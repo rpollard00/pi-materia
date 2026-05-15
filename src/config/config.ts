@@ -8,6 +8,7 @@ import { ensureCurrentSchemaMetadata, ensureLoadoutOwnershipAndLocks, ensureStab
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
+import { resolveDefaultLoadout, resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication } from "../schema/persistence.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "../types.js";
 
@@ -50,12 +51,15 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   if (migrationContext.profileChanged) await writeProfileConfig(profile);
   const migratedPartials = migratableLayers.map((layer) => layer.config);
   const config = await mergeConfigLayers(migratedPartials);
+  const loadoutSources = buildLoadoutSources(migratedPartials, loadedLayers);
+  const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
   return {
     config,
     source: loadedLayers.map((layer) => layer.path).join(" < "),
     layers,
-    loadoutSources: buildLoadoutSources(migratedPartials, loadedLayers),
-    defaultLoadoutId: validateDefaultLoadoutId(profile.defaultLoadoutId, config),
+    loadoutSources,
+    defaultLoadoutId: defaultLoadout.loadoutId,
+    ...(defaultLoadout.warning ? { defaultLoadoutWarning: defaultLoadout.warning } : {}),
   };
 }
 
@@ -86,9 +90,8 @@ export async function ensureUserProfileConfig(): Promise<string> {
 export async function saveDefaultLoadoutPreference(cwd: string, loadoutName: string | null, configuredPath?: string): Promise<string | null> {
   const loaded = await loadConfig(cwd, configuredPath);
   const requestedDefault = loadoutName?.trim() || null;
-  const nextDefault = requestedDefault
-    ? (findLoadoutNameById(loaded.config.loadouts, requestedDefault) ? requestedDefault : findLoadoutId(loaded.config.loadouts, requestedDefault) ?? null)
-    : null;
+  const resolvedDefault = requestedDefault ? resolveDefaultLoadout(requestedDefault, loaded.config.loadouts, loaded.loadoutSources) : { loadoutId: null };
+  const nextDefault = resolvedDefault.loadoutId;
   if (requestedDefault && !nextDefault) {
     const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
     throw new Error(loadoutNames.length
@@ -135,14 +138,14 @@ export async function saveActiveLoadout(cwd: string, loadoutName: string, config
   if (loadoutNames.length === 0) {
     throw new Error(`Cannot change Materia loadout because this config does not define any loadouts.`);
   }
-  const requestedLoadoutId = findLoadoutNameById(loaded.config.loadouts, loadoutName) ? loadoutName : findLoadoutId(loaded.config.loadouts, loadoutName);
-  const resolvedLoadoutName = requestedLoadoutId ? findLoadoutNameById(loaded.config.loadouts, requestedLoadoutId) : null;
+  const resolvedLoadout = resolveLoadoutReference(loadoutName, loaded.config.loadouts, loaded.loadoutSources);
+  const resolvedLoadoutName = resolvedLoadout?.loadoutName ?? null;
   if (!resolvedLoadoutName) {
     throw new Error(`Unknown Materia loadout "${loadoutName}". Available loadouts: ${loadoutNames.join(", ")}.`);
   }
 
   const targetPath = getWritableConfigPath(cwd, configuredPath, configuredPath ? "explicit" : "project");
-  await writeMinimalActiveLoadout(targetPath, resolvedLoadoutName, findLoadoutId(loaded.config.loadouts, resolvedLoadoutName));
+  await writeMinimalActiveLoadout(targetPath, resolvedLoadoutName, resolvedLoadout?.loadoutId ?? findLoadoutId(loaded.config.loadouts, resolvedLoadoutName));
   return targetPath;
 }
 
@@ -289,18 +292,6 @@ async function writeProfileConfig(profile: MateriaProfileConfig): Promise<string
   const file = await ensureUserProfileConfig();
   await writeJsonAtomic(file, ensureCurrentSchemaMetadata(profile));
   return file;
-}
-
-function validateDefaultLoadoutId(defaultLoadoutId: string | null | undefined, config: PiMateriaConfig): string | null {
-  if (!defaultLoadoutId) return null;
-  return findLoadoutNameById(config.loadouts, defaultLoadoutId) ? defaultLoadoutId : null;
-}
-
-function findLoadoutNameById(loadouts: PiMateriaConfig["loadouts"] | undefined, loadoutId: string): string | null {
-  for (const [name, loadout] of Object.entries(loadouts ?? {})) {
-    if (loadout && typeof loadout === "object" && !Array.isArray(loadout) && (loadout as { id?: unknown }).id === loadoutId) return name;
-  }
-  return null;
 }
 
 function findLoadoutId(loadouts: PiMateriaConfig["loadouts"] | undefined, name: string): string | undefined {

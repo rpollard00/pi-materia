@@ -151,11 +151,12 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   return { url, reused: false, autoOpenBrowser, sessionKey };
 }
 
-async function initializeDefaultLoadoutPreference(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<void> {
+export async function initializeDefaultLoadoutPreference(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<void> {
   try {
     const loaded = await loadConfig(ctx.cwd, configuredPath);
     const defaultLoadoutId = loaded.defaultLoadoutId;
     if (!defaultLoadoutId) {
+      if (loaded.defaultLoadoutWarning) ctx.ui.notify(loaded.defaultLoadoutWarning, "warning");
       await clearStaleDefaultLoadoutPreference(ctx.cwd, configuredPath);
       return;
     }

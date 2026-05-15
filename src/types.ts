@@ -32,6 +32,8 @@ export interface LoadedConfig {
   loadoutSources?: Record<string, MateriaConfigLayerScope>;
   /** Validated user preference for the default loadout. Missing or stale values are exposed as null. */
   defaultLoadoutId?: string | null;
+  /** Human-readable warning when a configured default preference could not be resolved exactly. */
+  defaultLoadoutWarning?: string;
 }
 
 export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
