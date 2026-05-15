@@ -2438,16 +2438,22 @@ describe('Materia loadout grid editor', () => {
     expect([d.style.left, d.style.top]).toEqual(['240px', '204px']);
   });
 
-  it('switches the active loadout as a clean client-side selection', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
+  it('switches the active loadout as a clean client-side selection without showing a viewed-loadout toast', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig })));
+    vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Planning-Consult/ }));
 
+    await waitFor(() => expect(screen.queryByTestId('socket-Socket-3')).toBeNull());
     expect(screen.getByTestId('socket-Socket-2')).toBeTruthy();
-    expect(screen.queryByTestId('socket-Socket-3')).toBeNull();
     expectHeaderStatus('test', 'clean');
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
+
+    const toastElements = Array.from(document.querySelectorAll<HTMLElement>('[data-toast-variant]'));
+    expect(toastElements.some((toastElement) => toastElement.textContent?.includes('Loadout update'))).toBe(false);
+    expect(toastElements.some((toastElement) => toastElement.textContent?.includes('Viewing loadout: Planning-Consult'))).toBe(false);
   });
 
 
