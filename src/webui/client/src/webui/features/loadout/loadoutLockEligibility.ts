@@ -31,6 +31,7 @@ function sortObjectKeys(value: unknown): unknown {
 function comparableLoadoutForLock(name: string, loadout: PipelineConfig | undefined): unknown {
   if (!loadout) return undefined;
   const comparable = cloneConfig(loadout);
+  // Compare only persisted content so a lock toggle cannot mask unrelated staged edits.
   delete comparable.lockState;
   const normalizedLoadout = normalizeMateriaConfigEdges({ loadouts: { [name]: comparable } }, { semantic: false }).loadouts?.[name] ?? comparable;
   return sortObjectKeys({ name, loadout: normalizedLoadout });
