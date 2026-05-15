@@ -25,6 +25,15 @@ async function harnessWithProfile(prefix = "pi-materia-webui-") {
   return { harness, profile };
 }
 
+async function waitForNotification(harness: FakePiHarness, includes: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (harness.notifications.some((notification) => notification.message.includes(includes))) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for notification including ${includes}`);
+}
+
 describe("/materia ui lifecycle", () => {
   test("does not build the WebUI when the built client entrypoint already exists", async () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-built-"));
@@ -158,6 +167,47 @@ describe("/materia ui lifecycle", () => {
       expect(secondResult.url).toBe(firstResult.url);
       expect(secondResult.sessionKey).toBe(firstResult.sessionKey);
       expect(harness.waitForIdleCalls).toBe(0);
+      expect(harness.sentMessages).toHaveLength(0);
+      expect(harness.appendedEntries).toHaveLength(0);
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("cast and link flows auto-start the WebUI without transcript side effects", async () => {
+    const { harness } = await harnessWithProfile("pi-materia-webui-auto-command-");
+
+    await harness.runCommand("materia", "cast");
+    await waitForNotification(harness, "Materia WebUI started:");
+
+    try {
+      expect(harness.sentMessages).toHaveLength(0);
+      expect(harness.appendedEntries).toHaveLength(0);
+      const started = harness.notifications.find((notification) => notification.message.includes("Materia WebUI started:"));
+      expect(started?.message).toContain("http://127.0.0.1:");
+
+      await harness.runCommand("materia", "link");
+      await waitForNotification(harness, "Materia WebUI ready:");
+
+      const ready = harness.notifications.find((notification) => notification.message.includes("Materia WebUI ready:"));
+      expect(ready?.message).toContain("http://127.0.0.1:");
+      expect(harness.sentMessages).toHaveLength(0);
+      expect(harness.appendedEntries).toHaveLength(0);
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("recast and revive commands also auto-start or reuse the WebUI", async () => {
+    const { harness } = await harnessWithProfile("pi-materia-webui-auto-recast-");
+
+    await harness.runCommand("materia", "recast");
+    await waitForNotification(harness, "Materia WebUI started:");
+
+    try {
+      await harness.runCommand("materia", "revive");
+      await waitForNotification(harness, "Materia WebUI ready:");
+
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
     } finally {

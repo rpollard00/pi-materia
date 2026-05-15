@@ -81,6 +81,10 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
+      if (shouldAutoStartWebUi(subcommand)) {
+        autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath() });
+      }
+
       await ctx.waitForIdle();
 
       if (subcommand === "link") {
@@ -280,6 +284,25 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
 
 function materiaSubcommands(): string[] {
   return ["cast", "link", "recast", "revive", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
+}
+
+function shouldAutoStartWebUi(subcommand: string | undefined): boolean {
+  return subcommand === "cast" || subcommand === "link" || subcommand === "recast" || subcommand === "revive";
+}
+
+function autoStartMateriaWebUi(input: { ctx: ExtensionContext; pi: ExtensionAPI; configuredPath?: string }): void {
+  void ensureMateriaWebUi({
+    ctx: input.ctx,
+    mode: "automatic",
+    configuredPath: input.configuredPath,
+    pi: input.pi,
+    notify: (message, type) => input.ctx.ui.notify(message, type),
+  }).then((result) => {
+    if (!result.ok) return;
+    input.ctx.ui.notify(`Materia WebUI ${result.status === "reused" ? "ready" : "started"}: ${result.url}`, "info");
+  }).catch((error) => {
+    input.ctx.ui.notify(`pi-materia WebUI failed to start: ${error instanceof Error ? error.message : String(error)}`, "error");
+  });
 }
 
 function recastStatusLabel(state: MateriaCastState): string {
