@@ -106,6 +106,11 @@ export function useLoadoutGraphMutationController({
     setStatus(message, variant);
   }
 
+  function closeModalAfterCommitted(committed: boolean) {
+    if (committed) closeSocketActionModal();
+    return committed;
+  }
+
   function readonlyBlocked(action: string) {
     if (editPolicy.canEdit) return false;
     setEdgeMutationError(editPolicy.reason);
@@ -128,8 +133,7 @@ export function useLoadoutGraphMutationController({
       `Deleted socket ${socketId}; graph edges and loop metadata were cleaned up.`,
       (message) => `Cannot delete socket ${socketId}: ${message}`,
     );
-    if (deleted) {
-      closeSocketActionModal();
+    if (closeModalAfterCommitted(deleted)) {
       setSelectedLoopSocketIds((current) => current.filter((id) => id !== socketId));
     }
     return deleted;
@@ -150,8 +154,8 @@ export function useLoadoutGraphMutationController({
       notifyStatus(`Cannot create socket after ${socketLabel(afterSocketId)}: ${formatGraphValidationErrors(result.errors)}`, 'validation');
       return;
     }
-    if (updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig)) {
-      closeSocketActionModal();
+    const created = updateLoadoutDraft(activeLoadoutName, () => result.graph as PipelineConfig);
+    if (closeModalAfterCommitted(created)) {
       notifyStatus(loopExitContext ? `Created a socket and loop-exit route from ${afterSocketId}.` : `Created a connected empty socket after ${afterSocketId}.`, 'success');
     }
   }
@@ -229,8 +233,7 @@ export function useLoadoutGraphMutationController({
       `Staged loop around ${selectedLabels.join(', ')} consuming ${generator.from}.${generator.output}; loop.exit will compile into parse/advance runtime control flow.`,
       (message) => `Cannot create loop: ${message}`,
     );
-    if (created) {
-      closeSocketActionModal();
+    if (closeModalAfterCommitted(created)) {
       setSelectedLoopSocketIds([]);
     }
   }
@@ -322,7 +325,7 @@ export function useLoadoutGraphMutationController({
         : `Staged edge ${socketLabel(from)} → ${socketLabel(to)} as ${edgeConditionLabel(edgeCondition)}.`,
       (message) => loopExitContext ? `Cannot create loop-exit route ${socketLabel(from)} → ${socketLabel(to)}: ${message}` : `Cannot create edge ${socketLabel(from)} → ${socketLabel(to)}: ${message}`,
     );
-    if (created) closeSocketActionModal();
+    closeModalAfterCommitted(created);
   }
 
   function removeLoopExitConnection(loopId: string, routeId: string) {
@@ -334,7 +337,7 @@ export function useLoadoutGraphMutationController({
       `Removed loop-exit route from ${route.from} to ${route.targetSocketId}; no normal edges were created.`,
       (message) => `Cannot remove loop-exit route ${loopId}:${routeId}: ${message}`,
     );
-    if (removed) closeSocketActionModal();
+    closeModalAfterCommitted(removed);
   }
 
   function toggleLoopExitCondition(loopId: string, routeId: string) {
@@ -358,7 +361,7 @@ export function useLoadoutGraphMutationController({
       `Removed edge ${from} → ${edge.to}; sockets were preserved.`,
       (message) => `Cannot remove edge ${from} → ${edge.to}: ${message}`,
     );
-    if (removed) closeSocketActionModal();
+    closeModalAfterCommitted(removed);
   }
 
   function removeLegacyNextEdge(from: string) {
@@ -370,7 +373,7 @@ export function useLoadoutGraphMutationController({
       `Removed legacy flow ${from} → ${to}; conditional edges and sockets were preserved.`,
       (message) => `Cannot remove legacy flow ${from} → ${to}: ${message}`,
     );
-    if (removed) closeSocketActionModal();
+    closeModalAfterCommitted(removed);
   }
 
   function saveSocketProperties(socketId: string) {
@@ -407,10 +410,12 @@ export function useLoadoutGraphMutationController({
 
     const limitsSaved = limitsChanged ? updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? setSocketLimits(loadout, socketId, nextLimits) : loadout) : false;
     const layoutSaved = layoutChanged ? updateLoadoutLayout(activeLoadoutName, (loadout) => setSocketLayouts(loadout, { [socketId]: nextLayout })) : false;
-    if (limitsChanged || layoutChanged) {
-      if (!limitsSaved && !layoutSaved) return;
+    if (!limitsChanged && !layoutChanged) {
+      notifyStatus(`No socket property changes to save for ${socketId}.`, 'info');
+      return;
     }
-    closeSocketActionModal();
+    if (!limitsSaved && !layoutSaved) return;
+    closeModalAfterCommitted(true);
     setSocketPropertyError('');
     notifyStatus(`Updated socket properties for ${socketId}.`, 'success');
   }

@@ -60,6 +60,7 @@ export function useLoadoutSocketInteractionController({
     setSocketActionId(undefined);
     setSocketActionMode('actions');
     setSelectedLoopSocketIds([]);
+    onModalErrorReset?.();
   }
 
   function switchLoadout(name: string) {
@@ -139,8 +140,7 @@ export function useLoadoutSocketInteractionController({
       return false;
     }
     if (!updateLoadoutDraft(activeLoadoutName, (loadout) => loadout.sockets?.[socketId] ? clearMateriaFromSocket(loadout, socketId) : loadout)) return false;
-    setSocketActionId(undefined);
-    setSocketActionMode('actions');
+    closeSocketActionModal();
     notifyStatus(`Cleared materia from ${socketId}; socket graph links and layout were preserved.`);
     return true;
   }
@@ -156,8 +156,7 @@ export function useLoadoutSocketInteractionController({
     }
     if (event.shiftKey) {
       toggleLoopSocketSelection(socketId);
-      setSocketActionId(undefined);
-      onSocketPropertyErrorReset?.();
+      closeSocketActionModal();
       return;
     }
     if (selectedMateriaId) {
@@ -245,7 +244,7 @@ export function useLoadoutSocketInteractionController({
     const point = canvasPoint(event);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     setSocketRegionSelectionDrag({ pointerId: event.pointerId, startX: point.x, startY: point.y, currentX: point.x, currentY: point.y });
-    setSocketActionId(undefined);
+    closeSocketActionModal();
   }
 
   function moveSocketRegionSelection(event: ReactPointerEvent<HTMLDivElement>) {
@@ -275,10 +274,7 @@ export function useLoadoutSocketInteractionController({
   }
 
   function replaceMateriaFromModal(socketId: string, materiaId: string) {
-    if (putMateria(socketId, materiaId)) {
-      setSocketActionId(undefined);
-      setSocketActionMode('actions');
-    }
+    if (putMateria(socketId, materiaId)) closeSocketActionModal();
   }
 
   function handleDrop(socketId: string, event: DragEvent) {
