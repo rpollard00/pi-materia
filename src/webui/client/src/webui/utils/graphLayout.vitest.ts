@@ -120,4 +120,42 @@ describe('loop display labels', () => {
     const centers = [...xs].sort((a, b) => a - b);
     expect(xs).toEqual([centers[2], centers[0], centers[1]]);
   });
+
+  it('does not use not-satisfied edges to derive the happy-path loop display order', () => {
+    const loadout = {
+      entry: 'Socket-1',
+      sockets: {
+        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'not_satisfied', to: 'Socket-3' }] },
+        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
+        'Socket-3': { type: 'agent', materia: 'Maintain', edges: [{ when: 'not_satisfied', to: 'Socket-2' }] },
+      },
+      loops: { review: { sockets: ['Socket-1', 'Socket-2', 'Socket-3'] } },
+    } satisfies PipelineConfig;
+
+    const xs = qControlXs(getLoopRegions(loadout, positioned(['Socket-1', 'Socket-2', 'Socket-3']))[0]!.cyclePath);
+    const centers = [...xs].sort((a, b) => a - b);
+    expect(xs).toEqual([centers[0], centers[1], centers[2]]);
+  });
+
+  it('does not treat loop-exit routes as internal loop cycle edges', () => {
+    const loadout = {
+      entry: 'Socket-1',
+      sockets: {
+        'Socket-1': { type: 'agent', materia: 'Build' },
+        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
+        'Socket-3': { type: 'agent', materia: 'Maintain' },
+      },
+      loops: {
+        review: {
+          sockets: ['Socket-1', 'Socket-2', 'Socket-3'],
+          exit: { from: 'Socket-1', when: 'satisfied', to: 'end' },
+          exits: [{ id: 'exit-satisfied', from: 'Socket-1', condition: 'satisfied', targetSocketId: 'Socket-3' }],
+        },
+      },
+    } satisfies PipelineConfig;
+
+    const xs = qControlXs(getLoopRegions(loadout, positioned(['Socket-1', 'Socket-2', 'Socket-3']))[0]!.cyclePath);
+    const centers = [...xs].sort((a, b) => a - b);
+    expect(xs).toEqual([centers[0], centers[1], centers[2]]);
+  });
 });

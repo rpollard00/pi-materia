@@ -536,6 +536,60 @@ function serpentineAutoPosition(autoIndex: number, rowGap = socketLayoutRowGap) 
 
 type Point = { x: number; y: number };
 
+type DisplayLoop = NonNullable<PipelineConfig['loops']>[string];
+
+function loopEdgePriority(when?: string): number | undefined {
+  const condition = edgeConditionState({ when });
+  if (condition === 'always') return 0;
+  if (condition === 'satisfied') return 1;
+  return undefined;
+}
+
+function orderLoopSocketsForDisplay(loop: DisplayLoop, loadout: PipelineConfig | undefined): string[] {
+  const storedOrder = loop.sockets;
+  const loopSocketSet = new Set(storedOrder);
+  if (storedOrder.length <= 1 || loopSocketSet.size !== storedOrder.length) return storedOrder;
+
+  const internalEdges = getLoadoutEdges(loadout).filter((edge) => edge.kind !== 'loop-exit');
+  const bestEdges = new Map<string, string>();
+  for (const from of storedOrder) {
+    const candidates = internalEdges
+      .filter((edge) => edge.from === from && loopSocketSet.has(edge.to))
+      .map((edge) => ({ to: edge.to, priority: loopEdgePriority(edge.when) }))
+      .filter((edge): edge is { to: string; priority: number } => edge.priority !== undefined)
+      .sort((a, b) => a.priority - b.priority || storedOrder.indexOf(a.to) - storedOrder.indexOf(b.to));
+    if (candidates.length === 0) continue;
+    const bestPriority = candidates[0].priority;
+    const best = candidates.filter((edge) => edge.priority === bestPriority);
+    if (best.length !== 1) return storedOrder;
+    bestEdges.set(from, best[0].to);
+  }
+
+  const buildPath = (start: string): string[] | undefined => {
+    const visited = new Set<string>();
+    const ordered: string[] = [];
+    let current: string | undefined = start;
+    while (current) {
+      if (visited.has(current)) return undefined;
+      visited.add(current);
+      ordered.push(current);
+      const next = bestEdges.get(current);
+      if (!next) break;
+      if (!loopSocketSet.has(next)) return undefined;
+      current = next;
+    }
+    if (ordered.length !== storedOrder.length) return undefined;
+    // Fall back for cyclic/branchy topologies; the display order should be a single
+    // happy-path chain, optionally ending at the configured loop exit source.
+    if (bestEdges.has(ordered[ordered.length - 1])) return undefined;
+    return ordered;
+  };
+
+  const validPaths = storedOrder.map(buildPath).filter((path): path is string[] => Boolean(path));
+  const exitSource = loop.exit?.from && loopSocketSet.has(loop.exit.from) ? loop.exit.from : undefined;
+  return validPaths.find((path) => exitSource && path[path.length - 1] === exitSource) ?? validPaths[0] ?? storedOrder;
+}
+
 function midpoint(a: Point, b: Point): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
@@ -583,6 +637,7 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
   return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop], index) => {
     const sockets = loop.sockets.map((socketId) => positions.get(socketId)).filter(Boolean) as PositionedSocket[];
     if (sockets.length === 0) return [];
+    const cycleSockets = orderLoopSocketsForDisplay(loop, loadout).map((socketId) => positions.get(socketId)).filter(Boolean) as PositionedSocket[];
     const minX = Math.min(...sockets.map((socket) => socket.x));
     const minY = Math.min(...sockets.map((socket) => socket.y));
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
@@ -594,7 +649,7 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const headerWidth = Math.min(loopHeaderMaxWidth, Math.max(estimateLoopHeaderWidth(label, summary), socketSpanWidth + 48));
     const headerX = rounded(minX + socketSpanWidth / 2 - headerWidth / 2);
     const headerY = minY - loopHeaderOffset;
-    return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(sockets), ...loopAccent(index) }];
+    return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(cycleSockets.length > 0 ? cycleSockets : sockets), ...loopAccent(index) }];
   });
 }
 
