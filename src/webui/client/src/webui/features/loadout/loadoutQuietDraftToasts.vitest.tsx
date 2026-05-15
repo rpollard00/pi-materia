@@ -183,12 +183,19 @@ describe('quiet draft loadout edit toasts', () => {
     expect(view.getByLabelText('toast-count').textContent).toBe('0');
   });
 
-  it('preserves validation toasts for blocked draft edits', () => {
+  it('preserves and dedupes validation toasts for blocked draft edits', () => {
     const view = render(<GraphMutationProbe policy={lockedPolicy} />);
 
     fireEvent.click(view.getByRole('button', { name: 'create socket' }));
     expect(view.getByLabelText('status').textContent).toContain('blocked: This loadout is locked');
     expect(view.getByLabelText('toast-count').textContent).toBe('1');
     expect(view.getByLabelText('toasts').textContent).toContain('validation');
+
+    fireEvent.click(view.getByRole('button', { name: 'create socket' }));
+    expect(view.getByLabelText('status').textContent).toContain('blocked: This loadout is locked');
+    expect(view.getByLabelText('toast-count').textContent).toBe('1');
+    const toasts = JSON.parse(view.getByLabelText('toasts').textContent ?? '[]') as Array<{ id?: string; variant?: string }>;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]).toEqual(expect.objectContaining({ variant: 'validation' }));
   });
 });
