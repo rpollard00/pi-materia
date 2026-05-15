@@ -206,9 +206,10 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     const activeLoopSocket = getByTestId('socket-Socket-2');
     expect(activeLoopSocket.className).toContain('materia-socket-loop-member');
     expect(activeLoopSocket.className).toContain('materia-socket-active');
+    expect(activeLoopSocket.getAttribute('data-loop-ids')).toBe('reviewLoop');
     expect(activeLoopSocket.getAttribute('aria-current')).toBe('step');
     expect(activeLoopSocket.getAttribute('aria-label')).toContain('active session socket');
-    expect(activeLoopSocket.querySelector('.materia-socket-active-indicator')).not.toBeNull();
+    expect(activeLoopSocket.querySelector('.materia-socket-orb-stage > .materia-socket-active-indicator')).not.toBeNull();
   });
 
   it('marks socket cards readonly and disables socket action mutations', () => {

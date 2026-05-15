@@ -574,19 +574,6 @@
   isolation: isolate;
 }
 
-.materia-socket-loop-member::before {
-  content: '';
-  position: absolute;
-  inset: -0.42rem -0.28rem 0.35rem;
-  z-index: -1;
-  border-radius: 1.25rem;
-  border: 1px solid color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 24%, transparent);
-  background: radial-gradient(circle at 50% 34%, var(--loop-accent-soft, rgb(165 180 252 / 0.22)), transparent 68%);
-  box-shadow: 0 0 26px var(--loop-accent-soft, rgb(165 180 252 / 0.22));
-  opacity: 0.78;
-  pointer-events: none;
-}
-
 .materia-socket-loop-member .materia-socket-orb-stage {
   border-width: 2px;
   border-color: color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 88%, white 12%);
@@ -613,6 +600,11 @@
 .materia-socket-loop-exit .materia-socket-orb-stage {
   border-color: color-mix(in srgb, var(--loop-accent, rgb(45 212 191)) 82%, white 18%);
   box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 0 3px var(--loop-accent-soft, rgb(45 212 191 / 0.2)), 0 0 34px color-mix(in srgb, var(--loop-accent, rgb(45 212 191)) 36%, transparent);
+}
+
+.materia-socket-loop-member.materia-socket-active .materia-socket-orb-stage {
+  border-color: rgb(250 204 21 / 0.82);
+  box-shadow: inset 0 0 34px rgb(8 47 73 / 0.95), 0 0 0 3px var(--loop-accent-soft, rgb(165 180 252 / 0.22)), 0 0 42px rgb(250 204 21 / 0.3), 0 0 90px rgb(34 211 238 / 0.18);
 }
 
 .materia-socket-orb-stage::before {
