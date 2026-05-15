@@ -41,6 +41,7 @@ export function App() {
     revertDraft,
     saveDraft,
     saveTarget,
+    getLoadoutLockEligibility,
     setDefaultLoadout,
     setLoadoutNameInput,
     setLoadoutLockState,
@@ -220,6 +221,7 @@ export function App() {
             onDuplicateLoadout={duplicateLoadout}
             onSetDefaultLoadout={setDefaultLoadout}
             onSetRuntimeActiveLoadout={setRuntimeActiveLoadout}
+            getLoadoutLockEligibility={getLoadoutLockEligibility}
             onToggleLoadoutLock={setLoadoutLockState}
           />
 

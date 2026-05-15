@@ -22,6 +22,7 @@ import {
   renameLoadoutDraft,
   saveTargetForSource,
 } from '../features/loadout/loadoutDraft.js';
+import { getLoadoutLockEligibility, type LoadoutLockEligibility } from '../features/loadout/loadoutLockEligibility.js';
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -504,12 +505,23 @@ export function useWebuiConfig() {
     return true;
   }
 
+  function getTargetLoadoutLockEligibility(name: string, lockState: LoadoutUserLockState): LoadoutLockEligibility {
+    return getLoadoutLockEligibility({ name, lockState, draftLoadouts: loadouts, baselineLoadouts: persistedLoadouts, loadoutSources });
+  }
+
   function setLoadoutLockState(name: string, lockState: LoadoutUserLockState) {
     const loadout = loadouts[name];
     if (!name || !loadout) return false;
-    const policy = getLoadoutEditPolicy({ source: (loadoutSources[name] ?? loadout.source ?? 'user') as never, lockState: loadout.lockState as never });
-    if (policy.readonly) {
-      setStatus(`${lockState === 'locked' ? 'Lock edit mode' : 'Unlock edit mode'} blocked: ${policy.reason}`);
+    const eligibility = getTargetLoadoutLockEligibility(name, lockState);
+    if (!eligibility.eligible) {
+      const message = `${lockState === 'locked' ? 'Lock edit mode' : 'Unlock edit mode'} blocked: ${eligibility.reason ?? 'Loadout cannot be toggled.'}`;
+      setStatus(message);
+      toast({
+        id: `loadout-lock-blocked:${name}:${lockState}`,
+        title: lockState === 'locked' ? 'Cannot lock loadout' : 'Cannot unlock loadout',
+        description: message,
+        variant: 'validation',
+      });
       return false;
     }
     if (loadout.lockState === lockState) return true;
@@ -684,6 +696,7 @@ export function useWebuiConfig() {
     revertDraft,
     saveDraft,
     saveTarget,
+    getLoadoutLockEligibility: getTargetLoadoutLockEligibility,
     setDefaultLoadout,
     setLoadoutNameInput,
     setPersistedActiveLoadout: setRuntimeActiveLoadout,

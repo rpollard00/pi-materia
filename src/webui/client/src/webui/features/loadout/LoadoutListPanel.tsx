@@ -2,6 +2,7 @@ import { EllipsisVertical, Lock, Star, Unlock, type LucideIcon } from 'lucide-re
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { LoadoutSourceScope } from '../../types.js';
+import type { LoadoutLockEligibility } from './loadoutLockEligibility.js';
 
 type LoadoutLockState = 'locked' | 'unlocked';
 
@@ -19,6 +20,7 @@ export interface LoadoutListPanelProps {
   onDuplicateLoadout: (name: string) => void;
   onSetDefaultLoadout: (loadoutId: string) => Promise<string | null>;
   onSetRuntimeActiveLoadout: (loadoutId: string) => Promise<string>;
+  getLoadoutLockEligibility: (name: string, lockState: LoadoutLockState) => LoadoutLockEligibility;
   onToggleLoadoutLock: (name: string, lockState: LoadoutLockState) => boolean;
 }
 
@@ -84,14 +86,14 @@ interface LoadoutLockAction {
   disabled: boolean;
 }
 
-function loadoutLockAction(loadout: PipelineConfig, scope: LoadoutSourceScope): LoadoutLockAction {
+function loadoutLockAction(loadout: PipelineConfig, scope: LoadoutSourceScope, eligibility: LoadoutLockEligibility): LoadoutLockAction {
   if (scope === 'default') {
-    return { iconKey: 'lock', label: 'Built-In read-only', title: 'Built-In read-only. Duplicate to edit.', menuLabel: 'Lock edits', nextState: 'locked', disabled: true };
+    return { iconKey: 'lock', label: 'Built-In read-only', title: eligibility.reason ?? 'Built-In read-only. Duplicate to edit.', menuLabel: 'Lock edits', nextState: 'locked', disabled: true };
   }
   if (loadout.lockState === 'locked') {
-    return { iconKey: 'lock', label: 'Unlock edits', title: 'Unlock edits', menuLabel: 'Unlock edits', nextState: 'unlocked', disabled: false };
+    return { iconKey: 'lock', label: 'Unlock edits', title: eligibility.reason ?? 'Unlock edits', menuLabel: 'Unlock edits', nextState: 'unlocked', disabled: !eligibility.eligible };
   }
-  return { iconKey: 'unlock', label: 'Lock edits', title: 'Lock edits', menuLabel: 'Lock edits', nextState: 'locked', disabled: false };
+  return { iconKey: 'unlock', label: 'Lock edits', title: eligibility.reason ?? 'Lock edits', menuLabel: 'Lock edits', nextState: 'locked', disabled: !eligibility.eligible };
 }
 
 function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRuntimeActive, canSetDefault, deleteDisabled, deleteTitle, lockAction, onSetRuntimeActive, onSetDefault, onToggleLock, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
@@ -166,7 +168,7 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRun
   );
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout, onToggleLoadoutLock }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const persistedRows = buildLoadoutSelectorViewModels(persistedLoadouts, defaultLoadoutId, runtimeActiveLoadoutId).filter(({ loadout }) => Boolean(loadout.id));
@@ -214,7 +216,8 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const deleteDisabled = !canDeleteLoadout(name);
           const persisted = Boolean(persistedLoadouts[name]?.id);
           const isDefaultLoadout = isDefault;
-          const lockAction = loadoutLockAction(loadout, sourceScope);
+          const nextLockState = loadout.lockState === 'locked' ? 'unlocked' : 'locked';
+          const lockAction = loadoutLockAction(loadout, sourceScope, getLoadoutLockEligibility(name, nextLockState));
           const LockIcon = loadoutLockIcons[lockAction.iconKey];
           return (
             <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>

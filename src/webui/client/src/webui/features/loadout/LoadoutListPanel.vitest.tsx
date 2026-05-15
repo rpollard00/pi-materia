@@ -26,6 +26,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutListPanel>>
     onDuplicateLoadout: vi.fn(),
     onSetDefaultLoadout: vi.fn(async (name: string) => name),
     onSetRuntimeActiveLoadout: vi.fn(async (name: string) => name),
+    getLoadoutLockEligibility: vi.fn(() => ({ eligible: true, reason: null })),
     onToggleLoadoutLock: vi.fn(() => true),
     ...overrides,
   };
@@ -277,6 +278,32 @@ describe('LoadoutListPanel', () => {
     fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Lock edits' }));
     expect(onToggleLoadoutLock).toHaveBeenLastCalledWith('Gamma', 'locked');
+  });
+
+  it('disables lock controls with target eligibility reason while leaving unrelated rows available', () => {
+    const onToggleLoadoutLock = vi.fn(() => true);
+    renderPanel({
+      getLoadoutLockEligibility: vi.fn((name: string, lockState: 'locked' | 'unlocked') => (
+        name === 'Alpha' && lockState === 'locked'
+          ? { eligible: false, reason: 'Save or revert pending edits before locking edit mode.' }
+          : { eligible: true, reason: null }
+      )),
+      onToggleLoadoutLock,
+    });
+
+    const alphaLock = within(cardFor('Alpha')).getByLabelText('Lock edits');
+    expect(alphaLock.getAttribute('aria-disabled')).toBe('true');
+    expect(alphaLock.getAttribute('title')).toBe('Save or revert pending edits before locking edit mode.');
+    fireEvent.click(alphaLock);
+    expect(onToggleLoadoutLock).not.toHaveBeenCalled();
+
+    fireEvent.click(within(cardFor('Alpha')).getByLabelText('Loadout actions'));
+    const lockMenuItem = screen.getByRole('menuitem', { name: 'Lock edits' });
+    expect(lockMenuItem).toHaveProperty('disabled', true);
+    expect(lockMenuItem.getAttribute('title')).toBe('Save or revert pending edits before locking edit mode.');
+
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Lock edits'));
+    expect(onToggleLoadoutLock).toHaveBeenCalledWith('Gamma', 'locked');
   });
 
   it('keeps Built-In lock controls disabled with duplicate-to-edit tooltip copy', () => {
