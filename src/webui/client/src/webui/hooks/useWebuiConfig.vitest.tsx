@@ -71,6 +71,7 @@ function ConfigProbe() {
       <output aria-label="runtime-active-loadout-id">{config.runtimeActiveLoadoutId ?? ''}</output>
       <output aria-label="default-loadout">{config.defaultLoadoutId ?? ''}</output>
       <output aria-label="toast-count">{String(toasts.length)}</output>
+      <output aria-label="toasts">{JSON.stringify(toasts)}</output>
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
       <button type="button" onClick={() => config.switchLoadout('Full-Auto')}>view Full-Auto</button>
       <button type="button" onClick={() => config.switchLoadout('Hojo-Consult')}>view Hojo-Consult</button>
@@ -441,6 +442,52 @@ describe('useWebuiConfig', () => {
     expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
     expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Hojo-Consult');
     expect(screen.getByLabelText('dirty').textContent).toBe('false');
+  });
+
+  it('emits one success toast when changing the runtime active loadout', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/loadout/active' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ name: 'Hojo-Consult' });
+        return new Response(JSON.stringify({
+          ok: true,
+          activeLoadout: 'Hojo-Consult',
+          activeLoadoutId: 'Hojo-Consult',
+          config: {
+            config: { ...reportedLayeredConfig, activeLoadout: 'Hojo-Consult', activeLoadoutId: 'Hojo-Consult' },
+            source: 'test',
+            loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+          },
+          message: 'Active loadout changed to Hojo-Consult.',
+        }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        source: 'default < user < project',
+        config: reportedLayeredConfig,
+        loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+        defaultLoadoutId: null,
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Full-Auto'));
+    expect(screen.getByLabelText('toast-count').textContent).toBe('0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'set active Hojo-Consult' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Active loadout changed to Hojo-Consult.'));
+    await waitFor(() => expect(screen.getByLabelText('toast-count').textContent).toBe('1'));
+    expect(JSON.parse(screen.getByLabelText('toasts').textContent ?? '[]')).toEqual([
+      expect.objectContaining({
+        id: 'active-loadout-success:Hojo-Consult',
+        title: 'Active loadout changed',
+        description: 'Active loadout changed to Hojo-Consult.',
+        variant: 'success',
+      }),
+    ]);
   });
 
   it('persists default changes separately from runtime active loadout changes', async () => {
