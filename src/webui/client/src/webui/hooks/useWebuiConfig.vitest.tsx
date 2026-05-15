@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MateriaConfig } from '../../loadoutModel.js';
+import { clearToasts, useToasts } from '../../toast/index.js';
 import { dirtyConfigKey, useWebuiConfig } from './useWebuiConfig.js';
 
 const initialConfig = {
@@ -58,13 +59,18 @@ const reportedLayeredConfig = {
 
 function ConfigProbe() {
   const config = useWebuiConfig();
+  const toasts = useToasts();
   return (
     <>
       <output aria-label="status">{config.status}</output>
       <output aria-label="dirty">{String(config.isDirty)}</output>
       <output aria-label="active-loadout">{config.activeLoadoutName}</output>
+      <output aria-label="active-entry-materia">{config.activeLoadout?.sockets?.[config.activeLoadout.entry ?? '']?.materia ?? ''}</output>
+      <output aria-label="active-entry-label">{config.activeLoadout?.sockets?.[config.activeLoadout.entry ?? '']?.label ?? ''}</output>
+      <output aria-label="active-socket-ids">{Object.keys(config.activeLoadout?.sockets ?? {}).join(',')}</output>
       <output aria-label="runtime-active-loadout-id">{config.runtimeActiveLoadoutId ?? ''}</output>
       <output aria-label="default-loadout">{config.defaultLoadoutId ?? ''}</output>
+      <output aria-label="toast-count">{String(toasts.length)}</output>
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
       <button type="button" onClick={() => config.switchLoadout('Full-Auto')}>view Full-Auto</button>
       <button type="button" onClick={() => config.switchLoadout('Hojo-Consult')}>view Hojo-Consult</button>
@@ -75,6 +81,8 @@ function ConfigProbe() {
       <button type="button" onClick={() => void config.setDefaultLoadout('Hojo-Consult')}>set default Hojo-Consult</button>
       <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
       <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
+      <button type="button" onClick={() => config.duplicateLoadout('Alpha')}>duplicate Alpha</button>
+      <button type="button" onClick={() => config.revertDraft()}>revert draft</button>
       <button type="button" onClick={() => config.createLoadout()}>create loadout</button>
       <button type="button" onClick={() => config.setActiveLoadoutLockState('locked')}>lock active loadout</button>
       <button type="button" onClick={() => config.setActiveLoadoutLockState('unlocked')}>unlock active loadout</button>
@@ -140,6 +148,7 @@ function ConfigProbe() {
 
 afterEach(() => {
   cleanup();
+  clearToasts();
   vi.restoreAllMocks();
 });
 
@@ -312,6 +321,125 @@ describe('useWebuiConfig', () => {
     await waitFor(() => expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Hojo-Consult'));
     expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
     expect(screen.getByLabelText('status').textContent).toBe('Draft ready. Changes are staged until you save.');
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+  });
+
+  it('switches viewed loadout cards synchronously without dirtying, status, toast, or network side effects', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      source: 'default < user < project',
+      config: reportedLayeredConfig,
+      loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Draft ready. Changes are staged until you save.'));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('active-socket-ids').textContent).toBe('Socket-1,Socket-2');
+    const readyStatus = screen.getByLabelText('status').textContent;
+
+    fireEvent.click(screen.getByRole('button', { name: 'view Hojo-Consult' }));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult');
+    expect(screen.getByLabelText('active-entry-label').textContent).toBe('Hojo profile consult');
+    expect(screen.getByLabelText('active-socket-ids').textContent).toBe('Socket-1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'view Full-Auto' }));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('active-entry-label').textContent).toBe('');
+    expect(screen.getByLabelText('active-socket-ids').textContent).toBe('Socket-1,Socket-2');
+
+    fireEvent.click(screen.getByRole('button', { name: 'view Hojo-Consult' }));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult');
+    expect(screen.getByLabelText('active-entry-label').textContent).toBe('Hojo profile consult');
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+    expect(screen.getByLabelText('status').textContent).toBe(readyStatus);
+    expect(screen.getByLabelText('toast-count').textContent).toBe('0');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves staged edits without persisting the locally viewed loadout as runtime active', async () => {
+    let savedConfig: MateriaConfig | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { config: MateriaConfig };
+        savedConfig = body.config;
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        source: 'default < user < project',
+        config: reportedLayeredConfig,
+        loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto'));
+    fireEvent.click(screen.getByRole('button', { name: 'view Hojo-Consult' }));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult');
+    fireEvent.click(screen.getByRole('button', { name: 'edit profile locally' }));
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('true'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Saved staged loadout edits to user scope.'));
+    expect(savedConfig?.activeLoadout).toBe('Full-Auto');
+    expect(savedConfig?.activeLoadoutId).toBe('Full-Auto');
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(0);
+  });
+
+  it('normalizes viewed selection when deleting the viewed loadout without changing runtime active loadout', async () => {
+    const config = {
+      activeLoadout: 'Alpha',
+      activeLoadoutId: 'Alpha',
+      materia: { Build: { prompt: 'Build.' } },
+      loadouts: {
+        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build', label: 'alpha socket' } } },
+        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build', label: 'beta socket' } } },
+      },
+    } satisfies MateriaConfig;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config, loadoutSources: { Alpha: 'user', Beta: 'user' } }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Alpha'));
+    fireEvent.click(screen.getByRole('button', { name: 'view Beta' }));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Beta');
+    expect(screen.getByLabelText('active-entry-label').textContent).toBe('beta socket');
+
+    fireEvent.click(screen.getByRole('button', { name: 'delete Beta' }));
+
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Alpha');
+    expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Alpha');
+    expect(screen.getByLabelText('active-entry-label').textContent).toBe('alpha socket');
+    expect(screen.getByLabelText('dirty').textContent).toBe('true');
+  });
+
+  it('keeps local viewed selection stable when external runtime active-loadout changes after card switching', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      source: 'default < user < project',
+      config: reportedLayeredConfig,
+      loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+    }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto'));
+    fireEvent.click(screen.getByRole('button', { name: 'view Hojo-Consult' }));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult');
+
+    fireEvent.click(screen.getByRole('button', { name: 'external active Hojo-Consult' }));
+    await waitFor(() => expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Hojo-Consult'));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Hojo-Consult');
+
+    fireEvent.click(screen.getByRole('button', { name: 'view Full-Auto' }));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Hojo-Consult');
     expect(screen.getByLabelText('dirty').textContent).toBe('false');
   });
 
