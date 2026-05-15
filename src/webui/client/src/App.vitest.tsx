@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { App } from './App.js';
-import { normalizeMateriaConfigEdges } from './loadoutModel.js';
+import { normalizeMateriaConfigEdges, type PipelineConfig } from './loadoutModel.js';
 import { fromWebUiLoadoutDto } from '../../loadoutDto.js';
 import { resetToastStoreForTests } from './toast/index.js';
 import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, layoutSockets, routeLoadoutEdges } from './webui/utils/graphLayout.js';
@@ -460,7 +460,7 @@ describe('Materia loadout grid editor', () => {
 
     await waitForConfigPostCount(fetchMock, 1);
     const saved = configPostBody(fetchMock);
-    expect(saved.config.activeLoadout).toBe('Unsaved Custom');
+    expect(saved.config.activeLoadout).toBe('Full-Auto');
     expect(saved.config.loadouts['New Loadout']).toBeUndefined();
     expect(saved.config.loadouts['Unsaved Custom']).toBeTruthy();
   });
@@ -1558,11 +1558,12 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
-    const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(Object.keys(created.sockets)).toEqual(['Socket-1']);
-    expect(created.entry).toBe('Socket-1');
-    expect(created.sockets['Socket-1']).toEqual({ empty: true, socketKind: 'entry' });
-    expect(created.sockets['Socket-1'].type).toBeUndefined();
+    const created = Object.entries(savedConfig.loadouts).find(([name]) => name.startsWith('New Loadout'))?.[1] as PipelineConfig | undefined;
+    expect(created).toBeTruthy();
+    expect(Object.keys(created?.sockets ?? {})).toEqual(['Socket-1']);
+    expect(created?.entry).toBe('Socket-1');
+    expect(created?.sockets?.['Socket-1']).toEqual({ empty: true, socketKind: 'entry' });
+    expect(created?.sockets?.['Socket-1'].type).toBeUndefined();
   });
 
   it('creates connected sockets with the same Empty display model', async () => {
@@ -1587,9 +1588,10 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
-    const created = savedConfig.loadouts[savedConfig.activeLoadout];
-    expect(created.sockets['Socket-1']).toEqual({ empty: true, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
-    expect(created.sockets['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
+    const created = Object.entries(savedConfig.loadouts).find(([name]) => name.startsWith('New Loadout'))?.[1] as PipelineConfig | undefined;
+    expect(created).toBeTruthy();
+    expect(created?.sockets?.['Socket-1']).toEqual({ empty: true, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created?.sockets?.['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
   });
 
   it('keeps palette definitions and save payload materia stable during new loadout grid edits', async () => {
@@ -1622,10 +1624,11 @@ describe('Materia loadout grid editor', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const savedConfig = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config;
-    const created = savedConfig.loadouts[savedConfig.activeLoadout];
+    const created = Object.entries(savedConfig.loadouts).find(([name]) => name.startsWith('New Loadout'))?.[1] as PipelineConfig | undefined;
+    expect(created).toBeTruthy();
     expect(savedConfig.materia).toEqual(initialMateria);
-    expect(created.sockets['Socket-1']).toEqual({ type: 'agent', materia: 'Build', empty: false, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
-    expect(created.sockets['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
+    expect(created?.sockets?.['Socket-1']).toEqual({ type: 'agent', materia: 'Build', empty: false, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
+    expect(created?.sockets?.['Socket-2']).toEqual({ empty: true, socketKind: 'normal' });
   });
 
   it('opens a valid tab from the URL query parameter', async () => {
@@ -1834,7 +1837,7 @@ describe('Materia loadout grid editor', () => {
     const saved = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.loadouts['Planning-Consult'].sockets;
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(saved['Socket-3']).toEqual({ empty: true, socketKind: 'normal' });
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Planning-Consult');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).config.activeLoadout).toBe('Full-Auto');
   });
 
   it('replaces socket materia from the modal while preserving socket graph metadata', async () => {

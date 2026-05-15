@@ -79,6 +79,12 @@ function loadoutIdForName(loadouts: Record<string, PipelineConfig>, name: string
   return name ? loadouts[name]?.id : undefined;
 }
 
+function resolveViewedLoadoutName(loadouts: Record<string, PipelineConfig>, preferredName?: string, runtimeActiveName?: string): string | undefined {
+  if (preferredName && loadouts[preferredName]) return preferredName;
+  if (runtimeActiveName && loadouts[runtimeActiveName]) return runtimeActiveName;
+  return Object.keys(loadouts)[0];
+}
+
 function mergeReloadedConfigIntoDraft(current: MateriaConfig | undefined, reloaded: MateriaConfig, preserveLoadoutEdits: boolean): MateriaConfig {
   if (!preserveLoadoutEdits || !current) return normalizeMateriaConfigEdges(reloaded);
   return normalizeMateriaConfigEdges({
@@ -102,9 +108,8 @@ function sortObjectKeys(value: unknown): unknown {
 export function configForDirtyComparison(config: MateriaConfig | undefined): unknown {
   if (!config) return config;
   const comparable = normalizeMateriaConfigEdges(config, { semantic: false });
-  // activeLoadout is the user's current UI/session selection. It remains in the
-  // persisted config for compatibility, but selecting a loadout must not require
-  // a save or make the header report staged edits by itself.
+  // activeLoadout is a legacy/runtime compatibility field. Editor card
+  // selection is local hook state, so it must not affect dirty comparison.
   delete comparable.activeLoadout;
   return sortObjectKeys(comparable);
 }
@@ -209,6 +214,7 @@ export function useWebuiConfig() {
   const [loadoutSources, setLoadoutSources] = useState<Record<string, LoadoutSourceScope>>({});
   const [deletedLoadoutNames, setDeletedLoadoutNames] = useState<string[]>([]);
   const [loadoutNameInput, setLoadoutNameInput] = useState('');
+  const [viewedLoadoutName, setViewedLoadoutName] = useState<string | undefined>();
   const [status, setStatus] = useState('Loading materia configuration…');
   const [saveTarget, setSaveTarget] = useState<SaveTarget>('user');
   const [defaultLoadoutId, setDefaultLoadoutId] = useState<string | null>(null);
@@ -219,13 +225,7 @@ export function useWebuiConfig() {
 
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const persistedLoadouts = useMemo(() => buildLoadouts(baselineConfig ?? draftConfig ?? {}), [baselineConfig, draftConfig]);
-  // The current config model stores the loadout being viewed/edited in
-  // draftConfig.activeLoadout. Keep this staged editor selection separate from
-  // the persisted runtime active loadout and from the upcoming durable default
-  // preference (defaultLoadoutId). Selecting cards or creating/duplicating
-  // drafts should update only these editing* values unless an explicit runtime
-  // or default action is invoked.
-  const editingLoadoutName = draftConfig?.activeLoadout && loadouts[draftConfig.activeLoadout] ? draftConfig.activeLoadout : Object.keys(loadouts)[0];
+  const editingLoadoutName = resolveViewedLoadoutName(loadouts, viewedLoadoutName, draftConfig?.activeLoadout);
   const runtimeActiveLoadoutId = hasLoadoutId(persistedLoadouts, baselineConfig?.activeLoadoutId) ? baselineConfig?.activeLoadoutId : undefined;
   const runtimeActiveLoadoutName = Object.entries(persistedLoadouts).find(([, loadout]) => Boolean(runtimeActiveLoadoutId) && loadout.id === runtimeActiveLoadoutId)?.[0];
   const editingLoadout = editingLoadoutName ? loadouts[editingLoadoutName] : undefined;
@@ -234,6 +234,13 @@ export function useWebuiConfig() {
   const activeLoadout = editingLoadout;
   const editingLoadoutPolicy = policyForLoadout(editingLoadout, editingLoadoutName ? loadoutSources[editingLoadoutName] : undefined);
   const isDirty = dirtyConfigKey(baselineConfig) !== dirtyConfigKey(draftConfig);
+
+  useEffect(() => {
+    const resolvedName = resolveViewedLoadoutName(loadouts, viewedLoadoutName, draftConfig?.activeLoadout);
+    if (resolvedName === viewedLoadoutName) return;
+    setViewedLoadoutName(resolvedName);
+    setLoadoutNameInput(resolvedName ?? '');
+  }, [draftConfig?.activeLoadout, loadouts, viewedLoadoutName]);
 
   function readonlyStatus(action: string) {
     const message = `${action} blocked: ${editingLoadoutPolicy.reason}`;
@@ -319,10 +326,11 @@ export function useWebuiConfig() {
     const normalizedLoaded = normalizeMateriaConfigEdges(loaded.config);
     const nextDraft = mergeReloadedConfigIntoDraft(draftConfigRef.current, loaded.config, preserveLoadoutEdits);
     const nextLoadouts = buildLoadouts(nextDraft);
-    const nextActive = nextDraft.activeLoadout && nextLoadouts[nextDraft.activeLoadout] ? nextDraft.activeLoadout : Object.keys(nextLoadouts)[0] ?? '';
+    const nextViewedName = resolveViewedLoadoutName(nextLoadouts, viewedLoadoutName, nextDraft.activeLoadout);
     setBaselineConfig(normalizedLoaded);
     setDraftConfig(nextDraft);
-    setLoadoutNameInput(nextActive);
+    setViewedLoadoutName(nextViewedName);
+    setLoadoutNameInput(nextViewedName ?? '');
     setSource(loaded.source);
     setLoadoutSources(loaded.loadoutSources ?? {});
     const nextPersistedLoadouts = buildLoadouts(normalizedLoaded);
@@ -339,6 +347,7 @@ export function useWebuiConfig() {
       const fallback = demoConfig();
       setBaselineConfig(cloneConfig(fallback));
       setDraftConfig(fallback);
+      setViewedLoadoutName(resolveViewedLoadoutName(buildLoadouts(fallback), undefined, fallback.activeLoadout));
       setLoadoutNameInput(fallback.activeLoadout ?? '');
       setSource('demo');
       setLoadoutSources({ 'Demo Loadout': 'default' });
@@ -350,11 +359,10 @@ export function useWebuiConfig() {
   }, []);
 
   function switchEditingLoadoutDraft(name: string) {
-    updateDraft((config) => {
-      config.activeLoadout = name;
-    });
+    if (!loadouts[name]) return false;
+    setViewedLoadoutName(name);
     setLoadoutNameInput(name);
-    setStatus(`Viewing loadout: ${name}`);
+    return true;
   }
 
   async function setDefaultLoadout(loadoutId: string | null) {
@@ -484,6 +492,7 @@ export function useWebuiConfig() {
     }
     const previousName = editingLoadoutName;
     setDraftConfig((current) => renameLoadoutDraft({ config: current ?? {}, activeLoadoutName: previousName, nextName }));
+    setViewedLoadoutName(nextName);
     setDeletedLoadoutNames((current) => deletedLoadoutNamesAfterRename({ current, baselineConfig, previousName, nextName }));
     if (baselineConfig?.loadouts?.[previousName]) setSaveTarget((current) => saveTargetForSource(current, loadoutSources[previousName]));
     setLoadoutNameInput(nextName);
@@ -494,6 +503,7 @@ export function useWebuiConfig() {
   function createLoadout() {
     const name = makeNewLoadoutName(loadouts);
     setDraftConfig((current) => createLoadoutDraft(current ?? {}, name));
+    setViewedLoadoutName(name);
     setLoadoutNameInput(name);
     setStatus('Created a new draft loadout with one empty entry socket. Rename and save when ready.');
   }
@@ -506,6 +516,7 @@ export function useWebuiConfig() {
     }
     const nextName = makeDuplicateLoadoutName(loadouts, name);
     setDraftConfig((current) => duplicateLoadoutDraft({ config: current ?? {}, name, nextName }));
+    setViewedLoadoutName(nextName);
     setLoadoutNameInput(nextName);
     const readyStatus = `Duplicated ${name} as ${nextName}. Save to persist.`;
     setStatus(readyStatus);
@@ -574,6 +585,7 @@ export function useWebuiConfig() {
     }
     const { config, fallbackName } = deleteLoadoutDraft({ config: draftConfig ?? {}, name, activeLoadoutName: editingLoadoutName });
     setDraftConfig(config);
+    setViewedLoadoutName(fallbackName);
     setLoadoutNameInput(fallbackName ?? '');
     if (baselineConfig?.loadouts?.[name]) {
       setDeletedLoadoutNames((current) => current.includes(name) ? current : [...current, name]);
@@ -584,7 +596,11 @@ export function useWebuiConfig() {
   }
 
   function revertDraft() {
-    setDraftConfig(cloneConfig(baselineConfig ?? {}));
+    const nextDraft = cloneConfig(baselineConfig ?? {});
+    const nextViewedName = resolveViewedLoadoutName(buildLoadouts(nextDraft), viewedLoadoutName, nextDraft.activeLoadout);
+    setDraftConfig(nextDraft);
+    setViewedLoadoutName(nextViewedName);
+    setLoadoutNameInput(nextViewedName ?? '');
     const readyStatus = 'Reverted staged edits.';
     setStatus(readyStatus);
     toast({

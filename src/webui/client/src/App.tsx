@@ -16,7 +16,6 @@ import { useLoadoutSocketInteractionController } from './webui/features/loadout/
 import { useLoadoutGraphMutationController } from './webui/features/loadout/useLoadoutGraphMutationController.js';
 
 const shouldSuppressGenericLoadoutStatusToast = (status: string) =>
-  /^Viewing loadout: .+/.test(status) ||
   /^Loading materia configuration|^Draft ready\.|^Saving staged loadout edits|^Cannot save staged loadout edits|^Save failed:|^Saved staged loadout edits|^Reverted staged edits\./.test(status);
 
 // Compatibility entry point for the browser bundle and tests. Keep feature
@@ -96,7 +95,7 @@ export function App() {
 
   const socketInteractions = useLoadoutSocketInteractionController({
     activeLoadout: editingLoadout,
-    activeLoadoutName: editingLoadoutName,
+    activeLoadoutName: editingLoadoutName ?? '',
     editPolicy: activeLoadoutPolicy,
     deleteLoadoutDraft,
     draftConfig,
@@ -159,7 +158,7 @@ export function App() {
 
   const graphMutation = useLoadoutGraphMutationController({
     activeLoadout: editingLoadout,
-    activeLoadoutName: editingLoadoutName,
+    activeLoadoutName: editingLoadoutName ?? '',
     editPolicy: activeLoadoutPolicy,
     loadoutGraph,
     materia,

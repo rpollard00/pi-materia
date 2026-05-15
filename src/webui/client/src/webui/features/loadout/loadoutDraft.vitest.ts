@@ -38,24 +38,24 @@ describe('loadout draft mutations', () => {
     expect(config.loadouts.Alpha).toBeTruthy();
   });
 
-  it('creates an empty entry loadout and makes it active', () => {
+  it('creates an empty entry loadout without changing the runtime active loadout', () => {
     const frozen = deepFreeze(config);
     const created = createLoadoutDraft(frozen, 'New Loadout 3');
 
-    expect(created.activeLoadout).toBe('New Loadout 3');
+    expect(created.activeLoadout).toBe('Alpha');
     expect(created.loadouts?.['New Loadout 3']?.entry).toBeTruthy();
     expect(Object.keys(created.loadouts?.['New Loadout 3']?.sockets ?? {})).toHaveLength(1);
     expect((config.loadouts as Record<string, unknown>)['New Loadout 3']).toBeUndefined();
   });
 
-  it('duplicates a loadout as an independent user-owned staged copy and makes it active', () => {
+  it('duplicates a loadout as an independent user-owned staged copy without changing the runtime active loadout', () => {
     const frozen = deepFreeze({
       ...config,
       loadouts: { ...config.loadouts, Alpha: { ...config.loadouts.Alpha, id: 'default:alpha', source: 'default' } },
     } satisfies MateriaConfig);
     const duplicated = duplicateLoadoutDraft({ config: frozen, name: 'Alpha', nextName: 'Alpha Copy', makeId: () => 'user:alpha-copy:test' });
 
-    expect(duplicated.activeLoadout).toBe('Alpha Copy');
+    expect(duplicated.activeLoadout).toBe('Alpha');
     expect(duplicated.loadouts?.['Alpha Copy']).toMatchObject({
       ...config.loadouts.Alpha,
       id: 'user:alpha-copy:test',

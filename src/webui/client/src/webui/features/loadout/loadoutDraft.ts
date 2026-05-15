@@ -23,8 +23,8 @@ function loadoutId(loadout: PipelineConfig | undefined): string | undefined {
   return typeof loadout?.id === 'string' && loadout.id.trim() ? loadout.id.trim() : undefined;
 }
 
-function fallbackNameAfterDelete(draftLoadouts: Record<string, PipelineConfig>, name: string, activeLoadoutName: string | undefined): string | undefined {
-  if (activeLoadoutName !== name) return activeLoadoutName;
+function fallbackNameAfterDelete(draftLoadouts: Record<string, PipelineConfig>, name: string, viewedLoadoutName: string | undefined): string | undefined {
+  if (viewedLoadoutName !== name) return viewedLoadoutName;
   const deleted = draftLoadouts[name];
   const originDefaultId = typeof deleted?.originDefaultId === 'string' ? deleted.originDefaultId : undefined;
   if (originDefaultId) {
@@ -56,7 +56,7 @@ export function renameLoadoutDraft({
   return normalizeMateriaConfigEdges({
     ...config,
     loadouts: { ...remainingLoadouts, [nextName]: renamedLoadout },
-    activeLoadout: nextName,
+    ...(config.activeLoadout === activeLoadoutName ? { activeLoadout: nextName } : {}),
   });
 }
 
@@ -65,7 +65,6 @@ export function createLoadoutDraft(config: MateriaConfig, name: string, makeId: 
   return normalizeMateriaConfigEdges({
     ...config,
     loadouts: { ...draftLoadouts, [name]: { ...makeEmptyEntryLoadout(), id: makeId(name), source: 'user', lockState: 'unlocked' } },
-    activeLoadout: name,
   });
 }
 
@@ -98,7 +97,6 @@ export function duplicateLoadoutDraft({
   return normalizeMateriaConfigEdges({
     ...config,
     loadouts: { ...draftLoadouts, [nextName]: duplicated },
-    activeLoadout: nextName,
   });
 }
 
@@ -120,7 +118,7 @@ export function deleteLoadoutDraft({
     config: normalizeMateriaConfigEdges({
       ...config,
       loadouts: remainingLoadouts,
-      activeLoadout: fallbackName,
+      ...(config.activeLoadout === name ? { activeLoadout: fallbackName } : {}),
       ...(deletedLoadoutId && config.activeLoadoutId === deletedLoadoutId ? (fallbackLoadoutId ? { activeLoadoutId: fallbackLoadoutId } : { activeLoadoutId: undefined }) : {}),
     }),
     fallbackName,
