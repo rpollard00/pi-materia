@@ -63,6 +63,7 @@ function ConfigProbe() {
       <output aria-label="status">{config.status}</output>
       <output aria-label="dirty">{String(config.isDirty)}</output>
       <output aria-label="active-loadout">{config.activeLoadoutName}</output>
+      <output aria-label="runtime-active-loadout-id">{config.runtimeActiveLoadoutId ?? ''}</output>
       <output aria-label="default-loadout">{config.defaultLoadoutId ?? ''}</output>
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
       <button type="button" onClick={() => config.switchLoadout('Full-Auto')}>view Full-Auto</button>
@@ -70,6 +71,7 @@ function ConfigProbe() {
       <button type="button" onClick={() => config.switchLoadout('Alpha')}>view Alpha</button>
       <button type="button" onClick={() => config.switchLoadout('Beta')}>view Beta</button>
       <button type="button" onClick={() => void config.setRuntimeActiveLoadout('Hojo-Consult')}>set active Hojo-Consult</button>
+      <button type="button" onClick={() => config.applyExternalRuntimeActiveLoadout('Hojo-Consult', 'Hojo-Consult')}>external active Hojo-Consult</button>
       <button type="button" onClick={() => void config.setDefaultLoadout('Hojo-Consult')}>set default Hojo-Consult</button>
       <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
       <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
@@ -288,6 +290,28 @@ describe('useWebuiConfig', () => {
 
     await waitFor(() => expect(screen.getByLabelText('default-loadout').textContent).toBe(''));
     expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('dirty').textContent).toBe('false');
+  });
+
+  it('applies external runtime active-loadout notifications without navigating editor selection or status', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      source: 'default < user < project',
+      config: reportedLayeredConfig,
+      loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+    }))));
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Draft ready. Changes are staged until you save.'));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Full-Auto');
+
+    fireEvent.click(screen.getByRole('button', { name: 'external active Hojo-Consult' }));
+
+    await waitFor(() => expect(screen.getByLabelText('runtime-active-loadout-id').textContent).toBe('Hojo-Consult'));
+    expect(screen.getByLabelText('active-loadout').textContent).toBe('Full-Auto');
+    expect(screen.getByLabelText('status').textContent).toBe('Draft ready. Changes are staged until you save.');
     expect(screen.getByLabelText('dirty').textContent).toBe('false');
   });
 

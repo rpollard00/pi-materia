@@ -108,9 +108,10 @@ function sortObjectKeys(value: unknown): unknown {
 export function configForDirtyComparison(config: MateriaConfig | undefined): unknown {
   if (!config) return config;
   const comparable = normalizeMateriaConfigEdges(config, { semantic: false });
-  // activeLoadout is a legacy/runtime compatibility field. Editor card
-  // selection is local hook state, so it must not affect dirty comparison.
+  // Runtime active-loadout fields are compatibility/runtime state, while editor
+  // card selection is local hook state, so neither should affect dirty comparison.
   delete comparable.activeLoadout;
+  delete comparable.activeLoadoutId;
   return sortObjectKeys(comparable);
 }
 
@@ -412,10 +413,11 @@ export function useWebuiConfig() {
     if (!trimmedId || trimmedId === runtimeActiveLoadoutId) return false;
     const name = Object.entries(persistedLoadouts).find(([, loadout]) => loadout.id === trimmedId)?.[0] ?? activeNameHint;
     if (!name || !persistedLoadouts[name]) return false;
-    // Monitor/session events are authoritative for runtime selection only; keep
-    // staged draft loadout edits intact so cross-surface sync cannot clobber UI work.
+    // Monitor/session events are authoritative for runtime selection only. The
+    // `activeLoadout` name is retained as a migration/compatibility field beside
+    // stable `activeLoadoutId`, but neither field drives local editor navigation
+    // or generic status/toast emission.
     setBaselineConfig((current) => normalizeMateriaConfigEdges({ ...(current ?? {}), activeLoadout: name, activeLoadoutId: trimmedId }));
-    setStatus(`Active loadout is now ${name}.`);
     return true;
   }
 
