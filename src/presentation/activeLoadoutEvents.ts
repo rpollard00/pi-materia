@@ -12,6 +12,7 @@ export interface ActiveLoadoutChangeEvent {
   eventType: typeof ACTIVE_LOADOUT_CHANGED_EVENT;
   source: ActiveLoadoutChangeSource;
   activeLoadout: string;
+  activeLoadoutId?: string;
   configSource?: string;
   configPath?: string;
   loadouts: string[];
@@ -37,11 +38,13 @@ export function publishActiveLoadoutChange(
   options: PublishActiveLoadoutChangeOptions,
 ): PublishActiveLoadoutChangeResult {
   const activeLoadout = options.loaded.config.activeLoadout ?? "";
+  const activeLoadoutId = options.loaded.config.activeLoadoutId;
   const lines = renderLoadoutList(options.loaded.config, options.loaded.source);
   const event: ActiveLoadoutChangeEvent = {
     eventType: ACTIVE_LOADOUT_CHANGED_EVENT,
     source: options.source,
     activeLoadout,
+    ...(activeLoadoutId ? { activeLoadoutId } : {}),
     ...(options.loaded.source ? { configSource: options.loaded.source } : {}),
     ...(options.writtenPath ? { configPath: options.writtenPath } : {}),
     loadouts: Object.keys(options.loaded.config.loadouts ?? {}),
@@ -66,6 +69,7 @@ export function publishActiveLoadoutChange(
       source: event.source,
       name: event.activeLoadout,
       activeLoadout: event.activeLoadout,
+      activeLoadoutId: event.activeLoadoutId,
       configSource: event.configSource,
       configPath: event.configPath,
       timestamp: event.timestamp,

@@ -21,6 +21,7 @@ export function App() {
   const { selectedTab, selectTab } = useAppNavigation();
   const {
     editingLoadout,
+    applyExternalRuntimeActiveLoadout,
     activeLoadoutPolicy,
     editingLoadoutName,
     canDeleteLoadout,
@@ -58,6 +59,11 @@ export function App() {
   const socketPropertyErrorResetRef = useRef(() => undefined as void);
   const monitor = useMonitorSnapshot();
   useCastCompletionToasts(monitor);
+
+  useEffect(() => {
+    if (!monitor?.activeLoadoutId) return;
+    applyExternalRuntimeActiveLoadout(monitor.activeLoadoutId, monitor.activeLoadout);
+  }, [applyExternalRuntimeActiveLoadout, monitor?.activeLoadout, monitor?.activeLoadoutId]);
 
   const lastStatusToastRef = useRef('');
   useEffect(() => {

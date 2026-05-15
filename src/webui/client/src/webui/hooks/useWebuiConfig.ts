@@ -399,6 +399,18 @@ export function useWebuiConfig() {
     return savedDefault;
   }
 
+  function applyExternalRuntimeActiveLoadout(loadoutId: string, activeNameHint?: string) {
+    const trimmedId = loadoutId.trim();
+    if (!trimmedId || trimmedId === runtimeActiveLoadoutId) return false;
+    const name = Object.entries(persistedLoadouts).find(([, loadout]) => loadout.id === trimmedId)?.[0] ?? activeNameHint;
+    if (!name || !persistedLoadouts[name]) return false;
+    // Monitor/session events are authoritative for runtime selection only; keep
+    // staged draft loadout edits intact so cross-surface sync cannot clobber UI work.
+    setBaselineConfig((current) => normalizeMateriaConfigEdges({ ...(current ?? {}), activeLoadout: name, activeLoadoutId: trimmedId }));
+    setStatus(`Active loadout is now ${name}.`);
+    return true;
+  }
+
   async function setRuntimeActiveLoadout(loadoutId: string) {
     const name = Object.entries(persistedLoadouts).find(([, loadout]) => loadout.id === loadoutId)?.[0] ?? loadoutId;
     setStatus(`Changing active loadout to ${name}…`);
@@ -429,10 +441,11 @@ export function useWebuiConfig() {
       throw new Error(message);
     }
     const activeName = body.activeLoadout ?? name;
+    const activeLoadoutId = body.activeLoadoutId ?? loadoutId;
     const readyStatus = body.message ?? `Active loadout changed to ${activeName}.`;
     if (body.config) {
       const snapshot = normalizeConfigSnapshot(body, baselineConfig ?? draftConfigRef.current);
-      const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: activeName ?? snapshot.config.activeLoadout ?? name, activeLoadoutId: snapshot.config.activeLoadoutId ?? loadoutId });
+      const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: activeName ?? snapshot.config.activeLoadout ?? name, activeLoadoutId: snapshot.config.activeLoadoutId ?? activeLoadoutId });
       setBaselineConfig(nextConfig);
       if (snapshot.source) setSource(snapshot.source);
       if (snapshot.loadoutSources) setLoadoutSources(snapshot.loadoutSources);
@@ -688,6 +701,7 @@ export function useWebuiConfig() {
     isDirty,
     loadoutNameInput,
     loadoutSources,
+    applyExternalRuntimeActiveLoadout,
     loadouts,
     persistedActiveLoadoutName,
     persistedLoadouts,

@@ -25,6 +25,9 @@ export interface MateriaWebUiSessionSnapshot {
   uiStartedAt: number;
   now: number;
   emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }>;
+  /** Canonical runtime active loadout id/name for WebUI/TUI synchronization. */
+  activeLoadoutId?: string;
+  activeLoadout?: string;
   artifactSummary?: {
     runDir?: string;
     request?: string;

@@ -129,7 +129,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       sessionFile,
       sessionId,
       startedAt,
-      getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt),
+      getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt, configuredPath),
       getConfig: () => loadConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
@@ -242,7 +242,7 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
         writtenPath: written,
         notifyMessage: `pi-materia active loadout changed from WebUI to ${activeLoadout} (${written})`,
       });
-      return { ok: true, activeLoadout, config: loaded, message: `Active loadout changed to ${activeLoadout}.` };
+      return { ok: true, activeLoadout, activeLoadoutId: loaded.config.activeLoadoutId, config: loaded, message: `Active loadout changed to ${activeLoadout}.` };
     } catch (error) {
       return {
         ok: false,
@@ -277,9 +277,10 @@ function listen(server: RunningWebUiServer["server"], host: string, port: number
   });
 }
 
-async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiStartedAt: number): Promise<MateriaWebUiSessionSnapshot> {
+async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiStartedAt: number, configuredPath?: string): Promise<MateriaWebUiSessionSnapshot> {
   const state = loadActiveCastState(ctx);
   const artifactSummary = state?.runDir ? await readArtifactSummary(state.runDir) : undefined;
+  const activeLoadoutSnapshot = await readActiveLoadoutSnapshot(ctx.cwd, configuredPath);
   return {
     ok: true,
     scope: "session",
@@ -291,6 +292,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
     uiStartedAt,
     now: Date.now(),
     emittedOutputs: readSessionEmittedOutputs(ctx, uiStartedAt),
+    ...activeLoadoutSnapshot,
     artifactSummary,
     activeCast: state ? {
       castId: state.castId,
@@ -306,6 +308,18 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
       updatedAt: state.updatedAt,
     } : undefined,
   };
+}
+
+async function readActiveLoadoutSnapshot(cwd: string, configuredPath?: string): Promise<Pick<MateriaWebUiSessionSnapshot, "activeLoadoutId" | "activeLoadout">> {
+  try {
+    const loaded = await loadConfig(cwd, configuredPath);
+    return {
+      activeLoadout: loaded.config.activeLoadout,
+      activeLoadoutId: loaded.config.activeLoadoutId,
+    };
+  } catch {
+    return {};
+  }
 }
 
 function readSessionEmittedOutputs(ctx: ExtensionContext, since: number): Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }> {

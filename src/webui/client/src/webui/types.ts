@@ -50,6 +50,7 @@ export interface ConfigResponse {
 export interface ActiveLoadoutResponse {
   ok?: boolean;
   activeLoadout?: string;
+  activeLoadoutId?: string;
   config?: MateriaConfig | LoadedConfigResponse;
   message?: string;
   error?: string | { code?: string; message?: string };
@@ -113,6 +114,8 @@ export interface MonitorSnapshot {
   uiStartedAt?: number;
   now?: number;
   emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }>;
+  activeLoadoutId?: string;
+  activeLoadout?: string;
   artifactSummary?: {
     runDir?: string;
     request?: string;

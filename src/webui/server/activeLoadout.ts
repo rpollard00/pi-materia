@@ -8,6 +8,8 @@ export type MateriaSetActiveLoadoutResult =
     ok: true;
     /** Canonical persisted active loadout name after the backend/session authority has applied the change. */
     activeLoadout: string;
+    /** Canonical stable active loadout id after the backend/session authority has applied the change. */
+    activeLoadoutId?: string;
     /** Optional freshly reloaded config/state for deterministic WebUI refreshes. */
     config?: unknown;
     message?: string;
@@ -19,6 +21,8 @@ export type MateriaSetActiveLoadoutResult =
     message: string;
     /** Current canonical active loadout name when known. */
     activeLoadout?: string;
+    /** Current canonical stable active loadout id when known. */
+    activeLoadoutId?: string;
     /** Optional freshly reloaded config/state for deterministic WebUI refreshes. */
     config?: unknown;
   };
@@ -59,6 +63,7 @@ export async function handleActiveLoadoutRoute(req: IncomingMessage, res: Server
     if (!result.ok) {
       sendActiveLoadoutError(res, activeLoadoutFailureStatus(result.code), result.code, result.message, {
         ...(result.activeLoadout ? { activeLoadout: result.activeLoadout } : {}),
+        ...(result.activeLoadoutId ? { activeLoadoutId: result.activeLoadoutId } : {}),
         ...(result.config !== undefined ? { config: result.config } : {}),
       });
       return;
@@ -66,6 +71,7 @@ export async function handleActiveLoadoutRoute(req: IncomingMessage, res: Server
     sendJson(res, 200, {
       ok: true,
       activeLoadout: result.activeLoadout,
+      ...(result.activeLoadoutId ? { activeLoadoutId: result.activeLoadoutId } : {}),
       ...(result.config !== undefined ? { config: result.config } : {}),
       message: result.message ?? `Active loadout changed to ${result.activeLoadout}.`,
     });
