@@ -4,7 +4,8 @@ import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
-import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference, launchMateriaWebUi } from "./webui/launcher.js";
+import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference } from "./webui/launcher.js";
+import { ensureMateriaWebUi } from "./webui/service.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 export { renderCastList } from "./infrastructure/index.js";
@@ -66,12 +67,14 @@ export default function piMateria(pi: ExtensionAPI) {
 
       if (subcommand === "ui") {
         try {
-          const result = await launchMateriaWebUi(ctx, getConfiguredConfigPath(), pi);
-          const lines = [`WebUI ${result.reused ? "ready" : "started"}: ${truncateLine(result.url, 110)}`];
+          const result = await ensureMateriaWebUi({ ctx, mode: "explicit", configuredPath: getConfiguredConfigPath(), pi });
+          if (!result.ok) return;
+          const reused = result.status === "reused";
+          const lines = [`WebUI ${reused ? "ready" : "started"}: ${truncateLine(result.url, 110)}`];
           clearMateriaAuxiliaryWidgets(ctx);
-          ctx.ui.notify(`Materia WebUI ${result.reused ? "ready" : "started"}: ${result.url}`, "info");
+          ctx.ui.notify(`Materia WebUI ${reused ? "ready" : "started"}: ${result.url}`, "info");
           pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "ui", materiaName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey } });
-          pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused: result.reused, startedAt: Date.now() });
+          pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused, startedAt: Date.now() });
         } catch (error) {
           ctx.ui.notify(`pi-materia ui failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }

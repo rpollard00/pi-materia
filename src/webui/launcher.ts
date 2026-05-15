@@ -35,6 +35,10 @@ interface MateriaWebUiArtifactOptions {
   projectRoot?: string;
 }
 
+export interface MateriaWebUiLaunchOptions {
+  initializeDefaultLoadout?: boolean;
+}
+
 interface MateriaWebUiBuildOptions extends MateriaWebUiArtifactOptions {
   runBuild?: () => Promise<void>;
 }
@@ -79,7 +83,7 @@ function resetMateriaWebUiBuildPromise(): void {
   materiaWebUiBuildPromise = undefined;
 }
 
-export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<MateriaWebUiLaunchResult> {
+export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI, options: MateriaWebUiLaunchOptions = {}): Promise<MateriaWebUiLaunchResult> {
   const sessionKey = webUiSessionKey(ctx);
   const existing = servers.get(sessionKey);
   if (existing?.server.listening) {
@@ -89,7 +93,7 @@ export async function launchMateriaWebUi(ctx: ExtensionContext, configuredPath?:
   const inFlight = pending.get(sessionKey);
   if (inFlight) return inFlight;
 
-  const launch = startServer(ctx, sessionKey, configuredPath, pi).finally(() => pending.delete(sessionKey));
+  const launch = startServer(ctx, sessionKey, configuredPath, pi, options).finally(() => pending.delete(sessionKey));
   pending.set(sessionKey, launch);
   return launch;
 }
@@ -107,7 +111,7 @@ export function webUiSessionKey(ctx: ExtensionContext): string {
   return createHash("sha256").update(raw).digest("hex").slice(0, 24);
 }
 
-async function startServer(ctx: ExtensionContext, sessionKey: string, configuredPath?: string, pi?: ExtensionAPI): Promise<MateriaWebUiLaunchResult> {
+async function startServer(ctx: ExtensionContext, sessionKey: string, configuredPath?: string, pi?: ExtensionAPI, options: MateriaWebUiLaunchOptions = {}): Promise<MateriaWebUiLaunchResult> {
   await assertMateriaWebUiArtifactAvailable();
 
   const profile = await loadProfileConfig();
@@ -118,7 +122,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   const sessionId = ctx.sessionManager.getSessionId() ?? "";
   const cwd = ctx.cwd;
   const startedAt = Date.now();
-  await initializeDefaultLoadoutPreference(ctx, configuredPath, pi);
+  if (options.initializeDefaultLoadout !== false) await initializeDefaultLoadoutPreference(ctx, configuredPath, pi);
 
   const { server } = createMateriaWebUiServer({
     host,

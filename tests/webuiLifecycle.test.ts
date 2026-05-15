@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
 import { launchMateriaWebUi, webUiLauncherTestInternals } from "../src/webui/launcher.js";
+import { ensureMateriaWebUi } from "../src/webui/service.js";
 import { getUserProfileConfigPath } from "../src/config/config.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -141,6 +142,27 @@ describe("/materia ui lifecycle", () => {
 
     await harness.emit("session_shutdown");
     await expect(fetch(new URL('/api/health', first.url))).rejects.toThrow();
+  });
+
+  test("automatic service startup returns structured status without transcript or idle side effects", async () => {
+    const { harness } = await harnessWithProfile("pi-materia-webui-auto-service-");
+
+    const first = ensureMateriaWebUi({ ctx: harness.ctx, mode: "automatic", pi: harness.pi, notify: harness.ctx.ui.notify });
+    const second = ensureMateriaWebUi({ ctx: harness.ctx, mode: "automatic", pi: harness.pi, notify: harness.ctx.ui.notify });
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    try {
+      expect(firstResult).toMatchObject({ ok: true, status: "started" });
+      expect(secondResult).toMatchObject({ ok: true, status: "started" });
+      if (!firstResult.ok || !secondResult.ok) throw new Error("WebUI did not start");
+      expect(secondResult.url).toBe(firstResult.url);
+      expect(secondResult.sessionKey).toBe(firstResult.sessionKey);
+      expect(harness.waitForIdleCalls).toBe(0);
+      expect(harness.sentMessages).toHaveLength(0);
+      expect(harness.appendedEntries).toHaveLength(0);
+    } finally {
+      await harness.emit("session_shutdown");
+    }
   });
 
   test("launcher wires Pi model registry and active thinking into the model catalog endpoint", async () => {
