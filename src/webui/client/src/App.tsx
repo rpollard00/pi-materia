@@ -15,6 +15,10 @@ import { useMateriaEditorController } from './webui/features/materia-editor/useM
 import { useLoadoutSocketInteractionController } from './webui/features/loadout/useLoadoutSocketInteractionController.js';
 import { useLoadoutGraphMutationController } from './webui/features/loadout/useLoadoutGraphMutationController.js';
 
+const shouldSuppressGenericLoadoutStatusToast = (status: string) =>
+  /^Viewing loadout: .+/.test(status) ||
+  /^Loading materia configuration|^Draft ready\.|^Saving staged loadout edits|^Cannot save staged loadout edits|^Save failed:|^Saved staged loadout edits|^Reverted staged edits\./.test(status);
+
 // Compatibility entry point for the browser bundle and tests. Keep feature
 // logic in hooks/controllers; App composes those boundaries into the shell.
 export function App() {
@@ -67,7 +71,7 @@ export function App() {
 
   const lastStatusToastRef = useRef('');
   useEffect(() => {
-    if (!status || status === lastStatusToastRef.current || /^Loading materia configuration|^Draft ready\.|^Saving staged loadout edits|^Cannot save staged loadout edits|^Save failed:|^Saved staged loadout edits|^Reverted staged edits\./.test(status)) return;
+    if (!status || status === lastStatusToastRef.current || shouldSuppressGenericLoadoutStatusToast(status)) return;
     lastStatusToastRef.current = status;
     const variant: ToastVariant = /^(Cannot|Blocked\b|.*\bblocked:|.*\bfailed:)/i.test(status) ? 'validation' : 'success';
     toast({
