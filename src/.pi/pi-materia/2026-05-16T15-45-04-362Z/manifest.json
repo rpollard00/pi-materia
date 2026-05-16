@@ -1,0 +1,90 @@
+{
+  "castId": "2026-05-16T15-45-04-362Z",
+  "request": "Enhancement: We should try to automatically recover in a more general fashion. Currently there are very few failures, and almost all of them I can recover via /materia recast. We should enhance to use our same node automatic recovery to try without specific error handling.",
+  "configSource": "/home/reese/.pi/agent/git/github.com/rpollard00/pi-materia/config/default.json < /home/reese/.config/pi/pi-materia/materia.json < /home/reese/projects/pi-materia/src/.pi/pi-materia.json",
+  "sessionFile": "/home/reese/.pi/agent/sessions/--home-reese-projects-pi-materia-src--/2026-05-16T15-44-38-154Z_019e3176-0309-7164-bdaa-3b955a67a282.jsonl",
+  "entries": [
+    {
+      "phase": "Socket-1",
+      "socket": "Socket-1",
+      "visit": 1,
+      "entryId": "utility:Socket-1:1:input",
+      "artifact": "sockets/Socket-1/1.input.json",
+      "timestamp": 1778946304376
+    },
+    {
+      "phase": "Socket-1",
+      "socket": "Socket-1",
+      "visit": 1,
+      "entryId": "utility:Socket-1:1",
+      "artifact": "sockets/Socket-1/1.md",
+      "kind": "socket_output",
+      "timestamp": 1778946304379
+    },
+    {
+      "phase": "Socket-2",
+      "socket": "Socket-2",
+      "visit": 1,
+      "entryId": "utility:Socket-2:1:input",
+      "artifact": "sockets/Socket-2/1.input.json",
+      "timestamp": 1778946304382
+    },
+    {
+      "phase": "Socket-2",
+      "socket": "Socket-2",
+      "visit": 1,
+      "entryId": "utility:Socket-2:1",
+      "artifact": "sockets/Socket-2/1.md",
+      "kind": "socket_output",
+      "timestamp": 1778946304400
+    },
+    {
+      "phase": "Socket-3",
+      "socket": "Socket-3",
+      "materia": "Interactive-Plan",
+      "visit": 1,
+      "artifact": "contexts/Socket-3-1.md",
+      "kind": "context",
+      "materiaModel": {
+        "model": "gpt-5.5",
+        "provider": "openai-codex",
+        "api": "openai-codex-responses",
+        "thinking": "xhigh",
+        "requestedModel": "openai-codex/gpt-5.5",
+        "requestedThinking": "xhigh",
+        "effectiveModel": "openai-codex/gpt-5.5",
+        "effectiveThinking": "xhigh",
+        "modelExplicit": true,
+        "thinkingExplicit": true,
+        "source": "configured",
+        "label": "openai-codex/gpt-5.5"
+      },
+      "timestamp": 1778946304411
+    },
+    {
+      "phase": "Socket-3",
+      "socket": "Socket-3",
+      "materia": "Interactive-Plan",
+      "visit": 1,
+      "entryId": "3397d704",
+      "artifact": "sockets/Socket-3/1.refinement-1-3397d704.md",
+      "kind": "socket_refinement",
+      "refinementTurn": 1,
+      "materiaModel": {
+        "model": "gpt-5.5",
+        "provider": "openai-codex",
+        "api": "openai-codex-responses",
+        "thinking": "xhigh",
+        "requestedModel": "openai-codex/gpt-5.5",
+        "requestedThinking": "xhigh",
+        "effectiveModel": "openai-codex/gpt-5.5",
+        "effectiveThinking": "xhigh",
+        "modelExplicit": true,
+        "thinkingExplicit": true,
+        "source": "configured",
+        "label": "openai-codex/gpt-5.5"
+      },
+      "timestamp": 1778946423115
+    }
+  ]
+}

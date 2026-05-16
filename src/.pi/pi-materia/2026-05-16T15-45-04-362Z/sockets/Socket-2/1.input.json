@@ -1,0 +1,27 @@
+{
+  "cwd": "/home/reese/projects/pi-materia/src",
+  "runDir": "/home/reese/projects/pi-materia/src/.pi/pi-materia/2026-05-16T15-45-04-362Z",
+  "request": "Enhancement: We should try to automatically recover in a more general fashion. Currently there are very few failures, and almost all of them I can recover via /materia recast. We should enhance to use our same node automatic recovery to try without specific error handling.",
+  "castId": "2026-05-16T15-45-04-362Z",
+  "socketId": "Socket-2",
+  "params": {},
+  "state": {
+    "artifactIgnore": {
+      "ok": true,
+      "root": "/home/reese/projects/pi-materia",
+      "file": "/home/reese/projects/pi-materia/.gitignore",
+      "patterns": [
+        ".pi/pi-materia/"
+      ],
+      "added": [],
+      "unchanged": [
+        ".pi/pi-materia/"
+      ]
+    }
+  },
+  "item": null,
+  "itemKey": null,
+  "itemLabel": null,
+  "cursor": null,
+  "cursors": {}
+}

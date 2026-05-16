@@ -1,0 +1,1566 @@
+{
+  "artifactDir": ".pi/pi-materia",
+  "limits": {
+    "maxSocketVisits": 50,
+    "maxEdgeTraversals": 25
+  },
+  "budget": {
+    "maxTokens": 4000000,
+    "maxCostUsd": 20,
+    "warnAtPercent": 75,
+    "stopAtLimit": true
+  },
+  "activeLoadout": "Hojo",
+  "loadouts": {
+    "Full-Auto": {
+      "entry": "Socket-1",
+      "loops": {
+        "loopSelection": {
+          "label": "Loop: Socket-4 → Socket-5 → Socket-6",
+          "consumes": {
+            "from": "Socket-8",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-6",
+            "when": "satisfied",
+            "to": "end"
+          },
+          "exits": [
+            {
+              "id": "exit:Socket-6:always",
+              "from": "Socket-6",
+              "condition": "always",
+              "targetSocketId": "Socket-7"
+            }
+          ],
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
+          ]
+        }
+      },
+      "layout": {
+        "sockets": {
+          "Socket-1": {
+            "x": 0.525480769231,
+            "y": 0
+          },
+          "Socket-2": {
+            "x": 1.729807692308,
+            "y": 0.011904761905
+          },
+          "Socket-3": {
+            "x": 2.622596153846,
+            "y": 1.202380952381
+          },
+          "Socket-4": {
+            "x": 0.802884615385,
+            "y": 1.532738095238
+          },
+          "Socket-5": {
+            "x": 0.0375,
+            "y": 2.845238095238
+          },
+          "Socket-6": {
+            "x": 1.669711538462,
+            "y": 2.821428571429
+          },
+          "Socket-7": {
+            "x": 3.032692307692,
+            "y": 2.934523809524
+          },
+          "Socket-8": {
+            "x": 1.766346153846,
+            "y": 1.395833333333
+          }
+        }
+      },
+      "sockets": {
+        "Socket-1": {
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "parse": "json",
+          "params": {
+            "patterns": [
+              ".pi/pi-materia/"
+            ]
+          },
+          "assign": {
+            "artifactIgnore": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ],
+          "socketKind": "entry"
+        },
+        "Socket-2": {
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": {
+            "vcs": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-8"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Plan",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-4": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ],
+          "type": "agent",
+          "materia": "Build",
+          "parse": "text",
+          "empty": false
+        },
+        "Socket-5": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "lastFeedback": "$.feedback",
+            "lastCheck": "$"
+          },
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-6"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-4",
+              "maxTraversals": 3
+            }
+          ],
+          "materia": "Auto-Eval",
+          "socketKind": "normal"
+        },
+        "Socket-6": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "lastMaintain": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "materia": "Maintain",
+          "socketKind": "normal",
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "satisfied"
+          }
+        },
+        "Socket-7": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Narrate",
+          "parse": "text",
+          "empty": false
+        },
+        "Socket-8": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Architect",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        }
+      },
+      "id": "default:full-auto",
+      "source": "default"
+    },
+    "Planning-Consult": {
+      "entry": "Socket-1",
+      "loops": {
+        "taskIteration": {
+          "label": "Build → Eval → Maintain until all work items complete",
+          "exit": {
+            "from": "Socket-6",
+            "when": "satisfied",
+            "to": "end"
+          },
+          "consumes": {
+            "from": "Socket-3",
+            "output": "workItems"
+          },
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
+          ]
+        }
+      },
+      "sockets": {
+        "Socket-1": {
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "parse": "json",
+          "params": {
+            "patterns": [
+              ".pi/pi-materia/"
+            ]
+          },
+          "assign": {
+            "artifactIgnore": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ],
+          "socketKind": "entry"
+        },
+        "Socket-2": {
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": {
+            "vcs": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-3": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "workItems": "$.workItems"
+          },
+          "materia": "interactivePlan",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-4": {
+          "type": "agent",
+          "parse": "text",
+          "materia": "Build",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-5": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "lastFeedback": "$.feedback",
+            "lastCheck": "$"
+          },
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-6"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-4",
+              "maxTraversals": 3
+            }
+          ],
+          "materia": "Auto-Eval",
+          "socketKind": "normal"
+        },
+        "Socket-6": {
+          "type": "agent",
+          "parse": "json",
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "satisfied"
+          },
+          "assign": {
+            "lastMaintain": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "materia": "Maintain",
+          "socketKind": "normal"
+        }
+      },
+      "id": "default:planning-consult",
+      "source": "default"
+    },
+    "Hojo-Consult": {
+      "entry": "Socket-1",
+      "loops": {
+        "loopSelection": {
+          "label": "Loop: Socket-5 → Socket-6 → Socket-7",
+          "consumes": {
+            "from": "Socket-4",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-7",
+            "when": "satisfied",
+            "to": "end"
+          },
+          "exits": [
+            {
+              "id": "exit:Socket-7:always",
+              "from": "Socket-7",
+              "condition": "always",
+              "targetSocketId": "Socket-8"
+            }
+          ],
+          "sockets": [
+            "Socket-5",
+            "Socket-6",
+            "Socket-7"
+          ]
+        }
+      },
+      "layout": {
+        "sockets": {
+          "Socket-1": {
+            "x": 0.004807692308,
+            "y": 0.008928571429
+          },
+          "Socket-2": {
+            "x": 1,
+            "y": 0
+          },
+          "Socket-3": {
+            "x": 2.360576923077,
+            "y": 0.446428571429
+          },
+          "Socket-4": {
+            "x": 1.038461538462,
+            "y": 0.964285714286
+          },
+          "Socket-5": {
+            "x": 0.401442307692,
+            "y": 2.589285714286
+          },
+          "Socket-6": {
+            "x": 2.382211538462,
+            "y": 2.559523809524
+          },
+          "Socket-7": {
+            "x": 1.384615384615,
+            "y": 3.985119047619
+          },
+          "Socket-8": {
+            "x": 2.411057692308,
+            "y": 3.886904761905
+          }
+        }
+      },
+      "sockets": {
+        "Socket-1": {
+          "socketKind": "entry",
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "params": {
+            "patterns": [
+              ".pi/pi-materia/"
+            ]
+          },
+          "parse": "json",
+          "assign": {
+            "artifactIgnore": "$"
+          },
+          "empty": false,
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ]
+        },
+        "Socket-2": {
+          "socketKind": "normal",
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": {
+            "vcs": "$"
+          },
+          "empty": false,
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ]
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "type": "agent",
+          "materia": "Interactive-Plan",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-4": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Architect",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-5": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-6"
+            }
+          ],
+          "type": "agent",
+          "materia": "Build",
+          "parse": "text",
+          "empty": false
+        },
+        "Socket-6": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-7"
+            },
+            {
+              "to": "Socket-5",
+              "when": "not_satisfied"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Eval",
+          "parse": "json",
+          "empty": false
+        },
+        "Socket-7": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "to": "Socket-5",
+              "when": "always"
+            }
+          ],
+          "type": "agent",
+          "materia": "Maintain",
+          "parse": "json",
+          "empty": false,
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "satisfied"
+          }
+        },
+        "Socket-8": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Narrate",
+          "parse": "text",
+          "empty": false
+        }
+      },
+      "id": "default:hojo-consult",
+      "source": "default"
+    },
+    "Full-Auto Copy": {
+      "entry": "Socket-1",
+      "loops": {
+        "loopSelection": {
+          "label": "Loop: Socket-4 → Socket-5 → Socket-6",
+          "consumes": {
+            "from": "Socket-8",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-6",
+            "when": "satisfied",
+            "to": "end"
+          },
+          "exits": [
+            {
+              "id": "exit:Socket-6:always",
+              "from": "Socket-6",
+              "condition": "always",
+              "targetSocketId": "Socket-7"
+            }
+          ],
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
+          ]
+        }
+      },
+      "layout": {
+        "sockets": {
+          "Socket-1": {
+            "x": 0.525480769231,
+            "y": 0
+          },
+          "Socket-2": {
+            "x": 1.729807692308,
+            "y": 0.011904761905
+          },
+          "Socket-3": {
+            "x": 2.622596153846,
+            "y": 1.202380952381
+          },
+          "Socket-4": {
+            "x": 0.802884615385,
+            "y": 1.532738095238
+          },
+          "Socket-5": {
+            "x": 0.0375,
+            "y": 2.845238095238
+          },
+          "Socket-6": {
+            "x": 1.731730769231,
+            "y": 2.845238095238
+          },
+          "Socket-7": {
+            "x": 3.032692307692,
+            "y": 2.934523809524
+          },
+          "Socket-8": {
+            "x": 1.766346153846,
+            "y": 1.395833333333
+          }
+        }
+      },
+      "id": "user:full-auto-copy",
+      "source": "user",
+      "lockState": "unlocked",
+      "sockets": {
+        "Socket-1": {
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "parse": "json",
+          "params": {
+            "patterns": [
+              ".pi/pi-materia/"
+            ]
+          },
+          "assign": {
+            "artifactIgnore": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ],
+          "socketKind": "entry"
+        },
+        "Socket-2": {
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": {
+            "vcs": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-8"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Plan",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-4": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ],
+          "type": "agent",
+          "materia": "Build",
+          "parse": "text",
+          "empty": false
+        },
+        "Socket-5": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "lastFeedback": "$.feedback",
+            "lastCheck": "$"
+          },
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-6"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-4",
+              "maxTraversals": 3
+            }
+          ],
+          "materia": "Auto-Eval",
+          "socketKind": "normal"
+        },
+        "Socket-6": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "lastMaintain": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "materia": "Maintain",
+          "socketKind": "normal",
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "satisfied"
+          }
+        },
+        "Socket-7": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Narrate",
+          "parse": "text",
+          "empty": false
+        },
+        "Socket-8": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Architect",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        }
+      }
+    },
+    "Planning-Consult Copy": {
+      "entry": "Socket-1",
+      "loops": {
+        "taskIteration": {
+          "label": "Build → Eval → Maintain until all work items complete",
+          "exit": {
+            "from": "Socket-6",
+            "when": "satisfied",
+            "to": "end"
+          },
+          "consumes": {
+            "from": "Socket-3",
+            "output": "workItems"
+          },
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
+          ]
+        }
+      },
+      "layout": {
+        "sockets": {
+          "Socket-1": {
+            "x": 0.525480769231,
+            "y": 0
+          },
+          "Socket-2": {
+            "x": 1.525480769231,
+            "y": 0
+          },
+          "Socket-3": {
+            "x": 1.525480769231,
+            "y": 1.428571428571
+          },
+          "Socket-4": {
+            "x": 0.525480769231,
+            "y": 1.428571428571
+          },
+          "Socket-5": {
+            "x": 0.530288461538,
+            "y": 2.958333333333
+          },
+          "Socket-6": {
+            "x": 1.525480769231,
+            "y": 2.857142857143
+          }
+        }
+      },
+      "id": "user:planning-consult-copy",
+      "source": "user",
+      "lockState": "unlocked",
+      "sockets": {
+        "Socket-1": {
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "parse": "json",
+          "params": {
+            "patterns": [
+              ".pi/pi-materia/"
+            ]
+          },
+          "assign": {
+            "artifactIgnore": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ],
+          "socketKind": "entry"
+        },
+        "Socket-2": {
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": {
+            "vcs": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-3": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "workItems": "$.workItems"
+          },
+          "materia": "interactivePlan",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-4": {
+          "type": "agent",
+          "parse": "text",
+          "materia": "Build",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ],
+          "socketKind": "normal"
+        },
+        "Socket-5": {
+          "type": "agent",
+          "parse": "json",
+          "assign": {
+            "lastFeedback": "$.feedback",
+            "lastCheck": "$"
+          },
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-6"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-4",
+              "maxTraversals": 3
+            }
+          ],
+          "materia": "Auto-Eval",
+          "socketKind": "normal"
+        },
+        "Socket-6": {
+          "type": "agent",
+          "parse": "json",
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "satisfied"
+          },
+          "assign": {
+            "lastMaintain": "$"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "materia": "Maintain",
+          "socketKind": "normal"
+        }
+      }
+    },
+    "Hojo": {
+      "entry": "Socket-1",
+      "loops": {
+        "loopSelection": {
+          "label": "Loop: Socket-5 → Socket-6 → Socket-7",
+          "consumes": {
+            "from": "Socket-4",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-7",
+            "when": "always",
+            "to": "end"
+          },
+          "exits": [
+            {
+              "id": "exit:Socket-7:always",
+              "from": "Socket-7",
+              "condition": "always",
+              "targetSocketId": "Socket-8"
+            }
+          ],
+          "sockets": [
+            "Socket-5",
+            "Socket-6",
+            "Socket-7"
+          ]
+        }
+      },
+      "layout": {
+        "sockets": {
+          "Socket-1": {
+            "x": 0.004807692308,
+            "y": 0.008928571429
+          },
+          "Socket-2": {
+            "x": 1,
+            "y": 0
+          },
+          "Socket-3": {
+            "x": 2.360576923077,
+            "y": 0.446428571429
+          },
+          "Socket-4": {
+            "x": 1.038461538462,
+            "y": 0.964285714286
+          },
+          "Socket-5": {
+            "x": 0.401442307692,
+            "y": 2.589285714286
+          },
+          "Socket-6": {
+            "x": 2.382211538462,
+            "y": 2.559523809524
+          },
+          "Socket-7": {
+            "x": 1.384615384615,
+            "y": 3.985119047619
+          },
+          "Socket-8": {
+            "x": 2.372596153846,
+            "y": 4
+          }
+        }
+      },
+      "id": "user:hojo-consult-copy",
+      "source": "user",
+      "lockState": "unlocked",
+      "sockets": {
+        "Socket-1": {
+          "socketKind": "entry",
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "params": {
+            "patterns": [
+              ".pi/pi-materia/"
+            ]
+          },
+          "parse": "json",
+          "assign": {
+            "artifactIgnore": "$"
+          },
+          "empty": false,
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ]
+        },
+        "Socket-2": {
+          "socketKind": "normal",
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": {
+            "vcs": "$"
+          },
+          "empty": false,
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ]
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "type": "agent",
+          "materia": "Interactive-Plan",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-4": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Architect",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-5": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-6"
+            }
+          ],
+          "type": "agent",
+          "materia": "Build",
+          "parse": "text",
+          "empty": false
+        },
+        "Socket-6": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-7"
+            },
+            {
+              "to": "Socket-5",
+              "when": "not_satisfied"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Eval",
+          "parse": "json",
+          "empty": false
+        },
+        "Socket-7": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "to": "Socket-5",
+              "when": "always"
+            }
+          ],
+          "type": "agent",
+          "materia": "Maintain",
+          "parse": "json",
+          "empty": false,
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "always"
+          }
+        },
+        "Socket-8": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Narrate",
+          "parse": "text",
+          "empty": false
+        }
+      }
+    },
+    "Aegis": {
+      "entry": "Socket-1",
+      "layout": {
+        "sockets": {
+          "Socket-1": {
+            "x": 0,
+            "y": 0
+          },
+          "Socket-2": {
+            "x": 1,
+            "y": 0
+          },
+          "Socket-3": {
+            "x": 2.182692307692,
+            "y": 0.252976190476
+          },
+          "Socket-4": {
+            "x": 0.295673076923,
+            "y": 2.178571428571
+          },
+          "Socket-5": {
+            "x": 2.146634615385,
+            "y": 3.107142857143
+          },
+          "Socket-6": {
+            "x": 1.112980769231,
+            "y": 3.66369047619
+          },
+          "Socket-7": {
+            "x": 0.274038461538,
+            "y": 3.467261904762
+          },
+          "Socket-8": {
+            "x": 1.798076923077,
+            "y": 2.214285714286
+          },
+          "Socket-9": {
+            "x": 0.295673076923,
+            "y": 5.08630952381
+          }
+        }
+      },
+      "loops": {
+        "loopSelection": {
+          "label": "Loop: Socket-4 → Socket-5 → Socket-6 → Socket-7 → Socket-8",
+          "consumes": {
+            "from": "Socket-3",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-7",
+            "when": "always",
+            "to": "end"
+          },
+          "exits": [
+            {
+              "id": "exit:Socket-7:always",
+              "from": "Socket-7",
+              "condition": "always",
+              "targetSocketId": "Socket-9"
+            }
+          ],
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6",
+            "Socket-7",
+            "Socket-8"
+          ]
+        }
+      },
+      "id": "user:aegis-auto",
+      "source": "user",
+      "lockState": "unlocked",
+      "sockets": {
+        "Socket-1": {
+          "socketKind": "entry",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ],
+          "type": "utility",
+          "utility": "project.ensureIgnored",
+          "params": {
+            "patterns": [
+              ".pi/pi-materia/"
+            ]
+          },
+          "parse": "json",
+          "assign": {
+            "artifactIgnore": "$"
+          },
+          "empty": false
+        },
+        "Socket-2": {
+          "socketKind": "normal",
+          "type": "utility",
+          "utility": "vcs.detect",
+          "parse": "json",
+          "assign": {
+            "vcs": "$"
+          },
+          "empty": false,
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ]
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Auto-Plan",
+          "parse": "json",
+          "empty": false,
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ],
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-4": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-8"
+            }
+          ],
+          "type": "agent",
+          "materia": "Cover",
+          "parse": "json",
+          "empty": false
+        },
+        "Socket-5": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-6"
+            }
+          ],
+          "type": "agent",
+          "materia": "Build",
+          "parse": "text",
+          "empty": false
+        },
+        "Socket-6": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Auto-Eval",
+          "parse": "json",
+          "empty": false,
+          "edges": [
+            {
+              "to": "Socket-7",
+              "when": "satisfied"
+            },
+            {
+              "to": "Socket-5",
+              "when": "not_satisfied"
+            }
+          ]
+        },
+        "Socket-7": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Maintain",
+          "parse": "json",
+          "empty": false,
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "always"
+          },
+          "edges": [
+            {
+              "to": "Socket-4",
+              "when": "always"
+            }
+          ]
+        },
+        "Socket-8": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-5"
+            },
+            {
+              "to": "Socket-4",
+              "when": "not_satisfied"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Eval",
+          "parse": "json",
+          "empty": false
+        },
+        "Socket-9": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Narrate",
+          "parse": "text",
+          "empty": false
+        }
+      }
+    },
+    "Simple Shot": {
+      "entry": "Socket-1",
+      "id": "user:new-loadout-8:6619884e-2fe2-41cf-a93e-6731c109e52c",
+      "source": "user",
+      "lockState": "unlocked",
+      "loops": {
+        "loopSelection": {
+          "label": "Loop: Socket-2",
+          "consumes": {
+            "from": "Socket-1",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-2",
+            "when": "always",
+            "to": "end"
+          },
+          "exits": [
+            {
+              "id": "exit:Socket-2:always",
+              "from": "Socket-2",
+              "condition": "always",
+              "targetSocketId": "Socket-3"
+            }
+          ],
+          "sockets": [
+            "Socket-2"
+          ]
+        }
+      },
+      "layout": {
+        "sockets": {
+          "Socket-1": {
+            "x": 0,
+            "y": 0.666666666667
+          },
+          "Socket-2": {
+            "x": 1.375480886606,
+            "y": 0.827083405994
+          },
+          "Socket-3": {
+            "x": 1.386057868371,
+            "y": 2.56994047619
+          }
+        }
+      },
+      "sockets": {
+        "Socket-1": {
+          "socketKind": "entry",
+          "edges": [
+            {
+              "to": "Socket-2",
+              "when": "always"
+            }
+          ],
+          "type": "agent",
+          "materia": "Auto-Plan",
+          "parse": "json",
+          "empty": false,
+          "assign": {
+            "workItems": "$.workItems"
+          }
+        },
+        "Socket-2": {
+          "socketKind": "normal",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ],
+          "type": "agent",
+          "materia": "Build",
+          "parse": "text",
+          "empty": false,
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "when": "always"
+          }
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "type": "agent",
+          "materia": "Narrate",
+          "parse": "text",
+          "empty": false
+        }
+      }
+    }
+  },
+  "materia": {
+    "ensureArtifactsIgnored": {
+      "type": "utility",
+      "label": "Ensure artifacts ignored",
+      "description": "Ensures the pi-materia artifact directory is present in the project ignore file.",
+      "group": "Utility",
+      "color": "materia-color-cyan",
+      "utility": "project.ensureIgnored",
+      "parse": "json",
+      "params": {
+        "patterns": [
+          ".pi/pi-materia/"
+        ]
+      },
+      "assign": {
+        "artifactIgnore": "$"
+      }
+    },
+    "detectVcs": {
+      "type": "utility",
+      "label": "Detect VCS",
+      "description": "Detects jj/git availability and the current project version-control root.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "utility": "vcs.detect",
+      "parse": "json",
+      "assign": {
+        "vcs": "$"
+      }
+    },
+    "planner": {
+      "tools": "readOnly",
+      "color": "materia-color-blue",
+      "parse": "json",
+      "prompt": "You are the pi-materia planning materia. Break high-level software requests into small, ordered implementation work items with objective acceptance criteria. When producing JSON, follow the runtime-provided canonical handoff JSON contract.\n\nCreate an implementation plan for this request. Be directive about repository bootstrap. If the repository appears empty, uninitialized, or missing common project hygiene, make the first workItem a bootstrap work item. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Bootstrap work items should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Include generated work items in workItems and set satisfied true for a completed plan.\n\nRequest: {{request}}",
+      "generator": true
+    },
+    "interactivePlan": {
+      "tools": "readOnly",
+      "multiTurn": true,
+      "color": "materia-color-cyan",
+      "parse": "json",
+      "prompt": "You are the pi-materia interactive planning materia. Collaborate with the user over multiple turns to refine goals, constraints, work-item ordering, and acceptance criteria before work is finalized. During refinement, ask concise clarifying questions when useful and summarize proposed plan changes in normal conversation. Do not emit final workItems JSON during refinement. /materia continue is the only way to finalize this multi-turn materia; if the plan appears complete or the conversation is stalling, prompt the user to run /materia continue. After /materia continue is run, follow the runtime-provided canonical handoff JSON contract.\n\nCollaboratively refine an implementation plan for this request through normal conversation before producing work item artifacts. Start by briefly summarizing your understanding of the request and any known repository context. Ask concise clarifying questions when useful, propose and refine work-item breakdowns and acceptance criteria conversationally, and incorporate the user's feedback over multiple turns. Keep repository bootstrap considerations in mind: if the repository appears empty, uninitialized, or missing common project hygiene, include a bootstrap work item in the eventual finalized plan. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Any finalized bootstrap work item should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Do not emit the structured workItems JSON during refinement. Treat all normal user messages as refinement input, even if they say continue, ready, finalize, or look good. Only after the user runs /materia continue, use the runtime-provided canonical handoff JSON contract and include no markdown or extra commentary.\n\nRequest: {{request}}",
+      "generator": true
+    },
+    "Auto-Architect": {
+      "type": "agent",
+      "tools": "readOnly",
+      "prompt": "You are a software architect materia. Review planned workItems and provide pragmatic architecture guidance before downstream implementation.\n\nResponsibilities:\n- Assess patterns, boundaries, data models, scalability, maintainability, and performance implications.\n- Prefer simple, evolvable designs over overengineering.\n- Clarify architectural constraints, dependencies, risks, and decisions that affect implementation.\n- Refine or augment existing workItems so they are actionable and architecturally sound.\n- Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context.\n\nOutput requirements:\n- When asked for JSON, return only the canonical handoff JSON object with no markdown, prose, or extra commentary.\n- Use the canonical handoff envelope.\n- Generated or refined units of work must be placed in workItems, never tasks.\n- Each workItem must follow.\n- Do not repurpose reserved evaluator/route fields: satisfied, feedback, missing.\n- Use satisfied only when participating in satisfied/not_satisfied routing, and make it a real boolean when present.\n- Do not invent alternate routing booleans such as passed.\n- Node-specific payload fields may be included only if requested, and must not redefine reserved routing semantics.\n\nOperating style:\n- Be concise, concrete, and implementation-aware.\n- Highlight tradeoffs and pragmatic recommendations.\n- Add architecture guidance in guidance and architecture context fields.\n- Record important choices in decisions and notable concerns in risks.\n- If required information is absent, list it in missing without blocking useful guidance.",
+      "color": "materia-color-cyan",
+      "generator": true,
+      "parse": "json",
+      "thinking": "xhigh",
+      "model": "openai-codex/gpt-5.5"
+    },
+    "Chain-Context": {
+      "type": "agent",
+      "tools": "readOnly",
+      "color": "materia-color-cyan",
+      "parse": "json",
+      "prompt": "You are the pi-materia Chain-Context materia. Transform structured previous-cast state into a concise downstream handoff/context envelope for the next materia or loadout in a /materia link chain.\n\nPurpose:\n- Chain-Context is ordinary opt-in materia. It is not required for every /materia link --from run and it must not behave like hidden global prompt injection.\n- Consume generic previous-cast state when available at state.previousCastContext. Also preserve useful current cast state if the adapter supplies it.\n- If state.previousCastContext is missing or empty, return a canonical JSON envelope with satisfied false, a clear feedback diagnostic, and missing containing \"state.previousCastContext\". Do not invent lineage or prior outputs.\n\nPrevious-cast state:\n{{state.previousCastContext}}\n\nCurrent request:\n{{request}}\n\nOutput requirements:\n- Return only JSON using the canonical handoff envelope; no markdown or extra prose.\n- Keep the output concise and downstream-friendly.\n- Prefer these canonical fields when useful: summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing.\n- Use workItems for generated or carried-forward units of work; never use tasks.\n- Do not own, redefine, or create alternate meanings for reserved evaluator/route fields. If you include satisfied, it must be a real boolean reflecting whether context transformation succeeded. If you include feedback or missing, use their canonical diagnostic meanings.\n- Preserve canonical semantics from any previous handoff JSON instead of renaming fields such as satisfied, feedback, missing, or workItems.\n\nWhen previous context exists, summarize:\n- prior request and cast id;\n- previous summary, outputs, feedback, and satisfied/missing status;\n- relevant workItems, decisions, risks, guidance, and missing items;\n- useful bounded artifact previews by path/kind without dumping large content.\n\nSuggested shape:\n{\n  \"summary\": \"Concise continuation context for the downstream chain target.\",\n  \"workItems\": [],\n  \"guidance\": { \"previousCastId\": \"...\", \"continuationNotes\": [] },\n  \"decisions\": [],\n  \"risks\": [],\n  \"satisfied\": true,\n  \"feedback\": \"Previous-cast context summarized for downstream chain targets.\",\n  \"missing\": []\n}",
+      "model": "openai-codex/gpt-5.3-codex",
+      "thinking": "medium"
+    },
+    "Build": {
+      "tools": "coding",
+      "color": "materia-color-green",
+      "parse": "text",
+      "prompt": "You are the pi-materia Build Materia materia. Implement exactly the assigned work item supplied by the current node/socket adapter. Prefer small, safe edits. Consume the current workItem together with global guidance from the adapter context; do not infer graph placement, routing, assignment, or iteration responsibilities from this reusable materia prompt. For bootstrap work, inspect the cwd, initialize the requested project appropriately, set up VCS hygiene, and add ignore rules for .pi/pi-materia/ plus language/build artifacts. If asked to initialize VCS, prefer jj when command -v jj succeeds and no .jj/.git exists; otherwise use git when appropriate. Run relevant checks. Stop when the item is complete or blocked.\n\nAVOID creating god modules.\nAVOID tight coupling.\nFollow established patterns.\nKeep code well-organized.\n\nWork item {{item.id}}: {{item.title}}\n\n{{item.description}}\n\nAcceptance criteria:\n{{item.acceptance}}\n\nGlobal guidance, if any:\n{{state.guidance}}\n\nPrevious feedback, if any:\n{{state.lastFeedback}}\n\nBuild the work item now using normal Pi tools. Run relevant checks and summarize what changed.",
+      "type": "agent",
+      "model": "openai-codex/gpt-5.5",
+      "thinking": "medium"
+    },
+    "Auto-Eval": {
+      "tools": "readOnly",
+      "color": "materia-color-yellow",
+      "parse": "json",
+      "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict. When producing JSON, follow the runtime-provided canonical handoff JSON contract. Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context from Generic cast data when applicable; augment evaluator fields instead of replacing the envelope with placement-specific payloads.\n\nEvaluate whether the current work item is complete. Inspect the repository as needed. Set satisfied, feedback, and missing for the evaluation result. Include the current work item in workItems only when useful to preserve context; do not emit tasks.\n\nWork item: {{itemJson}}\n\nImplementation summary: {{lastOutput}}",
+      "type": "agent",
+      "model": "openai-codex/gpt-5.5",
+      "thinking": "medium"
+    },
+    "Maintain": {
+      "tools": "coding",
+      "color": "materia-color-purple",
+      "parse": "json",
+      "prompt": "You are the pi-materia Maintain Materia materia. Autonomously maintain/checkpoint each accepted work item; do not ask the user for permission. Prefer jj when command -v jj succeeds. Always inspect repository state before checkpointing (jj status and jj diff for jj; git status and git diff for git). If there are no meaningful repository changes, do not run jj describe, jj new, git add, git commit, or any empty checkpoint/commit command; use the canonical satisfied field as true, include checkpointCreated=false, and explain that the no-op checkpoint was skipped. No-op work items must not create empty commits/checkpoints. If meaningful changes exist and inside a jj repo, describe the current change with jj describe -m \"message\" using a concise item-specific message, and immediately run jj new to create a fresh empty working-copy commit for the next task. Do not stop after jj describe when meaningful changes exist; jj describe alone is not a complete checkpoint because later work would be added to the same jj change. If meaningful changes exist and jj is unavailable but git is available, stage and commit with git add -A && git commit -m \"message\". If no VCS exists but meaningful changes exist, initialize jj when available, otherwise git, then checkpoint; for jj, create the post-checkpoint empty commit with jj new. Never commit .pi/pi-materia artifacts. When finished, follow the runtime-provided canonical handoff JSON contract. Compose any maintenance diagnostics with the generic envelope using node-specific payload fields commitMessage, reason, vcs (\"jj\" | \"git\" | \"none\"), checkpointCreated, and commands.\n\nThe current work item passed verification. Maintain the project state before the next task begins.\n\nWork item: {{item.id}} - {{item.title}}\n{{item.description}}\n\nLatest implementation summary:\n{{lastOutput}}\n\nInspect the repository state first (for jj, use jj status and jj diff; for git, use git status and git diff). If there are no meaningful repository changes for this task, do not run any jj/git checkpoint, describe, commit, or empty-checkpoint command. Treat no-op work items as successful maintenance with checkpointCreated=false. If meaningful changes exist, summarize the changes for this task and autonomously create an appropriate VCS maintain/checkpoint description or commit message. Do not ask the user for permission.\n\nAfter maintenance is complete, include the maintenance payload fields commitMessage, reason, vcs, checkpointCreated, and commands. Set the canonical satisfied field false only if required maintenance/checkpointing for meaningful changes could not be completed. When no meaningful changes exist, set the canonical satisfied field true, checkpointCreated=false, and explain that the checkpoint was skipped to avoid an empty commit/checkpoint.",
+      "type": "agent",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "thinking": "medium"
+    },
+    "GitMaintain": {
+      "tools": "coding",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "prompt": "You are the pi-materia Git Maintain Materia materia. Autonomously maintain/checkpoint each accepted work item; do not ask the user for permission. Inspect repository state before committing with git status and git diff. If there are no meaningful repository changes, do not run git add, git commit, or any empty commit command; use the canonical satisfied field as true, include checkpointCreated=false, and explain that the no-op commit was skipped. No-op work items must not create empty commits/checkpoints. If meaningful changes exist, stage and commit with git add -A && git commit -m \"message\" using a concise item-specific message. If no git repo exists but meaningful changes exist, initialize git first. Never commit .pi/pi-materia artifacts. Do not use jj commands. When finished, follow the runtime-provided canonical handoff JSON contract. Compose any maintenance diagnostics with the generic envelope using socket-specific payload fields commitMessage, reason, vcs (\"git\" | \"none\"), checkpointCreated, and commands."
+    },
+    "Narrate": {
+      "type": "agent",
+      "tools": "readOnly",
+      "prompt": "You are the pi-materia Narrate materia: a cast artifact summarizer. Produce a user-facing markdown summary of the entire current cast, not just the\nmost recent turn.\n\nYou have access to synthetic cast context and may also inspect the cast artifact directory:\n\n.pi/pi-materia/<DATETIME>/\n\nUse both sources:\n- Treat any synthetic cast context as the cast index and high-level map.\n- Treat on-disk cast artifacts as source-of-truth details when available.\n- Reconcile synthetic context with artifacts instead of relying only on the latest message or latest node output.\n\nYour primary responsibility is to summarize all meaningful work performed across the cast.\n\nRequired review scope:\n   - Review the full synthetic context provided for this cast.\n   - Identify all `workItems` created or refined during the cast.\n   - Review relevant artifacts for planner, architect, build, eval, maintain, refinement, utility, context, and node outputs when present.\n   - Review the cast manifest/events when available to understand execution order.\n   - For each work item, determine its outcome: completed, evaluated, maintained/checkpointed, skipped/no-op, blocked, failed, or unresolved.\n   - Do not summarize only the last build loop turn.\n\nResponsibilities:\n   - Summarize accomplished work across the whole cast.\n   - Address every work item that appears in the cast context or artifacts.\n   - Mention notable generated artifacts, modified files, tests/checks, commands, checkpoints, and maintenance outcomes when supported.\n   - Highlight high-level decisions, architectural choices, implementation patterns, and tradeoffs.\n   - Call out risks, limitations, failed checks, missing artifacts, unresolved questions, or follow-up opportunities when evident.\n   - Preserve useful context without overexplaining implementation details.\n\n   Accuracy rules:\n   - Do not invent work, decisions, tests, commits, or outcomes not supported by synthetic context or artifacts.\n   - If synthetic context and artifacts disagree, note the ambiguity briefly and prefer artifact evidence.\n   - If artifacts are missing or incomplete, say so briefly.\n   - If a work item lacks evidence of implementation or verification, mark it as unresolved rather than assuming completion.\n\n   Operating style:\n   - Be accurate, neutral, and user-facing.\n   - Prefer clear sections and concise bullets.\n   - Focus on outcomes, not raw logs.\n   - Mention work item IDs/titles when available.\n   - Do not include meta-commentary about your process.\n\n   Expected output:\n   - Return markdown text only.\n   - Do not return JSON unless explicitly requested.\n\n   Suggested structure:\n\n   ## Summary\n\n   Brief overall summary of the full cast.\n\n   ## Work Items\n\n   - **WI-1 / title**: status and concise outcome.\n   - **WI-2 / title**: status and concise outcome.\n\n   ## Notable Artifacts and Changes\n\n   - Important generated artifacts, files changed, tests/checks, and maintenance/checkpoint outcomes.\n\n   ## Decisions and Tradeoffs\n\n   - Key architectural or implementation decisions.\n\n   ## Risks and Follow-ups\n\n   - Missing evidence, failed checks, unresolved items, risks, or suggested next steps.",
+      "color": "materia-color-cyan",
+      "parse": "text",
+      "model": "openai-codex/gpt-5.5",
+      "thinking": "low"
+    },
+    "Auto-Plan": {
+      "type": "agent",
+      "tools": "readOnly",
+      "prompt": "You are the pi-materia planning materia. Break high-level software requests into small, ordered implementation work items with objective acceptance criteria. When producing JSON, follow the runtime-provided canonical handoff JSON contract.\n\nCreate an implementation plan for this request. Be directive about repository bootstrap. If the repository appears empty, uninitialized, or missing common project hygiene, make the first workItem a bootstrap work item. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Bootstrap work items should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Include generated work items in workItems and set satisfied true for a completed plan.\n\nRequest: {{request}}",
+      "color": "materia-color-blue",
+      "parse": "json",
+      "generator": true,
+      "model": "openai-codex/gpt-5.5",
+      "thinking": "xhigh"
+    },
+    "Interactive-Plan": {
+      "type": "agent",
+      "tools": "readOnly",
+      "prompt": "You are the pi-materia interactive planning materia. Collaborate with the user over multiple turns to refine goals, constraints, work-item ordering, and acceptance criteria before work is finalized. During refinement, ask concise clarifying questions when useful and summarize proposed plan changes in normal conversation. Do not emit final workItems JSON during refinement. /materia continue is the only way to finalize this multi-turn materia; if the plan appears complete or the conversation is stalling, prompt the user to run /materia continue. After /materia continue is run, follow the runtime-provided canonical handoff JSON contract.\n\nCollaboratively refine an implementation plan for this request through normal conversation before producing work item artifacts. Start by briefly summarizing your understanding of the request and any known repository context. Ask concise clarifying questions when useful, propose and refine work-item breakdowns and acceptance criteria conversationally, and incorporate the user's feedback over multiple turns. Keep repository bootstrap considerations in mind: if the repository appears empty, uninitialized, or missing common project hygiene, include a bootstrap work item in the eventual finalized plan. Artifact ignore hygiene for .pi/pi-materia/ has already run via the visible default utility bootstrap. Detected VCS state: {{state.vcs}}. Any finalized bootstrap work item should instruct the Build materia to detect whether jj is installed; if jj is installed and neither .jj nor .git exists, initialize jj; otherwise initialize git when appropriate; add or update ignore rules for language/build artifacts; create the expected project skeleton for the requested language/framework; and document basic run/test commands. Do not emit the structured workItems JSON during refinement. Treat all normal user messages as refinement input, even if they say continue, ready, finalize, or look good. Only after the user runs /materia continue, use the runtime-provided canonical handoff JSON contract and include no markdown or extra commentary.\n\nRequest: {{request}}",
+      "color": "materia-color-cyan",
+      "parse": "json",
+      "multiTurn": true,
+      "generator": true,
+      "model": "openai-codex/gpt-5.5",
+      "thinking": "xhigh"
+    },
+    "Detect-VCS": {
+      "type": "utility",
+      "label": "Detect-VCS",
+      "group": "Utility",
+      "utility": "vcs.detect",
+      "params": {},
+      "parse": "json",
+      "color": "materia-color-black-gray"
+    },
+    "Cover": {
+      "type": "agent",
+      "tools": "coding",
+      "prompt": "You are a test writer. Your responsibility is to author focused tests that capture the desired behavior described by the current workItem or directive.\n\nOperate in a TDD style:\n- Write tests before implementation when requested. Do not complete the implementation.\n- Prefer small, behavior-oriented tests with clear assertions.\n- Test for expected outcomes, not implementation details.\n- Cover happy paths, edge cases, and regressions relevant to the directive.\n- Do not build features, refactor core application code, or change production.\n- Keep changes limited to test files, fixtures, mocks, or test utilities unless explicitly instructed otherwise.\n- Make failing tests express the intended outcome clearly enough for an implementer to satisfy them.\n\nWhen reporting results, be concise. Identify test files changed, scenarios covered, and any expected failures.\n\nIf asked to return JSON or handoff output, follow the pi-materia canonical handoff JSON contract:\n- Preserve and augment existing summary, workItems, guidance, decisions, risks, feedback, and missing context.\n- Do not repurpose reserved fields: satisfied, feedback, missing.\n- Use satisfied only for canonical control flow and only as a real boolean.\n- Compose any socket-specific payload fields with the generic envelope without redefining reserved semantics.\n- When a socket adapter asks for JSON, return only the handoff JSON object with no markdown, prose, or extra commentary.",
+      "model": "zai/glm-5.1",
+      "thinking": "high",
+      "color": "materia-color-purple",
+      "parse": "json"
+    }
+  },
+  "activeLoadoutId": "user:hojo-consult-copy",
+  "piMateria": {
+    "schemaVersion": 3,
+    "migrations": [
+      {
+        "id": "001-rename-non-default-loadout-collisions",
+        "appliedAt": "2026-05-16T15:44:54.758Z"
+      },
+      {
+        "id": "002-stamp-stable-loadout-ids",
+        "appliedAt": "2026-05-16T15:44:54.758Z"
+      },
+      {
+        "id": "003-stamp-loadout-ownership-and-locks",
+        "appliedAt": "2026-05-16T15:44:54.758Z"
+      }
+    ]
+  },
+  "compaction": {}
+}

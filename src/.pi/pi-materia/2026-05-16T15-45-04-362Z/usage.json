@@ -1,0 +1,110 @@
+{
+  "tokens": {
+    "input": 1002,
+    "output": 1533,
+    "cacheRead": 53248,
+    "cacheWrite": 0,
+    "total": 55783
+  },
+  "cost": {
+    "input": 0.0050100000000000006,
+    "output": 0.04599,
+    "cacheRead": 0.026624,
+    "cacheWrite": 0,
+    "total": 0.077624
+  },
+  "model": "gpt-5.5",
+  "provider": "openai-codex",
+  "api": "openai-codex-responses",
+  "thinkingLevel": "xhigh",
+  "costKind": "subscription",
+  "byMateria": {
+    "Interactive-Plan": {
+      "tokens": {
+        "input": 1002,
+        "output": 1533,
+        "cacheRead": 53248,
+        "cacheWrite": 0,
+        "total": 55783
+      },
+      "cost": {
+        "input": 0.0050100000000000006,
+        "output": 0.04599,
+        "cacheRead": 0.026624,
+        "cacheWrite": 0,
+        "total": 0.077624
+      }
+    }
+  },
+  "bySocket": {
+    "Socket-3": {
+      "tokens": {
+        "input": 1002,
+        "output": 1533,
+        "cacheRead": 53248,
+        "cacheWrite": 0,
+        "total": 55783
+      },
+      "cost": {
+        "input": 0.0050100000000000006,
+        "output": 0.04599,
+        "cacheRead": 0.026624,
+        "cacheWrite": 0,
+        "total": 0.077624
+      }
+    }
+  },
+  "byTask": {},
+  "byAttempt": {},
+  "turns": [
+    {
+      "tokens": {
+        "input": 1002,
+        "output": 1533,
+        "cacheRead": 53248,
+        "cacheWrite": 0,
+        "total": 55783
+      },
+      "cost": {
+        "input": 0.0050100000000000006,
+        "output": 0.04599,
+        "cacheRead": 0.026624,
+        "cacheWrite": 0,
+        "total": 0.077624
+      },
+      "socket": "Socket-3",
+      "materia": "Interactive-Plan",
+      "attempt": 1,
+      "model": "gpt-5.5",
+      "provider": "openai-codex",
+      "api": "openai-codex-responses",
+      "thinking": "xhigh",
+      "requestedModel": "openai-codex/gpt-5.5",
+      "requestedThinking": "xhigh",
+      "effectiveModel": "openai-codex/gpt-5.5",
+      "effectiveThinking": "xhigh",
+      "modelExplicit": true,
+      "thinkingExplicit": true,
+      "source": "configured"
+    }
+  ],
+  "modelSelections": [
+    {
+      "model": "gpt-5.5",
+      "provider": "openai-codex",
+      "api": "openai-codex-responses",
+      "thinking": "xhigh",
+      "requestedModel": "openai-codex/gpt-5.5",
+      "requestedThinking": "xhigh",
+      "effectiveModel": "openai-codex/gpt-5.5",
+      "effectiveThinking": "xhigh",
+      "modelExplicit": true,
+      "thinkingExplicit": true,
+      "source": "configured",
+      "label": "openai-codex/gpt-5.5",
+      "socket": "Socket-3",
+      "materia": "Interactive-Plan",
+      "attempt": 1
+    }
+  ]
+}

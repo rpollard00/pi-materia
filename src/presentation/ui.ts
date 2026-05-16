@@ -1,15 +1,36 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { currentCastSocketId, currentCastSocketState, runStateCurrentSocketId, usageBySocket } from "../runtime/castStateAccessors.js";
-import { loopSockets, resolvedPipelineSockets } from "../loadout/loadoutAccessors.js";
-import type { MateriaCastState, MateriaRunState, UsageCostKind, UsageReport, UsageTotals } from "../types.js";
+import {
+  currentCastSocketId,
+  currentCastSocketState,
+  runStateCurrentSocketId,
+  usageBySocket,
+} from "../runtime/castStateAccessors.js";
+import {
+  loopSockets,
+  resolvedPipelineSockets,
+} from "../loadout/loadoutAccessors.js";
+import type {
+  MateriaCastState,
+  MateriaRunState,
+  UsageCostKind,
+  UsageReport,
+  UsageTotals,
+} from "../types.js";
 
 const WIDGET_MAX_LINE_LENGTH = 78;
 type MateriaWidgetState = MateriaRunState | MateriaCastState;
 type WidgetOwner = { runId: string; state: MateriaWidgetState };
 const widgetOwners = new WeakMap<ExtensionContext, WidgetOwner>();
-const widgetTickers = new WeakMap<ExtensionContext, ReturnType<typeof setInterval>>();
+const widgetTickers = new WeakMap<
+  ExtensionContext,
+  ReturnType<typeof setInterval>
+>();
 
-export function updateWidget(ctx: ExtensionContext, state: MateriaWidgetState, options: { replaceOwner?: boolean } = {}): void {
+export function updateWidget(
+  ctx: ExtensionContext,
+  state: MateriaWidgetState,
+  options: { replaceOwner?: boolean } = {},
+): void {
   const runState = widgetRunState(state);
   const owner = widgetOwners.get(ctx);
   if (owner && owner.runId !== runState.runId && !options.replaceOwner) return;
@@ -20,7 +41,9 @@ export function updateWidget(ctx: ExtensionContext, state: MateriaWidgetState, o
   }
 
   widgetOwners.set(ctx, { runId: runState.runId, state });
-  ctx.ui.setWidget("materia", renderMateriaWidgetState(state), { placement: "belowEditor" });
+  ctx.ui.setWidget("materia", renderMateriaWidgetState(state), {
+    placement: "belowEditor",
+  });
 
   if (runState.endedAt !== undefined) {
     stopWidgetTicker(ctx, runState.runId);
@@ -35,17 +58,24 @@ export function clearWidgetTicker(ctx: ExtensionContext): void {
   widgetOwners.delete(ctx);
 }
 
-export function syncConfiguredLoadoutWidget(ctx: ExtensionContext, loadoutName: string): boolean {
+export function syncConfiguredLoadoutWidget(
+  ctx: ExtensionContext,
+  loadoutName: string,
+): boolean {
   const owner = widgetOwners.get(ctx);
   if (owner && widgetRunState(owner.state).endedAt === undefined) return false;
 
   if (owner) {
     owner.state = withWidgetLoadout(owner.state, loadoutName);
-    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), { placement: "belowEditor" });
+    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), {
+      placement: "belowEditor",
+    });
     return true;
   }
 
-  ctx.ui.setWidget("materia", renderConfiguredLoadoutWidget(loadoutName), { placement: "belowEditor" });
+  ctx.ui.setWidget("materia", renderConfiguredLoadoutWidget(loadoutName), {
+    placement: "belowEditor",
+  });
   return true;
 }
 
@@ -61,7 +91,9 @@ function startWidgetTicker(ctx: ExtensionContext, runId: string): void {
       stopWidgetTicker(ctx, runId);
       return;
     }
-    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), { placement: "belowEditor" });
+    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), {
+      placement: "belowEditor",
+    });
   }, 5000);
   ticker.unref?.();
   widgetTickers.set(ctx, ticker);
@@ -74,7 +106,9 @@ function stopWidgetTicker(ctx: ExtensionContext, runId?: string): void {
   widgetTickers.delete(ctx);
 }
 
-function isMateriaCastWidgetState(state: MateriaWidgetState): state is MateriaCastState {
+function isMateriaCastWidgetState(
+  state: MateriaWidgetState,
+): state is MateriaCastState {
   return "runState" in state;
 }
 
@@ -82,28 +116,52 @@ function widgetRunState(state: MateriaWidgetState): MateriaRunState {
   return isMateriaCastWidgetState(state) ? state.runState : state;
 }
 
-function renderMateriaWidgetState(state: MateriaWidgetState, now = Date.now()): string[] {
-  return isMateriaCastWidgetState(state) ? renderMateriaCastStatusWidget(state, now) : renderMateriaRunWidget(state, now);
+function renderMateriaWidgetState(
+  state: MateriaWidgetState,
+  now = Date.now(),
+): string[] {
+  return isMateriaCastWidgetState(state)
+    ? renderMateriaCastStatusWidget(state, now)
+    : renderMateriaRunWidget(state, now);
 }
 
-function withWidgetLoadout(state: MateriaWidgetState, loadoutName: string): MateriaWidgetState {
+function withWidgetLoadout(
+  state: MateriaWidgetState,
+  loadoutName: string,
+): MateriaWidgetState {
   if (!isMateriaCastWidgetState(state)) return { ...state, loadoutName };
   return { ...state, runState: { ...state.runState, loadoutName } };
 }
 
-export function renderMateriaRunWidget(state: MateriaRunState, now = Date.now()): string[] {
+export function renderMateriaRunWidget(
+  state: MateriaRunState,
+  now = Date.now(),
+): string[] {
   return renderMateriaStatusWidget(createMateriaRunStatusModel(state, now));
 }
 
 export function renderConfiguredLoadoutWidget(loadoutName: string): string[] {
-  return renderMateriaStatusWidget(createConfiguredLoadoutStatusModel(loadoutName));
+  return renderMateriaStatusWidget(
+    createConfiguredLoadoutStatusModel(loadoutName),
+  );
 }
 
-export function renderMateriaCastStatusWidget(state: MateriaCastState, now = Date.now()): string[] {
+export function renderMateriaCastStatusWidget(
+  state: MateriaCastState,
+  now = Date.now(),
+): string[] {
   return renderMateriaStatusWidget(createMateriaCastStatusModel(state, now));
 }
 
-export type MateriaStatusSegmentKind = "cast" | "loadout" | "attempt" | "elapsed" | "usage" | "task" | "path" | "message";
+export type MateriaStatusSegmentKind =
+  | "cast"
+  | "loadout"
+  | "attempt"
+  | "elapsed"
+  | "usage"
+  | "task"
+  | "path"
+  | "message";
 
 export type MateriaStatusSegment = {
   kind: MateriaStatusSegmentKind;
@@ -118,7 +176,12 @@ export type MateriaStatusRenderModel = {
   panelLines: Array<MateriaStatusSegment[]>;
 };
 
-const FIRST_LINE_SEGMENTS: Array<{ kind: MateriaStatusSegmentKind; label: string; width: number; priority: number }> = [
+const FIRST_LINE_SEGMENTS: Array<{
+  kind: MateriaStatusSegmentKind;
+  label: string;
+  width: number;
+  priority: number;
+}> = [
   { kind: "cast", label: "✦", width: 10, priority: 80 },
   { kind: "loadout", label: "⌘", width: 30, priority: 100 },
   { kind: "attempt", label: "↻", width: 7, priority: 70 },
@@ -126,12 +189,20 @@ const FIRST_LINE_SEGMENTS: Array<{ kind: MateriaStatusSegmentKind; label: string
   { kind: "usage", label: "Σ", width: 12, priority: 60 },
 ];
 
-const SECOND_LINE_SEGMENTS: Array<{ kind: MateriaStatusSegmentKind; label: string; width: number; priority: number }> = [
+const SECOND_LINE_SEGMENTS: Array<{
+  kind: MateriaStatusSegmentKind;
+  label: string;
+  width: number;
+  priority: number;
+}> = [
   { kind: "task", label: "◆", width: 34, priority: 50 },
   { kind: "path", label: "⟲", width: 41, priority: 35 },
 ];
 
-function createMateriaRunStatusModel(state: MateriaRunState, now: number): MateriaStatusRenderModel {
+function createMateriaRunStatusModel(
+  state: MateriaRunState,
+  now: number,
+): MateriaStatusRenderModel {
   const usage = state.usage.tokens;
   const elapsedUntil = state.endedAt ?? now;
   return createMateriaStatusRenderModel({
@@ -146,7 +217,9 @@ function createMateriaRunStatusModel(state: MateriaRunState, now: number): Mater
   });
 }
 
-function createConfiguredLoadoutStatusModel(loadoutName: string): MateriaStatusRenderModel {
+function createConfiguredLoadoutStatusModel(
+  loadoutName: string,
+): MateriaStatusRenderModel {
   return createMateriaStatusRenderModel({
     cast: "ready",
     loadout: formatLoadoutMateria(loadoutName || "-", "no active cast"),
@@ -159,28 +232,71 @@ function createConfiguredLoadoutStatusModel(loadoutName: string): MateriaStatusR
   });
 }
 
-function createMateriaCastStatusModel(state: MateriaCastState, now: number): MateriaStatusRenderModel {
+function createMateriaCastStatusModel(
+  state: MateriaCastState,
+  now: number,
+): MateriaStatusRenderModel {
   const currentMateria = state.currentMateria ?? state.runState.currentMateria;
-  const socketState = currentCastSocketState(state) ?? (state.awaitingResponse ? "awaiting_agent_response" : state.active ? "idle" : state.phase);
-  const status = state.failedReason ? `failed: ${state.failedReason}` : socketState === "awaiting_user_refinement" ? "waiting for refinement; /materia continue to finalize" : `${currentMateria ?? state.phase}${state.active ? " active" : ""}`;
+  const socketState =
+    currentCastSocketState(state) ??
+    (state.awaitingResponse
+      ? "awaiting_agent_response"
+      : state.active
+        ? "idle"
+        : state.phase);
+  const status = state.failedReason
+    ? `failed: ${state.failedReason}`
+    : socketState === "awaiting_user_refinement"
+      ? "waiting for refinement; /materia continue to finalize"
+      : `${currentMateria ?? state.phase}${state.active ? " active" : ""}`;
   const loop = activeLoopDisplay(state);
   return createMateriaStatusRenderModel({
     cast: state.active ? "active" : state.phase || "done",
-    loadout: formatLoadoutMateria(state.runState.loadoutName, displayMateriaName(state.runState, currentMateria ?? currentCastSocketId(state))),
+    loadout: formatLoadoutMateria(
+      state.runState.loadoutName,
+      displayMateriaName(
+        state.runState,
+        currentMateria ?? currentCastSocketId(state),
+      ),
+    ),
     attempt: loop?.turn ?? String(state.runState.attempt ?? "-"),
-    elapsed: formatElapsed((state.runState.endedAt ?? now) - state.runState.startedAt),
+    elapsed: formatElapsed(
+      (state.runState.endedAt ?? now) - state.runState.startedAt,
+    ),
     usage: `${formatCompactNumber(state.runState.usage.tokens.input + state.runState.usage.tokens.cacheRead)}/${formatCompactNumber(state.runState.usage.tokens.output + state.runState.usage.tokens.cacheWrite)}`,
-    task: displayMateriaStatusValue(state.runState, state.currentItemLabel ?? state.runState.currentTask ?? state.request ?? "-"),
+    task: displayMateriaStatusValue(
+      state.runState,
+      state.currentItemLabel ??
+        state.runState.currentTask ??
+        state.request ??
+        "-",
+    ),
     path: loop?.path ?? "-",
     message: displayMateriaStatusValue(state.runState, status),
   });
 }
 
-function createMateriaStatusRenderModel(values: Record<MateriaStatusSegmentKind, string>): MateriaStatusRenderModel {
-  const firstLine = FIRST_LINE_SEGMENTS.map((definition) => ({ ...definition, value: values[definition.kind] }));
-  const secondLine = SECOND_LINE_SEGMENTS.map((definition) => ({ ...definition, value: values[definition.kind] }));
-  const message: MateriaStatusSegment = { kind: "message", label: "›", value: values.message, priority: 40 };
-  return { segments: [...firstLine, ...secondLine, message], panelLines: [firstLine, secondLine, [message]] };
+function createMateriaStatusRenderModel(
+  values: Record<MateriaStatusSegmentKind, string>,
+): MateriaStatusRenderModel {
+  const firstLine = FIRST_LINE_SEGMENTS.map((definition) => ({
+    ...definition,
+    value: values[definition.kind],
+  }));
+  const secondLine = SECOND_LINE_SEGMENTS.map((definition) => ({
+    ...definition,
+    value: values[definition.kind],
+  }));
+  const message: MateriaStatusSegment = {
+    kind: "message",
+    label: "›",
+    value: values.message,
+    priority: 40,
+  };
+  return {
+    segments: [...firstLine, ...secondLine, message],
+    panelLines: [firstLine, secondLine, [message]],
+  };
 }
 
 function renderMateriaStatusWidget(model: MateriaStatusRenderModel): string[] {
@@ -189,35 +305,55 @@ function renderMateriaStatusWidget(model: MateriaStatusRenderModel): string[] {
 
 function renderMateriaStatusLine(segments: MateriaStatusSegment[]): string {
   if (segments.length === 1 && segments[0].kind === "message") {
-    return truncateLine(`${segments[0].label} ${truncateValue(segments[0].value, WIDGET_MAX_LINE_LENGTH - 2)}`);
+    return truncateLine(
+      `${segments[0].label} ${truncateValue(segments[0].value, WIDGET_MAX_LINE_LENGTH - 2)}`,
+    );
   }
   const cells = segments.map((segment) => {
     const value = `${segment.label} ${segment.value}`;
-    return segment.width === undefined ? value : fixedCell(value, segment.width);
+    return segment.width === undefined
+      ? value
+      : fixedCell(value, segment.width);
   });
   return truncateLine(joinCells(cells));
 }
 
-export function updateMateriaWebUiStatusWidget(ctx: ExtensionContext, input: { url: string; status: "started" | "reused" }): void {
-  ctx.ui.setWidget("materia-webui", renderMateriaWebUiStatusWidget(input), { placement: "belowEditor" });
+export function updateMateriaWebUiStatusWidget(
+  ctx: ExtensionContext,
+  input: { url: string; status: "started" | "reused" },
+): void {
+  ctx.ui.setWidget("materia-webui", renderMateriaWebUiStatusWidget(input), {
+    placement: "belowEditor",
+  });
 }
 
-export function renderMateriaWebUiStatusWidget(input: { url: string; status: "started" | "reused" }): string[] {
+export function renderMateriaWebUiStatusWidget(input: {
+  url: string;
+  status: "started" | "reused";
+}): string[] {
   const state = input.status === "reused" ? "ready (reused)" : "started";
-  return [
-    `WebUI ${state}`,
-    truncateLine(input.url),
-  ];
+  return [`WebUI ${state}: ${truncateLine(input.url)}`];
 }
 
 export function clearMateriaAuxiliaryWidgets(ctx: ExtensionContext): void {
-  for (const key of ["materia-loadouts", "materia-status", "materia-casts", "materia-usage", "materia-grid"] as const) {
+  for (const key of [
+    "materia-loadouts",
+    "materia-status",
+    "materia-casts",
+    "materia-usage",
+    "materia-grid",
+  ] as const) {
     ctx.ui.setWidget(key, undefined, { placement: "belowEditor" });
   }
 }
 
-export function showUsageSummary(ctx: ExtensionContext, state: MateriaRunState): void {
-  ctx.ui.setWidget("materia-usage", renderCompactUsageWidget(state.usage), { placement: "belowEditor" });
+export function showUsageSummary(
+  ctx: ExtensionContext,
+  state: MateriaRunState,
+): void {
+  ctx.ui.setWidget("materia-usage", renderCompactUsageWidget(state.usage), {
+    placement: "belowEditor",
+  });
 }
 
 export function renderCompactUsageWidget(usage: UsageReport): string[] {
@@ -241,7 +377,10 @@ export function renderUsageSummary(usage: UsageReport): string[] {
   ];
 }
 
-function renderBreakdown(values: Record<string, UsageTotals>, costKind: UsageCostKind = "actual"): string[] {
+function renderBreakdown(
+  values: Record<string, UsageTotals>,
+  costKind: UsageCostKind = "actual",
+): string[] {
   const entries = Object.entries(values);
   if (entries.length === 0) return ["- none observed"];
   return entries
@@ -249,75 +388,125 @@ function renderBreakdown(values: Record<string, UsageTotals>, costKind: UsageCos
     .map(([key, usage]) => `- ${key}: ${formatUsage(usage, costKind)}`);
 }
 
-export function formatUsage(usage: UsageTotals, costKind: UsageCostKind = "actual"): string {
+export function formatUsage(
+  usage: UsageTotals,
+  costKind: UsageCostKind = "actual",
+): string {
   if (costKind === "subscription" && usage.cost.total === 0) {
     return `${usage.tokens.total} tokens, no per-token billing (subscription)`;
   }
   return `${usage.tokens.total} tokens, ${formatCostLabel(usage.cost.total, costKind)}`;
 }
 
-export function formatCostLabel(costUsd: number, costKind: UsageCostKind = "actual"): string {
-  if (costKind === "subscription") return `estimated token value: $${costUsd.toFixed(4)} (subscription; no per-token billing implied)`;
-  if (costKind === "estimated") return `estimated USD value: $${costUsd.toFixed(4)}`;
+export function formatCostLabel(
+  costUsd: number,
+  costKind: UsageCostKind = "actual",
+): string {
+  if (costKind === "subscription")
+    return `estimated token value: $${costUsd.toFixed(4)} (subscription; no per-token billing implied)`;
+  if (costKind === "estimated")
+    return `estimated USD value: $${costUsd.toFixed(4)}`;
   return `billed cost: $${costUsd.toFixed(4)}`;
 }
 
 export function usageCostNote(costKind: UsageCostKind = "actual"): string {
-  if (costKind === "subscription") return "Cost display: estimated token value only; subscription usage is not billed per token.";
-  if (costKind === "estimated") return "Cost display: estimated USD value, not confirmed billed charges.";
+  if (costKind === "subscription")
+    return "Cost display: estimated token value only; subscription usage is not billed per token.";
+  if (costKind === "estimated")
+    return "Cost display: estimated USD value, not confirmed billed charges.";
   return "Cost display: billed USD cost.";
 }
 
 function displayMateriaName(state: MateriaRunState, override?: string): string {
-  return override ?? state.currentMateria ?? runStateCurrentSocketId(state) ?? "-";
+  return (
+    override ?? state.currentMateria ?? runStateCurrentSocketId(state) ?? "-"
+  );
 }
 
-function formatLoadoutMateria(loadoutName: string | undefined, materiaName: string): string {
+function formatLoadoutMateria(
+  loadoutName: string | undefined,
+  materiaName: string,
+): string {
   return `${loadoutName || "-"} ◉ ${materiaName || "-"}`;
 }
 
-function activeLoopDisplay(state: MateriaCastState): { turn: string; path: string } | undefined {
+function activeLoopDisplay(
+  state: MateriaCastState,
+): { turn: string; path: string } | undefined {
   const currentSocketId = currentCastSocketId(state);
   if (!currentSocketId || !state.pipeline) return undefined;
-  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) => loopSockets(candidate).includes(currentSocketId));
+  const loop = Object.values(state.pipeline.loops ?? {}).find((candidate) =>
+    loopSockets(candidate).includes(currentSocketId),
+  );
   if (!loop) return undefined;
 
-  const cursor = loop.iterator?.cursor ?? loop.consumes?.cursor ?? `${currentSocketId}Index`;
+  const cursor =
+    loop.iterator?.cursor ?? loop.consumes?.cursor ?? `${currentSocketId}Index`;
   const currentIndex = Math.max(0, state.cursors[cursor] ?? 0);
-  const total = loop.iterator ? resolveLoopTotal(state, loop.iterator.items) : undefined;
+  const total = loop.iterator
+    ? resolveLoopTotal(state, loop.iterator.items)
+    : undefined;
   return {
-    turn: total === undefined ? `${currentIndex + 1}/?` : `${Math.min(currentIndex + 1, total)}/${total}`,
-    path: loopSockets(loop).map((socketId) => (socketId === currentSocketId ? `[${displayPipelineSocketName(state, socketId)}]` : displayPipelineSocketName(state, socketId))).join(" -> "),
+    turn:
+      total === undefined
+        ? `${currentIndex + 1}/?`
+        : `${Math.min(currentIndex + 1, total)}/${total}`,
+    path: loopSockets(loop)
+      .map((socketId) =>
+        socketId === currentSocketId
+          ? `[${displayPipelineSocketName(state, socketId)}]`
+          : displayPipelineSocketName(state, socketId),
+      )
+      .join(" -> "),
   };
 }
 
-function displayPipelineSocketName(state: MateriaCastState, socketId: string): string {
+function displayPipelineSocketName(
+  state: MateriaCastState,
+  socketId: string,
+): string {
   const socket = resolvedPipelineSockets(state.pipeline)[socketId];
   if (!socket) return socketId;
-  if ("materia" in socket) return socket.materia.label ?? socket.socket.materia ?? socketId;
+  if ("materia" in socket)
+    return socket.materia.label ?? socket.socket.materia ?? socketId;
   return socket.socket.utility ?? socket.socket.command?.[0] ?? socketId;
 }
 
-function resolveLoopTotal(state: MateriaCastState, itemsPath: string): number | undefined {
+function resolveLoopTotal(
+  state: MateriaCastState,
+  itemsPath: string,
+): number | undefined {
   const items = resolveDisplayPath(state, itemsPath);
   return Array.isArray(items) ? items.length : undefined;
 }
 
-function resolveDisplayPath(state: MateriaCastState, expression: string): unknown {
+function resolveDisplayPath(
+  state: MateriaCastState,
+  expression: string,
+): unknown {
   const trimmed = expression.trim();
-  if (trimmed.startsWith("state.")) return getDisplayPath(state.data, trimmed.slice("state.".length));
-  if (trimmed.startsWith("cursor.")) return state.cursors[trimmed.slice("cursor.".length)];
+  if (trimmed.startsWith("state."))
+    return getDisplayPath(state.data, trimmed.slice("state.".length));
+  if (trimmed.startsWith("cursor."))
+    return state.cursors[trimmed.slice("cursor.".length)];
   return undefined;
 }
 
 function getDisplayPath(value: unknown, path: string): unknown {
-  return path.split(".").filter(Boolean).reduce<unknown>((current, part) => {
-    if (current && typeof current === "object" && part in current) return (current as Record<string, unknown>)[part];
-    return undefined;
-  }, value);
+  return path
+    .split(".")
+    .filter(Boolean)
+    .reduce<unknown>((current, part) => {
+      if (current && typeof current === "object" && part in current)
+        return (current as Record<string, unknown>)[part];
+      return undefined;
+    }, value);
 }
 
-function displayMateriaStatusValue(state: MateriaRunState, value: string): string {
+function displayMateriaStatusValue(
+  state: MateriaRunState,
+  value: string,
+): string {
   const socketId = runStateCurrentSocketId(state);
   const materia = state.currentMateria;
   if (!socketId || !materia || socketId === materia) return value;
