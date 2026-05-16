@@ -78,9 +78,64 @@ describe("tool scope resolution", () => {
       activeTools: [] as string[],
     };
 
-    updateToolScope(pi as never, { tools: { type: "custom", tools: ["bash", "read"] }, prompt: "Evaluate." });
+    const resolved = updateToolScope(pi as never, { tools: { type: "custom", tools: ["bash", "read"] }, prompt: "Evaluate." });
 
     expect(pi.activeTools).toEqual(["bash", "read"]);
+    expect(resolved.activeTools).toEqual(["bash", "read"]);
+    expect(resolved.unavailableTools).toEqual([]);
+  });
+
+  test("runtime filters unavailable custom names and emits scoped deduped warnings", () => {
+    const pi = {
+      getAllTools: () => available.map((name) => ({ name })),
+      setActiveTools: (tools: string[]) => { pi.activeTools = tools; },
+      activeTools: [] as string[],
+    };
+    const warnings: string[] = [];
+
+    const resolved = updateToolScope(pi as never, { tools: { type: "custom", tools: ["read", "extensionTool", "bash", "extensionTool"] }, prompt: "Evaluate." }, {
+      context: { socket: "Socket-5", materia: "Build", itemKey: "W2", visit: 1 },
+      onWarning: (warning) => { warnings.push(warning.message); },
+    });
+    updateToolScope(pi as never, { tools: { type: "custom", tools: ["read", "extensionTool", "bash", "extensionTool"] }, prompt: "Evaluate." }, {
+      context: { socket: "Socket-5", materia: "Build", itemKey: "W2", visit: 1 },
+      onWarning: (warning) => { warnings.push(warning.message); },
+    });
+
+    expect(pi.activeTools).toEqual(["read", "bash"]);
+    expect(resolved.configuredTools).toEqual(["read", "extensionTool", "bash", "extensionTool"]);
+    expect(resolved.activeTools).toEqual(["read", "bash"]);
+    expect(resolved.unavailableTools).toEqual(["extensionTool"]);
+    expect(warnings).toEqual([expect.stringContaining('materia "Build" on socket "Socket-5"')]);
+    expect(warnings[0]).toContain("extensionTool");
+  });
+
+  test("runtime accepts an empty custom allowlist", () => {
+    const pi = {
+      getAllTools: () => available.map((name) => ({ name })),
+      setActiveTools: (tools: string[]) => { pi.activeTools = tools; },
+      activeTools: ["read"] as string[],
+    };
+
+    const resolved = updateToolScope(pi as never, { tools: { type: "custom", tools: [] }, prompt: "Evaluate." });
+
+    expect(pi.activeTools).toEqual([]);
+    expect(resolved.activeTools).toEqual([]);
+  });
+
+  test("runtime preserves preset compatibility", () => {
+    const pi = {
+      getAllTools: () => available.map((name) => ({ name })),
+      setActiveTools: (tools: string[]) => { pi.activeTools = tools; },
+      activeTools: [] as string[],
+    };
+
+    expect(updateToolScope(pi as never, { tools: "readOnly", prompt: "Evaluate." }).activeTools).toEqual(["read", "grep", "find", "ls"]);
+    expect(pi.activeTools).toEqual(["read", "grep", "find", "ls"]);
+    expect(updateToolScope(pi as never, { tools: "none", prompt: "Evaluate." }).activeTools).toEqual([]);
+    expect(pi.activeTools).toEqual([]);
+    expect(updateToolScope(pi as never, { tools: "coding", prompt: "Evaluate." }).activeTools).toEqual(available);
+    expect(pi.activeTools).toEqual(available);
   });
 
   test("runtime fails closed for malformed custom allowlists", () => {

@@ -15,7 +15,7 @@ export interface SameSocketRecoveryWorkflowDeps {
   writeUsage(runState: MateriaCastState["runState"]): Promise<void>;
   saveState(state: MateriaCastState): void;
   failCast(state: MateriaCastState, error: unknown, entryId?: string, options?: { preserveRecoveryExhaustion?: boolean }): Promise<void>;
-  updateToolScope(materia: MateriaAgentConfig): void;
+  updateToolScope(materia: MateriaAgentConfig): void | Promise<void>;
   sendMateriaTurn(state: MateriaCastState, prompt: string, options?: { skipProactiveCompaction?: boolean }): Promise<void>;
   buildRecoveryPrompt(state: MateriaCastState): string;
   updateWidget(state: MateriaCastState): void;
@@ -92,7 +92,7 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   try {
     const preparation = sameSocketRecoveryPreparation(reason, key, attempt, maxAttempts, options.entryId);
     if (preparation) await deps.runRecoveryAction(state, preparation);
-    deps.updateToolScope(deps.currentMateria(state));
+    await deps.updateToolScope(deps.currentMateria(state));
     await deps.sendMateriaTurn(state, deps.buildRecoveryPrompt(state), { skipProactiveCompaction: true });
     await deps.appendEvent(state.runState, "same_socket_recovery_retry", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
     deps.saveState(state);

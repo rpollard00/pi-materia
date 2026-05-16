@@ -29,13 +29,50 @@ import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.
 import { hashConfig, loadConfigFromState, resolvePersistedCastLoadoutName } from "./configPersistence.js";
 import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
-import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, updateToolScope } from "./agentTurnState.js";
+import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, updateToolScope, type ToolScopeRuntimeWarning } from "./agentTurnState.js";
 import { currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, nextRefinementTurn, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit, startTaskAttempt } from "./sessionState.js";
 export { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 
 
 const DEFAULT_MAX_SOCKET_VISITS = 25;
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
+
+async function updateSocketToolScope(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket): Promise<void> {
+  if (!isAgentResolvedSocket(socket)) return;
+  const emittedWarnings: ToolScopeRuntimeWarning[] = [];
+  updateToolScope(pi, socket.materia, {
+    context: toolScopeWarningContext(state, socket),
+    onWarning: (warning) => { emittedWarnings.push(warning); },
+  });
+  for (const warning of emittedWarnings) {
+    await appendToolScopeWarningEvent(state, warning);
+    ctx.ui.notify(warning.message, "warning");
+  }
+}
+
+async function appendToolScopeWarningEvent(state: MateriaCastState, warning: ToolScopeRuntimeWarning): Promise<void> {
+  await appendEvent(state.runState, "tool_scope_warning", {
+    warning: true,
+    message: warning.message,
+    warnings: warning.warnings,
+    unavailableTools: warning.unavailableTools,
+    activeTools: warning.activeTools,
+    configuredTools: warning.configuredTools,
+    socket: warning.context.socket,
+    materia: warning.context.materia,
+    itemKey: warning.context.itemKey,
+    visit: warning.context.visit,
+  });
+}
+
+function toolScopeWarningContext(state: MateriaCastState, socket: ResolvedMateriaSocket) {
+  return {
+    socket: socket.id,
+    materia: socketMateriaName(socket),
+    itemKey: state.currentItemKey,
+    visit: socketVisit(state, socket.id),
+  };
+}
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> }): Promise<void> {
   const config = loaded.config;
@@ -170,7 +207,7 @@ async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   updateWidget(ctx, state, { replaceOwner: true });
 
   if (isAgentResolvedSocket(socket) && state.activeTurnPrompt) {
-    updateToolScope(pi, socket.materia);
+    await updateSocketToolScope(pi, ctx, state, socket);
     await sendMateriaTurn(pi, ctx, state, state.activeTurnPrompt);
   } else {
     await startSocket(pi, ctx, state, socket);
@@ -198,7 +235,7 @@ async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionCo
   recordUsageModelSelection(state.runState.usage, { socket: socket.id, materia: resolvedSocketConfig(socket).materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
   await writeUsage(state.runState);
   await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn, finalization: true });
-  updateToolScope(pi, socket.materia);
+  await updateSocketToolScope(pi, ctx, state, socket);
   saveCastState(pi, state);
   await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, socket));
 }
@@ -393,7 +430,7 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   await writeUsage(state.runState);
   await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
   saveCastState(pi, state);
-  updateToolScope(pi, socket.materia);
+  await updateSocketToolScope(pi, ctx, state, socket);
   await sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket));
 }
 
@@ -431,7 +468,14 @@ async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: Ext
     writeUsage,
     saveState: (nextState) => saveCastState(pi, nextState),
     failCast: (nextState, nextError, entryId, failOptions) => failCast(pi, ctx, nextState, nextError, entryId, failOptions),
-    updateToolScope: (materia) => updateToolScope(pi, materia),
+    updateToolScope: async (materia) => {
+      const emittedWarnings: ToolScopeRuntimeWarning[] = [];
+      updateToolScope(pi, materia, { context: { socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, visit: currentSocketVisit(state, undefined) }, onWarning: (warning) => { emittedWarnings.push(warning); } });
+      for (const warning of emittedWarnings) {
+        await appendToolScopeWarningEvent(state, warning);
+        ctx.ui.notify(warning.message, "warning");
+      }
+    },
     sendMateriaTurn: (nextState, prompt, turnOptions) => sendMateriaTurn(pi, ctx, nextState, prompt, turnOptions),
     buildRecoveryPrompt: buildSameSocketRecoveryPrompt,
     updateWidget: (nextState) => updateWidget(ctx, nextState),
@@ -584,7 +628,7 @@ export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: Exte
   const contextArtifact = await writeContextArtifact(pi, state, buildSyntheticCastContext(state), `refinement-${refinementTurn}-${safeTimestamp()}`);
   await appendManifest(state, { phase: state.phase, socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, visit: socketVisit(state, socket.id), artifact: contextArtifact, kind: "context_refinement", refinementTurn, materiaModel: state.currentMateriaModel });
   await appendEvent(state.runState, "context_refinement", { socket: socket.id, materia: socketMateriaName(socket), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
-  updateToolScope(pi, socket.materia);
+  await updateSocketToolScope(pi, ctx, state, socket);
   saveCastState(pi, state);
 }
 
