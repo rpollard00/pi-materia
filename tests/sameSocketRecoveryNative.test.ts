@@ -39,6 +39,31 @@ function multiTurnConfig() {
   };
 }
 
+function jsonAgentConfig(next: string = "end") {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", parse: "json", assign: { result: "$.result" }, next } } } },
+    materia: { Build: { tools: "coding", prompt: "Build materia" } },
+  };
+}
+
+function budgetFailingAgentConfig() {
+  return {
+    ...jsonAgentConfig(),
+    budget: { maxTokens: 0 },
+  };
+}
+
+function utilityJsonConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", utility: "echo", parse: "json", params: { output: "not json" }, next: "end" } } } },
+    materia: { Build: { tools: "coding", prompt: "Build materia" } },
+  };
+}
+
 function foreachConfig() {
   return {
     artifactDir: ".pi/pi-materia",
@@ -195,12 +220,126 @@ describe("native same-socket recovery", () => {
     expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
   });
 
-  test("non-recoverable assistant errors fail without retry", async () => {
+  test("provider-ish assistant errors retry once without compaction and can then succeed", async () => {
     const harness = await makeHarness(singleAgentConfig());
-    await harness.runCommand("materia", "cast fail me");
+    await harness.runCommand("materia", "cast provider blip");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
+
+    harness.appendAssistantMessage("done after provider blip");
+    await harness.emit("agent_end", { messages: [] });
+
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.socketState).toBe("complete");
+    expect(latestState.lastAssistantText).toBe("done after provider blip");
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_retry" && event.data.reason === "turn_failure")).toBe(true);
+  });
+
+  test("agent_end failures without assistant output retry once without compaction and can then succeed", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast invalid request retry");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    await harness.emit("agent_end", { errorMessage: "invalid_request_error: provider rejected request" });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
+
+    harness.appendAssistantMessage("done after no-output failure");
+    await harness.emit("agent_end", { messages: [] });
+
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.socketState).toBe("complete");
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure")).toBe(true);
+  });
+
+  test("invalid JSON from an agent retries before graph advancement and can then succeed", async () => {
+    const harness = await makeHarness(jsonAgentConfig());
+    await harness.runCommand("materia", "cast invalid json retry");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    harness.appendAssistantMessage("{ not json");
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.data.result).toBeUndefined();
+    expect(latestState.lastJson).toBeUndefined();
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
+
+    harness.appendAssistantMessage('{"result":"ok"}');
+    await harness.emit("agent_end", { messages: [] });
+
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.data.result).toBe("ok");
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure" && String(event.data.error).includes("Pre-commit output validation failed"))).toBe(true);
+  });
+
+  test("handoff validation failures from an agent retry before graph advancement", async () => {
+    const harness = await makeHarness(jsonAgentConfig());
+    await harness.runCommand("materia", "cast handoff validation retry");
+
+    harness.appendAssistantMessage('{"satisfied":"yes","result":"invalid control"}');
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.data.result).toBeUndefined();
+    expect(latestState.lastJson).toBeUndefined();
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_complete")).toHaveLength(0);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure" && String(event.data.error).includes("Pre-commit output validation failed"))).toBe(true);
+  });
+
+  test("utility socket output validation failures fail fast without generic retry", async () => {
+    const harness = await makeHarness(utilityJsonConfig());
+    await harness.runCommand("materia", "cast utility json fail");
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(0);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.socketState).toBe("failed");
+    expect(latestState.failedReason).toContain("Pre-commit output validation failed");
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+  });
+
+  test("post-advance lifecycle failures are not retried after assignments apply", async () => {
+    const harness = await makeHarness(budgetFailingAgentConfig());
+    await harness.runCommand("materia", "cast unsafe post advance");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    harness.appendAssistantMessage('{"result":"applied"}');
     await harness.emit("agent_end", { messages: [] });
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
@@ -208,28 +347,12 @@ describe("native same-socket recovery", () => {
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
     expect(latestState.socketState).toBe("failed");
-    expect(latestState.failedReason).toContain("provider auth failed");
+    expect(latestState.data.result).toBe("applied");
+    expect(latestState.failedReason).toContain("pi-materia budget limit reached");
     const events = await readEvents(harness);
+    expect(events.some((event) => event.type === "socket_complete" && event.data.socket === "Socket-1")).toBe(true);
+    expect(events.some((event) => event.type === "budget_limit")).toBe(true);
     expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
-  });
-
-  test("non-recoverable agent_end failures fail without retry", async () => {
-    const harness = await makeHarness(singleAgentConfig());
-    await harness.runCommand("materia", "cast invalid request fail");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
-
-    await harness.emit("agent_end", { errorMessage: "invalid_request_error: provider rejected request" });
-
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
-    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
-    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(latestState.active).toBe(false);
-    expect(latestState.socketState).toBe("failed");
-    expect(latestState.failedReason).toContain("Non-recoverable turn failure");
-    expect(latestState.failedReason).toContain("invalid_request_error: provider rejected request");
-    const events = await readEvents(harness);
-    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
-    expect(events.some((event) => event.type === "cast_end" && event.data.ok === false)).toBe(true);
   });
 
   test("forced compaction failure is recorded and fails clearly", async () => {
@@ -284,20 +407,24 @@ describe("native same-socket recovery", () => {
     expect(events.some((event) => event.type === "same_socket_recovery_action_complete" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
   });
 
-  test("non-recoverable assistant errors fail with non-recoverable diagnostics", async () => {
+  test("generic assistant error recovery exhausts deterministically with structured metadata", async () => {
     const harness = await makeHarness(singleAgentConfig());
-    await harness.runCommand("materia", "cast fail diagnostic");
+    await harness.runCommand("materia", "cast generic exhaust");
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
     await harness.emit("agent_end", { messages: [] });
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "different provider failure" });
+    await harness.emit("agent_end", { messages: [] });
 
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("Non-recoverable turn failure");
-    expect(latestState.failedReason).toContain("provider auth failed");
+    expect(latestState.failedReason).toContain("Same-socket recovery exhausted");
+    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "turn_failure", socket: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
     const events = await readEvents(harness);
-    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
+    expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.reason === "turn_failure")).toBe(true);
   });
 
   test("recovery attempts are bounded and exhaustion fails clearly", async () => {
@@ -357,12 +484,11 @@ describe("native same-socket recovery", () => {
   });
 
   test("revive allowance extension rejects legacy or non-exhaustion failures", async () => {
-    const harness = await makeHarness(singleAgentConfig());
+    const harness = await makeHarness(utilityJsonConfig());
     await harness.runCommand("materia", "cast non exhaustion revive reject");
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
-    await harness.emit("agent_end", { messages: [] });
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(state.failedReason).toContain("Pre-commit output validation failed");
     expect(() => extendSameSocketRecoveryAllowanceForRevive(state)).toThrow(/missing structured same-socket recovery exhaustion metadata/);
 
     const legacy = { ...state, failedReason: "Same-socket recovery exhausted for socket", recoveryExhaustion: undefined };
