@@ -6,7 +6,7 @@ import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.j
 import { registerMateriaRenderer } from "./presentation/renderer.js";
 import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference } from "./webui/launcher.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
-import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, renderMateriaCastStatusWidget, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
+import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 export { renderCastList } from "./infrastructure/index.js";
 
@@ -171,9 +171,7 @@ export default function piMateria(pi: ExtensionAPI) {
           ctx.ui.notify("No pi-materia cast state in this session.", "info");
           return;
         }
-        const lines = renderMateriaCastStatusWidget(state);
-        clearMateriaAuxiliaryWidgets(ctx);
-        ctx.ui.setWidget("materia", lines, { placement: "belowEditor" });
+        const lines = updateWidget(ctx, state, { replaceOwner: true }) ?? [];
         pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "status", materiaName: "orchestrator", eventType: "status" } });
         return;
       }
