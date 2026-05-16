@@ -51,9 +51,8 @@ export function resolveToolScope(spec: ToolScopeSpec, availableToolNames: readon
   const validation = validateCustomToolScopeSpec(spec, availableSet, path);
   if (!validation.ok) return validation;
 
-  const requested = new Set(spec.tools);
-  const tools = available.filter((name) => requested.has(name));
-  return { ok: true, value: freezeResolvedToolScope({ spec: { type: "custom", tools: Object.freeze([...requested]) }, source: "custom", tools }) };
+  const tools = normalizeCustomToolNames(spec.tools, available);
+  return { ok: true, value: freezeResolvedToolScope({ spec: { type: "custom", tools }, source: "custom", tools }) };
 }
 
 export type ToolScopeSpecShapeValidation = { ok: true; value: ToolScopeSpec } | { ok: false; issues: ToolScopeIssue[] };
@@ -93,6 +92,11 @@ function validateCustomToolScopeSpec(spec: CustomToolScopeSpec, availableSet: Re
     return { ok: false, issues: [{ path: `${path}.tools`, message: `unknown tool name(s): ${invalid.join(", ")}. Valid tools: ${valid}` }] };
   }
   return { ok: true };
+}
+
+function normalizeCustomToolNames(requestedTools: readonly string[], availableTools: readonly string[]): string[] {
+  const requested = new Set(requestedTools);
+  return availableTools.filter((name) => requested.has(name));
 }
 
 function freezeResolvedToolScope(scope: { spec: ToolScopeSpec; source: ResolvedToolScope["source"]; tools: string[] }): ResolvedToolScope {

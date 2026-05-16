@@ -16,7 +16,16 @@ describe("tool scope resolution", () => {
     expect(resolveToolScope({ type: "custom", tools: ["read", "bash"] }, available)).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "bash"] }, source: "custom", tools: ["read", "bash"] } });
     const invalid = resolveToolScope({ type: "custom", tools: ["bsh"] }, available, "materia.Build.tools");
     expect(invalid.ok).toBe(false);
-    if (!invalid.ok) expect(invalid.issues[0]?.message).toContain("bsh");
+    if (!invalid.ok) {
+      expect(invalid.issues[0]?.path).toBe("materia.Build.tools.tools");
+      expect(invalid.issues[0]?.message).toContain("bsh");
+      expect(invalid.issues[0]?.message).toContain("Valid tools: bash, edit, find, grep, ls, read, write");
+    }
+  });
+
+  test("handles empty and duplicate custom allowlists deterministically", () => {
+    expect(resolveToolScope({ type: "custom", tools: [] }, available)).toEqual({ ok: true, value: { spec: { type: "custom", tools: [] }, source: "custom", tools: [] } });
+    expect(resolveToolScope({ type: "custom", tools: ["bash", "read", "bash", "grep"] }, available)).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "bash"] }, source: "custom", tools: ["read", "grep", "bash"] } });
   });
 
   test("rejects malformed tool scope shape", () => {
@@ -48,5 +57,16 @@ describe("tool scope resolution", () => {
     updateToolScope(pi as never, { tools: { type: "custom", tools: ["bash", "read"] }, prompt: "Evaluate." });
 
     expect(pi.activeTools).toEqual(["read", "bash"]);
+  });
+
+  test("runtime fails closed for invalid custom allowlists", () => {
+    const pi = {
+      getAllTools: () => available.map((name) => ({ name })),
+      setActiveTools: (tools: string[]) => { pi.activeTools = tools; },
+      activeTools: ["read"] as string[],
+    };
+
+    expect(() => updateToolScope(pi as never, { tools: { type: "custom", tools: ["bsh"] }, prompt: "Evaluate." })).toThrow(/Invalid materia tool scope: .*bsh/);
+    expect(pi.activeTools).toEqual(["read"]);
   });
 });
