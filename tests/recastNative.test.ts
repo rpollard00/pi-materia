@@ -201,7 +201,7 @@ describe("/materia recast", () => {
 
     await harness.runCommand("materia", "recast");
 
-    expect(harness.notifications.at(-1)).toEqual({
+    expect(harness.notifications).toContainEqual({
       message: "No failed or aborted pi-materia casts are available to recast.",
       type: "info",
     });
@@ -349,16 +349,35 @@ describe("/materia recast", () => {
     const harness = await makeHarness();
 
     await harness.runCommand("materia", "cast ordinary failure");
-    await failCurrentCast(harness, "ordinary failure");
+    const ordinary = await failCurrentCast(harness, "ordinary failure");
 
     await harness.runCommand("materia", "revive");
-    expect(harness.notifications.at(-1)).toEqual({
+    expect(harness.notifications).toContainEqual({
       message: "No failed pi-materia casts exhausted by same-socket recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.",
       type: "info",
     });
 
-    const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
-    expect(completions).toEqual([]);
+    const noEligibleCompletions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    expect(noEligibleCompletions).toEqual([]);
+
+    await harness.runCommand("materia", "cast exhausted failure");
+    const failed = await failCurrentCast(harness, "Same-socket recovery exhausted for normal turn");
+    const revivable = makeRevivableState(failed);
+    harness.pi.appendEntry("pi-materia-cast-state", revivable);
+
+    const mixedCompletions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    expect(mixedCompletions.map((item) => item.value)).toEqual([`revive ${revivable.castId}`]);
+    expect(mixedCompletions.map((item) => item.value)).not.toContain(`revive ${ordinary.castId}`);
+
+    await harness.runCommand("materia", "revive");
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(revivable.castId);
+    expect(resumed.active).toBe(true);
+    const ordinaryLatest = harness.appendedEntries
+      .filter((entry) => entry.customType === "pi-materia-cast-state" && (entry.data as MateriaCastState | undefined)?.castId === ordinary.castId)
+      .at(-1)?.data as MateriaCastState | undefined;
+    expect(ordinaryLatest).toMatchObject({ castId: ordinary.castId, active: false, phase: "failed", request: "ordinary failure" });
+    expect(ordinaryLatest?.failedReason).toContain("ordinary failure");
   });
 
   test("completions include only matching resumable casts newest first", async () => {

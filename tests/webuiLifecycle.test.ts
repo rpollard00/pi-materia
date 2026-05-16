@@ -188,8 +188,7 @@ describe("/materia ui lifecycle", () => {
     expect(first.reused).toBe(false);
     expect(first.url).toStartWith("http://127.0.0.1:");
     expect(harness.widgets.get("materia-webui")?.content).toEqual([
-      "WebUI started",
-      first.url,
+      `WebUI started: ${first.url}`,
     ]);
 
     const health = await fetch(new URL("/api/health", first.url));
@@ -216,8 +215,7 @@ describe("/materia ui lifecycle", () => {
     expect(second.url).toBe(first.url);
     expect(second.sessionKey).toBe(first.sessionKey);
     expect(harness.widgets.get("materia-webui")?.content).toEqual([
-      "WebUI ready (reused)",
-      first.url,
+      `WebUI ready (reused): ${first.url}`,
     ]);
     expect(harness.waitForIdleCalls).toBe(0);
 
@@ -283,8 +281,7 @@ describe("/materia ui lifecycle", () => {
       );
       expect(started?.message).toContain("http://127.0.0.1:");
       const startedWidget = harness.widgets.get("materia-webui")?.content;
-      expect(startedWidget?.[0]).toBe("WebUI started");
-      expect(startedWidget?.[1]).toContain("http://127.0.0.1:");
+      expect(startedWidget?.[0]).toContain("WebUI started: http://127.0.0.1:");
 
       await harness.runCommand("materia", "link");
       await waitForNotification(harness, "Materia WebUI ready:");
@@ -294,8 +291,7 @@ describe("/materia ui lifecycle", () => {
       );
       expect(ready?.message).toContain("http://127.0.0.1:");
       const readyWidget = harness.widgets.get("materia-webui")?.content;
-      expect(readyWidget?.[0]).toBe("WebUI ready (reused)");
-      expect(readyWidget?.[1]).toContain("http://127.0.0.1:");
+      expect(readyWidget?.[0]).toContain("WebUI ready (reused): http://127.0.0.1:");
       expect(harness.sentMessages).toHaveLength(0);
       expect(harness.appendedEntries).toHaveLength(0);
       expect(harness.waitForIdleCalls).toBe(0);

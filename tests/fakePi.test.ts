@@ -232,7 +232,8 @@ describe("FakePiHarness", () => {
   });
 
   test("loads pi-materia and runs /materia grid locally", async () => {
-    const harness = new FakePiHarness(process.cwd());
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-grid-command-"));
+    const harness = new FakePiHarness(dir);
     piMateria(harness.pi);
 
     await harness.runCommand("materia", "grid");
@@ -246,14 +247,23 @@ describe("FakePiHarness", () => {
   });
 
   test("/materia grid clears stale persistent grid widgets instead of adding below-editor noise", async () => {
-    const harness = new FakePiHarness(process.cwd());
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-grid-command-"));
+    const harness = new FakePiHarness(dir);
     piMateria(harness.pi);
     harness.widgets.set("materia-grid", { content: ["old", "noisy", "persistent", "grid", "widget"], options: { placement: "belowEditor" } });
 
     await harness.runCommand("materia", "grid");
 
     expect(harness.widgets.get("materia-grid")?.content).toBeUndefined();
-    const gridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(gridMessage.content).toContain("Materia Grid");
+    const firstGridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
+    expect(firstGridMessage.content).toContain("Materia Grid");
+
+    harness.widgets.set("materia-grid", { content: ["stale", "persistent", "grid"], options: { placement: "belowEditor" } });
+    await harness.runCommand("materia", "grid");
+
+    expect(harness.widgets.get("materia-grid")?.content).toBeUndefined();
+    const secondGridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
+    expect(secondGridMessage.content).toContain("Materia Grid");
+    expect(harness.sentMessages).toHaveLength(2);
   });
 });
