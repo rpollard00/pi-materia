@@ -219,7 +219,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error);
       return;
     }
-    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error);
+    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { allowGenericTurnFailure: true });
     if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error));
     return;
   }
@@ -237,7 +237,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error, { entryId: latest.entry.id });
       return;
     }
-    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id });
+    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id, allowGenericTurnFailure: true });
     if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error), latest.entry.id);
     return;
   }
@@ -302,11 +302,16 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   if (resolvedSocketConfig(socket).parse === "json") {
     try {
       parsed = parseJson<unknown>(text);
+      parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: socket.socket });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`Invalid JSON output for socket "${socket.id}": ${detail}`);
+      const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
+      if (isAgentResolvedSocket(socket)) {
+        const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
+        if (recovered) return;
+        throw nonRecoverableTurnError(state, validationError);
+      }
+      throw validationError;
     }
-    parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: socket.socket });
     state.lastJson = parsed;
     await recordSocketParsedJson({ state, socketId: socket.id, visit: socketVisit(state, socket.id), parsed });
   }
@@ -412,7 +417,7 @@ async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, 
   ctx.ui.notify(`pi-materia warning: ${state.runState.lastMessage}`, "warning");
 }
 
-async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<boolean> {
+async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string; allowGenericTurnFailure?: boolean } = {}): Promise<boolean> {
   return handleSameSocketRecoverableTurnFailureWorkflow(state, error, {
     appendEvent,
     writeUsage,
