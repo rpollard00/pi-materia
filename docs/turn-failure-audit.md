@@ -1,6 +1,6 @@
 # Materia agent turn lifecycle and failure-surface audit
 
-This audit traces the current Pi-native Materia execution paths in `src/castRuntime.ts`/`src/index.ts` for long-turn compaction recovery work.
+This audit traces the current Pi-native Materia execution paths in `src/castRuntime.ts`/`src/runtime/nativeLifecycle.ts` for bounded same-socket recovery. Automatic recovery is no longer limited to context-window failures: context-window recovery is one specialized mode, and safe generic agent-turn failures use the same bounded retry primitive without compaction.
 
 ## Lifecycle paths
 
@@ -12,10 +12,8 @@ This audit traces the current Pi-native Materia execution paths in `src/castRunt
 4. `sendMateriaTurn()` writes a context artifact, appends a manifest entry, sends visible metadata, appends a `pi-materia-context` entry, and sends the hidden `pi-materia-prompt` with `{ triggerTurn: true }`.
 5. Pi fires `before_agent_start`; Materia injects the active materia prompt.
 6. Pi fires `context`; Materia replaces visible history with isolated synthetic context plus the active Materia prompt slice.
-7. Pi fires `agent_end`; `handleAgentEnd()` finds the latest assistant entry, records text/error/usage, marks the state no longer awaiting, and either:
-   - calls `completeSocket()` for a normal agent socket, or
-   - records a multi-turn refinement instead of completing the socket.
-8. `completeSocket()` records output, parses JSON if configured, applies assignments/advance, emits `socket_complete`, checks budget, then `advanceToSocket()` either starts the next socket or `finishCast()`.
+7. Pi fires `agent_end`; `handleAgentEnd()` finds the latest assistant entry, records text/error/usage, and either attempts safe recovery, records a multi-turn refinement, or completes the socket.
+8. `completeSocket()` records output, parses JSON if configured, applies the generic handoff envelope/assignments/advance, emits `socket_complete`, checks budget, then `advanceToSocket()` either starts the next socket or `finishCast()`.
 
 ### Multi-turn refinement turn
 
@@ -34,21 +32,20 @@ This audit traces the current Pi-native Materia execution paths in `src/castRunt
 4. On `agent_end`, `handleAgentEnd()` captures `wasAwaitingFinalization`, clears `multiTurnFinalizing`, and calls `completeSocket(..., { finalizedMultiTurn: true })`.
 5. `completeSocket()` then records final output, parses/assigns/advances, and proceeds like a normal socket completion.
 
-## Incomplete-turn failure surfaces
+## Current incomplete-turn recovery surfaces
 
-Current behavior only handles failures visible as an assistant message:
+Recovery is attempted only while an active agent socket is still awaiting the same turn and before successful output state has been committed:
 
-- `handleAgentEnd()` calls `findLatestAssistantEntry()` after the previous processed entry.
-- If no assistant entry exists, it returns without changing state. The cast remains `active` and `awaitingResponse`, but there is no retry, failure event, or diagnostic.
-- If the assistant message has `stopReason === "error"`, `assistantErrorMessage()` converts `errorMessage` into `Pi agent turn failed for socket ...`; the catch block immediately fails the cast.
-- The same immediate-fail path is used for parse errors, artifact write errors, budget-limit errors, assignment/edge errors, and any error thrown while recording a refinement/finalization result.
+- Assistant error entries (`stopReason === "error"`) are classified before terminal failure. Context-window/token-limit messages become `context_window`; plain WebSocket transport failures become `transient_transport`; other errors can become `turn_failure` only at lifecycle call sites that explicitly opt in because the current turn is safe to resend.
+- `agent_end` failures with no usable assistant entry use the same classification path. Transient WebSocket failures preserve awaiting state; safe generic failures attempt bounded `turn_failure` recovery.
+- JSON parse and handoff validation failures for agent sockets are handled as pre-commit validation failures. They may attempt generic recovery after the raw output artifact exists, but before parsed JSON is recorded, before `applyGenericHandoffEnvelope()`, before assignments, before `applyAdvance()`, before `socket_complete`, before budget/route advancement, and before starting another socket.
+- Context-window failures run the reason-specific recovery action: compact first, then retry.
+- Generic `turn_failure` retries resend the saved active prompt directly without compaction, proactive compaction, `startSocket()`, visit increments, cursor advancement, or a new task attempt.
+- Recovery uses the existing `same_socket_recovery_start`, `same_socket_recovery_retry`, `same_socket_recovery_retry_failed`, and `same_socket_recovery_exhausted` event family with a structured `reason`.
 
-Relevant context-window/token-limit surfaces for recovery classification:
+## Transient transport preservation
 
-- Provider/Pi may append an assistant error message (`stopReason: "error"`) whose text mentions context overflow, context length/window, max tokens, token limit, input too long, request too large, or equivalent provider messages. Today these are not distinguished from non-recoverable provider errors.
-- Provider/Pi may abort before writing a usable assistant entry. Today `handleAgentEnd()` silently leaves the cast awaiting response.
-- Pi auto-compaction is enabled at the Pi layer and can recover overflow before Materia sees a failure, but Materia currently does not observe compaction start/end or force compaction.
-- `ctx.compact(options)` is available in extension contexts and can trigger compaction with completion/error callbacks; `session_before_compact` and `session_compact` events can be observed for proactive compaction telemetry.
+Plain WebSocket transport failures are intentionally distinct from same-socket retry. When such a failure is detected while awaiting an agent turn, Materia emits `transient_transport_turn_failure`, keeps the cast active/awaiting, and does not resend the prompt immediately. This avoids duplicating a provider request when the Pi transport may still complete or reconnect.
 
 ## Socket-start/state mutations unsafe to repeat during same-socket recovery
 
@@ -58,21 +55,21 @@ A full `startSocket()` call is not a safe retry primitive once a turn has been s
 - `enforceSocketVisitLimit()` increments `state.visits[socket.id]`; retrying would consume visits and change artifact paths/refinement identity keys.
 - `startTaskAttempt()` increments `taskAttempts` keyed by socket/item and updates `runState.attempt`; retrying would create duplicate attempts for the same logical turn.
 - `startSocket()` rewrites phase/current materia/current task/socket state and emits another `socket_start` event.
-- Utility sockets execute side effects immediately; recovery should target incomplete agent turns only, not re-run utility commands.
+- Utility sockets execute side effects immediately; automatic recovery targets incomplete agent turns only, not utility commands.
 - `completeSocket()` applies non-idempotent completion mutations: output artifacts, JSON artifacts, assignments into `state.data`, foreach cursor advancement via `applyAdvance()`, edge traversal increments in `selectNextTarget()`, and graph advancement through `advanceToSocket()`.
 - `recordMultiTurnRefinement()` increments `multiTurnRefinements`; retrying after an incomplete refinement turn must happen before this path, not by replaying a partially recorded refinement.
-- `startMultiTurnFinalizationTurn()` and `prepareMultiTurnRefinementTurn()` also mutate awaiting/finalizing flags and materia-model usage entries; retries should preserve the active mode rather than re-entering these setup functions blindly.
+- `startMultiTurnFinalizationTurn()` and `prepareMultiTurnRefinementTurn()` also mutate awaiting/finalizing flags and materia-model usage entries; retries preserve the active mode rather than re-entering these setup functions blindly.
 
-## Implementation notes for same-socket recovery
+## Fail-fast boundaries
 
-Integrate recovery at the incomplete agent-turn boundary, before `completeSocket()` or `recordMultiTurnRefinement()` mutates successful output state:
+Automatic same-socket recovery is intentionally bounded and pre-commit only. It does not provide rollback. The following remain fail-fast or manually recoverable through `/materia recast` where appropriate:
 
-1. Add a recovery classifier used by `handleAgentEnd()` when `assistantErrorMessage()` is present and by the no-assistant-entry path when Pi reports/records an incomplete turn. Classify context-window/token-limit failures as recoverable; all other errors remain fail-fast.
-2. Add a same-socket recovery handler that operates on the existing active state without calling `startSocket()`. Key retry counters by mode (`normal`, `refinement`, `finalization`), socket id, current foreach item key, and visit/refinement turn as applicable.
-3. For context-window recovery, call `ctx.compact({ customInstructions, onComplete, onError })` or an awaitable wrapper around it, record structured recovery events, then regenerate the prompt from saved state:
-   - normal: `buildSocketPrompt(state, socket)`
-   - finalization: `buildMultiTurnFinalizationPrompt(state, socket)` with `multiTurnFinalizing === true`
-   - refinement: prepare/send the refinement continuation prompt/context without incrementing refinement counters
-4. Retry by saving state and calling `sendMateriaTurn()` directly, not `startSocket()`/`continueNativeCast()`.
-5. If compaction fails or retry limit is exhausted, fail via a clear cast failure event explaining whether the cause was non-recoverable, compaction failure, or exhausted same-socket retries.
-6. Observe Pi compaction events (`session_before_compact`, `session_compact`) and `ctx.compact()` callback failures to emit Materia warnings without corrupting socket execution state.
+- utility socket execution or utility output validation failures,
+- assignment, generic handoff application, `applyAdvance()`, route selection, budget, or socket-complete failures after parsed output has been accepted,
+- any failure after graph advancement, next-socket startup, or cast completion,
+- broad catch blocks where the runtime cannot prove that no non-idempotent mutation occurred,
+- classifications where generic retry was not explicitly enabled by the lifecycle boundary.
+
+## Exhaustion and revive
+
+Same-socket recovery has a small bounded allowance keyed to the logical turn context (mode/socket/item/visit/refinement identity), not to each error string. On exhaustion, Materia records `recoveryExhaustion` with `kind: "same_socket_recovery_exhausted"`, `reason: "context_window" | "turn_failure"`, the recovery key, attempt counts, revive allowance metadata, socket/item/mode details, and the terminal failure reason. `/materia revive [cast-id]` is available only when that structured exhaustion metadata matches the current failed cast. Revive increases the exhausted context's effective allowance by the original max-attempt value and then follows the normal `/materia recast` path. General failures without matching exhaustion metadata should use `/materia recast` instead.

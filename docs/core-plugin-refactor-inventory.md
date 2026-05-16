@@ -56,7 +56,7 @@ Primary lifecycle:
    - executes a utility socket locally and completes it, or
    - applies model/tool settings and sends an isolated agent prompt.
 4. `sendMateriaTurn` stores the hidden prompt, may compact proactively, writes a context artifact, emits visible and hidden Pi messages, and triggers the Pi agent turn.
-5. `handleAgentEnd` finds the latest assistant response, captures usage, handles transport/context-window recovery, pauses multi-turn sockets for refinement, or completes the socket.
+5. `handleAgentEnd` finds the latest assistant response, captures usage, handles transient transport preservation and bounded same-socket recovery (`context_window` compacts before retry; safe generic `turn_failure` resends without compaction), pauses multi-turn sockets for refinement, or completes the socket.
 6. `completeSocket` records socket output artifacts, parses/validates JSON handoff if requested, updates generic envelope and assignments, applies loop advancement, enforces budget, chooses next route, and advances/finishes.
 7. `advanceToSocket` starts the next socket or `finishCast` writes terminal artifacts/events/state and UI updates.
 8. `resumeNativeCast`/`reviveNativeCast` rehydrate latest persisted session state and continue from the failed current socket.
