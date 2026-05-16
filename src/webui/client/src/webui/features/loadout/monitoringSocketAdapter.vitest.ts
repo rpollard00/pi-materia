@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MonitorSnapshot } from '../../types.js';
-import { resolveMonitoringSocketIndicator, type MonitoringSocketIndicator } from './monitoringSocketAdapter.js';
+import { resolveMonitoringSocketIndicator } from './monitoringSocketAdapter.js';
 
 function monitor(activeCast: Partial<NonNullable<MonitorSnapshot['activeCast']>>, loadoutIdentity: Pick<MonitorSnapshot, 'activeLoadoutId' | 'activeLoadout'> = {}): MonitorSnapshot {
   return {
@@ -18,14 +18,6 @@ function monitor(activeCast: Partial<NonNullable<MonitorSnapshot['activeCast']>>
     },
   };
 }
-
-type IdentityAwareResolver = (
-  monitor: MonitorSnapshot | undefined,
-  graphSocketIds: Iterable<string>,
-  viewedLoadoutIdentity?: { viewedLoadoutId?: string; viewedLoadoutName?: string },
-) => MonitoringSocketIndicator;
-
-const resolveWithViewedLoadout = resolveMonitoringSocketIndicator as IdentityAwareResolver;
 
 describe('resolveMonitoringSocketIndicator', () => {
   it('returns inactive when there is no active in-progress cast', () => {
@@ -46,7 +38,7 @@ describe('resolveMonitoringSocketIndicator', () => {
   });
 
   it('suppresses matching socket ids when the viewed loadout id is not the runtime active loadout id', () => {
-    expect(resolveWithViewedLoadout(
+    expect(resolveMonitoringSocketIndicator(
       monitor({ currentSocketId: 'Socket-2' }, { activeLoadoutId: 'runtime:alpha', activeLoadout: 'Alpha' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutId: 'runtime:beta', viewedLoadoutName: 'Beta' },
@@ -54,7 +46,7 @@ describe('resolveMonitoringSocketIndicator', () => {
   });
 
   it('returns the active graph socket when the viewed loadout id matches the runtime active loadout id', () => {
-    expect(resolveWithViewedLoadout(
+    expect(resolveMonitoringSocketIndicator(
       monitor({ currentSocketId: 'Socket-2' }, { activeLoadoutId: 'runtime:alpha', activeLoadout: 'Renamed Alpha' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutId: 'runtime:alpha', viewedLoadoutName: 'Local Alpha Name' },
@@ -66,7 +58,7 @@ describe('resolveMonitoringSocketIndicator', () => {
   });
 
   it('uses activeLoadout display-name fallback only when stable ids are unavailable', () => {
-    expect(resolveWithViewedLoadout(
+    expect(resolveMonitoringSocketIndicator(
       monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Legacy Alpha' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutName: 'Legacy Alpha' },
@@ -76,7 +68,7 @@ describe('resolveMonitoringSocketIndicator', () => {
       graphSocketId: 'Socket-2',
     });
 
-    expect(resolveWithViewedLoadout(
+    expect(resolveMonitoringSocketIndicator(
       monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Legacy Alpha' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutName: 'Legacy Beta' },
@@ -84,7 +76,7 @@ describe('resolveMonitoringSocketIndicator', () => {
   });
 
   it('prefers stable ids over matching names when both sides provide ids', () => {
-    expect(resolveWithViewedLoadout(
+    expect(resolveMonitoringSocketIndicator(
       monitor({ currentSocketId: 'Socket-2' }, { activeLoadoutId: 'runtime:alpha', activeLoadout: 'Shared Display Name' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutId: 'runtime:beta', viewedLoadoutName: 'Shared Display Name' },
@@ -92,7 +84,7 @@ describe('resolveMonitoringSocketIndicator', () => {
   });
 
   it('keeps the documented legacy socket-only fallback when monitor snapshots lack loadout identity', () => {
-    expect(resolveWithViewedLoadout(
+    expect(resolveMonitoringSocketIndicator(
       monitor({ currentSocketId: 'Socket-2' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutId: 'runtime:beta', viewedLoadoutName: 'Beta' },

@@ -53,7 +53,7 @@ export function useLoadoutSocketInteractionController({
   const [socketRegionSelectionDrag, setSocketRegionSelectionDrag] = useState<SocketRegionSelectionDragState | undefined>();
   const suppressSocketClickRef = useRef(false);
 
-  const viewModel = useLoadoutGraphViewModel({ activeLoadout, draftConfig, selectedLoopSocketIds, socketRegionSelectionDrag, monitor });
+  const viewModel = useLoadoutGraphViewModel({ activeLoadout, draftConfig, selectedLoopSocketIds, socketRegionSelectionDrag, monitor, viewedLoadoutName: activeLoadoutName });
   const { loadoutGraph, palette } = viewModel;
 
   function resetLoadoutSelectionChrome() {

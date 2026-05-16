@@ -19,6 +19,7 @@ export interface LoadoutGraphViewModelOptions {
   selectedLoopSocketIds: string[];
   socketRegionSelectionDrag: SocketRegionSelectionDragState | undefined;
   monitor: MonitorSnapshot | undefined;
+  viewedLoadoutName: string;
 }
 
 export function useLoadoutGraphViewModel({
@@ -27,6 +28,7 @@ export function useLoadoutGraphViewModel({
   selectedLoopSocketIds,
   socketRegionSelectionDrag,
   monitor,
+  viewedLoadoutName,
 }: LoadoutGraphViewModelOptions) {
   const materia = draftConfig?.materia ?? {};
   const semanticEdges = useMemo(() => getLoadoutEdges(activeLoadout), [activeLoadout?.sockets, activeLoadout?.loops]);
@@ -51,9 +53,20 @@ export function useLoadoutGraphViewModel({
   } : undefined;
   const createLoopDisabled = selectedLoopSocketIds.length === 0;
   const palette = useMemo(() => buildMateriaPalette(materia), [materia]);
+  const viewedLoadoutIdentity = useMemo(
+    () => ({ viewedLoadoutId: activeLoadout?.id, viewedLoadoutName }),
+    [activeLoadout?.id, viewedLoadoutName],
+  );
   const monitoringSocket = useMemo(
-    () => resolveMonitoringSocketIndicator(monitor, socketPositions.keys()),
-    [monitor?.activeCast?.active, monitor?.activeCast?.currentSocketId, socketPositions],
+    () => resolveMonitoringSocketIndicator(monitor, socketPositions.keys(), viewedLoadoutIdentity),
+    [
+      monitor?.activeCast?.active,
+      monitor?.activeCast?.currentSocketId,
+      monitor?.activeLoadoutId,
+      monitor?.activeLoadout,
+      socketPositions,
+      viewedLoadoutIdentity,
+    ],
   );
   const currentMonitorSocket = monitor?.activeCast?.currentSocketId;
   const activeMonitorSocketId = monitoringSocket.graphSocketId;
