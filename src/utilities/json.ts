@@ -16,6 +16,15 @@ export function parseJson<T>(text: string): T {
   }
 }
 
+export function parseSocketJson<T>(socketId: string, text: string): T {
+  try {
+    return parseJson<T>(text);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON output for socket "${socketId}": ${reason}`);
+  }
+}
+
 function extractBalancedJson(value: string): string | undefined {
   const opener = value[0];
   const closer = opener === "{" ? "}" : opener === "[" ? "]" : undefined;

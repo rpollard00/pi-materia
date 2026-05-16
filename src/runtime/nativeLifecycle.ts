@@ -4,7 +4,7 @@ import { safeTimestamp } from "../utilities/artifacts.js";
 import { resolveArtifactRoot } from "../config/config.js";
 import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
-import { parseJson } from "../utilities/json.js";
+import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
@@ -301,10 +301,13 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   let parsed: unknown = text;
   if (resolvedSocketConfig(socket).parse === "json") {
     try {
-      parsed = parseJson<unknown>(text);
+      parsed = parseSocketJson<unknown>(socket.id, text);
       parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: socket.socket });
     } catch (error) {
       const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
+      if (isMultiTurnResolvedAgentSocket(socket) && options.finalizedMultiTurn) {
+        throw validationError;
+      }
       if (isAgentResolvedSocket(socket)) {
         const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
         if (recovered) return;
