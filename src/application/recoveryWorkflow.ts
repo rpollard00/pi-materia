@@ -90,7 +90,8 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   deps.saveState(state);
 
   try {
-    if (reason === "context_window") await deps.runRecoveryAction(state, { action: "compact", reason, key, attempt, maxAttempts, entryId: options.entryId });
+    const preparation = sameSocketRecoveryPreparation(reason, key, attempt, maxAttempts, options.entryId);
+    if (preparation) await deps.runRecoveryAction(state, preparation);
     deps.updateToolScope(deps.currentMateria(state));
     await deps.sendMateriaTurn(state, deps.buildRecoveryPrompt(state), { skipProactiveCompaction: true });
     await deps.appendEvent(state.runState, "same_socket_recovery_retry", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state) });
@@ -117,6 +118,17 @@ export async function runSameSocketRecoveryActionWorkflow(state: MateriaCastStat
     await deps.appendEvent(state.runState, "same_socket_recovery_action_failed", { ...actionEventData(state, deps, options), error: errorMessage(actionError) });
     throw new Error(`Same-socket recovery action compact failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(actionError)}`);
   }
+}
+
+function sameSocketRecoveryPreparation(
+  reason: RecoverableTurnFailure,
+  key: string,
+  attempt: number,
+  maxAttempts: number,
+  entryId: string | undefined,
+): SameSocketRecoveryActionOptions | undefined {
+  if (reason !== "context_window") return undefined;
+  return { action: "compact", reason, key, attempt, maxAttempts, entryId };
 }
 
 function recoveryEventData(

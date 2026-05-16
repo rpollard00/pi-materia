@@ -79,7 +79,7 @@ describe("same-socket recovery workflow", () => {
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
   });
 
-  test("generic turn failures require opt-in and preserve structured recovery reason", async () => {
+  test("generic turn failures require opt-in and resend directly without recovery actions", async () => {
     const state = makeState();
     const events: Array<{ type: string; data: Record<string, unknown> }> = [];
     const calls: string[] = [];
@@ -89,6 +89,7 @@ describe("same-socket recovery workflow", () => {
     expect(recovered).toBe(true);
     expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry"]);
     expect(events[0].data).toMatchObject({ reason: "turn_failure", entryId: "entry-generic", socket: "Socket-1", mode: "normal" });
+    expect(events.some((event) => event.type.startsWith("same_socket_recovery_action_"))).toBe(false);
     expect(calls).not.toContain("runRecoveryAction");
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
   });
@@ -105,7 +106,26 @@ describe("same-socket recovery workflow", () => {
     expect(recovered).toBe(true);
     expect(state.active).toBe(false);
     expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "context_window", attempts: 1, effectiveMaxAttempts: 1, socket: "Socket-1", mode: "normal" });
-    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { attempts: 1, entryId: "entry-2" } });
+    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "context_window", attempts: 1, entryId: "entry-2" } });
+    expect(calls).toContain("failCast:true");
+  });
+
+  test("generic turn failures share the logical turn recovery budget across error strings", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("first provider interruption"), deps, { allowGenericTurnFailure: true });
+    const firstKey = events[0].data.key;
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("different provider interruption"), deps, { entryId: "entry-generic-2", allowGenericTurnFailure: true });
+
+    expect(recovered).toBe(true);
+    expect(state.active).toBe(false);
+    expect(state.recoveryAttempts).toEqual({ [String(firstKey)]: 1 });
+    expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "turn_failure", key: firstKey, attempts: 1, effectiveMaxAttempts: 1, socket: "Socket-1", mode: "normal" });
+    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "turn_failure", key: firstKey, attempts: 1, entryId: "entry-generic-2" } });
+    expect(calls.filter((call) => call === "runRecoveryAction")).toHaveLength(0);
     expect(calls).toContain("failCast:true");
   });
 
