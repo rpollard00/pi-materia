@@ -446,6 +446,13 @@ describe("config loadouts", () => {
     expect(autoEval?.prompt).toContain("Bash is available for evaluation commands");
     expect(autoEval?.prompt).toContain("do not use it to modify project files");
 
+    const pipeline = resolvePipeline(rawDefault);
+    const autoEvalSocket = Object.values(pipeline.sockets).find((socket) => socket.socket.type === "agent" && socket.socket.materia === "Auto-Eval");
+    expect(autoEvalSocket?.socket.materia).toBe("Auto-Eval");
+    expect(autoEvalSocket?.materia.prompt).toContain("Auto-Eval Materia materia");
+    const socketTools = resolveToolScope(autoEvalSocket!.materia.tools, ["read", "grep", "find", "ls", "bash", "edit", "write", "patch", "apply_patch"]);
+    expect(socketTools).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "find", "ls", "bash"] }, source: "custom", tools: ["read", "grep", "find", "ls", "bash"] } });
+
     expect(rawDefault.materia?.planner).toBeUndefined();
     expect(rawDefault.materia?.interactivePlan).toBeUndefined();
     expect(rawDefault.materia?.["Auto-Plan"]?.generator).toBe(true);

@@ -145,6 +145,37 @@ CLI config example:
 pi -e /path/to/pi-materia/src/index.ts --materia-config ./my-loadout.json
 ```
 
+### Tool scopes
+
+Agent materia configure Pi tool availability with `tools`. Presets remain backward compatible:
+
+```json
+{
+  "materia": {
+    "Build": { "tools": "coding", "prompt": "Implement changes." },
+    "Research": { "tools": "readOnly", "prompt": "Inspect files and report findings." },
+    "Narrate": { "tools": "none", "prompt": "Summarize without using tools." }
+  }
+}
+```
+
+Use a custom allowlist for granular availability. Canonical tool names include `read`, `grep`, `find`, `ls`, `bash`, `edit`, and `write`:
+
+```json
+{
+  "materia": {
+    "Auto-Eval": {
+      "tools": { "type": "custom", "tools": ["read", "grep", "find", "ls", "bash"] },
+      "prompt": "Run evaluation commands such as tests, but do not modify project files."
+    }
+  }
+}
+```
+
+Unknown tool names fail validation instead of falling back to broader access. An empty custom allowlist (`{ "type": "custom", "tools": [] }`) intentionally enables no tools, equivalent to the `none` preset. Legacy preset strings are migration-compatible, but new granular configs should use the custom object shape when they need a non-preset set.
+
+`bash`/command execution is powerful: commands can write files, update lockfiles, generate caches, or otherwise mutate the project. Tool scopes are role guidance and runtime tool selection, not a hard security sandbox; prompts should explicitly tell evaluation materia not to modify files when mutation is not desired.
+
 Minimal hello-world loadout:
 
 ```json
