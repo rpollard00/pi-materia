@@ -180,23 +180,23 @@ Configs can also define named `loadouts` that share the top-level `materia`, `li
   "activeLoadout": "Full-Auto",
   "loadouts": {
     "Full-Auto": {
-      "entry": "planner",
+      "entry": "Socket-1",
       "sockets": {
-        "planner": { "type": "agent", "materia": "planner", "next": "Build" },
+        "Socket-1": { "type": "agent", "materia": "Auto-Plan", "next": "Build" },
         "Build": { "type": "agent", "materia": "Build", "next": "end" }
       }
     },
     "Planning-Consult": {
-      "entry": "planner",
+      "entry": "Socket-1",
       "sockets": {
-        "planner": { "type": "agent", "materia": "interactivePlan", "next": "Build" },
+        "Socket-1": { "type": "agent", "materia": "Interactive-Plan", "next": "Build" },
         "Build": { "type": "agent", "materia": "Build", "next": "end" }
       }
     }
   },
   "materia": {
-    "planner": { "tools": "readOnly", "prompt": "Plan automatically." },
-    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaborate, then finalize only after /materia continue." },
+    "Auto-Plan": { "tools": "readOnly", "prompt": "Plan automatically." },
+    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaborate, then finalize only after /materia continue." },
     "Build": { "tools": "coding", "prompt": "Implement exactly the adapter-provided current workItem." }
   }
 }
@@ -232,12 +232,12 @@ Materia configs may optionally set `model` and `thinking` alongside `tools` and 
 
 Use `provider/model-id` (or an unambiguous model id from Pi's configured and credentialed model registry) for `model`. Supported `thinking` strings are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh` when the active Pi runtime/provider and selected model support thinking controls.
 
-Example loadout excerpt where planner and evaluator materia use a cheaper model, while Build uses a stronger coding model:
+Example loadout excerpt where planning and evaluator materia use a cheaper model, while Build uses a stronger coding model:
 
 ```json
 {
   "materia": {
-    "planner": {
+    "Auto-Plan": {
       "tools": "readOnly",
       "model": "openai/gpt-4o-mini",
       "thinking": "low",
@@ -284,7 +284,7 @@ Materia graphs are workflow state machines, not DAGs. Loops such as `Socket-4 (B
 
 Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, optional `multiTurn`, and optional `generator: true` for list-producing Generator materia. Set `"multiTurn": true` on a materia to let any agent socket using that materia pause for interactive refinement until the user runs `/materia continue`.
 
-### Multi-turn planner materia
+### Multi-turn planning materia
 
 Agent sockets are single-turn by default: after the assistant responds, pi-materia parses/assigns the output and follows edges or `next` automatically. Add `"multiTurn": true` to an agent materia when you want sockets using that materia to run a manual refinement loop. A multi-turn materia records each assistant response as a refinement artifact, keeps the cast active at the current socket, and treats ordinary user replies as refinement instructions instead of finalization.
 
@@ -299,7 +299,7 @@ Natural-language replies never finalize or advance the socket, even when they sa
 
 Only after `/materia continue` does pi-materia request the final assistant output and process it using the socket's normal `parse`, `assign`, `edges`, and `next` behavior. For JSON-parsed multi-turn sockets, refinement turns should stay conversational: the agent should not emit final structured JSON, and pi-materia should not parse final JSON, until the command-triggered finalization turn.
 
-The bundled config wires the `interactivePlan` materia, which has `multiTurn: true`, into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with named `loadouts` and `activeLoadout` like this excerpt:
+The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: true`, into the `Planning-Consult` loadout. To customize that behavior, create a project `.pi/pi-materia.json` or pass `--materia-config` with named `loadouts` and `activeLoadout` like this excerpt:
 
 ```json
 {
@@ -322,11 +322,11 @@ The bundled config wires the `interactivePlan` materia, which has `multiTurn: tr
           "utility": "vcs.detect",
           "parse": "json",
           "assign": { "vcs": "$" },
-          "next": "interactivePlan"
+          "next": "Socket-3"
         },
-        "interactivePlan": {
+        "Socket-3": {
           "type": "agent",
-          "materia": "interactivePlan",
+          "materia": "Interactive-Plan",
           "parse": "json",
           "assign": { "workItems": "$.workItems", "guidance": "$.guidance" },
           "next": "Build"
@@ -336,7 +336,7 @@ The bundled config wires the `interactivePlan` materia, which has `multiTurn: tr
     }
   },
   "materia": {
-    "interactivePlan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return the generic handoff envelope with shape: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks. Request: {{request}}" },
+    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return the generic handoff envelope with shape: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks. Request: {{request}}" },
     "Build": { "tools": "coding", "prompt": "Implement exactly the assigned workItem using adapter-provided guidance." }
   }
 }
@@ -384,8 +384,8 @@ Each cast writes enough information to debug the run after the fact:
 
 The bundled defaults live at `config/default.json` and set `activeLoadout` to `Full-Auto`.
 
-- `Full-Auto`: the autonomous software-development workflow. The `planner` materia immediately produces a generic handoff envelope with structured `workItems` from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
-- `Planning-Consult`: the conversational planning workflow. The planner socket uses the `interactivePlan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate work-item JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
+- `Full-Auto`: the autonomous software-development workflow. The `Auto-Plan` materia immediately produces a generic handoff envelope with structured `workItems` from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
+- `Planning-Consult`: the conversational planning workflow. The planning socket uses the `Interactive-Plan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate work-item JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
 
 When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured generic envelope (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing`), and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 

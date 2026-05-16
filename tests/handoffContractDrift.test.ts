@@ -52,7 +52,7 @@ describe("handoff contract drift regressions", () => {
     expect(canonicalDocs).not.toContain("Generated List");
 
     const parsedExample = JSON.parse(exampleLoadout) as { materia?: Record<string, unknown> };
-    expect(parsedExample.materia?.planner).toMatchObject({ generator: true });
+    expect(parsedExample.materia?.["Auto-Plan"]).toMatchObject({ generator: true });
     expect(exampleLoadout).toContain('"workItems"');
     expect(exampleLoadout).not.toContain('"tasks"');
     expect(exampleLoadout).not.toContain('"generates"');
@@ -67,8 +67,8 @@ describe("handoff contract drift regressions", () => {
     expect(prompt).toContain("do not emit tasks");
     expect(prompt).not.toContain('"passed": boolean');
 
-    const plannerPrompt = String(rawDefault.materia?.planner?.prompt ?? "");
-    const interactivePrompt = String(rawDefault.materia?.interactivePlan?.prompt ?? "");
+    const plannerPrompt = String(rawDefault.materia?.["Auto-Plan"]?.prompt ?? "");
+    const interactivePrompt = String(rawDefault.materia?.["Interactive-Plan"]?.prompt ?? "");
     expect(plannerPrompt).toContain("runtime-provided canonical handoff JSON");
     expect(plannerPrompt).toContain("workItems");
     expect(plannerPrompt).not.toContain('"tasks"');

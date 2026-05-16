@@ -35,7 +35,7 @@ Loops are explicit regions under a loadout's `loops` object. A loop region group
 A Generator materia uses the semantic authored marker `generator: true`. Runtime resolves that marker to the canonical work-items contract (`workItems`, `workItem`, `workItemIndex`, `end`). A generator socket must parse JSON and expose `workItems` from the canonical handoff envelope. For reusable work planning, use the generic handoff envelope and generate `workItems`; do not retain `tasks`, `work`, or custom `generates.output` aliases as compatibility outputs for newly generated units of work:
 
 ```json
-"planner": {
+"Auto-Plan": {
   "tools": "readOnly",
   "prompt": "Return the generic handoff envelope with workItems.",
   "generator": true
@@ -59,7 +59,7 @@ A loadout declares the consumer region separately from the generator materia:
 
 `consumes.from` is the socket id of the generator socket, not the materia definition name. `consumes.output` defaults to the canonical Generator output `workItems`; include it only to be explicit or when migrating a legacy config. Optional `as`, `cursor`, and `done` overrides belong on `consumes` only when that loop intentionally differs from the generator defaults.
 
-In the bundled default loadouts, socket ids are sequential placement identifiers (`Socket-1`, `Socket-2`, ...). Keep materia identity in the socket's `materia`, `utility`, labels, or palette metadata rather than encoding names such as `Build` or `planner` into socket ids. User-facing displays may combine both, for example `Socket-4 (Build)`, but routing, loop `sockets`, `consumes.from`, `exit.from`, and `advance` references should use the socket ids.
+In the bundled default loadouts, socket ids are sequential placement identifiers (`Socket-1`, `Socket-2`, ...). Keep materia identity in the socket's `materia`, `utility`, labels, or palette metadata rather than encoding names such as `Build` or `Auto-Plan` into socket ids. User-facing displays may combine both, for example `Socket-4 (Build)`, but routing, loop `sockets`, `consumes.from`, `exit.from`, and `advance` references should use the socket ids.
 
 The WebUI creates these regions from selected sockets. Select the sockets that form the cycle using shift-click or by dragging a selection rectangle around the socket cards, then choose **Create Loop**. Creation succeeds only when the selected sockets already contain a directed cycle and exactly one edge enters that cycle from a Generator materia. The generator edge is highlighted and the loop region label shows that it consumes canonical `workItems`.
 
@@ -70,7 +70,7 @@ Socket-4 (Build) --always--> Socket-5 (Auto-Eval) --satisfied--> Socket-6 (Maint
                                                └--not_satisfied--> Socket-4 (Build)
 ```
 
-The loop consumes the planner generator's `workItems` output, which derives an iterator over `state.workItems`; each member socket handles the current work item until `Maintain` advances the cursor. Build-style text sockets consume the current `workItem` plus global guidance supplied by the adapter context and summarize implementation; they do not decide parsing, assignment, routing, or iteration themselves. The documented exit summary renders source-aware, for example `exit=Socket-6.satisfied->end`; in the structured model, post-loop routing is selected from loop-owned exit metadata, with terminal `end` as the default when no route exists.
+The loop consumes the `Auto-Plan` generator's `workItems` output, which derives an iterator over `state.workItems`; each member socket handles the current work item until `Maintain` advances the cursor. Build-style text sockets consume the current `workItem` plus global guidance supplied by the adapter context and summarize implementation; they do not decide parsing, assignment, routing, or iteration themselves. The documented exit summary renders source-aware, for example `exit=Socket-6.satisfied->end`; in the structured model, post-loop routing is selected from loop-owned exit metadata, with terminal `end` as the default when no route exists.
 
 ## Loop-owned exit routes
 
@@ -101,16 +101,16 @@ Generator-to-generator chaining uses the same contract. An upstream generator em
 ```json
 {
   "materia": {
-    "planner": { "tools": "readOnly", "prompt": "Draft epics as workItems.", "generator": true },
-    "refiner": { "tools": "readOnly", "prompt": "Refine incoming workItems and emit the next workItems envelope.", "generator": true },
+    "Generator": { "tools": "readOnly", "prompt": "Draft epics as workItems.", "generator": true },
+    "Refiner": { "tools": "readOnly", "prompt": "Refine incoming workItems and emit the next workItems envelope.", "generator": true },
     "Build": { "tools": "coding", "prompt": "Build the adapter-provided workItem." }
   },
   "loadouts": {
     "Chained-Generators": {
       "entry": "Socket-1",
       "sockets": {
-        "Socket-1": { "type": "agent", "materia": "planner", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-2" },
-        "Socket-2": { "type": "agent", "materia": "refiner", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-3" },
+        "Socket-1": { "type": "agent", "materia": "Generator", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-2" },
+        "Socket-2": { "type": "agent", "materia": "Refiner", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-3" },
         "Socket-3": { "type": "agent", "materia": "Build", "next": "end" }
       }
     }

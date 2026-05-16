@@ -59,7 +59,7 @@ A UI-authored loop may be saved with only the declarative region and an uncondit
 {
   "entry": "Socket-1",
   "sockets": {
-    "Socket-1": { "type": "agent", "materia": "planner", "edges": [{ "when": "always", "to": "Socket-3" }] },
+    "Socket-1": { "type": "agent", "materia": "Auto-Plan", "edges": [{ "when": "always", "to": "Socket-3" }] },
     "Socket-3": { "type": "agent", "materia": "Build", "edges": [{ "when": "always", "to": "Socket-4" }] },
     "Socket-4": { "type": "agent", "materia": "Maintain", "edges": [{ "when": "always", "to": "Socket-3" }] }
   },
@@ -82,7 +82,7 @@ A richer loop keeps explicit retry routing and still uses the same exit material
 ```json
 {
   "sockets": {
-    "Socket-1": { "type": "agent", "materia": "planner", "edges": [{ "when": "always", "to": "Socket-4" }] },
+    "Socket-1": { "type": "agent", "materia": "Auto-Plan", "edges": [{ "when": "always", "to": "Socket-4" }] },
     "Socket-4": { "type": "agent", "materia": "Build", "edges": [{ "when": "always", "to": "Socket-5" }] },
     "Socket-5": {
       "type": "agent",

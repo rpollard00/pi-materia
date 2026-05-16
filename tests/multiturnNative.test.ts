@@ -129,7 +129,7 @@ describe("native multi-turn runtime", () => {
     await harness.runCommand("materia", "cast build the feature");
     const plannerStartedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(plannerStartedState.currentSocketId).toBe("Socket-3");
-    expect(plannerStartedState.currentMateria).toBe("interactivePlan");
+    expect(plannerStartedState.currentMateria).toBe("Interactive-Plan");
     expect(plannerStartedState.socketState).toBe("awaiting_agent_response");
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
     const firstPrompt = harness.sentMessages.find((sent) => (sent.message as any).customType === "pi-materia-prompt")?.message as any;
@@ -146,7 +146,7 @@ describe("native multi-turn runtime", () => {
     const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(pausedState.active).toBe(true);
     expect(pausedState.currentSocketId).toBe("Socket-3");
-    expect(pausedState.currentMateria).toBe("interactivePlan");
+    expect(pausedState.currentMateria).toBe("Interactive-Plan");
     expect(pausedState.socketState).toBe("awaiting_user_refinement");
     expect(pausedState.awaitingResponse).toBe(false);
     expect(pausedState.data.workItems).toBeUndefined();

@@ -22,7 +22,7 @@
         },
         "Socket-3": {
           "type": "agent",
-          "materia": "planner",
+          "materia": "Auto-Plan",
           "parse": "json",
           "assign": { "workItems": "$.workItems", "guidance": "$.guidance" },
           "edges": [{ "when": "always", "to": "Socket-4" }]
@@ -85,9 +85,9 @@
       "parse": "json",
       "assign": { "vcs": "$" }
     },
-    "planner": {
+    "Auto-Plan": {
       "tools": "readOnly",
-      "prompt": "Return only the generic handoff JSON envelope: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks.",
+      "prompt": "Return the generic handoff envelope with summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing. Use workItems, not tasks.",
       "generator": true
     },
     "Build": {

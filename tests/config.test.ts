@@ -412,8 +412,6 @@ describe("config loadouts", () => {
     const expectedParse = new Map([
       ["ensureArtifactsIgnored", "json"],
       ["detectVcs", "json"],
-      ["planner", "json"],
-      ["interactivePlan", "json"],
       ["Auto-Architect", "json"],
       ["Chain-Context", "json"],
       ["Build", "text"],
@@ -424,6 +422,7 @@ describe("config loadouts", () => {
       ["Auto-Plan", "json"],
       ["Interactive-Plan", "json"],
       ["Detect-VCS", "json"],
+      ["Cover", "json"],
     ]);
 
     for (const [materiaId, materia] of Object.entries(rawDefault.materia ?? {}) as Array<[string, { color?: unknown; generator?: unknown; generates?: unknown; parse?: unknown }]>) {
@@ -433,8 +432,8 @@ describe("config loadouts", () => {
       expect(materia.generates, `${materiaId}.generates`).toBeUndefined();
     }
 
-    expect(rawDefault.materia?.planner?.generator).toBe(true);
-    expect(rawDefault.materia?.interactivePlan?.generator).toBe(true);
+    expect(rawDefault.materia?.planner).toBeUndefined();
+    expect(rawDefault.materia?.interactivePlan).toBeUndefined();
     expect(rawDefault.materia?.["Auto-Plan"]?.generator).toBe(true);
     expect(rawDefault.materia?.["Interactive-Plan"]?.generator).toBe(true);
     expect(rawDefault.materia?.["Auto-Architect"]).toMatchObject({
@@ -442,7 +441,7 @@ describe("config loadouts", () => {
       tools: "readOnly",
       parse: "json",
       generator: true,
-      thinking: "medium",
+      thinking: "xhigh",
       color: "materia-color-cyan",
     });
     expect(rawDefault.materia?.["Auto-Architect"]?.prompt).toContain("software architect materia");
@@ -633,7 +632,7 @@ describe("config loadouts", () => {
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
+          sockets: { "Socket-1": { type: "agent", materia: "Interactive-Plan" } },
         },
       },
     });
@@ -645,8 +644,8 @@ describe("config loadouts", () => {
     expect(Object.keys(loaded.config.loadouts ?? {})).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult"]));
     expect(Object.keys(loaded.config.loadouts ?? {}).some((name) => /^Full-Auto Copy/.test(name))).toBe(true);
     expect(Object.keys(loaded.config.loadouts ?? {}).some((name) => /^Planning-Consult Copy/.test(name))).toBe(true);
-    expect(loaded.config.materia.planner.prompt).toContain("planning materia");
-    expect(loaded.config.materia.interactivePlan.prompt).toContain("interactive");
+    expect(loaded.config.materia["Auto-Plan"].prompt).toContain("planning materia");
+    expect(loaded.config.materia["Interactive-Plan"].prompt).toContain("interactive");
     expect(pipeline.entry.id).toBe("Socket-1");
   });
 
@@ -669,14 +668,14 @@ describe("config loadouts", () => {
     expect(fullAutoPlanner).toMatchObject({ materia: "Auto-Plan" });
     expect(planningConsultPlanner).toMatchObject({
       type: "agent",
-      materia: "interactivePlan",
+      materia: "Interactive-Plan",
       parse: "json",
     });
     expect("multiTurn" in (planningConsultPlanner ?? {})).toBe(false);
-    expect(loaded.config.materia.interactivePlan.multiTurn).toBe(true);
+    expect(loaded.config.materia["Interactive-Plan"].multiTurn).toBe(true);
 
     const fullAutoPrompt = loaded.config.materia["Auto-Plan"].prompt;
-    const planningConsultPrompt = loaded.config.materia.interactivePlan.prompt;
+    const planningConsultPrompt = loaded.config.materia["Interactive-Plan"].prompt;
     expect(fullAutoPrompt).toContain("runtime-provided canonical handoff JSON contract");
     expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
     expect(fullAutoPrompt).toContain("workItems");
@@ -700,7 +699,7 @@ describe("config loadouts", () => {
     const planningConsult = resolvePipeline(loaded.config);
     expect(planningConsult.sockets["Socket-3"].socket).toMatchObject({
       type: "agent",
-      materia: "interactivePlan",
+      materia: "Interactive-Plan",
       parse: "json",
     });
     expect("multiTurn" in planningConsult.sockets["Socket-3"].socket).toBe(false);
@@ -719,7 +718,7 @@ describe("active loadout persistence", () => {
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
+          sockets: { "Socket-1": { type: "agent", materia: "Interactive-Plan" } },
         },
       },
     });
@@ -774,7 +773,7 @@ describe("active loadout persistence", () => {
 });
 
 describe("config materia model settings", () => {
-  test("bundled default materia remain model-free except explicit Auto-Architect thinking", async () => {
+  test("bundled default materia preserve tuned model and thinking settings", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
@@ -787,10 +786,12 @@ describe("config materia model settings", () => {
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
     }
 
-    for (const [materiaId, materia] of Object.entries(loaded.config.materia)) {
-      expect(materia.model).toBeUndefined();
-      expect(materia.thinking, materiaId).toBe(materiaId === "Auto-Architect" ? "medium" : undefined);
-    }
+    expect(loaded.config.materia["Auto-Plan"]).toMatchObject({ model: "openai-codex/gpt-5.5", thinking: "xhigh" });
+    expect(loaded.config.materia["Interactive-Plan"]).toMatchObject({ model: "openai-codex/gpt-5.5", thinking: "xhigh" });
+    expect(loaded.config.materia.Build).toMatchObject({ model: "openai-codex/gpt-5.5", thinking: "medium" });
+    expect(loaded.config.materia.Cover).toMatchObject({ model: "zai/glm-5.1", thinking: "high" });
+    expect(loaded.config.materia.ensureArtifactsIgnored.model).toBeUndefined();
+    expect(loaded.config.materia.detectVcs.model).toBeUndefined();
   });
 
   test("project config can set model and thinking for one existing materia only", async () => {
@@ -809,8 +810,8 @@ describe("config materia model settings", () => {
     expect(loaded.config.materia.Build.thinking).toBe("high");
     expect(loaded.config.materia.Build.tools).toBe("coding");
     expect(loaded.config.materia.Build.prompt).toContain("pi-materia Build Materia materia");
-    expect(loaded.config.materia.planner.model).toBeUndefined();
-    expect(loaded.config.materia.planner.thinking).toBeUndefined();
+    expect(loaded.config.materia["Auto-Plan"].model).toBe("openai-codex/gpt-5.5");
+    expect(loaded.config.materia["Auto-Plan"].thinking).toBe("xhigh");
   });
 
   test("rejects non-string materia model with a friendly error", async () => {
@@ -826,8 +827,8 @@ describe("config materia model settings", () => {
   });
 
   test("rejects non-boolean materia multiTurn with a friendly error", async () => {
-    const { dir, file } = await writeConfig({ materia: { interactivePlan: { multiTurn: "yes" } } });
+    const { dir, file } = await writeConfig({ materia: { "Interactive-Plan": { multiTurn: "yes" } } });
 
-    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia "interactivePlan" has invalid multiTurn\. Expected a boolean/);
+    await expect(loadConfig(dir, file)).rejects.toThrow(/Materia "Interactive-Plan" has invalid multiTurn\. Expected a boolean/);
   });
 });

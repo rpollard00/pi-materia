@@ -181,7 +181,7 @@ The bundled built-in alias can express the same hygiene directly in config:
   "params": { "patterns": [".pi/pi-materia/"] },
   "parse": "json",
   "assign": { "artifactIgnore": "$" },
-  "next": "planner"
+  "next": "Socket-3"
 }
 ```
 
@@ -200,7 +200,7 @@ Utility JSON output can choose the next socket with edges:
     { "when": "$.kind == \"git\"", "to": "GitMaintain" },
     { "when": "$.kind == \"none\"", "to": "initVcs" }
   ],
-  "next": "planner"
+  "next": "Socket-3"
 }
 ```
 

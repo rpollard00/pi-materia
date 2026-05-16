@@ -2,11 +2,13 @@
 
 Date: 2026-05-08
 
-Scope: audit of the current codebase before migrating JSON-producing materia from placement-specific `tasks` handoffs and materia-named default socket ids to a generic reusable work-context envelope.
+Historical note: this audit is a pre-migration snapshot. Legacy names such as `planner`, `interactivePlan`, and `tasks` below describe the old state captured for migration analysis; they are not current bundled default materia names or current authoring guidance.
 
-## JSON-producing materia and current handoff shapes
+Scope: audit of the then-current codebase before migrating JSON-producing materia from placement-specific `tasks` handoffs and materia-named default socket ids to a generic reusable work-context envelope.
 
-Current JSON sockets are selected by socket/socket adapter config with `parse: "json"`; materia definitions do not inherently decide parsing unless their palette defaults are copied into a socket.
+## JSON-producing materia and historical handoff shapes
+
+In the audited historical state, JSON sockets were selected by socket/socket adapter config with `parse: "json"`; materia definitions did not inherently decide parsing unless their palette defaults were copied into a socket.
 
 ### Built-in utility JSON materia
 
@@ -21,17 +23,17 @@ Current JSON sockets are selected by socket/socket adapter config with `parse: "
   - It is not used by the bundled default loadout sockets today, but it is a JSON-producing materia definition because the prompt explicitly requires JSON and uses `satisfied` as an evaluator/route-style control field.
 - Utility command sockets in `src/castRuntime.ts` can also be JSON parsed when a socket sets `parse: "json"`; their parsed stdout is validated as a handoff object before assignment/routing.
 
-### Built-in agent JSON materia
+### Historical built-in agent JSON materia
 
-- `planner` prompt in `config/default.json` currently asks for:
+- `planner` prompt in `config/default.json` historically asked for:
   - `{ "tasks": [{ "id": string, "title": string, "description": string, "acceptance": string[] }] }`
   - `generates: { "output": "tasks", "as": "task", "cursor": "taskIndex", "done": "end", "listType": "array", "itemType": "task" }`
   - Default adapters assign `tasks` with `assign: { "tasks": "$.tasks" }` and route always to `Build`.
 - `interactivePlan` prompt asks for the same finalized `{ "tasks": [...] }` shape after `/materia continue`, with the same `generates` metadata.
-- `Auto-Eval` prompt currently asks for:
+- `Auto-Eval` prompt historically asked for:
   - `{ "satisfied": boolean, "feedback": string, "missing": string[] }`
   - Default adapters assign `lastFeedback` from `$.feedback` and `lastCheck` from `$`, then route on `satisfied` / `not_satisfied`.
-- `Maintain` prompt currently asks for:
+- `Maintain` prompt historically asked for:
   - `{ "satisfied": boolean, "commitMessage": string, "reason": string, "vcs": "jj" | "git" | "none", "checkpointCreated": boolean, "commands": string[] }`
   - Default adapters assign `lastMaintain` from `$`, advance the `taskIndex` cursor over `state.tasks` when `satisfied`, route `not_satisfied` to itself, and otherwise route to `Build`.
 
@@ -48,7 +50,7 @@ Current JSON sockets are selected by socket/socket adapter config with `parse: "
 
 ## References to `tasks` and work-item assignment
 
-Primary production references that need migration to `workItems` or generic context:
+Primary production references that needed migration to `workItems` or generic context:
 
 - `config/default.json`
   - Planner and interactive planner prompts request `{ "tasks": [...] }`.
@@ -57,11 +59,11 @@ Primary production references that need migration to `workItems` or generic cont
   - Maintain sockets advance over `state.tasks` with cursor `taskIndex` in both default loadouts.
   - Loop `taskIteration.consumes` uses `{ "from": "planner", "output": "tasks" }` in both default loadouts.
   - Built-in Build, Auto-Eval, and Maintain prompts call the current unit a `Task` or `task`.
-- `src/types.ts` and `src/runtime/pipeline.ts` are generic, but examples/comments and generator validation assume a generated list output; current defaults name it `tasks`.
+- `src/types.ts` and `src/runtime/pipeline.ts` are generic, but examples/comments and generator validation assume a generated list output; historical defaults name it `tasks`.
 - `src/castRuntime.ts` state/event/usage labels still use historical names such as `currentTask`, `taskId`, and `taskIdentityKey`; these are runtime metadata names for the current iterated item.
 - `src/webui/client/src/App.tsx` still has production WebUI defaults/placeholders for generator setup: `generatedOutput` defaults to `tasks`, `generatedItemType` and `generatedAs` default to `task`, `generatedCursor` defaults to `taskIndex`, generated-materia submit falls back to `tasks`/`taskIndex`, and the generated-materia form placeholders include `tasks`, `state.tasks`, and `taskIndex`.
 - `src/webui/client/src/loadoutModel.ts` is another production adapter surface:
-  - `MateriaBehaviorConfig.generates` carries arbitrary generated-list metadata, so current UI-created planner roles can preserve `output: "tasks"`, `itemType: "task"`, alias `task`, cursor `taskIndex`, and `items: "state.tasks"` conventions.
+  - `MateriaBehaviorConfig.generates` carries arbitrary generated-list metadata, so historical UI-created planner roles can preserve `output: "tasks"`, `itemType: "task"`, alias `task`, cursor `taskIndex`, and `items: "state.tasks"` conventions.
   - `normalizeMateriaConfigEdges()` normalizes and preserves `edges` / legacy `next`, including `satisfied` and `not_satisfied` conditions, when loading configs into the WebUI model.
   - `materiaPaletteNode()`, `extractMateriaBehavior()`, `extractSocketStructure()`, and `placeMateriaInSocket()` intentionally split behavior from socket structure: generated-list config, parse/assign/foreach behavior, and socket edges/layout/limits are copied or preserved when dragging/placing materia into sockets.
   - `makeEmptyEntryLoadout()`, `makeNewSocketId()`, `getSocketLabel()`, and `formatSocketLabel()` already implement adapter-oriented `Socket-N` creation/display, independent of materia ids.
@@ -104,7 +106,7 @@ Primary production references that need migration to `workItems` or generic cont
 
 ## Default loadout socket ids and placement-specific routing
 
-The bundled default loadouts currently use socket ids that encode materia/utility identity rather than sequential socket ids.
+At the time of this audit, the bundled default loadouts used socket ids that encoded materia/utility identity rather than sequential socket ids.
 
 ### `Full-Auto`
 
