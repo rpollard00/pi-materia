@@ -25,6 +25,14 @@ A prepared config can be treated as new-model or normalized when socket-valued l
 
 Do not add new domain, application, config, persistence, or WebUI APIs that accept loadout topology under any non-`sockets` field.
 
+## Tool scope compatibility boundary
+
+The canonical persisted granular tool scope is `{ "type": "custom", "tools": string[] }`. Persistence keeps those configured names portable: a saved custom allowlist may include built-in tools, extension tools, or tool names that are not registered in the current Pi session.
+
+Validation rejects malformed scope shapes, unknown scope types, non-array `tools`, non-string entries, and blank tool names. Availability is a separate runtime concern. When a cast starts, pi-materia intersects a valid custom allowlist with the tools currently registered by Pi, enables only that active intersection, and reports unavailable configured names as warnings. Unavailable names are not removed from persisted config and do not widen access to a preset.
+
+Older strict rejection of syntactically valid but unavailable custom tool names is migration-only compatibility for historical data paths. It is not the canonical save or runtime model for new configs.
+
 ## Loadout ownership and migrations
 
 Loadout ownership, default immutability, lock/edit mode, duplicate-name collision handling, migration registry rules, and command-layer mutation guard expectations are documented in [Loadout ownership, locking, and migration](loadout-ownership-locking.md). Keep persistence compatibility changes aligned with that contract: stable loadout ids are canonical, display names are not ownership, shipped default names are preserved, and migration metadata is audit-only.

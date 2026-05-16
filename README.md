@@ -172,7 +172,9 @@ Use a custom allowlist for granular availability. Canonical tool names include `
 }
 ```
 
-Unknown tool names fail validation instead of falling back to broader access. An empty custom allowlist (`{ "type": "custom", "tools": [] }`) intentionally enables no tools, equivalent to the `none` preset. Legacy preset strings are migration-compatible, but new granular configs should use the custom object shape when they need a non-preset set.
+Custom allowlists are portable configuration, not a snapshot of one Pi session's registered tools. pi-materia validates the shape and tool-name syntax (`{ "type": "custom", "tools": string[] }` with non-blank names), then at runtime enables only the configured names that are currently registered by Pi. Configured names that are unavailable in the current session are preserved and reported as warnings so extension tools can be saved before or after they are installed; they are skipped until registered and never cause a fallback to broader access. An empty custom allowlist (`{ "type": "custom", "tools": [] }`) intentionally enables no tools, equivalent to the `none` preset.
+
+Older strict unknown-name rejection is migration-only compatibility for previously validated data, not the canonical model. New granular configs should use the custom object shape when they need a non-preset set.
 
 `bash`/command execution is powerful: commands can write files, update lockfiles, generate caches, or otherwise mutate the project. Tool scopes are role guidance and runtime tool selection, not a hard security sandbox; prompts should explicitly tell evaluation materia not to modify files when mutation is not desired.
 

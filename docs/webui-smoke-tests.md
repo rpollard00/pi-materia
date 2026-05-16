@@ -41,6 +41,7 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 3. Save with the default `user` target and confirm it appears in `$PI_MATERIA_PROFILE_DIR/materia.json`.
 4. Create a tool/utility materia and explicitly choose `project`; confirm it is written to `.pi/pi-materia.json`.
 5. Edit an existing prompt materia and confirm graph links, layout, and inserted metadata on the socket are preserved. If it has a saved model that is not currently available in Pi, confirm only that saved value appears with an unavailable label so saving unchanged preserves it.
+6. For an agent materia, choose **Custom** tools, select a known tool, add a freeform extension-style tool name that is not currently registered, and save. Confirm the editor shows an unavailable-tool warning instead of blocking save, the saved JSON keeps the configured name, and the runtime warning explains that unavailable custom tools are skipped until registered.
 
 ## Role prompt generator
 
