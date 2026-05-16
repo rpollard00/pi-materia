@@ -1102,6 +1102,156 @@
   text-transform: uppercase;
 }
 
+.materia-custom-tools {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+}
+
+.materia-tool-card-fieldset {
+  display: grid;
+  min-width: 0;
+  gap: 0.65rem;
+  border: 0;
+  padding: 0;
+}
+
+.materia-tool-card-fieldset > legend {
+  color: rgb(165 243 252 / 0.82);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.materia-tool-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 0.7rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.materia-tool-card {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: start;
+  border-radius: 0.95rem;
+  border: 1px solid rgb(207 250 254 / 0.14);
+  background: rgb(2 6 23 / 0.48);
+  padding: 0.7rem;
+  color: rgb(226 232 240);
+  cursor: pointer;
+  letter-spacing: normal;
+  text-transform: none;
+  transition: 140ms ease;
+}
+
+.materia-tool-card:hover,
+.materia-tool-card:focus-within,
+.materia-tool-card-selected {
+  border-color: rgb(103 232 249 / 0.58);
+  background: linear-gradient(135deg, rgb(8 47 73 / 0.72), rgb(15 23 42 / 0.82));
+  box-shadow: 0 0 0 2px rgb(34 211 238 / 0.08), 0 0 18px rgb(34 211 238 / 0.12);
+}
+
+.materia-tool-card-warning {
+  border-color: rgb(251 191 36 / 0.28);
+}
+
+.materia-tool-card input[type="checkbox"] {
+  margin-top: 0.12rem;
+}
+
+.materia-tool-card-body {
+  display: grid;
+  min-width: 0;
+  gap: 0.18rem;
+}
+
+.materia-tool-card-title {
+  overflow-wrap: anywhere;
+  color: rgb(248 250 252);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.materia-tool-card-name {
+  width: max-content;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgb(15 23 42 / 0.82);
+  padding: 0.1rem 0.42rem;
+  color: rgb(165 243 252 / 0.9);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.materia-tool-card-description,
+.materia-tool-card-alert {
+  overflow-wrap: anywhere;
+  color: rgb(148 163 184 / 0.94);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.materia-tool-card-alert,
+.materia-custom-tools-warning {
+  color: rgb(254 240 138 / 0.95);
+}
+
+.materia-custom-tool-names {
+  width: 100%;
+}
+
+.materia-configured-tool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.materia-configured-tool-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(103 232 249 / 0.24);
+  background: rgb(8 47 73 / 0.5);
+  padding: 0.25rem 0.55rem;
+  color: rgb(224 242 254);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.materia-configured-tool-chip span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.materia-configured-tool-chip:hover,
+.materia-configured-tool-chip:focus-visible {
+  border-color: rgb(165 243 252 / 0.68);
+  background: rgb(14 116 144 / 0.5);
+  outline: none;
+}
+
+.materia-configured-tool-chip-warning {
+  border-color: rgb(251 191 36 / 0.42);
+  background: rgb(120 53 15 / 0.32);
+  color: rgb(254 240 138);
+}
+
 .graph-field {
   display: flex;
   min-width: 0;

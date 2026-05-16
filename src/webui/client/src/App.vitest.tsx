@@ -2942,8 +2942,11 @@ describe('Materia loadout grid editor', () => {
     await openTab('Materia Editor');
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Auto-Eval' } });
     expect(screen.getByTestId('materia-tools')).toHaveProperty('value', 'custom');
+    expect(screen.getByTestId('materia-custom-tools-panel').classList.contains('materia-custom-tools')).toBe(true);
+    expect(screen.getByTestId('materia-tool-card-grid').classList.contains('materia-tool-card-grid')).toBe(true);
     expect(screen.getByTestId('materia-custom-tools-panel').textContent).toContain('Command execution is powerful');
     expect(screen.getByTestId('materia-custom-tools')).toHaveProperty('value', 'read, grep, find, ls, bash');
+    expect(screen.getByTestId('materia-tool-bash').closest('.materia-tool-card')?.classList.contains('materia-tool-card-warning')).toBe(true);
     fireEvent.click(screen.getByTestId('materia-tool-bash'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
@@ -2967,6 +2970,7 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'custom' } });
     fireEvent.change(screen.getByTestId('materia-custom-tools'), { target: { value: 'read, bsh' } });
     expect(screen.getByTestId('materia-tool-registry-status').textContent).toContain('Live Pi tool registry unavailable');
+    expect(screen.getByRole('button', { name: /bsh/i }).classList.contains('materia-configured-tool-chip')).toBe(true);
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
     await waitForConfigPostCount(fetchMock, 1);
@@ -2997,8 +3001,10 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
     await waitFor(() => expect(screen.getByTestId('materia-tool-extensionTool')).toBeTruthy());
     expect(screen.getByTestId('materia-tool-extensionTool')).toHaveProperty('checked', true);
+    expect(screen.getByTestId('materia-tool-extensionTool').closest('.materia-tool-card')?.textContent).toContain('Live Pi tool registered for this session.');
     expect(screen.getByTestId('materia-tool-registry-status').textContent).toContain('2 live Pi tools');
     expect(screen.getByTestId('materia-custom-tools-warning').textContent).toContain('staleTool');
+    expect(screen.getByRole('button', { name: /staleTool/i }).classList.contains('materia-configured-tool-chip-warning')).toBe(true);
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
     await waitForConfigPostCount(fetchMock, 1);
