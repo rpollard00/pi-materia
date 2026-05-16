@@ -1,5 +1,5 @@
 {
-  "activeLoadout": "Hojo-Consult",
+  "activeLoadout": "Full-Auto",
   "piMateria": {
     "schemaVersion": 3,
     "migrations": [
@@ -16,5 +16,6 @@
         "appliedAt": "2026-05-14T15:05:47.493Z"
       }
     ]
-  }
+  },
+  "activeLoadoutId": "default:full-auto"
 }

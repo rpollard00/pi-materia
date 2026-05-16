@@ -195,6 +195,54 @@ describe('LoadoutListPanel', () => {
     expect(staleRows[0]?.isRuntimeActive).toBe(false);
   });
 
+  it('switches the viewed loadout when the selectable row button is clicked', () => {
+    const onSwitchEditingLoadout = vi.fn();
+    renderPanel({ onSwitchEditingLoadout });
+
+    fireEvent.click(within(cardFor('Gamma')).getByRole('button', { name: /Gamma/ }));
+
+    expect(onSwitchEditingLoadout).toHaveBeenCalledOnce();
+    expect(onSwitchEditingLoadout).toHaveBeenCalledWith('Gamma');
+  });
+
+  it('keeps vertical row hit-area ownership on real child controls instead of the non-interactive wrapper', () => {
+    renderPanel();
+
+    const betaCard = cardFor('Beta');
+    const selectButton = within(betaCard).getByRole('button', { name: /Beta/ });
+    expect(betaCard.tagName).toBe('DIV');
+    expect(selectButton.classList.contains('loadout-card-select')).toBe(true);
+    expect(selectButton.closest('.loadout-card')).toBe(betaCard);
+
+    const css = readFileSync('src/webui/client/src/styles.css', 'utf8');
+    expect(css).toMatch(/\.loadout-card\s*{(?=[^}]*display: flex;)(?=[^}]*align-items: stretch;)(?=[^}]*gap: 0\.25rem;)(?=[^}]*padding: 0;)\s*[^}]*}/s);
+    expect(css).not.toMatch(/\.loadout-card\s*{[^}]*padding:\s*0\.[1-9][^;}]*rem\s+0\.[0-9][^;}]*rem;/s);
+    expect(css).toMatch(/\.loadout-card-select\s*{(?=[^}]*display: flex;)(?=[^}]*flex: 1 1 auto;)(?=[^}]*align-self: stretch;)(?=[^}]*align-items: center;)(?=[^}]*padding: 0\.55rem 0\.45rem;)\s*[^}]*}/s);
+    expect(css).toMatch(/[^{}]*\.loadout-lock-indicator[^{}]*{[^}]*align-self: stretch;[^}]*}/s);
+    expect(css).toMatch(/[^{}]*\.loadout-actions-trigger[^{}]*{[^}]*align-self: stretch;[^}]*}/s);
+  });
+
+  it('does not switch the viewed loadout from lock, action trigger, or action menu controls', () => {
+    const onSwitchEditingLoadout = vi.fn();
+    const onToggleLoadoutLock = vi.fn(() => true);
+    const onDuplicateLoadout = vi.fn();
+    const onDeleteLoadout = vi.fn();
+    renderPanel({ onSwitchEditingLoadout, onToggleLoadoutLock, onDuplicateLoadout, onDeleteLoadout });
+
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Lock edits'));
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
+    expect(onSwitchEditingLoadout).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+    fireEvent.click(within(cardFor('Gamma')).getByLabelText('Loadout actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    expect(onToggleLoadoutLock).toHaveBeenCalledWith('Gamma', 'locked');
+    expect(onDuplicateLoadout).toHaveBeenCalledWith('Gamma');
+    expect(onDeleteLoadout).toHaveBeenCalledWith('Gamma');
+    expect(onSwitchEditingLoadout).not.toHaveBeenCalled();
+  });
+
   it('keeps menu interactions from selecting the card and separates active from default actions', async () => {
     const onSwitchEditingLoadout = vi.fn();
     const onSetRuntimeActiveLoadout = vi.fn(async (name: string) => name);
@@ -424,8 +472,8 @@ describe('LoadoutListPanel', () => {
     expect(longCard.querySelector('.loadout-card-select')?.getAttribute('title')).toContain(longName);
 
     const css = readFileSync('src/webui/client/src/styles.css', 'utf8');
-    expect(css).toMatch(/\.loadout-card\s*{[^}]*gap: 0\.25rem;[^}]*padding: 0\.55rem 0\.45rem;/s);
-    expect(css).toMatch(/\.loadout-card-select\s*{[^}]*flex: 1 1 auto;[^}]*overflow: hidden;[^}]*white-space: nowrap;/s);
+    expect(css).toMatch(/\.loadout-card\s*{(?=[^}]*gap: 0\.25rem;)(?=[^}]*padding: 0;)\s*[^}]*}/s);
+    expect(css).toMatch(/\.loadout-card-select\s*{(?=[^}]*flex: 1 1 auto;)(?=[^}]*overflow: hidden;)(?=[^}]*white-space: nowrap;)\s*[^}]*}/s);
     expect(css).toMatch(/\.loadout-card-select \.loadout-card-title\s*{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto auto;[^}]*column-gap: 0\.25rem;/s);
     expect(css).toMatch(/\.loadout-card-name\s*{[^}]*min-width: 0;[^}]*max-width: none;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   });
