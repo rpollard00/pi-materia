@@ -1,3 +1,4 @@
+import { TOOL_SCOPE_PRESET_OPTIONS, isToolScopePreset, type ToolScopePreset } from '../../../../../../domain/toolScope.js';
 import type { MateriaFormState, SaveTarget } from '../../types.js';
 import { thinkingLabel } from '../../utils/modelCatalog.js';
 import { ColorPickerField } from './ColorPickerField.js';
@@ -73,8 +74,9 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
                 </span>
               </label>
               <label className="graph-field">Tools
-                <select data-testid="materia-tools" value={materiaForm.toolAccess} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as MateriaFormState['toolAccess'] })}>
-                  <option value="none">none</option><option value="readOnly">read only</option><option value="coding">coding</option>
+                <select data-testid="materia-tools" value={isToolScopePreset(materiaForm.toolAccess) ? materiaForm.toolAccess : 'custom'} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as ToolScopePreset })}>
+                  {TOOL_SCOPE_PRESET_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  {!isToolScopePreset(materiaForm.toolAccess) ? <option value="custom">custom allowlist ({materiaForm.toolAccess.tools.join(', ') || 'no tools'})</option> : null}
                 </select>
               </label>
               <ColorPickerField form={form} colorPicker={colorPicker} />

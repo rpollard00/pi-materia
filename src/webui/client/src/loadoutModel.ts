@@ -3,6 +3,7 @@ import { normalizeLoadedLoadout } from '../../../loadout/loadoutNormalization.js
 import { materializeLoadoutLoopSemantics } from '../../../graph/loopSemantics.js';
 import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../domain/socket.js';
 import { fromWebUiLoadoutDto, toWebUiConfigDto, toWebUiLoadoutDto } from '../../loadoutDto.js';
+import type { ToolScopeSpec } from '../../../domain/toolScope.js';
 import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 
 type SocketType = 'agent' | 'utility';
@@ -130,7 +131,7 @@ function canonicalMateriaGeneratorOutput(definition?: MateriaBehaviorConfig): st
 
 export interface MateriaBehaviorConfig {
   type?: SocketType;
-  tools?: 'none' | 'readOnly' | 'coding';
+  tools?: ToolScopeSpec;
   prompt?: string;
   model?: string;
   thinking?: string;

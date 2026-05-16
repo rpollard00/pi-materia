@@ -11,6 +11,7 @@ import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLo
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication } from "../schema/persistence.js";
+import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "../types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -469,8 +470,12 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.prompt === undefined || typeof materia.prompt !== "string") {
       throw new Error(`Materia "${name}" has invalid prompt. Expected a string.`);
     }
-    if (materia.tools === undefined || !["none", "readOnly", "coding"].includes(String(materia.tools))) {
-      throw new Error(`Materia "${name}" has invalid tools. Expected "none", "readOnly", or "coding".`);
+    if (materia.tools === undefined) {
+      throw new Error(`Materia "${name}" has invalid tools. Expected ${validToolScopeShapeDescription()}.`);
+    }
+    const toolScope = validateToolScopeSpecShape(materia.tools, `materia.${name}.tools`);
+    if (!toolScope.ok) {
+      throw new Error(`Materia "${name}" has invalid tools. ${toolScope.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
     }
     if (materia.model !== undefined && typeof materia.model !== "string") {
       throw new Error(`Materia "${name}" has invalid model. Expected a string when configured.`);

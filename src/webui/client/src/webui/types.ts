@@ -1,3 +1,4 @@
+import type { ToolScopeSpec } from '../../../../domain/toolScope.js';
 import type { MateriaEdgeCondition } from '../../../../types.js';
 import type { MateriaConfig, PipelineConfig, PipelineSocket } from '../loadoutModel.js';
 
@@ -8,7 +9,7 @@ export interface MateriaFormState {
   name: string;
   behavior: 'prompt' | 'tool';
   prompt: string;
-  toolAccess: 'none' | 'readOnly' | 'coding';
+  toolAccess: ToolScopeSpec;
   model: string;
   thinking: string;
   color: string;

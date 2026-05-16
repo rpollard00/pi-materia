@@ -1,8 +1,9 @@
 import { ok, type DomainIssue, type DomainResult } from "./result.js";
 import type { Loadout, MateriaId, MateriaParseMode } from "./loadout.js";
+import { validateToolScopeSpecShape, type ToolScopeSpec } from "./toolScope.js";
 
 export type MateriaDefinitionType = "agent" | "utility";
-export type MateriaAgentTools = "none" | "readOnly" | "coding";
+export type MateriaAgentTools = ToolScopeSpec;
 
 export interface MateriaBehaviorIdentity {
   /** Stable reusable behavior id; for persisted config this is the materia record key. */
@@ -95,7 +96,7 @@ export function normalizeMateriaDefinition(id: MateriaId, config: MateriaConfigC
     ? {
         ...common,
         type: "agent" as const,
-        tools: config.tools as MateriaAgentTools,
+        tools: normalizeMateriaTools(config.tools),
         prompt: typeof config.prompt === "string" ? config.prompt : "",
         ...(typeof config.model === "string" ? { model: config.model } : {}),
         ...(typeof config.thinking === "string" ? { thinking: config.thinking } : {}),
@@ -137,7 +138,8 @@ export function validateMateriaDefinition(definition: MateriaDefinition, path = 
   validatePromptIntent(definition.promptIntent, `${path}.promptIntent`, issues);
 
   if (definition.type === "agent") {
-    if (!isAgentTools(definition.tools)) issues.push({ path: `${path}.tools`, message: "agent tools must be none, readOnly, or coding" });
+    const toolsValidation = validateToolScopeSpecShape(definition.tools, `${path}.tools`);
+    if (!toolsValidation.ok) issues.push(...toolsValidation.issues);
     if (!isNonEmptyString(definition.prompt)) issues.push({ path: `${path}.prompt`, message: "agent prompt is required" });
     if (definition.multiTurn !== undefined && typeof definition.multiTurn !== "boolean") issues.push({ path: `${path}.multiTurn`, message: "multiTurn must be a boolean" });
   } else {
@@ -183,8 +185,9 @@ function copyMateriaDefinition<T extends MateriaDefinition>(definition: T): T {
   } as T;
 }
 
-function isAgentTools(value: unknown): value is MateriaAgentTools {
-  return value === "none" || value === "readOnly" || value === "coding";
+function normalizeMateriaTools(value: unknown): MateriaAgentTools {
+  const result = validateToolScopeSpecShape(value);
+  return result.ok ? result.value : value as MateriaAgentTools;
 }
 
 function isNonEmptyString(value: unknown): value is string {

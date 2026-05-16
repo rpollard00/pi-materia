@@ -1,3 +1,5 @@
+import type { ToolScopeSpec } from "./domain/toolScope.js";
+
 export interface PiMateriaSchemaMigrationAudit {
   id: string;
   appliedAt: string;
@@ -541,7 +543,7 @@ export interface MateriaDefinitionMetadata {
 
 export interface MateriaAgentConfig extends MateriaDefinitionMetadata {
   type?: "agent";
-  tools: "none" | "readOnly" | "coding";
+  tools: ToolScopeSpec;
   prompt: string;
   model?: string;
   thinking?: string;

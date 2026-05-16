@@ -1,5 +1,6 @@
 import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { MateriaAgentConfig, MateriaCastState } from "../types.js";
+import { resolveToolScope } from "../domain/toolScope.js";
 import { addUsage, extractMessageModelInfo, extractUsage } from "../telemetry/usage.js";
 import { currentSocketId, currentTaskAttempt } from "./sessionState.js";
 
@@ -40,9 +41,10 @@ export function captureUsage(state: MateriaCastState, message: unknown): void {
 }
 
 export function updateToolScope(pi: ExtensionAPI, materia: MateriaAgentConfig): void {
-  const all = pi.getAllTools().map((tool) => tool.name);
-  const readOnly = all.filter((name) => ["read", "grep", "find", "ls"].includes(name));
-  if (materia.tools === "none") pi.setActiveTools([]);
-  else if (materia.tools === "readOnly") pi.setActiveTools(readOnly);
-  else pi.setActiveTools(all);
+  const availableToolNames = pi.getAllTools().map((tool) => tool.name);
+  const resolved = resolveToolScope(materia.tools, availableToolNames, "materia.tools");
+  if (!resolved.ok) {
+    throw new Error(`Invalid materia tool scope: ${resolved.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+  }
+  pi.setActiveTools([...resolved.value.tools]);
 }

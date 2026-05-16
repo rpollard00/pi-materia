@@ -3,6 +3,7 @@ import { assertValidPipelineGraph } from "../graph/graphValidation.js";
 import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../graph/generator.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, loopSockets } from "../loadout/loadoutAccessors.js";
 import { prepareLoadoutForRuntime } from "../loadout/loadoutNormalization.js";
+import { formatToolScopeSpec, validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline } from "../types.js";
 
 export interface EffectiveMateriaPipelineConfig {
@@ -121,6 +122,13 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
   if (rawMateria.type !== undefined && rawMateria.type !== "agent") throw new Error(`Materia "${name}" has unsupported type "${String(rawMateria.type)}".`);
   if (rawMateria.prompt === undefined || typeof rawMateria.prompt !== "string") {
     throw new Error(`Materia "${name}" has invalid prompt. Expected a string.`);
+  }
+  if (rawMateria.tools === undefined) {
+    throw new Error(`Materia "${name}" has invalid tools. Expected ${validToolScopeShapeDescription()}.`);
+  }
+  const toolScope = validateToolScopeSpecShape(rawMateria.tools, `materia.${name}.tools`);
+  if (!toolScope.ok) {
+    throw new Error(`Materia "${name}" has invalid tools. ${toolScope.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
   }
   if (rawMateria.multiTurn !== undefined && typeof rawMateria.multiTurn !== "boolean") {
     throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
@@ -285,7 +293,7 @@ function formatSocketSlot(config: PiMateriaConfig, socket: MateriaPipelineSocket
   if (socket.type === "agent") {
     const materia = config.materia[socket.materia];
     const agentMateria = materia && materia.type !== "utility" ? materia : undefined;
-    details.push(`materia=${socket.materia}`, `tools=${agentMateria?.tools ?? "unknown"}`);
+    details.push(`materia=${socket.materia}`, `tools=${agentMateria ? formatToolScopeSpec(agentMateria.tools) : "unknown"}`);
     if (agentMateria?.multiTurn) details.push("materia.multiTurn=true");
     if (agentMateria) details.push(formatMateriaModelSettings(agentMateria));
   } else {
@@ -311,7 +319,7 @@ function formatMateriaDetails(materia: MateriaConfig): string {
     return [`type=utility`, materia.utility ? `utility=${materia.utility}` : `command=${formatCommand(materia.command)}`, `parse=${materia.parse ?? "text"}`, generator].filter(Boolean).join(", ");
   }
   return [
-    `tools=${materia.tools}`,
+    `tools=${formatToolScopeSpec(materia.tools)}`,
     materia.parse ? `parse=${materia.parse}` : undefined,
     materia.multiTurn ? "multiTurn=true" : undefined,
     formatMateriaModelSettings(materia),
