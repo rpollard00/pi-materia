@@ -441,7 +441,6 @@ describe("config loadouts", () => {
       tools: "readOnly",
       parse: "json",
       generator: true,
-      thinking: "xhigh",
       color: "materia-color-cyan",
     });
     expect(rawDefault.materia?.["Auto-Architect"]?.prompt).toContain("software architect materia");
@@ -773,25 +772,13 @@ describe("active loadout persistence", () => {
 });
 
 describe("config materia model settings", () => {
-  test("bundled default materia preserve tuned model and thinking settings", async () => {
-    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
-    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
-    const previous = process.env.PI_MATERIA_PROFILE_DIR;
-    process.env.PI_MATERIA_PROFILE_DIR = profile;
-    let loaded;
-    try {
-      loaded = await loadConfig(cwd);
-    } finally {
-      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
-      else process.env.PI_MATERIA_PROFILE_DIR = previous;
-    }
+  test("bundled default materia omit model and thinking settings", async () => {
+    const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
 
-    expect(loaded.config.materia["Auto-Plan"]).toMatchObject({ model: "openai-codex/gpt-5.5", thinking: "xhigh" });
-    expect(loaded.config.materia["Interactive-Plan"]).toMatchObject({ model: "openai-codex/gpt-5.5", thinking: "xhigh" });
-    expect(loaded.config.materia.Build).toMatchObject({ model: "openai-codex/gpt-5.5", thinking: "medium" });
-    expect(loaded.config.materia.Cover).toMatchObject({ model: "zai/glm-5.1", thinking: "high" });
-    expect(loaded.config.materia.ensureArtifactsIgnored.model).toBeUndefined();
-    expect(loaded.config.materia.detectVcs.model).toBeUndefined();
+    for (const [materiaId, materia] of Object.entries(rawDefault.materia ?? {}) as Array<[string, { model?: unknown; thinking?: unknown }]>) {
+      expect(materia.model, `${materiaId}.model`).toBeUndefined();
+      expect(materia.thinking, `${materiaId}.thinking`).toBeUndefined();
+    }
   });
 
   test("project config can set model and thinking for one existing materia only", async () => {
@@ -803,15 +790,22 @@ describe("config materia model settings", () => {
         },
       },
     });
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const loaded = await loadConfig(dir, file);
 
-    const loaded = await loadConfig(dir, file);
-
-    expect(loaded.config.materia.Build.model).toBe("anthropic/claude-3-7-sonnet-latest");
-    expect(loaded.config.materia.Build.thinking).toBe("high");
-    expect(loaded.config.materia.Build.tools).toBe("coding");
-    expect(loaded.config.materia.Build.prompt).toContain("pi-materia Build Materia materia");
-    expect(loaded.config.materia["Auto-Plan"].model).toBe("openai-codex/gpt-5.5");
-    expect(loaded.config.materia["Auto-Plan"].thinking).toBe("xhigh");
+      expect(loaded.config.materia.Build.model).toBe("anthropic/claude-3-7-sonnet-latest");
+      expect(loaded.config.materia.Build.thinking).toBe("high");
+      expect(loaded.config.materia.Build.tools).toBe("coding");
+      expect(loaded.config.materia.Build.prompt).toContain("pi-materia Build Materia materia");
+      expect(loaded.config.materia["Auto-Plan"].model).toBeUndefined();
+      expect(loaded.config.materia["Auto-Plan"].thinking).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
   });
 
   test("rejects non-string materia model with a friendly error", async () => {
