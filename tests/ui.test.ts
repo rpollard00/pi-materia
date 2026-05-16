@@ -495,6 +495,87 @@ describe("persistent Materia widget ticker ownership", () => {
     }
   });
 
+  test("uses run updatedAt freshness when cast updatedAt is unavailable", () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    (globalThis as any).setInterval = () => ({ unref: () => undefined });
+    (globalThis as any).clearInterval = () => undefined;
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = {
+      sessionManager: { getSessionId: () => "run-freshness-session" },
+      ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) },
+    } as any;
+    const run = runState({ runId: "same-run", loadoutName: "Hojo", currentMateria: "Build", currentTask: "initial", attempt: 1 });
+    const current = loopCastState({
+      castId: "cast-without-updated-at",
+      updatedAt: undefined as never,
+      currentMateria: "Build",
+      currentItemLabel: "newer run metadata",
+      runState: { ...run, updatedAt: "1970-01-01T00:00:05.000Z", currentTask: "newer run metadata" } as MateriaRunState,
+    });
+    const stale = loopCastState({
+      castId: "cast-without-updated-at",
+      updatedAt: undefined as never,
+      currentMateria: "Interactive-Plan",
+      currentItemLabel: "older run metadata",
+      runState: { ...run, updatedAt: 4_000, currentMateria: "Interactive-Plan", currentTask: "older run metadata" } as MateriaRunState,
+    });
+    const newer = loopCastState({
+      castId: "cast-without-updated-at",
+      updatedAt: undefined as never,
+      currentMateria: "Maintain",
+      currentItemLabel: "newest run metadata",
+      runState: { ...run, updatedAt: new Date(6_000), currentMateria: "Maintain", currentTask: "newest run metadata" } as MateriaRunState,
+    });
+
+    try {
+      updateWidget(ctx, current, { replaceOwner: true });
+      const acceptedText = widgets.at(-1)?.value?.join("\n") ?? "";
+      expect(acceptedText).toContain("newer run metadata");
+
+      updateWidget(ctx, stale);
+      expect(widgets.at(-1)?.value?.join("\n")).toBe(acceptedText);
+      expect(widgets.at(-1)?.value?.join("\n")).not.toContain("older run metadata");
+
+      updateWidget(ctx, newer);
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("newest run metadata");
+    } finally {
+      clearWidgetTicker(ctx);
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+  });
+
+  test("does not let missing freshness overwrite a timestamped same-run widget", () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    (globalThis as any).setInterval = () => ({ unref: () => undefined });
+    (globalThis as any).clearInterval = () => undefined;
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = {
+      sessionManager: { getSessionId: () => "missing-freshness-session" },
+      ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) },
+    } as any;
+    const timestamped = runState({ runId: "same-run", startedAt: 1_000, currentMateria: "Build", lastMessage: "timestamped current" });
+    const missingFreshness = { ...timestamped, startedAt: Number.NaN, currentMateria: "Interactive-Plan", lastMessage: "missing freshness stale" };
+
+    try {
+      updateWidget(ctx, timestamped, { replaceOwner: true });
+      const acceptedText = widgets.at(-1)?.value?.join("\n") ?? "";
+      expect(acceptedText).toContain("timestamped current");
+
+      updateWidget(ctx, missingFreshness);
+      expect(widgets.at(-1)?.value?.join("\n")).toBe(acceptedText);
+      expect(widgets.at(-1)?.value?.join("\n")).not.toContain("missing freshness stale");
+    } finally {
+      clearWidgetTicker(ctx);
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+  });
+
   test("replaces prior terminal status when a new active cast becomes current", () => {
     const originalSetInterval = globalThis.setInterval;
     const originalClearInterval = globalThis.clearInterval;

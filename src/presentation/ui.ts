@@ -191,8 +191,12 @@ function widgetIdentity(state: MateriaWidgetState): string {
 }
 
 function widgetFreshness(state: MateriaWidgetState): number | undefined {
-  if (isMateriaCastWidgetState(state)) return toTimestamp(state.updatedAt) ?? toTimestamp(state.runState.endedAt) ?? toTimestamp(state.runState.startedAt);
-  return toTimestamp(state.endedAt) ?? toTimestamp(state.startedAt);
+  if (isMateriaCastWidgetState(state)) return toTimestamp(state.updatedAt) ?? runWidgetFreshness(state.runState);
+  return runWidgetFreshness(state);
+}
+
+function runWidgetFreshness(state: MateriaRunState): number | undefined {
+  return toTimestamp(state.endedAt) ?? toTimestamp((state as MateriaRunState & { updatedAt?: unknown }).updatedAt) ?? toTimestamp(state.startedAt);
 }
 
 function toTimestamp(value: unknown): number | undefined {
@@ -205,7 +209,9 @@ function toTimestamp(value: unknown): number | undefined {
 }
 
 function isOlderFreshness(incoming: number | undefined, current: number | undefined): boolean {
-  return incoming !== undefined && current !== undefined && incoming < current;
+  if (current === undefined) return false;
+  if (incoming === undefined) return true;
+  return incoming < current;
 }
 
 function isMateriaCastWidgetState(
