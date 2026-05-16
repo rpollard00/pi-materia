@@ -416,6 +416,43 @@ describe("persistent Materia widget ticker ownership", () => {
     }
   });
 
+  test("keys widget ownership by stable session id across context instances", () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const intervals: Array<{ handle: { id: number; unref: () => void }; cleared: boolean }> = [];
+    let nextId = 1;
+    (globalThis as any).setInterval = () => {
+      const handle = { id: nextId++, unref: () => undefined };
+      intervals.push({ handle, cleared: false });
+      return handle;
+    };
+    (globalThis as any).clearInterval = (handle: { id: number }) => {
+      const interval = intervals.find((entry) => entry.handle.id === handle.id);
+      if (interval) interval.cleared = true;
+    };
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const makeCtx = () => ({
+      sessionManager: { getSessionId: () => "stable-session-id" },
+      ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) },
+    }) as any;
+
+    try {
+      updateWidget(makeCtx(), runState({ runId: "stable-run", currentMateria: "Build", lastMessage: "first context" }), { replaceOwner: true });
+      updateWidget(makeCtx(), runState({ runId: "stable-run", currentMateria: "Review", lastMessage: "second context" }));
+
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(1);
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("second context");
+
+      updateWidget(makeCtx(), runState({ runId: "stable-run", endedAt: 11_000, currentMateria: "Review", lastMessage: "terminal" }));
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(0);
+    } finally {
+      clearWidgetTicker(makeCtx());
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+  });
+
   test("ignores older same-run cast freshness updates", () => {
     const originalSetInterval = globalThis.setInterval;
     const originalClearInterval = globalThis.clearInterval;

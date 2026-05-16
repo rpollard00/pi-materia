@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
   currentCastSocketId,
@@ -155,17 +156,33 @@ function stopMateriaWidgetControllerTicker(controller: MateriaWidgetController, 
 }
 
 function getMateriaWidgetScope(ctx: ExtensionContext): string {
-  const sessionManager = (ctx as ExtensionContext & { sessionManager?: { getSessionFile?: () => string | undefined; getSessionId?: () => string | undefined } }).sessionManager;
-  const sessionFile = sessionManager?.getSessionFile?.();
-  if (sessionFile) return `materia:${sessionFile}`;
-  const sessionId = sessionManager?.getSessionId?.();
-  if (sessionId) return `materia:${sessionId}`;
+  const sessionManager = (ctx as ExtensionContext & { sessionManager?: MateriaWidgetSessionManager }).sessionManager;
+  const sessionFile = readMateriaWidgetSessionValue(() => sessionManager?.getSessionFile?.());
+  if (sessionFile) return `materia:session-file:${path.normalize(sessionFile)}`;
+
+  const sessionId = readMateriaWidgetSessionValue(() => sessionManager?.getSessionId?.());
+  if (sessionId) return `materia:session-id:${sessionId}`;
+
   let fallback = fallbackWidgetScopes.get(ctx);
   if (!fallback) {
-    fallback = `materia:ctx-${nextFallbackWidgetScope++}`;
+    fallback = `materia:context:${nextFallbackWidgetScope++}`;
     fallbackWidgetScopes.set(ctx, fallback);
   }
   return fallback;
+}
+
+type MateriaWidgetSessionManager = {
+  getSessionFile?: () => string | undefined;
+  getSessionId?: () => string | undefined;
+};
+
+function readMateriaWidgetSessionValue(read: () => unknown): string | undefined {
+  try {
+    const value = read();
+    return typeof value === "string" && value.trim() ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function widgetIdentity(state: MateriaWidgetState): string {
