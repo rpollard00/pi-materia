@@ -262,9 +262,11 @@ export interface MateriaRecoveryAllowance {
   reviveCount: number;
 }
 
+export type MateriaRecoveryReason = "context_window" | "turn_failure";
+
 export interface MateriaRecoveryExhaustion {
   kind: "same_socket_recovery_exhausted";
-  reason: "context_window";
+  reason: MateriaRecoveryReason;
   key: string;
   attempts: number;
   originalMaxAttempts: number;

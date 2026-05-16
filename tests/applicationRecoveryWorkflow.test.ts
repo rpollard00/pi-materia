@@ -79,6 +79,20 @@ describe("same-socket recovery workflow", () => {
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
   });
 
+  test("generic turn failures require opt-in and preserve structured recovery reason", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("provider interrupted turn"), makeDeps(events, calls), { entryId: "entry-generic", allowGenericTurnFailure: true });
+
+    expect(recovered).toBe(true);
+    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry"]);
+    expect(events[0].data).toMatchObject({ reason: "turn_failure", entryId: "entry-generic", socket: "Socket-1", mode: "normal" });
+    expect(calls).not.toContain("runRecoveryAction");
+    expect(calls).toContain("sendMateriaTurn:retry prompt:true");
+  });
+
   test("exhausts allowance and delegates terminal failure with structured metadata", async () => {
     const state = makeState();
     const events: Array<{ type: string; data: Record<string, unknown> }> = [];

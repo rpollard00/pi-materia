@@ -48,9 +48,9 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   state: MateriaCastState,
   error: unknown,
   deps: SameSocketRecoveryWorkflowDeps,
-  options: { entryId?: string } = {},
+  options: { entryId?: string; allowGenericTurnFailure?: boolean } = {},
 ): Promise<boolean> {
-  const reason = classifyRecoverableTurnFailure(error);
+  const reason = classifyRecoverableTurnFailure(error, { allowGenericTurnFailure: options.allowGenericTurnFailure });
   if (!reason) return false;
 
   const key = recoveryIdentityKey(state);

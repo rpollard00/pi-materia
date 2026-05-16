@@ -1,20 +1,27 @@
 import { isActiveMultiTurnSocket } from "./promptAssembly.js";
-import type { MateriaCastState, MateriaRecoveryAllowance, ResolvedMateriaSocket } from "../types.js";
+import type { MateriaCastState, MateriaRecoveryAllowance, MateriaRecoveryReason, ResolvedMateriaSocket } from "../types.js";
 
 const DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS = 1;
 
-export type TurnFailureClassification = "context_window" | "transient_transport";
-export type RecoverableTurnFailure = "context_window";
+export type TurnFailureClassification = MateriaRecoveryReason | "transient_transport";
+export type RecoverableTurnFailure = MateriaRecoveryReason;
 
-export function classifyTurnFailure(error: unknown): TurnFailureClassification | undefined {
+export interface TurnFailureClassificationOptions {
+  /** Set only from lifecycle boundaries that have proven the active agent turn is safe to resend. */
+  allowGenericTurnFailure?: boolean;
+}
+
+export function classifyTurnFailure(error: unknown, options: TurnFailureClassificationOptions = {}): TurnFailureClassification | undefined {
   const message = errorMessage(error);
   if (isContextWindowFailureMessage(message)) return "context_window";
   if (isPlainWebSocketTransportFailure(message)) return "transient_transport";
+  if (options.allowGenericTurnFailure === true) return "turn_failure";
   return undefined;
 }
 
-export function classifyRecoverableTurnFailure(error: unknown): RecoverableTurnFailure | undefined {
-  return classifyTurnFailure(error) === "context_window" ? "context_window" : undefined;
+export function classifyRecoverableTurnFailure(error: unknown, options: TurnFailureClassificationOptions = {}): RecoverableTurnFailure | undefined {
+  const classification = classifyTurnFailure(error, options);
+  return classification === "context_window" || classification === "turn_failure" ? classification : undefined;
 }
 
 export function recoveryTurnMode(state: MateriaCastState): "normal" | "refinement" | "finalization" {
