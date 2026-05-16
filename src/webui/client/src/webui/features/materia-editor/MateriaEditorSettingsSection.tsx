@@ -1,4 +1,4 @@
-import { TOOL_SCOPE_PRESET_OPTIONS, isToolScopePreset, type ToolScopePreset } from '../../../../../../domain/toolScope.js';
+import { READ_ONLY_TOOL_NAMES, TOOL_SCOPE_BASH_WARNING, TOOL_SCOPE_PRESET_OPTIONS, TOOL_SCOPE_TOOL_OPTIONS, isToolScopePreset, type ToolScopePreset } from '../../../../../../domain/toolScope.js';
 import type { MateriaFormState, SaveTarget } from '../../types.js';
 import { thinkingLabel } from '../../utils/modelCatalog.js';
 import { ColorPickerField } from './ColorPickerField.js';
@@ -8,6 +8,18 @@ interface MateriaEditorSettingsSectionProps {
   form: MateriaEditorController['form'];
   modelOptions: MateriaEditorController['modelOptions'];
   colorPicker: MateriaEditorController['colorPicker'];
+}
+
+const allCustomToolNames = TOOL_SCOPE_TOOL_OPTIONS.map((option) => option.value);
+
+function customToolsForPreset(preset: ToolScopePreset): string[] {
+  if (preset === 'none') return [];
+  if (preset === 'readOnly') return [...READ_ONLY_TOOL_NAMES];
+  return allCustomToolNames;
+}
+
+function parseCustomTools(raw: string): string[] {
+  return raw.split(/[\s,]+/).map((tool) => tool.trim()).filter(Boolean);
 }
 
 export function MateriaEditorSettingsSection({ form, modelOptions: modelSection, colorPicker }: MateriaEditorSettingsSectionProps) {
@@ -74,11 +86,58 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
                 </span>
               </label>
               <label className="graph-field">Tools
-                <select data-testid="materia-tools" value={isToolScopePreset(materiaForm.toolAccess) ? materiaForm.toolAccess : 'custom'} onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: event.target.value as ToolScopePreset })}>
+                <select data-testid="materia-tools" value={isToolScopePreset(materiaForm.toolAccess) ? materiaForm.toolAccess : 'custom'} onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === 'custom') {
+                    const tools = isToolScopePreset(materiaForm.toolAccess) ? customToolsForPreset(materiaForm.toolAccess) : [...materiaForm.toolAccess.tools];
+                    setMateriaForm({ ...materiaForm, toolAccess: { type: 'custom', tools } });
+                  } else {
+                    setMateriaForm({ ...materiaForm, toolAccess: value as ToolScopePreset });
+                  }
+                }}>
                   {TOOL_SCOPE_PRESET_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  {!isToolScopePreset(materiaForm.toolAccess) ? <option value="custom">custom allowlist ({materiaForm.toolAccess.tools.join(', ') || 'no tools'})</option> : null}
+                  <option value="custom">Custom allowlist</option>
                 </select>
+                <span className="materia-field-hint">Build enables all available tools; Read-Only enables read/search tools; None disables tools.</span>
               </label>
+              {!isToolScopePreset(materiaForm.toolAccess) ? (() => {
+                const customToolAccess = materiaForm.toolAccess;
+                return (
+                  <div className="graph-field materia-custom-tools" data-testid="materia-custom-tools-panel">
+                    <span>Custom tool allowlist</span>
+                    <div className="materia-tool-checkbox-list" aria-label="Custom tool allowlist">
+                      {TOOL_SCOPE_TOOL_OPTIONS.map((option) => {
+                        const checked = customToolAccess.tools.includes(option.value);
+                        return (
+                          <label key={option.value} className="graph-field-inline text-sm" title={option.description}>
+                            <input
+                              data-testid={`materia-tool-${option.value}`}
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                const tools = event.target.checked
+                                  ? [...customToolAccess.tools, option.value]
+                                  : customToolAccess.tools.filter((tool: string) => tool !== option.value);
+                                setMateriaForm({ ...materiaForm, toolAccess: { type: 'custom', tools } });
+                              }}
+                            />
+                            {option.label} <span className="materia-field-hint">({option.value})</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <label className="graph-field">Tool names
+                      <input
+                        data-testid="materia-custom-tools"
+                        value={customToolAccess.tools.join(', ')}
+                        onChange={(event) => setMateriaForm({ ...materiaForm, toolAccess: { type: 'custom', tools: parseCustomTools(event.target.value) } })}
+                        placeholder="read, grep, find, ls, bash"
+                      />
+                    </label>
+                    <span className="materia-field-hint">Custom allowlists are saved as explicit tool names, not as a preset. {TOOL_SCOPE_BASH_WARNING}</span>
+                  </div>
+                );
+              })() : null}
               <ColorPickerField form={form} colorPicker={colorPicker} />
               <div className="materia-toggle-row materia-settings-toggle-row" aria-label="Boolean materia controls">
               <label className="graph-field graph-field-inline text-sm">Multiturn

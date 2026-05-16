@@ -2,6 +2,7 @@ import { canonicalGeneratorConfigFor } from '../../../../../graph/generator.js';
 import { edgeConditionState } from '../../../../../graph/graphValidation.js';
 import { analyzeLoadoutGraph } from '../../../../../graph/loadoutGraphAnalysis.js';
 import { fromWebUiLoadoutDto } from '../../../../loadoutDto.js';
+import { formatToolScopeSpec } from '../../../../../domain/toolScope.js';
 import type { MateriaEdgeCondition } from '../../../../../types.js';
 import {
   extractMateriaReference,
@@ -209,7 +210,7 @@ export function buildSocketHoverDetails(id: string, socket?: PipelineSocket, def
     lines.push(`Materia: ${socket.materia}`);
     const definition = definitions?.[socket.materia];
     if (definition?.model) lines.push(`Model: ${definition.model}`);
-    if (definition?.tools) lines.push(`Tools: ${definition.tools}`);
+    if (definition?.tools) lines.push(`Tools: ${formatToolScopeSpec(definition.tools)}`);
     if (definition?.thinking) lines.push(`Thinking: ${definition.thinking}`);
     if (definition?.multiTurn !== undefined) lines.push(`Multi-turn: ${definition.multiTurn ? 'yes' : 'no'}`);
     const prompt = summarizeHoverText(definition?.prompt);

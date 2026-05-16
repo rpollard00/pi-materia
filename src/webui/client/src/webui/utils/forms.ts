@@ -1,4 +1,5 @@
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from '../../../../../graph/generator.js';
+import { TOOL_SCOPE_TOOL_NAMES, resolveToolScope } from '../../../../../domain/toolScope.js';
 import { materiaColorChoices, type MateriaConfig, type PipelineSocket, type SocketLayout } from '../../loadoutModel.js';
 import type { DragPayload, GeneratedListOutputConfig, MateriaFormState, SocketPropertyFormState } from '../types.js';
 
@@ -116,9 +117,11 @@ export function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
       },
     };
   }
+  const toolScope = resolveToolScope(form.toolAccess, TOOL_SCOPE_TOOL_NAMES, 'tools');
+  if (!toolScope.ok) throw new Error(`Invalid tool scope: ${toolScope.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}`);
   const agentDefinition = {
     type: 'agent',
-    tools: form.toolAccess,
+    tools: toolScope.value.spec,
     prompt: form.prompt,
     model: form.model.trim() || undefined,
     thinking: form.thinking.trim() || undefined,

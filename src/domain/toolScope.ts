@@ -4,13 +4,35 @@ export type ToolScopePreset = typeof TOOL_SCOPE_PRESETS[number];
 export interface ToolScopePresetOption {
   readonly value: ToolScopePreset;
   readonly label: string;
+  readonly description: string;
 }
 
 export const TOOL_SCOPE_PRESET_OPTIONS: readonly ToolScopePresetOption[] = Object.freeze([
-  Object.freeze({ value: "none", label: "none" }),
-  Object.freeze({ value: "readOnly", label: "read only" }),
-  Object.freeze({ value: "coding", label: "coding" }),
+  Object.freeze({ value: "coding", label: "Build", description: "All available Pi tools for code-producing agent work." }),
+  Object.freeze({ value: "readOnly", label: "Read-Only", description: "Read project files and search without direct edit/write tools." }),
+  Object.freeze({ value: "none", label: "None", description: "No Pi tools are enabled." }),
 ]);
+
+export interface ToolScopeToolOption {
+  readonly value: string;
+  readonly label: string;
+  readonly description: string;
+  readonly warning?: string;
+}
+
+export const TOOL_SCOPE_TOOL_OPTIONS: readonly ToolScopeToolOption[] = Object.freeze([
+  Object.freeze({ value: "read", label: "Read file", description: "Read text files and supported images." }),
+  Object.freeze({ value: "grep", label: "Search contents", description: "Search file contents for matching lines." }),
+  Object.freeze({ value: "find", label: "Find files", description: "Find files by glob pattern." }),
+  Object.freeze({ value: "ls", label: "List directory", description: "List directory contents." }),
+  Object.freeze({ value: "bash", label: "Run command", description: "Run shell commands such as tests.", warning: "Command execution is powerful and can mutate files; it is not a strict sandbox." }),
+  Object.freeze({ value: "edit", label: "Edit file", description: "Modify files with targeted replacements." }),
+  Object.freeze({ value: "write", label: "Write file", description: "Create or overwrite files." }),
+]);
+
+export const TOOL_SCOPE_TOOL_NAMES = TOOL_SCOPE_TOOL_OPTIONS.map((option) => option.value);
+
+export const TOOL_SCOPE_BASH_WARNING = "Command execution is powerful and can mutate files; it is not a strict sandbox.";
 
 export const READ_ONLY_TOOL_NAMES = ["read", "grep", "find", "ls"] as const;
 export type ReadOnlyToolName = typeof READ_ONLY_TOOL_NAMES[number];

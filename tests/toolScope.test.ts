@@ -35,7 +35,7 @@ describe("tool scope resolution", () => {
   });
 
   test("webui metadata consumes shared tool scope options and preserves custom allowlists", () => {
-    expect(TOOL_SCOPE_PRESET_OPTIONS.map((option) => option.value)).toEqual(["none", "readOnly", "coding"]);
+    expect(TOOL_SCOPE_PRESET_OPTIONS.map((option) => option.value)).toEqual(["coding", "readOnly", "none"]);
 
     const patch = buildMateriaPatch({
       ...emptyMateriaForm(),

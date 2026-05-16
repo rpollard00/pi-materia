@@ -13,7 +13,7 @@ const testConfig = {
   materia: {
     planner: { tools: 'none', prompt: 'Plan the work', generator: true },
     Build: { tools: 'coding', prompt: 'Build the work', model: 'openai/gpt-test' },
-    'Auto-Eval': { tools: 'readOnly', prompt: 'Evaluate the work' },
+    'Auto-Eval': { tools: { type: 'custom', tools: ['read', 'grep', 'find', 'ls', 'bash'] }, prompt: 'Evaluate the work' },
     Maintain: { tools: 'coding', prompt: 'Maintain the work' },
     interactivePlan: { tools: 'readOnly', prompt: 'Plan interactively', multiTurn: true },
   },
@@ -2927,6 +2927,49 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('materia-timeout')).toHaveProperty('value', '90000');
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/config', '/api/models']);
+  });
+
+  it('edits custom tool allowlists distinctly from presets', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Auto-Eval' } });
+    expect(screen.getByTestId('materia-tools')).toHaveProperty('value', 'custom');
+    expect(screen.getByTestId('materia-custom-tools-panel').textContent).toContain('Command execution is powerful');
+    expect(screen.getByTestId('materia-custom-tools')).toHaveProperty('value', 'read, grep, find, ls, bash');
+    fireEvent.click(screen.getByTestId('materia-tool-bash'));
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+
+    await waitForConfigPostCount(fetchMock, 1);
+    const body = configPostBody(fetchMock);
+    expect(body.config.materia['Auto-Eval'].tools).toEqual({ type: 'custom', tools: ['read', 'grep', 'find', 'ls'] });
+  });
+
+  it('surfaces invalid custom tool names before save completes', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByTestId('materia-custom-tools'), { target: { value: 'read, bsh' } });
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+
+    await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('unknown tool name(s): bsh'));
+    expect(fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(0);
   });
 
   it('edits existing prompt materia materia settings where supported', async () => {
