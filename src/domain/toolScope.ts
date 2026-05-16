@@ -47,7 +47,16 @@ export type ToolScopeSpec = ToolScopePreset | CustomToolScopeSpec;
 export interface ResolvedToolScope {
   readonly spec: ToolScopeSpec;
   readonly source: "preset" | "custom";
+  /** Active tool names to pass to Pi at runtime. Kept for backward-compatible callers. */
   readonly tools: readonly string[];
+  /** Tool names exactly configured by a custom scope; empty for presets. */
+  readonly configuredTools: readonly string[];
+  /** Deduped tool names currently available for activation. */
+  readonly activeTools: readonly string[];
+  /** Deduped configured custom names that are not currently available. */
+  readonly unavailableTools: readonly string[];
+  /** Soft availability warnings. Malformed scope errors are reported as issues instead. */
+  readonly warnings: readonly string[];
 }
 
 export interface ToolScopeIssue {
@@ -57,24 +66,47 @@ export interface ToolScopeIssue {
 
 export type ToolScopeResolution = { ok: true; value: ResolvedToolScope } | { ok: false; issues: ToolScopeIssue[] };
 
-export function resolveToolScope(spec: ToolScopeSpec, availableToolNames: readonly string[], path = "tools"): ToolScopeResolution {
-  const available = [...availableToolNames];
+export function resolveToolScope(spec: unknown, availableToolNames?: readonly string[], path = "tools"): ToolScopeResolution {
+  const shape = validateToolScopeSpecShape(spec, path);
+  if (!shape.ok) return shape;
+
+  const shapedSpec = shape.value;
+  const hasAvailableRegistry = availableToolNames !== undefined;
+  const available = [...(availableToolNames ?? [])];
   const availableSet = new Set(available);
 
-  if (isToolScopePreset(spec)) {
-    const tools = spec === "none"
+  if (isToolScopePreset(shapedSpec)) {
+    const tools = shapedSpec === "none"
       ? []
-      : spec === "readOnly"
+      : shapedSpec === "readOnly"
         ? available.filter((name) => (READ_ONLY_TOOL_NAMES as readonly string[]).includes(name))
         : available;
-    return { ok: true, value: freezeResolvedToolScope({ spec, source: "preset", tools }) };
+    return { ok: true, value: freezeResolvedToolScope({ spec: shapedSpec, source: "preset", tools, configuredTools: [], activeTools: tools, unavailableTools: [], warnings: [] }) };
   }
 
-  const validation = validateCustomToolScopeSpec(spec, availableSet, path);
-  if (!validation.ok) return validation;
+  const configuredTools = [...shapedSpec.tools];
+  const activeTools = hasAvailableRegistry
+    ? uniqueInOrder(configuredTools.filter((tool) => availableSet.has(tool)))
+    : uniqueInOrder(configuredTools);
+  const unavailableTools = hasAvailableRegistry
+    ? uniqueInOrder(configuredTools.filter((tool) => !availableSet.has(tool)))
+    : [];
+  const warnings = unavailableTools.length > 0
+    ? [`Unavailable custom tool name(s) will be skipped at runtime until registered: ${unavailableTools.join(", ")}`]
+    : [];
 
-  const tools = normalizeCustomToolNames(spec.tools, available);
-  return { ok: true, value: freezeResolvedToolScope({ spec: { type: "custom", tools }, source: "custom", tools }) };
+  return {
+    ok: true,
+    value: freezeResolvedToolScope({
+      spec: { type: "custom", tools: configuredTools },
+      source: "custom",
+      tools: activeTools,
+      configuredTools,
+      activeTools,
+      unavailableTools,
+      warnings,
+    }),
+  };
 }
 
 export type ToolScopeSpecShapeValidation = { ok: true; value: ToolScopeSpec } | { ok: false; issues: ToolScopeIssue[] };
@@ -105,25 +137,36 @@ export function validToolScopeShapeDescription(): string {
   return formatValidScopeShapes();
 }
 
-function validateCustomToolScopeSpec(spec: CustomToolScopeSpec, availableSet: ReadonlySet<string>, path: string): { ok: true } | { ok: false; issues: ToolScopeIssue[] } {
-  const shape = validateToolScopeSpecShape(spec, path);
-  if (!shape.ok) return shape;
-  const invalid = [...new Set(spec.tools)].filter((tool) => !availableSet.has(tool));
-  if (invalid.length > 0) {
-    const valid = [...availableSet].sort().join(", ") || "none";
-    return { ok: false, issues: [{ path: `${path}.tools`, message: `unknown tool name(s): ${invalid.join(", ")}. Valid tools: ${valid}` }] };
+function uniqueInOrder(names: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const name of names) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    unique.push(name);
   }
-  return { ok: true };
+  return unique;
 }
 
-function normalizeCustomToolNames(requestedTools: readonly string[], availableTools: readonly string[]): string[] {
-  const requested = new Set(requestedTools);
-  return availableTools.filter((name) => requested.has(name));
-}
-
-function freezeResolvedToolScope(scope: { spec: ToolScopeSpec; source: ResolvedToolScope["source"]; tools: string[] }): ResolvedToolScope {
+function freezeResolvedToolScope(scope: {
+  spec: ToolScopeSpec;
+  source: ResolvedToolScope["source"];
+  tools: string[];
+  configuredTools: string[];
+  activeTools: string[];
+  unavailableTools: string[];
+  warnings: string[];
+}): ResolvedToolScope {
   const spec = typeof scope.spec === "string" ? scope.spec : Object.freeze({ type: "custom" as const, tools: Object.freeze([...scope.spec.tools]) });
-  return Object.freeze({ spec, source: scope.source, tools: Object.freeze([...scope.tools]) });
+  return Object.freeze({
+    spec,
+    source: scope.source,
+    tools: Object.freeze([...scope.tools]),
+    configuredTools: Object.freeze([...scope.configuredTools]),
+    activeTools: Object.freeze([...scope.activeTools]),
+    unavailableTools: Object.freeze([...scope.unavailableTools]),
+    warnings: Object.freeze([...scope.warnings]),
+  });
 }
 
 function formatValidScopeShapes(): string {

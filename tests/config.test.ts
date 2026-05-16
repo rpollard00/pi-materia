@@ -436,7 +436,7 @@ describe("config loadouts", () => {
     const autoEval = rawDefault.materia?.["Auto-Eval"];
     expect(autoEval?.tools).toEqual({ type: "custom", tools: ["read", "grep", "find", "ls", "bash"] });
     const resolvedAutoEvalTools = resolveToolScope(autoEval.tools, ["read", "grep", "find", "ls", "bash", "edit", "write", "patch", "apply_patch"]);
-    expect(resolvedAutoEvalTools).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "find", "ls", "bash"] }, source: "custom", tools: ["read", "grep", "find", "ls", "bash"] } });
+    expect(resolvedAutoEvalTools).toMatchObject({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "find", "ls", "bash"] }, source: "custom", tools: ["read", "grep", "find", "ls", "bash"], configuredTools: ["read", "grep", "find", "ls", "bash"], activeTools: ["read", "grep", "find", "ls", "bash"], unavailableTools: [], warnings: [] } });
     if (resolvedAutoEvalTools.ok) {
       expect(resolvedAutoEvalTools.value.tools).not.toContain("edit");
       expect(resolvedAutoEvalTools.value.tools).not.toContain("write");
@@ -451,7 +451,7 @@ describe("config loadouts", () => {
     expect(autoEvalSocket?.socket.materia).toBe("Auto-Eval");
     expect(autoEvalSocket?.materia.prompt).toContain("Auto-Eval Materia materia");
     const socketTools = resolveToolScope(autoEvalSocket!.materia.tools, ["read", "grep", "find", "ls", "bash", "edit", "write", "patch", "apply_patch"]);
-    expect(socketTools).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "find", "ls", "bash"] }, source: "custom", tools: ["read", "grep", "find", "ls", "bash"] } });
+    expect(socketTools).toMatchObject({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "find", "ls", "bash"] }, source: "custom", tools: ["read", "grep", "find", "ls", "bash"], configuredTools: ["read", "grep", "find", "ls", "bash"], activeTools: ["read", "grep", "find", "ls", "bash"], unavailableTools: [], warnings: [] } });
 
     expect(rawDefault.materia?.planner).toBeUndefined();
     expect(rawDefault.materia?.interactivePlan).toBeUndefined();

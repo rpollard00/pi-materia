@@ -6,32 +6,56 @@ import { buildMateriaPatch, emptyMateriaForm } from "../src/webui/client/src/web
 const available = ["read", "grep", "find", "ls", "bash", "edit", "write"];
 
 describe("tool scope resolution", () => {
-  test("preserves existing preset behavior", () => {
-    expect(resolveToolScope("none", available)).toEqual({ ok: true, value: { spec: "none", source: "preset", tools: [] } });
-    expect(resolveToolScope("readOnly", available)).toEqual({ ok: true, value: { spec: "readOnly", source: "preset", tools: ["read", "grep", "find", "ls"] } });
-    expect(resolveToolScope("coding", available)).toEqual({ ok: true, value: { spec: "coding", source: "preset", tools: available } });
+  test("preserves existing preset behavior without custom availability warnings", () => {
+    expect(resolveToolScope("none", available)).toEqual({ ok: true, value: resolvedPreset("none", []) });
+    expect(resolveToolScope("readOnly", available)).toEqual({ ok: true, value: resolvedPreset("readOnly", ["read", "grep", "find", "ls"]) });
+    expect(resolveToolScope("coding", available)).toEqual({ ok: true, value: resolvedPreset("coding", available) });
   });
 
-  test("validates normalized custom allowlists without broad fallback", () => {
-    expect(resolveToolScope({ type: "custom", tools: ["read", "bash"] }, available)).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "bash"] }, source: "custom", tools: ["read", "bash"] } });
-    const invalid = resolveToolScope({ type: "custom", tools: ["bsh"] }, available, "materia.Build.tools");
-    expect(invalid.ok).toBe(false);
-    if (!invalid.ok) {
-      expect(invalid.issues[0]?.path).toBe("materia.Build.tools.tools");
-      expect(invalid.issues[0]?.message).toContain("bsh");
-      expect(invalid.issues[0]?.message).toContain("Valid tools: bash, edit, find, grep, ls, read, write");
-    }
+  test("treats unavailable custom tool names as soft availability metadata", () => {
+    expect(resolveToolScope({ type: "custom", tools: ["read", "extensionTool"] }, available)).toEqual({
+      ok: true,
+      value: resolvedCustom(["read", "extensionTool"], ["read"], ["extensionTool"]),
+    });
+  });
+
+  test("preserves exact configured custom names while activating only available names", () => {
+    expect(resolveToolScope({ type: "custom", tools: ["bash", "read"] }, available)).toEqual({
+      ok: true,
+      value: resolvedCustom(["bash", "read"], ["bash", "read"], []),
+    });
+    expect(resolveToolScope({ type: "custom", tools: ["read", "extensionTool"] })).toEqual({
+      ok: true,
+      value: resolvedCustom(["read", "extensionTool"], ["read", "extensionTool"], []),
+    });
   });
 
   test("handles empty and duplicate custom allowlists deterministically", () => {
-    expect(resolveToolScope({ type: "custom", tools: [] }, available)).toEqual({ ok: true, value: { spec: { type: "custom", tools: [] }, source: "custom", tools: [] } });
-    expect(resolveToolScope({ type: "custom", tools: ["bash", "read", "bash", "grep"] }, available)).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "bash"] }, source: "custom", tools: ["read", "grep", "bash"] } });
+    expect(resolveToolScope({ type: "custom", tools: [] }, available)).toEqual({ ok: true, value: resolvedCustom([], [], []) });
+    expect(resolveToolScope({ type: "custom", tools: ["bash", "read", "bash", "grep", "missing", "missing"] }, available)).toEqual({
+      ok: true,
+      value: resolvedCustom(["bash", "read", "bash", "grep", "missing", "missing"], ["bash", "read", "grep"], ["missing"]),
+    });
   });
 
-  test("rejects malformed tool scope shape", () => {
-    const invalid = validateToolScopeSpecShape(["read"], "materia.Build.tools");
-    expect(invalid.ok).toBe(false);
-    if (!invalid.ok) expect(invalid.issues[0]?.path).toBe("materia.Build.tools");
+  test("rejects malformed tool scope shapes", () => {
+    const cases: Array<[unknown, string]> = [
+      [["read"], "materia.Build.tools"],
+      [{ type: "unknown", tools: ["read"] }, "materia.Build.tools.type"],
+      [{ type: "custom", tools: "read" }, "materia.Build.tools.tools"],
+      [{ type: "custom", tools: ["read", 1] }, "materia.Build.tools.tools"],
+      [{ type: "custom", tools: ["read", "  "] }, "materia.Build.tools.tools"],
+    ];
+
+    for (const [value, issuePath] of cases) {
+      const invalid = validateToolScopeSpecShape(value, "materia.Build.tools");
+      expect(invalid.ok).toBe(false);
+      if (!invalid.ok) expect(invalid.issues[0]?.path).toBe(issuePath);
+
+      const resolved = resolveToolScope(value, available, "materia.Build.tools");
+      expect(resolved.ok).toBe(false);
+      if (!resolved.ok) expect(resolved.issues[0]?.path).toBe(issuePath);
+    }
   });
 
   test("webui metadata consumes shared tool scope options and preserves custom allowlists", () => {
@@ -56,17 +80,35 @@ describe("tool scope resolution", () => {
 
     updateToolScope(pi as never, { tools: { type: "custom", tools: ["bash", "read"] }, prompt: "Evaluate." });
 
-    expect(pi.activeTools).toEqual(["read", "bash"]);
+    expect(pi.activeTools).toEqual(["bash", "read"]);
   });
 
-  test("runtime fails closed for invalid custom allowlists", () => {
+  test("runtime fails closed for malformed custom allowlists", () => {
     const pi = {
       getAllTools: () => available.map((name) => ({ name })),
       setActiveTools: (tools: string[]) => { pi.activeTools = tools; },
       activeTools: ["read"] as string[],
     };
 
-    expect(() => updateToolScope(pi as never, { tools: { type: "custom", tools: ["bsh"] }, prompt: "Evaluate." })).toThrow(/Invalid materia tool scope: .*bsh/);
+    expect(() => updateToolScope(pi as never, { tools: { type: "custom", tools: [" "] }, prompt: "Evaluate." })).toThrow(/Invalid materia tool scope: .*non-empty tool names/);
     expect(pi.activeTools).toEqual(["read"]);
   });
 });
+
+function resolvedPreset(spec: "none" | "readOnly" | "coding", tools: readonly string[]) {
+  return { spec, source: "preset", tools, configuredTools: [], activeTools: tools, unavailableTools: [], warnings: [] };
+}
+
+function resolvedCustom(configuredTools: readonly string[], activeTools: readonly string[], unavailableTools: readonly string[]) {
+  return {
+    spec: { type: "custom", tools: configuredTools },
+    source: "custom",
+    tools: activeTools,
+    configuredTools,
+    activeTools,
+    unavailableTools,
+    warnings: unavailableTools.length > 0
+      ? [`Unavailable custom tool name(s) will be skipped at runtime until registered: ${unavailableTools.join(", ")}`]
+      : [],
+  };
+}
