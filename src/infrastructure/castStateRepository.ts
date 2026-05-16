@@ -38,16 +38,16 @@ export function listLatestCastStates(ctx: ExtensionContext): MateriaCastState[] 
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "custom" || entry.customType !== MATERIA_CAST_STATE_ENTRY || !entry.data) continue;
-    const state = entry.data as MateriaCastState;
-    if (seenCastIds.has(state.castId)) continue;
+    const state = cloneCastState(entry.data as MateriaCastState);
+    if (!state.castId || seenCastIds.has(state.castId)) continue;
     seenCastIds.add(state.castId);
     states.push(state);
   }
-  return states;
+  return states.sort(compareCastStatesNewestFirst);
 }
 
 export function listResumableCastStates(ctx: ExtensionContext): MateriaCastState[] {
-  return listLatestCastStates(ctx).filter((state) => !state.active && state.phase !== "complete" && state.socketState !== "complete" && (state.phase === "failed" || state.socketState === "failed"));
+  return listLatestCastStates(ctx).filter(isResumableCastState);
 }
 
 export function listRevivableCastStates(ctx: ExtensionContext): MateriaCastState[] {
@@ -61,7 +61,7 @@ export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | u
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "custom" || entry.customType !== MATERIA_CAST_STATE_ENTRY || !entry.data) continue;
-    const state = entry.data as MateriaCastState;
+    const state = cloneCastState(entry.data as MateriaCastState);
     if (!latest) latest = state;
     if (seenCastIds.has(state.castId)) continue;
     seenCastIds.add(state.castId);
@@ -72,7 +72,7 @@ export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | u
 
 export function saveCastState(pi: ExtensionAPI, state: MateriaCastState): void {
   state.updatedAt = Date.now();
-  pi.appendEntry(MATERIA_CAST_STATE_ENTRY, state);
+  pi.appendEntry(MATERIA_CAST_STATE_ENTRY, cloneCastState(state));
 }
 
 export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason = "aborted"): MateriaCastState {
@@ -87,8 +87,12 @@ export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason
   return state;
 }
 
+function isResumableCastState(state: MateriaCastState): boolean {
+  return !state.active && state.phase !== "complete" && state.socketState !== "complete" && (state.phase === "failed" || state.socketState === "failed");
+}
+
 function isRevivableCastState(state: MateriaCastState): boolean {
-  if (state.active || (state.phase !== "failed" && state.socketState !== "failed")) return false;
+  if (!isResumableCastState(state)) return false;
   const exhaustion = state.recoveryExhaustion;
   if (!exhaustion || exhaustion.kind !== "same_socket_recovery_exhausted" || !exhaustion.key) return false;
   if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
@@ -99,4 +103,20 @@ function isRevivableCastState(state: MateriaCastState): boolean {
     Number.isSafeInteger(allowance.effectiveMaxAttempts) && allowance.effectiveMaxAttempts >= allowance.originalMaxAttempts &&
     Number.isSafeInteger(allowance.reviveCount) && allowance.reviveCount >= 0
   );
+}
+
+function compareCastStatesNewestFirst(a: MateriaCastState, b: MateriaCastState): number {
+  const byUpdatedAt = safeTime(b.updatedAt) - safeTime(a.updatedAt);
+  if (byUpdatedAt !== 0) return byUpdatedAt;
+  const byStartedAt = safeTime(b.startedAt) - safeTime(a.startedAt);
+  if (byStartedAt !== 0) return byStartedAt;
+  return b.castId.localeCompare(a.castId);
+}
+
+function safeTime(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function cloneCastState(state: MateriaCastState): MateriaCastState {
+  return structuredClone(state) as MateriaCastState;
 }

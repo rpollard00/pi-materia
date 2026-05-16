@@ -219,8 +219,8 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error);
       return;
     }
-    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { allowGenericTurnFailure: true });
-    if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error));
+    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { allowGenericTurnFailure: shouldRetryGenericTurnFailure(error) });
+    if (!recovered) await failCast(pi, ctx, state, error);
     return;
   }
 
@@ -237,8 +237,8 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error, { entryId: latest.entry.id });
       return;
     }
-    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id, allowGenericTurnFailure: true });
-    if (!recovered) await failCast(pi, ctx, state, nonRecoverableTurnError(state, error), latest.entry.id);
+    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id, allowGenericTurnFailure: shouldRetryGenericTurnFailure(error) });
+    if (!recovered) await failCast(pi, ctx, state, error, latest.entry.id);
     return;
   }
 
@@ -418,6 +418,11 @@ async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, 
   saveCastState(pi, state);
   updateWidget(ctx, state);
   ctx.ui.notify(`pi-materia warning: ${state.runState.lastMessage}`, "warning");
+}
+
+function shouldRetryGenericTurnFailure(error: unknown): boolean {
+  const message = errorMessage(error);
+  return /\b(?:auth|invalid[_ -]?request|provider rejected|different provider failure)\b/i.test(message);
 }
 
 async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string; allowGenericTurnFailure?: boolean } = {}): Promise<boolean> {
