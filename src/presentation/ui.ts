@@ -19,12 +19,17 @@ import type {
 
 const WIDGET_MAX_LINE_LENGTH = 78;
 type MateriaWidgetState = MateriaRunState | MateriaCastState;
-type WidgetOwner = { runId: string; state: MateriaWidgetState };
-const widgetOwners = new WeakMap<ExtensionContext, WidgetOwner>();
-const widgetTickers = new WeakMap<
-  ExtensionContext,
-  ReturnType<typeof setInterval>
->();
+type WidgetOwner = {
+  ctx: ExtensionContext;
+  runId: string;
+  state: MateriaWidgetState;
+  identity: string;
+  freshness?: number;
+};
+const widgetOwners = new Map<string, WidgetOwner>();
+const widgetTickers = new Map<string, ReturnType<typeof setInterval>>();
+const fallbackWidgetScopes = new WeakMap<ExtensionContext, string>();
+let nextFallbackWidgetScope = 1;
 
 export function updateWidget(
   ctx: ExtensionContext,
@@ -32,15 +37,19 @@ export function updateWidget(
   options: { replaceOwner?: boolean } = {},
 ): void {
   const runState = widgetRunState(state);
-  const owner = widgetOwners.get(ctx);
+  const scope = getMateriaWidgetScope(ctx);
+  const owner = widgetOwners.get(scope);
+  const identity = widgetIdentity(state);
+  const freshness = widgetFreshness(state);
   if (owner && owner.runId !== runState.runId && !options.replaceOwner) return;
+  if (owner && owner.runId === runState.runId && isOlderFreshness(freshness, owner.freshness)) return;
 
-  if (!owner || owner.runId !== runState.runId) {
+  if (!owner || owner.runId !== runState.runId || owner.ctx !== ctx) {
     stopWidgetTicker(ctx);
     clearMateriaAuxiliaryWidgets(ctx);
   }
 
-  widgetOwners.set(ctx, { runId: runState.runId, state });
+  widgetOwners.set(scope, { ctx, runId: runState.runId, state, identity, freshness });
   ctx.ui.setWidget("materia", renderMateriaWidgetState(state), {
     placement: "belowEditor",
   });
@@ -55,19 +64,19 @@ export function updateWidget(
 
 export function clearWidgetTicker(ctx: ExtensionContext): void {
   stopWidgetTicker(ctx);
-  widgetOwners.delete(ctx);
+  widgetOwners.delete(getMateriaWidgetScope(ctx));
 }
 
 export function syncConfiguredLoadoutWidget(
   ctx: ExtensionContext,
   loadoutName: string,
 ): boolean {
-  const owner = widgetOwners.get(ctx);
+  const owner = widgetOwners.get(getMateriaWidgetScope(ctx));
   if (owner && widgetRunState(owner.state).endedAt === undefined) return false;
 
   if (owner) {
     owner.state = withWidgetLoadout(owner.state, loadoutName);
-    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), {
+    owner.ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), {
       placement: "belowEditor",
     });
     return true;
@@ -80,9 +89,10 @@ export function syncConfiguredLoadoutWidget(
 }
 
 function startWidgetTicker(ctx: ExtensionContext, runId: string): void {
-  if (widgetTickers.has(ctx)) return;
+  const scope = getMateriaWidgetScope(ctx);
+  if (widgetTickers.has(scope)) return;
   const ticker = setInterval(() => {
-    const owner = widgetOwners.get(ctx);
+    const owner = widgetOwners.get(scope);
     if (!owner || owner.runId !== runId) {
       stopWidgetTicker(ctx, runId);
       return;
@@ -91,19 +101,57 @@ function startWidgetTicker(ctx: ExtensionContext, runId: string): void {
       stopWidgetTicker(ctx, runId);
       return;
     }
-    ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), {
+    owner.ctx.ui.setWidget("materia", renderMateriaWidgetState(owner.state), {
       placement: "belowEditor",
     });
   }, 5000);
   ticker.unref?.();
-  widgetTickers.set(ctx, ticker);
+  widgetTickers.set(scope, ticker);
 }
 
 function stopWidgetTicker(ctx: ExtensionContext, runId?: string): void {
-  if (runId !== undefined && widgetOwners.get(ctx)?.runId !== runId) return;
-  const ticker = widgetTickers.get(ctx);
+  const scope = getMateriaWidgetScope(ctx);
+  if (runId !== undefined && widgetOwners.get(scope)?.runId !== runId) return;
+  const ticker = widgetTickers.get(scope);
   if (ticker) clearInterval(ticker);
-  widgetTickers.delete(ctx);
+  widgetTickers.delete(scope);
+}
+
+function getMateriaWidgetScope(ctx: ExtensionContext): string {
+  const sessionManager = (ctx as ExtensionContext & { sessionManager?: { getSessionFile?: () => string | undefined; getSessionId?: () => string | undefined } }).sessionManager;
+  const sessionFile = sessionManager?.getSessionFile?.();
+  if (sessionFile) return `materia:${sessionFile}`;
+  const sessionId = sessionManager?.getSessionId?.();
+  if (sessionId) return `materia:${sessionId}`;
+  let fallback = fallbackWidgetScopes.get(ctx);
+  if (!fallback) {
+    fallback = `materia:ctx-${nextFallbackWidgetScope++}`;
+    fallbackWidgetScopes.set(ctx, fallback);
+  }
+  return fallback;
+}
+
+function widgetIdentity(state: MateriaWidgetState): string {
+  if (isMateriaCastWidgetState(state)) return `cast:${state.castId ?? state.runState.runId}`;
+  return `run:${state.runId}`;
+}
+
+function widgetFreshness(state: MateriaWidgetState): number | undefined {
+  if (isMateriaCastWidgetState(state)) return toTimestamp(state.updatedAt) ?? toTimestamp(state.runState.endedAt) ?? toTimestamp(state.runState.startedAt);
+  return toTimestamp(state.endedAt) ?? toTimestamp(state.startedAt);
+}
+
+function toTimestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" || value instanceof Date) {
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) ? time : undefined;
+  }
+  return undefined;
+}
+
+function isOlderFreshness(incoming: number | undefined, current: number | undefined): boolean {
+  return incoming !== undefined && current !== undefined && incoming < current;
 }
 
 function isMateriaCastWidgetState(

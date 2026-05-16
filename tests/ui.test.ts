@@ -354,6 +354,110 @@ describe("persistent Materia widget formatting", () => {
 });
 
 describe("persistent Materia widget ticker ownership", () => {
+  test("stale ticker callbacks cannot restore an older same-session cast snapshot", () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const intervals: Array<{ handle: { id: number; unref: () => void }; cleared: boolean; fn: () => void }> = [];
+    let nextId = 1;
+    (globalThis as any).setInterval = (fn: () => void) => {
+      const handle = { id: nextId++, unref: () => undefined };
+      intervals.push({ handle, cleared: false, fn });
+      return handle;
+    };
+    (globalThis as any).clearInterval = (handle: { id: number }) => {
+      const interval = intervals.find((entry) => entry.handle.id === handle.id);
+      if (interval) interval.cleared = true;
+    };
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const makeCtx = () => ({
+      sessionManager: { getSessionFile: () => "/tmp/stable-session.jsonl", getSessionId: () => "stable-session" },
+      ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) },
+    }) as any;
+    const run = runState({ runId: "same-run", loadoutName: "Hojo", attempt: 1 });
+    const earlier = loopCastState({
+      castId: "cast-1",
+      currentSocketId: "Socket-1",
+      currentMateria: "Interactive-Plan",
+      currentItemLabel: "FEATURE: More granular tool availability",
+      phase: "Socket-1",
+      updatedAt: 1_000,
+      runState: { ...run, currentSocketId: "Socket-1", currentMateria: "Interactive-Plan", currentTask: "FEATURE: More granular tool availability" },
+    });
+    const later = loopCastState({
+      castId: "cast-1",
+      currentSocketId: "Socket-1",
+      currentMateria: "Build",
+      currentItemLabel: "Map and normalize current materia widget state",
+      phase: "Socket-1",
+      updatedAt: 2_000,
+      runState: { ...run, currentSocketId: "Socket-1", currentMateria: "Build", currentTask: "Map and normalize current materia widget state" },
+    });
+
+    try {
+      const firstCtx = makeCtx();
+      updateWidget(firstCtx, earlier, { replaceOwner: true });
+      const staleTick = intervals[0].fn;
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("Interactive-Plan");
+
+      const secondCtx = makeCtx();
+      updateWidget(secondCtx, later, { replaceOwner: true });
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("Build");
+
+      staleTick();
+      const text = widgets.at(-1)?.value?.join("\n") ?? "";
+      expect(text).toContain("Build");
+      expect(text).not.toContain("Interactive-Plan");
+      expect(intervals.filter((interval) => !interval.cleared)).toHaveLength(1);
+    } finally {
+      clearWidgetTicker(makeCtx());
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+  });
+
+  test("ignores older same-run cast freshness updates", () => {
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    (globalThis as any).setInterval = () => ({ unref: () => undefined });
+    (globalThis as any).clearInterval = () => undefined;
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = {
+      sessionManager: { getSessionFile: () => "/tmp/freshness-session.jsonl", getSessionId: () => "freshness-session" },
+      ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) },
+    } as any;
+    const run = runState({ runId: "same-run", loadoutName: "Hojo", attempt: 1 });
+    const newer = loopCastState({
+      castId: "cast-1",
+      currentMateria: "Build",
+      currentItemLabel: "newer Build work",
+      updatedAt: 5_000,
+      runState: { ...run, currentMateria: "Build", currentTask: "newer Build work" },
+    });
+    const older = loopCastState({
+      castId: "cast-1",
+      currentMateria: "Interactive-Plan",
+      currentItemLabel: "older planning work",
+      updatedAt: 4_000,
+      runState: { ...run, currentMateria: "Interactive-Plan", currentTask: "older planning work" },
+    });
+
+    try {
+      updateWidget(ctx, newer, { replaceOwner: true });
+      const acceptedText = widgets.at(-1)?.value?.join("\n") ?? "";
+      expect(acceptedText).toContain("Build");
+
+      updateWidget(ctx, older);
+      expect(widgets.at(-1)?.value?.join("\n")).toBe(acceptedText);
+      expect(widgets.at(-1)?.value?.join("\n")).not.toContain("Interactive-Plan");
+    } finally {
+      clearWidgetTicker(ctx);
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+  });
+
   test("replaces prior terminal status when a new active cast becomes current", () => {
     const originalSetInterval = globalThis.setInterval;
     const originalClearInterval = globalThis.clearInterval;
