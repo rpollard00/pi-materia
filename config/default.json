@@ -272,7 +272,7 @@
           "assign": {
             "workItems": "$.workItems"
           },
-          "materia": "interactivePlan",
+          "materia": "Interactive-Plan",
           "edges": [
             {
               "when": "always",
