@@ -86,9 +86,7 @@ export function syncConfiguredLoadoutWidget(
     return true;
   }
 
-  ctx.ui.setWidget("materia", renderConfiguredLoadoutWidget(loadoutName), {
-    placement: "belowEditor",
-  });
+  setMateriaWidgetLines(ctx, renderConfiguredLoadoutWidget(loadoutName));
   return true;
 }
 
@@ -125,7 +123,14 @@ function acceptMateriaWidgetState(
 
 function renderMateriaWidgetController(controller: MateriaWidgetController): void {
   controller.lines = renderMateriaWidgetState(controller.state);
-  controller.ctx.ui.setWidget("materia", controller.lines, {
+  setMateriaWidgetLines(controller.ctx, controller.lines);
+}
+
+function setMateriaWidgetLines(
+  ctx: ExtensionContext,
+  lines: string[] | undefined,
+): void {
+  ctx.ui.setWidget("materia", lines, {
     placement: "belowEditor",
   });
 }
