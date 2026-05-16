@@ -1,5 +1,5 @@
-import { READ_ONLY_TOOL_NAMES, TOOL_SCOPE_BASH_WARNING, TOOL_SCOPE_PRESET_OPTIONS, TOOL_SCOPE_TOOL_OPTIONS, isToolScopePreset, type ToolScopePreset } from '../../../../../../domain/toolScope.js';
-import type { MateriaFormState, SaveTarget } from '../../types.js';
+import { READ_ONLY_TOOL_NAMES, TOOL_SCOPE_BASH_WARNING, TOOL_SCOPE_PRESET_OPTIONS, TOOL_SCOPE_TOOL_OPTIONS, isToolScopePreset, type ToolScopePreset, type ToolScopeToolOption } from '../../../../../../domain/toolScope.js';
+import type { MateriaFormState, SaveTarget, ToolRegistrySnapshot } from '../../types.js';
 import { thinkingLabel } from '../../utils/modelCatalog.js';
 import { ColorPickerField } from './ColorPickerField.js';
 import type { MateriaEditorController } from './useMateriaEditorController.js';
@@ -8,9 +8,24 @@ interface MateriaEditorSettingsSectionProps {
   form: MateriaEditorController['form'];
   modelOptions: MateriaEditorController['modelOptions'];
   colorPicker: MateriaEditorController['colorPicker'];
+  toolRegistry?: ToolRegistrySnapshot;
 }
 
 const allCustomToolNames = TOOL_SCOPE_TOOL_OPTIONS.map((option) => option.value);
+const builtinToolOptionsByName = new Map(TOOL_SCOPE_TOOL_OPTIONS.map((option) => [option.value, option]));
+
+function customToolOptions(toolRegistry?: ToolRegistrySnapshot, configuredTools: readonly string[] = []): ToolScopeToolOption[] {
+  const knownNames = Array.from(new Set([
+    ...TOOL_SCOPE_TOOL_OPTIONS.map((option) => option.value),
+    ...(toolRegistry?.available ? toolRegistry.tools ?? [] : []),
+    ...configuredTools.filter((tool) => builtinToolOptionsByName.has(tool)),
+  ]));
+  return knownNames.map((name) => builtinToolOptionsByName.get(name) ?? {
+    value: name,
+    label: name,
+    description: 'Live Pi tool registered for this session.',
+  });
+}
 
 function customToolsForPreset(preset: ToolScopePreset): string[] {
   if (preset === 'none') return [];
@@ -22,7 +37,7 @@ function parseCustomTools(raw: string): string[] {
   return raw.split(/[\s,]+/).map((tool) => tool.trim()).filter(Boolean);
 }
 
-export function MateriaEditorSettingsSection({ form, modelOptions: modelSection, colorPicker }: MateriaEditorSettingsSectionProps) {
+export function MateriaEditorSettingsSection({ form, modelOptions: modelSection, colorPicker, toolRegistry }: MateriaEditorSettingsSectionProps) {
   const {
     editableDefinitionIds, materiaForm, setMateriaForm, editMateria, handleMateriaModelChange, resetMateriaEditorForm,
   } = form;
@@ -102,11 +117,13 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
               </label>
               {!isToolScopePreset(materiaForm.toolAccess) ? (() => {
                 const customToolAccess = materiaForm.toolAccess;
+                const selectableToolOptions = customToolOptions(toolRegistry, customToolAccess.tools);
+                const unavailableConfiguredTools = toolRegistry?.available ? customToolAccess.tools.filter((tool) => !(toolRegistry.tools ?? []).includes(tool)) : [];
                 return (
                   <div className="graph-field materia-custom-tools" data-testid="materia-custom-tools-panel">
                     <span>Custom tool allowlist</span>
                     <div className="materia-tool-checkbox-list" aria-label="Custom tool allowlist">
-                      {TOOL_SCOPE_TOOL_OPTIONS.map((option) => {
+                      {selectableToolOptions.map((option) => {
                         const checked = customToolAccess.tools.includes(option.value);
                         return (
                           <label key={option.value} className="graph-field-inline text-sm" title={option.description}>
@@ -134,6 +151,10 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
                         placeholder="read, grep, find, ls, bash"
                       />
                     </label>
+                    <span className="materia-field-hint" data-testid="materia-tool-registry-status">
+                      {toolRegistry?.available ? `${toolRegistry.tools?.length ?? 0} live Pi tool${(toolRegistry.tools?.length ?? 0) === 1 ? '' : 's'} available for this session.` : 'Live Pi tool registry unavailable; using built-in tool metadata only.'}
+                    </span>
+                    {unavailableConfiguredTools.length > 0 ? <span className="materia-field-hint" data-testid="materia-custom-tools-warning">Unavailable in this session: {unavailableConfiguredTools.join(', ')}. Save is allowed; runtime will skip them until registered.</span> : null}
                     <span className="materia-field-hint">Custom allowlists are saved as explicit tool names, not as a preset. {TOOL_SCOPE_BASH_WARNING}</span>
                   </div>
                 );

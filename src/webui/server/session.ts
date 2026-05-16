@@ -14,6 +14,13 @@ export interface MateriaMonitorEventEntry {
   data?: unknown;
 }
 
+export interface MateriaToolRegistrySnapshot {
+  ok: boolean;
+  available: boolean;
+  tools: string[];
+  warnings?: string[];
+}
+
 export interface MateriaWebUiSessionSnapshot {
   ok: true;
   scope: 'session';
@@ -28,6 +35,8 @@ export interface MateriaWebUiSessionSnapshot {
   /** Canonical runtime active loadout id/name for WebUI/TUI synchronization. */
   activeLoadoutId?: string;
   activeLoadout?: string;
+  /** Additive live Pi tool registry metadata for editor affordances; omitted by older/fallback sessions. */
+  toolRegistry?: MateriaToolRegistrySnapshot;
   artifactSummary?: {
     runDir?: string;
     request?: string;

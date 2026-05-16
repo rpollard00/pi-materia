@@ -5,7 +5,7 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { clearStaleDefaultLoadoutPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch } from "../config/config.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
@@ -133,7 +133,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       sessionFile,
       sessionId,
       startedAt,
-      getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt, configuredPath),
+      getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt, configuredPath, pi),
       getConfig: () => loadConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
@@ -282,7 +282,7 @@ function listen(server: RunningWebUiServer["server"], host: string, port: number
   });
 }
 
-async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiStartedAt: number, configuredPath?: string): Promise<MateriaWebUiSessionSnapshot> {
+async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiStartedAt: number, configuredPath?: string, pi?: ExtensionAPI): Promise<MateriaWebUiSessionSnapshot> {
   const state = loadActiveCastState(ctx);
   const artifactSummary = state?.runDir ? await readArtifactSummary(state.runDir) : undefined;
   const activeLoadoutSnapshot = await readActiveLoadoutSnapshot(ctx.cwd, configuredPath);
@@ -298,6 +298,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
     now: Date.now(),
     emittedOutputs: readSessionEmittedOutputs(ctx, uiStartedAt),
     ...activeLoadoutSnapshot,
+    toolRegistry: readPiToolRegistry(pi),
     artifactSummary,
     activeCast: state ? {
       castId: state.castId,
@@ -313,6 +314,23 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
       updatedAt: state.updatedAt,
     } : undefined,
   };
+}
+
+function readPiToolRegistry(pi?: ExtensionAPI): MateriaToolRegistrySnapshot {
+  if (!pi) {
+    return { ok: false, available: false, tools: [], warnings: ["Pi tool registry is unavailable for this WebUI session."] };
+  }
+  try {
+    const names = pi.getAllTools().map((tool) => tool.name).filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+    return { ok: true, available: true, tools: Array.from(new Set(names)) };
+  } catch (error) {
+    return {
+      ok: false,
+      available: false,
+      tools: [],
+      warnings: [`Pi tool registry is unavailable: ${error instanceof Error ? error.message : String(error)}`],
+    };
+  }
 }
 
 async function readActiveLoadoutSnapshot(cwd: string, configuredPath?: string): Promise<Pick<MateriaWebUiSessionSnapshot, "activeLoadoutId" | "activeLoadout">> {
@@ -442,6 +460,8 @@ export const webUiLauncherTestInternals = {
   ensureMateriaWebUiBuilt,
   resetMateriaWebUiBuildPromise,
   createActiveLoadoutSetter,
+  currentSessionSnapshot,
+  readPiToolRegistry,
   loadMateriaWebUiProfileConfig: loadProfileConfig,
   webUiSessionKey,
 };

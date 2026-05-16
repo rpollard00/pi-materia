@@ -2952,7 +2952,7 @@ describe('Materia loadout grid editor', () => {
     expect(body.config.materia['Auto-Eval'].tools).toEqual({ type: 'custom', tools: ['read', 'grep', 'find', 'ls'] });
   });
 
-  it('surfaces invalid custom tool names before save completes', async () => {
+  it('saves portable custom tool names even when live registry metadata is unavailable', async () => {
     const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
@@ -2966,10 +2966,43 @@ describe('Materia loadout grid editor', () => {
     fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'custom' } });
     fireEvent.change(screen.getByTestId('materia-custom-tools'), { target: { value: 'read, bsh' } });
+    expect(screen.getByTestId('materia-tool-registry-status').textContent).toContain('Live Pi tool registry unavailable');
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
-    await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('unknown tool name(s): bsh'));
-    expect(fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(0);
+    await waitForConfigPostCount(fetchMock, 1);
+    const body = configPostBody(fetchMock);
+    expect(body.config.materia.Build.tools).toEqual({ type: 'custom', tools: ['read', 'bsh'] });
+  });
+
+  it('uses live tool registry metadata to show extension tools and warn about unavailable names', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
+    (config.materia as Record<string, any>).Build = { ...config.materia.Build, tools: { type: 'custom', tools: ['read', 'extensionTool', 'staleTool'] } };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('EventSource', class {
+      private listeners = new Map<string, (event: MessageEvent) => void>();
+      constructor(_url: string) {
+        queueMicrotask(() => this.listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({ ok: true, toolRegistry: { ok: true, available: true, tools: ['read', 'extensionTool'] } }) })));
+      }
+      addEventListener(type: string, listener: EventListener) { this.listeners.set(type, listener as (event: MessageEvent) => void); }
+      close() { this.listeners.clear(); }
+    });
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await waitFor(() => expect(screen.getByTestId('materia-tool-extensionTool')).toBeTruthy());
+    expect(screen.getByTestId('materia-tool-extensionTool')).toHaveProperty('checked', true);
+    expect(screen.getByTestId('materia-tool-registry-status').textContent).toContain('2 live Pi tools');
+    expect(screen.getByTestId('materia-custom-tools-warning').textContent).toContain('staleTool');
+    fireEvent.click(screen.getByTestId('save-materia-form'));
+
+    await waitForConfigPostCount(fetchMock, 1);
+    expect(configPostBody(fetchMock).config.materia.Build.tools).toEqual({ type: 'custom', tools: ['read', 'extensionTool', 'staleTool'] });
   });
 
   it('edits existing prompt materia materia settings where supported', async () => {

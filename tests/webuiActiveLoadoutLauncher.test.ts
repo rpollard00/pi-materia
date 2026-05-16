@@ -104,4 +104,22 @@ describe("WebUI active loadout launcher callback", () => {
 
     expect(webUiLauncherTestInternals.createActiveLoadoutSetter(harness.ctx, undefined, undefined)).toBeUndefined();
   });
+
+  test("session snapshot reads live Pi tool names from getAllTools", async () => {
+    const harness = new FakePiHarness();
+    harness.allTools = [{ name: "read" }, { name: "extensionTool" }, { name: "read" }];
+
+    const snapshot = await webUiLauncherTestInternals.currentSessionSnapshot(harness.ctx, "session-key", Date.now(), undefined, harness.pi);
+
+    expect(snapshot.toolRegistry).toEqual({ ok: true, available: true, tools: ["read", "extensionTool"] });
+  });
+
+  test("session snapshot reports unavailable registry when Pi access is absent", async () => {
+    const harness = new FakePiHarness();
+
+    const snapshot = await webUiLauncherTestInternals.currentSessionSnapshot(harness.ctx, "session-key", Date.now(), undefined, undefined);
+
+    expect(snapshot.toolRegistry).toMatchObject({ ok: false, available: false, tools: [] });
+    expect(snapshot.toolRegistry?.warnings?.join("\n")).toContain("unavailable");
+  });
 });

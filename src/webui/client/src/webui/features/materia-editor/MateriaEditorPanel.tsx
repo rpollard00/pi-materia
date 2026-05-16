@@ -3,12 +3,14 @@ import { MateriaEditorSettingsSection } from './MateriaEditorSettingsSection.js'
 import { MateriaPromptFields } from './MateriaPromptFields.js';
 import { RoleGenerationSection } from './RoleGenerationSection.js';
 import type { MateriaEditorController } from './useMateriaEditorController.js';
+import type { ToolRegistrySnapshot } from '../../types.js';
 
 interface MateriaEditorPanelProps {
   controller: MateriaEditorController;
+  toolRegistry?: ToolRegistrySnapshot;
 }
 
-export function MateriaEditorPanel({ controller }: MateriaEditorPanelProps) {
+export function MateriaEditorPanel({ controller, toolRegistry }: MateriaEditorPanelProps) {
   const { form, modelOptions, colorPicker, roleGeneration, persistence } = controller;
   const { materiaForm } = form;
 
@@ -20,7 +22,7 @@ export function MateriaEditorPanel({ controller }: MateriaEditorPanelProps) {
         <p className="mt-2 max-w-4xl text-sm text-slate-400">Forge reusable prompt materia or tool-invocation materia as staged definition edits. The form defaults to user profile persistence; choose Project only when you intentionally want repository-scoped materia.</p>
       </div>
 
-      <MateriaEditorSettingsSection form={form} modelOptions={modelOptions} colorPicker={colorPicker} />
+      <MateriaEditorSettingsSection form={form} modelOptions={modelOptions} colorPicker={colorPicker} toolRegistry={toolRegistry} />
 
       {materiaForm.behavior === 'prompt' && <RoleGenerationSection roleGeneration={roleGeneration} />}
 

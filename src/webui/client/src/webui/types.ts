@@ -109,6 +109,13 @@ export interface MateriaSavedEventDetail {
   scope: SaveTarget | string;
 }
 
+export interface ToolRegistrySnapshot {
+  ok?: boolean;
+  available?: boolean;
+  tools?: string[];
+  warnings?: string[];
+}
+
 export interface MonitorSnapshot {
   ok?: boolean;
   sessionKey?: string;
@@ -117,6 +124,7 @@ export interface MonitorSnapshot {
   emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }>;
   activeLoadoutId?: string;
   activeLoadout?: string;
+  toolRegistry?: ToolRegistrySnapshot;
   artifactSummary?: {
     runDir?: string;
     request?: string;

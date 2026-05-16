@@ -314,7 +314,7 @@ export function App() {
           </aside>
         </div>
       )}
-      materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} />}
+      materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} toolRegistry={monitor?.toolRegistry} />}
       monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorSocket={currentMonitorSocket} elapsed={elapsed} />}
     />
   );

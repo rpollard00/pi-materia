@@ -18,7 +18,7 @@ export type { MateriaModelCatalogModel, MateriaModelCatalogResponse, MateriaMode
 export type { MateriaGeneratorConfig, MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 export type { MateriaSetActiveLoadoutCallback, MateriaSetActiveLoadoutFailureCode, MateriaSetActiveLoadoutResult } from './activeLoadout.js';
 export type { MateriaSetDefaultLoadoutCallback, MateriaSetDefaultLoadoutFailureCode, MateriaSetDefaultLoadoutResult } from './defaultLoadout.js';
-export type { MateriaMonitorArtifactEntry, MateriaMonitorEventEntry, MateriaWebUiSessionSnapshot } from './session.js';
+export type { MateriaMonitorArtifactEntry, MateriaMonitorEventEntry, MateriaToolRegistrySnapshot, MateriaWebUiSessionSnapshot } from './session.js';
 
 export interface MateriaWebUiServerOptions {
   host?: string;
