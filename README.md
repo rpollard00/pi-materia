@@ -250,10 +250,10 @@ Example loadout excerpt where planning and evaluator materia use a cheaper model
       "prompt": "Implement exactly the adapter-provided current workItem."
     },
     "Auto-Eval": {
-      "tools": "readOnly",
+      "tools": { "type": "custom", "tools": ["read", "grep", "find", "ls", "bash"] },
       "model": "openai/gpt-4o-mini",
       "thinking": "medium",
-      "prompt": "Verify the current workItem strictly and return the generic evaluator envelope JSON with satisfied, feedback, and missing."
+      "prompt": "Verify the current workItem strictly. Bash is available for evaluation commands such as running tests; do not use it to modify project files."
     },
     "Maintain": {
       "tools": "coding",
@@ -282,7 +282,7 @@ Generic socket mechanics:
 
 Materia graphs are workflow state machines, not DAGs. Loops such as `Socket-4 (Build) -> Socket-5 (Auto-Eval) -> Socket-6 (Maintain) -> Socket-4 (Build)` are valid and model repeated work-item sections/retry paths; runtime socket-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Prefer declaring a top-level Generator materia with `generator: true`, wiring its JSON socket with `parse: "json"` and an assign entry for the canonical handoff path (`"workItems": "$.workItems"`), then adding a loadout-level `loops` region with `consumes: { from, output: "workItems" }`. pi-materia derives the loop consumer iterator path from the canonical Generator config (`state.workItems`) instead of tagging arbitrary loop members as iterators. Generated units of work intentionally use `workItems`; pi-materia does not retain a `tasks` compatibility output for new generated work units. Existing authored `generates` metadata is migration-only compatibility, not the canonical schema. See [docs/handoff-contract.md](docs/handoff-contract.md), [docs/graph-semantics.md](docs/graph-semantics.md), and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
 
-Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, optional `multiTurn`, and optional `generator: true` for list-producing Generator materia. Set `"multiTurn": true` on a materia to let any agent socket using that materia pause for interactive refinement until the user runs `/materia continue`.
+Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, optional `multiTurn`, and optional `generator: true` for list-producing Generator materia. The bundled Auto-Eval default uses a custom tool allowlist for read-oriented tools plus `bash` so it can run evaluation commands such as tests without edit/write tools; bash can still mutate files, so prompts should direct it not to modify project files. Set `"multiTurn": true` on a materia to let any agent socket using that materia pause for interactive refinement until the user runs `/materia continue`.
 
 ### Multi-turn planning materia
 

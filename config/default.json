@@ -580,8 +580,17 @@
     },
     "Auto-Eval": {
       "type": "agent",
-      "tools": "readOnly",
-      "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict. When producing JSON, follow the runtime-provided canonical handoff JSON contract. Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context from Generic cast data when applicable; augment evaluator fields instead of replacing the envelope with placement-specific payloads.\n\nEvaluate whether the current work item is complete. Inspect the repository as needed. Set satisfied, feedback, and missing for the evaluation result. Include the current work item in workItems only when useful to preserve context; do not emit tasks.\n\nWork item: {{itemJson}}\n\nImplementation summary: {{lastOutput}}",
+      "tools": {
+        "type": "custom",
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash"
+        ]
+      },
+      "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict. When producing JSON, follow the runtime-provided canonical handoff JSON contract. Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context from Generic cast data when applicable; augment evaluator fields instead of replacing the envelope with placement-specific payloads.\n\nEvaluate whether the current work item is complete. Inspect the repository as needed. Bash is available for evaluation commands such as running tests, but do not use it to modify project files. Set satisfied, feedback, and missing for the evaluation result. Include the current work item in workItems only when useful to preserve context; do not emit tasks.\n\nWork item: {{itemJson}}\n\nImplementation summary: {{lastOutput}}",
       "color": "materia-color-yellow",
       "parse": "json"
     },

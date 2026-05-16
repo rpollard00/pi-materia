@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config/config.js";
 import { CURRENT_PI_MATERIA_SCHEMA_VERSION } from "../src/config/migrations.js";
+import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import { getEffectivePipelineConfig, resolvePipeline } from "../src/runtime/pipeline.js";
 import { paletteColors } from "../src/webui/client/src/loadoutModel.js";
@@ -432,6 +433,19 @@ describe("config loadouts", () => {
       expect(materia.generates, `${materiaId}.generates`).toBeUndefined();
     }
 
+    const autoEval = rawDefault.materia?.["Auto-Eval"];
+    expect(autoEval?.tools).toEqual({ type: "custom", tools: ["read", "grep", "find", "ls", "bash"] });
+    const resolvedAutoEvalTools = resolveToolScope(autoEval.tools, ["read", "grep", "find", "ls", "bash", "edit", "write", "patch", "apply_patch"]);
+    expect(resolvedAutoEvalTools).toEqual({ ok: true, value: { spec: { type: "custom", tools: ["read", "grep", "find", "ls", "bash"] }, source: "custom", tools: ["read", "grep", "find", "ls", "bash"] } });
+    if (resolvedAutoEvalTools.ok) {
+      expect(resolvedAutoEvalTools.value.tools).not.toContain("edit");
+      expect(resolvedAutoEvalTools.value.tools).not.toContain("write");
+      expect(resolvedAutoEvalTools.value.tools).not.toContain("patch");
+      expect(resolvedAutoEvalTools.value.tools).not.toContain("apply_patch");
+    }
+    expect(autoEval?.prompt).toContain("Bash is available for evaluation commands");
+    expect(autoEval?.prompt).toContain("do not use it to modify project files");
+
     expect(rawDefault.materia?.planner).toBeUndefined();
     expect(rawDefault.materia?.interactivePlan).toBeUndefined();
     expect(rawDefault.materia?.["Auto-Plan"]?.generator).toBe(true);
@@ -778,6 +792,28 @@ describe("config materia model settings", () => {
     for (const [materiaId, materia] of Object.entries(rawDefault.materia ?? {}) as Array<[string, { model?: unknown; thinking?: unknown }]>) {
       expect(materia.model, `${materiaId}.model`).toBeUndefined();
       expect(materia.thinking, `${materiaId}.thinking`).toBeUndefined();
+    }
+  });
+
+  test("project config can explicitly override Auto-Eval default tools", async () => {
+    const { dir, file } = await writeConfig({
+      materia: {
+        "Auto-Eval": {
+          tools: "none",
+        },
+      },
+    });
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const loaded = await loadConfig(dir, file);
+
+      expect(loaded.config.materia["Auto-Eval"].tools).toBe("none");
+      expect(loaded.config.materia["Auto-Eval"].prompt).toContain("Auto-Eval Materia materia");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
     }
   });
 
