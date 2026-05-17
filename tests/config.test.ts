@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -29,6 +29,56 @@ describe("layered config loading and persistence", () => {
       expect(profile.roleGeneration).toEqual({ enabled: true, useReadOnlyProjectContext: false });
       expect(raw.webui.autoOpenBrowser).toBe(false);
       expect(raw.roleGeneration.enabled).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("syncs shipped utility scripts to the user profile and resolves default utilities through that copy", async () => {
+    const temp = await mkdtemp(path.join(tmpdir(), "pi-materia-shipped-utilities-"));
+    const cwd = path.join(temp, "project");
+    const profileDir = path.join(temp, "profile");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profileDir;
+    try {
+      await mkdir(cwd, { recursive: true });
+      const loaded = await loadConfig(cwd);
+      const utilitiesDir = path.join(profileDir, "utilities");
+      const manifest = JSON.parse(await readFile(path.join(utilitiesDir, ".pi-materia-shipped-utilities.json"), "utf8"));
+
+      expect(await readdir(utilitiesDir)).toEqual(expect.arrayContaining(["detect-vcs.mjs", "ensure-ignored.mjs", ".pi-materia-shipped-utilities.json"]));
+      expect(manifest.utilities["detect-vcs.mjs"].profileFile).toBe("detect-vcs.mjs");
+      expect(manifest.utilities["ensure-ignored.mjs"].profileFile).toBe("ensure-ignored.mjs");
+      expect(loaded.config.materia["Detect-VCS"]).toMatchObject({ command: ["node", path.join(utilitiesDir, "detect-vcs.mjs")] });
+      expect(loaded.config.materia["Ignore-Artifacts"]).toMatchObject({ command: ["node", path.join(utilitiesDir, "ensure-ignored.mjs")] });
+      expect(JSON.stringify(loaded.config.materia["Detect-VCS"])).not.toContain(process.cwd());
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("preserves modified profile utility scripts by resolving shipped updates to a hash-suffixed copy", async () => {
+    const temp = await mkdtemp(path.join(tmpdir(), "pi-materia-shipped-utilities-conflict-"));
+    const cwd = path.join(temp, "project");
+    const profileDir = path.join(temp, "profile");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profileDir;
+    try {
+      await mkdir(cwd, { recursive: true });
+      await loadConfig(cwd);
+      const utilitiesDir = path.join(profileDir, "utilities");
+      await writeFile(path.join(utilitiesDir, "detect-vcs.mjs"), "// user modified\n", "utf8");
+
+      const loaded = await loadConfig(cwd);
+      const manifest = JSON.parse(await readFile(path.join(utilitiesDir, ".pi-materia-shipped-utilities.json"), "utf8"));
+      const profileFile = manifest.utilities["detect-vcs.mjs"].profileFile;
+
+      expect(await readFile(path.join(utilitiesDir, "detect-vcs.mjs"), "utf8")).toBe("// user modified\n");
+      expect(profileFile).toMatch(/^detect-vcs\.[a-f0-9]{12}\.mjs$/);
+      expect(manifest.utilities["detect-vcs.mjs"].conflict).toBe("detect-vcs.mjs");
+      expect(loaded.config.materia["Detect-VCS"]).toMatchObject({ command: ["node", path.join(utilitiesDir, profileFile)] });
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

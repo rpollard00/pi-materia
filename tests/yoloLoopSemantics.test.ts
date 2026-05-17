@@ -45,16 +45,13 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
   const sockets: Record<string, unknown> = {
     "Socket-3": {
       type: "utility",
-      utility: "echo",
-      params: { text: "build" },
+      materia: "Yolo-Build",
       edges: [{ when: "always", to: "Socket-4" }],
       limits: { maxVisits: 10 },
     },
     "Socket-4": {
       type: "utility",
-      command: ["node", "-e", maintainScript],
-      params: { retryOnce: options.retryOnce ?? [] },
-      assign: { maintainAttempts: "$.maintainAttempts", lastSatisfied: "$.satisfied" },
+      materia: "Yolo-Maintain",
       edges: [{ when: "always", to: "Socket-3" }],
       limits: { maxVisits: 10 },
     },
@@ -67,7 +64,7 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
     },
   } as never;
   if (exitTo !== "end") {
-    (sockets as Record<string, unknown>)[exitTo] = { type: "utility", utility: "echo", params: { output: { done: true } }, parse: "json", assign: { done: "$.done" } };
+    (sockets as Record<string, unknown>)[exitTo] = { type: "utility", materia: "Yolo-Done" };
   }
 
   return {
@@ -89,6 +86,9 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
     },
     materia: {
       planner: { tools: "readOnly", prompt: "Plan.", generator: true },
+      "Yolo-Build": { type: "utility", utility: "echo", params: { text: "build" } },
+      "Yolo-Maintain": { type: "utility", command: ["node", "-e", maintainScript], params: { retryOnce: options.retryOnce ?? [] }, parse: "json", assign: { maintainAttempts: "$.maintainAttempts", lastSatisfied: "$.satisfied" } },
+      "Yolo-Done": { type: "utility", utility: "echo", params: { output: { done: true } }, parse: "json", assign: { done: "$.done" } },
     },
   };
 }
@@ -151,7 +151,8 @@ describe("Yolo loop semantics regression", () => {
 
   test("satisfied loop-exit route overrides legacy loop exit target with always fallback", async () => {
     const config = yoloConfig([{ id: "one", title: "One" }]);
-    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", utility: "echo", params: { output: { routed: true } }, parse: "json", assign: { routed: "$.routed" } };
+    config.materia.Routed = { type: "utility", utility: "echo", params: { output: { routed: true } }, parse: "json", assign: { routed: "$.routed" } };
+    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", materia: "Routed" };
     config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-satisfied", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-2" }];
 
     const { state } = await runYolo(config);
@@ -177,9 +178,12 @@ describe("Yolo loop semantics regression", () => {
 
   test("loop-exit route can enter another loop and no-match exhaustion falls through to end", async () => {
     const config = yoloConfig([{ id: "one", title: "One" }]);
-    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", utility: "echo", params: { output: { fallbackDone: true } }, parse: "json", assign: { fallbackDone: "$.fallbackDone" } };
-    testSockets(config.loadouts!.Yolo)["Socket-6"] = { type: "utility", utility: "echo", params: { text: "second build" }, foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
-    testSockets(config.loadouts!.Yolo)["Socket-7"] = { type: "utility", utility: "echo", params: { output: { satisfied: true, secondLoopDone: true } }, parse: "json", assign: { secondLoopDone: "$.secondLoopDone" }, advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
+    config.materia.FallbackDone = { type: "utility", utility: "echo", params: { output: { fallbackDone: true } }, parse: "json", assign: { fallbackDone: "$.fallbackDone" } };
+    config.materia.SecondBuild = { type: "utility", utility: "echo", params: { text: "second build" } };
+    config.materia.SecondDone = { type: "utility", utility: "echo", params: { output: { satisfied: true, secondLoopDone: true } }, parse: "json", assign: { secondLoopDone: "$.secondLoopDone" } };
+    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", materia: "FallbackDone" };
+    testSockets(config.loadouts!.Yolo)["Socket-6"] = { type: "utility", materia: "SecondBuild", foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
+    testSockets(config.loadouts!.Yolo)["Socket-7"] = { type: "utility", materia: "SecondDone", advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
     config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-first-loop", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-6" }];
     config.loadouts!.Yolo.loops!.secondLoop = { sockets: ["Socket-6", "Socket-7"] };
 
@@ -201,7 +205,6 @@ describe("Yolo loop semantics regression", () => {
   test("UI-authored and default-style Yolo loadouts normalize to equivalent executable semantics", () => {
     const uiAuthored = yoloConfig([{ id: "one", title: "One" }]);
     const defaultStyle = structuredClone(uiAuthored) as PiMateriaConfig;
-    testSockets(defaultStyle.loadouts!.Yolo)["Socket-4"].parse = "json";
     testSockets(defaultStyle.loadouts!.Yolo)["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" };
 
     const normalizedUiConfig = normalizeMateriaConfigEdges(uiAuthored as never) as PiMateriaConfig;
@@ -219,7 +222,6 @@ describe("Yolo loop semantics regression", () => {
 
   test("normalization preserves compatible explicit advance definitions and rejects conflicting ones", () => {
     const compatible = yoloConfig([{ id: "one", title: "One" }]);
-    testSockets(compatible.loadouts!.Yolo)["Socket-4"].parse = "json";
     testSockets(compatible.loadouts!.Yolo)["Socket-4"].advance = { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" };
     expect(resolvePipeline(compatible).sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" });
 

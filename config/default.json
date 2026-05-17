@@ -572,10 +572,11 @@
       "assign": {
         "vcs": "$"
       },
-      "command": [
-        "node",
-        "./utilities/detect-vcs.mjs"
-      ]
+      "script": {
+        "kind": "shippedUtility",
+        "name": "detect-vcs.mjs",
+        "runtime": "node"
+      }
     },
     "Chain-Context": {
       "type": "agent",
@@ -606,10 +607,11 @@
       "assign": {
         "artifactIgnore": "$"
       },
-      "command": [
-        "node",
-        "./utilities/ensure-ignored.mjs"
-      ]
+      "script": {
+        "kind": "shippedUtility",
+        "name": "ensure-ignored.mjs",
+        "runtime": "node"
+      }
     }
   }
 }

@@ -563,10 +563,17 @@ export interface MateriaAgentConfig extends MateriaDefinitionMetadata {
   multiTurn?: boolean;
 }
 
+export interface ShippedUtilityScriptConfig {
+  kind: "shippedUtility";
+  name: string;
+  runtime?: "node";
+}
+
 export interface MateriaUtilityConfig extends MateriaDefinitionMetadata {
   type: "utility";
   utility?: string;
   command?: string[];
+  script?: ShippedUtilityScriptConfig;
   params?: Record<string, unknown>;
   timeoutMs?: number;
   assign?: Record<string, string>;

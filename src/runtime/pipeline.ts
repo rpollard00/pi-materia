@@ -1,4 +1,5 @@
 import { resolveArtifactRoot } from "../config/config.js";
+import { isShippedUtilityScriptRef } from "../config/shippedUtilities.js";
 import { assertValidPipelineGraph } from "../graph/graphValidation.js";
 import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../graph/generator.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, loopSockets } from "../loadout/loadoutAccessors.js";
@@ -35,6 +36,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   if ("materiaDefinitions" in rawConfig) throw new Error(`Materia config configures obsolete materiaDefinitions.`);
   validateMateriaEntries(config);
   const effective = getEffectivePipelineConfig(config);
+  validateAuthoredUtilityRuntimeSockets(config, effective.loadoutName);
   validateLoadout(effective.loadoutName, effective.pipeline);
   assertValidPipelineGraph(effective.pipeline, { isGeneratorSocket: (socketId) => isGeneratorPipelineSocket(config, effective.pipeline, socketId) });
   const sockets = Object.fromEntries(
@@ -50,10 +52,6 @@ function resolveSocket(config: PiMateriaConfig, effective: EffectiveMateriaPipel
   const socket = getLoadoutSocket(effective.pipeline, id);
   if (!socket) throw new Error(`Unknown pipeline slot "${id}" referenced by ${source}`);
   validateSocket(id, socket);
-  if (socket.type === "utility" && (typeof socket.materia !== "string" || socket.materia.trim().length === 0)) {
-    const legacyMateria = legacyInlineUtilityMateria(id, socket as Extract<MateriaPipelineSocketConfig, { type: "utility" }>);
-    return { id, socket: { ...socket, materia: legacyMateria.id }, materiaId: legacyMateria.id, materia: legacyMateria };
-  }
 
   const materia = config.materia[socket.materia];
   if (!materia) throw new Error(`Pipeline slot "${id}" references unknown materia "${socket.materia}"`);
@@ -65,22 +63,23 @@ function resolveSocket(config: PiMateriaConfig, effective: EffectiveMateriaPipel
   const rawMateria = materia as unknown as Record<string, unknown>;
   if (rawMateria.type !== "utility") throw new Error(`Utility pipeline slot "${id}" must reference utility materia "${socket.materia}"`);
   validateUtilityMateriaEntry(socket.materia, rawMateria);
+  validateCanonicalUtilityRuntimeSocket(id, socket, materia as MateriaUtilityConfig);
   return { id, socket, materiaId: socket.materia, materia: materia as MateriaUtilityConfig };
 }
 
-function legacyInlineUtilityMateria(socketId: string, socket: Extract<MateriaPipelineSocketConfig, { type: "utility" }>): MateriaUtilityConfig & { id: string } {
-  const id = `legacyInlineUtility${socketId.replace(/[^a-z0-9]+/gi, "")}`;
-  return {
-    id,
-    type: "utility",
-    label: socket.utility ?? socket.command?.[0] ?? id,
-    ...(socket.utility ? { utility: socket.utility } : {}),
-    ...(socket.command ? { command: [...socket.command] } : {}),
-    ...(socket.params ? { params: { ...socket.params } } : {}),
-    ...(socket.timeoutMs ? { timeoutMs: socket.timeoutMs } : {}),
-    ...(socket.parse ? { parse: socket.parse } : {}),
-    ...(socket.assign ? { assign: { ...socket.assign } } : {}),
-  };
+// Runtime accepts only canonical utility sockets authored as graph placement
+// references. Legacy executable socket fields are migration input only; parse
+// may be materialized later for generator/loop control-flow semantics.
+function validateAuthoredUtilityRuntimeSockets(config: PiMateriaConfig, loadoutName: string): void {
+  const loadout = config.loadouts?.[loadoutName];
+  if (!loadout) return;
+  for (const [id, socket] of loadoutSocketEntries(loadout)) {
+    if (socket.type !== "utility") continue;
+    const rawSocket = socket as unknown as Record<string, unknown>;
+    for (const field of ["utility", "command", "script", "params", "timeoutMs", "parse", "assign"] as const) {
+      if (rawSocket[field] !== undefined) throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "${field}". Configure executable utility behavior on materia "${socket.materia}" instead.`);
+    }
+  }
 }
 
 function validateLoadout(name: string, pipeline: MateriaPipelineConfig): void {
@@ -110,11 +109,24 @@ function validateSocket(id: string, socket: MateriaPipelineSocketConfig): void {
     throw new Error(`Pipeline slot "${id}" configures obsolete multiTurn. Configure multiTurn on the referenced materia instead.`);
   }
   if (socket.type === "utility" && (typeof socket.materia !== "string" || socket.materia.trim().length === 0)) {
-    if (!socket.utility && !socket.command) throw new Error(`Utility pipeline slot "${id}" must configure either "utility" or "command".`);
-    if (socket.command !== undefined) validateCommand(id, socket.command);
-    if (socket.timeoutMs !== undefined && (!Number.isFinite(socket.timeoutMs) || socket.timeoutMs <= 0)) {
-      throw new Error(`Utility pipeline slot "${id}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
-    }
+    throw new Error(`Utility pipeline slot "${id}" must reference utility materia via "materia". Legacy inline utility or command sockets are migration-only and cannot execute at runtime.`);
+  }
+}
+
+function validateCanonicalUtilityRuntimeSocket(id: string, socket: Extract<MateriaPipelineSocketConfig, { type: "utility" }>, materia: MateriaUtilityConfig): void {
+  const rawSocket = socket as unknown as Record<string, unknown>;
+  for (const field of ["utility", "command", "script", "params", "timeoutMs"] as const) {
+    if (rawSocket[field] !== undefined) throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "${field}". Configure executable utility behavior on materia "${socket.materia}" instead.`);
+  }
+
+  const generator = canonicalGeneratorConfigFor(materia);
+  const allowsRuntimeMaterializedParse = socket.parse === "json";
+  const allowsDerivedGeneratorAssign = generator && socket.assign?.[generator.output] === `$.${generator.output}` && Object.keys(socket.assign).length === 1;
+  if (socket.parse !== undefined && !allowsRuntimeMaterializedParse) {
+    throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "parse". Configure parse on utility materia "${socket.materia}" instead.`);
+  }
+  if (socket.assign !== undefined && !allowsDerivedGeneratorAssign) {
+    throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "assign". Configure assign on utility materia "${socket.materia}" instead.`);
   }
 }
 
@@ -162,8 +174,9 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
 
 function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, unknown>): void {
   if ("systemPrompt" in rawMateria || "prompt" in rawMateria) throw new Error(`Utility materia "${name}" must not configure prompt/systemPrompt.`);
-  if (!rawMateria.utility && !rawMateria.command) throw new Error(`Utility materia "${name}" must configure either "utility" or "command".`);
+  if (!rawMateria.utility && !rawMateria.command && !rawMateria.script) throw new Error(`Utility materia "${name}" must configure either "utility", "command", or "script".`);
   if (rawMateria.command !== undefined) validateCommand(name, rawMateria.command);
+  if (rawMateria.script !== undefined) validateScript(name, rawMateria.script);
   if (rawMateria.timeoutMs !== undefined && (!Number.isFinite(rawMateria.timeoutMs) || Number(rawMateria.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
@@ -272,6 +285,11 @@ function validateCommand(id: string, command: unknown): void {
   }
 }
 
+function validateScript(id: string, script: unknown): void {
+  if (!isShippedUtilityScriptRef(script)) throw new Error(`Utility pipeline slot "${id}" has malformed script. Expected a shippedUtility script reference.`);
+  if (script.runtime !== undefined && script.runtime !== "node") throw new Error(`Utility pipeline slot "${id}" has malformed script runtime. Expected "node" when configured.`);
+}
+
 function pipelineSource(effective: EffectiveMateriaPipelineConfig): string {
   return `loadouts.${effective.loadoutName}`;
 }
@@ -321,8 +339,8 @@ function formatSocketSlot(config: PiMateriaConfig, socket: MateriaPipelineSocket
   } else {
     const utilityMateria = config.materia[socket.materia];
     if (socket.materia) details.push(`materia=${socket.materia}`);
-    if (utilityMateria?.type === "utility") details.push(utilityMateria.utility ? `utility=${utilityMateria.utility}` : `command=${formatCommand(utilityMateria.command)}`);
-    else details.push(socket.utility ? `utility=${socket.utility}` : `command=${formatCommand(socket.command)}`);
+    if (utilityMateria?.type === "utility") details.push(formatUtilityExecution(utilityMateria));
+    else details.push("utility=<invalid materia reference>");
   }
   const effectiveParse = socket.type === "utility" && config.materia[socket.materia]?.type === "utility" ? config.materia[socket.materia].parse : socket.parse;
   details.push(`parse=${effectiveParse ?? "text"}`);
@@ -332,10 +350,16 @@ function formatSocketSlot(config: PiMateriaConfig, socket: MateriaPipelineSocket
   if (socket.limits) details.push(`limits=${formatSocketLimits(socket.limits)}`);
   if (socket.type === "utility") {
     const utilityMateria = config.materia[socket.materia];
-    const timeoutMs = utilityMateria?.type === "utility" ? utilityMateria.timeoutMs : socket.timeoutMs;
+    const timeoutMs = utilityMateria?.type === "utility" ? utilityMateria.timeoutMs : undefined;
     if (timeoutMs !== undefined) details.push(`timeoutMs=${timeoutMs}`);
   }
   return details.join(", ");
+}
+
+function formatUtilityExecution(materia: MateriaUtilityConfig): string {
+  if (materia.utility) return `utility=${materia.utility}`;
+  if (materia.script) return `script=${materia.script.kind}:${materia.script.name}`;
+  return `command=${formatCommand(materia.command)}`;
 }
 
 function formatCommand(command: string[] | undefined): string {
@@ -346,7 +370,7 @@ function formatMateriaDetails(materia: MateriaConfig): string {
   const generatorConfig = canonicalGeneratorConfigFor(materia);
   const generator = generatorConfig ? `generator=${generatorConfig.output}:${generatorConfig.listType}<${generatorConfig.itemType}>` : undefined;
   if (materia.type === "utility") {
-    return [`type=utility`, materia.utility ? `utility=${materia.utility}` : `command=${formatCommand(materia.command)}`, `parse=${materia.parse ?? "text"}`, generator].filter(Boolean).join(", ");
+    return [`type=utility`, formatUtilityExecution(materia), `parse=${materia.parse ?? "text"}`, generator].filter(Boolean).join(", ");
   }
   return [
     `tools=${formatToolScopeSpec(materia.tools)}`,

@@ -328,7 +328,7 @@ describe("agent and utility validation", () => {
     expect(() => resolvePipeline({ ...config, materia: {} })).toThrow(/unknown materia "planner"/);
   });
 
-  test("accepts utility command and alias sockets and rejects malformed utility configuration", () => {
+  test("accepts utility materia references and rejects migration-only inline utility configuration", () => {
     expect(resolvePipeline({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
@@ -336,15 +336,18 @@ describe("agent and utility validation", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "utility", command: ["node", "script.js"], next: "Socket-2" },
-            "Socket-2": { type: "utility", utility: "project.ensureIgnored", parse: "json" },
+            "Socket-1": { type: "utility", materia: "Script", next: "Socket-2" },
+            "Socket-2": { type: "utility", materia: "Ignore-Artifacts" },
           },
         },
       },
-      materia: {},
+      materia: {
+        Script: { type: "utility", command: ["node", "script.js"] },
+        "Ignore-Artifacts": { type: "utility", utility: "project.ensureIgnored", parse: "json" },
+      },
     }).sockets["Socket-2"].socket.type).toBe("utility");
 
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility" } } } }, materia: {} })).toThrow(/must configure either "utility" or "command"/);
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", command: [] } } } }, materia: {} })).toThrow(/Expected at least one command element/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility" } } } }, materia: {} })).toThrow(/must reference utility materia/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", materia: "Bad", command: [] } } } }, materia: { Bad: { type: "utility", utility: "noop" } } })).toThrow(/migration-only socket field "command"/);
   });
 });

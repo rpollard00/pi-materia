@@ -9,18 +9,14 @@ const baseLoadout = {
   sockets: {
     "Socket-1": {
       type: "utility" as const,
-      command: ["node", "hello.js"],
-      parse: "json" as const,
-      params: { name: "world" },
+      materia: "HelloUtility",
       next: "Socket-2",
       foreach: { items: "state.items", as: "item", done: "end" },
       limits: { maxVisits: 2, maxEdgeTraversals: 3, maxOutputBytes: 1024 },
-      timeoutMs: 5000,
     },
     "Socket-2": {
       type: "utility" as const,
-      utility: "project.ensureIgnored",
-      parse: "text" as const,
+      materia: "Ignore-Artifacts",
     },
   },
 };
@@ -29,7 +25,10 @@ const baseConfig: PiMateriaConfig = {
   artifactDir: ".pi/pi-materia",
   activeLoadout: "Test",
   loadouts: { Test: baseLoadout },
-  materia: {},
+  materia: {
+    HelloUtility: { type: "utility", command: ["node", "hello.js"], parse: "json", params: { name: "world" }, timeoutMs: 5000 },
+    "Ignore-Artifacts": { type: "utility", utility: "project.ensureIgnored", parse: "text" },
+  },
 };
 
 function activeLoadout(config: PiMateriaConfig) {
@@ -572,7 +571,7 @@ describe("utility pipeline sockets", () => {
     const pipeline = resolvePipeline(baseConfig);
     const lines = renderGrid(baseConfig, pipeline, "test", "/tmp/project");
 
-    expect(lines).toContain("- none configured");
+    expect(lines).toContain('- HelloUtility: type=utility, command="node" "hello.js", parse=json');
 
     const hello = lines.find((line) => line.startsWith("- Socket-1:"));
     expect(hello).toContain("type=utility");
@@ -630,18 +629,25 @@ describe("utility pipeline sockets", () => {
     expect(build).toContain("thinking=active Pi thinking");
   });
 
-  test("rejects utility sockets without command or utility", () => {
+  test("rejects utility sockets without a materia reference", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).sockets["Socket-1"] = { type: "utility" };
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility" } as never;
 
-    expect(() => resolvePipeline(config)).toThrow(/must configure either "utility" or "command"/);
+    expect(() => resolvePipeline(config)).toThrow(/must reference utility materia via "materia"/);
   });
 
-  test("rejects unsupported parse modes with a friendly error", () => {
+  test("rejects utility socket-local parse fields as migration-only even when they mirror utility materia", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).sockets["Socket-1"] = { type: "utility", utility: "example", parse: "yaml" as never };
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility", materia: "HelloUtility", parse: "json" };
 
-    expect(() => resolvePipeline(config)).toThrow(/unsupported parse mode "yaml"/);
+    expect(() => resolvePipeline(config)).toThrow(/migration-only socket field "parse"/);
+  });
+
+  test("rejects utility socket-local script fields as migration-only", () => {
+    const config = structuredClone(baseConfig) as PiMateriaConfig;
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility", materia: "HelloUtility", script: "./legacy-tool.py" } as never;
+
+    expect(() => resolvePipeline(config)).toThrow(/migration-only socket field "script"/);
   });
 
   test("accepts multi-turn materia and renders materia plus agent slots with materia-derived capability", () => {
@@ -671,7 +677,7 @@ describe("utility pipeline sockets", () => {
 
   test("rejects obsolete socket-level multiTurn", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).sockets["Socket-1"] = { type: "utility", utility: "example", multiTurn: true } as never;
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility", materia: "HelloUtility", multiTurn: true } as never;
 
     expect(() => resolvePipeline(config)).toThrow(/obsolete multiTurn/);
   });
@@ -774,9 +780,10 @@ describe("utility pipeline sockets", () => {
     expect(() => resolvePipeline(config)).toThrow(/Materia "planner" has invalid multiTurn/);
   });
 
-  test("rejects malformed command arrays with a friendly error", () => {
+  test("rejects malformed command arrays on utility materia with a friendly error", () => {
     const config = structuredClone(baseConfig) as PiMateriaConfig;
-    activeLoadout(config).sockets["Socket-1"] = { type: "utility", command: ["node", ""] };
+    config.materia.BadCommand = { type: "utility", command: ["node", ""] };
+    activeLoadout(config).sockets["Socket-1"] = { type: "utility", materia: "BadCommand" };
 
     expect(() => resolvePipeline(config)).toThrow(/malformed command element at index 1/);
   });
@@ -809,10 +816,8 @@ describe("utility pipeline sockets", () => {
     expect(ensureLineIndex).toBeGreaterThanOrEqual(0);
     expect(detectLineIndex).toBeGreaterThan(ensureLineIndex);
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
-    expect(lines[ensureLineIndex]).toContain("command=");
-    expect(lines[ensureLineIndex]).toContain("ensure-ignored.mjs");
-    expect(lines[detectLineIndex]).toContain("command=");
-    expect(lines[detectLineIndex]).toContain("detect-vcs.mjs");
+    expect(lines[ensureLineIndex]).toContain("script=shippedUtility:ensure-ignored.mjs");
+    expect(lines[detectLineIndex]).toContain("script=shippedUtility:detect-vcs.mjs");
     expect(config.materia["Auto-Plan"]?.generator).toBe(true);
     expect(loadout.loops?.loopSelection.sockets).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
     expect(loadout.loops?.loopSelection.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });

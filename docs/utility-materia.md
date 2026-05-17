@@ -10,7 +10,7 @@ Canonical utility sockets reference reusable top-level utility materia; executab
 
 ```ts
 // socket
-{ "type": "utility", "materia": "ensureArtifactsIgnored", "edges"?: [{ "when"?: string, "to": string }] }
+{ "type": "utility", "materia": "Ignore-Artifacts", "edges"?: [{ "when"?: string, "to": string }] }
 
 // materia
 {
@@ -20,6 +20,11 @@ Canonical utility sockets reference reusable top-level utility materia; executab
   "group"?: string,
   "color"?: string,
   "command"?: string[],         // explicit local command and args
+  "script"?: {                  // shipped utility script resolved through the user profile
+    "kind": "shippedUtility",
+    "name": "detect-vcs.mjs",
+    "runtime"?: "node"
+  },
   "params"?: object,            // JSON-serializable utility parameters
   "parse"?: "text" | "json",    // default/text preserves stdout; json parses stdout
   "assign"?: { [target: string]: string },
@@ -28,9 +33,9 @@ Canonical utility sockets reference reusable top-level utility materia; executab
 }
 ```
 
-A utility materia must configure either `command` or, for legacy compatibility only, `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases `project.ensureIgnored` and `vcs.detect` are retained only so old inline utility sockets can migrate/load; new and saved configs should use command-backed utility materia.
+A utility materia must configure either `command`, `script`, or, for migration-only legacy data, `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases `project.ensureIgnored` and `vcs.detect`, old shipped ids `ensureArtifactsIgnored` and `detectVcs`, and socket-local executable fields are accepted only by migration input; canonical runtime sockets must reference top-level utility materia such as `Ignore-Artifacts` or `Detect-VCS`.
 
-Relative command script paths from loaded config files are resolved from the directory containing the owning config file, while the spawned process cwd remains the target project directory. Bundled defaults use this rule to call packaged scripts in `config/utilities/` without requiring target projects to have those files.
+Shipped defaults use the typed script locator `{ "kind": "shippedUtility", "name": "...mjs" }`. On config load, pi-materia syncs packaged scripts to the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities`, or `PI_MATERIA_PROFILE_DIR/utilities` when overridden), records hashes in `.pi-materia-shipped-utilities.json`, and resolves execution to that profile copy. If a user-modified profile script would be overwritten during an update, the modified file is preserved and the new packaged script is written under a hash-suffixed filename that the manifest points to. Relative command script paths from non-shipped config files are still resolved from the directory containing the owning config file, while every spawned process cwd remains the target project directory.
 
 Common mechanics:
 
@@ -167,16 +172,16 @@ Complete loadout using the script:
       "sockets": {
         "ignoreArtifacts": {
           "type": "utility",
-          "materia": "ensureArtifactsIgnored",
+          "materia": "Ignore-Artifacts",
           "next": "end"
         }
       }
     }
   },
   "materia": {
-    "ensureArtifactsIgnored": {
+    "Ignore-Artifacts": {
       "type": "utility",
-      "label": "Ensure artifacts ignored",
+      "label": "Ignore Artifacts",
       "command": ["python3", "scripts/ensure_ignored.py"],
       "params": {
         "file": ".gitignore",
@@ -198,7 +203,7 @@ Utility JSON output can choose the next socket with edges:
 ```json
 {
   "type": "utility",
-  "materia": "detectVcs",
+  "materia": "Detect-VCS",
   "edges": [
     { "when": "$.kind == \"jj\"", "to": "Maintain" },
     { "when": "$.kind == \"git\"", "to": "GitMaintain" },
@@ -208,7 +213,7 @@ Utility JSON output can choose the next socket with edges:
 }
 ```
 
-The referenced `detectVcs` utility materia owns `parse: "json"` and `assign: { "vcs": "$" }`, so sockets can focus on graph placement and routing.
+The referenced `Detect-VCS` utility materia owns `parse: "json"` and `assign: { "vcs": "$" }`, so sockets can focus on graph placement and routing.
 
 ## Utility generators
 
@@ -216,7 +221,7 @@ A utility materia may set `generator: true` when a deterministic script should p
 
 ## Bundled utility scripts
 
-The default config defines `ensureArtifactsIgnored` and `detectVcs` as command-backed utility materia that run `config/utilities/ensure-ignored.mjs` and `config/utilities/detect-vcs.mjs`. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. They are packaged with pi-materia and resolve relative to the bundled config file, while their cwd remains the target project.
+The default config defines `Ignore-Artifacts` and `Detect-VCS` as command-backed utility materia that run the shipped `ensure-ignored.mjs` and `detect-vcs.mjs` scripts. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Legacy ids `ensureArtifactsIgnored` and `detectVcs` are migration-only aliases, not canonical shipped ids.
 
 ## Local testing
 

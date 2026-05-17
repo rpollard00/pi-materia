@@ -340,16 +340,16 @@ The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: t
   "activeLoadout": "Custom",
   "loadouts": {
     "Custom": {
-      "entry": "ensureArtifactsIgnored",
+      "entry": "ignoreArtifacts",
       "sockets": {
-        "ensureArtifactsIgnored": {
+        "ignoreArtifacts": {
           "type": "utility",
-          "materia": "ensureArtifactsIgnored",
-          "next": "detectVcs"
+          "materia": "Ignore-Artifacts",
+          "next": "detectRepository"
         },
-        "detectVcs": {
+        "detectRepository": {
           "type": "utility",
-          "materia": "detectVcs",
+          "materia": "Detect-VCS",
           "next": "Socket-3"
         },
         "Socket-3": {
@@ -364,15 +364,15 @@ The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: t
     }
   },
   "materia": {
-    "ensureArtifactsIgnored": { "type": "utility", "command": ["node", "./utilities/ensure-ignored.mjs"], "parse": "json", "params": { "patterns": [".pi/pi-materia/"] }, "assign": { "artifactIgnore": "$" } },
-    "detectVcs": { "type": "utility", "command": ["node", "./utilities/detect-vcs.mjs"], "parse": "json", "assign": { "vcs": "$" } },
+    "Ignore-Artifacts": { "type": "utility", "script": { "kind": "shippedUtility", "name": "ensure-ignored.mjs", "runtime": "node" }, "parse": "json", "params": { "patterns": [".pi/pi-materia/"] }, "assign": { "artifactIgnore": "$" } },
+    "Detect-VCS": { "type": "utility", "script": { "kind": "shippedUtility", "name": "detect-vcs.mjs", "runtime": "node" }, "parse": "json", "assign": { "vcs": "$" } },
     "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return the generic handoff envelope with shape: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks. Request: {{request}}" },
     "Build": { "tools": "coding", "prompt": "Implement exactly the assigned workItem using adapter-provided guidance." }
   }
 }
 ```
 
-For deterministic local steps that should run without an LLM turn, use utility materia. A utility socket is canonical when it references a top-level utility materia by `materia`; the utility materia owns its label/color plus `command`, `params`, `parse`, `assign`, and `timeoutMs`. Command utilities receive JSON on stdin, write the machine-readable result on stdout, write diagnostics on stderr, and run with the target project as cwd. Relative command script paths are resolved from the config file that defined the utility materia, which is why bundled defaults can call packaged scripts under `config/utilities/` without copying them into each target project. Utility JSON output participates in normal `assign`, `always`/`satisfied`/`not_satisfied` routing, and generator materia marked `generator: true` can emit the canonical handoff envelope with `workItems` for loops. See [Utility Materia](docs/utility-materia.md) for the full contract, default scripts, examples, security notes, and compatibility guidance.
+For deterministic local steps that should run without an LLM turn, use utility materia. A utility socket is canonical when it references a top-level utility materia by `materia`; the utility materia owns its label/color plus `command` or typed shipped `script`, `params`, `parse`, `assign`, and `timeoutMs`. Command utilities receive JSON on stdin, write the machine-readable result on stdout, write diagnostics on stderr, and run with the target project as cwd. Bundled defaults use `{ "kind": "shippedUtility" }` script references that are synced from package assets into the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities` or `PI_MATERIA_PROFILE_DIR/utilities`) with a hash manifest so user-modified profile scripts are not overwritten; explicit relative command paths from user/project config are still resolved from the config file that defined the utility materia. Utility JSON output participates in normal `assign`, `always`/`satisfied`/`not_satisfied` routing, and generator materia marked `generator: true` can emit the canonical handoff envelope with `workItems` for loops. See [Utility Materia](docs/utility-materia.md) for the full contract, default scripts, examples, security notes, and compatibility guidance.
 
 Runtime artifacts are written to `.pi/pi-materia/<timestamp>/` by default. Override with:
 
@@ -420,7 +420,7 @@ The bundled defaults live at `config/default.json` and set `activeLoadout` to `F
 
 When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured generic envelope (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing`), and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 
-These loadouts are defined entirely as config using top-level reusable materia prompts and utility materia plus socket adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-8`); reusable behavior and appearance stay in top-level materia definitions referenced by socket `materia` fields, while displays can add context like `Socket-4 (Build)`. The first two bundled sockets reference the command-backed utility materia `ensureArtifactsIgnored` and `detectVcs`; inline utility socket fields and built-in aliases such as `project.ensureIgnored` or `vcs.detect` are migration-only compatibility, not the canonical model. Loadout config and WebUI save payloads use canonical `sockets` collections for loadout membership and loop membership. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
+These loadouts are defined entirely as config using top-level reusable materia prompts and utility materia plus socket adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-8`); reusable behavior and appearance stay in top-level materia definitions referenced by socket `materia` fields, while displays can add context like `Socket-4 (Build)`. The first two bundled sockets reference the command-backed utility materia `Ignore-Artifacts` and `Detect-VCS`; inline utility socket fields, old shipped ids such as `ensureArtifactsIgnored`/`detectVcs`, and built-in aliases such as `project.ensureIgnored` or `vcs.detect` are migration-only compatibility, not the canonical model. Loadout config and WebUI save payloads use canonical `sockets` collections for loadout membership and loop membership. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
 
 ### Socket terminology and compatibility
 

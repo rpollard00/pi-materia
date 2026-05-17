@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compactionConfig.js";
+import { isShippedUtilityScriptRef, resolveShippedUtilityScriptPath, syncShippedUtilityScripts } from "./shippedUtilities.js";
 import { ensureCurrentSchemaMetadata, ensureLoadoutOwnershipAndLocks, ensureStableLoadoutIds, migrateConfigLayers, validateNoDuplicateLoadoutOwnership, type MigratableConfigLayer } from "./migrations.js";
 import { normalizeMateriaCatalog, validateLoadoutMateriaReferences } from "../domain/materia.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
@@ -17,6 +18,7 @@ import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, Materia
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
+  await syncShippedUtilityScripts(getUserMateriaDir());
   const defaultPath = getBundledDefaultConfigPath();
   const userPath = getUserMateriaAssetPath();
   const projectPath = getProjectConfigPath(cwd);
@@ -56,7 +58,7 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const config = await mergeConfigLayers(migratedPartials);
   const loadoutSources = buildLoadoutSources(migratedPartials, loadedLayers);
   const materiaCommandSources = buildMateriaCommandSources(migratedPartials, loadedLayers);
-  resolveRelativeUtilityCommands(config, materiaCommandSources, loadedLayers);
+  resolveUtilityExecutionBindings(config, materiaCommandSources, loadedLayers);
   const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
   return {
     config,
@@ -389,11 +391,16 @@ function buildMateriaCommandSources(partials: Partial<PiMateriaConfig>[], layers
   return sources;
 }
 
-function resolveRelativeUtilityCommands(config: PiMateriaConfig, materiaSources: Record<string, MateriaConfigLayerScope>, layers: MateriaConfigLayer[]): void {
+function resolveUtilityExecutionBindings(config: PiMateriaConfig, commandSources: Record<string, MateriaConfigLayerScope>, layers: MateriaConfigLayer[]): void {
   const configDirs = new Map(layers.filter((layer) => layer.loaded).map((layer) => [layer.scope, path.dirname(layer.path)]));
   for (const [id, definition] of Object.entries(config.materia ?? {})) {
-    if (definition.type !== "utility" || !Array.isArray(definition.command)) continue;
-    const sourceDir = configDirs.get(materiaSources[id]);
+    if (definition.type !== "utility") continue;
+    if (isShippedUtilityScriptRef(definition.script)) {
+      definition.command = [definition.script.runtime ?? "node", resolveShippedUtilityScriptPath(getUserMateriaDir(), definition.script)];
+      continue;
+    }
+    if (!Array.isArray(definition.command)) continue;
+    const sourceDir = configDirs.get(commandSources[id]);
     if (!sourceDir) continue;
     definition.command = resolveUtilityCommandPaths(definition.command, sourceDir);
   }
@@ -562,9 +569,10 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
 
 function validateUtilityMateria(name: string, materia: Record<string, unknown>): void {
   if ("prompt" in materia) throw new Error(`Utility materia "${name}" must not configure prompt.`);
-  if (!materia.utility && !materia.command) throw new Error(`Utility materia "${name}" must configure either "utility" or "command".`);
+  if (!materia.utility && !materia.command && !materia.script) throw new Error(`Utility materia "${name}" must configure either "utility", "command", or "script".`);
   if (materia.utility !== undefined && typeof materia.utility !== "string") throw new Error(`Utility materia "${name}" has invalid utility. Expected a string.`);
   if (materia.command !== undefined) validateUtilityCommandMateria(name, materia.command);
+  if (materia.script !== undefined) validateUtilityScriptMateria(name, materia.script);
   if (materia.timeoutMs !== undefined && (!Number.isFinite(materia.timeoutMs) || Number(materia.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
@@ -592,6 +600,12 @@ function validateUtilityCommandMateria(name: string, command: unknown): void {
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== "string" || part.length === 0)) {
     throw new Error(`Utility materia "${name}" has invalid command. Expected a non-empty string array.`);
   }
+}
+
+function validateUtilityScriptMateria(name: string, script: unknown): void {
+  if (!isShippedUtilityScriptRef(script)) throw new Error(`Utility materia "${name}" has invalid script. Expected { kind: "shippedUtility", name: "<file>.mjs" }.`);
+  resolveShippedUtilityScriptPath(getUserMateriaDir(), script);
+  if (script.runtime !== undefined && script.runtime !== "node") throw new Error(`Utility materia "${name}" has invalid script runtime. Expected "node" when configured.`);
 }
 
 function rejectObsoleteConfigFields(config: Record<string, unknown>, file: string): void {

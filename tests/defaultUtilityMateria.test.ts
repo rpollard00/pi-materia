@@ -40,7 +40,7 @@ describe("bundled utility materia defaults", () => {
     }
   });
 
-  test("default utility materia are command-backed and package-listed", async () => {
+  test("default utility materia are shipped-script backed and package-listed", async () => {
     const [config, packageJson] = await Promise.all([
       loadDefaultConfig(),
       readFile(path.resolve("package.json"), "utf8").then((text) => JSON.parse(text) as { files?: string[] }),
@@ -48,16 +48,18 @@ describe("bundled utility materia defaults", () => {
 
     expect(config.materia?.["Ignore-Artifacts"]).toMatchObject({
       type: "utility",
-      command: ["node", "./utilities/ensure-ignored.mjs"],
+      script: { kind: "shippedUtility", name: "ensure-ignored.mjs", runtime: "node" },
       parse: "json",
       assign: { artifactIgnore: "$" },
     });
     expect(config.materia?.["Detect-VCS"]).toMatchObject({
       type: "utility",
-      command: ["node", "./utilities/detect-vcs.mjs"],
+      script: { kind: "shippedUtility", name: "detect-vcs.mjs", runtime: "node" },
       parse: "json",
       assign: { vcs: "$" },
     });
+    expect((config.materia?.["Ignore-Artifacts"] as { command?: unknown }).command).toBeUndefined();
+    expect((config.materia?.["Detect-VCS"] as { command?: unknown }).command).toBeUndefined();
     expect(packageJson.files).toContain("config/default.json");
     expect(config.materia?.ensureArtifactsIgnored).toBeUndefined();
     expect(config.materia?.detectVcs).toBeUndefined();

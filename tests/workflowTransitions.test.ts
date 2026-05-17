@@ -42,11 +42,13 @@ function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
 function socket(id: string, config: Partial<ResolvedMateriaSocket["socket"]> = {}): ResolvedMateriaSocket {
   return {
     id,
-    socket: { id, type: "utility", utility: "noop", ...config },
+    socket: { id, type: "utility", materia: "Noop", ...config },
+    materiaId: "Noop",
+    materia: { type: "utility", utility: "noop" },
   } as ResolvedMateriaSocket;
 }
 
-const config = { materia: {}, loadouts: {}, activeLoadout: "default" } as PiMateriaConfig;
+const config = { materia: { Noop: { type: "utility", utility: "noop" } }, loadouts: {}, activeLoadout: "default" } as PiMateriaConfig;
 
 describe("workflow transitions", () => {
   test("domain routing treats satisfied as the reserved canonical control field", () => {

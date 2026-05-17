@@ -285,7 +285,7 @@ function canonicalizeUtilitySockets(context: ConfigMigrationContext): void {
 interface UtilitySignature {
   utility?: string;
   command?: string[];
-  script?: string;
+  script?: unknown;
   params?: Record<string, unknown>;
   timeoutMs?: number;
   parse?: string;
@@ -305,7 +305,7 @@ function utilitySocketSignature(socket: Record<string, unknown>): UtilitySignatu
   return cleanSignature({
     ...(typeof socket.utility === "string" ? { utility: socket.utility } : {}),
     ...(Array.isArray(socket.command) && socket.command.every((part) => typeof part === "string") ? { command: [...socket.command] as string[] } : {}),
-    ...(typeof socket.script === "string" ? { script: socket.script } : {}),
+    ...(typeof socket.script === "string" || isPlainObject(socket.script) ? { script: clonePlain(socket.script) } : {}),
     ...(isPlainObject(socket.params) ? { params: clonePlain(socket.params) } : {}),
     ...(typeof socket.timeoutMs === "number" ? { timeoutMs: socket.timeoutMs } : {}),
     ...(typeof socket.parse === "string" ? { parse: socket.parse } : {}),
@@ -317,7 +317,7 @@ function utilitySignature(definition: Record<string, unknown>): string {
   return stableStringify(cleanSignature({
     ...(typeof definition.utility === "string" ? { utility: definition.utility } : {}),
     ...(Array.isArray(definition.command) && definition.command.every((part) => typeof part === "string") ? { command: [...definition.command] as string[] } : {}),
-    ...(typeof definition.script === "string" ? { script: definition.script } : {}),
+    ...(typeof definition.script === "string" || isPlainObject(definition.script) ? { script: clonePlain(definition.script) } : {}),
     ...(isPlainObject(definition.params) ? { params: clonePlain(definition.params) } : {}),
     ...(typeof definition.timeoutMs === "number" ? { timeoutMs: definition.timeoutMs } : {}),
     ...(typeof definition.parse === "string" ? { parse: definition.parse } : {}),
@@ -496,13 +496,13 @@ const SHIPPED_UTILITY_MIGRATIONS: readonly ShippedUtilityMigration[] = [
     canonicalId: "Detect-VCS",
     label: "VCS detector",
     legacyIds: ["detectVcs"],
-    signatures: [defaultDetectVcsSignature(), { command: ["node", "./utilities/detect-vcs.mjs"], parse: "json", assign: { vcs: "$" } }, { script: "./utilities/detect-vcs.mjs", parse: "json", assign: { vcs: "$" } }],
+    signatures: [defaultDetectVcsSignature(), { command: ["node", "./utilities/detect-vcs.mjs"], parse: "json", assign: { vcs: "$" } }, { script: "./utilities/detect-vcs.mjs", parse: "json", assign: { vcs: "$" } }, { script: { kind: "shippedUtility", name: "detect-vcs.mjs", runtime: "node" }, parse: "json", assign: { vcs: "$" } }],
   },
   {
     canonicalId: "Ignore-Artifacts",
     label: "artifact ignore utility",
     legacyIds: ["ensureArtifactsIgnored"],
-    signatures: [defaultEnsureIgnoredSignature(), { command: ["node", "./utilities/ensure-ignored.mjs"], params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } }, { script: "./utilities/ensure-ignored.mjs", params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } }],
+    signatures: [defaultEnsureIgnoredSignature(), { command: ["node", "./utilities/ensure-ignored.mjs"], params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } }, { script: "./utilities/ensure-ignored.mjs", params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } }, { script: { kind: "shippedUtility", name: "ensure-ignored.mjs", runtime: "node" }, params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } }],
   },
 ];
 
@@ -530,7 +530,7 @@ function normalizedUtilityBehavior(definition: Record<string, unknown>): string 
   const signature = cleanSignature({
     ...(typeof definition.utility === "string" ? { utility: definition.utility } : {}),
     ...(Array.isArray(definition.command) && definition.command.every((part) => typeof part === "string") ? { command: [...definition.command] as string[] } : {}),
-    ...(typeof definition.script === "string" ? { script: definition.script } : {}),
+    ...(typeof definition.script === "string" || isPlainObject(definition.script) ? { script: clonePlain(definition.script) } : {}),
     ...(isPlainObject(definition.params) && Object.keys(definition.params).length > 0 ? { params: clonePlain(definition.params) } : {}),
     ...(typeof definition.timeoutMs === "number" ? { timeoutMs: definition.timeoutMs } : {}),
     ...(typeof definition.parse === "string" ? { parse: definition.parse } : {}),
@@ -546,7 +546,8 @@ function auditChange(context: ConfigMigrationContext, layer: MigratableConfigLay
 function hoistLegacyUtilityMateria(materia: Record<string, unknown>, signatureToId: Map<string, string>, signature: UtilitySignature): string {
   const existing = signatureToId.get(stableStringify(signature));
   if (existing) return existing;
-  const base = `legacyUtility${pascalCase(signature.utility ?? signature.script ?? signature.command?.[0] ?? "command")}`;
+  const scriptLabel = typeof signature.script === "string" ? signature.script : isPlainObject(signature.script) && typeof signature.script.name === "string" ? signature.script.name : undefined;
+  const base = `legacyUtility${pascalCase(signature.utility ?? scriptLabel ?? signature.command?.[0] ?? "command")}`;
   const suffix = shortHash(stableStringify(signature));
   let id = `${base}${suffix}`;
   let counter = 2;

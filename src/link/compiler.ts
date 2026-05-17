@@ -198,15 +198,22 @@ function remapFragment(target: ResolvedLinkTarget, loadout: Loadout, socketStart
 }
 
 function remapSocket(socket: LoadoutSocket, socketMap: Map<SocketId, SocketId>): LoadoutSocket {
-  return {
+  const remapped: LoadoutSocket = {
     ...socket,
     ...(socket.edges ? { edges: socket.edges.map((edge) => ({ ...edge, to: remapGraphTarget(edge.to, socketMap) })) } : {}),
     ...(socket.foreach ? { foreach: { ...socket.foreach, ...(socket.foreach.done ? { done: remapGraphTarget(socket.foreach.done, socketMap) } : {}) } } : {}),
     ...(socket.advance ? { advance: { ...socket.advance, ...(socket.advance.done ? { done: remapGraphTarget(socket.advance.done, socketMap) } : {}) } } : {}),
-    ...(socket.type === "utility" && socket.command ? { command: [...socket.command] } : {}),
-    ...(socket.type === "utility" && socket.params ? { params: { ...socket.params } } : {}),
-    ...(socket.assign ? { assign: { ...socket.assign } } : {}),
+    ...(socket.type === "agent" && socket.assign ? { assign: { ...socket.assign } } : {}),
   };
+  if (remapped.type === "utility") {
+    delete (remapped as unknown as Record<string, unknown>).utility;
+    delete (remapped as unknown as Record<string, unknown>).command;
+    delete (remapped as unknown as Record<string, unknown>).params;
+    delete (remapped as unknown as Record<string, unknown>).timeoutMs;
+    delete (remapped as unknown as Record<string, unknown>).parse;
+    delete (remapped as unknown as Record<string, unknown>).assign;
+  }
+  return remapped;
 }
 
 function remapGraphTarget(socketId: SocketId, socketMap: Map<SocketId, SocketId>): SocketId {
