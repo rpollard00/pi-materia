@@ -1,37 +1,4 @@
 {
-  "activeLoadout": "Full-Auto",
-  "piMateria": {
-    "schemaVersion": 6,
-    "migrations": [
-      {
-        "id": "001-rename-non-default-loadout-collisions",
-        "appliedAt": "2026-05-14T15:05:47.493Z"
-      },
-      {
-        "id": "002-stamp-stable-loadout-ids",
-        "appliedAt": "2026-05-14T15:05:47.493Z"
-      },
-      {
-        "id": "003-stamp-loadout-ownership-and-locks",
-        "appliedAt": "2026-05-14T15:05:47.493Z"
-      },
-      {
-        "id": "004-canonicalize-utility-sockets",
-        "appliedAt": "2026-05-17T03:06:33.505Z"
-      },
-      {
-        "id": "005-stamp-explicit-materia-types",
-        "appliedAt": "2026-05-17T03:06:33.505Z"
-      },
-      {
-        "id": "006-repoint-legacy-default-materia-aliases",
-        "appliedAt": "2026-05-17T03:06:33.505Z"
-      },
-      {
-        "id": "007-repoint-legacy-utility-materia-identities",
-        "appliedAt": "2026-05-17T06:55:01.114Z"
-      }
-    ]
-  },
-  "activeLoadoutId": "default:full-auto"
+  "activeLoadoutId": "user:hojo-consult-copy",
+  "activeLoadout": "Hojo"
 }

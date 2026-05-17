@@ -1,7 +1,7 @@
 import { validateReservedHandoffFields, type HandoffObject } from "../domain/handoff.js";
 import { validateLoadout, type Loadout, type LoadoutLoop, type LoadoutSocket, type SocketId } from "../domain/loadout.js";
 import type { DomainIssue, DomainResult } from "../domain/result.js";
-import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, PiMateriaConfig } from "../types.js";
+import type { LoadoutSource, LoadoutUserLockState, MateriaConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, PiMateriaConfig, MateriaProfileConfig } from "../types.js";
 
 /**
  * Persistence/schema anti-corruption adapters.
@@ -11,24 +11,59 @@ import type { MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketCon
  * socket-collection aliases are not adapted at this boundary.
  */
 
-export interface PersistedLoadoutSchema {
-  schemaVersion?: number;
+export interface CurrentPersistedConfig {
+  artifactDir?: string;
+  budget?: PiMateriaConfig["budget"];
+  limits?: PiMateriaConfig["limits"];
+  compaction?: PiMateriaConfig["compaction"];
+  loadouts?: Record<string, CurrentPersistedLoadout | null>;
+  activeLoadoutId?: string;
+  activeLoadout?: string;
+  materia?: PiMateriaConfig["materia"];
+}
+
+export interface CurrentPersistedProfileConfig {
+  webui?: MateriaProfileConfig["webui"];
+  defaultLoadoutId?: string | null;
+  defaultSaveTarget?: MateriaProfileConfig["defaultSaveTarget"];
+  roleGeneration?: MateriaProfileConfig["roleGeneration"];
+}
+
+export interface CurrentPersistedLoadout {
   id?: string;
-  entry?: unknown;
-  sockets?: unknown;
-  loops?: unknown;
-  layout?: unknown;
+  source?: LoadoutSource;
+  lockState?: LoadoutUserLockState;
+  originDefaultId?: string;
+  entry: string;
+  sockets?: Record<string, CurrentPersistedSocket>;
+  loops?: Record<string, CurrentPersistedLoop>;
+  layout?: MateriaPipelineLayoutConfig;
 }
 
-export interface PersistedLoopSchema {
-  label?: unknown;
-  sockets?: unknown;
-  consumes?: unknown;
-  iterator?: unknown;
-  exits?: unknown;
+export interface CurrentPersistedSocket {
+  materia: string;
+  socketKind?: MateriaPipelineSocketConfig["socketKind"];
+  parse?: MateriaPipelineSocketConfig["parse"];
+  assign?: Record<string, string>;
+  edges?: MateriaPipelineSocketConfig["edges"];
+  foreach?: MateriaPipelineSocketConfig["foreach"];
+  advance?: MateriaPipelineSocketConfig["advance"];
+  limits?: MateriaPipelineSocketConfig["limits"];
+  empty?: boolean;
 }
 
-export function parsePersistedLoadout(value: unknown, path = "loadout"): DomainResult<Loadout> {
+export interface CurrentPersistedLoop {
+  sockets?: string[];
+  consumes?: MateriaLoopConfig["consumes"];
+  iterator?: MateriaLoopConfig["iterator"];
+  exit?: MateriaLoopConfig["exit"];
+  exits?: MateriaLoopConfig["exits"];
+}
+
+export interface PersistedLoadoutSchema extends CurrentPersistedLoadout {}
+export interface PersistedLoopSchema extends CurrentPersistedLoop {}
+
+export function parsePersistedLoadout(value: unknown, path = "loadout", materia: Record<string, Pick<MateriaConfig, "type">> = {}): DomainResult<Loadout> {
   const issues: DomainIssue[] = [];
   if (!isPlainObject(value)) return { ok: false, issues: [{ path, message: "loadout must be an object" }] };
 
@@ -37,7 +72,7 @@ export function parsePersistedLoadout(value: unknown, path = "loadout"): DomainR
   const loadout: Loadout = {
     ...(typeof value.id === "string" ? { id: value.id } : {}),
     entry: typeof value.entry === "string" ? value.entry : "",
-    sockets: isPlainObject(rawSockets) ? cloneRecord(rawSockets) as Record<SocketId, LoadoutSocket> : {},
+    sockets: isPlainObject(rawSockets) ? materializeRuntimeSockets(rawSockets, materia) as Record<SocketId, LoadoutSocket> : {},
     ...(value.loops === undefined ? {} : { loops: parseLoops(value.loops, `${path}.loops`, issues) }),
   };
   if (typeof value.entry !== "string" || value.entry.length === 0) issues.push({ path: `${path}.entry`, message: "entry is required" });
@@ -48,19 +83,18 @@ export function parsePersistedLoadout(value: unknown, path = "loadout"): DomainR
 
 export function serializePersistedLoadout(loadout: Loadout): PersistedLoadoutSchema {
   return {
-    schemaVersion: 2,
     ...(loadout.id ? { id: loadout.id } : {}),
     entry: loadout.entry,
-    sockets: serializeCanonicalSockets(loadout.sockets),
+    sockets: serializeCanonicalSockets(loadout.sockets) as Record<string, CurrentPersistedSocket>,
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, serializeLoop(loop)])) } : {}),
   };
 }
 
-export function pipelineConfigToDomainLoadout(loadout: MateriaPipelineConfig, id?: string): Loadout {
+export function pipelineConfigToDomainLoadout(loadout: MateriaPipelineConfig, id?: string, materia: Record<string, Pick<MateriaConfig, "type">> = {}): Loadout {
   return {
     ...(id ? { id } : {}),
     entry: loadout.entry,
-    sockets: cloneRecord(loadout.sockets ?? {}) as Record<SocketId, LoadoutSocket>,
+    sockets: materializeRuntimeSockets(loadout.sockets ?? {}, materia) as Record<SocketId, LoadoutSocket>,
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([loopId, loop]) => [loopId, pipelineLoopToDomain(loop)])) } : {}),
   };
 }
@@ -73,21 +107,63 @@ export function domainLoadoutToPipelineConfig(loadout: Loadout): MateriaPipeline
   };
 }
 
+export class CurrentPersistedConfigError extends Error {}
+
 export function normalizePersistedConfigForApplication<T extends Partial<PiMateriaConfig>>(config: T): T {
-  if (!isPlainObject(config.loadouts)) return config;
-  return {
-    ...config,
-    loadouts: Object.fromEntries(Object.entries(config.loadouts as Record<string, unknown>).map(([name, value]) => [name, normalizePersistedLoadoutForApplication(value)])) as PiMateriaConfig["loadouts"],
-  };
+  rejectMigrationMetadata(config as Record<string, unknown>, "Materia config");
+  return parseCurrentPersistedConfig(config as CurrentPersistedConfig) as T;
 }
 
-export function normalizePersistedLoadoutForApplication(value: unknown): unknown {
+export function rejectMigrationMetadata(config: Record<string, unknown>, label: string): void {
+  for (const key of ["piMateria", "schemaVersion", "migrations", "appliedMigrations"]) {
+    if (key in config) throw new CurrentPersistedConfigError(`${label} configures migration metadata field ${key}.`);
+  }
+}
+
+export function normalizePersistedLoadoutForApplication(value: unknown, materia: Record<string, Pick<MateriaConfig, "type">> = {}): unknown {
   if (!isPlainObject(value) || !isPlainObject(value.sockets)) return value;
   const loops = isPlainObject(value.loops)
     ? Object.fromEntries(Object.entries(value.loops).map(([id, loop]) => [id, normalizeLoopForApplication(loop)]))
     : value.loops;
   const { sockets: _sockets, ...rest } = value;
-  return { ...rest, sockets: cloneRecord(value.sockets), ...(loops === undefined ? {} : { loops }) };
+  return { ...rest, sockets: materializeRuntimeSockets(value.sockets, materia), ...(loops === undefined ? {} : { loops }) };
+}
+
+export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Partial<PiMateriaConfig> {
+  rejectMigrationMetadata(config as Record<string, unknown>, "Materia config");
+  const materia = isPlainObject(config.materia) ? config.materia as PiMateriaConfig["materia"] : undefined;
+  return {
+    ...(config.artifactDir !== undefined ? { artifactDir: config.artifactDir } : {}),
+    ...(config.budget !== undefined ? { budget: cloneRecord(config.budget) } : {}),
+    ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
+    ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
+    ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
+    ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
+    ...(materia !== undefined ? { materia: cloneRecord(materia) } : {}),
+    ...(isPlainObject(config.loadouts) ? { loadouts: Object.fromEntries(Object.entries(config.loadouts).map(([name, loadout]) => [name, loadout === null ? null : normalizePersistedLoadoutForApplication(loadout, materia ?? {})])) as PiMateriaConfig["loadouts"] } : {}),
+  };
+}
+
+export function serializeCurrentPersistedConfig(config: Partial<PiMateriaConfig>): CurrentPersistedConfig {
+  return {
+    ...(config.artifactDir !== undefined ? { artifactDir: config.artifactDir } : {}),
+    ...(config.budget !== undefined ? { budget: cloneRecord(config.budget) } : {}),
+    ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
+    ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
+    ...(config.loadouts !== undefined ? { loadouts: Object.fromEntries(Object.entries(config.loadouts as Record<string, MateriaPipelineConfig | null>).map(([name, loadout]) => [name, loadout === null ? null : serializePipelineLoadout(loadout)])) } : {}),
+    ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
+    ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
+    ...(config.materia !== undefined ? { materia: cloneRecord(config.materia) } : {}),
+  };
+}
+
+export function serializeCurrentProfileConfig(profile: MateriaProfileConfig): CurrentPersistedProfileConfig {
+  return {
+    ...(profile.webui !== undefined ? { webui: cloneRecord(profile.webui) } : {}),
+    ...(profile.defaultLoadoutId !== undefined ? { defaultLoadoutId: profile.defaultLoadoutId } : {}),
+    ...(profile.defaultSaveTarget !== undefined ? { defaultSaveTarget: profile.defaultSaveTarget } : {}),
+    ...(profile.roleGeneration !== undefined ? { roleGeneration: cloneRecord(profile.roleGeneration) } : {}),
+  };
 }
 
 export function validatePersistedHandoffPayload(value: unknown, path = "handoff"): DomainResult<HandoffObject> {
@@ -100,14 +176,47 @@ export function validatePersistedHandoffPayload(value: unknown, path = "handoff"
   return issues.length > 0 ? { ok: false, issues } : { ok: true, value: { ...value } };
 }
 
-function serializeCanonicalSockets(sockets: Record<SocketId, LoadoutSocket>): Record<string, unknown> {
+function serializePipelineLoadout(loadout: MateriaPipelineConfig): CurrentPersistedLoadout {
+  return {
+    ...(loadout.id ? { id: loadout.id } : {}),
+    ...(loadout.source ? { source: loadout.source } : {}),
+    ...(loadout.lockState ? { lockState: loadout.lockState } : {}),
+    ...(loadout.originDefaultId ? { originDefaultId: loadout.originDefaultId } : {}),
+    entry: loadout.entry,
+    sockets: serializeCanonicalSockets(loadout.sockets ?? {}) as Record<string, CurrentPersistedSocket>,
+    ...(loadout.layout ? { layout: cloneRecord(loadout.layout) } : {}),
+    ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, serializePipelineLoop(loop)])) } : {}),
+  };
+}
+
+function serializePipelineLoop(loop: MateriaLoopConfig): CurrentPersistedLoop {
+  return {
+    ...(loop.sockets ? { sockets: [...loop.sockets] } : {}),
+    ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
+    ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
+    ...(loop.exit ? { exit: { ...loop.exit } } : {}),
+    ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
+  };
+}
+
+function materializeRuntimeSockets(sockets: Record<string, unknown>, materia: Record<string, Pick<MateriaConfig, "type">>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(sockets).map(([id, socket]) => {
+    const copy = cloneRecord(socket) as Record<string, unknown>;
+    const materiaId = typeof copy.materia === "string" ? copy.materia : undefined;
+    const type = materiaId ? materia[materiaId]?.type : undefined;
+    return [id, { ...copy, type: type === "utility" ? "utility" : "agent" }];
+  }));
+}
+
+function serializeCanonicalSockets(sockets: Record<SocketId, LoadoutSocket> | Record<string, MateriaPipelineSocketConfig>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(sockets).map(([id, socket]) => {
     const copy = cloneRecord(socket) as unknown as Record<string, unknown>;
-    if (copy.type === "utility") {
-      delete copy.utility;
-      delete copy.command;
-      delete copy.params;
-      delete copy.timeoutMs;
+    delete copy.type;
+    delete copy.utility;
+    delete copy.command;
+    delete copy.params;
+    delete copy.timeoutMs;
+    if (socket.type === "utility") {
       delete copy.parse;
       delete copy.assign;
     }
@@ -132,7 +241,6 @@ function parseLoop(value: unknown, path: string, issues: DomainIssue[]): Loadout
   const rawSockets = value.sockets;
   if (!Array.isArray(rawSockets) || !rawSockets.every((item) => typeof item === "string")) issues.push({ path: `${path}.sockets`, message: "loop must define a sockets string array" });
   return {
-    ...(typeof value.label === "string" ? { label: value.label } : {}),
     sockets: Array.isArray(rawSockets) ? rawSockets.filter((item): item is string => typeof item === "string") : [],
     ...(isPlainObject(value.consumes) ? { consumes: { ...value.consumes } as unknown as LoadoutLoop["consumes"] } : {}),
     ...(isPlainObject(value.iterator) ? { iterator: { ...value.iterator } as unknown as LoadoutLoop["iterator"] } : {}),
@@ -142,7 +250,6 @@ function parseLoop(value: unknown, path: string, issues: DomainIssue[]): Loadout
 
 function serializeLoop(loop: LoadoutLoop): PersistedLoopSchema {
   return {
-    ...(loop.label ? { label: loop.label } : {}),
     sockets: [...loop.sockets],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
@@ -152,7 +259,6 @@ function serializeLoop(loop: LoadoutLoop): PersistedLoopSchema {
 
 function pipelineLoopToDomain(loop: MateriaLoopConfig): LoadoutLoop {
   return {
-    ...(loop.label ? { label: loop.label } : {}),
     sockets: [...(loop.sockets ?? [])],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
@@ -162,7 +268,6 @@ function pipelineLoopToDomain(loop: MateriaLoopConfig): LoadoutLoop {
 
 function domainLoopToPipeline(loop: LoadoutLoop): MateriaLoopConfig {
   return {
-    ...(loop.label ? { label: loop.label } : {}),
     sockets: [...loop.sockets],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),

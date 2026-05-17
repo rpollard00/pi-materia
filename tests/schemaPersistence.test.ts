@@ -1,7 +1,7 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { loadConfig, saveMateriaConfigPatch } from "../src/config/config.js";
+import { loadConfig, loadProfileConfig, saveMateriaConfigPatch } from "../src/config/config.js";
 import {
   domainLoadoutToPipelineConfig,
   normalizePersistedLoadoutForApplication,
@@ -30,24 +30,22 @@ describe("schema/persistence adapters", () => {
 
   test("reads and serializes current sockets payloads", () => {
     const parsed = parsePersistedLoadout({
-      schemaVersion: 2,
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }], parse: "json" },
-        "Socket-2": { type: "utility", materia: "Noop", utility: "noop", parse: "json", assign: { noop: "$" } },
+        "Socket-1": { materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }], parse: "json" },
+        "Socket-2": { materia: "Noop", utility: "noop", parse: "json", assign: { noop: "$" } },
       },
       loops: {
         main: { sockets: ["Socket-1", "Socket-2"] },
       },
-    });
+    }, "loadout", { Build: { type: "agent" }, Noop: { type: "utility" } });
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const serialized = serializePersistedLoadout(parsed.value);
-    expect(serialized.schemaVersion).toBe(2);
     expect(serialized.sockets).toBeDefined();
     expect((serialized.loops as Record<string, { sockets: string[] }>).main.sockets).toEqual(["Socket-1", "Socket-2"]);
-    expect((serialized.sockets as Record<string, Record<string, unknown>>)["Socket-2"]).toEqual({ type: "utility", materia: "Noop" });
+    expect((serialized.sockets as Record<string, Record<string, unknown>>)["Socket-2"]).toEqual({ materia: "Noop" });
   });
 
   test("reports malformed loadout data and missing optional fields remain optional", () => {
@@ -55,7 +53,7 @@ describe("schema/persistence adapters", () => {
     expect(malformed.ok).toBe(false);
     if (!malformed.ok) expect(malformed.issues.map((issue) => issue.path)).toContain("loadout.sockets");
 
-    const minimal = parsePersistedLoadout({ entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } });
+    const minimal = parsePersistedLoadout({ entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } }, "loadout", { Build: { type: "agent" } });
     expect(minimal.ok).toBe(true);
     if (minimal.ok) {
       expect(minimal.value.loops).toBeUndefined();
@@ -86,58 +84,164 @@ describe("schema/persistence adapters", () => {
       sockets: { "Socket-1": { type: "agent", materia: "Build" }, "Socket-2": { type: "utility", materia: "Noop", utility: "noop", parse: "json", assign: { noop: "$" } } },
       loops: { one: { sockets: ["Socket-1"] } },
     });
-    expect(pipeline.sockets["Socket-1"].type).toBe("agent");
+    expect(pipeline.sockets["Socket-1"].type).toBeUndefined();
     expect(pipeline.loops?.one.sockets).toEqual(["Socket-1"]);
-    expect(pipeline.sockets["Socket-2"]).toEqual({ type: "utility", materia: "Noop" });
+    expect(pipeline.sockets["Socket-2"]).toEqual({ materia: "Noop" });
 
-    const domain = pipelineConfigToDomainLoadout(pipeline);
+    const domain = pipelineConfigToDomainLoadout(pipeline, undefined, { Build: { type: "agent" }, Noop: { type: "utility" } });
     expect(domain.sockets["Socket-1"].type).toBe("agent");
     expect(domain.loops?.one.sockets).toEqual(["Socket-1"]);
   });
 
   test("config loading accepts sockets-format loadouts while preserving current application DTOs", async () => {
-    const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
-    const file = path.join(dir, "materia.json");
-    await writeFile(file, JSON.stringify({
-      activeLoadout: "SocketConfig",
-      materia,
-      loadouts: {
-        SocketConfig: {
-          entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "Build" } },
-          loops: { only: { sockets: ["Socket-1"] } },
+    const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+      const file = path.join(dir, "materia.json");
+      await writeFile(file, JSON.stringify({
+        activeLoadout: "SocketConfig",
+        materia,
+        loadouts: {
+          SocketConfig: {
+            entry: "Socket-1",
+            sockets: { "Socket-1": { materia: "Build" } },
+            loops: { only: { sockets: ["Socket-1"] } },
+          },
         },
-      },
-    }), "utf8");
+      }), "utf8");
 
-    const loaded = await loadConfig(dir, file);
-    expect(loaded.config.loadouts?.SocketConfig.sockets["Socket-1"].materia).toBe("Build");
-    expect(loaded.config.loadouts?.SocketConfig.loops?.only.sockets).toEqual(["Socket-1"]);
+      const loaded = await loadConfig(dir, file);
+      expect(loaded.config.loadouts?.SocketConfig.sockets["Socket-1"].materia).toBe("Build");
+      expect(loaded.config.loadouts?.SocketConfig.loops?.only.sockets).toEqual(["Socket-1"]);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("config loading rejects socket types and loop labels in persisted loadouts", async () => {
+    const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+      const socketTypeFile = path.join(dir, "socket-type.json");
+      await writeFile(socketTypeFile, JSON.stringify({
+        activeLoadout: "PersistedDetails",
+        materia,
+        loadouts: {
+          PersistedDetails: {
+            entry: "Socket-1",
+            sockets: { "Socket-1": { type: "agent", materia: "Build" } },
+          },
+        },
+      }), "utf8");
+
+      await expect(loadConfig(dir, socketTypeFile)).rejects.toThrow(/configures socket type/);
+
+      const loopLabelFile = path.join(dir, "loop-label.json");
+      await writeFile(loopLabelFile, JSON.stringify({
+        activeLoadout: "PersistedDetails",
+        materia,
+        loadouts: {
+          PersistedDetails: {
+            entry: "Socket-1",
+            sockets: { "Socket-1": { materia: "Build" } },
+            loops: { only: { label: "Only", sockets: ["Socket-1"] } },
+          },
+        },
+      }), "utf8");
+
+      await expect(loadConfig(dir, loopLabelFile)).rejects.toThrow(/configures persisted label/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("config and profile loading reject migration metadata", async () => {
+    const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+      const file = path.join(dir, "materia.json");
+      await writeFile(file, JSON.stringify({
+        piMateria: { schemaVersion: 1, migrations: [] },
+        activeLoadout: "SocketConfig",
+        materia,
+        loadouts: { SocketConfig: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
+      }), "utf8");
+
+      await expect(loadConfig(dir, file)).rejects.toThrow(/migration metadata field piMateria/);
+
+      await writeFile(path.join(profile, "config.json"), JSON.stringify({
+        defaultLoadoutId: null,
+        schemaVersion: 1,
+      }), "utf8");
+
+      await expect(loadProfileConfig()).rejects.toThrow(/migration metadata field schemaVersion/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("saving writes the current metadata-free config model", async () => {
+    const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+    const cwd = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const file = await saveMateriaConfigPatch(cwd, {
+        materia,
+        loadouts: { Custom: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
+        activeLoadout: "Custom",
+      });
+      const saved = JSON.parse(await readFile(file, "utf8"));
+      expect(saved.piMateria).toBeUndefined();
+      expect(saved.schemaVersion).toBeUndefined();
+      expect(saved.migrations).toBeUndefined();
+      expect(saved.loadouts.Custom.sockets["Socket-1"].type).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
   });
 
   test("config loading fails malformed socket payloads through canonical graph validation", async () => {
-    const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
-    const file = path.join(dir, "materia.json");
-    await writeFile(file, JSON.stringify({
-      activeLoadout: "BadConfig",
-      materia,
-      loadouts: {
-        BadConfig: {
-          entry: "Socket-1",
-          sockets: {},
-          loops: { only: { sockets: ["Socket-1"] } },
+    const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
+      const file = path.join(dir, "materia.json");
+      await writeFile(file, JSON.stringify({
+        activeLoadout: "BadConfig",
+        materia,
+        loadouts: {
+          BadConfig: {
+            entry: "Socket-1",
+            sockets: {},
+            loops: { only: { sockets: ["Socket-1"] } },
+          },
         },
-      },
-    }), "utf8");
+      }), "utf8");
 
-    await expect(loadConfig(dir, file)).rejects.toThrow(/Unknown graph endpoint|must include at least one socket id/);
+      await expect(loadConfig(dir, file)).rejects.toThrow(/Unknown graph endpoint|must include at least one socket id/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
   });
 
   test("application adapter preserves socket-shaped loadouts", () => {
     const normalized = normalizePersistedLoadoutForApplication({
       entry: "Socket-1",
-      sockets: { "Socket-1": { type: "agent", materia: "Build" } },
-    }) as { sockets: Record<string, { materia: string }> };
+      sockets: { "Socket-1": { materia: "Build" } },
+    }, { Build: { type: "agent" } }) as { sockets: Record<string, { materia: string }> };
 
     expect(normalized.sockets["Socket-1"].materia).toBe("Build");
   });

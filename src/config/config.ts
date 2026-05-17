@@ -6,15 +6,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compactionConfig.js";
 import { isShippedUtilityScriptRef, resolveShippedUtilityScriptPath, syncShippedUtilityScripts } from "./shippedUtilities.js";
-import { ensureCurrentSchemaMetadata, ensureLoadoutOwnershipAndLocks, ensureStableLoadoutIds, migrateConfigLayers, validateNoDuplicateLoadoutOwnership, type MigratableConfigLayer } from "./migrations.js";
 import { normalizeMateriaCatalog, validateLoadoutMateriaReferences } from "../domain/materia.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
-import { normalizePersistedConfigForApplication } from "../schema/persistence.js";
+import { CurrentPersistedConfigError, normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, rejectMigrationMetadata, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
-import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig } from "../types.js";
+import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState } from "../types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
@@ -48,16 +47,9 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
 
   const loadedLayers = layers.filter((layer) => layer.loaded);
   const profile = await loadProfileConfig();
-  const migratableLayers: MigratableConfigLayer[] = partials.map((config, index) => ({ ...loadedLayers[index], config }));
-  const migrationContext = migrateConfigLayers(migratableLayers, profile);
-  for (const layer of migratableLayers) {
-    if (layer.changed && layer.scope !== "default") await writeJsonAtomic(layer.path, layer.config);
-  }
-  if (migrationContext.profileChanged) await writeProfileConfig(profile);
-  const migratedPartials = migratableLayers.map((layer) => layer.config);
-  const config = await mergeConfigLayers(migratedPartials);
-  const loadoutSources = buildLoadoutSources(migratedPartials, loadedLayers);
-  const materiaCommandSources = buildMateriaCommandSources(migratedPartials, loadedLayers);
+  const config = await mergeConfigLayers(partials);
+  const loadoutSources = buildLoadoutSources(partials, loadedLayers);
+  const materiaCommandSources = buildMateriaCommandSources(partials, loadedLayers);
   resolveUtilityExecutionBindings(config, materiaCommandSources, loadedLayers);
   const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
   return {
@@ -79,8 +71,10 @@ export async function loadProfileConfig(): Promise<MateriaProfileConfig> {
       warnInvalidProfileConfig(file, "Expected a JSON object; using profile defaults.");
       return defaultProfileConfig();
     }
+    rejectMigrationMetadata(parsed, `Profile config ${file}`);
     return normalizeProfileConfig(parsed, file);
   } catch (error) {
+    if (isCurrentPersistedConfigError(error)) throw error;
     warnInvalidProfileConfig(file, `Could not read profile config; using profile defaults: ${error instanceof Error ? error.message : String(error)}`);
     return defaultProfileConfig();
   }
@@ -90,7 +84,7 @@ export async function ensureUserProfileConfig(): Promise<string> {
   const dir = getUserMateriaDir();
   const file = getUserProfileConfigPath();
   await mkdir(dir, { recursive: true });
-  if (!existsSync(file)) await writeJsonAtomic(file, ensureCurrentSchemaMetadata(defaultProfileConfig()));
+  if (!existsSync(file)) await writeJsonAtomic(file, serializeCurrentProfileConfig(defaultProfileConfig()));
   return file;
 }
 
@@ -129,14 +123,14 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
   next.loadouts = normalizeLoadoutsForSave(next.loadouts, next.materia as Record<string, MateriaConfig> | undefined);
   const materialized = withoutDeletedLoadoutMarkers(next);
-  ensureStableLoadoutIds(materialized, target);
-  ensureStableLoadoutIds(next, target);
-  ensureLoadoutOwnershipAndLocks(materialized, target);
-  ensureLoadoutOwnershipAndLocks(next, target);
+  ensureCurrentLoadoutIdentity(materialized, target);
+  ensureCurrentLoadoutIdentity(next, target);
+  ensureCurrentLoadoutOwnershipAndLocks(materialized, target);
+  ensureCurrentLoadoutOwnershipAndLocks(next, target);
   await validateSaveLoadoutOwnership(cwd, options.configuredPath, target, materialized);
   await validateSaveMateriaReferences(cwd, options.configuredPath, target, materialized);
   validateLoadoutGraphs(materialized.loadouts);
-  await writeJsonAtomic(file, ensureCurrentSchemaMetadata(next));
+  await writeJsonAtomic(file, serializeCurrentPersistedConfig(next));
   return file;
 }
 
@@ -160,9 +154,8 @@ export async function saveActiveLoadout(cwd: string, loadoutName: string, config
 async function readConfigPartial(file: string): Promise<Partial<PiMateriaConfig>> {
   const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<PiMateriaConfig>;
   if (!isPlainObject(parsed)) throw new Error(`Materia config file ${file} is invalid. Expected a JSON object.`);
-  const normalized = normalizePersistedConfigForApplication(parsed);
-  rejectObsoleteConfigFields(normalized, file);
-  return normalized;
+  rejectObsoleteConfigFields(parsed as Record<string, unknown>, file);
+  return normalizePersistedConfigForApplication(parsed);
 }
 
 function getBundledDefaultConfigPath(): string {
@@ -195,7 +188,7 @@ function getWritableConfigPath(cwd: string, configuredPath?: string, target: Mat
 }
 
 async function validateSaveLoadoutOwnership(cwd: string, configuredPath: string | undefined, target: MateriaSaveTarget, nextTargetConfig: Partial<PiMateriaConfig>): Promise<void> {
-  validateNoDuplicateLoadoutOwnership(await buildSaveValidationLayers(cwd, configuredPath, target, nextTargetConfig, { migrate: false }));
+  validateNoDuplicateLoadoutOwnership(await buildSaveValidationLayers(cwd, configuredPath, target, nextTargetConfig));
 }
 
 async function validateSaveMateriaReferences(cwd: string, configuredPath: string | undefined, target: MateriaSaveTarget, nextTargetConfig: Partial<PiMateriaConfig>): Promise<void> {
@@ -203,22 +196,67 @@ async function validateSaveMateriaReferences(cwd: string, configuredPath: string
   validateConfigMateriaReferences(merged);
 }
 
-async function buildSaveValidationLayers(cwd: string, configuredPath: string | undefined, target: MateriaSaveTarget, nextTargetConfig: Partial<PiMateriaConfig>, options: { migrate?: boolean } = {}): Promise<Array<{ scope: MateriaConfigLayerScope; config: Partial<PiMateriaConfig> }>> {
+async function buildSaveValidationLayers(cwd: string, configuredPath: string | undefined, target: MateriaSaveTarget, nextTargetConfig: Partial<PiMateriaConfig>): Promise<Array<{ scope: MateriaConfigLayerScope; config: Partial<PiMateriaConfig> }>> {
   const defaultPath = getBundledDefaultConfigPath();
   const userPath = getUserMateriaAssetPath();
   const projectPath = getProjectConfigPath(cwd);
   const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
-  const layers: MigratableConfigLayer[] = [
-    { scope: "default", path: defaultPath, loaded: true, config: await readConfigPartial(defaultPath) },
+  const layers: Array<{ scope: MateriaConfigLayerScope; config: Partial<PiMateriaConfig> }> = [
+    { scope: "default", config: await readConfigPartial(defaultPath) },
   ];
-  if (target === "user") layers.push({ scope: "user", path: userPath, loaded: true, config: nextTargetConfig });
-  else if (existsSync(userPath)) layers.push({ scope: "user", path: userPath, loaded: true, config: await readConfigPartial(userPath) });
-  if (target === "project") layers.push({ scope: "project", path: projectPath, loaded: true, config: nextTargetConfig });
-  else if (existsSync(projectPath)) layers.push({ scope: "project", path: projectPath, loaded: true, config: await readConfigPartial(projectPath) });
-  if (target === "explicit") layers.push({ scope: "explicit", path: explicitPath ?? "<explicit>", loaded: true, config: nextTargetConfig });
-  else if (explicitPath && existsSync(explicitPath)) layers.push({ scope: "explicit", path: explicitPath, loaded: true, config: await readConfigPartial(explicitPath) });
-  if (options.migrate !== false) migrateConfigLayers(layers);
-  return layers.map(({ scope, config }) => ({ scope, config }));
+  if (target === "user") layers.push({ scope: "user", config: nextTargetConfig });
+  else if (existsSync(userPath)) layers.push({ scope: "user", config: await readConfigPartial(userPath) });
+  if (target === "project") layers.push({ scope: "project", config: nextTargetConfig });
+  else if (existsSync(projectPath)) layers.push({ scope: "project", config: await readConfigPartial(projectPath) });
+  if (target === "explicit") layers.push({ scope: "explicit", config: nextTargetConfig });
+  else if (explicitPath && existsSync(explicitPath)) layers.push({ scope: "explicit", config: await readConfigPartial(explicitPath) });
+  return layers;
+}
+
+function ensureCurrentLoadoutIdentity(config: Partial<PiMateriaConfig>, scope: MateriaConfigLayerScope): void {
+  if (!isPlainObject(config.loadouts)) return;
+  for (const [displayName, loadout] of Object.entries(config.loadouts as Record<string, unknown>)) {
+    if (!isPlainObject(loadout)) continue;
+    const id = typeof loadout.id === "string" ? loadout.id.trim() : "";
+    if (!id) loadout.id = stableLoadoutId(scope, displayName);
+  }
+  const activeName = config.activeLoadout;
+  if (typeof activeName === "string" && typeof config.activeLoadoutId !== "string") {
+    const active = (config.loadouts as Record<string, unknown>)[activeName];
+    if (isPlainObject(active) && typeof active.id === "string" && active.id.trim()) config.activeLoadoutId = active.id;
+  }
+}
+
+function ensureCurrentLoadoutOwnershipAndLocks(config: Partial<PiMateriaConfig>, scope: MateriaConfigLayerScope): void {
+  if (!isPlainObject(config.loadouts)) return;
+  for (const loadout of Object.values(config.loadouts as Record<string, unknown>)) {
+    if (!isPlainObject(loadout)) continue;
+    loadout.source = scope;
+    if (scope === "default") delete loadout.lockState;
+    else if (!isLoadoutLockState(loadout.lockState)) loadout.lockState = "unlocked";
+  }
+}
+
+function validateNoDuplicateLoadoutOwnership(layers: Array<{ scope: MateriaConfigLayerScope; config: Partial<PiMateriaConfig> }>): void {
+  const owners = new Map<string, MateriaConfigLayerScope>();
+  for (const layer of layers) {
+    if (!isPlainObject(layer.config.loadouts)) continue;
+    for (const [name, loadout] of Object.entries(layer.config.loadouts as Record<string, unknown>)) {
+      if (loadout === null || !isPlainObject(loadout)) continue;
+      const existing = owners.get(name);
+      if (existing && existing !== layer.scope) throw new Error(`Materia loadout "${name}" is already owned by ${existing} scope; choose a unique name before saving to ${layer.scope}.`);
+      owners.set(name, layer.scope);
+    }
+  }
+}
+
+function isLoadoutLockState(value: unknown): value is LoadoutUserLockState {
+  return value === "locked" || value === "unlocked";
+}
+
+function stableLoadoutId(scope: MateriaConfigLayerScope, displayName: string): string {
+  const slug = displayName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "loadout";
+  return `${scope}:${slug}`;
 }
 
 function defaultProfileConfig(): MateriaProfileConfig {
@@ -232,8 +270,6 @@ function defaultRoleGenerationProfileConfig(): MateriaRoleGenerationProfileConfi
 function normalizeProfileConfig(parsed: Record<string, unknown>, file: string): MateriaProfileConfig {
   const defaults = defaultProfileConfig();
   const profile: MateriaProfileConfig = { ...defaults };
-
-  if (isPlainObject(parsed.piMateria)) profile.piMateria = parsed.piMateria as MateriaProfileConfig["piMateria"];
 
   if (parsed.webui !== undefined) {
     if (isPlainObject(parsed.webui)) profile.webui = parsed.webui as MateriaProfileConfig["webui"];
@@ -299,6 +335,10 @@ function warnInvalidProfileConfig(file: string, message: string): void {
   console.warn(`[pi-materia] Profile config ${file}: ${message}`);
 }
 
+function isCurrentPersistedConfigError(error: unknown): boolean {
+  return error instanceof CurrentPersistedConfigError;
+}
+
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   const dir = path.dirname(file);
   const temp = path.join(dir, `.pi-materia.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
@@ -309,7 +349,7 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
 
 async function writeProfileConfig(profile: MateriaProfileConfig): Promise<string> {
   const file = await ensureUserProfileConfig();
-  await writeJsonAtomic(file, ensureCurrentSchemaMetadata(profile));
+  await writeJsonAtomic(file, serializeCurrentProfileConfig(profile));
   return file;
 }
 
@@ -328,9 +368,9 @@ async function writeMinimalActiveLoadout(file: string, loadoutName: string, load
   }
 
   const activeLoadoutId = loadoutId ?? findLoadoutId(parsed.loadouts, loadoutName);
-  const next = ensureCurrentSchemaMetadata({ ...parsed, activeLoadout: loadoutName, ...(activeLoadoutId ? { activeLoadoutId } : {}) });
+  const next = { ...parsed, activeLoadout: loadoutName, ...(activeLoadoutId ? { activeLoadoutId } : {}) };
   try {
-    await writeJsonAtomic(file, next);
+    await writeJsonAtomic(file, serializeCurrentPersistedConfig(next));
   } catch (error) {
     throw new Error(`Failed to persist active Materia loadout to ${file}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -344,11 +384,20 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
+  config = normalizeConfigRuntimeSockets(config);
   config = normalizeConfigLoadoutsForLoad(config);
   config = prepareConfigLoadoutsForSave(config);
   validateConfigMateriaReferences(config);
   validateLoadoutGraphs(config.loadouts);
   return config;
+}
+
+function normalizeConfigRuntimeSockets(config: PiMateriaConfig): PiMateriaConfig {
+  if (!isPlainObject(config.loadouts)) return config;
+  return {
+    ...config,
+    loadouts: Object.fromEntries(Object.entries(config.loadouts).map(([name, loadout]) => [name, normalizePersistedLoadoutForApplication(loadout, config.materia)])) as PiMateriaConfig["loadouts"],
+  };
 }
 
 function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMateriaConfig>): Partial<PiMateriaConfig> {
@@ -583,9 +632,6 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
   validateLegacyGeneratorDeclaration(name, materia.generates);
 }
 
-// Migration-only cleanup marker: saved editors may write `generates: null` to
-// remove the obsolete declaration, but authored `generates` metadata must not
-// activate or describe runtime generator output.
 function validateLegacyGeneratorDeclaration(name: string, generates: unknown): void {
   if (generates === undefined || generates === null) return;
   throw new Error(`Materia "${name}" configures obsolete generates metadata. Use generator: true and emit canonical JSON with workItems; custom generates.output aliases are not active runtime generator outputs.`);
@@ -609,6 +655,7 @@ function validateUtilityScriptMateria(name: string, script: unknown): void {
 }
 
 function rejectObsoleteConfigFields(config: Record<string, unknown>, file: string): void {
+  rejectMigrationMetadata(config, `Materia config file ${file}`);
   if ("roles" in config) throw new Error(`Materia config file ${file} configures obsolete roles. Use top-level materia instead.`);
   if ("materiaDefinitions" in config) throw new Error(`Materia config file ${file} configures obsolete materiaDefinitions.`);
   for (const [name, materia] of Object.entries((config.materia ?? {}) as Record<string, unknown>)) {
@@ -619,8 +666,12 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
     if (!isPlainObject(loadout)) continue;
     if ("prompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete prompt. Define prompt on referenced materia instead.`);
     if ("systemPrompt" in loadout) throw new Error(`Materia loadout "${loadoutName}" configures obsolete systemPrompt. Define prompt on referenced materia instead.`);
+    for (const [loopName, loop] of Object.entries((loadout.loops ?? {}) as Record<string, unknown>)) {
+      if (isPlainObject(loop) && "label" in loop) throw new Error(`Materia loadout "${loadoutName}" loop "${loopName}" configures persisted label.`);
+    }
     for (const [socketName, socket] of Object.entries(loadoutSockets(loadout as unknown as MateriaPipelineConfig) as Record<string, unknown>)) {
       if (!isPlainObject(socket)) continue;
+      if ("type" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures socket type. Define behavior on referenced materia instead.`);
       if ("role" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures obsolete role. Use materia instead.`);
       if ("prompt" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures obsolete prompt. Define prompt on the referenced materia instead.`);
       if ("systemPrompt" in socket) throw new Error(`Materia loadout "${loadoutName}" socket "${socketName}" configures obsolete systemPrompt. Define prompt on the referenced materia instead.`);

@@ -1,5 +1,19 @@
 import { makeDuplicateLoadoutName } from "../loadout/loadoutNames.js";
-import type { LoadoutSource, LoadoutUserLockState, MateriaConfigLayerScope, MateriaProfileConfig, PiMateriaConfig, PiMateriaSchemaMigrationAudit } from "../types.js";
+import type { LoadoutSource, LoadoutUserLockState, MateriaConfigLayerScope, MateriaProfileConfig, PiMateriaConfig } from "../types.js";
+
+interface PiMateriaSchemaMigrationAudit {
+  id: string;
+  appliedAt: string;
+  changes?: string[];
+}
+
+interface MigrationMetadataContainer {
+  piMateria?: {
+    schemaVersion?: number;
+    migrations?: PiMateriaSchemaMigrationAudit[];
+  };
+}
+
 
 export const LOADOUT_CONFIG_MIGRATIONS = [
   { id: "001-rename-non-default-loadout-collisions", migrate: renameNonDefaultLoadoutCollisions },
@@ -65,14 +79,15 @@ export function migrateConfigLayers(layers: MigratableConfigLayer[], profile?: M
 }
 
 export function stampConfig(config: Partial<PiMateriaConfig> | MateriaProfileConfig, changes: string[] = [], now = new Date()): void {
+  const target = config as MigrationMetadataContainer;
   const appliedAt = now.toISOString();
-  const existing = Array.isArray(config.piMateria?.migrations) ? config.piMateria.migrations : [];
+  const existing = Array.isArray(target.piMateria?.migrations) ? target.piMateria.migrations : [];
   const existingIds = new Set(existing.map((migration) => migration.id));
   const migrations: PiMateriaSchemaMigrationAudit[] = [...existing];
   for (const migration of LOADOUT_CONFIG_MIGRATIONS) {
     if (!existingIds.has(migration.id)) migrations.push({ id: migration.id, appliedAt, ...(changes.length > 0 ? { changes: [...changes] } : {}) });
   }
-  config.piMateria = { ...(config.piMateria ?? {}), schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION, migrations };
+  target.piMateria = { ...(target.piMateria ?? {}), schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION, migrations };
 }
 
 export function ensureCurrentSchemaMetadata<T extends Partial<PiMateriaConfig> | MateriaProfileConfig>(config: T): T {
@@ -647,8 +662,9 @@ function stableLoadoutId(scope: MateriaConfigLayerScope, displayName: string): s
 }
 
 function shouldStampConfig(config: Partial<PiMateriaConfig> | MateriaProfileConfig): boolean {
-  if (config.piMateria?.schemaVersion !== CURRENT_PI_MATERIA_SCHEMA_VERSION || !Array.isArray(config.piMateria?.migrations)) return true;
-  const applied = new Set(config.piMateria.migrations.map((migration) => migration.id));
+  const target = config as MigrationMetadataContainer;
+  if (target.piMateria?.schemaVersion !== CURRENT_PI_MATERIA_SCHEMA_VERSION || !Array.isArray(target.piMateria?.migrations)) return true;
+  const applied = new Set(target.piMateria.migrations.map((migration) => migration.id));
   return LOADOUT_CONFIG_MIGRATIONS.some((migration) => !applied.has(migration.id));
 }
 

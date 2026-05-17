@@ -16,7 +16,6 @@
       "entry": "Socket-1",
       "loops": {
         "loopSelection": {
-          "label": "Loop: Socket-4 → Socket-5 → Socket-6",
           "consumes": {
             "from": "Socket-8",
             "output": "workItems"
@@ -79,7 +78,6 @@
       },
       "sockets": {
         "Socket-1": {
-          "type": "utility",
           "edges": [
             {
               "when": "always",
@@ -90,7 +88,6 @@
           "materia": "Ignore-Artifacts"
         },
         "Socket-2": {
-          "type": "utility",
           "edges": [
             {
               "when": "always",
@@ -108,7 +105,6 @@
               "to": "Socket-8"
             }
           ],
-          "type": "agent",
           "materia": "Auto-Plan",
           "parse": "json",
           "empty": false,
@@ -124,13 +120,11 @@
               "to": "Socket-5"
             }
           ],
-          "type": "agent",
           "materia": "Build",
           "parse": "text",
           "empty": false
         },
         "Socket-5": {
-          "type": "agent",
           "parse": "json",
           "assign": {
             "lastFeedback": "$.feedback",
@@ -151,7 +145,6 @@
           "socketKind": "normal"
         },
         "Socket-6": {
-          "type": "agent",
           "parse": "json",
           "assign": {
             "lastMaintain": "$"
@@ -173,7 +166,6 @@
         },
         "Socket-7": {
           "socketKind": "normal",
-          "type": "agent",
           "materia": "Narrate",
           "parse": "text",
           "empty": false
@@ -186,7 +178,6 @@
               "to": "Socket-4"
             }
           ],
-          "type": "agent",
           "materia": "Auto-Architect",
           "parse": "json",
           "empty": false,
@@ -200,7 +191,6 @@
       "entry": "Socket-1",
       "loops": {
         "taskIteration": {
-          "label": "Build → Eval → Maintain until all work items complete",
           "exit": {
             "from": "Socket-6",
             "when": "satisfied",
@@ -219,7 +209,6 @@
       },
       "sockets": {
         "Socket-1": {
-          "type": "utility",
           "edges": [
             {
               "when": "always",
@@ -230,7 +219,6 @@
           "materia": "Ignore-Artifacts"
         },
         "Socket-2": {
-          "type": "utility",
           "edges": [
             {
               "when": "always",
@@ -241,7 +229,6 @@
           "materia": "Detect-VCS"
         },
         "Socket-3": {
-          "type": "agent",
           "parse": "json",
           "assign": {
             "workItems": "$.workItems"
@@ -256,7 +243,6 @@
           "socketKind": "normal"
         },
         "Socket-4": {
-          "type": "agent",
           "parse": "text",
           "materia": "Build",
           "edges": [
@@ -268,7 +254,6 @@
           "socketKind": "normal"
         },
         "Socket-5": {
-          "type": "agent",
           "parse": "json",
           "assign": {
             "lastFeedback": "$.feedback",
@@ -289,7 +274,6 @@
           "socketKind": "normal"
         },
         "Socket-6": {
-          "type": "agent",
           "parse": "json",
           "advance": {
             "cursor": "workItemIndex",
@@ -315,7 +299,6 @@
       "entry": "Socket-1",
       "loops": {
         "loopSelection": {
-          "label": "Loop: Socket-5 → Socket-6 → Socket-7",
           "consumes": {
             "from": "Socket-4",
             "output": "workItems"
@@ -379,7 +362,6 @@
       "sockets": {
         "Socket-1": {
           "socketKind": "entry",
-          "type": "utility",
           "empty": false,
           "edges": [
             {
@@ -391,7 +373,6 @@
         },
         "Socket-2": {
           "socketKind": "normal",
-          "type": "utility",
           "empty": false,
           "edges": [
             {
@@ -409,7 +390,6 @@
               "to": "Socket-4"
             }
           ],
-          "type": "agent",
           "materia": "Interactive-Plan",
           "parse": "json",
           "empty": false,
@@ -425,7 +405,6 @@
               "to": "Socket-5"
             }
           ],
-          "type": "agent",
           "materia": "Auto-Architect",
           "parse": "json",
           "empty": false,
@@ -441,7 +420,6 @@
               "to": "Socket-6"
             }
           ],
-          "type": "agent",
           "materia": "Build",
           "parse": "text",
           "empty": false
@@ -458,7 +436,6 @@
               "when": "not_satisfied"
             }
           ],
-          "type": "agent",
           "materia": "Auto-Eval",
           "parse": "json",
           "empty": false
@@ -471,7 +448,6 @@
               "when": "always"
             }
           ],
-          "type": "agent",
           "materia": "Maintain",
           "parse": "json",
           "empty": false,
@@ -484,7 +460,6 @@
         },
         "Socket-8": {
           "socketKind": "normal",
-          "type": "agent",
           "materia": "Narrate",
           "parse": "text",
           "empty": false

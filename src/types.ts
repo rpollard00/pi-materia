@@ -1,18 +1,6 @@
 import type { ToolScopeSpec } from "./domain/toolScope.js";
 
-export interface PiMateriaSchemaMigrationAudit {
-  id: string;
-  appliedAt: string;
-  changes?: string[];
-}
-
-export interface PiMateriaSchemaMetadata {
-  schemaVersion?: number;
-  migrations?: PiMateriaSchemaMigrationAudit[];
-}
-
 export interface PiMateriaConfig {
-  piMateria?: PiMateriaSchemaMetadata;
   artifactDir?: string;
   budget?: MateriaBudgetConfig;
   limits?: MateriaLimitsConfig;
@@ -51,7 +39,6 @@ export interface MateriaConfigLayer {
 export type MateriaSaveTarget = "user" | "project" | "explicit";
 
 export interface MateriaProfileConfig {
-  piMateria?: PiMateriaSchemaMetadata;
   webui?: {
     autoOpenBrowser?: boolean;
     openBrowser?: boolean;
