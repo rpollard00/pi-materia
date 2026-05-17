@@ -581,8 +581,8 @@ function displayPipelineSocketName(
   const socket = resolvedPipelineSockets(state.pipeline)[socketId];
   if (!socket) return socketId;
   if ("materia" in socket)
-    return socket.materia.label ?? socket.socket.materia ?? socketId;
-  return socket.socket.utility ?? socket.socket.command?.[0] ?? socketId;
+    return socket.materia?.label ?? socket.socket.materia ?? socketId;
+  return socketId;
 }
 
 function resolveLoopTotal(

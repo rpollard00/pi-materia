@@ -16,7 +16,14 @@ const minimalLoadout = (materia = "Build") => ({
 describe("pi-materia config migrations", () => {
   it("keeps migration ids unique, sorted, stable, and derives the current schema version", () => {
     expect(() => assertValidMigrationRegistry()).not.toThrow();
-    expect(LOADOUT_CONFIG_MIGRATIONS.map((migration) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids", "003-stamp-loadout-ownership-and-locks"]);
+    expect(LOADOUT_CONFIG_MIGRATIONS.map((migration) => migration.id)).toEqual([
+      "001-rename-non-default-loadout-collisions",
+      "002-stamp-stable-loadout-ids",
+      "003-stamp-loadout-ownership-and-locks",
+      "004-canonicalize-utility-sockets",
+      "005-stamp-explicit-materia-types",
+      "006-repoint-legacy-default-materia-aliases",
+    ]);
     expect(CURRENT_PI_MATERIA_SCHEMA_VERSION).toBe(LOADOUT_CONFIG_MIGRATIONS.length);
   });
 
@@ -29,7 +36,7 @@ describe("pi-materia config migrations", () => {
     const first = migrateConfigLayers(layers);
     expect(first.layers[1].changed).toBe(true);
     expect(first.layers[1].config.piMateria?.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
-    expect(first.layers[1].config.piMateria?.migrations?.map((migration) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids", "003-stamp-loadout-ownership-and-locks"]);
+    expect(first.layers[1].config.piMateria?.migrations?.map((migration) => migration.id)).toEqual(LOADOUT_CONFIG_MIGRATIONS.map((migration) => migration.id));
     expect(first.layers[1].config.loadouts?.Beta?.id).toBe("user:beta");
     expect(first.layers[1].config.loadouts?.Beta?.source).toBe("user");
     expect(first.layers[1].config.loadouts?.Beta?.lockState).toBe("unlocked");
@@ -127,7 +134,7 @@ describe("pi-materia config migrations", () => {
       const writtenProfile = JSON.parse(await readFile(path.join(profileDir, "config.json"), "utf8"));
       expect(writtenProfile.piMateria.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
       expect(writtenProfile.piMateria.migrations[0]).toEqual({ id: "001-rename-non-default-loadout-collisions", appliedAt: "2020-01-01T00:00:00.000Z", changes: ["kept"] });
-      expect(writtenProfile.piMateria.migrations.map((migration: { id: string }) => migration.id)).toEqual(["001-rename-non-default-loadout-collisions", "002-stamp-stable-loadout-ids", "003-stamp-loadout-ownership-and-locks"]);
+      expect(writtenProfile.piMateria.migrations.map((migration: { id: string }) => migration.id)).toEqual(LOADOUT_CONFIG_MIGRATIONS.map((migration) => migration.id));
     } finally {
       if (previousProfile === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previousProfile;

@@ -11,7 +11,7 @@ import {
   validatePersistedHandoffPayload,
 } from "../src/schema/persistence.js";
 
-const materia = { Build: { tools: "coding", prompt: "build" }, Check: { tools: "none", prompt: "check" } };
+const materia = { Build: { type: "agent", tools: "coding", prompt: "build" }, Check: { type: "agent", tools: "none", prompt: "check" } };
 
 describe("schema/persistence adapters", () => {
   test("requires canonical sockets payloads", () => {
@@ -34,7 +34,7 @@ describe("schema/persistence adapters", () => {
       entry: "Socket-1",
       sockets: {
         "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }], parse: "json" },
-        "Socket-2": { type: "utility", utility: "noop" },
+        "Socket-2": { type: "utility", materia: "Noop", utility: "noop", parse: "json", assign: { noop: "$" } },
       },
       loops: {
         main: { sockets: ["Socket-1", "Socket-2"] },
@@ -47,6 +47,7 @@ describe("schema/persistence adapters", () => {
     expect(serialized.schemaVersion).toBe(2);
     expect(serialized.sockets).toBeDefined();
     expect((serialized.loops as Record<string, { sockets: string[] }>).main.sockets).toEqual(["Socket-1", "Socket-2"]);
+    expect((serialized.sockets as Record<string, Record<string, unknown>>)["Socket-2"]).toEqual({ type: "utility", materia: "Noop" });
   });
 
   test("reports malformed loadout data and missing optional fields remain optional", () => {
@@ -82,11 +83,12 @@ describe("schema/persistence adapters", () => {
   test("bridges domain sockets to the canonical pipeline DTO", () => {
     const pipeline = domainLoadoutToPipelineConfig({
       entry: "Socket-1",
-      sockets: { "Socket-1": { type: "agent", materia: "Build" } },
+      sockets: { "Socket-1": { type: "agent", materia: "Build" }, "Socket-2": { type: "utility", materia: "Noop", utility: "noop", parse: "json", assign: { noop: "$" } } },
       loops: { one: { sockets: ["Socket-1"] } },
     });
     expect(pipeline.sockets["Socket-1"].type).toBe("agent");
     expect(pipeline.loops?.one.sockets).toEqual(["Socket-1"]);
+    expect(pipeline.sockets["Socket-2"]).toEqual({ type: "utility", materia: "Noop" });
 
     const domain = pipelineConfigToDomainLoadout(pipeline);
     expect(domain.sockets["Socket-1"].type).toBe("agent");

@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compactionConfig.js";
 import { ensureCurrentSchemaMetadata, ensureLoadoutOwnershipAndLocks, ensureStableLoadoutIds, migrateConfigLayers, validateNoDuplicateLoadoutOwnership, type MigratableConfigLayer } from "./migrations.js";
+import { normalizeMateriaCatalog, validateLoadoutMateriaReferences } from "../domain/materia.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
@@ -129,6 +130,7 @@ export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMater
   ensureLoadoutOwnershipAndLocks(materialized, target);
   ensureLoadoutOwnershipAndLocks(next, target);
   await validateSaveLoadoutOwnership(cwd, options.configuredPath, target, materialized);
+  await validateSaveMateriaReferences(cwd, options.configuredPath, target, materialized);
   validateLoadoutGraphs(materialized.loadouts);
   await writeJsonAtomic(file, ensureCurrentSchemaMetadata(next));
   return file;
@@ -189,19 +191,30 @@ function getWritableConfigPath(cwd: string, configuredPath?: string, target: Mat
 }
 
 async function validateSaveLoadoutOwnership(cwd: string, configuredPath: string | undefined, target: MateriaSaveTarget, nextTargetConfig: Partial<PiMateriaConfig>): Promise<void> {
-  const layers: Array<{ scope: MateriaConfigLayerScope; config: Partial<PiMateriaConfig> }> = [
-    { scope: "default", config: await readConfigPartial(getBundledDefaultConfigPath()) },
-  ];
+  validateNoDuplicateLoadoutOwnership(await buildSaveValidationLayers(cwd, configuredPath, target, nextTargetConfig, { migrate: false }));
+}
+
+async function validateSaveMateriaReferences(cwd: string, configuredPath: string | undefined, target: MateriaSaveTarget, nextTargetConfig: Partial<PiMateriaConfig>): Promise<void> {
+  const merged = await mergeConfigLayers((await buildSaveValidationLayers(cwd, configuredPath, target, nextTargetConfig)).map((layer) => layer.config));
+  validateConfigMateriaReferences(merged);
+}
+
+async function buildSaveValidationLayers(cwd: string, configuredPath: string | undefined, target: MateriaSaveTarget, nextTargetConfig: Partial<PiMateriaConfig>, options: { migrate?: boolean } = {}): Promise<Array<{ scope: MateriaConfigLayerScope; config: Partial<PiMateriaConfig> }>> {
+  const defaultPath = getBundledDefaultConfigPath();
   const userPath = getUserMateriaAssetPath();
   const projectPath = getProjectConfigPath(cwd);
   const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
-  if (target === "user") layers.push({ scope: "user", config: nextTargetConfig });
-  else if (existsSync(userPath)) layers.push({ scope: "user", config: await readConfigPartial(userPath) });
-  if (target === "project") layers.push({ scope: "project", config: nextTargetConfig });
-  else if (existsSync(projectPath)) layers.push({ scope: "project", config: await readConfigPartial(projectPath) });
-  if (target === "explicit") layers.push({ scope: "explicit", config: nextTargetConfig });
-  else if (explicitPath && existsSync(explicitPath)) layers.push({ scope: "explicit", config: await readConfigPartial(explicitPath) });
-  validateNoDuplicateLoadoutOwnership(layers);
+  const layers: MigratableConfigLayer[] = [
+    { scope: "default", path: defaultPath, loaded: true, config: await readConfigPartial(defaultPath) },
+  ];
+  if (target === "user") layers.push({ scope: "user", path: userPath, loaded: true, config: nextTargetConfig });
+  else if (existsSync(userPath)) layers.push({ scope: "user", path: userPath, loaded: true, config: await readConfigPartial(userPath) });
+  if (target === "project") layers.push({ scope: "project", path: projectPath, loaded: true, config: nextTargetConfig });
+  else if (existsSync(projectPath)) layers.push({ scope: "project", path: projectPath, loaded: true, config: await readConfigPartial(projectPath) });
+  if (target === "explicit") layers.push({ scope: "explicit", path: explicitPath ?? "<explicit>", loaded: true, config: nextTargetConfig });
+  else if (explicitPath && existsSync(explicitPath)) layers.push({ scope: "explicit", path: explicitPath, loaded: true, config: await readConfigPartial(explicitPath) });
+  if (options.migrate !== false) migrateConfigLayers(layers);
+  return layers.map(({ scope, config }) => ({ scope, config }));
 }
 
 function defaultProfileConfig(): MateriaProfileConfig {
@@ -329,6 +342,7 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   validateCompactionConfig(config.compaction);
   config = normalizeConfigLoadoutsForLoad(config);
   config = prepareConfigLoadoutsForSave(config);
+  validateConfigMateriaReferences(config);
   validateLoadoutGraphs(config.loadouts);
   return config;
 }
@@ -458,6 +472,19 @@ function validateLoadoutGraphs(loadouts: PiMateriaConfig["loadouts"] | undefined
   }
 }
 
+function validateConfigMateriaReferences(config: Pick<PiMateriaConfig, "materia" | "loadouts">): void {
+  const catalog = normalizeMateriaCatalog(config.materia as unknown as Record<string, Record<string, unknown>>);
+  if (!catalog.ok) {
+    throw new Error(`Materia catalog is invalid: ${catalog.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+  }
+  for (const [name, loadout] of Object.entries(config.loadouts ?? {}) as Array<[string, MateriaPipelineConfig]>) {
+    const validation = validateLoadoutMateriaReferences(loadout as unknown as Parameters<typeof validateLoadoutMateriaReferences>[0], catalog.value, `loadouts.${name}`);
+    if (!validation.ok) {
+      throw new Error(`Materia loadout "${name}" has invalid materia references: ${validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+    }
+  }
+}
+
 function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
   for (const [name, materia] of Object.entries(materiaConfig as Record<string, unknown>)) {
     if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
@@ -466,7 +493,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
       validateUtilityMateria(name, materia);
       continue;
     }
-    if (materia.type !== undefined && materia.type !== "agent") throw new Error(`Materia "${name}" has unsupported type "${String(materia.type)}".`);
+    if (materia.type !== "agent") throw new Error(`Materia "${name}" has invalid type. Expected explicit "agent" or "utility".`);
     if (materia.prompt === undefined || typeof materia.prompt !== "string") {
       throw new Error(`Materia "${name}" has invalid prompt. Expected a string.`);
     }

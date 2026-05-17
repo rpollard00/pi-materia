@@ -51,7 +51,7 @@ export function serializePersistedLoadout(loadout: Loadout): PersistedLoadoutSch
     schemaVersion: 2,
     ...(loadout.id ? { id: loadout.id } : {}),
     entry: loadout.entry,
-    sockets: cloneRecord(loadout.sockets),
+    sockets: serializeCanonicalSockets(loadout.sockets),
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, serializeLoop(loop)])) } : {}),
   };
 }
@@ -68,7 +68,7 @@ export function pipelineConfigToDomainLoadout(loadout: MateriaPipelineConfig, id
 export function domainLoadoutToPipelineConfig(loadout: Loadout): MateriaPipelineConfig {
   return {
     entry: loadout.entry,
-    sockets: cloneRecord(loadout.sockets) as Record<string, MateriaPipelineSocketConfig>,
+    sockets: serializeCanonicalSockets(loadout.sockets) as Record<string, MateriaPipelineSocketConfig>,
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([loopId, loop]) => [loopId, domainLoopToPipeline(loop)])) } : {}),
   };
 }
@@ -98,6 +98,21 @@ export function validatePersistedHandoffPayload(value: unknown, path = "handoff"
   const reserved = validateReservedHandoffFields(value, path);
   if (!reserved.ok) issues.push(...reserved.issues);
   return issues.length > 0 ? { ok: false, issues } : { ok: true, value: { ...value } };
+}
+
+function serializeCanonicalSockets(sockets: Record<SocketId, LoadoutSocket>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(sockets).map(([id, socket]) => {
+    const copy = cloneRecord(socket) as unknown as Record<string, unknown>;
+    if (copy.type === "utility") {
+      delete copy.utility;
+      delete copy.command;
+      delete copy.params;
+      delete copy.timeoutMs;
+      delete copy.parse;
+      delete copy.assign;
+    }
+    return [id, copy];
+  }));
 }
 
 function parseLoops(value: unknown, path: string, issues: DomainIssue[]): Record<string, LoadoutLoop> | undefined {

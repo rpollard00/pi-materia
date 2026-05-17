@@ -400,9 +400,15 @@ export interface MateriaAgentSocketConfig extends MateriaPipelineSocketCommonCon
 
 export interface MateriaUtilitySocketConfig extends MateriaPipelineSocketCommonConfig {
   type: "utility";
+  /** Canonical reusable utility materia reference. */
+  materia: string;
+  /** @deprecated Migration-only inline utility alias. Configure on referenced utility materia instead. */
   utility?: string;
+  /** @deprecated Migration-only inline command. Configure on referenced utility materia instead. */
   command?: string[];
+  /** @deprecated Migration-only inline params. Configure on referenced utility materia instead. */
   params?: Record<string, unknown>;
+  /** @deprecated Migration-only inline timeout. Configure on referenced utility materia instead. */
   timeoutMs?: number;
 }
 
@@ -520,6 +526,7 @@ export interface ResolvedMateriaAgentSocket {
 export interface ResolvedMateriaUtilitySocket {
   id: string;
   socket: MateriaUtilitySocketConfig;
+  materia?: MateriaUtilityConfig;
 }
 
 export type MateriaConfig = MateriaAgentConfig | MateriaUtilityConfig;
@@ -542,7 +549,7 @@ export interface MateriaDefinitionMetadata {
 }
 
 export interface MateriaAgentConfig extends MateriaDefinitionMetadata {
-  type?: "agent";
+  type: "agent";
   tools: ToolScopeSpec;
   prompt: string;
   model?: string;

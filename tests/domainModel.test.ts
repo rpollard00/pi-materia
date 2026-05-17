@@ -42,9 +42,13 @@ describe("pure materia/loadout domain", () => {
     const utility: UtilityMateriaDefinition = {
       id: "Checkpoint",
       type: "utility",
-      behavior: { id: "Checkpoint" },
+      behavior: { id: "Checkpoint", label: "Checkpoint", description: "Save state", group: "Utility", color: "materia-color-cyan" },
       utility: "checkpoint",
       command: ["jj", "status"],
+      parse: "json",
+      assign: { checkpoint: "$" },
+      generator: false,
+      params: { dryRun: true },
       timeoutMs: 1000,
     };
     expect(validateMateriaDefinition(utility).ok).toBe(true);
@@ -54,9 +58,9 @@ describe("pure materia/loadout domain", () => {
     if (!invalid.ok) expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["materia..id", "materia..behavior.id", "materia..tools", "materia..prompt", "materia..parse", "materia..generator", "materia..multiTurn"]));
   });
 
-  test("normalizes existing config-shaped materia records into the domain catalog", () => {
+  test("normalizes explicit config-shaped materia records into the domain catalog", () => {
     const catalog = normalizeMateriaCatalog({
-      Build: { tools: "coding", prompt: "Build it", parse: "json", generator: true, multiTurn: true, label: "Build" },
+      Build: { type: "agent", tools: "coding", prompt: "Build it", parse: "json", generator: true, multiTurn: true, label: "Build" },
       Checkpoint: { type: "utility", utility: "checkpoint", command: ["jj", "describe"] },
     });
 
@@ -67,6 +71,10 @@ describe("pure materia/loadout domain", () => {
       expect(catalog.value.Build.generator).toBe(true);
       expect(catalog.value.Checkpoint.type).toBe("utility");
     }
+
+    const missingType = normalizeMateriaCatalog({ Build: { tools: "coding", prompt: "Build it" } });
+    expect(missingType.ok).toBe(false);
+    if (!missingType.ok) expect(missingType.issues[0]?.path).toBe("materia.Build.type");
   });
 
   test("validates loadout socket references and routing conditions", () => {
@@ -74,7 +82,7 @@ describe("pure materia/loadout domain", () => {
       entry: "Socket-1",
       sockets: {
         "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }] },
-        "Socket-2": { type: "utility", utility: "checkpoint" },
+        "Socket-2": { type: "utility", materia: "Checkpoint" },
       },
       loops: {
         LoopA: {
@@ -86,7 +94,7 @@ describe("pure materia/loadout domain", () => {
     };
 
     expect(validateLoadout(loadout).ok).toBe(true);
-    const catalog = normalizeMateriaCatalog({ Build: { tools: "coding", prompt: "Build it" } });
+    const catalog = normalizeMateriaCatalog({ Build: { type: "agent", tools: "coding", prompt: "Build it" }, Checkpoint: { type: "utility", utility: "checkpoint" } });
     expect(catalog.ok).toBe(true);
     if (catalog.ok) expect(validateLoadoutMateriaReferences(loadout, catalog.value).ok).toBe(true);
 
@@ -104,6 +112,10 @@ describe("pure materia/loadout domain", () => {
       const missingMateria = validateLoadoutMateriaReferences({ entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Missing" } } }, catalog.value);
       expect(missingMateria.ok).toBe(false);
       if (!missingMateria.ok) expect(missingMateria.issues[0]?.path).toBe("loadout.sockets.Socket-1.materia");
+
+      const utilityMismatch = validateLoadoutMateriaReferences({ entry: "Socket-1", sockets: { "Socket-1": { type: "utility", materia: "Build" } } }, catalog.value);
+      expect(utilityMismatch.ok).toBe(false);
+      if (!utilityMismatch.ok) expect(utilityMismatch.issues[0]?.message).toBe("utility socket must reference utility materia");
     }
   });
 

@@ -624,6 +624,7 @@
       }
     },
     "GitMaintain": {
+      "type": "agent",
       "tools": "coding",
       "color": "materia-color-black-gray",
       "parse": "json",

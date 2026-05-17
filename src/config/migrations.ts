@@ -5,6 +5,9 @@ export const LOADOUT_CONFIG_MIGRATIONS = [
   { id: "001-rename-non-default-loadout-collisions", migrate: renameNonDefaultLoadoutCollisions },
   { id: "002-stamp-stable-loadout-ids", migrate: stampStableLoadoutIds },
   { id: "003-stamp-loadout-ownership-and-locks", migrate: stampLoadoutOwnershipAndLocks },
+  { id: "004-canonicalize-utility-sockets", migrate: canonicalizeUtilitySockets },
+  { id: "005-stamp-explicit-materia-types", migrate: stampExplicitMateriaTypes },
+  { id: "006-repoint-legacy-default-materia-aliases", migrate: repointLegacyDefaultMateriaAliases },
 ] as const satisfies readonly ConfigMigration[];
 
 export type LoadoutConfigMigrationId = (typeof LOADOUT_CONFIG_MIGRATIONS)[number]["id"];
@@ -243,6 +246,202 @@ function stampLoadoutOwnershipAndLocks(context: ConfigMigrationContext): void {
       }
     }
   }
+}
+
+function canonicalizeUtilitySockets(context: ConfigMigrationContext): void {
+  for (const layer of context.layers) {
+    if (!layer.loaded || !isPlainObject(layer.config.loadouts)) continue;
+    const existingMateria = isPlainObject(layer.config.materia) ? layer.config.materia as Record<string, unknown> : {};
+    const signatureToId = new Map<string, string>();
+    for (const [id, definition] of Object.entries(existingMateria)) {
+      if (isUtilityMateriaDefinition(definition)) signatureToId.set(utilitySignature(definition), id);
+    }
+
+    for (const [loadoutName, loadout] of Object.entries(layer.config.loadouts as Record<string, unknown>)) {
+      if (!isPlainObject(loadout) || !isPlainObject(loadout.sockets)) continue;
+      for (const [socketId, rawSocket] of Object.entries(loadout.sockets)) {
+        if (!isPlainObject(rawSocket) || rawSocket.type !== "utility") continue;
+        const legacySignature = utilitySocketSignature(rawSocket);
+        const canonicalMateria = typeof rawSocket.materia === "string" && rawSocket.materia.trim() ? rawSocket.materia : undefined;
+        const materia = isPlainObject(layer.config.materia) ? layer.config.materia as Record<string, unknown> : ensureMateriaObject(layer.config);
+        const mappedId = canonicalMateria ?? findCanonicalUtilityMateriaId(legacySignature, materia, signatureToId);
+        const materiaId = mappedId ?? hoistLegacyUtilityMateria(materia, signatureToId, legacySignature);
+        const materiaChanged = rawSocket.materia !== materiaId;
+        const stripped = stripInlineUtilityFields(rawSocket);
+        const changed = materiaChanged || stripped;
+        rawSocket.materia = materiaId;
+        if (changed) {
+          layer.changed = true;
+          const changes = context.audit[layer.path] ?? [];
+          changes.push(`canonicalized utility socket ${loadoutName}.${socketId} to materia ${materiaId}`);
+          context.audit[layer.path] = changes;
+        }
+      }
+    }
+  }
+}
+
+interface UtilitySignature {
+  utility?: string;
+  command?: string[];
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
+  parse?: string;
+  assign?: Record<string, string>;
+}
+
+function ensureMateriaObject(config: Partial<PiMateriaConfig>): Record<string, unknown> {
+  if (!isPlainObject(config.materia)) config.materia = {} as PiMateriaConfig["materia"];
+  return config.materia as Record<string, unknown>;
+}
+
+function isUtilityMateriaDefinition(value: unknown): value is Record<string, unknown> {
+  return isPlainObject(value) && value.type === "utility";
+}
+
+function utilitySocketSignature(socket: Record<string, unknown>): UtilitySignature {
+  return cleanSignature({
+    ...(typeof socket.utility === "string" ? { utility: socket.utility } : {}),
+    ...(Array.isArray(socket.command) && socket.command.every((part) => typeof part === "string") ? { command: [...socket.command] as string[] } : {}),
+    ...(isPlainObject(socket.params) ? { params: clonePlain(socket.params) } : {}),
+    ...(typeof socket.timeoutMs === "number" ? { timeoutMs: socket.timeoutMs } : {}),
+    ...(typeof socket.parse === "string" ? { parse: socket.parse } : {}),
+    ...(isStringRecord(socket.assign) ? { assign: { ...socket.assign } } : {}),
+  });
+}
+
+function utilitySignature(definition: Record<string, unknown>): string {
+  return stableStringify(cleanSignature({
+    ...(typeof definition.utility === "string" ? { utility: definition.utility } : {}),
+    ...(Array.isArray(definition.command) && definition.command.every((part) => typeof part === "string") ? { command: [...definition.command] as string[] } : {}),
+    ...(isPlainObject(definition.params) ? { params: clonePlain(definition.params) } : {}),
+    ...(typeof definition.timeoutMs === "number" ? { timeoutMs: definition.timeoutMs } : {}),
+    ...(typeof definition.parse === "string" ? { parse: definition.parse } : {}),
+    ...(isStringRecord(definition.assign) ? { assign: { ...definition.assign } } : {}),
+  }));
+}
+
+function findCanonicalUtilityMateriaId(signature: UtilitySignature, materia: Record<string, unknown>, signatureToId: Map<string, string>): string | undefined {
+  const signatureKey = stableStringify(signature);
+  const knownAliasId = knownDefaultUtilityMateriaId(signature);
+  if (knownAliasId) {
+    const localDefinition = materia[knownAliasId];
+    if (localDefinition === undefined) return knownAliasId;
+    if (isUtilityMateriaDefinition(localDefinition) && utilitySignature(localDefinition) === signatureKey) return knownAliasId;
+  }
+  return signatureToId.get(signatureKey);
+}
+
+function knownDefaultUtilityMateriaId(signature: UtilitySignature): string | undefined {
+  const signatureKey = stableStringify(signature);
+  if (signature.utility === "project.ensureIgnored" && signatureKey === stableStringify(defaultEnsureIgnoredSignature())) return "ensureArtifactsIgnored";
+  if (signature.utility === "vcs.detect" && signatureKey === stableStringify(defaultDetectVcsSignature())) return "detectVcs";
+  return undefined;
+}
+
+function defaultEnsureIgnoredSignature(): UtilitySignature {
+  return { utility: "project.ensureIgnored", params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } };
+}
+
+function defaultDetectVcsSignature(): UtilitySignature {
+  return { utility: "vcs.detect", parse: "json", assign: { vcs: "$" } };
+}
+
+function stampExplicitMateriaTypes(context: ConfigMigrationContext): void {
+  for (const layer of context.layers) {
+    if (!layer.loaded || !isPlainObject(layer.config.materia)) continue;
+    for (const [id, definition] of Object.entries(layer.config.materia as Record<string, unknown>)) {
+      if (!isPlainObject(definition) || definition.type !== undefined) continue;
+      definition.type = "agent";
+      layer.changed = true;
+      const changes = context.audit[layer.path] ?? [];
+      changes.push(`stamped explicit agent type on materia ${id}`);
+      context.audit[layer.path] = changes;
+    }
+  }
+}
+
+function repointLegacyDefaultMateriaAliases(context: ConfigMigrationContext): void {
+  const aliases: Record<string, string> = { planner: "Auto-Plan", interactivePlan: "Interactive-Plan" };
+  for (const layer of context.layers) {
+    if (!layer.loaded || !isPlainObject(layer.config.loadouts)) continue;
+    for (const [loadoutName, loadout] of Object.entries(layer.config.loadouts as Record<string, unknown>)) {
+      if (!isPlainObject(loadout) || !isPlainObject(loadout.sockets)) continue;
+      for (const [socketId, socket] of Object.entries(loadout.sockets)) {
+        if (!isPlainObject(socket) || typeof socket.materia !== "string") continue;
+        const next = aliases[socket.materia];
+        if (!next) continue;
+        socket.materia = next;
+        layer.changed = true;
+        const changes = context.audit[layer.path] ?? [];
+        changes.push(`repointed legacy materia alias ${loadoutName}.${socketId} from ${Object.entries(aliases).find(([, value]) => value === next)?.[0] ?? "legacy"} to ${next}`);
+        context.audit[layer.path] = changes;
+      }
+    }
+  }
+}
+
+function hoistLegacyUtilityMateria(materia: Record<string, unknown>, signatureToId: Map<string, string>, signature: UtilitySignature): string {
+  const existing = signatureToId.get(stableStringify(signature));
+  if (existing) return existing;
+  const base = `legacyUtility${pascalCase(signature.utility ?? signature.command?.[0] ?? "command")}`;
+  const suffix = shortHash(stableStringify(signature));
+  let id = `${base}${suffix}`;
+  let counter = 2;
+  while (Object.prototype.hasOwnProperty.call(materia, id)) id = `${base}${suffix}${counter++}`;
+  materia[id] = {
+    type: "utility",
+    label: humanizeLegacyUtilityLabel(signature.utility ?? signature.command?.[0] ?? "Legacy utility"),
+    ...signature,
+  };
+  signatureToId.set(stableStringify(signature), id);
+  return id;
+}
+
+function stripInlineUtilityFields(socket: Record<string, unknown>): boolean {
+  let changed = false;
+  for (const key of ["utility", "command", "params", "timeoutMs", "parse", "assign"]) {
+    if (key in socket) {
+      delete socket[key];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function cleanSignature(signature: UtilitySignature): UtilitySignature {
+  return Object.fromEntries(Object.entries(signature).filter(([, value]) => value !== undefined)) as UtilitySignature;
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (isPlainObject(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function shortHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash >>> 0).toString(36).slice(0, 6);
+}
+
+function pascalCase(value: string): string {
+  return value.split(/[^a-z0-9]+/i).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Command";
+}
+
+function humanizeLegacyUtilityLabel(value: string): string {
+  return value.replace(/[^a-z0-9]+/gi, " ").trim() || "Legacy utility";
+}
+
+function clonePlain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isPlainObject(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
 function findLoadoutByDisplayName(layers: MigratableConfigLayer[], displayName: string): { scope: MateriaConfigLayerScope; loadout: Record<string, unknown> } | undefined {

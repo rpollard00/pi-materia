@@ -70,9 +70,15 @@ export interface AgentSocket extends LoadoutSocketCommon {
 
 export interface UtilitySocket extends LoadoutSocketCommon {
   type: "utility";
+  /** Canonical reusable utility materia reference. */
+  materia: MateriaId;
+  /** @deprecated Migration-only inline utility alias. Configure on referenced utility materia instead. */
   utility?: string;
+  /** @deprecated Migration-only inline command. Configure on referenced utility materia instead. */
   command?: string[];
+  /** @deprecated Migration-only inline params. Configure on referenced utility materia instead. */
   params?: Record<string, unknown>;
+  /** @deprecated Migration-only inline timeout. Configure on referenced utility materia instead. */
   timeoutMs?: number;
 }
 
@@ -194,6 +200,7 @@ export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
     if (!isCanonicalSocketId(socketId)) issues.push({ path: socketPath, message: "socket key must be a canonical Socket-N id" });
     if (socket.type !== "agent" && socket.type !== "utility") issues.push({ path: `${socketPath}.type`, message: "socket type must be agent or utility" });
     if (socket.type === "agent" && !isNonEmptyString(socket.materia)) issues.push({ path: `${socketPath}.materia`, message: "agent socket requires materia" });
+    if (socket.type === "utility" && !isNonEmptyString(socket.materia)) issues.push({ path: `${socketPath}.materia`, message: "utility socket requires materia" });
     if (socket.parse !== undefined && socket.parse !== "text" && socket.parse !== "json") issues.push({ path: `${socketPath}.parse`, message: "parse must be text or json" });
     for (const [index, edge] of (socket.edges ?? []).entries()) validateEdge(edge, sockets, `${socketPath}.edges.${index}`, issues);
     if (socket.advance?.when !== undefined && !isHandoffEdgeCondition(socket.advance.when)) issues.push({ path: `${socketPath}.advance.when`, message: `advance condition must be one of ${HANDOFF_EDGE_CONDITIONS.join(", ")}` });

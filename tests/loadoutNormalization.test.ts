@@ -8,10 +8,10 @@ import { prepareLoadoutForRuntime, prepareLoadoutForSave, normalizeLoadedLoadout
 import type { MateriaPipelineConfig, PiMateriaConfig } from "../src/types.js";
 
 const materia = {
-  planner: { prompt: "Plan", tools: "none", generator: true },
-  refiner: { prompt: "Refine", tools: "none", generator: true },
-  Build: { prompt: "Build", tools: "coding" },
-  Maintain: { prompt: "Maintain", tools: "coding" },
+  planner: { type: "agent", prompt: "Plan", tools: "none", generator: true },
+  refiner: { type: "agent", prompt: "Refine", tools: "none", generator: true },
+  Build: { type: "agent", prompt: "Build", tools: "coding" },
+  Maintain: { type: "agent", prompt: "Maintain", tools: "coding" },
 } satisfies PiMateriaConfig["materia"];
 
 function generatorLoopLoadout(): MateriaPipelineConfig {

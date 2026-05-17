@@ -37,8 +37,8 @@ describe("materia cast notification formatting", () => {
     await harness.runCommand("materia", "cast reduce socket prominence");
 
     const message = harness.sentMessages.map(({ message }) => message as { customType?: string; content?: string; details?: Record<string, unknown> }).find((candidate) => candidate.customType === "pi-materia");
-    expect(message?.content).toBe("Casting **interactivePlan (3)**");
+    expect(message?.content).toBe("Casting **Interactive-Plan (3)**");
     expect(message?.content).not.toContain("Socket-3");
-    expect(message?.details).toMatchObject({ socketId: "Socket-3", materiaName: "interactivePlan", socketOrdinal: 3, eventType: "materia_prompt" });
+    expect(message?.details).toMatchObject({ socketId: "Socket-3", materiaName: "Interactive-Plan", socketOrdinal: 3, eventType: "materia_prompt" });
   });
 });

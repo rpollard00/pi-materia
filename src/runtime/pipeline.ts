@@ -50,15 +50,49 @@ function resolveSocket(config: PiMateriaConfig, effective: EffectiveMateriaPipel
   const socket = getLoadoutSocket(effective.pipeline, id);
   if (!socket) throw new Error(`Unknown pipeline slot "${id}" referenced by ${source}`);
   validateSocket(id, socket);
+  if (socket.type === "utility" && (typeof socket.materia !== "string" || socket.materia.trim().length === 0)) {
+    const legacyMateria = legacyInlineUtilityMateria(id, socket as Extract<MateriaPipelineSocketConfig, { type: "utility" }>);
+    return { id, socket: { ...socket, materia: legacyMateria.id, ...utilityRuntimeFields(legacyMateria) }, materia: legacyMateria };
+  }
 
+  const materia = config.materia[socket.materia];
+  if (!materia) throw new Error(`Pipeline slot "${id}" references unknown materia "${socket.materia}"`);
   if (socket.type === "agent") {
-    const materia = config.materia[socket.materia];
-    if (!materia) throw new Error(`Pipeline slot "${id}" references unknown materia "${socket.materia}"`);
     validateAgentMateriaEntry(socket.materia, materia);
     return { id, socket, materia };
   }
 
-  return { id, socket };
+  const rawMateria = materia as unknown as Record<string, unknown>;
+  if (rawMateria.type !== "utility") throw new Error(`Utility pipeline slot "${id}" must reference utility materia "${socket.materia}"`);
+  validateUtilityMateriaEntry(socket.materia, rawMateria);
+  return { id, socket: { ...socket, ...utilityRuntimeFields(materia) }, materia: materia as Extract<MateriaConfig, { type: "utility" }> };
+}
+
+function utilityRuntimeFields(materia: MateriaConfig): Partial<Extract<MateriaPipelineSocketConfig, { type: "utility" }>> {
+  if (materia.type !== "utility") return {};
+  return {
+    ...(materia.utility ? { utility: materia.utility } : {}),
+    ...(materia.command ? { command: [...materia.command] } : {}),
+    ...(materia.params ? { params: { ...materia.params } } : {}),
+    ...(materia.timeoutMs ? { timeoutMs: materia.timeoutMs } : {}),
+    ...(materia.parse ? { parse: materia.parse } : {}),
+    ...(materia.assign ? { assign: { ...materia.assign } } : {}),
+  };
+}
+
+function legacyInlineUtilityMateria(socketId: string, socket: Extract<MateriaPipelineSocketConfig, { type: "utility" }>): Extract<MateriaConfig, { type: "utility" }> & { id: string } {
+  const id = `legacyInlineUtility${socketId.replace(/[^a-z0-9]+/gi, "")}`;
+  return {
+    id,
+    type: "utility",
+    label: socket.utility ?? socket.command?.[0] ?? id,
+    ...(socket.utility ? { utility: socket.utility } : {}),
+    ...(socket.command ? { command: [...socket.command] } : {}),
+    ...(socket.params ? { params: { ...socket.params } } : {}),
+    ...(socket.timeoutMs ? { timeoutMs: socket.timeoutMs } : {}),
+    ...(socket.parse ? { parse: socket.parse } : {}),
+    ...(socket.assign ? { assign: { ...socket.assign } } : {}),
+  };
 }
 
 function validateLoadout(name: string, pipeline: MateriaPipelineConfig): void {
@@ -87,7 +121,7 @@ function validateSocket(id: string, socket: MateriaPipelineSocketConfig): void {
   if ("multiTurn" in socket) {
     throw new Error(`Pipeline slot "${id}" configures obsolete multiTurn. Configure multiTurn on the referenced materia instead.`);
   }
-  if (socket.type === "utility") {
+  if (socket.type === "utility" && (typeof socket.materia !== "string" || socket.materia.trim().length === 0)) {
     if (!socket.utility && !socket.command) throw new Error(`Utility pipeline slot "${id}" must configure either "utility" or "command".`);
     if (socket.command !== undefined) validateCommand(id, socket.command);
     if (socket.timeoutMs !== undefined && (!Number.isFinite(socket.timeoutMs) || socket.timeoutMs <= 0)) {
@@ -297,14 +331,21 @@ function formatSocketSlot(config: PiMateriaConfig, socket: MateriaPipelineSocket
     if (agentMateria?.multiTurn) details.push("materia.multiTurn=true");
     if (agentMateria) details.push(formatMateriaModelSettings(agentMateria));
   } else {
-    details.push(socket.utility ? `utility=${socket.utility}` : `command=${formatCommand(socket.command)}`);
+    const utilityMateria = config.materia[socket.materia];
+    if (socket.materia) details.push(`materia=${socket.materia}`);
+    if (utilityMateria?.type === "utility") details.push(utilityMateria.utility ? `utility=${utilityMateria.utility}` : `command=${formatCommand(utilityMateria.command)}`);
+    else details.push(socket.utility ? `utility=${socket.utility}` : `command=${formatCommand(socket.command)}`);
   }
   details.push(`parse=${socket.parse ?? "text"}`);
   if (socket.edges?.length) details.push(`edges=${socket.edges.map((edge) => `${edgeLabel(edge)}->${edge.to}`).join(",")}`);
   if (socket.foreach) details.push(`foreach=${socket.foreach.items}${socket.foreach.as ? ` as ${socket.foreach.as}` : ""}${socket.foreach.done ? ` done ${socket.foreach.done}` : ""}`);
   if (socket.advance) details.push(`advance=${socket.advance.cursor}:${socket.advance.items}${socket.advance.when ? ` when ${socket.advance.when}` : ""}${socket.advance.done ? ` done ${socket.advance.done}` : ""}`);
   if (socket.limits) details.push(`limits=${formatSocketLimits(socket.limits)}`);
-  if (socket.type === "utility" && socket.timeoutMs !== undefined) details.push(`timeoutMs=${socket.timeoutMs}`);
+  if (socket.type === "utility") {
+    const utilityMateria = config.materia[socket.materia];
+    const timeoutMs = utilityMateria?.type === "utility" ? utilityMateria.timeoutMs : socket.timeoutMs;
+    if (timeoutMs !== undefined) details.push(`timeoutMs=${timeoutMs}`);
+  }
   return details.join(", ");
 }
 

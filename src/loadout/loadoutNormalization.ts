@@ -32,16 +32,22 @@ export function normalizeLoadedLoadout<TLoadout extends MateriaPipelineConfig>(l
 }
 
 export function prepareLoadoutForSave<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, materia: Record<string, GeneratorMateriaLike> = {}, options: { loadoutName?: string } = {}): NormalizedLoadoutResult<TLoadout> {
+  const result = prepareLoadout(loadout, materia, options);
+  pruneCanonicalUtilitySocketFields(result.loadout);
+  return { loadout: result.loadout, analysis: analyzeLoadoutGraph(result.loadout, materia) };
+}
+
+export function prepareLoadoutForRuntime<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, config: Pick<PiMateriaConfig, "materia">, options: { loadoutName?: string } = {}): NormalizedLoadoutResult<TLoadout> {
+  return prepareLoadout(loadout, config.materia ?? {}, options);
+}
+
+function prepareLoadout<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, materia: Record<string, GeneratorMateriaLike>, options: { loadoutName?: string }): NormalizedLoadoutResult<TLoadout> {
   const { loadout: prepared } = normalizeLoadedLoadout(loadout, materia);
   reconcileLoopConsumers(prepared, materia);
   normalizeGeneratorPipelineSockets(prepared, materia);
   materializeLoadoutLoopSemantics({ materia: materia as Record<string, MateriaConfig> }, prepared, options);
   pruneLoadoutLayout(prepared);
   return { loadout: prepared, analysis: analyzeLoadoutGraph(prepared, materia) };
-}
-
-export function prepareLoadoutForRuntime<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, config: Pick<PiMateriaConfig, "materia">, options: { loadoutName?: string } = {}): NormalizedLoadoutResult<TLoadout> {
-  return prepareLoadoutForSave(loadout, config.materia ?? {}, options);
 }
 
 export function normalizeConfigLoadoutsForLoad(config: PiMateriaConfig): PiMateriaConfig {
@@ -93,6 +99,14 @@ function normalizeLoadoutLayout(loadout: MateriaPipelineConfig): void {
 
 function pruneLoadoutLayout(loadout: MateriaPipelineConfig): void {
   normalizeLoadoutLayout(loadout);
+}
+
+function pruneCanonicalUtilitySocketFields(loadout: MateriaPipelineConfig): void {
+  for (const [, socket] of loadoutSocketEntries(loadout)) {
+    if (socket.type !== "utility") continue;
+    const canonicalSocket = socket as unknown as Record<string, unknown>;
+    for (const key of ["utility", "command", "params", "timeoutMs", "parse", "assign"]) delete canonicalSocket[key];
+  }
 }
 
 function reconcileLoopConsumers(loadout: MateriaPipelineConfig, materia: Record<string, GeneratorMateriaLike>): void {

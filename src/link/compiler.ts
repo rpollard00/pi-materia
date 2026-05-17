@@ -149,10 +149,9 @@ function loadoutForMateriaTarget(target: ResolvedLinkTarget, source: LinkGraphSo
     return undefined;
   }
   if ((definition as { type?: unknown }).type === "utility") {
-    const utility = definition as MateriaDefinition | MateriaConfig;
     return {
       entry: "Socket-1",
-      sockets: { "Socket-1": { type: "utility", ...(typeof (utility as { utility?: unknown }).utility === "string" ? { utility: (utility as { utility: string }).utility } : {}), ...(isStringArray((utility as { command?: unknown }).command) ? { command: [...(utility as { command: string[] }).command] } : {}), ...copyRecordField(utility, "params"), ...(typeof (utility as { timeoutMs?: unknown }).timeoutMs === "number" ? { timeoutMs: (utility as { timeoutMs: number }).timeoutMs } : {}), ...copyStringRecordField(utility, "assign"), ...copyParseField(utility) } },
+      sockets: { "Socket-1": { type: "utility", materia: target.id } },
     };
   }
   return { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: target.id, ...copyParseField(definition) } } };

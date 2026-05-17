@@ -130,7 +130,7 @@ describe("layered config loading and persistence", () => {
       await writeFile(getUserMateriaAssetPath(), JSON.stringify({
         activeLoadout: "UserLoadout",
         materia: { Build: { model: "user/model" } },
-        loadouts: { UserLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "planner" } } } },
+        loadouts: { UserLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
       }), "utf8");
       await mkdir(path.join(cwd, ".pi"), { recursive: true });
       await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
@@ -141,7 +141,7 @@ describe("layered config loading and persistence", () => {
       await writeFile(explicit, JSON.stringify({
         activeLoadout: "ExplicitLoadout",
         materia: { Build: { model: "explicit/model" } },
-        loadouts: { ExplicitLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Check" } } } },
+        loadouts: { ExplicitLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
       }), "utf8");
 
       const loaded = await loadConfig(cwd, explicit);
@@ -228,6 +228,36 @@ describe("layered config loading and persistence", () => {
     }
   });
 
+  test("save patches serialize utility sockets as canonical materia references", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-canonical-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const savedPath = await saveMateriaConfigPatch(cwd, {
+        materia: {
+          Build: { type: "agent", tools: "coding", prompt: "build" },
+          Checkpoint: { type: "utility", utility: "project.ensureIgnored", parse: "json", params: { patterns: [".pi/pi-materia/"] }, assign: { artifactIgnore: "$" }, timeoutMs: 1000 },
+        },
+        loadouts: {
+          Custom: {
+            entry: "Socket-1",
+            sockets: {
+              "Socket-1": { type: "utility", materia: "Checkpoint", utility: "project.ensureIgnored", command: ["node", "utility.mjs"], params: { patterns: [".pi/pi-materia/"] }, timeoutMs: 1000, parse: "json", assign: { artifactIgnore: "$" }, edges: [{ when: "always", to: "Socket-2" }] } as never,
+              "Socket-2": { type: "agent", materia: "Build" },
+            },
+          },
+        },
+      });
+
+      const raw = JSON.parse(await readFile(savedPath, "utf8"));
+      expect(raw.loadouts.Custom.sockets["Socket-1"]).toEqual({ type: "utility", materia: "Checkpoint", socketKind: "entry", edges: [{ when: "always", to: "Socket-2" }] });
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("WebUI-style saves default to user profile and only touch project when explicitly targeted", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
@@ -240,7 +270,7 @@ describe("layered config loading and persistence", () => {
       const beforeProject = await readFile(projectFile, "utf8");
 
       const userWritten = await saveMateriaConfigPatch(cwd, {
-        materia: { Custom: { tools: "none", prompt: "custom user materia" } },
+        materia: { Custom: { type: "agent", tools: "none", prompt: "custom user materia" } },
         loadouts: { UserCreated: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Custom" } } } },
       });
       expect(userWritten).toBe(getUserMateriaAssetPath());
@@ -563,6 +593,7 @@ describe("config loadouts", () => {
     process.env.PI_MATERIA_PROFILE_DIR = profile;
     try {
       await expect(saveMateriaConfigPatch(cwd, {
+        materia: { Check: { type: "agent", tools: "none", prompt: "check" }, Done: { type: "agent", tools: "none", prompt: "done" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -582,6 +613,7 @@ describe("config loadouts", () => {
       })).rejects.toThrow(/loadout "Custom" graph is invalid: .*unreachable outgoing edge/);
 
       await expect(saveMateriaConfigPatch(cwd, {
+        materia: { Check: { type: "agent", tools: "none", prompt: "check" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -593,6 +625,7 @@ describe("config loadouts", () => {
       })).rejects.toThrow(/Missing graph endpoint referenced by Socket-1\.edges\[0\]\.to/);
 
       await expect(saveMateriaConfigPatch(cwd, {
+        materia: { Check: { type: "agent", tools: "none", prompt: "check" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -604,6 +637,7 @@ describe("config loadouts", () => {
       })).rejects.toThrow(/invalid edge condition at Socket-1\.edges\[0\]\.when/);
 
       await expect(saveMateriaConfigPatch(cwd, {
+        materia: { Check: { type: "agent", tools: "none", prompt: "check" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -642,9 +676,51 @@ describe("config loadouts", () => {
     }
   });
 
+  test("saved config patches reject unknown and cross-type materia references", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-refs-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", materia: "Build" } } } },
+      })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: utility socket must reference utility materia/);
+
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "ensureArtifactsIgnored" } } } },
+      })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: agent socket must reference agent materia/);
+
+      await expect(saveMateriaConfigPatch(cwd, {
+        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Missing" } } } },
+      })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: agent socket references unknown materia "Missing"/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("saved config patches reject materia without explicit discriminant", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-materia-type-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await expect(saveMateriaConfigPatch(cwd, {
+        materia: { Custom: { tools: "coding", prompt: "Do it" } as never },
+      })).rejects.toThrow(/Materia "Custom" has invalid type/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("project config can define loadouts and activeLoadout without duplicating materia", async () => {
     const { dir, file } = await writeConfig({
       activeLoadout: "Planning-Consult",
+      materia: {
+        planner: { type: "agent", tools: "readOnly", prompt: "legacy planner" },
+        interactivePlan: { type: "agent", tools: "readOnly", prompt: "legacy interactive" },
+      },
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
