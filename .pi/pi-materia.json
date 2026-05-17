@@ -1,7 +1,7 @@
 {
   "activeLoadout": "Full-Auto",
   "piMateria": {
-    "schemaVersion": 3,
+    "schemaVersion": 6,
     "migrations": [
       {
         "id": "001-rename-non-default-loadout-collisions",
