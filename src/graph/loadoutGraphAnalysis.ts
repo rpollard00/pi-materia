@@ -157,11 +157,15 @@ export function reconcileLoadoutLoopConsumersFromGraphInPlace(loadout: MateriaPi
 }
 
 function isWorkItemsGeneratorSocket(socket: AnalyzeableSocket | undefined, materia: Record<string, GeneratorMateriaLike>): boolean {
-  return socket?.type === "agent" && typeof socket.materia === "string" && Boolean(canonicalGeneratorConfigFor(materia[socket.materia]));
+  return isMateriaSocket(socket) && Boolean(canonicalGeneratorConfigFor(materia[socket.materia]));
 }
 
 function generatorOutputForSocket(socket: AnalyzeableSocket | undefined, materia: Record<string, GeneratorMateriaLike>): string | undefined {
-  return socket?.type === "agent" && typeof socket.materia === "string" ? canonicalGeneratorConfigFor(materia[socket.materia])?.output : undefined;
+  return isMateriaSocket(socket) ? canonicalGeneratorConfigFor(materia[socket.materia])?.output : undefined;
+}
+
+function isMateriaSocket(socket: AnalyzeableSocket | undefined): socket is AnalyzeableSocket & { materia: string } {
+  return (socket?.type === "agent" || socket?.type === "utility") && typeof socket.materia === "string";
 }
 
 function cloneValue<T>(value: T): T {

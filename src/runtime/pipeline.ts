@@ -193,7 +193,7 @@ function validateLegacyGeneratorDeclaration(name: string, generates: unknown): v
 
 function isGeneratorPipelineSocket(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, socketId: string): boolean {
   const socket = getLoadoutSocket(pipeline, socketId);
-  return Boolean(socket?.type === "agent" && isGeneratorMateria(config.materia[socket.materia]));
+  return Boolean(socket && isMateriaSocket(socket) && isGeneratorMateria(config.materia[socket.materia]));
 }
 
 function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
@@ -208,7 +208,7 @@ function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPi
     if (uniqueGeneratorIds.length === 1) {
       const from = uniqueGeneratorIds[0];
       const source = getLoadoutSocket(pipeline, from);
-      if (source?.type !== "agent") continue;
+      if (!source || !isMateriaSocket(source)) continue;
       const output = canonicalGeneratorConfigFor(config.materia[source.materia])?.output;
       if (output) loop.consumes = { from, output };
     } else if (uniqueGeneratorIds.length > 1) {
@@ -220,7 +220,7 @@ function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPi
 function normalizeGeneratorPipelineSlots(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
   for (const id of generatorPipelineSocketIds(config, pipeline)) {
     const socket = getLoadoutSocket(pipeline, id);
-    if (!socket || socket.type !== "agent") continue;
+    if (!socket || !isMateriaSocket(socket)) continue;
     const generator = canonicalGeneratorConfigFor(config.materia[socket.materia]);
     if (!generator) continue;
     socket.parse = "json";
@@ -232,7 +232,7 @@ function validateGeneratorSocketContracts(config: PiMateriaConfig, effective: Ef
   const generatorPipelineIds = generatorPipelineSocketIds(config, effective.pipeline);
   for (const id of generatorPipelineIds) {
     const socket = getLoadoutSocket(effective.pipeline, id);
-    if (!socket || socket.type !== "agent") continue;
+    if (!socket || !isMateriaSocket(socket)) continue;
     const generator = canonicalGeneratorConfigFor(config.materia[socket.materia]);
     if (!generator) continue;
     if (generator.listType !== "array") throw new Error(`Generator materia "${socket.materia}" must resolve listType="array" for generator pipeline output "${generator.output}".`);
@@ -412,10 +412,14 @@ function generatorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConf
   if (!consumer) throw new Error(`Loop "${loopId}" does not declare a generator consumer.`);
   const source = getLoadoutSocket(pipeline, consumer.from);
   if (!source) throw new Error(`Loop "${loopId}" consumes unknown generator socket "${consumer.from}".`);
-  if (source.type !== "agent") throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but only agent materia can declare generated outputs.`);
+  if (!isMateriaSocket(source)) throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but the source socket does not reference materia.`);
   const generator = canonicalGeneratorConfigFor(config.materia[source.materia]);
   if (!generator) throw new Error(`Loop "${loopId}" consumes "${consumer.from}", but materia "${source.materia}" is not marked as a Generator.`);
   return generator;
+}
+
+function isMateriaSocket(socket: MateriaPipelineSocketConfig): socket is MateriaPipelineSocketConfig & { materia: string } {
+  return (socket.type === "agent" || socket.type === "utility") && typeof socket.materia === "string";
 }
 
 export { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";

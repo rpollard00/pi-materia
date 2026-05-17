@@ -7,8 +7,8 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
   pickHandoffEnvelopeFields,
 } from "../handoff/handoffContract.js";
-import type { MateriaCastState, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
-import { isPlainObject, resolvedSocketConfig } from "./workflowTransitions.js";
+import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
+import { isPlainObject } from "./workflowTransitions.js";
 
 export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, socket?: ResolvedMateriaSocket): void {
   if (!isPlainObject(parsed)) return;
@@ -38,9 +38,5 @@ export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unk
 
 function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, socket?: ResolvedMateriaSocket): boolean {
   if (!Array.isArray(state.data.workItems) || state.data.workItems.length === 0) return true;
-  return Boolean(socket && isAgentResolvedSocket(socket) && canonicalGeneratorConfigFor(socket.materia)?.output === "workItems");
-}
-
-function isAgentResolvedSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
-  return resolvedSocketConfig(socket).type === "agent";
+  return Boolean(socket && canonicalGeneratorConfigFor(socket.materia)?.output === "workItems");
 }

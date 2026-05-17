@@ -91,11 +91,15 @@ function advanceForLoopExit(loop: MateriaLoopConfig, generator: MateriaGenerator
 
 function generatorForLoop(materia: Record<string, MateriaConfig>, pipeline: MateriaPipelineConfig, loop: MateriaLoopConfig): MateriaGeneratorConfig | undefined {
   const source = loop.consumes ? getLoadoutSocket(pipeline, loop.consumes.from) : undefined;
-  if (!source || source.type !== "agent") return undefined;
+  if (!source || !isMateriaSocket(source)) return undefined;
   const generator = canonicalGeneratorConfigFor(materia[source.materia]);
   if (!generator) return undefined;
   const output = loop.consumes?.output ?? generator.output;
   return { ...generator, output };
+}
+
+function isMateriaSocket(socket: MateriaPipelineSocketConfig): socket is MateriaPipelineSocketConfig & { materia: string } {
+  return (socket.type === "agent" || socket.type === "utility") && typeof socket.materia === "string";
 }
 
 function loopSource(loadoutName: string | undefined, loopId: string, socketId: string): string {

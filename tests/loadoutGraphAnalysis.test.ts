@@ -7,6 +7,7 @@ const materia = {
   planner: { prompt: "Plan", tools: "none", generator: true },
   refiner: { prompt: "Refine", tools: "none", generator: true },
   Build: { prompt: "Build", tools: "coding" },
+  scriptPlanner: { type: "utility", command: ["node", "plan.mjs"], generator: true },
 } satisfies PiMateriaConfig["materia"];
 
 function overlappingLoopLoadout(): MateriaPipelineConfig {
@@ -80,5 +81,28 @@ describe("loadout graph analysis under overlapping loop memberships", () => {
       "loop-consumer-missing:missing:",
       ...Array.from({ length: 24 }, (_, index) => `loop-consumer-stale:overlap-${index.toString().padStart(2, "0")}:Socket-999`),
     ].sort());
+  });
+
+  test("treats utility materia marked generator as loop workItems producers", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { type: "utility", materia: "scriptPlanner", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { type: "agent", materia: "Build" },
+      },
+      loops: {
+        work: { sockets: ["Socket-2"], consumes: { from: "stale", output: "workItems" } },
+      },
+    };
+
+    const analysis = analyzeLoadoutGraph(loadout, materia);
+    const prepared = prepareLoadoutForSave(loadout, materia).loadout;
+
+    expect(analysis.loopConsumerSources.get("work")).toEqual({ from: "Socket-1", output: "workItems" });
+    expect(analysis.workItemProducingSocketIds).toEqual(new Set(["Socket-1"]));
+    expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["loop-consumer-stale"]);
+    expect(prepared.loops?.work.consumes).toEqual({ from: "Socket-1", output: "workItems" });
+    expect(prepared.sockets["Socket-1"]?.parse).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.assign).toBeUndefined();
   });
 });

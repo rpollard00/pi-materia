@@ -4,7 +4,7 @@ import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, materializeCa
 import { analyzeLoadoutGraph, type LoadoutGraphAnalysis } from "../graph/loadoutGraphAnalysis.js";
 import { materializeLoadoutLoopSemantics } from "../graph/loopSemantics.js";
 import { normalizeLegacyLoopRoutingCompatibilityInPlace } from "./loopCompatibility.js";
-import type { MateriaConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaSocketLayoutConfig, PiMateriaConfig } from "../types.js";
+import type { MateriaConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, MateriaSocketLayoutConfig, PiMateriaConfig } from "../types.js";
 
 export interface NormalizedLoadoutResult<TLoadout extends MateriaPipelineConfig = MateriaPipelineConfig> {
   loadout: TLoadout;
@@ -121,12 +121,16 @@ function reconcileLoopConsumers(loadout: MateriaPipelineConfig, materia: Record<
 function normalizeGeneratorPipelineSockets(loadout: MateriaPipelineConfig, materia: Record<string, GeneratorMateriaLike>): void {
   for (const id of analyzeLoadoutGraph(loadout, materia).workItemProducingSocketIds) {
     const socket = getLoadoutSocket(loadout, id);
-    if (!socket || socket.type !== "agent") continue;
+    if (!socket || !isMateriaSocket(socket)) continue;
     const generator = canonicalGeneratorConfigFor(materia[socket.materia]);
     if (!generator) continue;
     socket.parse = "json";
     socket.assign = { ...(socket.assign ?? {}), [generator.output]: `$.${generator.output}` };
   }
+}
+
+function isMateriaSocket(socket: MateriaPipelineSocketConfig): socket is MateriaPipelineSocketConfig & { materia: string } {
+  return (socket.type === "agent" || socket.type === "utility") && typeof socket.materia === "string";
 }
 
 function isSocketLayout(value: unknown): value is MateriaSocketLayoutConfig {

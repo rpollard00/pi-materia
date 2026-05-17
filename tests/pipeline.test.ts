@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "bun:test";
 import { loopIteratorForSocket, renderGrid, resolvePipeline } from "../src/runtime/pipeline.js";
+import { effectiveResolvedSocketConfig } from "../src/runtime/resolvedMateria.js";
 import type { PiMateriaConfig } from "../src/types.js";
 
 const baseLoadout = {
@@ -179,6 +180,48 @@ describe("loadout-aware pipeline resolution", () => {
     expect(pipeline.sockets["Socket-4"].socket.edges).toEqual([{ when: "always", to: "Socket-3" }]);
     expect(pipeline.loops?.loopSelection.exits).toEqual([{ id: "exit:Socket-4:satisfied", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-2" }]);
     expect(pipeline.loops?.loopSelection.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+  });
+
+  test("resolvePipeline lets utility generator materia feed loop iterators", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Loop",
+      loadouts: {
+        Loop: {
+          entry: "Socket-1",
+          loops: {
+            taskIteration: {
+              sockets: ["Socket-2", "Socket-3", "Socket-4"],
+              consumes: { from: "Socket-1" },
+              exit: { from: "Socket-4", when: "satisfied", to: "end" },
+            },
+          },
+          sockets: {
+            "Socket-1": { type: "utility", materia: "scriptPlanner", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-3": { type: "agent", materia: "Eval", edges: [{ when: "always", to: "Socket-4" }] },
+            "Socket-4": { type: "agent", materia: "Maintain", edges: [{ when: "always", to: "Socket-2" }] },
+          },
+        },
+      },
+      materia: {
+        scriptPlanner: { type: "utility", command: ["node", "plan.mjs"], generator: true, parse: "text", assign: { other: "$.other" } },
+        Build: { tools: "coding", prompt: "Build." },
+        Eval: { tools: "readOnly", prompt: "Eval." },
+        Maintain: { tools: "coding", prompt: "Maintain." },
+      },
+    };
+
+    const pipeline = resolvePipeline(config);
+    const effectiveGeneratorConfig = effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]);
+
+    expect(pipeline.sockets["Socket-1"].socket.parse).toBe("json");
+    expect(pipeline.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    expect(effectiveGeneratorConfig.parse).toBe("json");
+    expect(effectiveGeneratorConfig.assign).toEqual({ other: "$.other", workItems: "$.workItems" });
+    expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-1", output: "workItems" });
+    expect(pipeline.loops?.taskIteration.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
   });
 
   test("resolvePipeline preserves compatible materialized loop semantics and rejects conflicts", () => {

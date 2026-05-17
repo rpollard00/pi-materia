@@ -569,6 +569,9 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
   validateMateriaParseMode(name, materia.parse);
+  if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
+  }
   validateLegacyGeneratorDeclaration(name, materia.generates);
 }
 

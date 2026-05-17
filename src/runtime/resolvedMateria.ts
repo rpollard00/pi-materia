@@ -1,3 +1,4 @@
+import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import type { MateriaConfig, MateriaPipelineSocketConfig, MateriaUtilityConfig, ResolvedMateriaAgentSocket, ResolvedMateriaSocket, ResolvedMateriaUtilitySocket } from "../types.js";
 
 export function isAgentResolvedSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
@@ -33,11 +34,17 @@ export function effectiveUtilityConfig(socket: ResolvedMateriaUtilitySocket): Ma
 export function effectiveResolvedSocketConfig(socket: ResolvedMateriaSocket): MateriaPipelineSocketConfig {
   if (isAgentResolvedSocket(socket)) return socket.socket;
   const utility = effectiveUtilityConfig(socket);
-  return {
+  const generator = canonicalGeneratorConfigFor(socket.materia);
+  const effective: MateriaPipelineSocketConfig = {
     ...socket.socket,
     ...(utility.parse ? { parse: utility.parse } : {}),
     ...(utility.assign ? { assign: utility.assign } : {}),
   };
+  if (generator) {
+    effective.parse = "json";
+    effective.assign = { ...(effective.assign ?? {}), [generator.output]: `$.${generator.output}` };
+  }
+  return effective;
 }
 
 function legacyInlineUtilityConfig(socket: ResolvedMateriaUtilitySocket): MateriaUtilityConfig {
