@@ -333,8 +333,8 @@ describe("config loadouts", () => {
         assign: { vcs: "$" },
       });
       expect(pipeline.entry.id).toBe("Socket-1");
-      expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ type: "utility", utility: "project.ensureIgnored" });
-      expect(pipeline.sockets["Socket-2"].socket).toMatchObject({ type: "utility", utility: "vcs.detect" });
+      expect(pipeline.sockets["Socket-1"]).toMatchObject({ socket: { type: "utility", materia: "ensureArtifactsIgnored" }, materiaId: "ensureArtifactsIgnored", materia: { utility: "project.ensureIgnored" } });
+      expect(pipeline.sockets["Socket-2"]).toMatchObject({ socket: { type: "utility", materia: "detectVcs" }, materiaId: "detectVcs", materia: { utility: "vcs.detect" } });
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

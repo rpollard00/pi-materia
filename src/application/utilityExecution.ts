@@ -1,6 +1,7 @@
 import { currentItem } from "./workflowTransitions.js";
 import { stringifyDeterministicHandoffOutput } from "../handoff/handoffContract.js";
 import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
+import { effectiveUtilityConfig, resolvedMateriaDisplayName, resolvedMateriaId, resolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
 
 export type UtilityResolvedSocket = Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>;
@@ -25,7 +26,7 @@ export async function executeUtilitySocketWithDeps(state: MateriaCastState, sock
   const inputArtifact = await deps.recordUtilityInput(input);
   await deps.appendUtilityInputEvent(inputArtifact, visit);
 
-  const utilityConfig = resolvedSocketConfig(socket);
+  const utilityConfig = effectiveUtilityConfig(socket);
   const params = utilityConfig.params ?? {};
   let output: string;
   if (utilityConfig.command) {
@@ -36,7 +37,7 @@ export async function executeUtilitySocketWithDeps(state: MateriaCastState, sock
   } else if (deps.hasBuiltInUtility(utilityConfig.utility ?? "")) {
     output = await deps.executeBuiltInUtility(utilityConfig.utility ?? "", input);
   } else {
-    throw new Error(`Unknown utility alias "${utilityConfig.utility}" for socket "${socket.id}".`);
+    throw new Error(`Unknown utility alias "${utilityConfig.utility}" for utility materia "${resolvedMateriaId(socket)}" on socket "${socket.id}".`);
   }
 
   return { output, entryId: `utility:${socket.id}:${visit}` };
@@ -51,7 +52,9 @@ export function buildUtilityInput(state: MateriaCastState, socket: UtilityResolv
     request: state.request,
     castId: state.castId,
     socketId: socket.id,
-    params: resolvedSocketConfig(socket).params ?? {},
+    materiaId: resolvedMateriaId(socket),
+    materiaLabel: resolvedMateriaDisplayName(socket),
+    params: effectiveUtilityConfig(socket).params ?? {},
     state: state.data,
     item: currentItem(state) ?? null,
     itemKey: state.currentItemKey ?? null,
@@ -65,6 +68,3 @@ function socketVisit(state: MateriaCastState, socketId: string): number {
   return state.visits[socketId] ?? 0;
 }
 
-function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
-  return socket.socket;
-}

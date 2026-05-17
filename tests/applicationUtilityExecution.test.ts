@@ -30,14 +30,14 @@ function state(): MateriaCastState {
   } as MateriaCastState;
 }
 
-function utilitySocket(socket: UtilityResolvedSocket["socket"]): UtilityResolvedSocket {
-  return { id: "Socket-1", socket } as UtilityResolvedSocket;
+function utilitySocket(materia: UtilityResolvedSocket["materia"], socket: Partial<UtilityResolvedSocket["socket"]> = {}): UtilityResolvedSocket {
+  return { id: "Socket-1", socket: { type: "utility", materia: "Utility", ...socket }, materiaId: "Utility", materia };
 }
 
 describe("application utility execution", () => {
   test("builds stable utility input with canonical socketId", () => {
-    const input = buildUtilityInput(state(), utilitySocket({ type: "utility", utility: "echo", params: { answer: 42 } }));
-    expect(input).toMatchObject({ cwd: "/tmp/project", request: "do utility work", castId: "cast-1", socketId: "Socket-1", params: { answer: 42 }, itemKey: "item-a", itemLabel: "Item A", state: { existing: true } });
+    const input = buildUtilityInput(state(), utilitySocket({ type: "utility", label: "Utility Label", utility: "echo", params: { answer: 42 } }));
+    expect(input).toMatchObject({ cwd: "/tmp/project", request: "do utility work", castId: "cast-1", socketId: "Socket-1", materiaId: "Utility", materiaLabel: "Utility Label", params: { answer: 42 }, itemKey: "item-a", itemLabel: "Item A", state: { existing: true } });
   });
 
   test("routes command utilities through the command executor boundary and records input", async () => {
@@ -55,6 +55,18 @@ describe("application utility execution", () => {
 
     expect(result).toEqual({ output: "command output", entryId: "utility:Socket-1:3" });
     expect(calls).toEqual(["event:sockets/Socket-1/3.input.json:3", "command:Socket-1"]);
+  });
+
+  test("uses resolved utility materia instead of inline socket behavior", async () => {
+    const result = await executeUtilitySocketWithDeps(state(), utilitySocket({ type: "utility", utility: "echo", params: { output: "from materia" } }, { utility: "wrong", params: { output: "from socket" } }), {
+      executeCommand: async () => { throw new Error("command should not run"); },
+      executeBuiltInUtility: () => { throw new Error("built-in should not run"); },
+      hasBuiltInUtility: () => false,
+      recordUtilityInput: async () => "input.json",
+      appendUtilityInputEvent: async () => {},
+    });
+
+    expect(result.output).toBe("from materia");
   });
 
   test("serializes configured object output with deterministic handoff serializer", async () => {

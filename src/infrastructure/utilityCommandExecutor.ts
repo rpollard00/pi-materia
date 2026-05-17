@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { effectiveUtilityConfig, resolvedMateriaDisplayName, resolvedMateriaId } from "../runtime/resolvedMateria.js";
 import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
 import type { CommandUtilityRequest } from "../application/utilityExecution.js";
 import { appendEvent, recordCommandArtifacts as recordCommandArtifactsFile } from "./castArtifacts.js";
@@ -8,11 +9,9 @@ export const MAX_UTILITY_OUTPUT_BYTES = 1024 * 1024;
 export const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 
 export async function executeCommandUtility({ state, socket, input }: CommandUtilityRequest): Promise<string> {
-  const command = resolvedSocketConfig(socket).command;
-  if (!command || command.length === 0) throw new Error(`Utility socket "${socket.id}" has no explicit command configured.`);
+  const command = effectiveUtilityConfig(socket).command;  if (!command || command.length === 0) throw new Error(`Utility socket "${socket.id}" has no explicit command configured.`);
 
-  const timeoutMs = resolvedSocketConfig(socket).timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;
-  const child = spawn(command[0], command.slice(1), { cwd: state.cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
+  const timeoutMs = effectiveUtilityConfig(socket).timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;  const child = spawn(command[0], command.slice(1), { cwd: state.cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
   const stdout = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
   const stderr = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
   let timedOut = false;
@@ -43,7 +42,7 @@ export async function executeCommandUtility({ state, socket, input }: CommandUti
   const stdoutText = stdout.text();
   const stderrText = stderr.text();
   const artifacts = await recordCommandArtifacts(state, socket, stdoutText, stderrText, stdout.truncated, stderr.truncated);
-  await appendEvent(state.runState, "utility_command", { socket: socket.id, command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
+  await appendEvent(state.runState, "utility_command", { socket: socket.id, materia: resolvedMateriaId(socket), materiaLabel: resolvedMateriaDisplayName(socket), command, code: result.code, signal: result.signal, timedOut, timeoutMs, stdoutArtifact: artifacts.stdoutArtifact, stderrArtifact: artifacts.stderrArtifact, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
 
   if (timedOut) {
     throw new CommandUtilityError(`Utility command timed out for socket "${socket.id}" after ${timeoutMs}ms: ${formatCommandForError(command)}. stdout: ${artifacts.stdoutArtifact}; stderr: ${artifacts.stderrArtifact}`, { command, result, timedOut, timeoutMs, artifacts, stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated });
@@ -107,7 +106,7 @@ export function createBoundedCapture(maxBytes: number): { push(chunk: Buffer | s
 }
 
 function recordCommandArtifacts(state: MateriaCastState, socket: ResolvedMateriaSocket, stdout: string, stderr: string, stdoutTruncated: boolean, stderrTruncated: boolean): Promise<{ stdoutArtifact: string; stderrArtifact: string; metaArtifact: string }> {
-  return recordCommandArtifactsFile({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), stdout, stderr, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES });
+  return recordCommandArtifactsFile({ state, socketId: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), visit: socketVisit(state, socket.id), stdout, stderr, stdoutTruncated, stderrTruncated, maxBytes: MAX_UTILITY_OUTPUT_BYTES });
 }
 
 function summarizeStderr(stderr: string, truncated: boolean): string {
@@ -123,12 +122,6 @@ function socketVisit(state: MateriaCastState, socketId: string): number {
   return state.visits[socketId] ?? 0;
 }
 
-function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
-  return socket.socket;
-}
-
 function socketMateriaName(socket: ResolvedMateriaSocket | undefined): string | undefined {
-  if (!socket) return undefined;
-  if (socket.socket.type === "agent") return socket.socket.materia;
-  return socket.socket.utility;
+  return resolvedMateriaId(socket);
 }

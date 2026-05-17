@@ -3,16 +3,17 @@ import { buildSyntheticCastContext } from "../application/promptAssembly.js";
 import { recordSocketOutput as recordSocketOutputFile, recordSocketRefinement, writeContextArtifact as writeContextArtifactFile } from "../infrastructure/castArtifacts.js";
 import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
 import { formatModelSource, formatThinkingSource } from "./modelSelection.js";
+import { resolvedMateriaDisplayName } from "./resolvedMateria.js";
 import { currentRefinementTurn, currentSocketId, currentSocketVisit, isMultiTurnResolvedAgentSocket, nextRefinementTurn, socketMateriaName, socketVisit } from "./sessionState.js";
 
 export async function recordSocketOutput(state: MateriaCastState, socket: ResolvedMateriaSocket, text: string, entryId: string): Promise<string> {
   const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
-  return recordSocketOutputFile({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), text, entryId, kind: "socket_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, materiaModel: state.currentMateriaModel });
+  return recordSocketOutputFile({ state, socketId: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), visit: socketVisit(state, socket.id), text, entryId, kind: "socket_output", finalized: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, materiaModel: state.currentMateriaModel });
 }
 
 export async function recordMultiTurnRefinement(state: MateriaCastState, socket: ResolvedMateriaSocket, text: string, entryId: string): Promise<{ artifact: string; turn: number }> {
   const turn = nextRefinementTurn(state, socket.id);
-  const artifact = await recordSocketRefinement({ state, socketId: socket.id, materia: socketMateriaName(socket), visit: socketVisit(state, socket.id), text, entryId, kind: "socket_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
+  const artifact = await recordSocketRefinement({ state, socketId: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), visit: socketVisit(state, socket.id), text, entryId, kind: "socket_refinement", refinementTurn: turn, materiaModel: state.currentMateriaModel });
   return { artifact, turn };
 }
 

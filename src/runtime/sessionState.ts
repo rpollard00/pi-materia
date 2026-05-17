@@ -1,4 +1,5 @@
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
+import { isAgentResolvedSocket, resolvedMateriaDisplayName, resolvedMateriaId, resolvedSocketConfig } from "./resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 
 export function socketVisit(state: MateriaCastState, socketId: string): number {
@@ -56,24 +57,17 @@ export function currentMateria(state: MateriaCastState): MateriaAgentConfig {
 }
 
 export function materiaStatusLabel(state: MateriaCastState, socket?: ResolvedMateriaSocket, options: { suffix?: string; includeItem?: boolean } = {}): string {
-  const base = socketMateriaName(socket) ?? state.currentMateria ?? socket?.id ?? currentSocketId(state) ?? state.phase;
+  const base = resolvedMateriaDisplayName(socket) ?? state.currentMateria ?? socket?.id ?? currentSocketId(state) ?? state.phase;
   const parts = [base];
   if (options.suffix) parts.push(options.suffix);
   if (options.includeItem !== false && state.currentItemLabel) parts.push(state.currentItemLabel);
   return parts.join(":");
 }
 
-export function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
-  return socket.socket;
-}
+export { isAgentResolvedSocket, resolvedSocketConfig } from "./resolvedMateria.js";
 
 export function socketMateriaName(socket: ResolvedMateriaSocket | undefined): string | undefined {
-  return socket && isAgentResolvedSocket(socket) ? resolvedSocketConfig(socket).materia : undefined;
-}
-
-export function isAgentResolvedSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
-  return resolvedSocketConfig(socket).type === "agent";
-}
+  return resolvedMateriaId(socket);}
 
 export function isMultiTurnResolvedAgentSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
   return isAgentResolvedSocket(socket) && socket.materia.multiTurn === true;

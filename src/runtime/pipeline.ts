@@ -4,7 +4,7 @@ import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../graph/genera
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, loopSockets } from "../loadout/loadoutAccessors.js";
 import { prepareLoadoutForRuntime } from "../loadout/loadoutNormalization.js";
 import { formatToolScopeSpec, validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
-import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, MateriaConfig, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline } from "../types.js";
+import type { MateriaAgentConfig, MateriaBudgetConfig, MateriaEdgeConfig, MateriaForeachConfig, MateriaGeneratorConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, MateriaConfig, MateriaUtilityConfig, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline } from "../types.js";
 
 export interface EffectiveMateriaPipelineConfig {
   pipeline: MateriaPipelineConfig;
@@ -52,7 +52,7 @@ function resolveSocket(config: PiMateriaConfig, effective: EffectiveMateriaPipel
   validateSocket(id, socket);
   if (socket.type === "utility" && (typeof socket.materia !== "string" || socket.materia.trim().length === 0)) {
     const legacyMateria = legacyInlineUtilityMateria(id, socket as Extract<MateriaPipelineSocketConfig, { type: "utility" }>);
-    return { id, socket: { ...socket, materia: legacyMateria.id, ...utilityRuntimeFields(legacyMateria) }, materia: legacyMateria };
+    return { id, socket: { ...socket, materia: legacyMateria.id }, materiaId: legacyMateria.id, materia: legacyMateria };
   }
 
   const materia = config.materia[socket.materia];
@@ -65,22 +65,10 @@ function resolveSocket(config: PiMateriaConfig, effective: EffectiveMateriaPipel
   const rawMateria = materia as unknown as Record<string, unknown>;
   if (rawMateria.type !== "utility") throw new Error(`Utility pipeline slot "${id}" must reference utility materia "${socket.materia}"`);
   validateUtilityMateriaEntry(socket.materia, rawMateria);
-  return { id, socket: { ...socket, ...utilityRuntimeFields(materia) }, materia: materia as Extract<MateriaConfig, { type: "utility" }> };
+  return { id, socket, materiaId: socket.materia, materia: materia as MateriaUtilityConfig };
 }
 
-function utilityRuntimeFields(materia: MateriaConfig): Partial<Extract<MateriaPipelineSocketConfig, { type: "utility" }>> {
-  if (materia.type !== "utility") return {};
-  return {
-    ...(materia.utility ? { utility: materia.utility } : {}),
-    ...(materia.command ? { command: [...materia.command] } : {}),
-    ...(materia.params ? { params: { ...materia.params } } : {}),
-    ...(materia.timeoutMs ? { timeoutMs: materia.timeoutMs } : {}),
-    ...(materia.parse ? { parse: materia.parse } : {}),
-    ...(materia.assign ? { assign: { ...materia.assign } } : {}),
-  };
-}
-
-function legacyInlineUtilityMateria(socketId: string, socket: Extract<MateriaPipelineSocketConfig, { type: "utility" }>): Extract<MateriaConfig, { type: "utility" }> & { id: string } {
+function legacyInlineUtilityMateria(socketId: string, socket: Extract<MateriaPipelineSocketConfig, { type: "utility" }>): MateriaUtilityConfig & { id: string } {
   const id = `legacyInlineUtility${socketId.replace(/[^a-z0-9]+/gi, "")}`;
   return {
     id,
@@ -336,7 +324,8 @@ function formatSocketSlot(config: PiMateriaConfig, socket: MateriaPipelineSocket
     if (utilityMateria?.type === "utility") details.push(utilityMateria.utility ? `utility=${utilityMateria.utility}` : `command=${formatCommand(utilityMateria.command)}`);
     else details.push(socket.utility ? `utility=${socket.utility}` : `command=${formatCommand(socket.command)}`);
   }
-  details.push(`parse=${socket.parse ?? "text"}`);
+  const effectiveParse = socket.type === "utility" && config.materia[socket.materia]?.type === "utility" ? config.materia[socket.materia].parse : socket.parse;
+  details.push(`parse=${effectiveParse ?? "text"}`);
   if (socket.edges?.length) details.push(`edges=${socket.edges.map((edge) => `${edgeLabel(edge)}->${edge.to}`).join(",")}`);
   if (socket.foreach) details.push(`foreach=${socket.foreach.items}${socket.foreach.as ? ` as ${socket.foreach.as}` : ""}${socket.foreach.done ? ` done ${socket.foreach.done}` : ""}`);
   if (socket.advance) details.push(`advance=${socket.advance.cursor}:${socket.advance.items}${socket.advance.when ? ` when ${socket.advance.when}` : ""}${socket.advance.done ? ` done ${socket.advance.done}` : ""}`);

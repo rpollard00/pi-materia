@@ -3,12 +3,14 @@ import { HANDOFF_SATISFIED_FIELD } from "../handoff/handoffContract.js";
 import { canonicalOutgoingEdges } from "../graph/graphValidation.js";
 import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 import { loopExitIndexForPipeline, resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback } from "../graph/graphSemantics.js";
+import { effectiveResolvedSocketConfig, resolvedSocketConfig } from "../runtime/resolvedMateria.js";
+export { resolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaCastState, MateriaEdgeCondition, MateriaEdgeConfig, PiMateriaConfig, ResolvedMateriaSocket } from "../types.js";
 
 export const DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS = 25;
 
 export function applyAssignments(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): void {
-  for (const [target, source] of Object.entries(resolvedSocketConfig(socket).assign ?? {})) {
+  for (const [target, source] of Object.entries(effectiveResolvedSocketConfig(socket).assign ?? {})) {
     setPath(state.data, target, resolveValue(source, state, parsed));
   }
 }
@@ -40,7 +42,7 @@ export function canonicalSatisfiedOutcome(state: MateriaCastState, parsed: unkno
 }
 
 export function selectNextTarget(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown, config: PiMateriaConfig): string {
-  const edge = selectMatchingEdge(canonicalOutgoingEdges(resolvedSocketConfig(socket)), canonicalSatisfiedOutcome(state, parsed));
+  const edge = selectMatchingEdge(canonicalOutgoingEdges(effectiveResolvedSocketConfig(socket)), canonicalSatisfiedOutcome(state, parsed));
   if (edge) {
     enforceEdgeLimit(state, socket.id, edge, config);
     return edge.to;
@@ -166,6 +168,3 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-export function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(socket: TSocket): TSocket["socket"] {
-  return socket.socket;
-}

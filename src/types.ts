@@ -286,6 +286,7 @@ export interface MateriaManifestEntry {
   phase: MateriaCastPhase;
   socket?: string;
   materia?: string;
+  materiaLabel?: string;
   itemKey?: string;
   itemLabel?: string;
   itemLabelShort?: string;
@@ -525,8 +526,12 @@ export interface ResolvedMateriaAgentSocket {
 
 export interface ResolvedMateriaUtilitySocket {
   id: string;
+  /** Structural socket config: graph placement, routing, foreach/advance, limits, and layout. */
   socket: MateriaUtilitySocketConfig;
-  materia?: MateriaUtilityConfig;
+  /** Referenced utility materia id. Kept explicit so runtime code does not read legacy inline socket behavior. */
+  materiaId: string;
+  /** Resolved reusable utility behavior, appearance, parse, assignment, params, and execution config. */
+  materia: MateriaUtilityConfig;
 }
 
 export type MateriaConfig = MateriaAgentConfig | MateriaUtilityConfig;

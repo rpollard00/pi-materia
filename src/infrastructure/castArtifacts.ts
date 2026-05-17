@@ -71,6 +71,7 @@ export interface SocketTextArtifactInput {
   state: MateriaCastState;
   socketId: string;
   materia?: string;
+  materiaLabel?: string;
   visit: number;
   text: string;
   entryId: string;
@@ -111,6 +112,7 @@ export interface UtilityInputArtifactInput {
   state: MateriaCastState;
   socketId: string;
   materia?: string;
+  materiaLabel?: string;
   visit: number;
   input: Record<string, unknown>;
 }
@@ -118,7 +120,7 @@ export interface UtilityInputArtifactInput {
 export async function recordUtilityInput(input: UtilityInputArtifactInput): Promise<string> {
   const artifact = socketArtifactPath(input.state, input.socketId, input.visit, ".input.json");
   await writeRunFile(input.state.runDir, artifact, JSON.stringify(input.input, null, 2));
-  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:input`, artifact });
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, materiaLabel: input.materiaLabel, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:input`, artifact });
   return artifact;
 }
 
@@ -126,6 +128,7 @@ export interface CommandArtifactsInput {
   state: MateriaCastState;
   socketId: string;
   materia?: string;
+  materiaLabel?: string;
   visit: number;
   stdout: string;
   stderr: string;
@@ -140,10 +143,10 @@ export async function recordCommandArtifacts(input: CommandArtifactsInput): Prom
   const metaArtifact = socketArtifactPath(input.state, input.socketId, input.visit, ".command.json");
   await writeRunFile(input.state.runDir, stdoutArtifact, input.stdout);
   await writeRunFile(input.state.runDir, stderrArtifact, input.stderr);
-  await writeRunFile(input.state.runDir, metaArtifact, JSON.stringify({ stdoutArtifact, stderrArtifact, stdoutTruncated: input.stdoutTruncated, stderrTruncated: input.stderrTruncated, maxBytes: input.maxBytes }, null, 2));
-  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stdout`, artifact: stdoutArtifact });
-  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stderr`, artifact: stderrArtifact });
-  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:meta`, artifact: metaArtifact });
+  await writeRunFile(input.state.runDir, metaArtifact, JSON.stringify({ materia: input.materia, materiaLabel: input.materiaLabel, stdoutArtifact, stderrArtifact, stdoutTruncated: input.stdoutTruncated, stderrTruncated: input.stderrTruncated, maxBytes: input.maxBytes }, null, 2));
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, materiaLabel: input.materiaLabel, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stdout`, artifact: stdoutArtifact });
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, materiaLabel: input.materiaLabel, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:stderr`, artifact: stderrArtifact });
+  await appendManifest(input.state, { phase: input.state.phase, socket: input.socketId, materia: input.materia, materiaLabel: input.materiaLabel, itemKey: input.state.currentItemKey, visit: input.visit, entryId: `utility:${input.socketId}:${input.visit}:command:meta`, artifact: metaArtifact });
   return { stdoutArtifact, stderrArtifact, metaArtifact };
 }
 
@@ -195,6 +198,7 @@ function socketManifestEntry(input: SocketTextArtifactInput, artifact: string): 
     phase: input.state.phase,
     socket: input.socketId,
     materia: input.materia,
+    materiaLabel: input.materiaLabel,
     itemKey: input.state.currentItemKey,
     visit: input.visit,
     entryId: input.entryId,
