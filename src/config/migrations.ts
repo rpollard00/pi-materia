@@ -8,6 +8,7 @@ export const LOADOUT_CONFIG_MIGRATIONS = [
   { id: "004-canonicalize-utility-sockets", migrate: canonicalizeUtilitySockets },
   { id: "005-stamp-explicit-materia-types", migrate: stampExplicitMateriaTypes },
   { id: "006-repoint-legacy-default-materia-aliases", migrate: repointLegacyDefaultMateriaAliases },
+  { id: "007-repoint-legacy-utility-materia-identities", migrate: repointLegacyUtilityMateriaIdentities },
 ] as const satisfies readonly ConfigMigration[];
 
 export type LoadoutConfigMigrationId = (typeof LOADOUT_CONFIG_MIGRATIONS)[number]["id"];
@@ -284,6 +285,7 @@ function canonicalizeUtilitySockets(context: ConfigMigrationContext): void {
 interface UtilitySignature {
   utility?: string;
   command?: string[];
+  script?: string;
   params?: Record<string, unknown>;
   timeoutMs?: number;
   parse?: string;
@@ -303,6 +305,7 @@ function utilitySocketSignature(socket: Record<string, unknown>): UtilitySignatu
   return cleanSignature({
     ...(typeof socket.utility === "string" ? { utility: socket.utility } : {}),
     ...(Array.isArray(socket.command) && socket.command.every((part) => typeof part === "string") ? { command: [...socket.command] as string[] } : {}),
+    ...(typeof socket.script === "string" ? { script: socket.script } : {}),
     ...(isPlainObject(socket.params) ? { params: clonePlain(socket.params) } : {}),
     ...(typeof socket.timeoutMs === "number" ? { timeoutMs: socket.timeoutMs } : {}),
     ...(typeof socket.parse === "string" ? { parse: socket.parse } : {}),
@@ -314,6 +317,7 @@ function utilitySignature(definition: Record<string, unknown>): string {
   return stableStringify(cleanSignature({
     ...(typeof definition.utility === "string" ? { utility: definition.utility } : {}),
     ...(Array.isArray(definition.command) && definition.command.every((part) => typeof part === "string") ? { command: [...definition.command] as string[] } : {}),
+    ...(typeof definition.script === "string" ? { script: definition.script } : {}),
     ...(isPlainObject(definition.params) ? { params: clonePlain(definition.params) } : {}),
     ...(typeof definition.timeoutMs === "number" ? { timeoutMs: definition.timeoutMs } : {}),
     ...(typeof definition.parse === "string" ? { parse: definition.parse } : {}),
@@ -381,10 +385,168 @@ function repointLegacyDefaultMateriaAliases(context: ConfigMigrationContext): vo
   }
 }
 
+function repointLegacyUtilityMateriaIdentities(context: ConfigMigrationContext): void {
+  const legacyToCanonical = new Map<string, string>();
+
+  for (const layer of context.layers) {
+    if (!layer.loaded) continue;
+    const materia = isPlainObject(layer.config.materia) ? layer.config.materia as Record<string, unknown> : undefined;
+    const safeRenames = materia ? canonicalizeLegacyUtilityMateriaDefinitions(layer, context, materia) : defaultLegacyUtilityRenames();
+    for (const [from, to] of safeRenames) legacyToCanonical.set(from, to);
+    canonicalizeLegacyUtilityReferences(layer, context, safeRenames);
+  }
+
+  if (context.profile) {
+    const changed = rewriteMateriaReferenceValues(context.profile as unknown as Record<string, unknown>, legacyToCanonical);
+    if (changed) {
+      context.profileChanged = true;
+      context.profileAudit.push("repointed legacy utility materia ids in profile metadata");
+    }
+  }
+}
+
+function defaultLegacyUtilityRenames(): Map<string, string> {
+  return new Map(SHIPPED_UTILITY_MIGRATIONS.flatMap((shipped) => shipped.legacyIds.map((legacyId) => [legacyId, shipped.canonicalId] as const)));
+}
+
+function canonicalizeLegacyUtilityMateriaDefinitions(layer: MigratableConfigLayer, context: ConfigMigrationContext, materia: Record<string, unknown>): Map<string, string> {
+  const renames = new Map<string, string>();
+  for (const shipped of SHIPPED_UTILITY_MIGRATIONS) {
+    const canonicalDefinition = materia[shipped.canonicalId];
+    const canonicalAbsent = canonicalDefinition === undefined;
+    const canonicalMatches = canonicalAbsent || isShippedUtilityDefinition(canonicalDefinition, shipped);
+    if (!canonicalMatches) {
+      const aliasesPresent = shipped.legacyIds.some((id) => materia[id] !== undefined) || hasLegacyUtilityReference(layer.config, shipped.legacyIds) || Object.entries(materia).some(([id, definition]) => id !== shipped.canonicalId && isShippedUtilityDefinition(definition, shipped));
+      if (aliasesPresent) {
+        preserveConflictingShippedUtilityAliases(layer, context, materia, shipped);
+        auditChange(context, layer, `conflict: canonical utility materia ${shipped.canonicalId} differs from shipped ${shipped.label} behavior; legacy aliases were preserved and not repointed to it`);
+      }
+      continue;
+    }
+
+    for (const [id, definition] of Object.entries(materia)) {
+      if (id === shipped.canonicalId || !isShippedUtilityDefinition(definition, shipped)) continue;
+      if (canonicalAbsent && materia[shipped.canonicalId] === undefined) {
+        materia[shipped.canonicalId] = definition;
+        auditChange(context, layer, `renamed shipped utility materia ${id} to ${shipped.canonicalId}`);
+      } else {
+        auditChange(context, layer, `deduplicated shipped utility materia ${id} into ${shipped.canonicalId}`);
+      }
+      delete materia[id];
+      renames.set(id, shipped.canonicalId);
+      layer.changed = true;
+    }
+
+    for (const legacyId of shipped.legacyIds) {
+      if (legacyId !== shipped.canonicalId && materia[legacyId] === undefined) renames.set(legacyId, shipped.canonicalId);
+    }
+  }
+  return renames;
+}
+
+function canonicalizeLegacyUtilityReferences(layer: MigratableConfigLayer, context: ConfigMigrationContext, safeRenames: Map<string, string>): void {
+  if (safeRenames.size === 0 || !isPlainObject(layer.config.loadouts)) return;
+  for (const [loadoutName, loadout] of Object.entries(layer.config.loadouts as Record<string, unknown>)) {
+    if (!isPlainObject(loadout)) continue;
+    const changedMetadata = rewriteMateriaReferenceValues(loadout, safeRenames);
+    if (changedMetadata) {
+      layer.changed = true;
+      auditChange(context, layer, `repointed legacy utility materia references in loadout ${loadoutName}`);
+    }
+  }
+}
+
+function rewriteMateriaReferenceValues(value: unknown, renames: Map<string, string>): boolean {
+  if (Array.isArray(value)) return value.map((entry) => rewriteMateriaReferenceValues(entry, renames)).some(Boolean);
+  if (!isPlainObject(value)) return false;
+  let changed = false;
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === "materia" || key === "materiaId" || key === "selectedMateriaId") && typeof child === "string") {
+      const next = renames.get(child);
+      if (next) {
+        value[key] = next;
+        changed = true;
+      }
+      continue;
+    }
+    if (rewriteMateriaReferenceValues(child, renames)) changed = true;
+  }
+  return changed;
+}
+
+function hasLegacyUtilityReference(value: unknown, legacyIds: readonly string[]): boolean {
+  if (Array.isArray(value)) return value.some((entry) => hasLegacyUtilityReference(entry, legacyIds));
+  if (!isPlainObject(value)) return false;
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === "materia" || key === "materiaId" || key === "selectedMateriaId") && typeof child === "string" && legacyIds.includes(child)) return true;
+    if (hasLegacyUtilityReference(child, legacyIds)) return true;
+  }
+  return false;
+}
+
+interface ShippedUtilityMigration {
+  canonicalId: "Detect-VCS" | "Ignore-Artifacts";
+  label: string;
+  legacyIds: string[];
+  signatures: UtilitySignature[];
+}
+
+const SHIPPED_UTILITY_MIGRATIONS: readonly ShippedUtilityMigration[] = [
+  {
+    canonicalId: "Detect-VCS",
+    label: "VCS detector",
+    legacyIds: ["detectVcs"],
+    signatures: [defaultDetectVcsSignature(), { command: ["node", "./utilities/detect-vcs.mjs"], parse: "json", assign: { vcs: "$" } }, { script: "./utilities/detect-vcs.mjs", parse: "json", assign: { vcs: "$" } }],
+  },
+  {
+    canonicalId: "Ignore-Artifacts",
+    label: "artifact ignore utility",
+    legacyIds: ["ensureArtifactsIgnored"],
+    signatures: [defaultEnsureIgnoredSignature(), { command: ["node", "./utilities/ensure-ignored.mjs"], params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } }, { script: "./utilities/ensure-ignored.mjs", params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } }],
+  },
+];
+
+function preserveConflictingShippedUtilityAliases(layer: MigratableConfigLayer, context: ConfigMigrationContext, materia: Record<string, unknown>, shipped: ShippedUtilityMigration): void {
+  for (const legacyId of shipped.legacyIds) {
+    if (!hasLegacyUtilityReference(layer.config, [legacyId]) || materia[legacyId] !== undefined) continue;
+    materia[legacyId] = {
+      type: "utility",
+      label: shipped.canonicalId,
+      group: "Utility",
+      ...clonePlain(shipped.signatures[0]),
+    };
+    layer.changed = true;
+    auditChange(context, layer, `preserved shipped utility behavior as ${legacyId} because ${shipped.canonicalId} is custom`);
+  }
+}
+
+function isShippedUtilityDefinition(value: unknown, shipped: ShippedUtilityMigration): boolean {
+  if (!isUtilityMateriaDefinition(value)) return false;
+  const signature = normalizedUtilityBehavior(value);
+  return shipped.signatures.some((candidate) => normalizedUtilityBehavior(candidate as Record<string, unknown>) === signature);
+}
+
+function normalizedUtilityBehavior(definition: Record<string, unknown>): string {
+  const signature = cleanSignature({
+    ...(typeof definition.utility === "string" ? { utility: definition.utility } : {}),
+    ...(Array.isArray(definition.command) && definition.command.every((part) => typeof part === "string") ? { command: [...definition.command] as string[] } : {}),
+    ...(typeof definition.script === "string" ? { script: definition.script } : {}),
+    ...(isPlainObject(definition.params) && Object.keys(definition.params).length > 0 ? { params: clonePlain(definition.params) } : {}),
+    ...(typeof definition.timeoutMs === "number" ? { timeoutMs: definition.timeoutMs } : {}),
+    ...(typeof definition.parse === "string" ? { parse: definition.parse } : {}),
+    ...(isStringRecord(definition.assign) ? { assign: { ...definition.assign } } : {}),
+  });
+  return stableStringify(signature);
+}
+
+function auditChange(context: ConfigMigrationContext, layer: MigratableConfigLayer, change: string): void {
+  context.audit[layer.path] = [...(context.audit[layer.path] ?? []), change];
+}
+
 function hoistLegacyUtilityMateria(materia: Record<string, unknown>, signatureToId: Map<string, string>, signature: UtilitySignature): string {
   const existing = signatureToId.get(stableStringify(signature));
   if (existing) return existing;
-  const base = `legacyUtility${pascalCase(signature.utility ?? signature.command?.[0] ?? "command")}`;
+  const base = `legacyUtility${pascalCase(signature.utility ?? signature.script ?? signature.command?.[0] ?? "command")}`;
   const suffix = shortHash(stableStringify(signature));
   let id = `${base}${suffix}`;
   let counter = 2;
@@ -400,7 +562,7 @@ function hoistLegacyUtilityMateria(materia: Record<string, unknown>, signatureTo
 
 function stripInlineUtilityFields(socket: Record<string, unknown>): boolean {
   let changed = false;
-  for (const key of ["utility", "command", "params", "timeoutMs", "parse", "assign"]) {
+  for (const key of ["utility", "command", "script", "params", "timeoutMs", "parse", "assign"]) {
     if (key in socket) {
       delete socket[key];
       changed = true;

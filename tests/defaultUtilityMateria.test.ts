@@ -20,13 +20,13 @@ describe("bundled utility materia defaults", () => {
       expect(loadout?.sockets?.["Socket-1"]).toMatchObject({
         type: "utility",
         socketKind: "entry",
-        materia: "ensureArtifactsIgnored",
+        materia: "Ignore-Artifacts",
         edges: [{ when: "always", to: "Socket-2" }],
       });
       expect(loadout?.sockets?.["Socket-2"]).toMatchObject({
         type: "utility",
         socketKind: "normal",
-        materia: "detectVcs",
+        materia: "Detect-VCS",
         edges: [{ when: "always", to: "Socket-3" }],
       });
 
@@ -46,19 +46,21 @@ describe("bundled utility materia defaults", () => {
       readFile(path.resolve("package.json"), "utf8").then((text) => JSON.parse(text) as { files?: string[] }),
     ]);
 
-    expect(config.materia?.ensureArtifactsIgnored).toMatchObject({
+    expect(config.materia?.["Ignore-Artifacts"]).toMatchObject({
       type: "utility",
       command: ["node", "./utilities/ensure-ignored.mjs"],
       parse: "json",
       assign: { artifactIgnore: "$" },
     });
-    expect(config.materia?.detectVcs).toMatchObject({
+    expect(config.materia?.["Detect-VCS"]).toMatchObject({
       type: "utility",
       command: ["node", "./utilities/detect-vcs.mjs"],
       parse: "json",
       assign: { vcs: "$" },
     });
     expect(packageJson.files).toContain("config/default.json");
+    expect(config.materia?.ensureArtifactsIgnored).toBeUndefined();
+    expect(config.materia?.detectVcs).toBeUndefined();
     expect(packageJson.files).toContain("config/utilities/*.mjs");
     expect(packageJson.files).not.toContain(".pi/pi-materia");
     expect(packageJson.files).not.toContain(".pi/pi-materia/**");

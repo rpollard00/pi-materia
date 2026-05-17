@@ -792,12 +792,12 @@ describe("utility pipeline sockets", () => {
     expect(pipeline.entry.socket.type).toBe("utility");
     expect(loadout.sockets?.["Socket-1"]).toMatchObject({
       type: "utility",
-      materia: "ensureArtifactsIgnored",
+      materia: "Ignore-Artifacts",
       edges: [{ when: "always", to: "Socket-2" }],
     });
     expect(loadout.sockets?.["Socket-2"]).toMatchObject({
       type: "utility",
-      materia: "detectVcs",
+      materia: "Detect-VCS",
       edges: [{ when: "always", to: "Socket-3" }],
     });
     expect(JSON.stringify(loadout.sockets)).not.toContain('"next"');

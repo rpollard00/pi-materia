@@ -87,7 +87,7 @@
             }
           ],
           "socketKind": "entry",
-          "materia": "ensureArtifactsIgnored"
+          "materia": "Ignore-Artifacts"
         },
         "Socket-2": {
           "type": "utility",
@@ -98,7 +98,7 @@
             }
           ],
           "socketKind": "normal",
-          "materia": "detectVcs"
+          "materia": "Detect-VCS"
         },
         "Socket-3": {
           "socketKind": "normal",
@@ -227,7 +227,7 @@
             }
           ],
           "socketKind": "entry",
-          "materia": "ensureArtifactsIgnored"
+          "materia": "Ignore-Artifacts"
         },
         "Socket-2": {
           "type": "utility",
@@ -238,7 +238,7 @@
             }
           ],
           "socketKind": "normal",
-          "materia": "detectVcs"
+          "materia": "Detect-VCS"
         },
         "Socket-3": {
           "type": "agent",
@@ -387,7 +387,7 @@
               "to": "Socket-2"
             }
           ],
-          "materia": "ensureArtifactsIgnored"
+          "materia": "Ignore-Artifacts"
         },
         "Socket-2": {
           "socketKind": "normal",
@@ -399,7 +399,7 @@
               "to": "Socket-3"
             }
           ],
-          "materia": "detectVcs"
+          "materia": "Detect-VCS"
         },
         "Socket-3": {
           "socketKind": "normal",
@@ -555,41 +555,6 @@
       "color": "materia-color-yellow",
       "parse": "json"
     },
-    "ensureArtifactsIgnored": {
-      "type": "utility",
-      "label": "Ensure artifacts ignored",
-      "description": "Ensures the pi-materia artifact directory is present in the project ignore file.",
-      "group": "Utility",
-      "color": "materia-color-cyan",
-      "parse": "json",
-      "params": {
-        "patterns": [
-          ".pi/pi-materia/"
-        ]
-      },
-      "assign": {
-        "artifactIgnore": "$"
-      },
-      "command": [
-        "node",
-        "./utilities/ensure-ignored.mjs"
-      ]
-    },
-    "detectVcs": {
-      "type": "utility",
-      "label": "Detect VCS",
-      "description": "Detects jj/git availability and the current project version-control root.",
-      "group": "Utility",
-      "color": "materia-color-black-gray",
-      "parse": "json",
-      "assign": {
-        "vcs": "$"
-      },
-      "command": [
-        "node",
-        "./utilities/detect-vcs.mjs"
-      ]
-    },
     "GitMaintain": {
       "type": "agent",
       "tools": "coding",
@@ -600,10 +565,13 @@
     "Detect-VCS": {
       "type": "utility",
       "label": "Detect-VCS",
+      "description": "Detects jj/git availability and the current project version-control root.",
       "group": "Utility",
-      "params": {},
-      "parse": "json",
       "color": "materia-color-black-gray",
+      "parse": "json",
+      "assign": {
+        "vcs": "$"
+      },
       "command": [
         "node",
         "./utilities/detect-vcs.mjs"
@@ -622,6 +590,26 @@
       "prompt": "You are a test writer. Your responsibility is to author focused tests that capture the desired behavior described by the current workItem or directive.\n\nOperate in a TDD style:\n- Write tests before implementation when requested. Do not complete the implementation.\n- Prefer small, behavior-oriented tests with clear assertions.\n- Test for expected outcomes, not implementation details.\n- Cover happy paths, edge cases, and regressions relevant to the directive.\n- Do not build features, refactor core application code, or change production.\n- Keep changes limited to test files, fixtures, mocks, or test utilities unless explicitly instructed otherwise.\n- Make failing tests express the intended outcome clearly enough for an implementer to satisfy them.\n\nWhen reporting results, be concise. Identify test files changed, scenarios covered, and any expected failures.\n\nIf asked to return JSON or handoff output, follow the pi-materia canonical handoff JSON contract:\n- Preserve and augment existing summary, workItems, guidance, decisions, risks, feedback, and missing context.\n- Do not repurpose reserved fields: satisfied, feedback, missing.\n- Use satisfied only for canonical control flow and only as a real boolean.\n- Compose any socket-specific payload fields with the generic envelope without redefining reserved semantics.\n- When a socket adapter asks for JSON, return only the handoff JSON object with no markdown, prose, or extra commentary.",
       "color": "materia-color-purple",
       "parse": "json"
+    },
+    "Ignore-Artifacts": {
+      "type": "utility",
+      "label": "Ignore-Artifacts",
+      "description": "Ensures the pi-materia artifact directory is present in the project ignore file.",
+      "group": "Utility",
+      "color": "materia-color-cyan",
+      "parse": "json",
+      "params": {
+        "patterns": [
+          ".pi/pi-materia/"
+        ]
+      },
+      "assign": {
+        "artifactIgnore": "$"
+      },
+      "command": [
+        "node",
+        "./utilities/ensure-ignored.mjs"
+      ]
     }
   }
 }

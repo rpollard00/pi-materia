@@ -23,6 +23,7 @@ describe("pi-materia config migrations", () => {
       "004-canonicalize-utility-sockets",
       "005-stamp-explicit-materia-types",
       "006-repoint-legacy-default-materia-aliases",
+      "007-repoint-legacy-utility-materia-identities",
     ]);
     expect(CURRENT_PI_MATERIA_SCHEMA_VERSION).toBe(LOADOUT_CONFIG_MIGRATIONS.length);
   });
@@ -113,6 +114,129 @@ describe("pi-materia config migrations", () => {
     expect(result.layers[3].config.activeLoadout).toBe("Alpha");
     expect(result.layers[1].config.loadouts).toHaveProperty("Alpha Copy");
     expect(result.layers[2].config.loadouts).toHaveProperty("Alpha Copy 2");
+  });
+
+  it("migrates legacy shipped utility ids and inline aliases to canonical utility materia", () => {
+    const layers = [{
+      scope: "user" as const,
+      path: "/user.json",
+      loaded: true,
+      config: {
+        materia: {
+          detectVcs: { type: "utility", label: "Detect VCS", command: ["node", "./utilities/detect-vcs.mjs"], parse: "json", assign: { vcs: "$" } },
+          ensureArtifactsIgnored: { type: "utility", label: "Ensure artifacts ignored", utility: "project.ensureIgnored", params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" } },
+        },
+        loadouts: {
+          Legacy: {
+            entry: "Socket-1",
+            sockets: {
+              "Socket-1": { type: "utility", socketKind: "entry", utility: "project.ensureIgnored", params: { patterns: [".pi/pi-materia/"] }, parse: "json", assign: { artifactIgnore: "$" }, edges: [{ when: "always", to: "Socket-2" }] },
+              "Socket-2": { type: "utility", socketKind: "normal", utility: "vcs.detect", parse: "json", assign: { vcs: "$" } },
+            },
+            layout: { selectedMateriaId: "detectVcs" },
+          },
+        },
+      } as Partial<PiMateriaConfig>,
+    }];
+
+    migrateConfigLayers(layers);
+    const config = layers[0].config as PiMateriaConfig;
+
+    expect(config.materia).not.toHaveProperty("detectVcs");
+    expect(config.materia).not.toHaveProperty("ensureArtifactsIgnored");
+    expect(config.materia["Detect-VCS"]).toMatchObject({ type: "utility", assign: { vcs: "$" } });
+    expect(config.materia["Ignore-Artifacts"]).toMatchObject({ type: "utility", assign: { artifactIgnore: "$" } });
+    expect(config.loadouts?.Legacy.sockets["Socket-1"]).toEqual({ type: "utility", socketKind: "entry", materia: "Ignore-Artifacts", edges: [{ when: "always", to: "Socket-2" }] });
+    expect(config.loadouts?.Legacy.sockets["Socket-2"]).toEqual({ type: "utility", socketKind: "normal", materia: "Detect-VCS" });
+    expect((config.loadouts?.Legacy.layout as Record<string, unknown>).selectedMateriaId).toBe("Detect-VCS");
+
+    layers[0].changed = false;
+    const snapshot = JSON.stringify(config);
+    migrateConfigLayers(layers);
+    expect(JSON.stringify(config)).toBe(snapshot);
+  });
+
+  it("hoists custom inline utility behavior and reports canonical utility conflicts", () => {
+    const layers = [{
+      scope: "user" as const,
+      path: "/user.json",
+      loaded: true,
+      config: {
+        materia: {
+          "Detect-VCS": { type: "utility", label: "Custom detector", utility: "echo", params: { text: "custom" } },
+        },
+        loadouts: {
+          Legacy: {
+            entry: "Socket-1",
+            sockets: {
+              "Socket-1": { type: "utility", utility: "vcs.detect", parse: "json", assign: { customVcs: "$" }, timeoutMs: 123, advance: { when: "always", to: "end" } },
+              "Socket-2": { type: "utility", utility: "vcs.detect", parse: "json", assign: { vcs: "$" } },
+            },
+          },
+        },
+      } as Partial<PiMateriaConfig>,
+    }];
+
+    const result = migrateConfigLayers(layers);
+    const config = layers[0].config as PiMateriaConfig;
+    const customMateria = config.loadouts?.Legacy.sockets["Socket-1"].materia;
+
+    expect(customMateria).toMatch(/^legacyUtilityVcsDetect/);
+    expect(config.materia[customMateria as string]).toMatchObject({ type: "utility", utility: "vcs.detect", parse: "json", assign: { customVcs: "$" }, timeoutMs: 123 });
+    expect(config.loadouts?.Legacy.sockets["Socket-1"]).toEqual({ type: "utility", materia: customMateria, advance: { when: "always", to: "end" } });
+    expect(config.loadouts?.Legacy.sockets["Socket-2"].materia).toBe("detectVcs");
+    expect(config.materia.detectVcs).toMatchObject({ type: "utility", utility: "vcs.detect", parse: "json", assign: { vcs: "$" } });
+    expect(result.audit["/user.json"].join("\n")).toContain("preserved shipped utility behavior as detectVcs because Detect-VCS is custom");
+    expect(result.audit["/user.json"].join("\n")).toContain("conflict: canonical utility materia Detect-VCS differs from shipped VCS detector behavior");
+  });
+
+  it("repoints known inline utility aliases even when the layer has no materia block", () => {
+    const layers = [{
+      scope: "user" as const,
+      path: "/user.json",
+      loaded: true,
+      config: {
+        loadouts: {
+          Legacy: {
+            entry: "Socket-1",
+            sockets: {
+              "Socket-1": { type: "utility", utility: "vcs.detect", parse: "json", assign: { vcs: "$" }, layout: { x: 1 } },
+            },
+          },
+        },
+      } as Partial<PiMateriaConfig>,
+    }];
+
+    migrateConfigLayers(layers);
+
+    expect(layers[0].config.loadouts?.Legacy.sockets["Socket-1"]).toEqual({ type: "utility", materia: "Detect-VCS", layout: { x: 1 } });
+    expect(layers[0].config.materia).toEqual({});
+  });
+
+  it("hoists custom script utility behavior without leaving inline executable fields", () => {
+    const layers = [{
+      scope: "user" as const,
+      path: "/user.json",
+      loaded: true,
+      config: {
+        loadouts: {
+          Legacy: {
+            entry: "Socket-1",
+            sockets: {
+              "Socket-1": { type: "utility", script: "./custom-tool.py", parse: "json", assign: { custom: "$" }, timeoutMs: 77, limits: { turns: 1 } },
+            },
+          },
+        },
+      } as Partial<PiMateriaConfig>,
+    }];
+
+    migrateConfigLayers(layers);
+    const config = layers[0].config as PiMateriaConfig;
+    const materiaId = config.loadouts?.Legacy.sockets["Socket-1"].materia as string;
+
+    expect(materiaId).toMatch(/^legacyUtilityUtilitiesCustomToolPy|^legacyUtilityCustomToolPy|^legacyUtility/);
+    expect(config.materia[materiaId]).toMatchObject({ type: "utility", script: "./custom-tool.py", parse: "json", assign: { custom: "$" }, timeoutMs: 77 });
+    expect(config.loadouts?.Legacy.sockets["Socket-1"]).toEqual({ type: "utility", materia: materiaId, limits: { turns: 1 } });
   });
 
   it("preserves rollback-compatible profile migration audit metadata when normalizing and migrating", async () => {

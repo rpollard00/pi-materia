@@ -315,28 +315,28 @@ describe("config loadouts", () => {
 
       expect(effective.loadoutName).toBe("Full-Auto");
       expect(loaded.config.loadouts?.["Full-Auto"]).toBeDefined();
-      expect(loaded.config.materia.ensureArtifactsIgnored).toMatchObject({
+      expect(loaded.config.materia["Ignore-Artifacts"]).toMatchObject({
         type: "utility",
-        label: "Ensure artifacts ignored",
+        label: "Ignore-Artifacts",
         group: "Utility",
         command: ["node", expect.any(String)],
         parse: "json",
         params: { patterns: [".pi/pi-materia/"] },
         assign: { artifactIgnore: "$" },
       });
-      expect(loaded.config.materia.detectVcs).toMatchObject({
+      expect(loaded.config.materia["Detect-VCS"]).toMatchObject({
         type: "utility",
-        label: "Detect VCS",
+        label: "Detect-VCS",
         group: "Utility",
         command: ["node", expect.any(String)],
         parse: "json",
         assign: { vcs: "$" },
       });
       expect(pipeline.entry.id).toBe("Socket-1");
-      expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ type: "utility", materia: "ensureArtifactsIgnored" });
-      expect(pipeline.sockets["Socket-1"].materiaId).toBe("ensureArtifactsIgnored");
-      expect(pipeline.sockets["Socket-2"].socket).toMatchObject({ type: "utility", materia: "detectVcs" });
-      expect(pipeline.sockets["Socket-2"].materiaId).toBe("detectVcs");
+      expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ type: "utility", materia: "Ignore-Artifacts" });
+      expect(pipeline.sockets["Socket-1"].materiaId).toBe("Ignore-Artifacts");
+      expect(pipeline.sockets["Socket-2"].socket).toMatchObject({ type: "utility", materia: "Detect-VCS" });
+      expect(pipeline.sockets["Socket-2"].materiaId).toBe("Detect-VCS");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
@@ -443,8 +443,8 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const allowedColors = new Set(paletteColors);
     const expectedParse = new Map([
-      ["ensureArtifactsIgnored", "json"],
-      ["detectVcs", "json"],
+      ["Ignore-Artifacts", "json"],
+      ["Detect-VCS", "json"],
       ["Auto-Architect", "json"],
       ["Chain-Context", "json"],
       ["Build", "text"],
@@ -454,7 +454,6 @@ describe("config loadouts", () => {
       ["Narrate", "text"],
       ["Auto-Plan", "json"],
       ["Interactive-Plan", "json"],
-      ["Detect-VCS", "json"],
       ["Cover", "json"],
     ]);
 
@@ -689,7 +688,7 @@ describe("config loadouts", () => {
       })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: utility socket must reference utility materia/);
 
       await expect(saveMateriaConfigPatch(cwd, {
-        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "ensureArtifactsIgnored" } } } },
+        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Ignore-Artifacts" } } } },
       })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: agent socket must reference agent materia/);
 
       await expect(saveMateriaConfigPatch(cwd, {

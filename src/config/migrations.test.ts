@@ -56,7 +56,7 @@ test("config migration canonicalizes known inline utility sockets to utility mat
 
   migrateConfigLayers([configLayer]);
 
-  assert.deepEqual(configLayer.config.loadouts?.Hojo?.sockets?.["Socket-1"], { type: "utility", materia: "ensureArtifactsIgnored", edges: [{ when: "always", to: "Socket-2" }] });
+  assert.deepEqual(configLayer.config.loadouts?.Hojo?.sockets?.["Socket-1"], { type: "utility", materia: "Ignore-Artifacts", edges: [{ when: "always", to: "Socket-2" }] });
 });
 
 test("config migration maps default utility aliases across layered configs", () => {
@@ -86,8 +86,8 @@ test("config migration maps default utility aliases across layered configs", () 
 
   migrateConfigLayers([defaultLayer, userLayer]);
 
-  assert.equal((userLayer.config.loadouts?.Hojo?.sockets?.["Socket-1"] as { materia?: string }).materia, "ensureArtifactsIgnored");
-  assert.equal((userLayer.config.loadouts?.Hojo?.sockets?.["Socket-2"] as { materia?: string }).materia, "detectVcs");
+  assert.equal((userLayer.config.loadouts?.Hojo?.sockets?.["Socket-1"] as { materia?: string }).materia, "Ignore-Artifacts");
+  assert.equal((userLayer.config.loadouts?.Hojo?.sockets?.["Socket-2"] as { materia?: string }).materia, "Detect-VCS");
   assert.equal(userLayer.config.materia?.legacyUtilityProjectEnsureIgnored, undefined);
   assert.equal(userLayer.config.materia?.legacyUtilityVcsDetect, undefined);
 });
