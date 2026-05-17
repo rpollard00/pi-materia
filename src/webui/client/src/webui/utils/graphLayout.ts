@@ -196,29 +196,32 @@ function summarizeHoverText(value?: unknown): string | undefined {
 }
 
 export function buildSocketHoverDetails(id: string, socket?: PipelineSocket, definitions?: MateriaConfig['materia'], loadout?: PipelineConfig): string {
-  const lines = [`Socket: ${id}`, `Display: ${formatSocketLabel(id, socket)}`];
+  const lines = [`Socket: ${id}`, `Display: ${formatSocketLabel(id, socket, definitions)}`];
   if (isEmptySocket(socket)) return [...lines, 'Empty socket'].join('\n');
 
-  const label = getSocketLabel(id, socket);
+  const label = getSocketLabel(id, socket, definitions);
   lines.push(`Label: ${label}`);
   if (hasIteratorBehavior(socket, definitions)) lines.push(formatIteratorBehavior(socket, definitions));
   const loopConsumer = loopConsumerForSocket(loadout, id, definitions);
   if (loopConsumer) lines.push(loopConsumer);
   lines.push(...loopExitSummariesForSocket(loadout, id));
   if (socket?.type) lines.push(`Type: ${socket.type}`);
-  if (socket?.type === 'agent' && socket.materia) {
-    lines.push(`Materia: ${socket.materia}`);
-    const definition = definitions?.[socket.materia];
-    if (definition?.model) lines.push(`Model: ${definition.model}`);
-    if (definition?.tools) lines.push(`Tools: ${formatToolScopeSpec(definition.tools)}`);
-    if (definition?.thinking) lines.push(`Thinking: ${definition.thinking}`);
-    if (definition?.multiTurn !== undefined) lines.push(`Multi-turn: ${definition.multiTurn ? 'yes' : 'no'}`);
-    const prompt = summarizeHoverText(definition?.prompt);
+  const referenced = extractMateriaReference(socket);
+  const definition = referenced ? definitions?.[referenced.materia] : undefined;
+  if (referenced) lines.push(`Materia: ${referenced.materia}`);
+  if (socket?.type === 'agent' && definition) {
+    if (definition.model) lines.push(`Model: ${definition.model}`);
+    if (definition.tools) lines.push(`Tools: ${formatToolScopeSpec(definition.tools)}`);
+    if (definition.thinking) lines.push(`Thinking: ${definition.thinking}`);
+    if (definition.multiTurn !== undefined) lines.push(`Multi-turn: ${definition.multiTurn ? 'yes' : 'no'}`);
+    const prompt = summarizeHoverText(definition.prompt);
     if (prompt) lines.push(`Prompt: ${prompt}`);
   }
   if (socket?.type === 'utility') {
-    if (socket.utility) lines.push(`Utility: ${socket.utility}`);
-    if (socket.command?.length) lines.push(`Command: ${socket.command.join(' ')}`);
+    const utility = definition?.utility ?? socket.utility;
+    const command = definition?.command ?? socket.command;
+    if (utility) lines.push(`Utility: ${utility}`);
+    if (command?.length) lines.push(`Command: ${command.join(' ')}`);
   }
   if (socket?.edges?.length) {
     lines.push(`Edges: ${socket.edges.map((edge) => `${generatorEdgeLabel({ from: id, to: edge.to, when: edge.when, kind: 'normal' }, loadout, definitions)} → ${formatSocketLabel(edge.to, loadout?.sockets?.[edge.to])}`).join(', ')}`);

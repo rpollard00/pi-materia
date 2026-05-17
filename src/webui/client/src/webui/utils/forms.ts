@@ -7,6 +7,9 @@ export const emptyMateriaForm = (): MateriaFormState => ({
   editingSocketId: '',
   name: '',
   behavior: 'prompt',
+  label: '',
+  description: '',
+  group: '',
   prompt: '',
   toolAccess: 'none',
   model: '',
@@ -18,6 +21,7 @@ export const emptyMateriaForm = (): MateriaFormState => ({
   utility: '',
   command: '',
   params: '{}',
+  assign: '{}',
   timeoutMs: '',
   persistScope: 'user',
 });
@@ -99,19 +103,23 @@ export function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
     const command = form.command.trim() ? form.command.trim().split(/\s+/) : undefined;
     const params = JSON.parse(form.params.trim() || '{}') as Record<string, unknown>;
     const timeoutMs = form.timeoutMs.trim() ? Number(form.timeoutMs.trim()) : undefined;
+    const assign = JSON.parse(form.assign.trim() || '{}') as Record<string, string>;
     if (!utility && !command) throw new Error('Tool materia must configure a utility alias or command.');
     if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) throw new Error('Timeout ms must be a positive number.');
     return {
       materia: {
         [name]: {
           type: 'utility',
-          label: name,
-          group: 'Utility',
+          label: form.label.trim() || name,
+          description: form.description.trim() || undefined,
+          group: form.group.trim() || 'Utility',
           utility,
           command,
           params,
+          assign: Object.keys(assign).length > 0 ? assign : undefined,
           timeoutMs,
-          parse: form.outputFormat,
+          parse: form.generator ? 'json' : form.outputFormat,
+          generator: form.generator || undefined,
           color: form.color.trim() || undefined,
         },
       },
@@ -121,6 +129,9 @@ export function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
   if (!toolScope.ok) throw new Error(`Invalid tool scope: ${toolScope.issues.map((issue) => `${issue.path}: ${issue.message}`).join('; ')}`);
   const agentDefinition = {
     type: 'agent',
+    label: form.label.trim() || undefined,
+    description: form.description.trim() || undefined,
+    group: form.group.trim() || undefined,
     tools: toolScope.value.spec,
     prompt: form.prompt,
     model: form.model.trim() || undefined,

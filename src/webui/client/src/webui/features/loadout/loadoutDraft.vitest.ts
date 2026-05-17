@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { migrateConfigLayers } from '../../../../../../config/migrations.js';
 import type { MateriaConfig } from '../../../loadoutModel.js';
 import {
   buildConfigToSave,
@@ -167,6 +168,59 @@ describe('loadout draft mutations', () => {
 
     expect(payload.loadouts?.Alpha?.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
     expect(payload.loadouts?.Alpha?.loops?.work.sockets).toEqual(['Socket-2']);
+  });
+
+  it('loads migrated legacy inline utility WebUI DTOs and saves canonical utility references', () => {
+    const layer = {
+      scope: 'user' as const,
+      path: 'user.json',
+      loaded: true,
+      config: {
+        materia: { Build: { type: 'agent', prompt: 'build' } },
+        loadouts: {
+          Alpha: {
+            entry: 'Socket-1',
+            sockets: {
+              'Socket-1': {
+                type: 'utility',
+                utility: 'shell',
+                command: ['node', 'legacy-hook.mjs'],
+                params: { ci: true },
+                timeoutMs: 30000,
+                parse: 'json',
+                assign: { hook: '$' },
+                edges: [{ when: 'always' as const, to: 'Socket-2' }],
+              },
+              'Socket-2': { type: 'agent', materia: 'Build' },
+            },
+          },
+        },
+      },
+    } as any;
+
+    migrateConfigLayers([layer]);
+    const migratedSocket = layer.config.loadouts?.Alpha?.sockets?.['Socket-1'];
+    const migratedMateriaId = migratedSocket?.materia as string;
+    expect(migratedSocket).toMatchObject({ type: 'utility', materia: expect.stringMatching(/^legacyUtilityShell/) });
+    expect(migratedSocket).not.toHaveProperty('utility');
+    expect(migratedSocket).not.toHaveProperty('command');
+    expect(migratedSocket).not.toHaveProperty('params');
+    expect(migratedSocket).not.toHaveProperty('timeoutMs');
+    expect(migratedSocket).not.toHaveProperty('parse');
+    expect(migratedSocket).not.toHaveProperty('assign');
+
+    const payload = buildConfigToSave(layer.config, []);
+    const savedSocket = payload.loadouts?.Alpha?.sockets?.['Socket-1'];
+    expect(savedSocket).toEqual({ type: 'utility', materia: migratedMateriaId, edges: [{ when: 'always', to: 'Socket-2' }], socketKind: 'entry' });
+    expect((payload.materia as Record<string, unknown> | undefined)?.[migratedMateriaId]).toMatchObject({
+      type: 'utility',
+      label: 'shell',
+      command: ['node', 'legacy-hook.mjs'],
+      params: { ci: true },
+      timeoutMs: 30000,
+      parse: 'json',
+      assign: { hook: '$' },
+    });
   });
 
   it('chooses the next unused loadout name without filling existing gaps unexpectedly', () => {

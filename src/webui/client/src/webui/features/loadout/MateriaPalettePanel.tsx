@@ -30,7 +30,7 @@ export function MateriaPalettePanel({ palette, materia, selectedMateriaId, onDra
             <button key={id} draggable title={title} data-testid={`palette-${id}`} onDragStart={(event) => onDragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => onSelectMateria(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''} ${isIterator ? 'palette-orb-iterator' : ''} ${isGenerator ? 'palette-orb-generator' : ''}`}>
               <Orb small color={socketColor(id, index, materia, socket)} label={id} iterator={isIterator} />
               <span className="flex flex-col items-start leading-tight">
-                <span>{getSocketLabel(id, socket)}</span>
+                <span>{getSocketLabel(id, socket, materia)}</span>
                 {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
                 {isIterator && <span className={`materia-iterator-badge palette-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
               </span>

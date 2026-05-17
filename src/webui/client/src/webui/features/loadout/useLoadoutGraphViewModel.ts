@@ -43,8 +43,8 @@ export function useLoadoutGraphViewModel({
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);
   const selectedLoopSocketSet = useMemo(() => new Set(selectedLoopSocketIds), [selectedLoopSocketIds]);
   const selectedLoopSockets = useMemo(() => loadoutGraph.sockets.filter((socket) => selectedLoopSocketSet.has(socket.id)), [loadoutGraph.sockets, selectedLoopSocketSet]);
-  const socketLabel = useCallback((id: string) => formatSocketLabel(id, activeLoadout?.sockets?.[id]), [activeLoadout?.sockets]);
-  const socketDisplayLabel = useCallback((id: string) => resolveSocketDisplayLabel(activeLoadout, id), [activeLoadout]);
+  const socketLabel = useCallback((id: string) => formatSocketLabel(id, activeLoadout?.sockets?.[id], materia), [activeLoadout?.sockets, materia]);
+  const socketDisplayLabel = useCallback((id: string) => resolveSocketDisplayLabel(activeLoadout, id, materia), [activeLoadout, materia]);
   const loopSelectionRectangle = socketRegionSelectionDrag ? {
     x: Math.min(socketRegionSelectionDrag.startX, socketRegionSelectionDrag.currentX),
     y: Math.min(socketRegionSelectionDrag.startY, socketRegionSelectionDrag.currentY),

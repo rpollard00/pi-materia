@@ -1,5 +1,6 @@
 import {
   assertValidLoadoutSaveSemantics,
+  canonicalizeUtilitySocketReferences,
   makeEmptyEntryLoadout,
   normalizeMateriaConfigEdges,
   type MateriaConfig,
@@ -142,7 +143,7 @@ export function deletedLoadoutNamesAfterRename({
 }
 
 export function buildConfigToSave(normalizedDraft: MateriaConfig, deletedLoadoutNames: string[]) {
-  const preparedDraft = normalizeMateriaConfigEdges(normalizedDraft);
+  const preparedDraft = canonicalizeUtilitySocketReferences(normalizeMateriaConfigEdges(normalizedDraft));
   assertValidLoadoutSaveSemantics(preparedDraft);
   const loadouts: Record<string, PipelineConfig | null> = Object.fromEntries(
     Object.entries(preparedDraft.loadouts ?? {}).filter(([, loadout]) => loadout?.source !== 'default'),

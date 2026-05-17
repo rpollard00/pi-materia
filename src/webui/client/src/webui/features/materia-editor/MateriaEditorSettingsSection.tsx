@@ -59,6 +59,15 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
         <label className="graph-field">Name
           <input data-testid="materia-name" value={materiaForm.name} onChange={(event) => setMateriaForm({ ...materiaForm, name: event.target.value })} placeholder="Critique" />
         </label>
+        <label className="graph-field">Label
+          <input data-testid="materia-label" value={materiaForm.label} onChange={(event) => setMateriaForm({ ...materiaForm, label: event.target.value })} placeholder="Display label" />
+        </label>
+        <label className="graph-field">Group
+          <input data-testid="materia-group" value={materiaForm.group} onChange={(event) => setMateriaForm({ ...materiaForm, group: event.target.value })} placeholder="Planning" />
+        </label>
+        <label className="graph-field">Description
+          <input data-testid="materia-description" value={materiaForm.description} onChange={(event) => setMateriaForm({ ...materiaForm, description: event.target.value })} placeholder="Short palette/editor summary" />
+        </label>
         <label className="graph-field">Behavior
           <select data-testid="materia-behavior" value={materiaForm.behavior} onChange={(event) => setMateriaForm({ ...materiaForm, behavior: event.target.value as MateriaFormState['behavior'] })}>
             <option value="prompt">Prompt / agent</option>
@@ -202,6 +211,10 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
               <label className="graph-field">Utility<input data-testid="materia-utility" value={materiaForm.utility} onChange={(event) => setMateriaForm({ ...materiaForm, utility: event.target.value })} placeholder="shell" /></label>
               <label className="graph-field">Command<input data-testid="materia-command" value={materiaForm.command} onChange={(event) => setMateriaForm({ ...materiaForm, command: event.target.value })} placeholder="npm test" /></label>
               <label className="graph-field">Timeout ms<input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" /></label>
+              <ColorPickerField form={form} colorPicker={colorPicker} />
+              <label className="graph-field graph-field-inline text-sm" title="Generator utility materia parse JSON and produce the canonical workItems envelope for downstream loops or generator pipeline stages.">Generator
+                <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
+              </label>
             </div>
           </fieldset>
         )}

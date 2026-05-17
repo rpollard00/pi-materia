@@ -3,6 +3,7 @@ import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../
 import {
   assertValidLoadoutSaveSemantics,
   buildMateriaPalette,
+  canonicalizeUtilitySocketReferences,
   canDeleteSocket,
   deleteSocketFromLoadout,
   formatSocketLabel,
@@ -75,6 +76,26 @@ describe('loadout socket display model', () => {
     expect(formatSocketLabel('Socket-2', { type: 'agent', materia: 'Consult' })).toBe('Socket-2 (Consult)');
     expect(formatSocketLabel('Socket-3', { type: 'utility', label: 'Detect VCS', utility: 'vcs.detect' })).toBe('Socket-3 (Detect VCS)');
     expect(formatSocketLabel('Socket-4', { type: 'utility', utility: 'vcs.detect' })).toBe('Socket-4 (vcs.detect)');
+    expect(formatSocketLabel('Socket-5', { type: 'utility', materia: 'detectVcs' }, { detectVcs: { type: 'utility', label: 'Detect VCS', color: 'materia-color-cyan' } })).toBe('Socket-5 (Detect VCS)');
+  });
+
+  it('builds utility palette sockets as canonical references without copied executable fields', () => {
+    const palette = buildMateriaPalette({
+      ensureArtifactsIgnored: {
+        type: 'utility',
+        label: 'Ensure Ignore',
+        color: 'materia-color-cyan',
+        utility: 'project.ensureIgnored',
+        command: ['node', 'config/utilities/ensure-ignored.mjs'],
+        params: { patterns: ['.pi/pi-materia/'] },
+        timeoutMs: 1000,
+        parse: 'json',
+        assign: { artifactIgnore: '$' },
+      },
+    });
+
+    expect(palette).toEqual([['ensureArtifactsIgnored', { type: 'utility', materia: 'ensureArtifactsIgnored' }]]);
+    expect(getSocketLabel('Socket-1', palette[0][1], { ensureArtifactsIgnored: { type: 'utility', label: 'Ensure Ignore' } })).toBe('Ensure Ignore');
   });
 });
 
@@ -127,6 +148,46 @@ describe('loadout normalization model', () => {
 
     expect(config.loadouts?.Bare.layout).toBeUndefined();
     expect(config.loadouts?.Bare.sockets?.['Socket-1'].socketKind).toBe('entry');
+  });
+
+  it('prunes copied utility execution fields from canonical utility socket references before save', () => {
+    const config = canonicalizeUtilitySocketReferences({
+      materia: { detectVcs: { type: 'utility', label: 'Detect VCS', command: ['node', 'detect-vcs.mjs'], parse: 'json', assign: { vcs: '$' } } },
+      loadouts: {
+        Hooks: {
+          entry: 'Socket-1',
+          sockets: {
+            'Socket-1': {
+              type: 'utility',
+              materia: 'detectVcs',
+              utility: 'vcs.detect',
+              command: ['copied'],
+              params: { copied: true },
+              timeoutMs: 1,
+              parse: 'json',
+              assign: { copied: '$' },
+              edges: [{ when: 'always', to: 'end' }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(config.loadouts?.Hooks.sockets?.['Socket-1']).toEqual({ type: 'utility', materia: 'detectVcs', edges: [{ when: 'always', to: 'end' }] });
+  });
+
+  it('rejects unknown and cross-type utility materia references during save validation', () => {
+    const unknown = normalizeMateriaConfigEdges({
+      materia: { Build: { type: 'agent', prompt: 'Build.' } },
+      loadouts: { Hooks: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'utility', materia: 'missingUtility' } } } },
+    }, { semantic: false });
+    expect(() => assertValidLoadoutSaveSemantics(unknown)).toThrow(/utility socket references unknown materia/);
+
+    const mismatch = normalizeMateriaConfigEdges({
+      materia: { Build: { type: 'agent', prompt: 'Build.' } },
+      loadouts: { Hooks: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'utility', materia: 'Build' } } } },
+    }, { semantic: false });
+    expect(() => assertValidLoadoutSaveSemantics(mismatch)).toThrow(/utility socket must reference utility materia/);
   });
 
   it('normalizes generator-to-generator sockets to canonical JSON workItems assignment before save', () => {
@@ -592,16 +653,21 @@ describe('loop-exit connection mutation model', () => {
 });
 
 describe('loadout materia color model', () => {
-  it('resolves configured colors by materia identity for both palette and socketed materia', () => {
+  it('resolves configured colors by materia identity for agent and utility palette/socket materia', () => {
     const materia = {
       Build: { prompt: 'build', color: 'from-emerald-200 via-lime-300 to-green-700' },
       Maintain: { prompt: 'maintain', color: 'from-fuchsia-200 via-pink-300 to-purple-700' },
+      detectVcs: { type: 'utility', label: 'Detect VCS', color: 'materia-color-cyan', command: ['node', 'detect-vcs.mjs'] },
     } satisfies Record<string, MateriaBehaviorConfig>;
     const paletteMaintain = buildMateriaPalette(materia).find(([id]) => id === 'Maintain')?.[1];
     const socketedMaintain = placeMateriaInSocket(makeEmptySocket({ layout: { x: 1, y: 0 } }), paletteMaintain);
+    const paletteDetectVcs = buildMateriaPalette(materia).find(([id]) => id === 'detectVcs')?.[1];
+    const socketedDetectVcs = placeMateriaInSocket(makeEmptySocket({ layout: { x: 2, y: 0 } }), paletteDetectVcs);
 
     expect(resolveMateriaColor('Maintain', materia)).toBe('from-fuchsia-200 via-pink-300 to-purple-700');
     expect(resolveMateriaColor(socketedMaintain.materia as string, materia)).toBe(resolveMateriaColor('Maintain', materia));
+    expect(resolveMateriaColor('detectVcs', materia)).toBe('materia-color-cyan');
+    expect(resolveMateriaColor(socketedDetectVcs.materia as string, materia)).toBe(resolveMateriaColor('detectVcs', materia));
   });
 
   it('uses a deterministic centralized fallback for materia without configured colors', () => {
@@ -632,7 +698,7 @@ describe('loadout materia palette model', () => {
     expect(Object.values(loadouts.Active.sockets ?? {}).some((socket) => socket.materia === 'AdHoc')).toBe(true);
   });
 
-  it('includes first-class utility materia in the palette with executable bindings', () => {
+  it('includes first-class utility materia in the palette as canonical references', () => {
     const materia = {
       ensureArtifactsIgnored: {
         type: 'utility',
@@ -657,18 +723,14 @@ describe('loadout materia palette model', () => {
 
     const palette = buildMateriaPalette(materia);
     expect(palette.map(([id]) => id)).toEqual(['ensureArtifactsIgnored', 'detectVcs', 'Build']);
-    expect(palette.find(([id]) => id === 'ensureArtifactsIgnored')?.[1]).toMatchObject({
+    expect(palette.find(([id]) => id === 'ensureArtifactsIgnored')?.[1]).toEqual({
       type: 'utility',
-      label: 'Ensure artifacts ignored',
-      utility: 'project.ensureIgnored',
-      parse: 'json',
-      params: { patterns: ['.pi/pi-materia/'] },
-      assign: { artifactIgnore: '$' },
+      materia: 'ensureArtifactsIgnored',
     });
     expect(materia.ensureArtifactsIgnored.group).toBe('Utility');
   });
 
-  it('places palette-created utility materia as normal executable utility sockets', () => {
+  it('places palette-created utility materia as normal reference utility sockets', () => {
     const materia = {
       detectVcs: { type: 'utility', label: 'Detect VCS', group: 'Utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' } },
     } satisfies Record<string, MateriaBehaviorConfig>;
@@ -677,8 +739,8 @@ describe('loadout materia palette model', () => {
 
     loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], utilityMateria);
 
-    expect(loadout.sockets!['Socket-1']).toEqual({ type: 'utility', utility: 'vcs.detect', parse: 'json', assign: { vcs: '$' }, empty: false, socketKind: 'entry' });
-    expect(getSocketLabel('Socket-1', loadout.sockets!['Socket-1'])).toBe('vcs.detect');
+    expect(loadout.sockets!['Socket-1']).toEqual({ type: 'utility', materia: 'detectVcs', empty: false, socketKind: 'entry' });
+    expect(getSocketLabel('Socket-1', loadout.sockets!['Socket-1'], materia)).toBe('Detect VCS');
   });
 
   it('keeps palette contents stable when palette materia is placed into a new loadout socket', () => {

@@ -8,6 +8,9 @@ export interface MateriaFormState {
   editingSocketId: string;
   name: string;
   behavior: 'prompt' | 'tool';
+  label: string;
+  description: string;
+  group: string;
   prompt: string;
   toolAccess: ToolScopeSpec;
   model: string;
@@ -19,6 +22,7 @@ export interface MateriaFormState {
   utility: string;
   command: string;
   params: string;
+  assign: string;
   timeoutMs: string;
   persistScope: SaveTarget;
 }

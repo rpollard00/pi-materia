@@ -2803,7 +2803,7 @@ describe('Materia loadout grid editor', () => {
     expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.' });
   });
 
-  it('renders prompt-only toggle controls inside settings and hides them for tool materia', async () => {
+  it('renders prompt toggles inside settings and keeps generator available for tool materia', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }))));
 
     render(<App />);
@@ -2818,7 +2818,7 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.change(screen.getByTestId('materia-behavior'), { target: { value: 'tool' } });
     expect(screen.queryByTestId('materia-multiturn')).toBeNull();
-    expect(screen.queryByTestId('materia-generator')).toBeNull();
+    expect(screen.queryByTestId('materia-generator')).not.toBeNull();
   });
 
   it('creates reusable tool invocation materia as first-class utility definitions', async () => {
