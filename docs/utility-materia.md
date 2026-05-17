@@ -4,28 +4,28 @@ Utility sockets are deterministic Materia pipeline sockets that run configured l
 
 Agent sockets still render prompts and wait for Pi assistant output. Utility sockets skip the agent turn, write artifacts, optionally parse their output, apply `assign`, choose `edges`/`next`, participate in `foreach`, and update the same manifest/event log as agent sockets.
 
-## Utility socket schema
+## Utility schema
 
-A pipeline socket with `type: "utility"` supports:
+Canonical utility sockets reference reusable top-level utility materia; executable behavior lives on the materia definition:
 
 ```ts
+// socket
+{ "type": "utility", "materia": "ensureArtifactsIgnored", "edges"?: [{ "when"?: string, "to": string }] }
+
+// materia
 {
   "type": "utility",
-  "utility"?: string,           // built-in alias, e.g. "project.ensureIgnored"
   "command"?: string[],         // explicit local command and args
   "params"?: object,            // JSON-serializable utility parameters
   "parse"?: "text" | "json",    // default/text preserves stdout; json parses stdout
   "assign"?: { [target: string]: string },
-  "next"?: string,
-  "edges"?: [{ "when"?: string, "to": string, "maxTraversals"?: number }],
-  "foreach"?: { "items": string, "as"?: string, "cursor"?: string, "done"?: string },
-  "advance"?: { "cursor": string, "items": string, "done"?: string },
-  "limits"?: { "maxVisits"?: number, "maxEdgeTraversals"?: number, "maxOutputBytes"?: number },
   "timeoutMs"?: number
 }
 ```
 
-A utility socket must configure either `command` or `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases currently include `project.ensureIgnored` and `vcs.detect`.
+A utility materia must configure either `command` or, for legacy compatibility only, `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases `project.ensureIgnored` and `vcs.detect` are retained only for migrated/legacy configs; bundled defaults use command-backed scripts in `config/utilities/`.
+
+Relative command script paths from loaded config files are resolved from the directory containing the owning config file, while the spawned process cwd remains the target project directory.
 
 Common mechanics:
 

@@ -319,7 +319,7 @@ describe("config loadouts", () => {
         type: "utility",
         label: "Ensure artifacts ignored",
         group: "Utility",
-        utility: "project.ensureIgnored",
+        command: ["node", expect.any(String)],
         parse: "json",
         params: { patterns: [".pi/pi-materia/"] },
         assign: { artifactIgnore: "$" },
@@ -328,13 +328,15 @@ describe("config loadouts", () => {
         type: "utility",
         label: "Detect VCS",
         group: "Utility",
-        utility: "vcs.detect",
+        command: ["node", expect.any(String)],
         parse: "json",
         assign: { vcs: "$" },
       });
       expect(pipeline.entry.id).toBe("Socket-1");
-      expect(pipeline.sockets["Socket-1"]).toMatchObject({ socket: { type: "utility", materia: "ensureArtifactsIgnored" }, materiaId: "ensureArtifactsIgnored", materia: { utility: "project.ensureIgnored" } });
-      expect(pipeline.sockets["Socket-2"]).toMatchObject({ socket: { type: "utility", materia: "detectVcs" }, materiaId: "detectVcs", materia: { utility: "vcs.detect" } });
+      expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ type: "utility", materia: "ensureArtifactsIgnored" });
+      expect(pipeline.sockets["Socket-1"].materiaId).toBe("ensureArtifactsIgnored");
+      expect(pipeline.sockets["Socket-2"].socket).toMatchObject({ type: "utility", materia: "detectVcs" });
+      expect(pipeline.sockets["Socket-2"].materiaId).toBe("detectVcs");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
@@ -513,7 +515,7 @@ describe("config loadouts", () => {
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { next?: unknown; parse?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
       for (const [socketName, socket] of Object.entries(loadout.sockets ?? {})) {
         expect(socket.next, `${loadoutName}.${socketName}.next`).toBeUndefined();
-        expect(["text", "json"].includes(String(socket.parse)), `${loadoutName}.${socketName}.parse`).toBe(true);
+        if (!(socket.type === "utility" && typeof socket.materia === "string")) expect(["text", "json"].includes(String(socket.parse)), `${loadoutName}.${socketName}.parse`).toBe(true);
         for (const [index, edge] of (socket.edges ?? []).entries()) {
           expect(edge.when, `${loadoutName}.${socketName}.edges[${index}].when`).toBeDefined();
           expect(canonical.has(edge.when as string), `${loadoutName}.${socketName}.edges[${index}].when`).toBe(true);

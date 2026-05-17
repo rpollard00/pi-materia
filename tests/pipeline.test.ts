@@ -749,13 +749,12 @@ describe("utility pipeline sockets", () => {
     expect(pipeline.entry.socket.type).toBe("utility");
     expect(loadout.sockets?.["Socket-1"]).toMatchObject({
       type: "utility",
-      utility: "project.ensureIgnored",
+      materia: "ensureArtifactsIgnored",
       edges: [{ when: "always", to: "Socket-2" }],
     });
     expect(loadout.sockets?.["Socket-2"]).toMatchObject({
       type: "utility",
-      utility: "vcs.detect",
-      assign: { vcs: "$" },
+      materia: "detectVcs",
       edges: [{ when: "always", to: "Socket-3" }],
     });
     expect(JSON.stringify(loadout.sockets)).not.toContain('"next"');
@@ -767,8 +766,10 @@ describe("utility pipeline sockets", () => {
     expect(ensureLineIndex).toBeGreaterThanOrEqual(0);
     expect(detectLineIndex).toBeGreaterThan(ensureLineIndex);
     expect(plannerLineIndex).toBeGreaterThan(detectLineIndex);
-    expect(lines[ensureLineIndex]).toContain("utility=project.ensureIgnored");
-    expect(lines[detectLineIndex]).toContain("utility=vcs.detect");
+    expect(lines[ensureLineIndex]).toContain("command=");
+    expect(lines[ensureLineIndex]).toContain("ensure-ignored.mjs");
+    expect(lines[detectLineIndex]).toContain("command=");
+    expect(lines[detectLineIndex]).toContain("detect-vcs.mjs");
     expect(config.materia["Auto-Plan"]?.generator).toBe(true);
     expect(loadout.loops?.loopSelection.sockets).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
     expect(loadout.loops?.loopSelection.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });

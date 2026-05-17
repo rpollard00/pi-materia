@@ -55,6 +55,8 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const migratedPartials = migratableLayers.map((layer) => layer.config);
   const config = await mergeConfigLayers(migratedPartials);
   const loadoutSources = buildLoadoutSources(migratedPartials, loadedLayers);
+  const materiaCommandSources = buildMateriaCommandSources(migratedPartials, loadedLayers);
+  resolveRelativeUtilityCommands(config, materiaCommandSources, loadedLayers);
   const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
   return {
     config,
@@ -373,6 +375,43 @@ function buildLoadoutSources(partials: Partial<PiMateriaConfig>[], layers: Mater
     }
   });
   return sources;
+}
+
+function buildMateriaCommandSources(partials: Partial<PiMateriaConfig>[], layers: MateriaConfigLayer[]): Record<string, MateriaConfigLayerScope> {
+  const sources: Record<string, MateriaConfigLayerScope> = {};
+  partials.forEach((partial, index) => {
+    const scope = layers[index]?.scope;
+    if (!scope || !isPlainObject(partial.materia)) return;
+    for (const [id, definition] of Object.entries(partial.materia as Record<string, unknown>)) {
+      if (isPlainObject(definition) && Array.isArray(definition.command)) sources[id] = scope;
+    }
+  });
+  return sources;
+}
+
+function resolveRelativeUtilityCommands(config: PiMateriaConfig, materiaSources: Record<string, MateriaConfigLayerScope>, layers: MateriaConfigLayer[]): void {
+  const configDirs = new Map(layers.filter((layer) => layer.loaded).map((layer) => [layer.scope, path.dirname(layer.path)]));
+  for (const [id, definition] of Object.entries(config.materia ?? {})) {
+    if (definition.type !== "utility" || !Array.isArray(definition.command)) continue;
+    const sourceDir = configDirs.get(materiaSources[id]);
+    if (!sourceDir) continue;
+    definition.command = resolveUtilityCommandPaths(definition.command, sourceDir);
+  }
+}
+
+function resolveUtilityCommandPaths(command: string[], sourceDir: string): string[] {
+  const resolved = [...command];
+  if (isRelativeScriptPath(resolved[0])) resolved[0] = path.resolve(sourceDir, resolved[0]);
+  if (isNodeExecutable(resolved[0]) && isRelativeScriptPath(resolved[1])) resolved[1] = path.resolve(sourceDir, resolved[1]);
+  return resolved;
+}
+
+function isNodeExecutable(command: string | undefined): boolean {
+  return command === "node" || command === "nodejs" || command?.endsWith(`${path.sep}node`) === true || command?.endsWith(`${path.sep}nodejs`) === true;
+}
+
+function isRelativeScriptPath(value: string | undefined): value is string {
+  return typeof value === "string" && !path.isAbsolute(value) && (value.startsWith("./") || value.startsWith("../")) && /\.(?:mjs|cjs|js)$/i.test(value);
 }
 
 function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>, protectedLoadoutNames = new Set<string>()): PiMateriaConfig {

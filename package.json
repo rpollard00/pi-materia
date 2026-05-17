@@ -18,6 +18,7 @@
     "src/**/*.html",
     "src/**/tsconfig.json",
     "config/default.json",
+    "config/utilities/*.mjs",
     "docs/*.md",
     "examples/*.json",
     "README.md",
