@@ -10,7 +10,7 @@ Canonical utility sockets reference reusable top-level utility materia; executab
 
 ```ts
 // socket
-{ "type": "utility", "materia": "Ignore-Artifacts", "edges"?: [{ "when"?: string, "to": string }] }
+{ "materia": "Ignore-Artifacts", "edges"?: [{ "when"?: string, "to": string }] }
 
 // materia
 {
@@ -33,7 +33,7 @@ Canonical utility sockets reference reusable top-level utility materia; executab
 }
 ```
 
-A utility materia must configure either `command`, `script`, or, for migration-only legacy data, `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases `project.ensureIgnored` and `vcs.detect`, old shipped ids `ensureArtifactsIgnored` and `detectVcs`, and socket-local executable fields are accepted only by migration input; canonical runtime sockets must reference top-level utility materia such as `Ignore-Artifacts` or `Detect-VCS`.
+A utility materia must configure either `command` or `script`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Runtime sockets reference top-level utility materia such as `Ignore-Artifacts` or `Detect-VCS`.
 
 Shipped defaults use the typed script locator `{ "kind": "shippedUtility", "name": "...mjs" }`. On config load, pi-materia syncs packaged scripts to the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities`, or `PI_MATERIA_PROFILE_DIR/utilities` when overridden), records hashes in `.pi-materia-shipped-utilities.json`, and resolves execution to that profile copy. If a user-modified profile script would be overwritten during an update, the modified file is preserved and the new packaged script is written under a hash-suffixed filename that the manifest points to. Relative command script paths from non-shipped config files are still resolved from the directory containing the owning config file, while every spawned process cwd remains the target project directory.
 
@@ -99,7 +99,6 @@ This loadout completes without an LLM turn by using an explicit command utility.
       "entry": "hello",
       "sockets": {
         "hello": {
-          "type": "utility",
           "materia": "helloUtility",
           "next": "end"
         }
@@ -171,7 +170,6 @@ Complete loadout using the script:
       "entry": "ignoreArtifacts",
       "sockets": {
         "ignoreArtifacts": {
-          "type": "utility",
           "materia": "Ignore-Artifacts",
           "next": "end"
         }
@@ -194,15 +192,12 @@ Complete loadout using the script:
 }
 ```
 
-Legacy configs may still contain an inline socket such as `{ "type": "utility", "utility": "project.ensureIgnored" }`. That shape is accepted only by migration/normalization code, which hoists behavior into top-level utility materia and saves canonical socket references. Do not author new loadouts with inline `utility`, `command`, `params`, `parse`, `assign`, or `timeoutMs` on utility sockets.
-
 ## Routing from JSON output
 
 Utility JSON output can choose the next socket with edges:
 
 ```json
 {
-  "type": "utility",
   "materia": "Detect-VCS",
   "edges": [
     { "when": "$.kind == \"jj\"", "to": "Maintain" },
@@ -223,20 +218,14 @@ A utility materia may set `generator: true` when a deterministic script should p
 
 The default config defines `Ignore-Artifacts` and `Detect-VCS` as shipped-script utility materia that run `ensure-ignored.mjs` and `detect-vcs.mjs` through profile-resolved copies. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Legacy ids `ensureArtifactsIgnored` and `detectVcs`, legacy aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `legacyUtilityVcsDetect...` are migration-only input, not canonical shipped ids.
 
-## Migration boundary and profile verification
+## Profile verification
 
-Legacy utility config is accepted at the raw persisted-config boundary so migrations can rewrite it. Runtime validation intentionally rejects utility sockets that still carry executable socket fields. After migration, utility sockets should look like `{ "type": "utility", "materia": "Detect-VCS" }`, while the referenced utility materia owns `script`/`command`, `params`, `parse`, `assign`, and `timeoutMs`.
-
-To verify this machine's profile and bundled defaults no longer reference old utility forms or source-checkout script paths:
+To verify this machine's profile and bundled defaults use the current utility form:
 
 1. Inspect `config/default.json` and the active profile config (`${PI_MATERIA_PROFILE_DIR:-~/.config}/pi/pi-materia/config.json`, depending on your profile override).
 2. Confirm shipped utility materia ids are `Detect-VCS` and `Ignore-Artifacts`.
-3. Confirm loadout utility sockets reference those ids with `materia` and do not include socket-local `utility`, `command`, `script`, `params`, `parse`, `assign`, or `timeoutMs`.
-4. Search for migration-only ids/aliases: `detectVcs`, `ensureArtifactsIgnored`, `vcs.detect`, `project.ensureIgnored`, and `legacyUtility`.
-5. Search for absolute source-checkout paths such as `/home/reese/projects/pi-materia`; shipped utilities should resolve through the profile `utilities/` directory instead.
-6. Run `bun test tests/defaultUtilityMateria.test.ts tests/configMigrations.test.ts tests/config.test.ts tests/utilityNative.test.ts` and `npm run pack:dry-run` before publishing or depending on packaged shipped utilities.
-
-The audit helper used during the migration work is recorded under `.pi/pi-materia/<cast-id>/utility-config-audit.mjs` artifacts when available; it is read-only and reports exact JSON pointers for stale persisted and effective migrated config.
+3. Confirm loadout utility sockets reference those ids with `materia`.
+4. Run `bun test tests/defaultUtilityMateria.test.ts tests/config.test.ts tests/utilityNative.test.ts` and `npm run pack:dry-run` before publishing or depending on packaged shipped utilities.
 
 ## Local testing
 

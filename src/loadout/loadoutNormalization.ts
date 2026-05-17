@@ -23,7 +23,7 @@ export interface NormalizedLoadoutResult<TLoadout extends MateriaPipelineConfig 
  * transform utilities so dragging layout metadata does not force semantic work.
  */
 export function normalizeLoadedLoadout<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, materia: Record<string, GeneratorMateriaLike> = {}): NormalizedLoadoutResult<TLoadout> {
-  const normalized = materializeCanonicalSockets(normalizePipelineGraph(loadout) as TLoadout);
+  const normalized = materializeCanonicalSockets(normalizePipelineGraph(loadout) as TLoadout, materia as Record<string, Pick<MateriaConfig, "type">>);
   normalizeLoadoutSocketKinds(normalized);
   normalizeLoadoutLayout(normalized);
   normalizeLegacyLoopRoutingCompatibilityInPlace(normalized);

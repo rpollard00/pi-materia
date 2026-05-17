@@ -109,9 +109,9 @@ Generator-to-generator chaining uses the same contract. An upstream generator em
     "Chained-Generators": {
       "entry": "Socket-1",
       "sockets": {
-        "Socket-1": { "type": "agent", "materia": "Generator", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-2" },
-        "Socket-2": { "type": "agent", "materia": "Refiner", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-3" },
-        "Socket-3": { "type": "agent", "materia": "Build", "next": "end" }
+        "Socket-1": { "materia": "Generator", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-2" },
+        "Socket-2": { "materia": "Refiner", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-3" },
+        "Socket-3": { "materia": "Build", "next": "end" }
       }
     }
   }

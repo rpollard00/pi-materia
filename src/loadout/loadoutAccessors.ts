@@ -1,5 +1,5 @@
 import { classifyGraphTarget } from "../domain/socket.js";
-import type { MateriaForeachConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, ResolvedMateriaPipeline, ResolvedMateriaSocket } from "../types.js";
+import type { MateriaConfig, MateriaForeachConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig, ResolvedMateriaPipeline, ResolvedMateriaSocket } from "../types.js";
 
 export class LoadoutTopologyError extends Error {
   constructor(public readonly path: string, message: string) {
@@ -113,8 +113,14 @@ export function assertValidLoadoutSocketReferences(loadout: Pick<MateriaPipeline
   if (!result.ok) throw new LoadoutTopologyError(result.issues[0]?.path ?? "loadout", result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "));
 }
 
-export function materializeCanonicalSockets<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout): TLoadout {
+export function materializeCanonicalSockets<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, materia: Record<string, Pick<MateriaConfig, "type">> = {}): TLoadout {
   loadout.sockets = loadout.sockets ?? {};
+  for (const socket of Object.values(loadout.sockets) as unknown as Array<Record<string, unknown>>) {
+    if (socket.type !== undefined) continue;
+    const materiaId = typeof socket.materia === "string" ? socket.materia : undefined;
+    const type = materiaId ? materia[materiaId]?.type : undefined;
+    if (type === "agent" || type === "utility") socket.type = type;
+  }
   for (const loop of Object.values(loadout.loops ?? {})) {
     loop.sockets = loop.sockets ?? [];
   }

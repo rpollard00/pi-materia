@@ -69,6 +69,7 @@ export function parsePersistedLoadout(value: unknown, path = "loadout", materia:
 
   const rawSockets = value.sockets;
   if (!isPlainObject(rawSockets)) issues.push({ path: `${path}.sockets`, message: "loadout must define a sockets object" });
+  else rejectPersistedSocketTypes(rawSockets, `${path}.sockets`, issues);
   const loadout: Loadout = {
     ...(typeof value.id === "string" ? { id: value.id } : {}),
     entry: typeof value.entry === "string" ? value.entry : "",
@@ -197,6 +198,12 @@ function serializePipelineLoop(loop: MateriaLoopConfig): CurrentPersistedLoop {
     ...(loop.exit ? { exit: { ...loop.exit } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
+}
+
+function rejectPersistedSocketTypes(sockets: Record<string, unknown>, path: string, issues: DomainIssue[]): void {
+  for (const [id, socket] of Object.entries(sockets)) {
+    if (isPlainObject(socket) && "type" in socket) issues.push({ path: `${path}.${id}.type`, message: "persisted sockets must not configure type; define behavior on referenced materia" });
+  }
 }
 
 function materializeRuntimeSockets(sockets: Record<string, unknown>, materia: Record<string, Pick<MateriaConfig, "type">>): Record<string, unknown> {

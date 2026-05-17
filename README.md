@@ -189,7 +189,6 @@ Minimal hello-world loadout:
       "entry": "hello",
       "sockets": {
         "hello": {
-          "type": "agent",
           "materia": "echoer",
           "next": "end"
         }
@@ -215,15 +214,15 @@ Configs can also define named `loadouts` that share the top-level `materia`, `li
     "Full-Auto": {
       "entry": "Socket-1",
       "sockets": {
-        "Socket-1": { "type": "agent", "materia": "Auto-Plan", "next": "Build" },
-        "Build": { "type": "agent", "materia": "Build", "next": "end" }
+        "Socket-1": { "materia": "Auto-Plan", "next": "Build" },
+        "Build": { "materia": "Build", "next": "end" }
       }
     },
     "Planning-Consult": {
       "entry": "Socket-1",
       "sockets": {
-        "Socket-1": { "type": "agent", "materia": "Interactive-Plan", "next": "Build" },
-        "Build": { "type": "agent", "materia": "Build", "next": "end" }
+        "Socket-1": { "materia": "Interactive-Plan", "next": "Build" },
+        "Build": { "materia": "Build", "next": "end" }
       }
     }
   },
@@ -343,23 +342,20 @@ The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: t
       "entry": "ignoreArtifacts",
       "sockets": {
         "ignoreArtifacts": {
-          "type": "utility",
           "materia": "Ignore-Artifacts",
           "next": "detectRepository"
         },
         "detectRepository": {
-          "type": "utility",
           "materia": "Detect-VCS",
           "next": "Socket-3"
         },
         "Socket-3": {
-          "type": "agent",
           "materia": "Interactive-Plan",
           "parse": "json",
           "assign": { "workItems": "$.workItems", "guidance": "$.guidance" },
           "next": "Build"
         },
-        "Build": { "type": "agent", "materia": "Build", "foreach": { "items": "state.workItems", "as": "workItem", "cursor": "workItemIndex", "done": "end" }, "next": "end" }
+        "Build": { "materia": "Build", "foreach": { "items": "state.workItems", "as": "workItem", "cursor": "workItemIndex", "done": "end" }, "next": "end" }
       }
     }
   },

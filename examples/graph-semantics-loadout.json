@@ -6,56 +6,108 @@
       "entry": "Socket-1",
       "sockets": {
         "Socket-1": {
-          "type": "utility",
           "materia": "ensureArtifactsIgnored",
-          "edges": [{ "when": "always", "to": "Socket-2" }]
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ]
         },
         "Socket-2": {
-          "type": "utility",
           "materia": "detectVcs",
-          "edges": [{ "when": "always", "to": "Socket-3" }]
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ]
         },
         "Socket-3": {
-          "type": "agent",
           "materia": "Auto-Plan",
           "parse": "json",
-          "assign": { "workItems": "$.workItems", "guidance": "$.guidance" },
-          "edges": [{ "when": "always", "to": "Socket-4" }]
+          "assign": {
+            "workItems": "$.workItems",
+            "guidance": "$.guidance"
+          },
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ]
         },
         "Socket-4": {
-          "type": "agent",
           "materia": "Build",
           "parse": "text",
-          "edges": [{ "when": "always", "to": "Socket-5" }]
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ]
         },
         "Socket-5": {
-          "type": "agent",
           "materia": "Auto-Eval",
           "parse": "json",
-          "assign": { "lastCheck": "$", "lastFeedback": "$.feedback" },
+          "assign": {
+            "lastCheck": "$",
+            "lastFeedback": "$.feedback"
+          },
           "edges": [
-            { "when": "satisfied", "to": "Socket-6" },
-            { "when": "not_satisfied", "to": "Socket-4", "maxTraversals": 3 }
+            {
+              "when": "satisfied",
+              "to": "Socket-6"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-4",
+              "maxTraversals": 3
+            }
           ]
         },
         "Socket-6": {
-          "type": "agent",
           "materia": "Maintain",
           "parse": "json",
-          "assign": { "lastMaintain": "$" },
-          "advance": { "cursor": "workItemIndex", "items": "state.workItems", "done": "end", "when": "satisfied" },
+          "assign": {
+            "lastMaintain": "$"
+          },
+          "advance": {
+            "cursor": "workItemIndex",
+            "items": "state.workItems",
+            "done": "end",
+            "when": "satisfied"
+          },
           "edges": [
-            { "when": "not_satisfied", "to": "Socket-6", "maxTraversals": 3 },
-            { "when": "always", "to": "Socket-4" }
+            {
+              "when": "not_satisfied",
+              "to": "Socket-6",
+              "maxTraversals": 3
+            },
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
           ]
         }
       },
       "loops": {
         "workItemIteration": {
           "label": "Build → Eval → Maintain until all work items complete",
-          "sockets": ["Socket-4", "Socket-5", "Socket-6"],
-          "consumes": { "from": "Socket-3", "output": "workItems" },
-          "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" }
+          "sockets": [
+            "Socket-4",
+            "Socket-5",
+            "Socket-6"
+          ],
+          "consumes": {
+            "from": "Socket-3",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-6",
+            "when": "satisfied",
+            "to": "end"
+          }
         }
       }
     }
@@ -66,19 +118,33 @@
       "label": "Ensure artifacts ignored",
       "description": "Ensures .pi/pi-materia/ is ignored by the project.",
       "group": "Utility",
-      "command": ["node", "../config/utilities/ensure-ignored.mjs"],
+      "command": [
+        "node",
+        "../config/utilities/ensure-ignored.mjs"
+      ],
       "parse": "json",
-      "params": { "patterns": [".pi/pi-materia/"] },
-      "assign": { "artifactIgnore": "$" }
+      "params": {
+        "patterns": [
+          ".pi/pi-materia/"
+        ]
+      },
+      "assign": {
+        "artifactIgnore": "$"
+      }
     },
     "detectVcs": {
       "type": "utility",
       "label": "Detect VCS",
       "description": "Detects jj/git availability and repository root.",
       "group": "Utility",
-      "command": ["node", "../config/utilities/detect-vcs.mjs"],
+      "command": [
+        "node",
+        "../config/utilities/detect-vcs.mjs"
+      ],
       "parse": "json",
-      "assign": { "vcs": "$" }
+      "assign": {
+        "vcs": "$"
+      }
     },
     "Auto-Plan": {
       "tools": "readOnly",

@@ -59,9 +59,9 @@ A UI-authored loop may be saved with only the declarative region and an uncondit
 {
   "entry": "Socket-1",
   "sockets": {
-    "Socket-1": { "type": "agent", "materia": "Auto-Plan", "edges": [{ "when": "always", "to": "Socket-3" }] },
-    "Socket-3": { "type": "agent", "materia": "Build", "edges": [{ "when": "always", "to": "Socket-4" }] },
-    "Socket-4": { "type": "agent", "materia": "Maintain", "edges": [{ "when": "always", "to": "Socket-3" }] }
+    "Socket-1": { "materia": "Auto-Plan", "edges": [{ "when": "always", "to": "Socket-3" }] },
+    "Socket-3": { "materia": "Build", "edges": [{ "when": "always", "to": "Socket-4" }] },
+    "Socket-4": { "materia": "Maintain", "edges": [{ "when": "always", "to": "Socket-3" }] }
   },
   "loops": {
     "workItemIteration": {
@@ -82,10 +82,9 @@ A richer loop keeps explicit retry routing and still uses the same exit material
 ```json
 {
   "sockets": {
-    "Socket-1": { "type": "agent", "materia": "Auto-Plan", "edges": [{ "when": "always", "to": "Socket-4" }] },
-    "Socket-4": { "type": "agent", "materia": "Build", "edges": [{ "when": "always", "to": "Socket-5" }] },
+    "Socket-1": { "materia": "Auto-Plan", "edges": [{ "when": "always", "to": "Socket-4" }] },
+    "Socket-4": { "materia": "Build", "edges": [{ "when": "always", "to": "Socket-5" }] },
     "Socket-5": {
-      "type": "agent",
       "materia": "Auto-Eval",
       "parse": "json",
       "edges": [
@@ -94,7 +93,6 @@ A richer loop keeps explicit retry routing and still uses the same exit material
       ]
     },
     "Socket-6": {
-      "type": "agent",
       "materia": "Maintain",
       "edges": [
         { "when": "not_satisfied", "to": "Socket-6", "maxTraversals": 3 },

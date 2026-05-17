@@ -78,7 +78,6 @@ This loop advances on `Socket-6` when Maintain returns `{ "satisfied": true }`. 
   },
   "sockets": {
     "Socket-6": {
-      "type": "agent",
       "materia": "Maintain",
       "parse": "json",
       "advance": {
@@ -109,7 +108,6 @@ This loop has no `exits` route. After the final item, completion falls through t
   },
   "sockets": {
     "Socket-6": {
-      "type": "agent",
       "materia": "Maintain",
       "parse": "json",
       "advance": {

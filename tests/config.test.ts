@@ -189,18 +189,18 @@ describe("layered config loading and persistence", () => {
       await writeFile(getUserMateriaAssetPath(), JSON.stringify({
         activeLoadout: "UserLoadout",
         materia: { Build: { model: "user/model" } },
-        loadouts: { UserLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { UserLoadout: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
       }), "utf8");
       await mkdir(path.join(cwd, ".pi"), { recursive: true });
       await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
         activeLoadout: "ProjectLoadout",
         materia: { Build: { model: "project/model" } },
-        loadouts: { ProjectLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { ProjectLoadout: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
       }), "utf8");
       await writeFile(explicit, JSON.stringify({
         activeLoadout: "ExplicitLoadout",
         materia: { Build: { model: "explicit/model" } },
-        loadouts: { ExplicitLoadout: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { ExplicitLoadout: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
       }), "utf8");
 
       const loaded = await loadConfig(cwd, explicit);
@@ -227,7 +227,7 @@ describe("layered config loading and persistence", () => {
       await mkdir(path.dirname(projectFile), { recursive: true });
       await writeFile(projectFile, JSON.stringify({
         activeLoadout: "ProjectOnly",
-        loadouts: { ProjectOnly: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { ProjectOnly: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
       }), "utf8");
 
       await saveMateriaConfigPatch(cwd, { activeLoadout: "Full-Auto", loadouts: { ProjectOnly: null } } as never, { target: "project" });
@@ -251,7 +251,7 @@ describe("layered config loading and persistence", () => {
     try {
       await mkdir(profile, { recursive: true });
       await writeFile(getUserMateriaAssetPath(), JSON.stringify({
-        loadouts: { "Full-Auto": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
+        loadouts: { "Full-Auto": { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
       }), "utf8");
 
       const loaded = await loadConfig(cwd);
@@ -278,7 +278,7 @@ describe("layered config loading and persistence", () => {
     try {
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: {
-          "Full-Auto": { id: "default:full-auto", source: "default", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
+          "Full-Auto": { id: "default:full-auto", source: "default", entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } },
         },
       } as never)).rejects.toThrow('Cannot save shipped default Materia loadout "Full-Auto". Duplicate it before editing.');
     } finally {
@@ -302,15 +302,15 @@ describe("layered config loading and persistence", () => {
           Custom: {
             entry: "Socket-1",
             sockets: {
-              "Socket-1": { type: "utility", materia: "Checkpoint", utility: "project.ensureIgnored", command: ["node", "utility.mjs"], params: { patterns: [".pi/pi-materia/"] }, timeoutMs: 1000, parse: "json", assign: { artifactIgnore: "$" }, edges: [{ when: "always", to: "Socket-2" }] } as never,
-              "Socket-2": { type: "agent", materia: "Build" },
+              "Socket-1": { materia: "Checkpoint", edges: [{ when: "always", to: "Socket-2" }] },
+              "Socket-2": { materia: "Build" },
             },
           },
         },
       });
 
       const raw = JSON.parse(await readFile(savedPath, "utf8"));
-      expect(raw.loadouts.Custom.sockets["Socket-1"]).toEqual({ type: "utility", materia: "Checkpoint", socketKind: "entry", edges: [{ when: "always", to: "Socket-2" }] });
+      expect(raw.loadouts.Custom.sockets["Socket-1"]).toEqual({ materia: "Checkpoint", socketKind: "entry", edges: [{ when: "always", to: "Socket-2" }] });
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
@@ -330,7 +330,7 @@ describe("layered config loading and persistence", () => {
 
       const userWritten = await saveMateriaConfigPatch(cwd, {
         materia: { Custom: { type: "agent", tools: "none", prompt: "custom user materia" } },
-        loadouts: { UserCreated: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Custom" } } } },
+        loadouts: { UserCreated: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Custom" } } } },
       });
       expect(userWritten).toBe(getUserMateriaAssetPath());
       expect(await readFile(projectFile, "utf8")).toBe(beforeProject);
@@ -392,9 +392,9 @@ describe("config loadouts", () => {
         assign: { vcs: "$" },
       });
       expect(pipeline.entry.id).toBe("Socket-1");
-      expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ type: "utility", materia: "Ignore-Artifacts" });
+      expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ materia: "Ignore-Artifacts" });
       expect(pipeline.sockets["Socket-1"].materiaId).toBe("Ignore-Artifacts");
-      expect(pipeline.sockets["Socket-2"].socket).toMatchObject({ type: "utility", materia: "Detect-VCS" });
+      expect(pipeline.sockets["Socket-2"].socket).toMatchObject({ materia: "Detect-VCS" });
       expect(pipeline.sockets["Socket-2"].materiaId).toBe("Detect-VCS");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
@@ -406,17 +406,17 @@ describe("config loadouts", () => {
     const saved = await writeConfig({
       activeLoadout: "Yolo",
       materia: {
-        yoloPlanner: { tools: "readOnly", prompt: "Plan.", generator: true },
-        yoloBuild: { tools: "coding", prompt: "Build." },
-        yoloMaintain: { tools: "coding", prompt: "Maintain." },
+        yoloPlanner: { type: "agent", tools: "readOnly", prompt: "Plan.", generator: true },
+        yoloBuild: { type: "agent", tools: "coding", prompt: "Build." },
+        yoloMaintain: { type: "agent", tools: "coding", prompt: "Maintain." },
       },
       loadouts: {
         Yolo: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "yoloPlanner", edges: [{ when: "always", to: "Socket-3" }] },
-            "Socket-3": { type: "agent", materia: "yoloBuild", edges: [{ when: "always", to: "Socket-4" }] },
-            "Socket-4": { type: "agent", materia: "yoloMaintain", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-1": { materia: "yoloPlanner", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-3": { materia: "yoloBuild", edges: [{ when: "always", to: "Socket-4" }] },
+            "Socket-4": { materia: "yoloMaintain", edges: [{ when: "always", to: "Socket-3" }] },
           },
           loops: {
             loopSelection: {
@@ -444,16 +444,15 @@ describe("config loadouts", () => {
     const saved = await writeConfig({
       activeLoadout: "ConflictingLoop",
       materia: {
-        conflictPlanner: { tools: "readOnly", prompt: "Plan.", generator: true },
-        conflictBuild: { tools: "coding", prompt: "Build." },
+        conflictPlanner: { type: "agent", tools: "readOnly", prompt: "Plan.", generator: true },
+        conflictBuild: { type: "agent", tools: "coding", prompt: "Build." },
       },
       loadouts: {
         ConflictingLoop: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "conflictPlanner", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-1": { materia: "conflictPlanner", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": {
-              type: "agent",
               materia: "conflictBuild",
               parse: "json",
               advance: { cursor: "otherIndex", items: "state.workItems", done: "end", when: "satisfied" },
@@ -480,7 +479,7 @@ describe("config loadouts", () => {
         Custom: {
           entry: "Socket-1",
           prompt: "obsolete loadout behavior",
-          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { materia: "planner" } },
         },
       },
     });
@@ -491,7 +490,7 @@ describe("config loadouts", () => {
         Custom: {
           entry: "Socket-1",
           systemPrompt: "obsolete loadout system behavior",
-          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { materia: "planner" } },
         },
       },
     });
@@ -570,10 +569,11 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const canonical = new Set(["always", "satisfied", "not_satisfied"]);
 
-    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { next?: unknown; parse?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
+    for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { next?: unknown; materia?: string; parse?: unknown; edges?: Array<{ when?: unknown; to?: string }> }> }]>) {
       for (const [socketName, socket] of Object.entries(loadout.sockets ?? {})) {
         expect(socket.next, `${loadoutName}.${socketName}.next`).toBeUndefined();
-        if (!(socket.type === "utility" && typeof socket.materia === "string")) expect(["text", "json"].includes(String(socket.parse)), `${loadoutName}.${socketName}.parse`).toBe(true);
+        const materia = typeof socket.materia === "string" ? rawDefault.materia?.[socket.materia] : undefined;
+        if (materia?.type !== "utility") expect(["text", "json"].includes(String(socket.parse)), `${loadoutName}.${socketName}.parse`).toBe(true);
         for (const [index, edge] of (socket.edges ?? []).entries()) {
           expect(edge.when, `${loadoutName}.${socketName}.edges[${index}].when`).toBeDefined();
           expect(canonical.has(edge.when as string), `${loadoutName}.${socketName}.edges[${index}].when`).toBe(true);
@@ -636,7 +636,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Socket-1",
             prompt: "obsolete saved behavior",
-            sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+            sockets: { "Socket-1": { materia: "planner" } },
           } as never,
         },
       })).rejects.toThrow(/loadout "Custom" configures obsolete prompt/);
@@ -659,14 +659,13 @@ describe("config loadouts", () => {
             entry: "Socket-1",
             sockets: {
               "Socket-1": {
-                type: "agent",
                 materia: "Check",
                 edges: [
                   { when: "always", to: "Socket-2" },
                   { when: "satisfied", to: "Socket-1" },
                 ],
               },
-              "Socket-2": { type: "agent", materia: "Done" },
+              "Socket-2": { materia: "Done" },
             },
           },
         },
@@ -678,7 +677,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Socket-1",
             sockets: {
-              "Socket-1": { type: "agent", materia: "Check", edges: [{ when: "satisfied", to: undefined as never }] },
+              "Socket-1": { materia: "Check", edges: [{ when: "satisfied", to: undefined as never }] },
             },
           },
         },
@@ -690,7 +689,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Socket-1",
             sockets: {
-              "Socket-1": { type: "agent", materia: "Check", edges: [{ when: " " as never, to: "Socket-1" }] },
+              "Socket-1": { materia: "Check", edges: [{ when: " " as never, to: "Socket-1" }] },
             },
           },
         },
@@ -702,7 +701,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Socket-1",
             sockets: {
-              "Socket-1": { type: "agent", materia: "Check", edges: [{ when: "$.passed == true" as never, to: "Socket-1" }] },
+              "Socket-1": { materia: "Check", edges: [{ when: "$.passed == true" as never, to: "Socket-1" }] },
             },
           },
         },
@@ -713,9 +712,8 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Socket-1",
             sockets: {
-              "Socket-1": { type: "agent", materia: "Build", next: "Socket-2" } as never,
+              "Socket-1": { materia: "Build", next: "Socket-2" } as never,
               "Socket-2": {
-                type: "agent",
                 materia: "Auto-Eval",
                 edges: [
                   { when: "satisfied", to: "Socket-3" },
@@ -723,7 +721,7 @@ describe("config loadouts", () => {
                   { when: "not_satisfied", to: "Socket-1", maxTraversals: 3 },
                 ],
               },
-              "Socket-3": { type: "agent", materia: "Maintain", next: "Socket-1" } as never,
+              "Socket-3": { materia: "Maintain", next: "Socket-1" } as never,
             },
           },
         },
@@ -736,22 +734,14 @@ describe("config loadouts", () => {
     }
   });
 
-  test("saved config patches reject unknown and cross-type materia references", async () => {
+  test("saved config patches reject unknown materia references", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-refs-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
     process.env.PI_MATERIA_PROFILE_DIR = profile;
     try {
       await expect(saveMateriaConfigPatch(cwd, {
-        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", materia: "Build" } } } },
-      })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: utility socket must reference utility materia/);
-
-      await expect(saveMateriaConfigPatch(cwd, {
-        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Ignore-Artifacts" } } } },
-      })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: agent socket must reference agent materia/);
-
-      await expect(saveMateriaConfigPatch(cwd, {
-        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Missing" } } } },
+        loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Missing" } } } },
       })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: agent socket references unknown materia "Missing"/);
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
@@ -784,11 +774,11 @@ describe("config loadouts", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "Interactive-Plan" } },
+          sockets: { "Socket-1": { materia: "Interactive-Plan" } },
         },
       },
     });
@@ -870,11 +860,11 @@ describe("active loadout persistence", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "Interactive-Plan" } },
+          sockets: { "Socket-1": { materia: "Interactive-Plan" } },
         },
       },
     });
@@ -913,7 +903,7 @@ describe("active loadout persistence", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { materia: "planner" } },
         },
       },
     });

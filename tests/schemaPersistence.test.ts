@@ -28,6 +28,17 @@ describe("schema/persistence adapters", () => {
     expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("sockets");
   });
 
+  test("rejects persisted socket type fields", () => {
+    const parsed = parsePersistedLoadout({
+      entry: "Socket-1",
+      sockets: { "Socket-1": { type: "agent", materia: "Build" } },
+    }, "loadout", { Build: { type: "agent" } });
+
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.issues).toContainEqual({ path: "loadout.sockets.Socket-1.type", message: "persisted sockets must not configure type; define behavior on referenced materia" });
+  });
+
   test("reads and serializes current sockets payloads", () => {
     const parsed = parsePersistedLoadout({
       entry: "Socket-1",
