@@ -7,17 +7,12 @@
       "sockets": {
         "Socket-1": {
           "type": "utility",
-          "utility": "project.ensureIgnored",
-          "parse": "json",
-          "params": { "patterns": [".pi/pi-materia/"] },
-          "assign": { "artifactIgnore": "$" },
+          "materia": "ensureArtifactsIgnored",
           "edges": [{ "when": "always", "to": "Socket-2" }]
         },
         "Socket-2": {
           "type": "utility",
-          "utility": "vcs.detect",
-          "parse": "json",
-          "assign": { "vcs": "$" },
+          "materia": "detectVcs",
           "edges": [{ "when": "always", "to": "Socket-3" }]
         },
         "Socket-3": {
@@ -71,7 +66,7 @@
       "label": "Ensure artifacts ignored",
       "description": "Ensures .pi/pi-materia/ is ignored by the project.",
       "group": "Utility",
-      "utility": "project.ensureIgnored",
+      "command": ["node", "../config/utilities/ensure-ignored.mjs"],
       "parse": "json",
       "params": { "patterns": [".pi/pi-materia/"] },
       "assign": { "artifactIgnore": "$" }
@@ -81,7 +76,7 @@
       "label": "Detect VCS",
       "description": "Detects jj/git availability and repository root.",
       "group": "Utility",
-      "utility": "vcs.detect",
+      "command": ["node", "../config/utilities/detect-vcs.mjs"],
       "parse": "json",
       "assign": { "vcs": "$" }
     },

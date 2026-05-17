@@ -15,17 +15,22 @@ Canonical utility sockets reference reusable top-level utility materia; executab
 // materia
 {
   "type": "utility",
+  "label"?: string,
+  "description"?: string,
+  "group"?: string,
+  "color"?: string,
   "command"?: string[],         // explicit local command and args
   "params"?: object,            // JSON-serializable utility parameters
   "parse"?: "text" | "json",    // default/text preserves stdout; json parses stdout
   "assign"?: { [target: string]: string },
-  "timeoutMs"?: number
+  "timeoutMs"?: number,
+  "generator"?: boolean
 }
 ```
 
-A utility materia must configure either `command` or, for legacy compatibility only, `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases `project.ensureIgnored` and `vcs.detect` are retained only for migrated/legacy configs; bundled defaults use command-backed scripts in `config/utilities/`.
+A utility materia must configure either `command` or, for legacy compatibility only, `utility`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Built-in aliases `project.ensureIgnored` and `vcs.detect` are retained only so old inline utility sockets can migrate/load; new and saved configs should use command-backed utility materia.
 
-Relative command script paths from loaded config files are resolved from the directory containing the owning config file, while the spawned process cwd remains the target project directory.
+Relative command script paths from loaded config files are resolved from the directory containing the owning config file, while the spawned process cwd remains the target project directory. Bundled defaults use this rule to call packaged scripts in `config/utilities/` without requiring target projects to have those files.
 
 Common mechanics:
 
@@ -90,16 +95,22 @@ This loadout completes without an LLM turn by using an explicit command utility.
       "sockets": {
         "hello": {
           "type": "utility",
-          "command": ["python3", "-c", "import json,sys; ctx=json.load(sys.stdin); print(json.dumps({'ok': True, 'message': ctx['params']['message']}))"],
-          "params": { "message": "HELLO WORLD" },
-          "parse": "json",
-          "assign": { "hello": "$" },
+          "materia": "helloUtility",
           "next": "end"
         }
       }
     }
   },
-  "materia": {}
+  "materia": {
+    "helloUtility": {
+      "type": "utility",
+      "label": "Hello Utility",
+      "command": ["python3", "-c", "import json,sys; ctx=json.load(sys.stdin); print(json.dumps({'ok': True, 'message': ctx['params']['message']}))"],
+      "params": { "message": "HELLO WORLD" },
+      "parse": "json",
+      "assign": { "hello": "$" }
+    }
+  }
 }
 ```
 
@@ -156,34 +167,29 @@ Complete loadout using the script:
       "sockets": {
         "ignoreArtifacts": {
           "type": "utility",
-          "command": ["python3", "scripts/ensure_ignored.py"],
-          "params": {
-            "file": ".gitignore",
-            "patterns": [".pi/pi-materia/"]
-          },
-          "parse": "json",
-          "assign": { "artifactIgnore": "$" },
+          "materia": "ensureArtifactsIgnored",
           "next": "end"
         }
       }
     }
   },
-  "materia": {}
+  "materia": {
+    "ensureArtifactsIgnored": {
+      "type": "utility",
+      "label": "Ensure artifacts ignored",
+      "command": ["python3", "scripts/ensure_ignored.py"],
+      "params": {
+        "file": ".gitignore",
+        "patterns": [".pi/pi-materia/"]
+      },
+      "parse": "json",
+      "assign": { "artifactIgnore": "$" }
+    }
+  }
 }
 ```
 
-The bundled built-in alias can express the same hygiene directly in config:
-
-```json
-{
-  "type": "utility",
-  "utility": "project.ensureIgnored",
-  "params": { "patterns": [".pi/pi-materia/"] },
-  "parse": "json",
-  "assign": { "artifactIgnore": "$" },
-  "next": "Socket-3"
-}
-```
+Legacy configs may still contain an inline socket such as `{ "type": "utility", "utility": "project.ensureIgnored" }`. That shape is accepted only by migration/normalization code, which hoists behavior into top-level utility materia and saves canonical socket references. Do not author new loadouts with inline `utility`, `command`, `params`, `parse`, `assign`, or `timeoutMs` on utility sockets.
 
 ## Routing from JSON output
 
@@ -192,9 +198,7 @@ Utility JSON output can choose the next socket with edges:
 ```json
 {
   "type": "utility",
-  "utility": "vcs.detect",
-  "parse": "json",
-  "assign": { "vcs": "$" },
+  "materia": "detectVcs",
   "edges": [
     { "when": "$.kind == \"jj\"", "to": "Maintain" },
     { "when": "$.kind == \"git\"", "to": "GitMaintain" },
@@ -203,6 +207,16 @@ Utility JSON output can choose the next socket with edges:
   "next": "Socket-3"
 }
 ```
+
+The referenced `detectVcs` utility materia owns `parse: "json"` and `assign: { "vcs": "$" }`, so sockets can focus on graph placement and routing.
+
+## Utility generators
+
+A utility materia may set `generator: true` when a deterministic script should produce the same canonical handoff envelope as a planning agent. Generator utility output is normalized to `parse: "json"` and must expose `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. Preserve the canonical envelope field names (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, `missing`) and do not use legacy generated-output aliases such as `tasks`.
+
+## Bundled utility scripts
+
+The default config defines `ensureArtifactsIgnored` and `detectVcs` as command-backed utility materia that run `config/utilities/ensure-ignored.mjs` and `config/utilities/detect-vcs.mjs`. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. They are packaged with pi-materia and resolve relative to the bundled config file, while their cwd remains the target project.
 
 ## Local testing
 

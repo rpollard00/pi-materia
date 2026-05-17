@@ -41,17 +41,12 @@ function regressionConfig(): PiMateriaConfig {
         sockets: {
           "Socket-1": {
             type: "utility",
-            utility: "project.ensureIgnored",
-            parse: "json",
-            params: { patterns: [".pi/pi-materia/"] },
-            assign: { artifactIgnore: "$" },
+            materia: "ensureArtifactsIgnored",
             edges: [{ when: "always", to: "Socket-2" }],
           },
           "Socket-2": {
             type: "utility",
-            utility: "vcs.detect",
-            parse: "json",
-            assign: { vcs: "$" },
+            materia: "detectVcs",
             edges: [{ when: "always", to: "Socket-3" }],
           },
           "Socket-3": {
@@ -138,8 +133,8 @@ describe("graph semantics regression", () => {
 
     expect(validatePipelineGraph(loadout)).toEqual({ ok: true, errors: [] });
     const palette = new Map(buildMateriaPalette(config.materia));
-    expect(palette.get("ensureArtifactsIgnored")).toMatchObject({ type: "utility", utility: "project.ensureIgnored", parse: "json" });
-    expect(palette.get("detectVcs")).toMatchObject({ type: "utility", utility: "vcs.detect", parse: "json" });
+    expect(palette.get("ensureArtifactsIgnored")).toMatchObject({ type: "utility", materia: "ensureArtifactsIgnored" });
+    expect(palette.get("detectVcs")).toMatchObject({ type: "utility", materia: "detectVcs" });
     expect(palette.get("Build")?.foreach).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
 
     const harness = await makeHarness(config);
