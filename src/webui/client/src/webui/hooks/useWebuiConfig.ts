@@ -109,7 +109,7 @@ function sortObjectKeys(value: unknown): unknown {
 export function configForDirtyComparison(config: MateriaConfig | undefined): unknown {
   if (!config) return config;
   const comparable = normalizeMateriaConfigEdges(config, { semantic: false });
-  // Runtime active-loadout fields are compatibility/runtime state, while editor
+  // Runtime active-loadout fields are stable API/runtime state, while editor
   // card selection is local hook state, so neither should affect dirty comparison.
   delete comparable.activeLoadout;
   delete comparable.activeLoadoutId;
@@ -198,10 +198,10 @@ function demoConfig(): MateriaConfig {
       'Demo Loadout': {
         entry: 'Socket-1',
         sockets: {
-          'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
-          'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
-          'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Socket-4' }] },
-          'Socket-4': { type: 'agent', materia: 'Maintain' },
+          'Socket-1': { materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+          'Socket-2': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
+          'Socket-3': { materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Socket-4' }] },
+          'Socket-4': { materia: 'Maintain' },
         },
       },
     },
@@ -255,7 +255,7 @@ export function useWebuiConfig() {
   }
 
   /**
-   * Compatibility builder boundary for non-loadout config edits and tests.
+   * Stable API builder boundary for non-loadout config edits and tests.
    * Routine loadout graph/layout edits should use updateLoadoutDraft or
    * updateLoadoutLayout so they structurally share untouched config branches.
    */
@@ -419,7 +419,7 @@ export function useWebuiConfig() {
     const name = Object.entries(persistedLoadouts).find(([, loadout]) => loadout.id === trimmedId)?.[0] ?? activeNameHint;
     if (!name || !persistedLoadouts[name]) return false;
     // Monitor/session events are authoritative for runtime selection only. The
-    // `activeLoadout` name is retained as a migration/compatibility field beside
+    // `activeLoadout` name is retained as a stable API field beside
     // stable `activeLoadoutId`, but neither field drives local editor navigation
     // or generic status/toast emission.
     setBaselineConfig((current) => normalizeMateriaConfigEdges({ ...(current ?? {}), activeLoadout: name, activeLoadoutId: trimmedId }));

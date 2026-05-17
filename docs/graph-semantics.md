@@ -2,37 +2,35 @@
 
 Materia graphs are ordered workflow state machines. They may branch, loop, and run deterministic utility sockets before or between agent turns.
 
-For the normative structured loop contract that runtime, validation, link compilation, and materialization work must follow, see [Structured loop semantics](structured-loop-semantics.md). For the named migration shims and removal plan, see [Loop compatibility and sunset plan](loop-compatibility-sunset.md). In short: normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is only the graph/loadout terminal sentinel.
+For the structured loop contract, see [Structured loop semantics](structured-loop-semantics.md). Normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is the graph/loadout terminal sentinel.
 
-## Canonical edge conditions
+## Edge conditions
 
-All graph links use the same canonical edge model:
+All graph links use the same edge model:
 
 ```json
 { "when": "always", "to": "Socket-4" }
 ```
 
-The supported `when` values are:
+Supported `when` values:
 
-- `always`: an unconditional transition. The UI may label this as **Flow**, but Flow is not a separate edge type; it is the `always` condition of the canonical edge model.
-- `satisfied`: follows when the previous JSON handoff contains `{ "satisfied": true }`.
-- `not_satisfied`: follows when the previous JSON handoff contains `{ "satisfied": false }`.
+- `always`: unconditional transition.
+- `satisfied`: follows when parsed JSON contains `{ "satisfied": true }`.
+- `not_satisfied`: follows when parsed JSON contains `{ "satisfied": false }`.
 
-Edges are evaluated in order and the first matching edge wins. Put guarded edges before any `always` edge, because edges after an unconditional edge are unreachable.
+Edges are evaluated in order and the first matching edge wins. Put guarded edges before any `always` edge.
 
-## Canonical output parsing and control fields
+## Output parsing and control fields
 
-`parse` is the canonical persisted output parsing field for loadout sockets. UI-authored loadouts and JSON-authored defaults must save the same semantics here: use `parse: "json"` for sockets whose output is structured JSON that feeds `assign`, `advance`, or guarded routing, and use `parse: "text"` or omit `parse` only for plain-text outputs.
+`parse` is the persisted output parsing field for loadout sockets. Use `parse: "json"` for sockets whose output feeds `assign`, `advance`, or guarded routing. Use `parse: "text"` or omit `parse` only for plain-text outputs.
 
-`satisfied` is the only canonical boolean satisfaction/control field. `satisfied` and `not_satisfied` edges, and `advance.when: "satisfied"`, read the parsed JSON handoff's boolean `satisfied` value. Because that value is only available after JSON parsing, any socket with `satisfied` / `not_satisfied` routing must have `parse: "json"`; text-outputting sockets may only use `always` edges. Legacy aliases such as `passed` are migration-only compatibility if encountered in old configs or tests; do not author new defaults, reusable materia, UI saves, or prompts that depend on them.
-
-When adding reusable materia or defaults, make the socket `parse` value explicit whenever routing or state assignment depends on structured output. Palette/UI-created sockets should preserve this canonical `parse` setting so UI-authored and hand-written JSON loadouts remain equivalent.
+`satisfied` is the boolean control field read by `satisfied` / `not_satisfied` edges and `advance.when`.
 
 ## Generator and loop-consumer regions
 
-Loops are explicit regions under a loadout's `loops` object. A loop region groups socket ids, consumes at most one generator-provided list with `consumes: { from, output }`, derives shared iterator metadata from the referenced materia's canonical Generator config, and declares an exit condition with `exit: { from, when, to }` using the same canonical edge conditions as normal edges. For generator-consuming loops, `loops.exit` plus `loops.consumes` may materialize runtime compatibility fields on the exit source: `parse: "json"` when `satisfied` / `not_satisfied` control is needed, and an `advance` block whose `cursor`/`items` come from the consumed generator output and whose `when` follows the loop exit condition. The normal ordered `edges` remain same-item routing; `advance` increments the cursor and detects exhaustion, while `loops.<id>.exits` owns canonical post-loop routing. If no loop exit route matches, exhaustion falls through to the terminal `end` sentinel. Legacy `advance.done` values are accepted as migration-compatible inputs, not as the canonical post-loop route for new-model validation or authoring. The `exit.from` socket must exist and be one of the loop members. See [Loop semantics](loop-semantics.md) for migration behavior, conflict handling, and full examples.
+Loops are explicit regions under a loadout's `loops` object. A loop region groups socket ids, consumes at most one generator-provided list with `consumes: { from, output }`, and uses `loops.<id>.exits` for post-exhaustion routes.
 
-A Generator materia uses the semantic authored marker `generator: true`. Runtime resolves that marker to the canonical work-items contract (`workItems`, `workItem`, `workItemIndex`, `end`). A generator socket must parse JSON and expose `workItems` from the canonical handoff envelope. For reusable work planning, use the generic handoff envelope and generate `workItems`; do not retain `tasks`, `work`, or custom `generates.output` aliases as compatibility outputs for newly generated units of work:
+A Generator materia uses `generator: true`. Runtime resolves that marker to the work-items contract (`workItems`, `workItem`, `workItemIndex`, `end`). A generator socket must parse JSON and expose `workItems` from the handoff envelope.
 
 ```json
 "Auto-Plan": {
@@ -42,26 +40,21 @@ A Generator materia uses the semantic authored marker `generator: true`. Runtime
 }
 ```
 
-Any generator socket whose loop consumes that generator must parse JSON and assign the canonical output from the handoff JSON, for example `"parse": "json"` and `"assign": { "workItems": "$.workItems" }`. The derived loop iterator defaults to `state.workItems`. If validation reports `Generator pipeline slot "Socket-N" must parse JSON and expose generated output "workItems" from the canonical handoff envelope`, fix the named socket by setting `parse: "json"` and assigning `workItems` from `$.workItems`.
-
 A loadout declares the consumer region separately from the generator materia:
 
 ```json
 "loops": {
   "workItemIteration": {
-    "label": "Build → Eval → Maintain until all work items complete",
     "sockets": ["Socket-4", "Socket-5", "Socket-6"],
     "consumes": { "from": "Socket-3", "output": "workItems" },
-    "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" }
+    "exits": [
+      { "id": "exit:Socket-6:satisfied", "from": "Socket-6", "condition": "satisfied", "targetSocketId": "Socket-7" }
+    ]
   }
 }
 ```
 
-`consumes.from` is the socket id of the generator socket, not the materia definition name. `consumes.output` defaults to the canonical Generator output `workItems`; include it only to be explicit or when migrating a legacy config. Optional `as`, `cursor`, and `done` overrides belong on `consumes` only when that loop intentionally differs from the generator defaults.
-
-In the bundled default loadouts, socket ids are sequential placement identifiers (`Socket-1`, `Socket-2`, ...). Keep materia identity in the socket's `materia`, `utility`, labels, or palette metadata rather than encoding names such as `Build` or `Auto-Plan` into socket ids. User-facing displays may combine both, for example `Socket-4 (Build)`, but routing, loop `sockets`, `consumes.from`, `exit.from`, and `advance` references should use the socket ids.
-
-The WebUI creates these regions from selected sockets. Select the sockets that form the cycle using shift-click or by dragging a selection rectangle around the socket cards, then choose **Create Loop**. Creation succeeds only when the selected sockets already contain a directed cycle and exactly one edge enters that cycle from a Generator materia. The generator edge is highlighted and the loop region label shows that it consumes canonical `workItems`.
+`consumes.from` is the socket id of the generator socket, not the materia definition name. Socket ids are sequential placement identifiers (`Socket-1`, `Socket-2`, ...). Keep materia identity in the socket's `materia` field and in materia definition metadata.
 
 The default software workflow models work-item iteration as:
 
@@ -70,17 +63,14 @@ Socket-4 (Build) --always--> Socket-5 (Auto-Eval) --satisfied--> Socket-6 (Maint
                                                └--not_satisfied--> Socket-4 (Build)
 ```
 
-The loop consumes the `Auto-Plan` generator's `workItems` output, which derives an iterator over `state.workItems`; each member socket handles the current work item until `Maintain` advances the cursor. Build-style text sockets consume the current `workItem` plus global guidance supplied by the adapter context and summarize implementation; they do not decide parsing, assignment, routing, or iteration themselves. The documented exit summary renders source-aware, for example `exit=Socket-6.satisfied->end`; in the structured model, post-loop routing is selected from loop-owned exit metadata, with terminal `end` as the default when no route exists.
-
 ## Loop-owned exit routes
 
-Loops declare explicit post-completion routes in `loops.<id>.exits`. These records are canonical graph semantics owned by the loop, not normal socket `edges`, not generator edges, and not persisted derived render/runtime edges:
+Loops declare explicit post-completion routes in `loops.<id>.exits`. These records are graph semantics owned by the loop, not normal socket `edges`, not generator edges, and not persisted derived render/runtime edges:
 
 ```json
 "loops": {
   "workItemIteration": {
     "sockets": ["Socket-4", "Socket-5", "Socket-6"],
-    "exit": { "from": "Socket-6", "when": "satisfied", "to": "end" },
     "exits": [
       { "id": "exit:Socket-6:always", "from": "Socket-6", "condition": "always", "targetSocketId": "Socket-7" },
       { "id": "exit:Socket-6:satisfied", "from": "Socket-6", "condition": "satisfied", "targetSocketId": "Socket-8" },
@@ -90,63 +80,27 @@ Loops declare explicit post-completion routes in `loops.<id>.exits`. These recor
 }
 ```
 
-Each route id is stable and unique within the owning loop. `from` is the loop member socket that acts as the loop exit, `targetSocketId` must be an existing socket or the terminal `end` sentinel, and there may be at most one route for each `condition` per `from` socket. Breaking or deleting a loop removes its `exits` metadata; pi-materia must not convert those routes into normal outgoing edges or leave stale materialized `advance.done` routes behind.
+Each route id is stable and unique within the owning loop. `from` is the loop member socket that acts as the loop exit, and `targetSocketId` must be an existing socket. Breaking or deleting a loop removes its `exits` metadata.
 
-Route resolution is centralized and deterministic. When the loop finishes with canonical `{ "satisfied": true }`, a `satisfied` route wins, then `always`, then terminal `end` if no route exists. When it finishes with `{ "satisfied": false }`, a `not_satisfied` route wins, then `always`, then terminal `end` if no route exists. When the satisfaction outcome is unavailable, only `always` may be selected before falling back to `end`. The resolver reads only the canonical boolean `satisfied` field. `passed` is not a canonical loop-exit field; any compatibility handling for `passed` belongs only to explicit migrations or negative compatibility tests, not to authored loadouts or new prompts. Legacy `loops.exit.to` / `advance.done` routing is migration compatibility, not the future authoring model.
+Route resolution is deterministic. A final `{ "satisfied": true }` result selects `satisfied`, then `always`, then `end`. A final `{ "satisfied": false }` result selects `not_satisfied`, then `always`, then `end`. Without a boolean result, only `always` can match before `end`.
 
-The WebUI derives special visual edges for these routes with stable ids like `loop-exit:<loopId>:<routeId>` and labels such as **Upon Loop Exit**, **Upon Loop Exit: Satisfied**, and **Upon Loop Exit: Not Satisfied**. Editing or deleting those visual edges mutates `loops.<id>.exits`, not normal socket edges.
-
-Generator-to-generator chaining uses the same contract. An upstream generator emits a handoff envelope with `workItems`; a downstream generator may consume those items, refine or split them, and must itself return a JSON handoff envelope with a new canonical `workItems` array:
-
-```json
-{
-  "materia": {
-    "Generator": { "tools": "readOnly", "prompt": "Draft epics as workItems.", "generator": true },
-    "Refiner": { "tools": "readOnly", "prompt": "Refine incoming workItems and emit the next workItems envelope.", "generator": true },
-    "Build": { "tools": "coding", "prompt": "Build the adapter-provided workItem." }
-  },
-  "loadouts": {
-    "Chained-Generators": {
-      "entry": "Socket-1",
-      "sockets": {
-        "Socket-1": { "materia": "Generator", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-2" },
-        "Socket-2": { "materia": "Refiner", "parse": "json", "assign": { "workItems": "$.workItems" }, "next": "Socket-3" },
-        "Socket-3": { "materia": "Build", "next": "end" }
-      }
-    }
-  }
-}
-```
-
-The important invariant is that every generator stage in the pipeline consumes and produces the canonical `workItems` envelope; generator chaining is not an untyped “always show” connection.
+The WebUI derives visual edges for these routes with stable ids like `loop-exit:<loopId>:<routeId>`. Editing or deleting those visual edges mutates `loops.<id>.exits`, not normal socket edges.
 
 ## Utility materia and generator/consumer styling
 
-Bundled setup/discovery steps such as `Ignore-Artifacts` and `Detect-VCS` are first-class utility materia. They appear in the WebUI palette under the Utility group and can be placed in sockets like agent materia. Palette-created utility sockets render and execute through the same graph runtime as generated utility sockets; old ids such as `ensureArtifactsIgnored` and `detectVcs` are migration-only aliases.
+Bundled setup/discovery steps such as `Ignore-Artifacts` and `Detect-VCS` are utility materia. They appear in the WebUI palette under the Utility group and execute through the same graph runtime as agent materia.
 
-Generator materia are marked with a **Generator** badge. Sockets inside loop regions are marked as **Loop consumer** instead of labeling arbitrary loop members as iterators. The badge is the accessible cue; the overlay preserves the materia's configured base color.
-
-## Migration and compatibility
-
-`satisfied` is the canonical boolean route/control field for `satisfied` / `not_satisfied` edges and `advance.when`. Legacy aliases are migration-only when they are mentioned by old notes or negative tests; do not author new loadouts that depend on aliases such as `passed`.
-
-Saved UI loadouts that already declare legacy `loops.exit` and generator `consumes` but are missing executable socket-level fields are normalized through the shared materializer in `loadConfig()`, `saveMateriaConfigPatch()`, WebUI save normalization, and `resolvePipeline()`. Compatible hand-authored fields are preserved. Socket-valued legacy `loop.exit.to` and loop-member `advance.done` inputs are mirrored into canonical `loops.<id>.exits` on prepared/normalized loadout values; terminal `end` remains the no-route fallback. Conflicts, such as `parse: "text"` on a `satisfied` exit source or incompatible cursor/items/when fields, fail with remediation messages instead of being silently rewritten. See [Loop compatibility and sunset plan](loop-compatibility-sunset.md) for owner locations, warning-to-error timing, and tests to convert when compatibility is removed.
-
-Older layouts may have loop regions with direct `iterator` metadata but no `consumes` generator declaration. pi-materia preserves explicit iterator-only loops for non-generator workflows. When a legacy iterator loop has exactly one inbound edge from a generator materia, `resolvePipeline` migrates the resolved loop by adding `consumes: { from, output }` from that generator while preserving the original iterator fields for runtime compatibility.
-
-If a legacy iterator loop has more than one inbound generator edge, pi-materia fails with a remediation error that names the candidate generator sockets. Fix the layout by adding an explicit `loops.<id>.consumes` entry and ensuring only one generator edge enters the selected cycle. If the intended generator is not detected, set `generator: true` on that materia and make the generator socket parse JSON with `assign: { "workItems": "$.workItems" }`. Existing authored `generates` metadata is migration-only compatibility, not as the canonical schema; legacy `tasks`, `work`, and custom generated-output aliases are not active generator outputs.
+Generator materia are marked with a **Generator** badge. Sockets inside loop regions are marked as **Loop consumer**. The badge is the accessible cue; the overlay preserves the materia's configured base color.
 
 ## Example
 
-See [`../examples/graph-semantics-loadout.json`](../examples/graph-semantics-loadout.json) for a complete loadout that combines utility materia, `always`/`satisfied`/`not_satisfied` edges, a generic-envelope generator materia, sequential `Socket-N` ids, and the Build → Eval → Maintain work-item loop.
+See [`../examples/graph-semantics-loadout.json`](../examples/graph-semantics-loadout.json) for a complete loadout that combines utility materia, edge conditions, a generic-envelope generator materia, sequential `Socket-N` ids, and the Build → Eval → Maintain work-item loop.
 
 ## Contributor commands
 
-Common local checks:
-
 ```bash
 npm run typecheck
-npm test        # bun test
+npm test
 npm run test:webui
 npm run build:webui
 ```

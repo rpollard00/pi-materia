@@ -30,7 +30,7 @@ function agentConfig(overrides: Record<string, unknown> = {}, socket: Record<str
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", ...socket } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", ...socket } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia", ...overrides } },
   };
 }
@@ -53,8 +53,8 @@ function twoAgentConfig() {
       Test: {
         entry: "Socket-1",
         sockets: {
-          "Socket-1": { type: "agent", materia: "Build", next: "Socket-2" },
-          "Socket-2": { type: "agent", materia: "Review" },
+          "Socket-1": { materia: "Build", edges: [{ when: 'always', to: 'Socket-2' }] },
+          "Socket-2": { materia: "Review" },
         },
       },
     },
@@ -268,7 +268,7 @@ describe("native per-materia model settings", () => {
     const harness = await makeHarness({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
-      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", utility: "echo", params: { text: "done" } } } } },
+      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { utility: "echo", params: { text: "done" } } } } },
       materia: { Build: { tools: "coding", prompt: "Build materia", model: "anthropic/claude-test", thinking: "high" } },
     });
 

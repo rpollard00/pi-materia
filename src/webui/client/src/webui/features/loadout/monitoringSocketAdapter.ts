@@ -35,8 +35,8 @@ function monitorMatchesViewedLoadout(
 
   if (runtimeLoadoutId || runtimeLoadoutName) return false;
 
-  // Legacy monitor snapshots emitted before loadout identity was reported can only be
-  // scoped by the socket id. Keep that compatibility path explicit and covered by tests.
+  // Current monitor snapshots emitted before loadout identity was reported can only be
+  // scoped by the socket id. Keep that stable API path explicit and covered by tests.
   return true;
 }
 

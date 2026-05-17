@@ -6,7 +6,7 @@ export interface ParsedSocketId {
 const CANONICAL_SOCKET_ID_PATTERN = /^Socket-([1-9]\d*)$/;
 
 export const CANONICAL_SOCKET_ID_DESCRIPTION = "Socket-N, where N is a positive integer without leading zeroes";
-export const SOCKET_ID_METADATA_GUIDANCE = "Socket IDs are structural graph identifiers; store human-readable labels or materia names in metadata fields such as label, materia, loop label, or utility label.";
+export const SOCKET_ID_METADATA_GUIDANCE = "Socket IDs are structural graph identifiers; store human-readable names in metadata fields such as materia or utility labels.";
 export const TERMINAL_ADVANCE_TARGET = "end";
 
 export type SocketTargetSet = ReadonlySet<string> | readonly string[] | Record<string, unknown>;

@@ -48,9 +48,9 @@ function loopCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastSt
     pipeline: {
       entry: {} as never,
       sockets: {
-        "Socket-1": { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "", label: "Build" } },
-        "Socket-2": { id: "Socket-2", socket: { type: "agent", materia: "Auto-Eval" }, materia: { tools: "readOnly", prompt: "", label: "Auto-Eval" } },
-        "Socket-3": { id: "Socket-3", socket: { type: "agent", materia: "Maintain" }, materia: { tools: "coding", prompt: "", label: "Maintain" } },
+        "Socket-1": { id: "Socket-1", socket: { materia: "Build" }, materia: { tools: "coding", prompt: "", label: "Build" } },
+        "Socket-2": { id: "Socket-2", socket: { materia: "Auto-Eval" }, materia: { tools: "readOnly", prompt: "", label: "Auto-Eval" } },
+        "Socket-3": { id: "Socket-3", socket: { materia: "Maintain" }, materia: { tools: "coding", prompt: "", label: "Maintain" } },
       },
       loops: { itemLoop: { sockets: ["Socket-1", "Socket-2", "Socket-3"], iterator: { items: "state.workItems", cursor: "workItemsIndex" } } },
     },

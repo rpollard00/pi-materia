@@ -6,17 +6,16 @@ import type { MateriaPipelineConfig } from "../src/types.js";
 const validGraph = (): MateriaPipelineConfig => ({
   entry: "Socket-1",
   sockets: {
-    "Socket-1": { type: "agent", materia: "Socket-1", next: "Socket-2" },
+    "Socket-1": { materia: "Socket-1", edges: [{ when: "always", to: "Socket-2" }] },
     "Socket-2": {
-      type: "agent",
       materia: "Socket-2",
       edges: [
         { when: "satisfied", to: "Socket-4" },
         { when: "not_satisfied", to: "Socket-3" },
       ],
     },
-    "Socket-3": { type: "agent", materia: "Socket-3", next: "Socket-4" },
-    "Socket-4": { type: "agent", materia: "Socket-4" },
+    "Socket-3": { materia: "Socket-3", edges: [{ when: "always", to: "Socket-4" }] },
+    "Socket-4": { materia: "Socket-4" },
   },
 });
 
@@ -32,7 +31,7 @@ describe("graph validation foundation", () => {
 
   test("rejects non-canonical socket ids in loadout graph structure", () => {
     const graph = validGraph();
-    graph.sockets["Socket-only"] = { type: "agent", materia: "AdHoc" };
+    graph.sockets["Socket-only"] = { materia: "AdHoc" };
     graph.sockets["Socket-2"].edges = [{ when: "always", to: "Build" }];
 
     const result = validatePipelineGraph(graph);
@@ -41,7 +40,7 @@ describe("graph validation foundation", () => {
     expect(result.errors).toContainEqual(expect.objectContaining({ code: "invalid-socket-id", source: "sockets.Socket-only" }));
     expect(result.errors).toContainEqual(expect.objectContaining({ code: "invalid-socket-id", source: "Socket-2.edges[0].to" }));
     expect(formatGraphValidationErrors(result.errors)).toContain("Expected Socket-N, where N is a positive integer without leading zeroes");
-    expect(formatGraphValidationErrors(result.errors)).toContain("store human-readable labels or materia names in metadata fields");
+    expect(formatGraphValidationErrors(result.errors)).toContain("store human-readable names in metadata fields such as materia or utility labels");
   });
 
   test("validates all loadout socket references as canonical ids while preserving end only for targets", () => {
@@ -97,7 +96,7 @@ describe("graph validation foundation", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.map((error) => error.code)).toEqual(["invalid-socket-id", "invalid-socket-id", "missing-endpoint"]);
     expect(formatGraphValidationErrors(result.errors)).toContain('Invalid socket id "MissingEntry" referenced by entry. Expected Socket-N, where N is a positive integer without leading zeroes.');
-    expect(formatGraphValidationErrors(result.errors)).toContain("Socket IDs are structural graph identifiers; store human-readable labels or materia names in metadata fields");
+    expect(formatGraphValidationErrors(result.errors)).toContain("Socket IDs are structural graph identifiers; store human-readable names in metadata fields such as materia or utility labels");
     expect(formatGraphValidationErrors(result.errors)).toContain("Missing graph endpoint referenced by Socket-2.edges[1].to.");
   });
 
@@ -113,7 +112,7 @@ describe("graph validation foundation", () => {
     expect(validatePipelineGraph(graph)).toEqual({ ok: true, errors: [] });
   });
 
-  test("rejects empty and free-form edge conditions while accepting legacy flow aliases through normalization", () => {
+  test("rejects empty and free-form edge conditions", () => {
     const graph = validGraph();
     graph.sockets["Socket-2"].edges = [
       { when: " " as never, to: "Socket-3" },
@@ -185,7 +184,6 @@ describe("graph validation foundation", () => {
     graph.sockets["Socket-4"].next = "Socket-3";
     graph.loops = {
       taskIteration: {
-        label: "Build → Eval → Maintain until complete",
         sockets: ["Socket-3", "Socket-5", "Socket-4"],
         iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
         exit: { from: "Socket-4", when: "satisfied", to: "end" },
@@ -221,8 +219,8 @@ describe("graph validation foundation", () => {
 
   test("accepts canonical loop-owned exit routes without normal outgoing edges", () => {
     const graph = validGraph();
-    graph.sockets["Socket-3"] = { type: "agent", materia: "Socket-3" };
-    graph.sockets["Socket-4"] = { type: "agent", materia: "Socket-4" };
+    graph.sockets["Socket-3"] = { materia: "Socket-3" };
+    graph.sockets["Socket-4"] = { materia: "Socket-4" };
     graph.loops = {
       taskIteration: {
         sockets: ["Socket-2", "Socket-3"],
@@ -273,9 +271,9 @@ describe("graph validation foundation", () => {
 
   test("validates executable loop semantics before UI-created loops are accepted", () => {
     const graph = validGraph();
-    graph.sockets["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
-    graph.sockets["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
-    graph.sockets["Socket-4"] = { type: "agent", materia: "Maintain", parse: "text", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.sockets["Socket-1"] = { materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.sockets["Socket-3"] = { materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.sockets["Socket-4"] = { materia: "Maintain", parse: "text", edges: [{ when: "always", to: "Socket-3" }] };
     graph.loops = {
       loopSelection: {
         sockets: ["Socket-3", "Socket-4"],
@@ -294,9 +292,9 @@ describe("graph validation foundation", () => {
 
   test("rejects consumed loops that cannot advance safely or continue non-final items", () => {
     const graph = validGraph();
-    graph.sockets["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
-    graph.sockets["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
-    graph.sockets["Socket-4"] = { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "taskIndex", items: "state.tasks", done: "Socket-3", when: "not_satisfied" } };
+    graph.sockets["Socket-1"] = { materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.sockets["Socket-3"] = { materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.sockets["Socket-4"] = { materia: "Maintain", parse: "json", advance: { cursor: "taskIndex", items: "state.tasks", done: "Socket-3", when: "not_satisfied" } };
     graph.loops = {
       loopSelection: {
         sockets: ["Socket-3", "Socket-4"],
@@ -324,9 +322,9 @@ describe("graph validation foundation", () => {
 
   test("accepts consumed loop advance without route-bearing advance.done", () => {
     const graph = validGraph();
-    graph.sockets["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
-    graph.sockets["Socket-2"] = { type: "agent", materia: "summary" };
-    graph.sockets["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.sockets["Socket-1"] = { materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.sockets["Socket-2"] = { materia: "summary" };
+    graph.sockets["Socket-3"] = { materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
     graph.sockets["Socket-4"] = {
       type: "agent",
       materia: "Maintain",
@@ -350,9 +348,9 @@ describe("graph validation foundation", () => {
 
   test("validates opposite-condition retry routes for conditional loop continuations", () => {
     const graph = validGraph();
-    graph.sockets["Socket-1"] = { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
-    graph.sockets["Socket-3"] = { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
-    graph.sockets["Socket-4"] = { type: "agent", materia: "Maintain", parse: "json", edges: [{ when: "satisfied", to: "Socket-3" }] };
+    graph.sockets["Socket-1"] = { materia: "planner", edges: [{ when: "always", to: "Socket-3" }] };
+    graph.sockets["Socket-3"] = { materia: "Build", edges: [{ when: "always", to: "Socket-4" }] };
+    graph.sockets["Socket-4"] = { materia: "Maintain", parse: "json", edges: [{ when: "satisfied", to: "Socket-3" }] };
     graph.loops = {
       loopSelection: {
         sockets: ["Socket-3", "Socket-4"],
@@ -368,17 +366,15 @@ describe("graph validation foundation", () => {
     expect(formatGraphValidationErrors(result.errors)).toContain("has no not_satisfied route back into the loop");
   });
 
-  test("normalizes legacy next and flow edges into canonical always edges", () => {
+  test("keeps canonical edges unchanged during graph normalization", () => {
     const graph = validGraph();
-    graph.sockets["Socket-1"].edges = [{ to: "Socket-4" } as never, { when: "Flow" as never, to: "Socket-2" }];
+    graph.sockets["Socket-1"].edges = [{ when: "always", to: "Socket-4" }, { when: "satisfied", to: "Socket-2" }];
 
     const normalized = normalizePipelineGraph(graph);
 
-    expect(normalized.sockets["Socket-1"].next).toBeUndefined();
     expect(normalized.sockets["Socket-1"].edges).toEqual([
       { to: "Socket-4", when: "always" },
-      { to: "Socket-2", when: "always" },
-      { when: "always", to: "Socket-2" },
+      { to: "Socket-2", when: "satisfied" },
     ]);
   });
 
@@ -394,20 +390,20 @@ describe("graph validation foundation", () => {
     expect(graph.sockets["Socket-2"].edges).toHaveLength(2);
 
     const acceptedLoop = stageValidatedPipelineGraphChange(graph, (draft) => {
-      draft.sockets["Socket-4"].next = "Socket-3";
+      draft.sockets["Socket-4"].edges = [{ when: "always", to: "Socket-3" }];
     });
 
     expect(acceptedLoop.ok).toBe(true);
     expect(acceptedLoop.graph.sockets["Socket-4"].edges).toEqual([{ when: "always", to: "Socket-3" }]);
 
     const rejected = stageValidatedPipelineGraphChange(graph, (draft) => {
-      draft.sockets["Socket-4"].next = "MissingTarget";
+      draft.sockets["Socket-4"].edges = [{ when: "always", to: "MissingTarget" }];
     });
 
     expect(rejected.ok).toBe(false);
     expect(rejected.errors).toContainEqual(expect.objectContaining({ code: "invalid-socket-id" }));
     expect(rejected.graph).toBe(graph);
-    expect(graph.sockets["Socket-4"].next).toBeUndefined();
+    expect(graph.sockets["Socket-4"].edges).toBeUndefined();
   });
 
   test("classifies only canonical edge condition strings", () => {

@@ -29,27 +29,22 @@ function attemptConfig() {
         entry: "Socket-1",
         sockets: {
           "Socket-1": {
-            type: "utility",
-            utility: "echo",
-            parse: "json",
-            params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
-            assign: { items: "$.items" },
-            next: "Socket-2",
+            materia: "Seed-Items",
+            edges: [{ when: 'always', to: 'Socket-2' }],
           },
           "Socket-2": {
-            type: "agent",
             materia: "Build",
             parse: "json",
             foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "Socket-3" },
             advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "Socket-3" },
-            next: "Socket-2",
+            edges: [{ when: 'always', to: 'Socket-2' }],
             limits: { maxVisits: 5 },
           },
-          "Socket-3": { type: "agent", materia: "Build" },
+          "Socket-3": { materia: "Build" },
         },
       },
     },
-    materia: { Build: { tools: "coding", prompt: "Build materia" } },
+    materia: { "Seed-Items": { type: "utility", utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" } }, Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
 
@@ -76,7 +71,6 @@ describe("native attempt identity", () => {
       { socket: "Socket-2", taskId: "a", attempt: 1 },
       { socket: "Socket-2", taskId: "a", attempt: 2 },
       { socket: "Socket-2", taskId: "b", attempt: 1 },
-      { socket: "Socket-3", taskId: undefined, attempt: 1 },
     ]);
     expect(Object.keys(usage.byAttempt).sort()).toEqual(["a:1", "a:2", "b:1"]);
   });

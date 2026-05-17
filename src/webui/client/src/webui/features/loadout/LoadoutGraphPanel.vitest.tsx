@@ -44,8 +44,8 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutGraphPanel>
     lockState: 'unlocked' as const,
     entry: 'Socket-1',
     sockets: {
-      'Socket-1': { type: 'agent' as const, materia: 'Build', edges: [{ when: 'always' as const, to: 'Socket-2' }] },
-      'Socket-2': { type: 'agent' as const, materia: 'Test' },
+      'Socket-1': { materia: 'Build', edges: [{ when: 'always' as const, to: 'Socket-2' }] },
+      'Socket-2': { materia: 'Test' },
     },
   };
   const props: ComponentProps<typeof LoadoutGraphPanel> = {
@@ -61,8 +61,8 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutGraphPanel>
       loopMemberships: new Map(),
       loopRegions: [],
       loopSelectionRectangle: undefined,
-      materia: { Build: { type: 'agent', materia: 'Build' }, Test: { type: 'agent', materia: 'Test' } },
-      palette: [['Build', { type: 'agent', materia: 'Build' }]],
+      materia: { Build: { materia: 'Build' }, Test: { materia: 'Test' } },
+      palette: [['Build', { materia: 'Build' }]],
       routedEdges: [],
       selectedLoopSocketIds: [],
       selectedLoopSocketSet: new Set(),
@@ -118,7 +118,6 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutGraphPanel>
         openEdgeConnector: vi.fn(),
         openSocketPropertyEditor: vi.fn(),
         removeEdge: vi.fn(),
-        removeLegacyNextEdge: vi.fn(),
         removeLoopExitConnection: vi.fn(),
         removeMateria: vi.fn(),
         replaceMateriaFromModal: vi.fn(),
@@ -221,7 +220,6 @@ describe('LoadoutGraphPanel readonly defaults', () => {
       openEdgeConnector: vi.fn(),
       openSocketPropertyEditor: vi.fn(),
       removeEdge: vi.fn(),
-      removeLegacyNextEdge: vi.fn(),
       removeLoopExitConnection: vi.fn(),
       removeMateria: vi.fn(),
       replaceMateriaFromModal: vi.fn(),

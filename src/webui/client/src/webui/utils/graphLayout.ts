@@ -11,7 +11,6 @@ import {
   getSocketLayout,
   isEmptySocket,
   resolveSocketDisplayLabel,
-  type LegacyPipelineSocket,
   type MateriaConfig,
   type PipelineConfig,
   type PipelineSocket,
@@ -100,7 +99,7 @@ export function formatIteratorBehavior(socket?: PipelineSocket, definitions?: Ma
     const generatorConfig = canonicalGeneratorConfigFor(definition);
     return definition?.generator === true
       ? 'Generator: canonical workItems output'
-      : `Generator: migration-only ${generatorOutput}${generatorConfig?.itemType ? ` (${generatorConfig.itemType} list)` : ''}`;
+      : `Generator: obsolete ${generatorOutput}${generatorConfig?.itemType ? ` (${generatorConfig.itemType} list)` : ''}`;
   }
   const foreach = socket?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
   if (foreach) return `Iterator: ${foreach.items}${foreach.as ? ` as ${foreach.as}` : ''}${foreach.done ? ` until ${foreach.done}` : ''}`;
@@ -127,7 +126,7 @@ function loopConsumerForSocket(loadout: PipelineConfig | undefined, socketId: st
 
 function formatLoopExitSummary(loadout: PipelineConfig | undefined, loopId: string, loop: NonNullable<PipelineConfig['loops']>[string]): string | undefined {
   if (!loop.exit) return undefined;
-  const label = formatLoopDisplayLabel(loadout, loopId, loop.sockets, loop.label);
+  const label = formatLoopDisplayLabel(loadout, loopId, loop.sockets);
   const target = loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.sockets?.[loop.exit.to]);
   return `Loop exit for ${label}: ${edgeConditionLabel(loop.exit.when)} → ${target}`;
 }
@@ -182,9 +181,9 @@ export function loopExitEdgeLabel(when?: string): string {
 
 export function iteratorBadgeLabel(details?: string): string {
   if (details?.startsWith('Generator: canonical')) return 'Generator';
-  if (details?.startsWith('Generator: migration-only')) {
-    const output = details.slice('Generator: migration-only'.length).trim().split(/\s|\(/)[0];
-    return output ? `Legacy: ${output}` : 'Legacy generator';
+  if (details?.startsWith('Generator: obsolete')) {
+    const output = details.slice('Generator: obsolete'.length).trim().split(/\s|\(/)[0];
+    return output ? `Generator: ${output}` : 'Generator';
   }
   return 'Iterator';
 }
@@ -205,11 +204,10 @@ export function buildSocketHoverDetails(id: string, socket?: PipelineSocket, def
   const loopConsumer = loopConsumerForSocket(loadout, id, definitions);
   if (loopConsumer) lines.push(loopConsumer);
   lines.push(...loopExitSummariesForSocket(loadout, id));
-  if (socket?.type) lines.push(`Type: ${socket.type}`);
   const referenced = extractMateriaReference(socket);
   const definition = referenced ? definitions?.[referenced.materia] : undefined;
   if (referenced) lines.push(`Materia: ${referenced.materia}`);
-  if (socket?.type === 'agent' && definition) {
+  if (definition && definition.type !== 'utility') {
     if (definition.model) lines.push(`Model: ${definition.model}`);
     if (definition.tools) lines.push(`Tools: ${formatToolScopeSpec(definition.tools)}`);
     if (definition.thinking) lines.push(`Thinking: ${definition.thinking}`);
@@ -217,9 +215,9 @@ export function buildSocketHoverDetails(id: string, socket?: PipelineSocket, def
     const prompt = summarizeHoverText(definition.prompt);
     if (prompt) lines.push(`Prompt: ${prompt}`);
   }
-  if (socket?.type === 'utility') {
-    const utility = definition?.utility ?? socket.utility;
-    const command = definition?.command ?? socket.command;
+  if (definition?.type === 'utility' || socket?.utility || socket?.command) {
+    const utility = definition?.utility ?? socket?.utility;
+    const command = definition?.command ?? socket?.command;
     if (utility) lines.push(`Utility: ${utility}`);
     if (command?.length) lines.push(`Command: ${command.join(' ')}`);
   }
@@ -230,8 +228,6 @@ export function buildSocketHoverDetails(id: string, socket?: PipelineSocket, def
   if (loopExitRoutes.length) {
     lines.push(`Loop-exit routes: ${loopExitRoutes.map((route) => `${loopExitEdgeLabel(route.condition)} → ${formatSocketLabel(route.targetSocketId, loadout?.sockets?.[route.targetSocketId])}`).join(', ')}`);
   }
-  const legacyNext = (socket as LegacyPipelineSocket | undefined)?.next;
-  if (legacyNext) lines.push(`Legacy flow: Always → ${legacyNext}`);
   if (socket?.limits) {
     const limits = [
       socket.limits.maxVisits !== undefined ? `max visits ${socket.limits.maxVisits}` : undefined,
@@ -253,10 +249,6 @@ export function getLoadoutEdges(loadout: PipelineConfig | undefined): LoadoutEdg
   for (const [from, socket] of Object.entries(sockets)) {
     for (const [index, edge] of (socket.edges ?? []).entries()) {
       if (sockets[edge.to]) edges.push({ id: `${from}:edge:${index}:${edge.to}:${edge.when}`, from, to: edge.to, when: edge.when, kind: 'normal', edgeIndex: index });
-    }
-    const legacyNext = (socket as LegacyPipelineSocket).next;
-    if (typeof legacyNext === 'string' && sockets[legacyNext]) {
-      edges.push({ id: `${from}:legacy-next:${legacyNext}`, from, to: legacyNext, when: 'always', kind: 'legacy-next' });
     }
   }
   for (const [loopId, loop] of Object.entries(loadout?.loops ?? {})) {
@@ -631,10 +623,9 @@ function loopMemberLabels(loadout: PipelineConfig | undefined, socketIds: string
   return socketIds.map((socketId) => resolveSocketDisplayLabel(loadout, socketId));
 }
 
-export function formatLoopDisplayLabel(loadout: PipelineConfig | undefined, loopId: string, socketIds: string[], label?: string): string {
+export function formatLoopDisplayLabel(loadout: PipelineConfig | undefined, loopId: string, socketIds: string[]): string {
   const memberSequence = loopMemberLabels(loadout, socketIds).join(' → ');
-  if (!label) return memberSequence || loopId;
-  return label.replace(/Socket-\d+(?=\b)/g, (socketId) => resolveSocketDisplayLabel(loadout, socketId));
+  return memberSequence || loopId;
 }
 
 export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>, definitions?: MateriaConfig['materia']): LoopRegion[] {
@@ -648,7 +639,7 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const consumer = loopConsumerSummary(loadout, id, loop, definitions);
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.sockets?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.sockets?.[loop.exit.to])}` : undefined;
     const summary = [consumer, exit].filter(Boolean).join(' • ');
-    const label = formatLoopDisplayLabel(loadout, id, loop.sockets, loop.label);
+    const label = formatLoopDisplayLabel(loadout, id, loop.sockets);
     const socketSpanWidth = maxX - minX;
     const headerWidth = Math.min(loopHeaderMaxWidth, Math.max(estimateLoopHeaderWidth(label, summary), socketSpanWidth + 48));
     const headerX = rounded(minX + socketSpanWidth / 2 - headerWidth / 2);

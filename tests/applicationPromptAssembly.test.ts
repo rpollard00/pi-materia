@@ -8,7 +8,7 @@ import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.
 function agentSocket(overrides: Partial<ResolvedMateriaAgentSocket> = {}): ResolvedMateriaAgentSocket {
   return {
     id: "Socket-1",
-    socket: { type: "agent", materia: "Build", parse: "text" },
+    socket: { materia: "Build", parse: "text" },
     materia: { tools: "readOnly", prompt: "Build {{ item.id }} for {{ request }}." },
     edges: [],
     ...overrides,
@@ -73,7 +73,7 @@ describe("application prompt assembly", () => {
 
   test("generator JSON sockets receive canonical workItems and evaluator route-field instructions", () => {
     const socket = agentSocket({
-      socket: { type: "agent", materia: "Plan", parse: "json" },
+      socket: { materia: "Plan", parse: "json" },
       materia: { tools: "readOnly", prompt: "Plan work.", generator: true },
     });
     const prompt = buildSocketPrompt(state(socket), socket);
@@ -87,7 +87,7 @@ describe("application prompt assembly", () => {
 
   test("multi-turn refinement stays conversational until continue finalization", () => {
     const socket = agentSocket({
-      socket: { type: "agent", materia: "Plan", parse: "json" },
+      socket: { materia: "Plan", parse: "json" },
       materia: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
     });
     const prompt = buildSocketPrompt(state(socket), socket);
@@ -99,7 +99,7 @@ describe("application prompt assembly", () => {
 
   test("/materia continue finalization includes synthetic context and canonical JSON contract", () => {
     const socket = agentSocket({
-      socket: { type: "agent", materia: "Plan", parse: "json" },
+      socket: { materia: "Plan", parse: "json" },
       materia: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
     });
     const prompt = buildMultiTurnFinalizationPrompt(state(socket, { multiTurnFinalizing: true, lastOutput: "previous refinement" }), socket);
@@ -113,7 +113,7 @@ describe("application prompt assembly", () => {
 
   test("Chain-Context prompt renders useful structured previous-cast context when available", () => {
     const socket = agentSocket({
-      socket: { type: "agent", materia: "Chain-Context", parse: "json" },
+      socket: { materia: "Chain-Context", parse: "json" },
       materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Chain-Context"), parse: "json" },
     });
     const prompt = buildSocketPrompt(state(socket, {
@@ -140,7 +140,7 @@ describe("application prompt assembly", () => {
 
   test("Chain-Context prompt gives clear behavior when previous-cast context is missing", () => {
     const socket = agentSocket({
-      socket: { type: "agent", materia: "Chain-Context", parse: "json" },
+      socket: { materia: "Chain-Context", parse: "json" },
       materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Chain-Context"), parse: "json" },
     });
     const prompt = buildSocketPrompt(state(socket, { data: {} }), socket);

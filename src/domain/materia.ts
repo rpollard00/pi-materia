@@ -39,7 +39,7 @@ export interface MateriaDefinitionCommon {
   behavior: MateriaBehaviorIdentity;
   parse?: MateriaParseMode;
   generator?: boolean;
-  /** Legacy/migration metadata only; generator: true is the canonical domain flag. */
+  /** Obsolete metadata; generator: true is the canonical domain flag. */
   generates?: MateriaGeneratorMetadata;
   promptIntent?: MateriaPromptIntentMetadata;
 }
@@ -75,10 +75,10 @@ export function normalizeMateriaDefinition(id: MateriaId, config: MateriaConfigC
   if (!isPlainObject(config)) return { ok: false, issues: [{ path, message: "materia definition must be an object" }] };
 
   const rawType = config.type;
-  if (rawType !== "agent" && rawType !== "utility") {
-    return { ok: false, issues: [{ path: `${path}.type`, message: "materia type must be explicit agent or utility" }] };
+  if (rawType !== undefined && rawType !== "agent" && rawType !== "utility") {
+    return { ok: false, issues: [{ path: `${path}.type`, message: "materia type must be agent or utility" }] };
   }
-  const type: MateriaDefinitionType = rawType;
+  const type: MateriaDefinitionType = rawType ?? (config.utility !== undefined || config.command !== undefined || config.script !== undefined ? "utility" : "agent");
   const behavior: MateriaBehaviorIdentity = {
     id,
     ...(typeof config.label === "string" ? { label: config.label } : {}),
@@ -160,11 +160,9 @@ export function validateLoadoutMateriaReferences(loadout: Loadout, catalog: Mate
   for (const [socketId, socket] of Object.entries(loadout.sockets ?? {})) {
     const materia = catalog[socket.materia];
     if (!materia) {
-      issues.push({ path: `${path}.sockets.${socketId}.materia`, message: `${socket.type} socket references unknown materia ${JSON.stringify(socket.materia)}` });
+      issues.push({ path: `${path}.sockets.${socketId}.materia`, message: `socket references unknown materia ${JSON.stringify(socket.materia)}` });
       continue;
     }
-    if (socket.type === "agent" && materia.type !== "agent") issues.push({ path: `${path}.sockets.${socketId}.materia`, message: "agent socket must reference agent materia" });
-    if (socket.type === "utility" && materia.type !== "utility") issues.push({ path: `${path}.sockets.${socketId}.materia`, message: "utility socket must reference utility materia" });
   }
   return issues.length > 0 ? { ok: false, issues } : ok(loadout);
 }

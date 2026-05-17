@@ -77,7 +77,7 @@ describe("/materia casts listing", () => {
       taskAttempts: {},
       edgeTraversals: {},
       runState: { castId: id, runDir: dir, usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} }, attempt: 1 },
-      pipeline: { entry: { id: "Build", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "" } }, sockets: {} },
+      pipeline: { entry: { id: "Build", socket: { materia: "Build" }, materia: { tools: "coding", prompt: "" } }, sockets: {} },
     }]);
 
     const text = lines.join("\n");

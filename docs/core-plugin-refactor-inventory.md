@@ -88,7 +88,7 @@ Cast/session persistence:
 - Prompt assembly currently lives in `native.ts` (`buildSocketPrompt`, `buildMultiTurnFinalizationPrompt`, `activeMateriaSystemPrompt`, `buildSyntheticCastContext`, `materiaPrompt`, template rendering).
 - JSON sockets receive the canonical handoff contract final instruction; multi-turn JSON sockets receive it only on `/materia continue` finalization.
 - Text/build sockets receive adapter context containing current work item and global guidance.
-- Generator sockets receive adapter context requiring canonical `workItems`; legacy `tasks`/custom generated aliases are not active runtime outputs.
+- Generator sockets receive adapter context requiring canonical `workItems`; current `tasks`/custom generated aliases are not active runtime outputs.
 
 ### Assignment, routing, and loop flows
 
@@ -105,7 +105,7 @@ Primary types in `src/types.ts`:
 - `PiMateriaConfig`: artifact/budget/limits/compaction, reusable `materia`, named `loadouts`, `activeLoadout`.
 - `MateriaConfig`: reusable agent or utility behavior definition.
 - `MateriaPipelineConfig`: active loadout graph with `entry`, `sockets`, `layout`, and `loops`.
-- `MateriaPipelineSocketConfig`: agent/utility socket config with parse, assign, edges, foreach, advance, limits, and legacy layout.
+- `MateriaPipelineSocketConfig`: agent/utility socket config with parse, assign, edges, foreach, advance, limits, and current layout.
 - `ResolvedMateriaPipeline` / `ResolvedMateriaSocket`: runtime graph after resolving socket references to reusable materia.
 - `MateriaCastState`: persisted runtime cast state, including current socket/socket, data, cursors, visits, recovery state, usage run state, and resolved pipeline.
 - `HandoffEnvelope`/`HandoffWorkItem` in `handoffContract.ts`: canonical inter-socket payload.
@@ -156,14 +156,14 @@ Thin composition/orchestration shell:
 - `src/presentation/renderer.ts`: Pi custom renderer registration.
 - WebUI launch command wiring in `index.ts` should remain at plugin edge.
 
-### Compatibility/schema candidates
+### Stability/schema candidates
 
-Anti-corruption layer for external JSON and legacy formats:
+Anti-corruption layer for external JSON and current formats:
 
 - `config.ts` read/merge/write JSON schema handling and obsolete field rejection.
-- `loadoutNormalization.ts`, `loopSemantics.ts`, `loadoutGraphAnalysis.ts`: migration/normalization for legacy layout, loop iterator/consumer metadata, and generated output conventions.
-- Legacy `next` edge normalization in `graphValidation.ts` should move to schema adapter while domain consumes canonical edges.
-- Legacy `sockets` terminology compatibility should be isolated here before canonical internal APIs move toward sockets.
+- `loadoutNormalization.ts`, `loopSemantics.ts`, `loadoutGraphAnalysis.ts`: stability/normalization for current layout, loop iterator/consumer metadata, and generated output conventions.
+- Canonical edge validation in `graphValidation.ts` should stay separate from schema adapters.
+- Current `sockets` terminology stability should be isolated here before canonical internal APIs move toward sockets.
 
 ## Dependency map and boundary leaks
 
@@ -215,15 +215,15 @@ Notable boundary leaks/cycles to address during extraction:
 - `native.ts` is the main boundary leak: domain rules, application workflow, Pi session APIs, fs artifacts, command execution, prompt assembly, usage, model/tool mutation, and UI updates are in one module.
 - `pipeline.ts` imports `config.ts` only for `resolveArtifactRoot` in `renderGrid`, creating an avoidable dependency from graph resolution/rendering back to config IO utilities.
 - `config.ts` performs both filesystem/profile IO and schema/domain validation. It should become an infrastructure/schema adapter around pure validators.
-- `graphValidation.ts` currently includes both canonical graph invariants and legacy `next`/`flow` normalization; normalization belongs at compatibility boundaries.
-- `types.ts` mixes external schema DTOs, domain concepts, runtime state, persistence manifests, and usage reports. Expect staged splitting with compatibility barrels.
+- `graphValidation.ts` should contain canonical graph invariants; schema normalization belongs at stability boundaries.
+- `types.ts` mixes external schema DTOs, domain concepts, runtime state, persistence manifests, and usage reports. Expect staged splitting with stability barrels.
 - `usage.ts` mixes pure aggregation/extraction with filesystem event/usage writing through `artifacts.ts`.
 - `activeLoadoutEvents.ts` couples active-loadout domain events to UI widget rendering.
 - WebUI client imports shared core helper modules directly; these are integration contracts to preserve while moving internals behind stable barrels/DTOs.
 
 No obvious import cycle was observed from the current source import map, but several modules have reversed or too-broad dependency direction for the target architecture.
 
-## Socket terminology migration points
+## Socket terminology stability points
 
 The canonical core model is socket-first:
 
@@ -233,7 +233,7 @@ The canonical core model is socket-first:
 - Artifact layout uses `sockets/<socket-id>/...`.
 - WebUI/server monitor and config/loadout DTOs are socket-only.
 
-Migration intent:
+Stability intent:
 
 - New domain/application APIs use socket terminology (`socketId`, `sockets`, socket state).
 - Persisted loadouts use `sockets`.
@@ -250,7 +250,7 @@ Plugin composition
     -> application ports/use cases
       -> domain
 
-Schema/persistence compatibility adapters sit at the edge and translate external
+Schema/persistence stability adapters sit at the edge and translate external
 JSON/save/session formats into domain/application models before use.
 ```
 
@@ -260,13 +260,13 @@ Rules:
 - Application imports domain and defines minimal use-case-oriented ports.
 - Infrastructure imports application ports/domain DTOs to implement concrete fs/Pi/runtime/provider/VCS/prompt adapters.
 - Plugin entrypoints compose concrete adapters and delegate workflows.
-- Schema adapters own legacy `sockets`/`next`/layout/generates compatibility and produce canonical domain/application models.
+- Schema adapters own current `sockets`/layout/generator-marker stability and produce canonical domain/application models.
 
 ## Suggested extraction order notes
 
 1. Add characterization tests around existing plugin-facing behavior and persisted formats before moving logic.
-2. Split pure domain helpers first behind compatibility barrels: socket ids, handoff contract/validation, graph invariants, loop exit routing, assignment/condition helpers.
-3. Add schema adapters for config/session/cast formats, including legacy `sockets` to canonical sockets mapping.
+2. Split pure domain helpers first behind stability barrels: socket ids, handoff contract/validation, graph invariants, loop exit routing, assignment/condition helpers.
+3. Add schema adapters for config/session/cast formats, including current `sockets` to canonical sockets mapping.
 4. Move use cases out of `native.ts` in vertical slices: start cast, process agent end, continue/recast/revive, utility execution, prompt prep.
 5. Replace direct Pi/fs/process calls with narrow ports as each use case moves.
 6. Keep WebUI contracts stable; migrate internals to socket terminology only after adapters and fixtures are in place.

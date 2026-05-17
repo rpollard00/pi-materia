@@ -15,13 +15,29 @@ import { FakePiHarness } from "./fakePi.js";
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-utility-"));
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
-  await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(config, null, 2));
+  await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(currentUtilityFixtureConfig(config), null, 2));
   const harness = new FakePiHarness(cwd);
   piMateria(harness.pi);
   return harness;
 }
 
 const socketAliases: Record<string, string> = { second: "Socket-2", retry: "Socket-2", loop: "Socket-2", seed: "Socket-1", Build: "Socket-1", "Auto-Eval": "Socket-2", Maintain: "Socket-3" };
+
+function currentUtilityFixtureConfig(config: unknown): unknown {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return config;
+  const copy = structuredClone(config) as Record<string, any>;
+  copy.materia = copy.materia ?? {};
+  for (const loadout of Object.values(copy.loadouts ?? {}) as any[]) {
+    for (const [socketId, socket] of Object.entries(loadout?.sockets ?? {}) as Array<[string, any]>) {
+      if (!socket || typeof socket !== "object" || socket.materia || (!socket.utility && !socket.command && !socket.script)) continue;
+      const materiaId = `Utility-${socketId}`;
+      const { utility, command, script, parse, params, assign, timeoutMs, ...placement } = socket;
+      copy.materia[materiaId] = { type: "utility", ...(utility !== undefined ? { utility } : {}), ...(command !== undefined ? { command } : {}), ...(script !== undefined ? { script } : {}), ...(parse !== undefined ? { parse } : {}), ...(params !== undefined ? { params } : {}), ...(assign !== undefined ? { assign } : {}), ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+      loadout.sockets[socketId] = { ...placement, materia: materiaId };
+    }
+  }
+  return copy;
+}
 
 function canonicalizeFixtureSockets<T>(value: T, parentKey = ""): T {
   if (typeof value === "string") return (["to", "next", "from", "done"].includes(parentKey) ? (socketAliases[value] ?? value) : value) as T;
@@ -33,11 +49,21 @@ function canonicalizeFixtureSockets<T>(value: T, parentKey = ""): T {
 }
 
 function utilityConfig(socket: Record<string, unknown>, extraSockets: Record<string, unknown> = {}) {
+  const materia: Record<string, unknown> = {};
+  const sockets: Record<string, unknown> = {};
+  const toSocket = (id: string, input: Record<string, unknown>) => {
+    const utilityMateriaId = `Utility-${id.replace(/[^A-Za-z0-9]/g, "-")}`;
+    const { utility, command, script, parse, params, assign, timeoutMs, ...placement } = canonicalizeFixtureSockets(input) as Record<string, unknown>;
+    materia[utilityMateriaId] = { type: "utility", ...(utility !== undefined ? { utility } : {}), ...(command !== undefined ? { command } : {}), ...(script !== undefined ? { script } : {}), ...(parse !== undefined ? { parse } : {}), ...(params !== undefined ? { params } : {}), ...(assign !== undefined ? { assign } : {}), ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+    sockets[id] = { ...placement, materia: utilityMateriaId };
+  };
+  toSocket("Socket-1", socket);
+  for (const [key, value] of Object.entries(extraSockets)) toSocket(socketAliases[key] ?? key, value as Record<string, unknown>);
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": canonicalizeFixtureSockets({ type: "utility", ...socket }), ...canonicalizeFixtureSockets(extraSockets) } } },
-    materia: {},
+    loadouts: { Test: { entry: "Socket-1", sockets } },
+    materia,
   };
 }
 
@@ -54,7 +80,7 @@ describe("native utility socket execution", () => {
         loadouts: {
           Test: {
             entry: "Socket-1",
-            sockets: { "Socket-1": { type: "utility", materia: "Ignore-Artifacts", next: "end" } },
+            sockets: { "Socket-1": { materia: "Ignore-Artifacts", edges: [{ when: 'always', to: 'end' }] } },
           },
         },
         materia: {
@@ -179,7 +205,7 @@ describe("native utility socket execution", () => {
   test("parses JSON output, assigns state, and routes edges", async () => {
     const harness = await makeHarness(utilityConfig(
       { utility: "echo", parse: "json", params: { output: { satisfied: true, value: 7 } }, assign: { answer: "$.value" }, edges: [{ when: "satisfied", to: "second" }] },
-      { second: { type: "utility", utility: "echo", params: { text: "second" } } },
+      { second: { utility: "echo", params: { text: "second" } } },
     ));
 
     await harness.runCommand("materia", "cast json");
@@ -197,7 +223,7 @@ describe("native utility socket execution", () => {
   test("canonical not_satisfied routes only when satisfied is false", async () => {
     const harness = await makeHarness(utilityConfig(
       { utility: "echo", parse: "json", params: { output: { satisfied: false, feedback: "retry" } }, edges: [{ when: "not_satisfied", to: "retry" }] },
-      { retry: { type: "utility", utility: "echo", params: { text: "retry" } } },
+      { retry: { utility: "echo", params: { text: "retry" } } },
     ));
 
     await harness.runCommand("materia", "cast canonical retry");
@@ -211,7 +237,7 @@ describe("native utility socket execution", () => {
   test("satisfied edge conditions reject legacy passed JSON without canonical satisfied", async () => {
     const harness = await makeHarness(utilityConfig(
       { utility: "echo", parse: "json", params: { output: { passed: true, feedback: "ok" } }, edges: [{ when: "satisfied", to: "second" }] },
-      { second: { type: "utility", utility: "echo", params: { text: "second" } } },
+      { second: { utility: "echo", params: { text: "second" } } },
     ));
 
     await harness.runCommand("materia", "cast legacy eval");
@@ -235,7 +261,7 @@ describe("native utility socket execution", () => {
   });
 
   test("parse json utility rejects wrong satisfied field type", async () => {
-    const harness = await makeHarness(utilityConfig({ utility: "echo", parse: "json", params: { output: { satisfied: "true" } }, edges: [{ when: "satisfied", to: "second" }] }, { second: { type: "utility", utility: "echo", params: { text: "second" } } }));
+    const harness = await makeHarness(utilityConfig({ utility: "echo", parse: "json", params: { output: { satisfied: "true" } }, edges: [{ when: "satisfied", to: "second" }] }, { second: { utility: "echo", params: { text: "second" } } }));
 
     await harness.runCommand("materia", "cast bad satisfied");
 
@@ -266,16 +292,14 @@ describe("native utility socket execution", () => {
           entry: "Socket-1",
           sockets: {
             "Socket-1": {
-              type: "utility",
               utility: "echo",
               parse: "json",
               params: { output: { workItems: [{ id: "alpha", title: "Alpha" }] } },
               assign: { workItems: "$.workItems" },
               edges: [{ when: "always", to: "Socket-2" }],
             },
-            "Socket-2": { type: "utility", utility: "echo", params: { text: "build" }, edges: [{ when: "always", to: "Socket-3" }], limits: { maxVisits: 5 } },
+            "Socket-2": { utility: "echo", params: { text: "build" }, edges: [{ when: "always", to: "Socket-3" }], limits: { maxVisits: 5 } },
             "Socket-3": {
-              type: "utility",
               command: ["node", "-e", evalScript],
               // This reproduces the UI-saved Hojo-Consult failure: Socket-3/Auto-Eval
               // emitted a JSON-shaped string with canonical `satisfied`, but without
@@ -290,7 +314,6 @@ describe("native utility socket execution", () => {
               limits: { maxVisits: 5 },
             },
             "Socket-4": {
-              type: "utility",
               utility: "echo",
               parse: "json",
               params: { output: { satisfied: true, commitMessage: "maintain" } },
@@ -300,7 +323,6 @@ describe("native utility socket execution", () => {
           },
           loops: {
             loopSelection: {
-              label: "Hojo-like Build → Auto-Eval → Maintain",
               sockets: ["Socket-2", "Socket-3", "Socket-4"],
               iterator: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" },
               exit: { from: "Socket-4", when: "satisfied", to: "end" },
@@ -348,9 +370,8 @@ describe("native utility socket execution", () => {
         Loop: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "utility", utility: "echo", params: { text: "build" }, next: "Socket-2", limits: { maxVisits: 5 } },
+            "Socket-1": { utility: "echo", params: { text: "build" }, edges: [{ when: 'always', to: 'Socket-2' }], limits: { maxVisits: 5 } },
             "Socket-2": {
-              type: "utility",
               command: ["node", "-e", evalScript],
               parse: "json",
               assign: { evalCycle: "$.cycle" },
@@ -360,7 +381,7 @@ describe("native utility socket execution", () => {
               ],
               limits: { maxVisits: 5 },
             },
-            "Socket-3": { type: "utility", utility: "echo", params: { text: "maintain" }, next: "end", limits: { maxVisits: 3 } },
+            "Socket-3": { utility: "echo", params: { text: "maintain" }, edges: [{ when: 'always', to: 'end' }], limits: { maxVisits: 3 } },
           },
         },
       },
@@ -387,8 +408,8 @@ describe("native utility socket execution", () => {
     // Seed state through a first JSON utility then loop over it.
     await mkdir(path.join(harness.cwd, ".pi"), { recursive: true });
     await writeFile(path.join(harness.cwd, ".pi", "pi-materia.json"), JSON.stringify(utilityConfig(
-      { utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, next: "loop" },
-      { loop: { type: "utility", utility: "echo", params: { text: "item" }, foreach: { items: "state.items", as: "work", cursor: "itemCursor", done: "end" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, next: "loop" } },
+      { utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, edges: [{ when: "always", to: "loop" }] },
+      { loop: { utility: "echo", params: { text: "item" }, foreach: { items: "state.items", as: "work", cursor: "itemCursor", done: "end" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, edges: [{ when: "always", to: "loop" }] } },
     ), null, 2));
 
     await harness.runCommand("materia", "cast loop");
@@ -414,12 +435,11 @@ describe("native utility socket execution", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "utility", utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, edges: [{ when: "always", to: "Socket-2" }] },
-            "Socket-2": { type: "utility", utility: "echo", params: { text: "loop item" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-1": { utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { utility: "echo", params: { text: "loop item" }, advance: { cursor: "itemCursor", items: "state.items", done: "end" }, edges: [{ when: "always", to: "Socket-2" }] },
           },
           loops: {
             taskIteration: {
-              label: "Runtime item loop",
               sockets: ["Socket-2"],
               iterator: { items: "state.items", as: "work", cursor: "itemCursor", done: "end" },
               exit: { from: "Socket-2", when: "satisfied", to: "end" },
@@ -521,8 +541,8 @@ describe("native utility socket execution", () => {
 
   test("utility failure marks the cast failed and stops routing", async () => {
     const harness = await makeHarness(utilityConfig(
-      { utility: "missing.alias", next: "second" },
-      { second: { type: "utility", utility: "echo", params: { text: "should not run" } } },
+      { utility: "missing.alias", edges: [{ when: "always", to: "second" }] },
+      { second: { utility: "echo", params: { text: "should not run" } } },
     ));
 
     await harness.runCommand("materia", "cast fail");

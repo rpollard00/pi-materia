@@ -4,7 +4,6 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config/config.js";
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
-import { CURRENT_PI_MATERIA_SCHEMA_VERSION } from "../src/config/migrations.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import { getEffectivePipelineConfig, resolvePipeline } from "../src/runtime/pipeline.js";
@@ -295,8 +294,8 @@ describe("layered config loading and persistence", () => {
     try {
       const savedPath = await saveMateriaConfigPatch(cwd, {
         materia: {
-          Build: { type: "agent", tools: "coding", prompt: "build" },
-          Checkpoint: { type: "utility", utility: "project.ensureIgnored", parse: "json", params: { patterns: [".pi/pi-materia/"] }, assign: { artifactIgnore: "$" }, timeoutMs: 1000 },
+          Build: { tools: "coding", prompt: "build" },
+          Checkpoint: { utility: "project.ensureIgnored", parse: "json", params: { patterns: [".pi/pi-materia/"] }, assign: { artifactIgnore: "$" }, timeoutMs: 1000 },
         },
         loadouts: {
           Custom: {
@@ -329,7 +328,7 @@ describe("layered config loading and persistence", () => {
       const beforeProject = await readFile(projectFile, "utf8");
 
       const userWritten = await saveMateriaConfigPatch(cwd, {
-        materia: { Custom: { type: "agent", tools: "none", prompt: "custom user materia" } },
+        materia: { Custom: { tools: "none", prompt: "custom user materia" } },
         loadouts: { UserCreated: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Custom" } } } },
       });
       expect(userWritten).toBe(getUserMateriaAssetPath());
@@ -406,9 +405,9 @@ describe("config loadouts", () => {
     const saved = await writeConfig({
       activeLoadout: "Yolo",
       materia: {
-        yoloPlanner: { type: "agent", tools: "readOnly", prompt: "Plan.", generator: true },
-        yoloBuild: { type: "agent", tools: "coding", prompt: "Build." },
-        yoloMaintain: { type: "agent", tools: "coding", prompt: "Maintain." },
+        yoloPlanner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        yoloBuild: { tools: "coding", prompt: "Build." },
+        yoloMaintain: { tools: "coding", prompt: "Maintain." },
       },
       loadouts: {
         Yolo: {
@@ -444,8 +443,8 @@ describe("config loadouts", () => {
     const saved = await writeConfig({
       activeLoadout: "ConflictingLoop",
       materia: {
-        conflictPlanner: { type: "agent", tools: "readOnly", prompt: "Plan.", generator: true },
-        conflictBuild: { type: "agent", tools: "coding", prompt: "Build." },
+        conflictPlanner: { tools: "readOnly", prompt: "Plan.", generator: true },
+        conflictBuild: { tools: "coding", prompt: "Build." },
       },
       loadouts: {
         ConflictingLoop: {
@@ -536,7 +535,7 @@ describe("config loadouts", () => {
     expect(autoEval?.prompt).toContain("do not use it to modify project files");
 
     const pipeline = resolvePipeline(rawDefault);
-    const autoEvalSocket = Object.values(pipeline.sockets).find((socket) => socket.socket.type === "agent" && socket.socket.materia === "Auto-Eval");
+    const autoEvalSocket = Object.values(pipeline.sockets).find((socket) => socket.socket.materia === "Auto-Eval");
     expect(autoEvalSocket?.socket.materia).toBe("Auto-Eval");
     expect(autoEvalSocket?.materia.prompt).toContain("Auto-Eval Materia materia");
     const socketTools = resolveToolScope(autoEvalSocket!.materia.tools, ["read", "grep", "find", "ls", "bash", "edit", "write", "patch", "apply_patch"]);
@@ -653,7 +652,7 @@ describe("config loadouts", () => {
     process.env.PI_MATERIA_PROFILE_DIR = profile;
     try {
       await expect(saveMateriaConfigPatch(cwd, {
-        materia: { Check: { type: "agent", tools: "none", prompt: "check" }, Done: { type: "agent", tools: "none", prompt: "done" } },
+        materia: { Check: { tools: "none", prompt: "check" }, Done: { tools: "none", prompt: "done" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -672,7 +671,7 @@ describe("config loadouts", () => {
       })).rejects.toThrow(/loadout "Custom" graph is invalid: .*unreachable outgoing edge/);
 
       await expect(saveMateriaConfigPatch(cwd, {
-        materia: { Check: { type: "agent", tools: "none", prompt: "check" } },
+        materia: { Check: { tools: "none", prompt: "check" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -684,7 +683,7 @@ describe("config loadouts", () => {
       })).rejects.toThrow(/Missing graph endpoint referenced by Socket-1\.edges\[0\]\.to/);
 
       await expect(saveMateriaConfigPatch(cwd, {
-        materia: { Check: { type: "agent", tools: "none", prompt: "check" } },
+        materia: { Check: { tools: "none", prompt: "check" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -696,7 +695,7 @@ describe("config loadouts", () => {
       })).rejects.toThrow(/invalid edge condition at Socket-1\.edges\[0\]\.when/);
 
       await expect(saveMateriaConfigPatch(cwd, {
-        materia: { Check: { type: "agent", tools: "none", prompt: "check" } },
+        materia: { Check: { tools: "none", prompt: "check" } },
         loadouts: {
           Custom: {
             entry: "Socket-1",
@@ -712,7 +711,7 @@ describe("config loadouts", () => {
           Custom: {
             entry: "Socket-1",
             sockets: {
-              "Socket-1": { materia: "Build", next: "Socket-2" } as never,
+              "Socket-1": { materia: "Build", edges: [{ when: 'always', to: 'Socket-2' }] } as never,
               "Socket-2": {
                 materia: "Auto-Eval",
                 edges: [
@@ -721,7 +720,7 @@ describe("config loadouts", () => {
                   { when: "not_satisfied", to: "Socket-1", maxTraversals: 3 },
                 ],
               },
-              "Socket-3": { materia: "Maintain", next: "Socket-1" } as never,
+              "Socket-3": { materia: "Maintain", edges: [{ when: 'always', to: 'Socket-1' }] } as never,
             },
           },
         },
@@ -742,22 +741,24 @@ describe("config loadouts", () => {
     try {
       await expect(saveMateriaConfigPatch(cwd, {
         loadouts: { Bad: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Missing" } } } },
-      })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: agent socket references unknown materia "Missing"/);
+      })).rejects.toThrow(/loadouts\.Bad\.sockets\.Socket-1\.materia: socket references unknown materia "Missing"/);
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
     }
   });
 
-  test("saved config patches reject materia without explicit discriminant", async () => {
+  test("saved config patches infer materia behavior without socket-level types", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-save-materia-type-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
     process.env.PI_MATERIA_PROFILE_DIR = profile;
     try {
-      await expect(saveMateriaConfigPatch(cwd, {
+      const saved = await saveMateriaConfigPatch(cwd, {
         materia: { Custom: { tools: "coding", prompt: "Do it" } as never },
-      })).rejects.toThrow(/Materia "Custom" has invalid type/);
+      });
+      const raw = JSON.parse(await readFile(saved, "utf8"));
+      expect(raw.materia.Custom.type).toBe("agent");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
@@ -767,10 +768,7 @@ describe("config loadouts", () => {
   test("project config can define loadouts and activeLoadout without duplicating materia", async () => {
     const { dir, file } = await writeConfig({
       activeLoadout: "Planning-Consult",
-      materia: {
-        planner: { type: "agent", tools: "readOnly", prompt: "legacy planner" },
-        interactivePlan: { type: "agent", tools: "readOnly", prompt: "legacy interactive" },
-      },
+      materia: {},
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
@@ -786,10 +784,9 @@ describe("config loadouts", () => {
     const loaded = await loadConfig(dir, file);
     const pipeline = resolvePipeline(loaded.config);
 
-    expect(loaded.config.activeLoadout).toMatch(/^Planning-Consult Copy/);
+    expect(loaded.config.activeLoadout).toBe("Planning-Consult");
     expect(Object.keys(loaded.config.loadouts ?? {})).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult"]));
-    expect(Object.keys(loaded.config.loadouts ?? {}).some((name) => /^Full-Auto Copy/.test(name))).toBe(true);
-    expect(Object.keys(loaded.config.loadouts ?? {}).some((name) => /^Planning-Consult Copy/.test(name))).toBe(true);
+    expect(Object.keys(loaded.config.loadouts ?? {}).some((name) => /^Full-Auto Copy/.test(name))).toBe(false);
     expect(loaded.config.materia["Auto-Plan"].prompt).toContain("planning materia");
     expect(loaded.config.materia["Interactive-Plan"].prompt).toContain("interactive");
     expect(pipeline.entry.id).toBe("Socket-1");
@@ -813,7 +810,6 @@ describe("config loadouts", () => {
     const planningConsultPlanner = loaded.config.loadouts?.["Planning-Consult"]?.sockets["Socket-3"];
     expect(fullAutoPlanner).toMatchObject({ materia: "Auto-Plan" });
     expect(planningConsultPlanner).toMatchObject({
-      type: "agent",
       materia: "Interactive-Plan",
       parse: "json",
     });
@@ -836,18 +832,19 @@ describe("config loadouts", () => {
     expect(planningConsultPrompt).not.toContain("Return only JSON");
 
     const fullAuto = resolvePipeline(loaded.config);
-    expect(fullAuto.sockets["Socket-3"].socket.type).toBe("agent");
+    expect(fullAuto.sockets["Socket-3"].socket).toEqual(expect.objectContaining({ materia: "Auto-Plan", parse: "json" }));
     expect(fullAuto.sockets["Socket-3"].materia.multiTurn).toBeUndefined();
     expect(fullAuto.sockets["Socket-3"].materia.prompt).toContain("planning materia");
+    expect(fullAuto.sockets["Socket-4"].socket).toMatchObject({ materia: "Build" });
     expect(fullAuto.sockets["Socket-8"].socket).toMatchObject({ materia: "Auto-Architect", parse: "json" });
 
     loaded.config.activeLoadout = "Planning-Consult";
     const planningConsult = resolvePipeline(loaded.config);
     expect(planningConsult.sockets["Socket-3"].socket).toMatchObject({
-      type: "agent",
       materia: "Interactive-Plan",
       parse: "json",
     });
+    expect("type" in planningConsult.sockets["Socket-3"].socket).toBe(false);
     expect("multiTurn" in planningConsult.sockets["Socket-3"].socket).toBe(false);
     expect(planningConsult.sockets["Socket-3"].materia.multiTurn).toBe(true);
     expect(planningConsult.sockets["Socket-3"].materia.prompt).toContain("interactive planning materia");
@@ -891,7 +888,8 @@ describe("active loadout persistence", () => {
     const reloaded = await loadConfig(dir);
 
     expect(written).toBe(projectFile);
-    expect(raw).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult", piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
+    expect(raw).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult" });
+    expect(raw.piMateria).toBeUndefined();
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
     expect(reloaded.config.activeLoadout).toBe("Planning-Consult");
     expect(resolvePipeline(reloaded.config).sockets["Socket-3"].materia.prompt).toContain("interactive planning materia");
@@ -912,9 +910,9 @@ describe("active loadout persistence", () => {
     await expect(saveActiveLoadout(dir, "Missing", file)).rejects.toThrow(/Unknown Materia loadout "Missing"/);
 
     const after = JSON.parse(await readFile(file, "utf8"));
-    expect(after.activeLoadout).toMatch(/^Full-Auto Copy/);
-    expect(after).toMatchObject({ piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
-    expect(Object.keys(after.loadouts).some((name) => /^Full-Auto Copy/.test(name))).toBe(true);
+    expect(after.activeLoadout).toBe("Full-Auto");
+    expect(after.piMateria).toBeUndefined();
+    expect(Object.keys(after.loadouts)).toContain("Full-Auto");
   });
 });
 

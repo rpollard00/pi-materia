@@ -114,11 +114,11 @@ All parse, resolution, previous-cast loading, and graph-compilation failures abo
 - **Ambiguous terminal stitching**: adjacent targets with multiple terminal outputs or multiple entry inputs fail before cast creation; v1 does not guess. Split the chain into smaller commands, simplify the loadout graph, or wait for future explicit socket mapping syntax.
 - **Invalid composed graph**: unsupported cycles, invalid socket shapes, or remapping conflicts introduced by composition fail before cast creation.
 
-## Handoff compatibility and migration notes
+## Handoff stability and stability notes
 
 Canonical linked handoff/context envelopes should use `summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing` where those fields apply. `workItems` is the canonical generated-unit field; do not author new link examples, materia prompts, or loadouts that use `tasks` for generated work.
 
-Legacy aliases from older configs or tests, such as `passed` for satisfaction or `tasks` for generated work, are migration-only compatibility if encountered. They are not part of the canonical `/materia link` contract, and `Chain-Context` should preserve or emit canonical fields rather than redefining reserved evaluator/route fields.
+Current aliases from older configs or tests, such as `passed` for satisfaction or `tasks` for generated work, are obsolete stability if encountered. They are not part of the canonical `/materia link` contract, and `Chain-Context` should preserve or emit canonical fields rather than redefining reserved evaluator/route fields.
 
 ## v1 non-goals
 

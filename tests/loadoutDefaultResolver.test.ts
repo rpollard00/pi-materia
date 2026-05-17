@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { resolveDefaultLoadout, resolveLoadoutReference } from "../src/loadout/defaultLoadoutResolver.js";
 import type { PiMateriaConfig } from "../src/types.js";
 
-const loadout = (id: string) => ({ id, entry: "Socket-1", sockets: { "Socket-1": { type: "agent" as const, materia: "Build" } } });
+const loadout = (id: string) => ({ id, entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } });
 
 describe("default loadout resolution", () => {
   test("selects a configured user default named Hojo instead of similarly named built-in Hojo-Consult", () => {

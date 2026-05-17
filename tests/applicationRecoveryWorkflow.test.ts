@@ -27,7 +27,7 @@ function makeState(): MateriaCastState {
     taskAttempts: {},
     edgeTraversals: {},
     runState: { castId: "cast-1", runDir: "/tmp/run", model: {}, currentSocketId: "Socket-1", currentMateria: "Build", lastMessage: "", usage: { totals: {} }, events: [] } as any,
-    pipeline: { entry: { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "Build" } }, sockets: { "Socket-1": { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "coding", prompt: "Build" } } } } as any,
+    pipeline: { entry: { id: "Socket-1", socket: { materia: "Build" }, materia: { tools: "coding", prompt: "Build" } }, sockets: { "Socket-1": { id: "Socket-1", socket: { materia: "Build" }, materia: { tools: "coding", prompt: "Build" } } } } as any,
   } as MateriaCastState;
 }
 

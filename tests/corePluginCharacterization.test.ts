@@ -33,7 +33,7 @@ describe("core plugin characterization", () => {
         Characterize: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "Build", parse: "text", edges: [{ when: "always", to: "end" }] },
+            "Socket-1": { materia: "Build", parse: "text", edges: [{ when: "always", to: "end" }] },
           },
         },
       },
@@ -82,13 +82,12 @@ describe("core plugin characterization", () => {
           entry: "Socket-1",
           sockets: {
             "Socket-1": {
-              type: "agent",
               materia: "Plan",
               parse: "json",
               assign: { routedSummary: "$.summary", copiedFeedback: "$.feedback" },
               edges: [{ when: "satisfied", to: "Socket-2" }, { when: "not_satisfied", to: "end" }],
             },
-            "Socket-2": { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
+            "Socket-2": { materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
           },
         },
       },
@@ -144,7 +143,7 @@ describe("core plugin characterization", () => {
   });
 
   test.serial("loads persisted cast states newest-first and returns the active state from session custom entries", async () => {
-    const harness = await makeCoreHarness({ activeLoadout: "Unused", loadouts: { Unused: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } } });
+    const harness = await makeCoreHarness({ activeLoadout: "Unused", loadouts: { Unused: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } } });
     const base = {
       version: 1,
       request: "persisted request",
@@ -167,7 +166,7 @@ describe("core plugin characterization", () => {
       taskAttempts: {},
       edgeTraversals: {},
       runState: { castId: "older", runDir: path.join(harness.cwd, ".pi/pi-materia/cast"), usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} } },
-      pipeline: { entry: { id: "Socket-1", socket: { type: "agent", materia: "Build" }, materia: { tools: "readOnly", prompt: "" } }, sockets: {} },
+      pipeline: { entry: { id: "Socket-1", socket: { materia: "Build" }, materia: { tools: "readOnly", prompt: "" } }, sockets: {} },
     };
 
     harness.pi.appendEntry("pi-materia-cast-state", { ...base, active: false, castId: "older", failedReason: "first failed" });

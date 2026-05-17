@@ -31,7 +31,7 @@ function state(): MateriaCastState {
 }
 
 function utilitySocket(materia: UtilityResolvedSocket["materia"], socket: Partial<UtilityResolvedSocket["socket"]> = {}): UtilityResolvedSocket {
-  return { id: "Socket-1", socket: { type: "utility", materia: "Utility", ...socket }, materiaId: "Utility", materia };
+  return { id: "Socket-1", socket: { materia: "Utility", ...socket }, materiaId: "Utility", materia };
 }
 
 describe("application utility execution", () => {

@@ -15,7 +15,6 @@ export interface SocketLayout {
 }
 
 export interface PipelineSocket {
-  type?: SocketType;
   socketKind?: SocketKind;
   materia?: string;
   utility?: string;
@@ -41,7 +40,6 @@ export interface PipelineLoopExitRoute {
 }
 
 export interface PipelineLoop {
-  label?: string;
   sockets: string[];
   consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
@@ -64,10 +62,7 @@ export interface PipelineConfig {
   [key: string]: unknown;
 }
 
-export type LegacyPipelineSocket = PipelineSocket & { next?: string };
-
 function normalizeEdgeConditionForClient(when: unknown): MateriaEdgeCondition {
-  if (when === undefined || when === '' || when === 'flow' || when === 'Flow') return 'always';
   if (when === 'always' || when === 'satisfied' || when === 'not_satisfied') return when;
   return when as MateriaEdgeCondition;
 }
@@ -83,13 +78,11 @@ export function normalizeMateriaConfigEdges(config: MateriaConfig, options: Norm
   for (const loadout of Object.values(normalized.loadouts ?? {})) {
     normalizeLoadoutSocketKinds(loadout);
     normalizeLoadoutLayout(loadout);
-    for (const socket of Object.values(loadout.sockets ?? {}) as LegacyPipelineSocket[]) {
+    for (const socket of Object.values(loadout.sockets ?? {})) {
       normalizeCanonicalParseSemantics(socket);
       const edges = (socket.edges ?? []).map((edge) => ({ ...edge, when: normalizeEdgeConditionForClient(edge.when) }));
-      if (typeof socket.next === 'string' && socket.next) edges.push({ when: 'always', to: socket.next });
       if (edges.length > 0) socket.edges = edges;
       else delete socket.edges;
-      delete socket.next;
     }
     if (semantic) {
       let semanticLoadout = fromWebUiLoadoutDto(loadout as never);
@@ -114,7 +107,7 @@ function normalizeCanonicalParseSemantics(container: { parse?: unknown; outputFo
 function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
   for (const id of generatorPipelineSocketIds(loadout, definitions)) {
     const socket = loadout.sockets?.[id];
-    if ((socket?.type !== 'agent' && socket?.type !== 'utility') || typeof socket.materia !== 'string') continue;
+    if (typeof socket?.materia !== 'string') continue;
     if (!canonicalMateriaGeneratorOutput(definitions[socket.materia])) continue;
     socket.parse = 'json';
     socket.assign = { ...(socket.assign as Record<string, string> | undefined ?? {}), workItems: '$.workItems' };
@@ -142,6 +135,7 @@ export interface MateriaBehaviorConfig {
   group?: string;
   utility?: string;
   command?: string[];
+  script?: unknown;
   params?: Record<string, unknown>;
   timeoutMs?: number;
   parse?: 'text' | 'json';
@@ -161,7 +155,6 @@ export interface MateriaConfig {
 }
 
 export interface MateriaReference {
-  type: SocketType;
   materia: string;
 }
 
@@ -243,12 +236,11 @@ export function deleteSocketFromLoadout(loadout: PipelineConfig, socketId: strin
   if (!loadout.sockets || !canDeleteSocket(socket)) return false;
 
   delete loadout.sockets[socketId];
-  for (const current of Object.values(loadout.sockets) as LegacyPipelineSocket[]) {
+  for (const current of Object.values(loadout.sockets)) {
     if (current.edges) {
       current.edges = current.edges.filter((edge) => edge.to !== socketId);
       if (current.edges.length === 0) delete current.edges;
     }
-    if (current.next === socketId) delete current.next;
     deleteOptionalTarget(current.foreach, socketId);
     deleteOptionalTarget(current.advance as { done?: string } | undefined, socketId);
   }
@@ -290,8 +282,8 @@ function isSocketLayout(value: unknown): value is SocketLayout {
 export function getSocketLayout(loadout: PipelineConfig | undefined, socketId: string): SocketLayout | undefined {
   const explicit = loadout?.layout?.sockets?.[socketId];
   if (isSocketLayout(explicit)) return explicit;
-  const legacy = loadout?.sockets?.[socketId]?.layout;
-  return isSocketLayout(legacy) ? legacy : undefined;
+  const current = loadout?.sockets?.[socketId]?.layout;
+  return isSocketLayout(current) ? current : undefined;
 }
 
 export function setLoadoutSocketLayout(loadout: PipelineConfig, socketId: string, layout: SocketLayout | undefined): PipelineConfig {
@@ -315,10 +307,8 @@ export function normalizeLoadoutLayout(loadout: PipelineConfig): PipelineConfig 
   const socketLayouts: Record<string, SocketLayout> = {};
 
   for (const id of Object.keys(sockets).sort((a, b) => a.localeCompare(b))) {
-    const authoritative = existingSockets[id];
-    const fallback = sockets[id]?.layout;
-    const source = isSocketLayout(authoritative) ? authoritative : isSocketLayout(fallback) ? fallback : undefined;
-    if (source) socketLayouts[id] = { ...(typeof source.x === 'number' ? { x: source.x } : {}), ...(typeof source.y === 'number' ? { y: source.y } : {}) };
+    const source = existingSockets[id] ?? sockets[id]?.layout;
+    if (isSocketLayout(source)) socketLayouts[id] = { ...(typeof source.x === 'number' ? { x: source.x } : {}), ...(typeof source.y === 'number' ? { y: source.y } : {}) };
     if (sockets[id] && 'layout' in sockets[id]) delete sockets[id].layout;
   }
 
@@ -389,12 +379,12 @@ export function removeLoopExitRoute(loadout: PipelineConfig, loopId: string, rou
   return true;
 }
 
-export function createMateriaReference(materiaId: string, type: SocketType = 'agent'): MateriaReference {
-  return { type, materia: materiaId };
+export function createMateriaReference(materiaId: string, _type: SocketType = 'agent'): MateriaReference {
+  return { materia: materiaId };
 }
 
 export function materiaPaletteSocket(id: string, definition?: MateriaBehaviorConfig): PipelineSocket {
-  if (definition?.type === 'utility') return { ...createMateriaReference(id, 'utility') };
+  if (definition?.type === 'utility' || definition?.utility !== undefined || definition?.command !== undefined || definition?.script !== undefined) return { ...createMateriaReference(id, 'utility') };
   return {
     ...createMateriaReference(id, 'agent'),
     parse: definition?.parse,
@@ -408,8 +398,8 @@ export function buildMateriaPalette(definitions: Record<string, MateriaBehaviorC
 }
 
 export function extractMateriaReference(socket?: PipelineSocket): MateriaReference | undefined {
-  if (!socket || socket.empty || (socket.type !== 'agent' && socket.type !== 'utility') || typeof socket.materia !== 'string' || !socket.materia) return undefined;
-  return createMateriaReference(socket.materia, socket.type);
+  if (!socket || socket.empty || typeof socket.materia !== 'string' || !socket.materia) return undefined;
+  return createMateriaReference(socket.materia);
 }
 
 export function extractMateriaBehavior(socket?: PipelineSocket): PipelineSocket {
@@ -428,7 +418,7 @@ export function extractSocketStructure(socket?: PipelineSocket): PipelineSocket 
       if (isSocketKind(value)) structure.socketKind = value;
       continue;
     }
-    if (!materiaBehaviorKeys.has(key) && key !== 'empty' && key !== 'next' && key !== 'layout') structure[key] = cloneValue(value);
+    if (!materiaBehaviorKeys.has(key) && key !== 'empty' && key !== 'layout') structure[key] = cloneValue(value);
   }
   return structure;
 }
@@ -449,8 +439,7 @@ export function getSocketLabel(id: string, socket?: PipelineSocket, definitions?
   const definition = referenced ? definitions?.[referenced.materia] : undefined;
   if (definition?.label) return definition.label;
   if (referenced) return referenced.materia;
-  if (socket?.type === 'utility') return socket.label ?? socket.utility ?? socket.command?.join(' ') ?? id;
-  return socket?.materia ?? socket?.utility ?? id;
+  return socket?.label ?? socket?.materia ?? socket?.utility ?? id;
 }
 
 export function formatSocketLabel(id: string, socket?: PipelineSocket, definitions?: Record<string, MateriaBehaviorConfig>): string {
@@ -478,15 +467,8 @@ function effectiveSocketParse(socket: PipelineSocket | undefined, definitions: R
 
 function validateCanonicalSocketReferences(loadoutName: string, loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>, errors: string[]): void {
   for (const [socketId, socket] of Object.entries(loadout.sockets ?? {})) {
-    if ((socket.type !== 'agent' && socket.type !== 'utility') || typeof socket.materia !== 'string' || !socket.materia) continue;
-    const definition = definitions[socket.materia];
-    if (!definition) {
-      if (socket.type === 'utility') errors.push(`loadouts.${loadoutName}.sockets.${socketId}.materia: utility socket references unknown materia ${JSON.stringify(socket.materia)}`);
-      continue;
-    }
-    if (definition.type === undefined) continue;
-    if (socket.type === 'agent' && definition.type !== 'agent') errors.push(`loadouts.${loadoutName}.sockets.${socketId}.materia: agent socket must reference agent materia`);
-    if (socket.type === 'utility' && definition.type !== 'utility') errors.push(`loadouts.${loadoutName}.sockets.${socketId}.materia: utility socket must reference utility materia`);
+    if (typeof socket.materia !== 'string' || !socket.materia) continue;
+    if (Object.keys(definitions).length > 0 && !definitions[socket.materia]) errors.push(`loadouts.${loadoutName}.sockets.${socketId}.materia: socket references unknown materia ${JSON.stringify(socket.materia)}`);
   }
 }
 
@@ -557,7 +539,9 @@ export function canonicalizeUtilitySocketReferences(config: MateriaConfig): Mate
   const next = cloneValue(config);
   for (const loadout of Object.values(next.loadouts ?? {})) {
     for (const socket of Object.values(loadout.sockets ?? {})) {
-      if (socket.type !== 'utility' || typeof socket.materia !== 'string' || !socket.materia) continue;
+      if (typeof socket.materia !== 'string' || !socket.materia) continue;
+      const definition = next.materia?.[socket.materia];
+      if (definition?.type !== 'utility' && definition?.utility === undefined && definition?.command === undefined && definition?.script === undefined) continue;
       delete socket.utility;
       delete socket.command;
       delete socket.params;

@@ -81,7 +81,7 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
     `Reserved evaluator/route fields ${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")} must not carry generator payload data.`,
     Array.isArray(upstreamWorkItems) ? `Upstream generated workItems JSON for this generator stage:\n${JSON.stringify(upstreamWorkItems, null, 2)}` : undefined,
     "If upstream workItems are present, consume them as input context and transform/refine them into a new canonical workItems array; this stage must still output another JSON-parsed canonical handoff envelope with workItems.",
-    "Compatibility note: any legacy generates metadata is migration-only adapter metadata and is not an active runtime output contract.",
+    "Compatibility note: any legacy generates metadata is obsolete adapter metadata and is not an active runtime output contract.",
   ].filter(Boolean).join("\n");
 }
 
@@ -222,7 +222,7 @@ export function resolvedSocketConfig<TSocket extends ResolvedMateriaSocket>(sock
 }
 
 export function isAgentResolvedSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
-  return resolvedSocketConfig(socket).type === "agent";
+  return "prompt" in socket.materia;
 }
 
 export function isMultiTurnResolvedAgentSocket(socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {

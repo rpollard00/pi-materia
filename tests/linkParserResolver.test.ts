@@ -10,10 +10,10 @@ const materia = {
 } satisfies MateriaCatalog;
 
 const loadouts = {
-  Consult: { id: "Consult", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
-  Build: { id: "BuildLoadout", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
-  "Hojo Consult": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
-  "Hojo-Consult": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
+  Consult: { id: "Consult", entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } },
+  Build: { id: "BuildLoadout", entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } },
+  "Hojo Consult": { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } },
+  "Hojo-Consult": { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } },
 } satisfies Record<string, Loadout>;
 
 describe("/materia link parser", () => {

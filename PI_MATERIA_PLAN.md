@@ -1,6 +1,6 @@
 # pi-materia Next Features Plan
 
-> Historical implementation plan. Examples, module paths, and terminology in this file document older designs or migration history and are not current import guidance. Historical examples below have been updated to socket terminology where they describe pi-materia graph concepts; active configuration uses top-level `materia` entries and socket `materia` assignments. Use `docs/core-layering.md` for the current root surface and import policy.
+> Historical implementation plan. Examples, module paths, and terminology in this file document older designs or stability history and are not current import guidance. Historical examples below have been updated to socket terminology where they describe pi-materia graph concepts; active configuration uses top-level `materia` entries and socket `materia` assignments. Use `docs/core-layering.md` for the current root surface and import policy.
 
 This plan turns the first test feedback into a staged roadmap for pi-materia, a Pi extension for configurable agent pipelines.
 
@@ -79,12 +79,12 @@ Tasks:
         "planner": {
           "type": "agent",
           "role": "planner",
-          "next": "builder"
+          "edges": [{ "when": "always", "to": "builder" }]
         },
         "builder": {
           "type": "agent",
           "role": "builder",
-          "next": "evaluator"
+          "edges": [{ "when": "always", "to": "evaluator" }]
         },
         "evaluator": {
           "type": "agent",
@@ -97,7 +97,7 @@ Tasks:
         "maintainer": {
           "type": "agent",
           "role": "jjMaintainer",
-          "next": "planner"
+          "edges": [{ "when": "always", "to": "planner" }]
         }
       }
     },
@@ -199,7 +199,7 @@ Tasks:
   ```
 - [x] Show roles, tools, max attempts, artifact dir, and budget.
 - [ ] Show maintain policy once `maintainPolicy` exists in Phase 4.
-- [x] Generalize graph rendering for configured `next` and labeled `edges`.
+- [x] Generalize graph rendering for configured `edges`.
   - Runtime execution is still intentionally limited to the supported Phase 1 grid shape.
 
 Acceptance:
@@ -479,26 +479,21 @@ This phase should happen before deeper Maintenance/VCS Policy work so that VCS a
 Tasks:
 - Extend pipeline socket schema to support non-agent utility sockets:
   ```ts
-  interface MateriaUtilitySocketConfig {
-    type: "utility";
-    utility?: string;
-    command?: string[];
-    params?: Record<string, unknown>;
+  interface MateriaPipelineSocketConfig {
+    materia: string;
     parse?: "json" | "text";
     assign?: Record<string, string>;
-    next?: string;
     edges?: MateriaEdgeConfig[];
     foreach?: MateriaForeachConfig;
     advance?: MateriaAdvanceConfig;
     limits?: MateriaSocketLimitsConfig;
-    timeoutMs?: number;
   }
   ```
 - Keep `agent` and `utility` sockets on the same generic completion path:
   - write raw output artifact
   - optionally parse JSON
   - apply `assign`
-  - evaluate configured `edges`/`next`
+  - evaluate configured `edges`
   - enforce visit/traversal limits
   - write manifest and event metadata
 - Update `/materia grid` rendering and validation to show utility sockets and validate `command`/`utility` fields.
@@ -529,7 +524,7 @@ Example config:
         "assign": {
           "bootstrap": "$"
         },
-        "next": "planner"
+        "edges": [{ "when": "always", "to": "planner" }]
       }
     }
   }
@@ -620,7 +615,7 @@ Acceptance:
 Problem: there is currently no test script or test harness. `npm run typecheck` exists, but runtime behavior is only manually smoke-tested.
 
 Tasks:
-- Evaluate adopting Bun for local development/test speed while preserving npm package compatibility for Pi users.
+- Evaluate adopting Bun for local development/test speed while preserving npm package stability for Pi users.
 - Add `bun test` based test scripts, for example:
   ```json
   {
@@ -631,7 +626,7 @@ Tasks:
     }
   }
   ```
-- Decide whether to switch package management fully to Bun (`bun.lock`) or keep `package-lock.json` until publishing compatibility is confirmed.
+- Decide whether to switch package management fully to Bun (`bun.lock`) or keep `package-lock.json` until publishing stability is confirmed.
 - Add a lightweight fake Pi extension context/session harness for native runtime tests.
 - Keep tests runnable in a normal repo checkout without requiring real provider API calls.
 
@@ -837,8 +832,8 @@ The engine must not know domain concepts:
 - checkpoint/commit
 
 Acceptance:
-- A config with one socket that prompts `Say exactly: HELLO WORLD` and `next: "end"` works without framework code changes.
-- Searching `src/` for planner/builder/evaluator/maintainer/plan/build/evaluation/maintain should find only docs/examples/default config compatibility comments if any, not runtime branches.
+- A config with one socket that prompts `Say exactly: HELLO WORLD` and an `always` edge to `end` works without framework code changes.
+- Searching `src/` for planner/builder/evaluator/maintainer/plan/build/evaluation/maintain should find only docs/examples/default config stability comments if any, not runtime branches.
 
 ### 14. Replace semantic socket schema with generic socket schema — Done
 
@@ -857,12 +852,9 @@ Introduce generic socket fields:
 
 ```ts
 interface MateriaPipelineSocketConfig {
-  type: "agent";
-  role: string;
-  prompt?: string;
+  materia: string;
   parse?: "text" | "json";
   assign?: Record<string, string>;
-  next?: string;
   edges?: MateriaEdgeConfig[];
   foreach?: {
     items: string;
@@ -893,7 +885,7 @@ Examples:
     "type": "agent",
     "role": "echoer",
     "prompt": "Say exactly: HELLO WORLD",
-    "next": "end"
+    "edges": [{ "when": "always", "to": "end" }]
   }
 }
 ```
@@ -1013,8 +1005,8 @@ Responsibilities:
 - set `state.lastJson` when parsed
 - apply `assign` mappings
 - apply cursor advancement when configured
-- evaluate edges/next
-- call `startSocket(next)` or complete cast
+- evaluate edges
+- call `startSocket(target)` or complete cast
 
 Generic assignment examples:
 
@@ -1070,11 +1062,10 @@ Acceptance:
 
 ### 19. Implement generic edge traversal and cycle safety — Done
 
-Generic next resolution order:
+Generic routing resolution order:
 
 1. first matching configured edge
-2. `next`
-3. `end`
+2. `end`
 
 Track:
 
@@ -1160,7 +1151,7 @@ Minimal hello-world grid:
         "type": "agent",
         "role": "echoer",
         "prompt": "Say exactly: HELLO WORLD",
-        "next": "end"
+        "edges": [{ "when": "always", "to": "end" }]
       }
     }
   },

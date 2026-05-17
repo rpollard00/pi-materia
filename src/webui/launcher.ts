@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { clearStaleDefaultLoadoutPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch } from "../config/config.js";
+import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
 
@@ -225,8 +226,8 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
     try {
       let loaded = await loadConfig(ctx.cwd, configuredPath);
       const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
-      const loadoutIdKnown = Object.values(loaded.config.loadouts ?? {}).some((loadout) => loadout.id === name);
-      if (!loadoutIdKnown) {
+      const loadoutKnown = resolveLoadoutReference(name, loaded.config.loadouts, loaded.loadoutSources);
+      if (!loadoutKnown) {
         return {
           ok: false,
           code: "unknown_loadout",

@@ -10,7 +10,6 @@ import {
   placeMateriaInSocket,
   setLoadoutSocketLayout,
   loopExitRouteId,
-  type LegacyPipelineSocket,
   type PipelineConfig,
   type PipelineLoop,
   type PipelineSocket,
@@ -146,13 +145,9 @@ export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string)
   let sockets: Record<string, PipelineSocket> = { ...loadout.sockets };
   delete sockets[socketId];
   for (const [id, current] of Object.entries(sockets)) {
-    let next = current as LegacyPipelineSocket;
+    let next = current;
     const edges = current.edges?.filter((edge) => edge.to !== socketId);
-    if (edges && edges.length !== (current.edges ?? []).length) next = withoutUndefinedEdges({ ...next, edges }) as LegacyPipelineSocket;
-    if (next.next === socketId) {
-      next = { ...next };
-      delete next.next;
-    }
+    if (edges && edges.length !== (current.edges ?? []).length) next = withoutUndefinedEdges({ ...next, edges });
     const foreach = deleteOptionalDone(next.foreach, socketId);
     const advance = deleteOptionalDone(next.advance as { done?: string } | undefined, socketId) as PipelineSocket['advance'];
     if (foreach !== next.foreach || advance !== next.advance) next = { ...next, foreach, advance };
@@ -184,7 +179,7 @@ export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string)
   return setLoadoutSocketLayout(replaceLoops(replaceSockets(loadout, sockets), loops), socketId, undefined);
 }
 
-export function createTaskLoop(loadout: PipelineConfig, loopId: string, label: string, sockets: string[], consumes: { from: string; output: string }, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
+export function createTaskLoop(loadout: PipelineConfig, loopId: string, sockets: string[], consumes: { from: string; output: string }, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
   if (sockets.length === 0) return loadout;
   let nextLoadout = loadout;
   if (sockets.length === 1) {
@@ -194,7 +189,7 @@ export function createTaskLoop(loadout: PipelineConfig, loopId: string, label: s
       nextLoadout = replaceSockets(loadout, { ...loadout.sockets, [socketId]: { ...socket, edges: [{ when: 'always', to: socketId }] } });
     }
   }
-  return { ...nextLoadout, loops: { ...(nextLoadout.loops ?? {}), [loopId]: { label, sockets, consumes, exit } } };
+  return { ...nextLoadout, loops: { ...(nextLoadout.loops ?? {}), [loopId]: { sockets, consumes, exit } } };
 }
 
 export function updateLoopExitInLoadout(loadout: PipelineConfig, loopId: string, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
@@ -261,20 +256,11 @@ export function removeEdgeFromLoadout(loadout: PipelineConfig, from: string, edg
   return replaceSockets(loadout, { ...loadout.sockets, [from]: withoutUndefinedEdges({ ...socket, edges }) });
 }
 
-export function removeLegacyNextFromLoadout(loadout: PipelineConfig, from: string): PipelineConfig {
-  const socket = loadout.sockets?.[from] as LegacyPipelineSocket | undefined;
-  if (!loadout.sockets || !socket?.next) return loadout;
-  const next = { ...socket };
-  delete next.next;
-  return replaceSockets(loadout, { ...loadout.sockets, [from]: next });
-}
-
 export function toggleEdgeConditionInLoadout(loadout: PipelineConfig, from: string, to: string, when: MateriaEdgeCondition, nextWhen: MateriaEdgeCondition, edgeIndex?: number): PipelineConfig {
-  const socket = loadout.sockets?.[from] as LegacyPipelineSocket | undefined;
+  const socket = loadout.sockets?.[from];
   if (!loadout.sockets || !socket) return loadout;
   if (edgeIndex === undefined) {
     const next = { ...socket, edges: [...(socket.edges ?? []), { to, when: nextWhen }] };
-    delete next.next;
     return replaceSockets(loadout, { ...loadout.sockets, [from]: next });
   }
   const candidate = socket.edges?.[edgeIndex];

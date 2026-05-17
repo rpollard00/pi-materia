@@ -44,15 +44,15 @@ describe("socket-only loadout accessors", () => {
     const loadout = {
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "utility", utility: "vcs.status" },
+        "Socket-1": { materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { utility: "vcs.status" },
       },
     } satisfies MateriaPipelineConfig;
 
     expect(loadoutSocketIds(loadout)).toEqual(["Socket-1", "Socket-2"]);
     expect(loadoutSocketEntries(loadout).map(([id]) => id)).toEqual(["Socket-1", "Socket-2"]);
     expect(loadoutSocketIdSet(loadout)).toEqual(new Set(["Socket-1", "Socket-2"]));
-    expect(getLoadoutSocket(loadout, "Socket-2")?.type).toBe("utility");
+    expect(getLoadoutSocket(loadout, "Socket-2")?.utility).toBe("vcs.status");
   });
 
   test("provides loop traversal helpers", () => {

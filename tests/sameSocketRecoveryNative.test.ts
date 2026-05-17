@@ -25,7 +25,7 @@ function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", edges: [{ when: 'always', to: 'end' }] } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
@@ -34,16 +34,16 @@ function multiTurnConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: 'always', to: 'end' }] } } } },
     materia: { Plan: { tools: "readOnly", prompt: "Collaborative planner", multiTurn: true } },
   };
 }
 
-function jsonAgentConfig(next: string = "end") {
+function jsonAgentConfig(target: string = "end") {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", parse: "json", assign: { result: "$.result" }, next } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", parse: "json", assign: { result: "$.result" }, edges: [{ when: "always", to: target }] } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
@@ -59,8 +59,8 @@ function utilityJsonConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", utility: "echo", parse: "json", params: { output: "not json" }, next: "end" } } } },
-    materia: { Build: { tools: "coding", prompt: "Build materia" } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Broken-Json", edges: [{ when: 'always', to: 'end' }] } } } },
+    materia: { "Broken-Json": { type: "utility", utility: "echo", parse: "json", params: { output: "not json" } }, Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
 
@@ -73,26 +73,21 @@ function foreachConfig() {
         entry: "Socket-1",
         sockets: {
           "Socket-1": {
-            type: "utility",
-            utility: "echo",
-            parse: "json",
-            params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } },
-            assign: { items: "$.items" },
-            next: "Socket-2",
+            materia: "Seed-Items",
+            edges: [{ when: 'always', to: 'Socket-2' }],
           },
           "Socket-2": {
-            type: "agent",
             materia: "Build",
             parse: "json",
             foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "end" },
             advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "end" },
-            next: "Socket-2",
+            edges: [{ when: 'always', to: 'Socket-2' }],
             limits: { maxVisits: 5 },
           },
         },
       },
     },
-    materia: { Build: { tools: "coding", prompt: "Build materia" } },
+    materia: { "Seed-Items": { type: "utility", utility: "echo", parse: "json", params: { output: { items: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }] } }, assign: { items: "$.items" } }, Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
 

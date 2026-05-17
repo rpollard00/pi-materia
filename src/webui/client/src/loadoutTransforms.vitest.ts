@@ -11,7 +11,6 @@ import {
   deleteLoopFromLoadout,
   deleteSocketImmutable,
   removeEdgeFromLoadout,
-  removeLegacyNextFromLoadout,
   removeLoopExitRouteFromLoadout,
   setSocketMateria,
   swapSocketMateria,
@@ -32,15 +31,14 @@ function baseLoadout(): PipelineConfig {
   return {
     entry: 'Socket-1',
     sockets: {
-      'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+      'Socket-1': { socketKind: 'entry', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
       'Socket-2': { socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }] },
-      'Socket-3': { socketKind: 'normal', type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
-      'Socket-4': { socketKind: 'normal', type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
+      'Socket-3': { socketKind: 'normal', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
+      'Socket-4': { socketKind: 'normal', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
     },
     layout: { sockets: { 'Socket-1': { x: 0, y: 0 }, 'Socket-2': { x: 1, y: 0 } } },
     loops: {
       work: {
-        label: 'Work loop',
         sockets: ['Socket-3', 'Socket-4'],
         consumes: { from: 'Socket-1', output: 'workItems' },
         exit: { from: 'Socket-4', when: 'satisfied', to: 'end' },
@@ -67,8 +65,8 @@ describe('immutable loadout transforms', () => {
 
   it('places, swaps, and clears materia by cloning only affected sockets', () => {
     const previous = deepFreeze(baseLoadout());
-    const placed = setSocketMateria(previous, 'Socket-2', { type: 'agent', materia: 'Review', parse: 'json' });
-    expect(placed.sockets?.['Socket-2']).toMatchObject({ type: 'agent', materia: 'Review', parse: 'json', empty: false });
+    const placed = setSocketMateria(previous, 'Socket-2', { materia: 'Review', parse: 'json' });
+    expect(placed.sockets?.['Socket-2']).toMatchObject({ materia: 'Review', parse: 'json', empty: false });
     expect(placed.sockets?.['Socket-1']).toBe(previous.sockets?.['Socket-1']);
     expect(previous.sockets?.['Socket-2']).toEqual({ socketKind: 'normal', empty: true, edges: [{ when: 'always', to: 'Socket-3' }] });
     expect(previous.layout?.sockets?.['Socket-2']).toEqual({ x: 1, y: 0 });
@@ -82,10 +80,10 @@ describe('immutable loadout transforms', () => {
     expect(swapped.sockets?.['Socket-1']).toMatchObject({ materia: 'Review' });
   });
 
-  it('adds and removes graph edges and legacy next links immutably', () => {
-    const withLegacy: PipelineConfig = baseLoadout();
-    withLegacy.sockets = { ...withLegacy.sockets!, 'Socket-5': { socketKind: 'normal' }, Legacy: { socketKind: 'normal', next: 'Socket-1' } };
-    const previous = deepFreeze(withLegacy);
+  it('adds, removes, and toggles graph edges immutably', () => {
+    const withCurrent: PipelineConfig = baseLoadout();
+    withCurrent.sockets = { ...withCurrent.sockets!, 'Socket-5': { socketKind: 'normal' }, Current: { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-1' }] } };
+    const previous = deepFreeze(withCurrent);
     const added = addEdgeToLoadout(previous, 'Socket-2', 'Socket-5', 'satisfied');
     expect(added.sockets?.['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }, { when: 'satisfied', to: 'Socket-5' }]);
     expect(previous.sockets?.['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
@@ -93,9 +91,7 @@ describe('immutable loadout transforms', () => {
     const removed = removeEdgeFromLoadout(added, 'Socket-2', 0);
     expect(removed.sockets?.['Socket-2'].edges).toEqual([{ when: 'satisfied', to: 'Socket-5' }]);
 
-    const withoutNext = removeLegacyNextFromLoadout(previous, 'Legacy');
-    expect(withoutNext.sockets?.Legacy).not.toHaveProperty('next');
-    expect(previous.sockets?.Legacy).toHaveProperty('next', 'Socket-1');
+    expect(previous.sockets?.Current?.edges).toEqual([{ when: 'always', to: 'Socket-1' }]);
 
     const toggled = toggleEdgeConditionInLoadout(previous, 'Socket-1', 'Socket-2', 'always', 'satisfied', 0);
     expect(toggled.sockets?.['Socket-1'].edges).toEqual([{ when: 'satisfied', to: 'Socket-2' }]);
@@ -103,7 +99,7 @@ describe('immutable loadout transforms', () => {
 
   it('creates, edits, clears, deletes loops and loop-exit routes without mutating inputs', () => {
     const previous = deepFreeze(baseLoadout());
-    const created = createTaskLoop(previous, 'single', 'Single', ['Socket-2'], { from: 'Socket-1', output: 'workItems' }, { from: 'Socket-2', when: 'always', to: 'end' });
+    const created = createTaskLoop(previous, 'single', ['Socket-2'], { from: 'Socket-1', output: 'workItems' }, { from: 'Socket-2', when: 'always', to: 'end' });
     expect(created.loops?.single).toBeDefined();
     expect(created.sockets?.['Socket-2'].edges).toContainEqual({ when: 'always', to: 'Socket-2' });
     expect(previous.loops?.single).toBeUndefined();
@@ -154,7 +150,7 @@ describe('immutable loadout transforms', () => {
     const directToLoop = baseLoadout();
     directToLoop.sockets!['Socket-1'].edges = [{ when: 'always', to: 'Socket-3' }];
     const previous = deepFreeze(directToLoop);
-    const inserted = setSocketMateria(createConnectedEmptySocket(previous, 'Socket-1'), 'Socket-5', { type: 'agent', materia: 'refiner' });
+    const inserted = setSocketMateria(createConnectedEmptySocket(previous, 'Socket-1'), 'Socket-5', { materia: 'refiner' });
 
     expect(inserted).not.toBe(previous);
     expect(inserted.sockets).not.toBe(previous.sockets);

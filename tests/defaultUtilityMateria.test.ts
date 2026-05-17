@@ -18,13 +18,11 @@ describe("bundled utility materia defaults", () => {
       expect(loadout, loadoutName).toBeTruthy();
       expect(loadout?.entry).toBe("Socket-1");
       expect(loadout?.sockets?.["Socket-1"]).toMatchObject({
-        type: "utility",
         socketKind: "entry",
         materia: "Ignore-Artifacts",
         edges: [{ when: "always", to: "Socket-2" }],
       });
       expect(loadout?.sockets?.["Socket-2"]).toMatchObject({
-        type: "utility",
         socketKind: "normal",
         materia: "Detect-VCS",
         edges: [{ when: "always", to: "Socket-3" }],

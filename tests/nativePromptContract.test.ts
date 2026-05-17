@@ -82,28 +82,31 @@ describe("native JSON prompt handoff contract guidance", () => {
           entry: "Socket-1",
           sockets: {
             "Socket-1": {
-              type: "utility",
-              utility: "echo",
-              parse: "json",
-              params: {
-                output: {
-                  summary: "seeded plan",
-                  workItems: [{ id: "one", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "adapter owned", constraints: [], dependencies: [], risks: [] } }],
-                  guidance: { architecture: "reuse materia; sockets adapt placement" },
-                  decisions: [],
-                  risks: [],
-                  satisfied: true,
-                  feedback: "",
-                  missing: [],
-                },
-              },
+              materia: "Seed",
               edges: [{ when: "always", to: "Socket-2" }],
             },
-            "Socket-2": { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
+            "Socket-2": { materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
           },
         },
       },
       materia: {
+        Seed: {
+          type: "utility",
+          utility: "echo",
+          parse: "json",
+          params: {
+            output: {
+              summary: "seeded plan",
+              workItems: [{ id: "one", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "adapter owned", constraints: [], dependencies: [], risks: [] } }],
+              guidance: { architecture: "reuse materia; sockets adapt placement" },
+              decisions: [],
+              risks: [],
+              satisfied: true,
+              feedback: "",
+              missing: [],
+            },
+          },
+        },
         Build: { tools: "readOnly", prompt: "Build prompt body." },
       },
     });
@@ -128,8 +131,8 @@ describe("native JSON prompt handoff contract guidance", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
-            "Socket-2": { type: "agent", materia: "Architect", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "end" }] },
+            "Socket-1": { materia: "Plan", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Architect", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "end" }] },
           },
         },
       },
@@ -148,7 +151,7 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(firstPrompt).toContain("expose generated output as workItems");
     expect(firstPrompt).toContain("must come from $.workItems");
     expect(firstPrompt).toContain("Reserved evaluator/route fields");
-    expect(firstPrompt).toContain("Compatibility note: any legacy generates metadata is migration-only");
+    expect(firstPrompt).toContain("Compatibility note: any legacy generates metadata is obsolete");
     expectPromptIncludesCentralHandoffContract(firstPrompt);
 
     harness.appendAssistantMessage(JSON.stringify({
@@ -180,8 +183,8 @@ describe("native JSON prompt handoff contract guidance", () => {
         Yolo: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "Plan", edges: [{ when: "always", to: "Socket-2" }] },
-            "Socket-2": { type: "agent", materia: "Architect", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "end" }] },
+            "Socket-1": { materia: "Plan", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Architect", assign: { tasks: "$.tasks" }, edges: [{ when: "always", to: "end" }] },
           },
         },
       },
@@ -208,7 +211,7 @@ describe("native JSON prompt handoff contract guidance", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "Check", parse: "json" },
+            "Socket-1": { materia: "Check", parse: "json" },
           },
         },
       },
@@ -236,7 +239,7 @@ describe("native JSON prompt handoff contract guidance", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "Plan", parse: "json" },
+            "Socket-1": { materia: "Plan", parse: "json" },
           },
         },
       },
@@ -275,7 +278,7 @@ describe("native JSON prompt handoff contract guidance", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "agent", materia: "Speak" },
+            "Socket-1": { materia: "Speak" },
           },
         },
       },

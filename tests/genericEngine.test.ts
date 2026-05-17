@@ -79,13 +79,12 @@ describe("generic engine helper mechanics", () => {
     expect(evaluateCondition("!exists($.missing)", state, parsed)).toBe(true);
   });
 
-  test("routes canonical always/satisfied/not_satisfied edges and legacy next with one handoff contract", () => {
+  test("routes canonical always/satisfied/not_satisfied edges with one handoff contract", () => {
     const state = makeState();
     const config = { limits: { maxEdgeTraversals: 5 } } as PiMateriaConfig;
     const socket = {
       id: "Check",
       socket: {
-        type: "agent",
         materia: "Check",
         edges: [
           { when: "satisfied", to: "Done" },
@@ -99,18 +98,17 @@ describe("generic engine helper mechanics", () => {
     expect(selectNextTarget(state, socket, { satisfied: true }, config)).toBe("Done");
     expect(selectNextTarget(state, socket, { satisfied: false }, config)).toBe("Build");
     expect(selectNextTarget(state, socket, {}, config)).toBe("Fallback");
-    expect(selectNextTarget(state, { ...socket, socket: { ...socket.socket, edges: undefined, next: "Legacy" } }, {}, config)).toBe("Legacy");
+    expect(selectNextTarget(state, { ...socket, socket: { ...socket.socket, edges: undefined } }, {}, config)).toBe("end");
   });
 
   test("advances loop completion through loop-owned exit routes without materialized edges", () => {
     const socket = {
       id: "Socket-2",
       socket: {
-        type: "utility",
         utility: "echo",
         advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
       },
-      materia: { type: "utility", utility: "echo" },
+      materia: { utility: "echo" },
     } satisfies ResolvedMateriaSocket;
     const state = makeState({
       cursors: { itemCursor: 0 },
@@ -143,11 +141,10 @@ describe("generic engine helper mechanics", () => {
     const socket = {
       id: "Socket-2",
       socket: {
-        type: "utility",
         utility: "echo",
         advance: { cursor: "itemCursor", items: "state.items", done: "Socket-9", when: "always" },
       },
-      materia: { type: "utility", utility: "echo" },
+      materia: { utility: "echo" },
     } satisfies ResolvedMateriaSocket;
     const state = makeState({
       cursors: { itemCursor: 0 },
@@ -228,7 +225,7 @@ describe("generic engine helper mechanics", () => {
     const state = makeState({ data: { workItems: generatedWorkItems } });
     const evaluator = {
       id: "Socket-5",
-      socket: { type: "agent", materia: "Auto-Eval", parse: "json" },
+      socket: { materia: "Auto-Eval", parse: "json" },
       materia: { tools: "coding", prompt: "evaluate" },
     } satisfies ResolvedMateriaSocket;
 
@@ -246,17 +243,17 @@ describe("generic engine helper mechanics", () => {
     const state = makeState({ data: {}, cursors: {}, currentItemKey: undefined, currentItemLabel: undefined });
     const planner = {
       id: "Socket-3",
-      socket: { type: "agent", materia: "planner", parse: "json", assign: { workItems: "$.workItems" } },
+      socket: { materia: "planner", parse: "json", assign: { workItems: "$.workItems" } },
       materia: { tools: "readOnly", prompt: "plan" },
     } satisfies ResolvedMateriaSocket;
     const builder = {
       id: "Socket-4",
-      socket: { type: "agent", materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
+      socket: { materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
       materia: { tools: "coding", prompt: "build {{item.id}}" },
     } satisfies ResolvedMateriaSocket;
     const maintainer = {
       id: "Socket-6",
-      socket: { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" } },
+      socket: { materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" } },
       materia: { tools: "coding", prompt: "maintain" },
     } satisfies ResolvedMateriaSocket;
 
@@ -296,7 +293,7 @@ describe("generic engine helper mechanics", () => {
         sockets: {
           "Socket-4": {
             id: "Socket-4",
-            socket: { type: "agent", materia: "Build", parse: "text" },
+            socket: { materia: "Build", parse: "text" },
             materia: { tools: "coding", prompt: "Build {{item.id}} with {{state.guidance.testCommand}}." },
           },
         },
@@ -320,15 +317,15 @@ describe("agent and utility validation", () => {
     const config: PiMateriaConfig = {
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
-      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "planner", parse: "text" } } } },
+      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "planner", parse: "text" } } } },
       materia: { planner: { tools: "readOnly", prompt: "Plan." } },
     };
 
-    expect(resolvePipeline(config).entry.socket.type).toBe("agent");
+    expect(resolvePipeline(config).entry.socket).toEqual(expect.objectContaining({ materia: "planner" }));
     expect(() => resolvePipeline({ ...config, materia: {} })).toThrow(/unknown materia "planner"/);
   });
 
-  test("accepts utility materia references and rejects migration-only inline utility configuration", () => {
+  test("accepts utility materia references and rejects obsolete inline utility configuration", () => {
     expect(resolvePipeline({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
@@ -336,18 +333,18 @@ describe("agent and utility validation", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { type: "utility", materia: "Script", next: "Socket-2" },
-            "Socket-2": { type: "utility", materia: "Ignore-Artifacts" },
+            "Socket-1": { materia: "Script", edges: [{ when: 'always', to: 'Socket-2' }] },
+            "Socket-2": { materia: "Ignore-Artifacts" },
           },
         },
       },
       materia: {
-        Script: { type: "utility", command: ["node", "script.js"] },
+        Script: { command: ["node", "script.js"] },
         "Ignore-Artifacts": { type: "utility", utility: "project.ensureIgnored", parse: "json" },
       },
-    }).sockets["Socket-2"].socket.type).toBe("utility");
+    }).sockets["Socket-2"].socket).toEqual(expect.objectContaining({ materia: "Ignore-Artifacts" }));
 
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility" } } } }, materia: {} })).toThrow(/must reference utility materia/);
-    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "utility", materia: "Bad", command: [] } } } }, materia: { Bad: { type: "utility", utility: "noop" } } })).toThrow(/migration-only socket field "command"/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": {} as never } } }, materia: {} })).toThrow(/must reference materia/);
+    expect(() => resolvePipeline({ artifactDir: ".pi/pi-materia", activeLoadout: "Test", loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Bad", command: [] } } } }, materia: { Bad: { utility: "noop" } } })).toThrow(/obsolete socket field "command"/);
   });
 });

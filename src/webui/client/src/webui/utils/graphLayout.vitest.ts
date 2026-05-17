@@ -13,14 +13,13 @@ function positioned(ids: string[]) {
 const loopLoadout = {
   entry: 'Socket-1',
   sockets: {
-    'Socket-1': { type: 'agent', materia: 'Build' },
-    'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
-    'Socket-3': { type: 'agent', materia: 'Maintain' },
+    'Socket-1': { materia: 'Build' },
+    'Socket-2': { materia: 'Auto-Eval' },
+    'Socket-3': { materia: 'Maintain' },
     'Socket-4': makeEmptySocket(),
   },
   loops: {
     taskIteration: {
-      label: 'Loop: Socket-1 → Socket-2 → Socket-3',
       sockets: ['Socket-1', 'Socket-2', 'Socket-3'],
       consumes: { from: 'Socket-1', output: 'workItems' },
     },
@@ -28,13 +27,12 @@ const loopLoadout = {
 } satisfies PipelineConfig;
 
 describe('loop display labels', () => {
-  it('formats persisted loop socket-id labels with materia names for the loop panel', () => {
+  it('derives loop labels from member materia names for the loop panel', () => {
     expect(formatLoopDisplayLabel(
       loopLoadout,
       'taskIteration',
       loopLoadout.loops!.taskIteration.sockets,
-      loopLoadout.loops!.taskIteration.label,
-    )).toBe('Loop: Build → Auto-Eval → Maintain');
+    )).toBe('Build → Auto-Eval → Maintain');
   });
 
   it('uses the same materia-name sequence for loadout grid loop regions', () => {
@@ -44,7 +42,7 @@ describe('loop display labels', () => {
       ['Socket-3', { id: 'Socket-3', x: 640, y: 160 }],
     ]) as Parameters<typeof getLoopRegions>[1];
 
-    expect(getLoopRegions(loopLoadout, positions)[0]?.label).toBe('Loop: Build → Auto-Eval → Maintain');
+    expect(getLoopRegions(loopLoadout, positions)[0]?.label).toBe('Build → Auto-Eval → Maintain');
   });
 
   it('falls back safely for unassigned loop members without changing stored socket ids', () => {
@@ -61,9 +59,9 @@ describe('loop display labels', () => {
     const loadout = {
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
-        'Socket-2': { type: 'agent', materia: 'Maintain' },
-        'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
+        'Socket-1': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-2': { materia: 'Maintain' },
+        'Socket-3': { materia: 'Auto-Eval', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
       },
       loops: { review: { sockets: ['Socket-1', 'Socket-2', 'Socket-3'] } },
     } satisfies PipelineConfig;
@@ -77,9 +75,9 @@ describe('loop display labels', () => {
     const loadout = {
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'satisfied', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }] },
-        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
-        'Socket-3': { type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-1': { materia: 'Build', edges: [{ when: 'satisfied', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }] },
+        'Socket-2': { materia: 'Auto-Eval' },
+        'Socket-3': { materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-2' }] },
       },
       loops: { review: { sockets: ['Socket-1', 'Socket-2', 'Socket-3'] } },
     } satisfies PipelineConfig;
@@ -93,9 +91,9 @@ describe('loop display labels', () => {
     const loadout = {
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
-        'Socket-2': { type: 'agent', materia: 'Maintain' },
-        'Socket-3': { type: 'agent', materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-1': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-2': { materia: 'Maintain' },
+        'Socket-3': { materia: 'Auto-Eval', edges: [{ when: 'always', to: 'Socket-2' }] },
       },
       loops: { review: { sockets: ['Socket-1', 'Socket-2', 'Socket-3'], exit: { from: 'Socket-2', when: 'satisfied', to: 'end' } } },
     } satisfies PipelineConfig;
@@ -109,9 +107,9 @@ describe('loop display labels', () => {
     const loadout = {
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }] },
-        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
-        'Socket-3': { type: 'agent', materia: 'Maintain' },
+        'Socket-1': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }, { when: 'always', to: 'Socket-3' }] },
+        'Socket-2': { materia: 'Auto-Eval' },
+        'Socket-3': { materia: 'Maintain' },
       },
       loops: { review: { sockets: ['Socket-3', 'Socket-1', 'Socket-2'] } },
     } satisfies PipelineConfig;
@@ -125,9 +123,9 @@ describe('loop display labels', () => {
     const loadout = {
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'not_satisfied', to: 'Socket-3' }] },
-        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
-        'Socket-3': { type: 'agent', materia: 'Maintain', edges: [{ when: 'not_satisfied', to: 'Socket-2' }] },
+        'Socket-1': { materia: 'Build', edges: [{ when: 'not_satisfied', to: 'Socket-3' }] },
+        'Socket-2': { materia: 'Auto-Eval' },
+        'Socket-3': { materia: 'Maintain', edges: [{ when: 'not_satisfied', to: 'Socket-2' }] },
       },
       loops: { review: { sockets: ['Socket-1', 'Socket-2', 'Socket-3'] } },
     } satisfies PipelineConfig;
@@ -141,9 +139,9 @@ describe('loop display labels', () => {
     const loadout = {
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build' },
-        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
-        'Socket-3': { type: 'agent', materia: 'Maintain' },
+        'Socket-1': { materia: 'Build' },
+        'Socket-2': { materia: 'Auto-Eval' },
+        'Socket-3': { materia: 'Maintain' },
       },
       loops: {
         review: {

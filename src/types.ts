@@ -9,7 +9,7 @@ export interface PiMateriaConfig {
   loadouts?: Record<string, MateriaPipelineConfig>;
   /** Stable id of the loadout to use. Current-format runtime/UI identity must compare against loadout.id only. */
   activeLoadoutId?: string;
-  /** Legacy/display name used for compatibility and editor selection; migration/load code translates it to activeLoadoutId when possible. */
+  /** Display name used for editor selection; activeLoadoutId is the stable runtime identity. */
   activeLoadout?: string;
   /** Top-level reusable materia behavior definitions. */
   materia: Record<string, MateriaConfig>;
@@ -83,7 +83,7 @@ export interface MateriaLimitsConfig {
 }
 
 export interface MateriaCompactionConfig {
-  /** Backward-compatible single proactive compaction threshold percentage. */
+  /** Single proactive compaction threshold percentage. */
   proactiveThresholdPercent?: number;
   /** Ordered min-inclusive/max-exclusive context-window tiers. Tiers must cover 0..infinity without gaps. */
   proactiveThresholdTiers?: MateriaCompactionThresholdTierConfig[];
@@ -298,9 +298,9 @@ export interface MateriaManifest {
 export interface MateriaRunState {
   runId: string;
   startedAt: number;
-  /** Canonical terminal timestamp. Optional for legacy persisted run state. */
+  /** Canonical terminal timestamp. */
   endedAt?: number;
-  /** Active loadout name used to execute this cast. Optional for legacy persisted run state. */
+  /** Active loadout name used to execute this cast. */
   loadoutName?: string;
   runDir: string;
   eventsFile: string;
@@ -340,7 +340,7 @@ export interface MateriaPipelineConfig {
   source?: LoadoutSource;
   /** User-controlled lock state for editable loadout sources. Policy may still force readonly. */
   lockState?: LoadoutUserLockState;
-  /** Optional provenance for duplicates or migrated local copies derived from a shipped default. */
+  /** Optional provenance for duplicates or local copies derived from a shipped default. */
   originDefaultId?: string;
   entry: string;
   /** Canonical socket map for core/domain/application code. */
@@ -364,11 +364,9 @@ export interface MateriaSocketLayoutConfig {
 export type MateriaParseMode = "text" | "json";
 
 export type MateriaSocketKind = "entry" | "normal";
-export type MateriaPipelineSocketConfig = MateriaAgentSocketConfig | MateriaUtilitySocketConfig;
-/** Legacy migration-only shape for old next-based graph edges. */
-export type LegacyMateriaPipelineSocketConfig = MateriaPipelineSocketConfig & { next?: string };
 
-export interface MateriaPipelineSocketCommonConfig {
+export interface MateriaPipelineSocketConfig {
+  materia: string;
   socketKind?: MateriaSocketKind;
   parse?: MateriaParseMode;
   assign?: Record<string, string>;
@@ -376,29 +374,12 @@ export interface MateriaPipelineSocketCommonConfig {
   foreach?: MateriaForeachConfig;
   advance?: MateriaAdvanceConfig;
   limits?: MateriaSocketLimitsConfig;
-  /** @deprecated Use loadout.layout.sockets[socketId]. Kept for legacy config loading only. */
   layout?: MateriaSocketLayoutConfig;
   empty?: boolean;
 }
 
-export interface MateriaAgentSocketConfig extends MateriaPipelineSocketCommonConfig {
-  type: "agent";
-  materia: string;
-}
-
-export interface MateriaUtilitySocketConfig extends MateriaPipelineSocketCommonConfig {
-  type: "utility";
-  /** Canonical reusable utility materia reference. */
-  materia: string;
-  /** @deprecated Migration-only inline utility alias. Configure on referenced utility materia instead. */
-  utility?: string;
-  /** @deprecated Migration-only inline command. Configure on referenced utility materia instead. */
-  command?: string[];
-  /** @deprecated Migration-only inline params. Configure on referenced utility materia instead. */
-  params?: Record<string, unknown>;
-  /** @deprecated Migration-only inline timeout. Configure on referenced utility materia instead. */
-  timeoutMs?: number;
-}
+export type MateriaAgentSocketConfig = MateriaPipelineSocketConfig;
+export type MateriaUtilitySocketConfig = MateriaPipelineSocketConfig;
 
 export type MateriaEdgeCondition = "always" | "satisfied" | "not_satisfied";
 
@@ -440,15 +421,13 @@ export interface MateriaAdvanceConfig {
 }
 
 export interface MateriaLoopConfig {
-  /** Human-readable label for graph/UI display. */
-  label?: string;
   /** Socket ids contained by this loop region. */
   sockets?: string[];
   /** Optional generator consumed by this loop region. Prefer this over directly tagging loop members as iterators. */
   consumes?: MateriaLoopConsumerConfig;
-  /** Legacy/shared iterator metadata. Prefer consumes so this is derived from generator metadata. */
+  /** Shared iterator metadata. Prefer consumes so this is derived from generator metadata. */
   iterator?: MateriaForeachConfig;
-  /** Optional documented exit edge/condition for legacy loop materialization. */
+  /** Optional documented exit edge/condition. */
   exit?: MateriaLoopExitConfig;
   /**
    * Canonical loop-owned routes followed after the loop exits.
@@ -515,7 +494,7 @@ export interface ResolvedMateriaUtilitySocket {
   id: string;
   /** Structural socket config: graph placement, routing, foreach/advance, limits, and layout. */
   socket: MateriaUtilitySocketConfig;
-  /** Referenced utility materia id. Kept explicit so runtime code does not read legacy inline socket behavior. */
+  /** Referenced utility materia id. */
   materiaId: string;
   /** Resolved reusable utility behavior, appearance, parse, assignment, params, and execution config. */
   materia: MateriaUtilityConfig;
@@ -536,7 +515,7 @@ export interface MateriaDefinitionMetadata {
   parse?: MateriaParseMode;
   /** Marks this materia as a generator; runtime resolves the canonical workItems contract. */
   generator?: boolean;
-  /** Legacy migration-only generated list metadata. Prefer generator: true. */
+  /** Generated list metadata. Prefer generator: true for the standard workItems contract. */
   generates?: MateriaGeneratorConfig;
 }
 

@@ -99,7 +99,7 @@ function generatorForLoop(materia: Record<string, MateriaConfig>, pipeline: Mate
 }
 
 function isMateriaSocket(socket: MateriaPipelineSocketConfig): socket is MateriaPipelineSocketConfig & { materia: string } {
-  return (socket.type === "agent" || socket.type === "utility") && typeof socket.materia === "string";
+  return typeof socket.materia === "string";
 }
 
 function loopSource(loadoutName: string | undefined, loopId: string, socketId: string): string {

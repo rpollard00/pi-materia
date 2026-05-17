@@ -44,19 +44,16 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
   const exitTo = options.exitTo ?? "end";
   const sockets: Record<string, unknown> = {
     "Socket-3": {
-      type: "utility",
       materia: "Yolo-Build",
       edges: [{ when: "always", to: "Socket-4" }],
       limits: { maxVisits: 10 },
     },
     "Socket-4": {
-      type: "utility",
       materia: "Yolo-Maintain",
       edges: [{ when: "always", to: "Socket-3" }],
       limits: { maxVisits: 10 },
     },
     "Socket-5": {
-      type: "agent",
       materia: "planner",
       parse: "json",
       assign: { workItems: "$.workItems" },
@@ -64,7 +61,7 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
     },
   } as never;
   if (exitTo !== "end") {
-    (sockets as Record<string, unknown>)[exitTo] = { type: "utility", materia: "Yolo-Done" };
+    (sockets as Record<string, unknown>)[exitTo] = { materia: "Yolo-Done" };
   }
 
   return {
@@ -85,7 +82,7 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
       },
     },
     materia: {
-      planner: { tools: "readOnly", prompt: "Plan.", generator: true },
+      planner: { type: "agent", tools: "readOnly", prompt: "Plan.", generator: true },
       "Yolo-Build": { type: "utility", utility: "echo", params: { text: "build" } },
       "Yolo-Maintain": { type: "utility", command: ["node", "-e", maintainScript], params: { retryOnce: options.retryOnce ?? [] }, parse: "json", assign: { maintainAttempts: "$.maintainAttempts", lastSatisfied: "$.satisfied" } },
       "Yolo-Done": { type: "utility", utility: "echo", params: { output: { done: true } }, parse: "json", assign: { done: "$.done" } },
@@ -152,7 +149,7 @@ describe("Yolo loop semantics regression", () => {
   test("satisfied loop-exit route overrides legacy loop exit target with always fallback", async () => {
     const config = yoloConfig([{ id: "one", title: "One" }]);
     config.materia.Routed = { type: "utility", utility: "echo", params: { output: { routed: true } }, parse: "json", assign: { routed: "$.routed" } };
-    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", materia: "Routed" };
+    testSockets(config.loadouts!.Yolo)["Socket-2"] = { materia: "Routed" };
     config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-satisfied", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-2" }];
 
     const { state } = await runYolo(config);
@@ -181,9 +178,9 @@ describe("Yolo loop semantics regression", () => {
     config.materia.FallbackDone = { type: "utility", utility: "echo", params: { output: { fallbackDone: true } }, parse: "json", assign: { fallbackDone: "$.fallbackDone" } };
     config.materia.SecondBuild = { type: "utility", utility: "echo", params: { text: "second build" } };
     config.materia.SecondDone = { type: "utility", utility: "echo", params: { output: { satisfied: true, secondLoopDone: true } }, parse: "json", assign: { secondLoopDone: "$.secondLoopDone" } };
-    testSockets(config.loadouts!.Yolo)["Socket-2"] = { type: "utility", materia: "FallbackDone" };
-    testSockets(config.loadouts!.Yolo)["Socket-6"] = { type: "utility", materia: "SecondBuild", foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
-    testSockets(config.loadouts!.Yolo)["Socket-7"] = { type: "utility", materia: "SecondDone", advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
+    testSockets(config.loadouts!.Yolo)["Socket-2"] = { materia: "FallbackDone" };
+    testSockets(config.loadouts!.Yolo)["Socket-6"] = { materia: "SecondBuild", foreach: { items: "state.workItems", cursor: "secondIndex" }, edges: [{ when: "always", to: "Socket-7" }] };
+    testSockets(config.loadouts!.Yolo)["Socket-7"] = { materia: "SecondDone", advance: { cursor: "secondIndex", items: "state.workItems", done: "end", when: "satisfied" }, edges: [{ when: "always", to: "Socket-6" }] };
     config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-first-loop", from: "Socket-4", condition: "satisfied", targetSocketId: "Socket-6" }];
     config.loadouts!.Yolo.loops!.secondLoop = { sockets: ["Socket-6", "Socket-7"] };
 
@@ -209,8 +206,6 @@ describe("Yolo loop semantics regression", () => {
 
     const normalizedUiConfig = normalizeMateriaConfigEdges(uiAuthored as never) as PiMateriaConfig;
     expect(testSockets(normalizedUiConfig.loadouts!.Yolo)["Socket-4"]).toMatchObject({
-      parse: "json",
-      advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" },
       edges: [{ when: "always", to: "Socket-3" }],
     });
 

@@ -19,7 +19,7 @@ When applicable, JSON-producing agent materia return this envelope:
 }
 ```
 
-Generated units of work use `workItems`, not `tasks`. pi-materia intentionally does not keep a `tasks` compatibility layer for newly generated work units; adapters should assign and iterate `workItems` directly:
+Generated units of work use `workItems`, not `tasks`. pi-materia intentionally does not keep a `tasks` stability layer for newly generated work units; adapters should assign and iterate `workItems` directly:
 
 ```json
 {
@@ -42,7 +42,7 @@ JSON sockets should preserve useful existing `summary`, `workItems`, `guidance`,
 
 Materia marked `generator: true` produce generated work through the same handoff envelope. Their canonical output is always the top-level `workItems` array. A generator socket, including a generator upstream of another generator, must use JSON parsing and expose `workItems` (for example, `"assign": { "workItems": "$.workItems" }`).
 
-Generator-to-generator pipelines behave like iterator transforms: the upstream generator emits `workItems`; the downstream generator consumes that context, transforms or filters it, and emits a new handoff JSON object with its own `workItems`. Legacy `generates`, `tasks`, `task`, `work`, or custom output names are not canonical generator payloads and should appear only in migration notes or negative tests.
+Generator-to-generator pipelines behave like iterator transforms: the upstream generator emits `workItems`; the downstream generator consumes that context, transforms or filters it, and emits a new handoff JSON object with its own `workItems`. `workItems` is the canonical generator payload; do not author `tasks`, `task`, `work`, or custom output names for generated work.
 
 ## Reserved evaluator/route fields
 
@@ -53,7 +53,7 @@ Generator-to-generator pipelines behave like iterator transforms: the upstream g
 - Reserved evaluator/route fields must not be repurposed by general payload logic.
 - When present, `satisfied` must be a JSON boolean (`true` or `false`).
 - Sockets whose graph control flow depends on `satisfied` or `not_satisfied` must return `satisfied`.
-- Do not use legacy aliases such as `passed` as routing fields. They are not canonical handoff fields.
+- Do not use current aliases such as `passed` as routing fields. They are not canonical handoff fields.
 
 ## Routing semantics
 
@@ -104,7 +104,7 @@ A socket can assign that payload into cast state:
 {
   "parse": "json",
   "assign": { "workItems": "$.workItems" },
-  "next": "Build"
+  "edges": [{ "when": "always", "to": "Build" }]
 }
 ```
 

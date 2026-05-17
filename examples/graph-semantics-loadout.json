@@ -93,7 +93,6 @@
       },
       "loops": {
         "workItemIteration": {
-          "label": "Build → Eval → Maintain until all work items complete",
           "sockets": [
             "Socket-4",
             "Socket-5",

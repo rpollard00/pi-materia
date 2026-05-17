@@ -115,12 +115,6 @@ export function assertValidLoadoutSocketReferences(loadout: Pick<MateriaPipeline
 
 export function materializeCanonicalSockets<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, materia: Record<string, Pick<MateriaConfig, "type">> = {}): TLoadout {
   loadout.sockets = loadout.sockets ?? {};
-  for (const socket of Object.values(loadout.sockets) as unknown as Array<Record<string, unknown>>) {
-    if (socket.type !== undefined) continue;
-    const materiaId = typeof socket.materia === "string" ? socket.materia : undefined;
-    const type = materiaId ? materia[materiaId]?.type : undefined;
-    if (type === "agent" || type === "utility") socket.type = type;
-  }
   for (const loop of Object.values(loadout.loops ?? {})) {
     loop.sockets = loop.sockets ?? [];
   }

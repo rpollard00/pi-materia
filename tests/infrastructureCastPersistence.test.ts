@@ -44,7 +44,7 @@ function castState(runDir: string, overrides: Partial<MateriaCastState> = {}): M
       usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} },
       budgetWarned: false,
     },
-    pipeline: { entry: { id: "Build", socket: { type: "agent", materia: "Build" }, materia: { prompt: "", tools: "coding" } }, sockets: {} } as MateriaCastState["pipeline"],
+    pipeline: { entry: { id: "Build", socket: { materia: "Build" }, materia: { prompt: "", tools: "coding" } }, sockets: {} } as MateriaCastState["pipeline"],
     ...overrides,
   };
   state.runState.runDir = runDir;

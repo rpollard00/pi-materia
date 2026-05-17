@@ -1,6 +1,6 @@
-# Loadout ownership, locking, and migration
+# Loadout ownership and locking
 
-This document records the user-facing loadout behavior and the developer guardrails that keep shipped defaults immutable. Keep it aligned with `src/domain/loadout.ts`, `src/loadout/loadoutNames.ts`, `src/config/migrations.ts`, and the WebUI loadout draft/mutation controllers.
+This document records the user-facing loadout behavior and the developer guardrails that keep shipped defaults immutable. Keep it aligned with `src/domain/loadout.ts`, `src/loadout/loadoutNames.ts`, and the WebUI loadout draft/mutation controllers.
 
 ## User-facing behavior
 
@@ -36,7 +36,7 @@ If the deleted loadout is active and has `originDefaultId`, the active loadout f
 
 ## Identity and ownership model
 
-Stable loadout ids are canonical identity. Display names are labels and migration hints only; they must not be used to infer ownership or to decide whether a loadout is a shipped default.
+Stable loadout ids are canonical identity. Display names are labels and stability hints only; they must not be used to infer ownership or to decide whether a loadout is a shipped default.
 
 Current source values are:
 
@@ -45,29 +45,11 @@ Current source values are:
 - `project` for target-project loadouts, and
 - `explicit` for explicitly loaded/imported configuration where applicable.
 
-Default display names are preserved. When another scope collides with a default name, migration and save/import paths must rename the non-default loadout rather than renaming the shipped default. `originDefaultId` is optional provenance for duplicates and migration/fallback behavior; it is not a replacement for stable ids.
-
-## Migration registry rules
-
-Loadout/config migrations live in `src/config/migrations.ts` as `LOADOUT_CONFIG_MIGRATIONS`.
-
-Rules for new migrations:
-
-1. Add migrations only by appending a new entry with a stable `NNN-name` id.
-2. Do not reorder, rename, or remove existing migration ids.
-3. Keep `CURRENT_PI_MATERIA_SCHEMA_VERSION` derived from or validated against the registry.
-4. Do not add down migrations. Schema additions should be rollback-compatible or safely ignored by older versions where possible.
-5. Treat `piMateria.schemaVersion` and `piMateria.migrations` as audit metadata, not as the only proof that data is structurally valid.
-6. Run idempotent structural checks on every config load, including files with current audit metadata.
-7. Treat configs without metadata as version 0 and migrate/stamp forward.
-8. Stamp written, regenerated, or migrated configs with current schema metadata and per-file migration audit entries.
-9. Write only changed files during migration, and preserve old/restored configs by migrating them on load.
-
-The collision migration must preserve shipped default names, use stable ids for active/default references where possible, and repoint legacy active/default references only when the target can be determined unambiguously.
+Default display names are preserved. When another scope collides with a default name, save/import paths must rename the non-default loadout rather than renaming the shipped default. `originDefaultId` is optional provenance for duplicates and fallback behavior; it is not a replacement for stable ids.
 
 ## Duplicate-name and save/import guardrails
 
-Use `makeDuplicateLoadoutName` from `src/loadout/loadoutNames.ts` anywhere a loadout duplicate or collision rename is created. This includes duplicate-from-default, duplicate user loadout, import collision, and migration collision paths.
+Use `makeDuplicateLoadoutName` from `src/loadout/loadoutNames.ts` anywhere a loadout duplicate or collision rename is created. This includes duplicate-from-default, duplicate user loadout, and import collision paths.
 
 Before persistence, save/import paths must reject or rename duplicate-name ownership across scopes. Do not allow the same display name to be owned by more than one scope unless a future namespaced UI explicitly supports that distinction.
 
@@ -86,7 +68,7 @@ Useful checks for this area:
 ```bash
 npm run typecheck
 npm run test:webui -- webui/features/loadout/LoadoutListPanel.vitest.tsx webui/features/loadout/LoadoutGraphPanel.vitest.tsx webui/features/loadout/loadoutDraft.vitest.ts
-bun test tests/configMigrations.test.ts tests/domainModel.test.ts tests/loadoutAccessors.test.ts
+bun test tests/domainModel.test.ts tests/loadoutAccessors.test.ts
 ```
 
-Use the targeted commands above while changing loadout ownership, locking, migrations, or WebUI mutation behavior; run the broader suite with `npm test` when changing shared domain/config code.
+Use the targeted commands above while changing loadout ownership, locking, or WebUI mutation behavior; run the broader suite with `npm test` when changing shared domain/config code.

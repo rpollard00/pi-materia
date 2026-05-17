@@ -32,7 +32,7 @@ export function ColorPickerField({ form, colorPicker }: ColorPickerFieldProps) {
         </div>
       )}
     </div>
-    {materiaForm.color && !materiaColorChoices.some((choice) => choice.value === materiaForm.color) && <p className="materia-color-legacy">Legacy custom color is selected; choose a palette color to replace it.</p>}
+    {materiaForm.color && !materiaColorChoices.some((choice) => choice.value === materiaForm.color) && <p className="materia-color-current">Current custom color is selected; choose a palette color to replace it.</p>}
     </fieldset>
   );
 }

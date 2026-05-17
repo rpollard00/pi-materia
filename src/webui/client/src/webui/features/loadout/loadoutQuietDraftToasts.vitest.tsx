@@ -39,8 +39,8 @@ function initialLoadout(): PipelineConfig {
     id: 'Alpha',
     entry: 'Socket-1',
     sockets: {
-      'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
-      'Socket-2': { type: 'agent', materia: 'Test' },
+      'Socket-1': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+      'Socket-2': { materia: 'Test' },
     },
   };
 }

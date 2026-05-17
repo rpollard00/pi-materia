@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { CURRENT_PI_MATERIA_SCHEMA_VERSION } from "../src/config/migrations.js";
 import piMateria from "../src/index.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -41,11 +40,11 @@ describe("FakePiHarness", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
+          sockets: { "Socket-1": { materia: "interactivePlan" } },
         },
       },
     }), "utf8");
@@ -54,8 +53,8 @@ describe("FakePiHarness", () => {
 
     await harness.runCommand("materia", "loadout");
     const listed = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(listed.content).toContain("⌘ Full-Auto Copy");
-    expect(listed.content).toContain("Full-Auto Copy*");
+    expect(listed.content).toContain("⌘ Full-Auto");
+    expect(listed.content).toContain("Full-Auto*");
     expect(listed.content).toContain("Planning-Consult");
     expect(listed.content).not.toContain("Loadout:");
     expect(listed.content).not.toContain("Available:");
@@ -80,7 +79,7 @@ describe("FakePiHarness", () => {
         activeLoadout: "Planning-Consult",
       },
     });
-    expect((switchedDetails?.loadoutEvent as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult", "Full-Auto Copy", "Planning-Consult Copy"]));
+    expect((switchedDetails?.loadoutEvent as { loadouts?: string[] } | undefined)?.loadouts).toEqual(expect.arrayContaining(["Full-Auto", "Planning-Consult"]));
     expect(harness.appendedEntries.at(-1)).toMatchObject({
       customType: "pi-materia-active-loadout-changed",
       data: {
@@ -108,7 +107,8 @@ describe("FakePiHarness", () => {
 
     const raw = JSON.parse(await readFile(projectFile, "utf8"));
     const switched = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(raw).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult", piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
+    expect(raw).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult" });
+    expect(raw.piMateria).toBeUndefined();
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
     expect(switched.content).toContain("⌘ Planning-Consult");
     expect(switched.content).toContain("Planning-Consult*");
@@ -127,11 +127,11 @@ describe("FakePiHarness", () => {
       loadouts: {
         "Full-Auto": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "planner" } },
+          sockets: { "Socket-1": { materia: "planner" } },
         },
         "Planning-Consult": {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "interactivePlan" } },
+          sockets: { "Socket-1": { materia: "interactivePlan" } },
         },
       },
     }), "utf8");
@@ -143,8 +143,8 @@ describe("FakePiHarness", () => {
     expect(harness.notifications.at(-1)?.type).toBe("error");
     expect(harness.notifications.at(-1)?.message).toContain('Unknown Materia loadout "Missing". Available loadouts: Full-Auto, Planning-Consult');
     const after = JSON.parse(await readFile(configFile, "utf8"));
-    expect(after.activeLoadout).toBe("Full-Auto Copy");
-    expect(after.piMateria.schemaVersion).toBe(CURRENT_PI_MATERIA_SCHEMA_VERSION);
+    expect(after.activeLoadout).toBe("Full-Auto");
+    expect(after.piMateria).toBeUndefined();
     expect(harness.operationLog).not.toContain("triggerTurn");
   });
 
@@ -190,7 +190,7 @@ describe("FakePiHarness", () => {
       loadouts: {
         ReviewOnly: {
           entry: "Socket-1",
-          sockets: { "Socket-1": { type: "agent", materia: "Review" } },
+          sockets: { "Socket-1": { materia: "Review" } },
         },
       },
     }), "utf8");
@@ -205,7 +205,7 @@ describe("FakePiHarness", () => {
     expect(harness.notifications.some((entry) => entry.message.includes("pi-materia linked virtual loadout"))).toBe(true);
     const stateEntry = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-cast-state")?.data as { data?: Record<string, unknown>; request?: string; pipeline?: { entry?: { id?: string } } } | undefined;
     expect(stateEntry?.request).toBe("implement chained build");
-    expect(stateEntry?.data?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "project:reviewonly" }] }, virtualLoadout: { name: "Linked virtual loadout: Build → ReviewOnly" } });
+    expect(stateEntry?.data?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "ReviewOnly" }] }, virtualLoadout: { name: "Linked virtual loadout: Build → ReviewOnly" } });
     expect(stateEntry?.pipeline?.entry?.id).toBe("Socket-1");
     expect(JSON.parse(await readFile(configFile, "utf8")).activeLoadout).toBe("ReviewOnly");
   });
@@ -217,7 +217,7 @@ describe("FakePiHarness", () => {
     await writeFile(configFile, JSON.stringify({
       activeLoadout: "Default",
       materia: { Build: { prompt: "Build." } },
-      loadouts: { Default: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } },
+      loadouts: { Default: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
     }), "utf8");
     const harness = new FakePiHarness(dir);
     piMateria(harness.pi);
@@ -228,7 +228,9 @@ describe("FakePiHarness", () => {
     expect(harness.notifications.at(-1)?.message).toContain("missing prompt delimiter");
     expect(harness.operationLog).not.toContain("triggerTurn");
     expect(harness.appendedEntries.find((entry) => entry.customType === "pi-materia-cast-state")).toBeUndefined();
-    expect(JSON.parse(await readFile(configFile, "utf8"))).toMatchObject({ activeLoadout: "Default", activeLoadoutId: "project:default", piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
+    const rawConfig = JSON.parse(await readFile(configFile, "utf8"));
+    expect(rawConfig).toMatchObject({ activeLoadout: "Default" });
+    expect(rawConfig.piMateria).toBeUndefined();
   });
 
   test("loads pi-materia and runs /materia grid locally", async () => {

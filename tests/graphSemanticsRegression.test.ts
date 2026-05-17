@@ -40,35 +40,17 @@ function regressionConfig(): PiMateriaConfig {
         entry: "Socket-1",
         sockets: {
           "Socket-1": {
-            type: "utility",
             materia: "ensureArtifactsIgnored",
             edges: [{ when: "always", to: "Socket-2" }],
           },
           "Socket-2": {
-            type: "utility",
             materia: "detectVcs",
             edges: [{ when: "always", to: "Socket-3" }],
           },
-          "Socket-3": {
-            type: "utility",
-            utility: "echo",
-            parse: "json",
-            params: { output: { tasks: [{ id: "alpha", title: "Alpha" }, { id: "beta", title: "Beta" }] } },
-            assign: { tasks: "$.tasks" },
-            edges: [{ when: "always", to: "Socket-4" }],
-          },
-          "Socket-4": {
-            type: "utility",
-            utility: "echo",
-            params: { text: "build" },
-            edges: [{ when: "always", to: "Socket-5" }],
-            limits: { maxVisits: 5 },
-          },
+          "Socket-3": { materia: "SeedTasks", edges: [{ when: "always", to: "Socket-4" }] },
+          "Socket-4": { materia: "BuildUtility", edges: [{ when: "always", to: "Socket-5" }], limits: { maxVisits: 5 } },
           "Socket-5": {
-            type: "utility",
-            command: ["node", "-e", evalScript],
-            parse: "json",
-            assign: { lastFeedback: "$.feedback", evalAttempts: "$.evalAttempts" },
+            materia: "EvalUtility",
             edges: [
               { when: "satisfied", to: "Socket-6" },
               { when: "not_satisfied", to: "Socket-4", maxTraversals: 3 },
@@ -76,11 +58,7 @@ function regressionConfig(): PiMateriaConfig {
             limits: { maxVisits: 5 },
           },
           "Socket-6": {
-            type: "utility",
-            utility: "echo",
-            parse: "json",
-            params: { output: { satisfied: true, commitMessage: "maintain" } },
-            assign: { lastMaintain: "$" },
+            materia: "MaintainUtility",
             advance: { cursor: "taskIndex", items: "state.tasks", done: "end", when: "satisfied" },
             edges: [
               { when: "not_satisfied", to: "Socket-6", maxTraversals: 3 },
@@ -91,7 +69,6 @@ function regressionConfig(): PiMateriaConfig {
         },
         loops: {
           taskIteration: {
-            label: "Build → Eval → Maintain until all tasks complete",
             sockets: ["Socket-4", "Socket-5", "Socket-6"],
             iterator: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" },
             exit: { from: "Socket-6", when: "satisfied", to: "end" },
@@ -101,7 +78,6 @@ function regressionConfig(): PiMateriaConfig {
     },
     materia: {
       ensureArtifactsIgnored: {
-        type: "utility",
         label: "Ensure artifacts ignored",
         description: "Ensures artifact output is ignored.",
         group: "Utility",
@@ -111,7 +87,6 @@ function regressionConfig(): PiMateriaConfig {
         assign: { artifactIgnore: "$" },
       },
       detectVcs: {
-        type: "utility",
         label: "Detect VCS",
         description: "Detects jj/git repository state.",
         group: "Utility",
@@ -119,6 +94,10 @@ function regressionConfig(): PiMateriaConfig {
         parse: "json",
         assign: { vcs: "$" },
       },
+      SeedTasks: { type: "utility", utility: "echo", parse: "json", params: { output: { tasks: [{ id: "alpha", title: "Alpha" }, { id: "beta", title: "Beta" }] } }, assign: { tasks: "$.tasks" } },
+      BuildUtility: { type: "utility", utility: "echo", params: { text: "build" } },
+      EvalUtility: { type: "utility", command: ["node", "-e", evalScript], parse: "json", assign: { lastFeedback: "$.feedback", evalAttempts: "$.evalAttempts" } },
+      MaintainUtility: { type: "utility", utility: "echo", parse: "json", params: { output: { satisfied: true, commitMessage: "maintain" } }, assign: { lastMaintain: "$" } },
       Build: { tools: "coding", foreach: { items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" }, prompt: "build" } as never,
       "Auto-Eval": { tools: "readOnly", prompt: "eval" },
       Maintain: { tools: "coding", prompt: "maintain" },
@@ -133,8 +112,8 @@ describe("graph semantics regression", () => {
 
     expect(validatePipelineGraph(loadout)).toEqual({ ok: true, errors: [] });
     const palette = new Map(buildMateriaPalette(config.materia));
-    expect(palette.get("ensureArtifactsIgnored")).toMatchObject({ type: "utility", materia: "ensureArtifactsIgnored" });
-    expect(palette.get("detectVcs")).toMatchObject({ type: "utility", materia: "detectVcs" });
+    expect(palette.get("ensureArtifactsIgnored")).toMatchObject({ materia: "ensureArtifactsIgnored" });
+    expect(palette.get("detectVcs")).toMatchObject({ materia: "detectVcs" });
     expect(palette.get("Build")?.foreach).toEqual({ items: "state.tasks", as: "task", cursor: "taskIndex", done: "end" });
 
     const harness = await makeHarness(config);

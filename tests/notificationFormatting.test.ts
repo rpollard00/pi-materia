@@ -28,8 +28,8 @@ describe("materia cast notification formatting", () => {
     await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
       artifactDir: ".pi/pi-materia",
       activeLoadout: "Test",
-      loadouts: { Test: { entry: "Socket-3", sockets: { "Socket-3": { type: "agent", materia: "interactivePlan", next: "end" } } } },
-      materia: { interactivePlan: { tools: "none", prompt: "Plan {{request}}" } },
+      loadouts: { Test: { entry: "Socket-3", sockets: { "Socket-3": { materia: "interactivePlan", edges: [{ when: 'always', to: 'end' }] } } } },
+      materia: { interactivePlan: { type: "agent", label: "Interactive-Plan", tools: "none", prompt: "Plan {{request}}" } },
     }, null, 2));
     const harness = new FakePiHarness(cwd);
     piMateria(harness.pi);

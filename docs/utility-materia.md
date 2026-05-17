@@ -2,7 +2,7 @@
 
 Utility sockets are deterministic Materia pipeline sockets that run configured local utilities instead of starting a Pi agent/LLM turn. Use them for setup, discovery, code generation, checks, or other repeatable steps that should be visible in the loadout and removable by editing config.
 
-Agent sockets still render prompts and wait for Pi assistant output. Utility sockets skip the agent turn, write artifacts, optionally parse their output, apply `assign`, choose `edges`/`next`, participate in `foreach`, and update the same manifest/event log as agent sockets.
+Agent sockets still render prompts and wait for Pi assistant output. Utility sockets skip the agent turn, write artifacts, optionally parse their output, apply `assign`, route through `edges`, participate in `foreach`, and update the same manifest/event log as agent sockets.
 
 ## Utility schema
 
@@ -41,7 +41,7 @@ Common mechanics:
 
 - `parse: "json"` parses stdout into `lastJson`; `parse: "text"` or omitted keeps stdout as `lastOutput`.
 - `assign` copies values into generic cast state, for example `{ "vcs": "$" }` or `{ "kind": "$.kind" }`.
-- `edges` evaluate against parsed output (`$`) and state (`state.foo`), then route to `to`; `next` is the fallback.
+- `edges` evaluate against parsed output (`$`) and state (`state.foo`), then route to `to`.
 - `foreach` exposes current item metadata to the utility and can loop over arrays in state.
 
 ## JSON stdin/stdout protocol
@@ -100,7 +100,7 @@ This loadout completes without an LLM turn by using an explicit command utility.
       "sockets": {
         "hello": {
           "materia": "helloUtility",
-          "next": "end"
+          "edges": [{ "when": "always", "to": "end" }]
         }
       }
     }
@@ -118,7 +118,7 @@ This loadout completes without an LLM turn by using an explicit command utility.
 }
 ```
 
-Expected result: the cast writes utility input/stdout/stderr/metadata under `.pi/pi-materia/<cast-id>/sockets/hello/` (legacy-stable artifact path, keyed by socket id), assigns `state.hello`, and ends without asking a model to respond.
+Expected result: the cast writes utility input/stdout/stderr/metadata under `.pi/pi-materia/<cast-id>/sockets/hello/` (current-stable artifact path, keyed by socket id), assigns `state.hello`, and ends without asking a model to respond.
 
 ## Python example: add ignore patterns
 
@@ -171,7 +171,7 @@ Complete loadout using the script:
       "sockets": {
         "ignoreArtifacts": {
           "materia": "Ignore-Artifacts",
-          "next": "end"
+          "edges": [{ "when": "always", "to": "end" }]
         }
       }
     }
@@ -194,17 +194,16 @@ Complete loadout using the script:
 
 ## Routing from JSON output
 
-Utility JSON output can choose the next socket with edges:
+Utility JSON output can route with edges:
 
 ```json
 {
   "materia": "Detect-VCS",
   "edges": [
-    { "when": "$.kind == \"jj\"", "to": "Maintain" },
-    { "when": "$.kind == \"git\"", "to": "GitMaintain" },
-    { "when": "$.kind == \"none\"", "to": "initVcs" }
-  ],
-  "next": "Socket-3"
+    { "when": "satisfied", "to": "Maintain" },
+    { "when": "not_satisfied", "to": "GitMaintain" },
+    { "when": "always", "to": "Socket-3" }
+  ]
 }
 ```
 
@@ -212,11 +211,11 @@ The referenced `Detect-VCS` utility materia owns `parse: "json"` and `assign: { 
 
 ## Utility generators
 
-A utility materia may set `generator: true` when a deterministic script should produce the same canonical handoff envelope as a planning agent. Generator utility output is normalized to `parse: "json"` and must expose `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. Preserve the canonical envelope field names (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, `missing`) and do not use legacy generated-output aliases such as `tasks`.
+A utility materia may set `generator: true` when a deterministic script should produce the same canonical handoff envelope as a planning agent. Generator utility output is normalized to `parse: "json"` and must expose `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. Preserve the canonical envelope field names (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, `missing`) and do not use current generated-output aliases such as `tasks`.
 
 ## Bundled utility scripts
 
-The default config defines `Ignore-Artifacts` and `Detect-VCS` as shipped-script utility materia that run `ensure-ignored.mjs` and `detect-vcs.mjs` through profile-resolved copies. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Legacy ids `ensureArtifactsIgnored` and `detectVcs`, legacy aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `legacyUtilityVcsDetect...` are migration-only input, not canonical shipped ids.
+The default config defines `Ignore-Artifacts` and `Detect-VCS` as shipped-script utility materia that run `ensure-ignored.mjs` and `detect-vcs.mjs` through profile-resolved copies. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Current ids `ensureArtifactsIgnored` and `detectVcs`, current aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `currentUtilityVcsDetect...` are obsolete input, not canonical shipped ids.
 
 ## Profile verification
 

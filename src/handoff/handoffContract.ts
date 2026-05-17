@@ -68,7 +68,7 @@ export const HANDOFF_CONTRACT_DOC_TEXT = [
   "Each workItem has id, title, description, acceptance, and context fields; context carries optional architecture guidance plus constraints, dependencies, and risks arrays.",
   `Reserved evaluator/route fields (${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")}) are owned by evaluator and graph-flow adapters and must not be repurposed by general payload logic.`,
   `The reserved control field ${JSON.stringify(HANDOFF_SATISFIED_FIELD)} is the only canonical satisfaction field. It is required by sockets whose graph control flow depends on satisfied/not_satisfied semantics and must be a boolean when present.`,
-  `Legacy aliases (${HANDOFF_LEGACY_NON_CANONICAL_ALIASES.map((field) => JSON.stringify(field)).join(", ")}) are not canonical handoff fields. Any compatibility behavior for them must be explicitly documented as migration-only outside the canonical field list.`,
+  `Legacy aliases (${HANDOFF_LEGACY_NON_CANONICAL_ALIASES.map((field) => JSON.stringify(field)).join(", ")}) are not canonical handoff fields. Any compatibility behavior for them must be explicitly documented as obsolete outside the canonical field list.`,
 ].join("\n\n");
 
 void HANDOFF_EDGE_CONDITIONS;

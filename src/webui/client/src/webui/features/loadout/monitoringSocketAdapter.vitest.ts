@@ -59,9 +59,9 @@ describe('resolveMonitoringSocketIndicator', () => {
 
   it('uses activeLoadout display-name fallback only when stable ids are unavailable', () => {
     expect(resolveMonitoringSocketIndicator(
-      monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Legacy Alpha' }),
+      monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Current Alpha' }),
       ['Socket-1', 'Socket-2'],
-      { viewedLoadoutName: 'Legacy Alpha' },
+      { viewedLoadoutName: 'Current Alpha' },
     )).toEqual({
       state: 'active',
       sourceSocketId: 'Socket-2',
@@ -69,9 +69,9 @@ describe('resolveMonitoringSocketIndicator', () => {
     });
 
     expect(resolveMonitoringSocketIndicator(
-      monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Legacy Alpha' }),
+      monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Current Alpha' }),
       ['Socket-1', 'Socket-2'],
-      { viewedLoadoutName: 'Legacy Beta' },
+      { viewedLoadoutName: 'Current Beta' },
     )).toEqual({ state: 'inactive' });
   });
 
@@ -83,7 +83,7 @@ describe('resolveMonitoringSocketIndicator', () => {
     )).toEqual({ state: 'inactive' });
   });
 
-  it('keeps the documented legacy socket-only fallback when monitor snapshots lack loadout identity', () => {
+  it('keeps the documented current socket-only fallback when monitor snapshots lack loadout identity', () => {
     expect(resolveMonitoringSocketIndicator(
       monitor({ currentSocketId: 'Socket-2' }),
       ['Socket-1', 'Socket-2'],

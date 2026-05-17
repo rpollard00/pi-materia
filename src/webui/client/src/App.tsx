@@ -17,7 +17,7 @@ import { useLoadoutGraphMutationController } from './webui/features/loadout/useL
 
 const isStatusAlsoShownAsValidationToast = (message: string) => /^(Cannot|Blocked\b|.*\bblocked:|Ignored\b)/i.test(message);
 
-// Compatibility entry point for the browser bundle and tests. Keep feature
+// Stable API entry point for the browser bundle and tests. Keep feature
 // logic in hooks/controllers; App composes those boundaries into the shell.
 export function App() {
   const { selectedTab, selectTab } = useAppNavigation();
@@ -174,7 +174,6 @@ export function App() {
     removeLoopExitConnection,
     toggleLoopExitCondition,
     removeEdge,
-    removeLegacyNextEdge,
     saveSocketProperties,
     toggleEdgeCondition,
   } = graphMutation;
@@ -281,7 +280,6 @@ export function App() {
                 openEdgeConnector,
                 openSocketPropertyEditor,
                 removeEdge,
-                removeLegacyNextEdge,
                 removeLoopExitConnection,
                 removeMateria,
                 replaceMateriaFromModal,

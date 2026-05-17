@@ -7,7 +7,7 @@ const alpha = {
   source: 'user',
   lockState: 'unlocked',
   entry: 'Socket-1',
-  sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } },
+  sockets: { 'Socket-1': { materia: 'Build' } },
 } satisfies PipelineConfig;
 
 function eligibility(draftLoadouts: Record<string, PipelineConfig>, baselineLoadouts: Record<string, PipelineConfig> = { Alpha: alpha }) {
@@ -35,7 +35,7 @@ describe('getLoadoutLockEligibility', () => {
   });
 
   it('does not let unrelated dirty loadouts block a clean target loadout', () => {
-    const beta = { ...alpha, id: 'loadout-beta', sockets: { 'Socket-1': { type: 'agent', materia: 'Changed' } } } satisfies PipelineConfig;
+    const beta = { ...alpha, id: 'loadout-beta', sockets: { 'Socket-1': { materia: 'Changed' } } } satisfies PipelineConfig;
     const result = getLoadoutLockEligibility({
       name: 'Alpha',
       lockState: 'locked',
@@ -50,7 +50,7 @@ describe('getLoadoutLockEligibility', () => {
     const result = getLoadoutLockEligibility({
       name: 'Alpha',
       lockState: 'unlocked',
-      draftLoadouts: { Alpha: { ...alpha, lockState: 'locked', sockets: { 'Socket-1': { type: 'agent', materia: 'Changed' } } } },
+      draftLoadouts: { Alpha: { ...alpha, lockState: 'locked', sockets: { 'Socket-1': { materia: 'Changed' } } } },
       baselineLoadouts: { Alpha: { ...alpha, lockState: 'locked' } },
       loadoutSources: { Alpha: 'user' },
     });

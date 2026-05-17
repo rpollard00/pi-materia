@@ -17,7 +17,7 @@ Dependency direction should remain:
 
 Schema handling is an edge concern: external JSON loadouts must use `sockets` and newly written runtime/persistence DTOs use socket-shaped fields.
 
-## Compatibility policy
+## Stability policy
 
 - `sockets` is canonical for core/domain/application code and loadout JSON.
 - `currentSocketId`, `currentSocketState`, `socketState`, `socketId`, `bySocket`, `socket_*` event/artifact kinds, and `sockets/` artifact paths are canonical runtime/persistence names.
@@ -33,7 +33,7 @@ The base `src/` directory is reserved for intentional entrypoints/facades:
 - `src/types.ts`: shared public DTO/type surface.
 - `src/castRuntime.ts`: Pi-facing runtime facade for cast lifecycle integration.
 
-Do not add root compatibility barrels or one-line `export * from "./..."` shims. Import focused nested modules by default, such as `src/config/config.ts`, `src/graph/graphValidation.ts`, or `src/runtime/nativeLifecycle.ts`. Use `src/castRuntime.ts` only when consuming the Pi-facing runtime facade; implementation code should prefer the narrower nested module that owns the behavior.
+Do not add root stability barrels or one-line `export * from "./..."` shims. Import focused nested modules by default, such as `src/config/config.ts`, `src/graph/graphValidation.ts`, or `src/runtime/nativeLifecycle.ts`. Use `src/castRuntime.ts` only when consuming the Pi-facing runtime facade; implementation code should prefer the narrower nested module that owns the behavior.
 
 ## Where new code should go
 
@@ -41,7 +41,7 @@ Do not add root compatibility barrels or one-line `export * from "./..."` shims.
 - Put user-facing workflows and orchestration in `src/application`, depending on explicit ports for IO/runtime work.
 - Put filesystem, environment, process execution, artifact/event/session persistence, and usage IO in `src/infrastructure`.
 - Put Pi transport/session lifecycle facade exports in `src/castRuntime.ts` and focused implementation modules under `src/runtime`.
-- Put saved JSON shape/version/migration handling in `src/schema` and WebUI loadout shape conversion in `src/webui/loadoutDto.ts`.
+- Put saved JSON shape/version/stability handling in `src/schema` and WebUI loadout shape conversion in `src/webui/loadoutDto.ts`.
 - Put Pi command/event registration and adapter wiring in `src/index.ts`/`src/runtime/pluginAdapters.ts`.
 
 ## Lightweight layering check
@@ -52,7 +52,7 @@ Do not add root compatibility barrels or one-line `export * from "./..."` shims.
 - application imports infrastructure, runtime facades, WebUI, plugin composition, or Node builtins;
 - infrastructure imports WebUI, runtime facades, or plugin composition;
 - schema imports application, infrastructure, WebUI, or plugin composition;
-- `src/native.ts` is restored or root export-star compatibility shims are reintroduced instead of importing focused nested modules.
+- `src/native.ts` is restored or root export-star stability shims are reintroduced instead of importing focused nested modules.
 
 Run it with the normal suite (`npm test`).
 

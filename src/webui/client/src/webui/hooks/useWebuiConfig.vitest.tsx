@@ -7,12 +7,12 @@ import { dirtyConfigKey, useWebuiConfig } from './useWebuiConfig.js';
 const initialConfig = {
   activeLoadout: 'Alpha',
   activeLoadoutId: 'Alpha',
-  materia: { Build: { tools: 'coding', prompt: 'old prompt' } },
+  materia: { Build: { tools: 'coding', prompt: 'old prompt' }, LocalEdit: { tools: 'coding', prompt: 'Local edit.' } },
   loadouts: {
     Alpha: {
       id: 'Alpha',
       entry: 'Socket-1',
-      sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } },
+      sockets: { 'Socket-1': { materia: 'Build' } },
     },
   },
 } satisfies MateriaConfig;
@@ -20,12 +20,12 @@ const initialConfig = {
 const reloadedConfig = {
   activeLoadout: 'Alpha',
   activeLoadoutId: 'Alpha',
-  materia: { Build: { tools: 'coding', prompt: 'new prompt' } },
+  materia: { Build: { tools: 'coding', prompt: 'new prompt' }, LocalEdit: { tools: 'coding', prompt: 'Local edit.' } },
   loadouts: {
     Alpha: {
       id: 'Alpha',
       entry: 'Socket-1',
-      sockets: { 'Socket-1': { type: 'agent', materia: 'Reloaded' } },
+      sockets: { 'Socket-1': { materia: 'Reloaded' } },
     },
   },
 } satisfies MateriaConfig;
@@ -35,6 +35,7 @@ const reportedLayeredConfig = {
   activeLoadoutId: 'Full-Auto',
   materia: {
     Build: { tools: 'coding', prompt: 'Build the assigned work.' },
+    LocalEdit: { tools: 'coding', prompt: 'Local edit.' },
     'Auto-Eval': { tools: 'readOnly', prompt: 'Evaluate the work.' },
   },
   loadouts: {
@@ -42,15 +43,15 @@ const reportedLayeredConfig = {
       id: 'Full-Auto',
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
-        'Socket-2': { type: 'agent', materia: 'Auto-Eval' },
+        'Socket-1': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-2': { materia: 'Auto-Eval' },
       },
     },
     'Hojo-Consult': {
       id: 'Hojo-Consult',
       entry: 'Socket-1',
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'Build', label: 'Hojo profile consult' },
+        'Socket-1': { materia: 'Build', label: 'Hojo profile consult' },
       },
     },
   },
@@ -163,8 +164,8 @@ describe('dirty config comparison', () => {
       loadouts: {
         'Full-Auto': {
           sockets: {
-            'Socket-1': { next: 'Socket-2', materia: 'Build', type: 'agent' },
-            'Socket-2': { materia: 'Build', type: 'agent' },
+            'Socket-1': { edges: [{ when: 'always', to: 'Socket-2' }], materia: 'Build' },
+            'Socket-2': { materia: 'Build' },
           },
           entry: 'Socket-1',
         },
@@ -175,8 +176,8 @@ describe('dirty config comparison', () => {
         'Full-Auto': {
           entry: 'Socket-1',
           sockets: {
-            'Socket-2': { type: 'agent', materia: 'Build' },
-            'Socket-1': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'Build' },
+            'Socket-1': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
           },
         },
       },
@@ -189,14 +190,14 @@ describe('dirty config comparison', () => {
     expect(dirtyConfigKey(baseline)).toBe(dirtyConfigKey(draft));
   });
 
-  it('does not mark migrated legacy socket layout dirty after normalization', () => {
-    const legacy = {
+  it('does not mark migrated socket layout dirty after normalization', () => {
+    const current = {
       loadouts: {
         Layout: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Build', layout: { x: 1, y: 2 } },
-            'Socket-2': { type: 'agent', materia: 'Build', layout: { x: 3, y: 4 } },
+            'Socket-1': { materia: 'Build', layout: { x: 1, y: 2 } },
+            'Socket-2': { materia: 'Build', layout: { x: 3, y: 4 } },
           },
         },
       },
@@ -208,15 +209,15 @@ describe('dirty config comparison', () => {
           entry: 'Socket-1',
           layout: { sockets: { 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 3, y: 4 } } },
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Build' },
-            'Socket-2': { type: 'agent', materia: 'Build' },
+            'Socket-1': { materia: 'Build' },
+            'Socket-2': { materia: 'Build' },
           },
         },
       },
       materia: { Build: { tools: 'coding', prompt: 'Build.' } },
     } satisfies MateriaConfig;
 
-    expect(dirtyConfigKey(legacy)).toBe(dirtyConfigKey(migrated));
+    expect(dirtyConfigKey(current)).toBe(dirtyConfigKey(migrated));
   });
 
   it('detects real persisted config additions, deletions, renames, and socket/materia/profile/loadout edits', () => {
@@ -234,7 +235,7 @@ describe('dirty config comparison', () => {
     expect(dirtyConfigKey(editedProfile)).not.toBe(dirtyConfigKey(baseline));
 
     const addedLoadout = cloneConfigForTest(baseline);
-    addedLoadout.loadouts!.Added = { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } };
+    addedLoadout.loadouts!.Added = { entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } };
     expect(dirtyConfigKey(addedLoadout)).not.toBe(dirtyConfigKey(baseline));
 
     const deletedLoadout = cloneConfigForTest(baseline);
@@ -399,8 +400,8 @@ describe('useWebuiConfig', () => {
       activeLoadoutId: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build', label: 'alpha socket' } } },
-        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build', label: 'beta socket' } } },
+        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build', label: 'alpha socket' } } },
+        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build', label: 'beta socket' } } },
       },
     } satisfies MateriaConfig;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, source: 'test', config, loadoutSources: { Alpha: 'user', Beta: 'user' } }))));
@@ -596,7 +597,7 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -641,7 +642,7 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -673,8 +674,8 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-        Beta: { id: 'Beta', source: 'user', lockState: 'locked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+        Beta: { id: 'Beta', source: 'user', lockState: 'locked', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
     }, loadoutSources: { Alpha: 'user', Beta: 'user' } }))));
 
@@ -693,8 +694,8 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-        Beta: { id: 'Beta', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+        Beta: { id: 'Beta', source: 'user', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
     }, loadoutSources: { Alpha: 'user', Beta: 'user' } }))));
 
@@ -724,7 +725,7 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', source: 'default', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', source: 'default', lockState: 'unlocked', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
     }, loadoutSources: { Alpha: 'default' } }))));
 
@@ -744,7 +745,7 @@ describe('useWebuiConfig', () => {
         Alpha: {
           id: 'Alpha',
           entry: 'Socket-1',
-          sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } },
+          sockets: { 'Socket-1': { materia: 'Build' } },
         },
       },
     } satisfies MateriaConfig;
@@ -787,8 +788,8 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -823,8 +824,8 @@ describe('useWebuiConfig', () => {
       activeLoadout: 'Alpha',
       materia: { Build: { prompt: 'Build.' } },
       loadouts: {
-        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+        Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

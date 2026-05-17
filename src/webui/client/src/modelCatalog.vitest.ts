@@ -34,16 +34,16 @@ describe('modelSelectOptions', () => {
 
     expect(modelSelectOptions(catalog, {
       editingSocketId: 'agent-a',
-      model: 'legacy-provider/legacy-model',
+      model: 'current-provider/current-model',
       thinking: 'high',
     })).toContainEqual({
-      value: 'legacy-provider/legacy-model',
-      label: 'legacy-provider/legacy-model (unavailable)',
+      value: 'current-provider/current-model',
+      label: 'current-provider/current-model (unavailable)',
       unavailable: true,
     });
 
     expect(modelSelectOptions(catalog, undefined)).not.toContainEqual(expect.objectContaining({
-      value: 'legacy-provider/legacy-model',
+      value: 'current-provider/current-model',
     }));
   });
 });

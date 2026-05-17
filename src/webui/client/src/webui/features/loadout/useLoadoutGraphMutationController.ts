@@ -9,7 +9,6 @@ import {
   extractMateriaReference,
   findLoopExitConnectionContext,
   getSocketLayout,
-  type LegacyPipelineSocket,
   type PipelineConfig,
   type PipelineSocket,
 } from '../../../loadoutModel.js';
@@ -21,7 +20,6 @@ import {
   deleteLoopFromLoadout,
   deleteSocketImmutable,
   removeEdgeFromLoadout,
-  removeLegacyNextFromLoadout,
   removeLoopExitRouteFromLoadout,
   setSocketLayouts,
   setSocketLimits,
@@ -225,12 +223,11 @@ export function useLoadoutGraphMutationController({
     let suffix = 2;
     while (existingLoops[loopId]) loopId = `${baseId}${suffix++}`;
     const selectedLabels = selectedIds.map((id) => socketDisplayLabel(id));
-    const label = `Loop: ${selectedIds.join(' → ')}`;
     const isSingleSocketLoop = selectedIds.length === 1;
     const exitCondition: MateriaEdgeCondition = isSingleSocketLoop ? 'always' : 'satisfied';
     const created = commitGraphMutation(
       `Staged loop around ${selectedLabels.join(', ')}.`,
-      (loadout) => createTaskLoop(loadout, loopId, label, selectedIds, { from: generator.from, output: generator.output }, { from: selectedIds[selectedIds.length - 1], when: exitCondition, to: 'end' }),
+      (loadout) => createTaskLoop(loadout, loopId, selectedIds, { from: generator.from, output: generator.output }, { from: selectedIds[selectedIds.length - 1], when: exitCondition, to: 'end' }),
       `Staged loop around ${selectedLabels.join(', ')} consuming ${generator.from}.${generator.output}; loop.exit will compile into parse/advance runtime control flow.`,
       (message) => `Cannot create loop: ${message}`,
     );
@@ -269,7 +266,7 @@ export function useLoadoutGraphMutationController({
   function breakLoop(loopId: string) {
     const loop = activeLoadout?.loops?.[loopId];
     if (!loop) return;
-    const label = formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets, loop.label);
+    const label = formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets);
     commitGraphMutation(
       `Broke loop ${loopId}.`,
       (loadout) => deleteLoopFromLoadout(loadout, loopId),
@@ -365,18 +362,6 @@ export function useLoadoutGraphMutationController({
     closeModalAfterCommitted(removed);
   }
 
-  function removeLegacyNextEdge(from: string) {
-    const to = (activeLoadout?.sockets?.[from] as LegacyPipelineSocket | undefined)?.next;
-    if (!to) return;
-    const removed = commitGraphMutation(
-      `Removed legacy flow ${from} → ${to}.`,
-      (loadout) => removeLegacyNextFromLoadout(loadout, from),
-      `Removed legacy flow ${from} → ${to}; conditional edges and sockets were preserved.`,
-      (message) => `Cannot remove legacy flow ${from} → ${to}: ${message}`,
-    );
-    closeModalAfterCommitted(removed);
-  }
-
   function saveSocketProperties(socketId: string) {
     if (readonlyBlocked(`Save socket properties for ${socketLabel(socketId)}`)) return;
     if (!activeLoadoutName || !activeLoadout?.sockets?.[socketId]) return;
@@ -462,7 +447,6 @@ export function useLoadoutGraphMutationController({
     removeLoopExitConnection,
     toggleLoopExitCondition,
     removeEdge,
-    removeLegacyNextEdge,
     saveSocketProperties,
     toggleEdgeCondition,
   };

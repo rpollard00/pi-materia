@@ -30,7 +30,7 @@ describe("/materia link compiler", () => {
       id: "Hojo-Consult",
       entry: "Socket-7",
       sockets: {
-        "Socket-7": { type: "agent", materia: "Build", advance: { cursor: "items", items: "$.items", done: "end" } },
+        "Socket-7": { materia: "Build", advance: { cursor: "items", items: "$.items", done: "end" } },
       },
     };
 
@@ -49,7 +49,7 @@ describe("/materia link compiler", () => {
       id: "Broken",
       entry: "Socket-7",
       sockets: {
-        "Socket-7": { type: "agent", materia: "Build", advance: { cursor: "items", items: "$.items", done: "missing" } },
+        "Socket-7": { materia: "Build", advance: { cursor: "items", items: "$.items", done: "missing" } },
       },
     };
 
@@ -79,8 +79,8 @@ describe("/materia link compiler", () => {
       id: "virtual-link-materia-Build-materia-Eval",
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", parse: "json", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Eval" },
+        "Socket-1": { materia: "Build", parse: "json", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Eval" },
       },
     });
     expect(result.value.virtualLoadout.metadata.stitching).toEqual([
@@ -93,10 +93,10 @@ describe("/materia link compiler", () => {
       id: "Iterative",
       entry: "Socket-7",
       sockets: {
-        "Socket-7": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
-        "Socket-8": { type: "agent", materia: "Eval", foreach: { items: "$.items", done: "Socket-10" } },
-        "Socket-9": { type: "agent", materia: "Build", advance: { cursor: "items", items: "$.items", done: "end" } },
-        "Socket-10": { type: "agent", materia: "Eval" },
+        "Socket-7": { materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
+        "Socket-8": { materia: "Eval", foreach: { items: "$.items", done: "Socket-10" } },
+        "Socket-9": { materia: "Build", advance: { cursor: "items", items: "$.items", done: "end" } },
+        "Socket-10": { materia: "Eval" },
       },
       loops: {
         work: {
@@ -134,8 +134,8 @@ describe("/materia link compiler", () => {
   });
 
   test("composes loadout-to-loadout targets while remapping colliding socket ids", () => {
-    const first: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { type: "agent", materia: "Eval", socketKind: "entry" } } };
-    const second: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Eval", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { type: "agent", materia: "Build" } } };
+    const first: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { materia: "Eval", socketKind: "entry" } } };
+    const second: Loadout = { entry: "Socket-1", sockets: { "Socket-1": { materia: "Eval", edges: [{ when: "satisfied", to: "Socket-2" }] }, "Socket-2": { materia: "Build" } } };
 
     const result = compileLinkPlan({ plan: plan([target(0, "loadout", "First"), target(1, "loadout", "Second")]) }, createConfigLinkGraphSource({ materia, loadouts: { First: first, Second: second } }));
 
@@ -157,8 +157,8 @@ describe("/materia link compiler", () => {
       id: "Consult",
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Eval", edges: [{ when: "satisfied", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Build" },
+        "Socket-1": { materia: "Eval", edges: [{ when: "satisfied", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
       },
     };
     const inputPlan = plan([target(0, "materia", "Build"), target(1, "loadout", "Consult")]);
@@ -173,9 +173,9 @@ describe("/materia link compiler", () => {
       id: "virtual-link-materia-Build-loadout-Consult",
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", parse: "json", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Eval", edges: [{ when: "satisfied", to: "Socket-3" }] },
-        "Socket-3": { type: "agent", materia: "Build" },
+        "Socket-1": { materia: "Build", parse: "json", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Eval", edges: [{ when: "satisfied", to: "Socket-3" }] },
+        "Socket-3": { materia: "Build" },
       },
     });
     expect(result.value.virtualLoadout.metadata.remappings).toEqual([
@@ -193,9 +193,9 @@ describe("/materia link compiler", () => {
     const fanout: Loadout = {
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Build" },
-        "Socket-3": { type: "agent", materia: "Eval" },
+        "Socket-1": { materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
+        "Socket-3": { materia: "Eval" },
       },
     };
 
@@ -209,8 +209,8 @@ describe("/materia link compiler", () => {
     const cycle: Loadout = {
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Eval", edges: [{ when: "always", to: "Socket-1" }] },
+        "Socket-1": { materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Eval", edges: [{ when: "always", to: "Socket-1" }] },
       },
     };
 

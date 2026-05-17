@@ -6,9 +6,9 @@ import type { PipelineConfig } from '../../../loadoutModel.js';
 import { buildLoadoutSelectorViewModels, LoadoutListPanel } from './LoadoutListPanel.js';
 
 const loadouts = {
-  Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
-  Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Test' } } },
-  Gamma: { id: 'Gamma', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+  Alpha: { id: 'Alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+  Beta: { id: 'Beta', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Test' } } },
+  Gamma: { id: 'Gamma', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
 } satisfies Record<string, PipelineConfig>;
 
 function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutListPanel>> = {}) {
@@ -114,10 +114,10 @@ describe('LoadoutListPanel', () => {
     renderPanel({
       defaultLoadoutId: 'user:hojo',
       loadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       persistedLoadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       loadoutSources: { Hojo: 'user' },
     });
@@ -129,10 +129,10 @@ describe('LoadoutListPanel', () => {
     renderPanel({
       defaultLoadoutId: 'Hojo',
       loadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       persistedLoadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       loadoutSources: { Hojo: 'user' },
     });
@@ -145,10 +145,10 @@ describe('LoadoutListPanel', () => {
       runtimeActiveLoadoutId: 'user:hojo',
       defaultLoadoutId: null,
       loadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       persistedLoadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       loadoutSources: { Hojo: 'user' },
     });
@@ -156,15 +156,15 @@ describe('LoadoutListPanel', () => {
     expect(within(cardFor('Hojo')).getByLabelText('Runtime active loadout')).toBeTruthy();
   });
 
-  it('does not fall back to legacy activeLoadout display names for the active green dot', () => {
+  it('does not fall back to current activeLoadout display names for the active green dot', () => {
     renderPanel({
       runtimeActiveLoadoutId: undefined,
       defaultLoadoutId: null,
       loadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       persistedLoadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
       },
       loadoutSources: { Hojo: 'user' },
       activeLoadout: 'Hojo',
@@ -277,12 +277,12 @@ describe('LoadoutListPanel', () => {
       runtimeActiveLoadoutId: 'user:alpha',
       defaultLoadoutId: null,
       loadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
-        Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
+        Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
       persistedLoadouts: {
-        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Review' } } },
-        Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Build' } } },
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
+        Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
       },
       loadoutSources: { Hojo: 'user', Alpha: 'user' },
       onSetRuntimeActiveLoadout,
@@ -445,15 +445,15 @@ describe('LoadoutListPanel', () => {
     const longName = 'Extremely-Long-Loadout-Name-With-A-Deeply-Nested-Execution-Strategy';
     renderPanel({
       loadouts: {
-        [mediumName]: { id: mediumName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
-        [longName]: { id: longName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
+        [mediumName]: { id: mediumName, entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Planning' } }, lockState: 'locked' },
+        [longName]: { id: longName, entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Planning' } } },
       },
       editingLoadoutName: mediumName,
       runtimeActiveLoadoutId: mediumName,
       defaultLoadoutId: mediumName,
       persistedLoadouts: {
-        [mediumName]: { id: mediumName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } }, lockState: 'locked' },
-        [longName]: { id: longName, entry: 'Socket-1', sockets: { 'Socket-1': { type: 'agent', materia: 'Planning' } } },
+        [mediumName]: { id: mediumName, entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Planning' } }, lockState: 'locked' },
+        [longName]: { id: longName, entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Planning' } } },
       },
       loadoutSources: { [mediumName]: 'user', [longName]: 'user' },
     });

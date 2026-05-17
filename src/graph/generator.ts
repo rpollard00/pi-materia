@@ -22,7 +22,7 @@ export const CANONICAL_WORK_ITEMS_GENERATOR_CONFIG: MateriaGeneratorConfig = {
 
 /**
  * Canonical authored generator marker. Legacy `generates` metadata is
- * migration-only and must not activate runtime generator semantics.
+ * obsolete and must not activate runtime generator semantics.
  */
 export function isGeneratorMateria(definition: GeneratorMateriaLike | undefined): boolean {
   return definition?.generator === true;

@@ -1,6 +1,6 @@
 export function materiaColorClass(color: string): string {
   if (!color) return '';
-  // Existing saved configs may still contain Tailwind gradient stops; keep them renderable as migration compatibility.
+  // Existing saved configs may still contain Tailwind gradient stops; keep them renderable as stable API input.
   return color.includes('from-') ? `bg-gradient-to-br ${color}` : color;
 }
 

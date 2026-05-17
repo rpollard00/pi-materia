@@ -2,9 +2,9 @@ import { currentItem } from "./workflowTransitions.js";
 import { stringifyDeterministicHandoffOutput } from "../handoff/handoffContract.js";
 import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 import { effectiveUtilityConfig, resolvedMateriaDisplayName, resolvedMateriaId, resolvedSocketConfig } from "../runtime/resolvedMateria.js";
-import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
+import type { MateriaCastState, ResolvedMateriaUtilitySocket } from "../types.js";
 
-export type UtilityResolvedSocket = Extract<ResolvedMateriaSocket, { socket: { type: "utility" } }>;
+export type UtilityResolvedSocket = ResolvedMateriaUtilitySocket;
 
 export interface UtilityExecutionDeps {
   executeCommand(input: CommandUtilityRequest): Promise<string>;

@@ -63,12 +63,12 @@ describe("POST /api/config", () => {
 
     const response = await postConfig(baseUrl, {
       target: "user",
-      config: { loadouts: { Active: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } }, loops: { work: { sockets: ["Socket-1"] } } } } },
+      config: { loadouts: { Active: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } }, loops: { work: { sockets: ["Socket-1"] } } } } },
     });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, target: "user", written: "/tmp/materia.json" });
-    expect(calls[0]?.patch).toEqual({ loadouts: { Active: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } }, loops: { work: { sockets: ["Socket-1"] } } } } });
+    expect(calls[0]?.patch).toEqual({ loadouts: { Active: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } }, loops: { work: { sockets: ["Socket-1"] } } } } });
   });
 
   test("passes config patches to save validation", async () => {

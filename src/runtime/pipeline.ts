@@ -55,31 +55,43 @@ function resolveSocket(config: PiMateriaConfig, effective: EffectiveMateriaPipel
 
   const materia = config.materia[socket.materia];
   if (!materia) throw new Error(`Pipeline slot "${id}" references unknown materia "${socket.materia}"`);
-  if (socket.type === "agent") {
+  const rawMateria = materia as unknown as Record<string, unknown>;
+  const isUtility = rawMateria.type === "utility" || rawMateria.utility !== undefined || rawMateria.command !== undefined || rawMateria.script !== undefined;
+  if (!isUtility) {
     validateAgentMateriaEntry(socket.materia, materia);
     return { id, socket, materia };
   }
 
-  const rawMateria = materia as unknown as Record<string, unknown>;
-  if (rawMateria.type !== "utility") throw new Error(`Utility pipeline slot "${id}" must reference utility materia "${socket.materia}"`);
   validateUtilityMateriaEntry(socket.materia, rawMateria);
   validateCanonicalUtilityRuntimeSocket(id, socket, materia as MateriaUtilityConfig);
   return { id, socket, materiaId: socket.materia, materia: materia as MateriaUtilityConfig };
 }
 
 // Runtime accepts only canonical utility sockets authored as graph placement
-// references. Legacy executable socket fields are migration input only; parse
+// references. Executable socket fields belong on referenced utility materia; parse
 // may be materialized later for generator/loop control-flow semantics.
 function validateAuthoredUtilityRuntimeSockets(config: PiMateriaConfig, loadoutName: string): void {
   const loadout = config.loadouts?.[loadoutName];
   if (!loadout) return;
   for (const [id, socket] of loadoutSocketEntries(loadout)) {
-    if (socket.type !== "utility") continue;
+    const materia = typeof socket.materia === "string" ? config.materia?.[socket.materia] : undefined;
+    const rawMateria = materia as unknown as Record<string, unknown> | undefined;
+    const isUtility = rawMateria?.type === "utility" || rawMateria?.utility !== undefined || rawMateria?.command !== undefined || rawMateria?.script !== undefined;
+    if (!isUtility) continue;
     const rawSocket = socket as unknown as Record<string, unknown>;
-    for (const field of ["utility", "command", "script", "params", "timeoutMs", "parse", "assign"] as const) {
-      if (rawSocket[field] !== undefined) throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "${field}". Configure executable utility behavior on materia "${socket.materia}" instead.`);
+    for (const field of ["utility", "command", "script", "params", "timeoutMs"] as const) {
+      if (rawSocket[field] !== undefined) throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "${field}". Configure executable utility behavior on materia "${socket.materia}" instead.`);
     }
+    const generator = canonicalGeneratorConfigFor(rawMateria as unknown as MateriaUtilityConfig);
+    const allowsRuntimeMaterializedParse = socket.parse === "json" && isLoopJsonExitSource(loadout, id);
+    const allowsDerivedGeneratorAssign = generator && socket.assign?.[generator.output] === `$.${generator.output}` && Object.keys(socket.assign).length === 1;
+    if (socket.parse !== undefined && !allowsRuntimeMaterializedParse) throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "parse". Configure parse on utility materia "${socket.materia}" instead.`);
+    if (socket.assign !== undefined && !allowsDerivedGeneratorAssign) throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "assign". Configure assign on utility materia "${socket.materia}" instead.`);
   }
+}
+
+function isLoopJsonExitSource(loadout: MateriaPipelineConfig, socketId: string): boolean {
+  return Object.values(loadout.loops ?? {}).some((loop) => loop.exit?.from === socketId && (loop.exit.when === "satisfied" || loop.exit.when === "not_satisfied"));
 }
 
 function validateLoadout(name: string, pipeline: MateriaPipelineConfig): void {
@@ -93,8 +105,8 @@ function validateLoadout(name: string, pipeline: MateriaPipelineConfig): void {
 }
 
 function validateSocket(id: string, socket: MateriaPipelineSocketConfig): void {
-  if (socket.type !== "agent" && socket.type !== "utility") {
-    throw new Error(`Pipeline slot "${id}" has unsupported type "${String((socket as { type?: unknown }).type)}"`);
+  if ("type" in (socket as unknown as Record<string, unknown>)) {
+    throw new Error(`Pipeline slot "${id}" configures obsolete socket field "type". Socket behavior is determined by referenced materia.`);
   }
   if (socket.parse !== undefined && socket.parse !== "text" && socket.parse !== "json") {
     throw new Error(`Pipeline slot "${id}" has unsupported parse mode "${String(socket.parse)}". Expected "text" or "json".`);
@@ -108,25 +120,25 @@ function validateSocket(id: string, socket: MateriaPipelineSocketConfig): void {
   if ("multiTurn" in socket) {
     throw new Error(`Pipeline slot "${id}" configures obsolete multiTurn. Configure multiTurn on the referenced materia instead.`);
   }
-  if (socket.type === "utility" && (typeof socket.materia !== "string" || socket.materia.trim().length === 0)) {
-    throw new Error(`Utility pipeline slot "${id}" must reference utility materia via "materia". Legacy inline utility or command sockets are migration-only and cannot execute at runtime.`);
+  if (typeof socket.materia !== "string" || socket.materia.trim().length === 0) {
+    throw new Error(`Pipeline slot "${id}" must reference materia via "materia".`);
   }
 }
 
-function validateCanonicalUtilityRuntimeSocket(id: string, socket: Extract<MateriaPipelineSocketConfig, { type: "utility" }>, materia: MateriaUtilityConfig): void {
+function validateCanonicalUtilityRuntimeSocket(id: string, socket: MateriaPipelineSocketConfig, materia: MateriaUtilityConfig): void {
   const rawSocket = socket as unknown as Record<string, unknown>;
   for (const field of ["utility", "command", "script", "params", "timeoutMs"] as const) {
-    if (rawSocket[field] !== undefined) throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "${field}". Configure executable utility behavior on materia "${socket.materia}" instead.`);
+    if (rawSocket[field] !== undefined) throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "${field}". Configure executable utility behavior on materia "${socket.materia}" instead.`);
   }
 
   const generator = canonicalGeneratorConfigFor(materia);
   const allowsRuntimeMaterializedParse = socket.parse === "json";
   const allowsDerivedGeneratorAssign = generator && socket.assign?.[generator.output] === `$.${generator.output}` && Object.keys(socket.assign).length === 1;
   if (socket.parse !== undefined && !allowsRuntimeMaterializedParse) {
-    throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "parse". Configure parse on utility materia "${socket.materia}" instead.`);
+    throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "parse". Configure parse on utility materia "${socket.materia}" instead.`);
   }
   if (socket.assign !== undefined && !allowsDerivedGeneratorAssign) {
-    throw new Error(`Utility pipeline slot "${id}" configures migration-only socket field "assign". Configure assign on utility materia "${socket.materia}" instead.`);
+    throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "assign". Configure assign on utility materia "${socket.materia}" instead.`);
   }
 }
 
@@ -142,7 +154,7 @@ function validateMateriaEntries(config: PiMateriaConfig): void {
 function validateMateriaEntry(name: string, materia: MateriaConfig): void {
   const rawMateria = materia as unknown as Record<string, unknown>;
   if (!isPlainObject(rawMateria)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
-  if (rawMateria.type === "utility") {
+  if (rawMateria.type === "utility" || rawMateria.utility !== undefined || rawMateria.command !== undefined || rawMateria.script !== undefined) {
     validateUtilityMateriaEntry(name, rawMateria);
     return;
   }
@@ -169,7 +181,7 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
   }
   validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
-  validateLegacyGeneratorDeclaration(name, rawMateria.generates);
+  validateObsoleteGeneratorDeclaration(name, rawMateria.generates);
 }
 
 function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, unknown>): void {
@@ -182,7 +194,7 @@ function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, un
   }
   validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
-  validateLegacyGeneratorDeclaration(name, rawMateria.generates);
+  validateObsoleteGeneratorDeclaration(name, rawMateria.generates);
 }
 
 function validateGeneratorMarker(name: string, generator: unknown): void {
@@ -196,10 +208,10 @@ function validateMateriaParseMode(name: string, parse: unknown): void {
   if (parse !== "text" && parse !== "json") throw new Error(`Materia "${name}" has unsupported parse mode "${String(parse)}". Expected "text" or "json".`);
 }
 
-// Migration-only cleanup marker: saved editors may write `generates: null` to
+// Obsolete cleanup marker: saved editors may write `generates: null` to
 // remove the obsolete declaration, but authored `generates` metadata must not
 // activate or describe runtime generator output.
-function validateLegacyGeneratorDeclaration(name: string, generates: unknown): void {
+function validateObsoleteGeneratorDeclaration(name: string, generates: unknown): void {
   if (generates === undefined || generates === null) return;
   throw new Error(`Materia "${name}" configures obsolete generates metadata. Use generator: true and emit canonical JSON with workItems; custom generates.output aliases are not active runtime generator outputs.`);
 }
@@ -207,27 +219,6 @@ function validateLegacyGeneratorDeclaration(name: string, generates: unknown): v
 function isGeneratorPipelineSocket(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, socketId: string): boolean {
   const socket = getLoadoutSocket(pipeline, socketId);
   return Boolean(socket && isMateriaSocket(socket) && isGeneratorMateria(config.materia[socket.materia]));
-}
-
-function migrateLegacyLoopConsumers(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
-  for (const [loopId, loop] of Object.entries(pipeline.loops ?? {})) {
-    if (loop.consumes || !loop.iterator) continue;
-    const loopSet = new Set(loopSockets(loop));
-    const inboundGeneratorEdges = loadoutSocketEntries(pipeline).flatMap(([from, socket]) => {
-      if (loopSet.has(from) || !isGeneratorPipelineSocket(config, pipeline, from)) return [];
-      return (socket.edges ?? []).filter((edge) => loopSet.has(edge.to)).map(() => from);
-    });
-    const uniqueGeneratorIds = Array.from(new Set(inboundGeneratorEdges));
-    if (uniqueGeneratorIds.length === 1) {
-      const from = uniqueGeneratorIds[0];
-      const source = getLoadoutSocket(pipeline, from);
-      if (!source || !isMateriaSocket(source)) continue;
-      const output = canonicalGeneratorConfigFor(config.materia[source.materia])?.output;
-      if (output) loop.consumes = { from, output };
-    } else if (uniqueGeneratorIds.length > 1) {
-      throw new Error(`Legacy loop "${loopId}" declares iterator metadata but no consumes generator. Add loops.${loopId}.consumes with exactly one generator source; found inbound generator sockets: ${uniqueGeneratorIds.join(", ")}.`);
-    }
-  }
 }
 
 function normalizeGeneratorPipelineSlots(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
@@ -329,30 +320,24 @@ function renderMateria(config: PiMateriaConfig): string[] {
 }
 
 function formatSocketSlot(config: PiMateriaConfig, socket: MateriaPipelineSocketConfig): string {
-  const details: string[] = [`type=${socket.type}`];
-  if (socket.type === "agent") {
-    const materia = config.materia[socket.materia];
-    const agentMateria = materia && materia.type !== "utility" ? materia : undefined;
-    details.push(`materia=${socket.materia}`, `tools=${agentMateria ? formatToolScopeSpec(agentMateria.tools) : "unknown"}`);
+  const materia = config.materia[socket.materia];
+  const isUtility = materia?.type === "utility";
+  const details: string[] = [`materia=${socket.materia}`];
+  if (!isUtility) {
+    const agentMateria = materia;
+    details.push(`tools=${agentMateria ? formatToolScopeSpec(agentMateria.tools) : "unknown"}`);
     if (agentMateria?.multiTurn) details.push("materia.multiTurn=true");
     if (agentMateria) details.push(formatMateriaModelSettings(agentMateria));
   } else {
-    const utilityMateria = config.materia[socket.materia];
-    if (socket.materia) details.push(`materia=${socket.materia}`);
-    if (utilityMateria?.type === "utility") details.push(formatUtilityExecution(utilityMateria));
-    else details.push("utility=<invalid materia reference>");
+    details.push(formatUtilityExecution(materia));
   }
-  const effectiveParse = socket.type === "utility" && config.materia[socket.materia]?.type === "utility" ? config.materia[socket.materia].parse : socket.parse;
+  const effectiveParse = isUtility ? materia.parse : socket.parse;
   details.push(`parse=${effectiveParse ?? "text"}`);
   if (socket.edges?.length) details.push(`edges=${socket.edges.map((edge) => `${edgeLabel(edge)}->${edge.to}`).join(",")}`);
   if (socket.foreach) details.push(`foreach=${socket.foreach.items}${socket.foreach.as ? ` as ${socket.foreach.as}` : ""}${socket.foreach.done ? ` done ${socket.foreach.done}` : ""}`);
   if (socket.advance) details.push(`advance=${socket.advance.cursor}:${socket.advance.items}${socket.advance.when ? ` when ${socket.advance.when}` : ""}${socket.advance.done ? ` done ${socket.advance.done}` : ""}`);
   if (socket.limits) details.push(`limits=${formatSocketLimits(socket.limits)}`);
-  if (socket.type === "utility") {
-    const utilityMateria = config.materia[socket.materia];
-    const timeoutMs = utilityMateria?.type === "utility" ? utilityMateria.timeoutMs : undefined;
-    if (timeoutMs !== undefined) details.push(`timeoutMs=${timeoutMs}`);
-  }
+  if (isUtility && materia.timeoutMs !== undefined) details.push(`timeoutMs=${materia.timeoutMs}`);
   return details.join(", ");
 }
 
@@ -396,6 +381,14 @@ function formatSocketLimits(limits: NonNullable<MateriaPipelineSocketConfig["lim
   ].filter(Boolean).join("/") || "default";
 }
 
+function formatLoopDisplayText(pipeline: MateriaPipelineConfig, loopId: string, loop: MateriaLoopConfig): string {
+  const members = loopSockets(loop).map((socketId) => {
+    const materia = pipeline.sockets?.[socketId]?.materia;
+    return typeof materia === "string" && materia.trim().length > 0 ? materia : socketId;
+  });
+  return members.length > 0 ? `${loopId} (${members.join(" → ")})` : loopId;
+}
+
 function renderGraph(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): string[] {
   const lines: string[] = [];
   for (const [id, socket] of loadoutSocketEntries(pipeline)) {
@@ -404,7 +397,7 @@ function renderGraph(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): 
   }
   const loops = resolveLoopIterators(config, { pipeline, loadoutName: "<render>" });
   for (const [id, loop] of Object.entries(loops ?? {})) {
-    const label = loop.label ? `${id} (${loop.label})` : id;
+    const label = formatLoopDisplayText(pipeline, id, loop);
     const consumer = loop.consumes ? ` consumes=${loop.consumes.from}.${loop.consumes.output ?? generatorForLoop(config, pipeline, id)?.output ?? "<generated>"}` : "";
     const iterator = loop.iterator ? ` iterator=${formatForeach(loop.iterator)}` : "";
     const exit = loop.exit ? ` exit=${loop.exit.from}.${loop.exit.when}->${loop.exit.to}` : "";
@@ -443,7 +436,7 @@ function generatorForLoop(config: PiMateriaConfig, pipeline: MateriaPipelineConf
 }
 
 function isMateriaSocket(socket: MateriaPipelineSocketConfig): socket is MateriaPipelineSocketConfig & { materia: string } {
-  return (socket.type === "agent" || socket.type === "utility") && typeof socket.materia === "string";
+  return typeof socket.materia === "string";
 }
 
 export { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";

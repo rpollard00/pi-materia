@@ -56,7 +56,7 @@ describe("schema/persistence adapters", () => {
     const serialized = serializePersistedLoadout(parsed.value);
     expect(serialized.sockets).toBeDefined();
     expect((serialized.loops as Record<string, { sockets: string[] }>).main.sockets).toEqual(["Socket-1", "Socket-2"]);
-    expect((serialized.sockets as Record<string, Record<string, unknown>>)["Socket-2"]).toEqual({ materia: "Noop" });
+    expect((serialized.sockets as Record<string, Record<string, unknown>>)["Socket-2"]).toEqual({ materia: "Noop", parse: "json", assign: { noop: "$" } });
   });
 
   test("reports malformed loadout data and missing optional fields remain optional", () => {
@@ -92,15 +92,15 @@ describe("schema/persistence adapters", () => {
   test("bridges domain sockets to the canonical pipeline DTO", () => {
     const pipeline = domainLoadoutToPipelineConfig({
       entry: "Socket-1",
-      sockets: { "Socket-1": { type: "agent", materia: "Build" }, "Socket-2": { type: "utility", materia: "Noop", utility: "noop", parse: "json", assign: { noop: "$" } } },
+      sockets: { "Socket-1": { materia: "Build" }, "Socket-2": { materia: "Noop", utility: "noop", parse: "json", assign: { noop: "$" } } },
       loops: { one: { sockets: ["Socket-1"] } },
     });
     expect(pipeline.sockets["Socket-1"].type).toBeUndefined();
     expect(pipeline.loops?.one.sockets).toEqual(["Socket-1"]);
-    expect(pipeline.sockets["Socket-2"]).toEqual({ materia: "Noop" });
+    expect(pipeline.sockets["Socket-2"]).toEqual({ materia: "Noop", parse: "json", assign: { noop: "$" } });
 
     const domain = pipelineConfigToDomainLoadout(pipeline, undefined, { Build: { type: "agent" }, Noop: { type: "utility" } });
-    expect(domain.sockets["Socket-1"].type).toBe("agent");
+    expect(domain.sockets["Socket-1"]).toEqual(expect.objectContaining({ materia: "Build" }));
     expect(domain.loops?.one.sockets).toEqual(["Socket-1"]);
   });
 
@@ -172,34 +172,6 @@ describe("schema/persistence adapters", () => {
     }
   });
 
-  test("config and profile loading reject migration metadata", async () => {
-    const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
-    const previous = process.env.PI_MATERIA_PROFILE_DIR;
-    process.env.PI_MATERIA_PROFILE_DIR = profile;
-    try {
-      const dir = await Bun.$`mktemp -d`.text().then((value) => value.trim());
-      const file = path.join(dir, "materia.json");
-      await writeFile(file, JSON.stringify({
-        piMateria: { schemaVersion: 1, migrations: [] },
-        activeLoadout: "SocketConfig",
-        materia,
-        loadouts: { SocketConfig: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
-      }), "utf8");
-
-      await expect(loadConfig(dir, file)).rejects.toThrow(/migration metadata field piMateria/);
-
-      await writeFile(path.join(profile, "config.json"), JSON.stringify({
-        defaultLoadoutId: null,
-        schemaVersion: 1,
-      }), "utf8");
-
-      await expect(loadProfileConfig()).rejects.toThrow(/migration metadata field schemaVersion/);
-    } finally {
-      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
-      else process.env.PI_MATERIA_PROFILE_DIR = previous;
-    }
-  });
-
   test("saving writes the current metadata-free config model", async () => {
     const profile = await Bun.$`mktemp -d`.text().then((value) => value.trim());
     const cwd = await Bun.$`mktemp -d`.text().then((value) => value.trim());
@@ -208,14 +180,15 @@ describe("schema/persistence adapters", () => {
     try {
       const file = await saveMateriaConfigPatch(cwd, {
         materia,
-        loadouts: { Custom: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } },
+        loadouts: { Custom: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } }, loops: { only: { sockets: ["Socket-1"] } } } },
         activeLoadout: "Custom",
       });
       const saved = JSON.parse(await readFile(file, "utf8"));
       expect(saved.piMateria).toBeUndefined();
       expect(saved.schemaVersion).toBeUndefined();
-      expect(saved.migrations).toBeUndefined();
       expect(saved.loadouts.Custom.sockets["Socket-1"].type).toBeUndefined();
+      expect(saved.loadouts.Custom.loops.only).toEqual({ sockets: ["Socket-1"] });
+      expect(saved.loadouts.Custom.loops.only.label).toBeUndefined();
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

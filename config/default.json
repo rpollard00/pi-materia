@@ -13,6 +13,8 @@
   "activeLoadout": "Full-Auto",
   "loadouts": {
     "Full-Auto": {
+      "id": "default:full-auto",
+      "source": "default",
       "entry": "Socket-1",
       "loops": {
         "loopSelection": {
@@ -188,6 +190,8 @@
       }
     },
     "Planning-Consult": {
+      "id": "default:planning-consult",
+      "source": "default",
       "entry": "Socket-1",
       "loops": {
         "taskIteration": {

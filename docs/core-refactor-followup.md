@@ -20,7 +20,7 @@ Passing tests are useful regression evidence, but they do not prove the architec
 | Native runtime shape | The prior summary says application services and infrastructure/plugin adapters were introduced. | `src/castRuntime.ts` is the retained Pi-facing runtime facade; active lifecycle implementation lives behind focused runtime modules. | Import `src/castRuntime.ts` only for intentional Pi-facing runtime facade use. |
 | Cast execution split | The prior summary says application ports/use cases were added. | Cast execution use cases now depend on narrow lifecycle/context/agent/status ports instead of one broad runtime facade. | Continue keeping application ports narrow and behavior-oriented. |
 | Domain model | The prior summary says a pure materia/loadout domain model was extracted. | `src/domain` now owns pure socket/loadout/handoff/prompt intent concepts. | Keep domain deterministic and free of IO/plugin dependencies. |
-| Socket terminology | The socket-only migration supersedes older topology wording. | Config/defaults, saved loadouts, persisted runtime state, artifacts, events, usage, and WebUI DTOs now use socket terminology. | Keep sockets canonical in core and WebUI boundaries. |
+| Socket terminology | The socket-only stability supersedes older topology wording. | Config/defaults, saved loadouts, persisted runtime state, artifacts, events, usage, and WebUI DTOs now use socket terminology. | Keep sockets canonical in core and WebUI boundaries. |
 
 ## Target layering for future slices
 

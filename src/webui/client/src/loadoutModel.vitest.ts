@@ -44,8 +44,8 @@ describe('loadout socket display model', () => {
         Canonical: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }] },
-            'Socket-2': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-1': { materia: 'planner', parse: 'json', assign: { workItems: '$.workItems' }, edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-2' }] },
           },
           loops: { work: { sockets: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
         },
@@ -73,10 +73,10 @@ describe('loadout socket display model', () => {
   });
 
   it('formats contextual socket labels without renaming the socket id', () => {
-    expect(formatSocketLabel('Socket-2', { type: 'agent', materia: 'Consult' })).toBe('Socket-2 (Consult)');
+    expect(formatSocketLabel('Socket-2', { materia: 'Consult' })).toBe('Socket-2 (Consult)');
     expect(formatSocketLabel('Socket-3', { type: 'utility', label: 'Detect VCS', utility: 'vcs.detect' })).toBe('Socket-3 (Detect VCS)');
     expect(formatSocketLabel('Socket-4', { type: 'utility', utility: 'vcs.detect' })).toBe('Socket-4 (vcs.detect)');
-    expect(formatSocketLabel('Socket-5', { type: 'utility', materia: 'detectVcs' }, { detectVcs: { type: 'utility', label: 'Detect VCS', color: 'materia-color-cyan' } })).toBe('Socket-5 (Detect VCS)');
+    expect(formatSocketLabel('Socket-5', { materia: 'detectVcs' }, { detectVcs: { type: 'utility', label: 'Detect VCS', color: 'materia-color-cyan' } })).toBe('Socket-5 (Detect VCS)');
   });
 
   it('builds utility palette sockets as canonical references without copied executable fields', () => {
@@ -94,49 +94,49 @@ describe('loadout socket display model', () => {
       },
     });
 
-    expect(palette).toEqual([['ensureArtifactsIgnored', { type: 'utility', materia: 'ensureArtifactsIgnored' }]]);
+    expect(palette).toEqual([['ensureArtifactsIgnored', { materia: 'ensureArtifactsIgnored' }]]);
     expect(getSocketLabel('Socket-1', palette[0][1], { ensureArtifactsIgnored: { type: 'utility', label: 'Ensure Ignore' } })).toBe('Ensure Ignore');
   });
 });
 
 describe('loadout normalization model', () => {
-  it('normalizes legacy loadout socket kinds before save', () => {
+  it('normalizes current loadout socket kinds before save', () => {
     const config = normalizeMateriaConfigEdges({
       loadouts: {
-        Legacy: {
+        Current: {
           entry: 'Socket-2',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Build', socketKind: 'entry' as never },
-            'Socket-2': { type: 'agent', materia: 'Plan' },
-            'Socket-3': { type: 'agent', materia: 'Check', socketKind: 'invalid' as never },
+            'Socket-1': { materia: 'Build', socketKind: 'entry' as never },
+            'Socket-2': { materia: 'Plan' },
+            'Socket-3': { materia: 'Check', socketKind: 'invalid' as never },
           },
         },
       },
     });
 
-    expect(config.loadouts?.Legacy.sockets?.['Socket-1'].socketKind).toBe('normal');
-    expect(config.loadouts?.Legacy.sockets?.['Socket-2'].socketKind).toBe('entry');
-    expect(config.loadouts?.Legacy.sockets?.['Socket-3'].socketKind).toBe('normal');
-    expect(canDeleteSocket(config.loadouts?.Legacy.sockets?.['Socket-2'])).toBe(false);
-    expect(canDeleteSocket(config.loadouts?.Legacy.sockets?.['Socket-3'])).toBe(true);
+    expect(config.loadouts?.Current.sockets?.['Socket-1'].socketKind).toBe('normal');
+    expect(config.loadouts?.Current.sockets?.['Socket-2'].socketKind).toBe('entry');
+    expect(config.loadouts?.Current.sockets?.['Socket-3'].socketKind).toBe('normal');
+    expect(canDeleteSocket(config.loadouts?.Current.sockets?.['Socket-2'])).toBe(false);
+    expect(canDeleteSocket(config.loadouts?.Current.sockets?.['Socket-3'])).toBe(true);
   });
 
-  it('migrates legacy socket layout into loadout-level socket layout and strips semantic socket layout', () => {
+  it('migrates socket layout into loadout-level socket layout and strips semantic socket layout', () => {
     const config = normalizeMateriaConfigEdges({
       loadouts: {
-        Legacy: {
+        Current: {
           entry: 'Socket-1',
           layout: { sockets: { 'Socket-2': { x: 20, y: 30 }, Missing: { x: 99, y: 99 } } },
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Build', layout: { x: 1, y: 2 } },
-            'Socket-2': { type: 'agent', materia: 'Check', layout: { x: 3, y: 4 } },
-            'Socket-3': { type: 'agent', materia: 'Ship' },
+            'Socket-1': { materia: 'Build', layout: { x: 1, y: 2 } },
+            'Socket-2': { materia: 'Check', layout: { x: 3, y: 4 } },
+            'Socket-3': { materia: 'Ship' },
           },
         },
       },
     });
 
-    const loadout = config.loadouts?.Legacy;
+    const loadout = config.loadouts?.Current;
     expect(loadout?.layout?.sockets).toEqual({ 'Socket-1': { x: 1, y: 2 }, 'Socket-2': { x: 20, y: 30 } });
     expect(loadout?.sockets?.['Socket-1'].layout).toBeUndefined();
     expect(loadout?.sockets?.['Socket-2'].layout).toBeUndefined();
@@ -158,7 +158,6 @@ describe('loadout normalization model', () => {
           entry: 'Socket-1',
           sockets: {
             'Socket-1': {
-              type: 'utility',
               materia: 'detectVcs',
               utility: 'vcs.detect',
               command: ['copied'],
@@ -173,21 +172,15 @@ describe('loadout normalization model', () => {
       },
     });
 
-    expect(config.loadouts?.Hooks.sockets?.['Socket-1']).toEqual({ type: 'utility', materia: 'detectVcs', edges: [{ when: 'always', to: 'end' }] });
+    expect(config.loadouts?.Hooks.sockets?.['Socket-1']).toEqual({ materia: 'detectVcs', edges: [{ when: 'always', to: 'end' }] });
   });
 
-  it('rejects unknown and cross-type utility materia references during save validation', () => {
+  it('rejects unknown materia references during save validation', () => {
     const unknown = normalizeMateriaConfigEdges({
       materia: { Build: { type: 'agent', prompt: 'Build.' } },
-      loadouts: { Hooks: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'utility', materia: 'missingUtility' } } } },
+      loadouts: { Hooks: { entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'missingUtility' } } } },
     }, { semantic: false });
-    expect(() => assertValidLoadoutSaveSemantics(unknown)).toThrow(/utility socket references unknown materia/);
-
-    const mismatch = normalizeMateriaConfigEdges({
-      materia: { Build: { type: 'agent', prompt: 'Build.' } },
-      loadouts: { Hooks: { entry: 'Socket-1', sockets: { 'Socket-1': { type: 'utility', materia: 'Build' } } } },
-    }, { semantic: false });
-    expect(() => assertValidLoadoutSaveSemantics(mismatch)).toThrow(/utility socket must reference utility materia/);
+    expect(() => assertValidLoadoutSaveSemantics(unknown)).toThrow(/socket references unknown materia/);
   });
 
   it('normalizes generator-to-generator sockets to canonical JSON workItems assignment before save', () => {
@@ -197,8 +190,8 @@ describe('loadout normalization model', () => {
         Yolo: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
-            'Socket-2': { type: 'agent', materia: 'refiner', assign: { tasks: '$.tasks' }, edges: [{ when: 'always', to: 'end' }] },
+            'Socket-1': { materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'refiner', assign: { tasks: '$.tasks' }, edges: [{ when: 'always', to: 'end' }] },
           },
         },
       },
@@ -221,8 +214,8 @@ describe('loadout normalization model', () => {
           entry: 'Socket-1',
           loops: { taskIteration: { sockets: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'planner', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
-            'Socket-2': { type: 'agent', materia: 'Build' },
+            'Socket-1': { materia: 'planner', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'Build' },
           },
         },
       },
@@ -250,10 +243,10 @@ describe('loadout normalization model', () => {
             },
           },
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
-            'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
-            'Socket-3': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
-            'Socket-4': { type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-1': { materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-3': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
+            'Socket-4': { materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
           },
         },
       },
@@ -283,9 +276,9 @@ describe('loadout normalization model', () => {
         },
       },
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
-        'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
-        'Socket-3': { type: 'agent', materia: 'Build' },
+        'Socket-1': { materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-2': { materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-3': { materia: 'Build' },
       },
     } as any;
     const before = JSON.stringify(loadout);
@@ -314,17 +307,17 @@ describe('loadout normalization model', () => {
   it('diagnoses missing and ambiguous graph-derived loop consumer sources', () => {
     const missing = analyzeLoadoutGraph({
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'planner' },
-        'Socket-2': { type: 'agent', materia: 'Build' },
+        'Socket-1': { materia: 'planner' },
+        'Socket-2': { materia: 'Build' },
       },
       loops: { work: { sockets: ['Socket-2'], consumes: { from: 'Socket-1', output: 'workItems' } } },
     }, { planner: { generator: true }, Build: {} });
 
     const ambiguous = analyzeLoadoutGraph({
       sockets: {
-        'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
-        'Socket-2': { type: 'agent', materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
-        'Socket-3': { type: 'agent', materia: 'Build' },
+        'Socket-1': { materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-2': { materia: 'refiner', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-3': { materia: 'Build' },
       },
       loops: { work: { sockets: ['Socket-3'], consumes: { from: 'Socket-1', output: 'workItems' } } },
     }, { planner: { generator: true }, refiner: { generator: true }, Build: {} });
@@ -333,7 +326,7 @@ describe('loadout normalization model', () => {
     expect(ambiguous.diagnostics).toEqual([expect.objectContaining({ code: 'loop-consumer-ambiguous', loopId: 'work' })]);
   });
 
-  it('canonicalizes legacy UI outputFormat fields to parse before save', () => {
+  it('canonicalizes current UI outputFormat fields to parse before save', () => {
     const config = normalizeMateriaConfigEdges({
       materia: {
         Critique: { prompt: 'Review.', outputFormat: 'json' } as MateriaBehaviorConfig,
@@ -342,7 +335,7 @@ describe('loadout normalization model', () => {
         Draft: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Critique', outputFormat: 'json' } as PipelineSocket,
+            'Socket-1': { materia: 'Critique', outputFormat: 'json' } as PipelineSocket,
           },
         },
       },
@@ -360,8 +353,8 @@ describe('loadout normalization model', () => {
         HojoLike: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Build', parse: 'text', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
-            'Socket-2': { type: 'agent', materia: 'Maintain' },
+            'Socket-1': { materia: 'Build', parse: 'text', edges: [{ when: 'satisfied', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'Maintain' },
           },
         },
       },
@@ -376,8 +369,8 @@ describe('loadout normalization model', () => {
         TextFlow: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Build', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
-            'Socket-2': { type: 'agent', materia: 'Maintain' },
+            'Socket-1': { materia: 'Build', parse: 'text', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'Maintain' },
           },
         },
       },
@@ -392,9 +385,9 @@ describe('loadout normalization model', () => {
         JsonControl: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Auto-Eval', parse: 'json', edges: [{ when: 'satisfied', to: 'Socket-2' }, { when: 'not_satisfied', to: 'Socket-3' }] },
-            'Socket-2': { type: 'agent', materia: 'Maintain' },
-            'Socket-3': { type: 'agent', materia: 'Build' },
+            'Socket-1': { materia: 'Auto-Eval', parse: 'json', edges: [{ when: 'satisfied', to: 'Socket-2' }, { when: 'not_satisfied', to: 'Socket-3' }] },
+            'Socket-2': { materia: 'Maintain' },
+            'Socket-3': { materia: 'Build' },
           },
         },
       },
@@ -407,11 +400,11 @@ describe('loadout normalization model', () => {
     const config: MateriaConfig = {
       materia: { Generate: { generator: true }, Build: {} },
       loadouts: {
-        LegacyEditorState: {
+        EditorState: {
           entry: 'Socket-1',
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'Generate', next: 'Socket-2' } as PipelineSocket,
-            'Socket-2': { type: 'agent', materia: 'Build', layout: { x: 10, y: 20 } },
+            'Socket-1': { materia: 'Generate', edges: [{ when: 'always', to: 'Socket-2' }] } as PipelineSocket,
+            'Socket-2': { materia: 'Build', layout: { x: 10, y: 20 } },
           },
           loops: {
             work: { sockets: ['Socket-2'], consumes: { from: 'Stale', output: 'workItems' } },
@@ -421,10 +414,10 @@ describe('loadout normalization model', () => {
     };
 
     expect(() => assertValidLoadoutSaveSemantics(config)).not.toThrow();
-    expect(config.loadouts?.LegacyEditorState.sockets?.['Socket-1']).not.toHaveProperty('edges');
-    expect(config.loadouts?.LegacyEditorState.sockets?.['Socket-1']).toHaveProperty('next', 'Socket-2');
-    expect(config.loadouts?.LegacyEditorState.sockets?.['Socket-2']).toHaveProperty('layout');
-    expect(config.loadouts?.LegacyEditorState.loops?.work.consumes?.from).toBe('Stale');
+    expect(config.loadouts?.EditorState.sockets?.['Socket-1']).toHaveProperty('edges');
+    expect(config.loadouts?.EditorState.sockets?.['Socket-1']).not.toHaveProperty('next');
+    expect(config.loadouts?.EditorState.sockets?.['Socket-2']).toHaveProperty('layout');
+    expect(config.loadouts?.EditorState.loops?.work.consumes?.from).toBe('Stale');
   });
 
   it('materializes loop exit control fields before save without deleting back-edges', () => {
@@ -440,9 +433,9 @@ describe('loadout normalization model', () => {
             },
           },
           sockets: {
-            'Socket-1': { type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
-            'Socket-3': { type: 'agent', materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
-            'Socket-4': { type: 'agent', materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-1': { materia: 'planner', edges: [{ when: 'always', to: 'Socket-3' }] },
+            'Socket-3': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-4' }] },
+            'Socket-4': { materia: 'Maintain', edges: [{ when: 'always', to: 'Socket-3' }] },
           },
         },
       },
@@ -517,7 +510,7 @@ describe('loadout socket deletion model', () => {
             },
           },
           sockets: {
-            'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-1': { socketKind: 'entry', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }] },
             'Socket-3': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-4': { socketKind: 'normal' },
@@ -551,7 +544,7 @@ describe('loadout socket deletion model', () => {
             },
           },
           sockets: {
-            'Socket-1': { socketKind: 'entry', type: 'agent', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-1': { socketKind: 'entry', materia: 'planner', edges: [{ when: 'always', to: 'Socket-2' }] },
             'Socket-2': { socketKind: 'normal', edges: [{ when: 'always', to: 'Socket-3' }] },
             'Socket-3': {
               socketKind: 'normal',
@@ -632,7 +625,7 @@ describe('loop-exit connection mutation model', () => {
           entry: 'Socket-1',
           sockets: {
             'Socket-1': { socketKind: 'entry' },
-            'Socket-2': { socketKind: 'normal', type: 'agent', materia: 'Maintain', parse: 'text' },
+            'Socket-2': { socketKind: 'normal', materia: 'Maintain', parse: 'text' },
             'Socket-3': { socketKind: 'normal' },
           },
           loops: {
@@ -688,8 +681,8 @@ describe('loadout materia palette model', () => {
       Active: {
         entry: 'Socket-1',
         sockets: {
-          'Socket-1': { type: 'agent', materia: 'Build' },
-          'Socket-only': { type: 'agent', materia: 'AdHoc' },
+          'Socket-1': { materia: 'Build' },
+          'Socket-only': { materia: 'AdHoc' },
         },
       },
     };
@@ -724,7 +717,6 @@ describe('loadout materia palette model', () => {
     const palette = buildMateriaPalette(materia);
     expect(palette.map(([id]) => id)).toEqual(['ensureArtifactsIgnored', 'detectVcs', 'Build']);
     expect(palette.find(([id]) => id === 'ensureArtifactsIgnored')?.[1]).toEqual({
-      type: 'utility',
       materia: 'ensureArtifactsIgnored',
     });
     expect(materia.ensureArtifactsIgnored.group).toBe('Utility');
@@ -739,7 +731,7 @@ describe('loadout materia palette model', () => {
 
     loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], utilityMateria);
 
-    expect(loadout.sockets!['Socket-1']).toEqual({ type: 'utility', materia: 'detectVcs', empty: false, socketKind: 'entry' });
+    expect(loadout.sockets!['Socket-1']).toEqual({ materia: 'detectVcs', empty: false, socketKind: 'entry' });
     expect(getSocketLabel('Socket-1', loadout.sockets!['Socket-1'], materia)).toBe('Detect VCS');
   });
 
@@ -754,7 +746,7 @@ describe('loadout materia palette model', () => {
 
     loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], buildMateria);
 
-    expect(loadout.sockets!['Socket-1']).toMatchObject({ type: 'agent', materia: 'Build', parse: 'json', assign: { satisfied: '$.satisfied' }, empty: false });
+    expect(loadout.sockets!['Socket-1']).toMatchObject({ materia: 'Build', parse: 'json', assign: { satisfied: '$.satisfied' }, empty: false });
     expect(paletteSignature(materia)).toBe(before);
   });
 
@@ -793,10 +785,10 @@ describe('loadout materia palette model', () => {
     const newTarget = placeMateriaInSocket(target, source);
     const newSource = placeMateriaInSocket(source, target);
 
-    expect(newTarget).toMatchObject({ type: 'agent', materia: 'Build', limits: { maxOutputBytes: 1024 }, socketKind: 'normal' });
+    expect(newTarget).toMatchObject({ materia: 'Build', limits: { maxOutputBytes: 1024 }, socketKind: 'normal' });
     expect(newTarget.layout).toBeUndefined();
     expect(newTarget.edges).toEqual([{ to: 'TargetEdge', when: 'not_satisfied' }, { to: 'AfterTarget', when: 'always' }]);
-    expect(newSource).toMatchObject({ type: 'agent', materia: 'Check', limits: { maxVisits: 3 }, socketKind: 'entry' });
+    expect(newSource).toMatchObject({ materia: 'Check', limits: { maxVisits: 3 }, socketKind: 'entry' });
     expect(newSource.layout).toBeUndefined();
     expect(newSource.edges).toEqual([{ to: 'SourceEdge', when: 'satisfied' }, { to: 'AfterSource', when: 'always' }]);
   });
@@ -807,7 +799,7 @@ describe('loadout materia palette model', () => {
     } satisfies Record<string, MateriaBehaviorConfig>;
     const loadout = makeEmptyEntryLoadout();
     loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], buildMateriaPalette(materia)[0][1]);
-    loadout.sockets!['Socket-2'] = { type: 'agent', materia: 'SocketOnly' };
+    loadout.sockets!['Socket-2'] = { materia: 'SocketOnly' };
     const savePayload: MateriaConfig = {
       activeLoadout: 'Draft',
       materia,

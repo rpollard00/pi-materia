@@ -44,11 +44,11 @@ function socket(id: string, config: Partial<ResolvedMateriaSocket["socket"]> = {
     id,
     socket: { id, type: "utility", materia: "Noop", ...config },
     materiaId: "Noop",
-    materia: { type: "utility", utility: "noop" },
+    materia: { utility: "noop" },
   } as ResolvedMateriaSocket;
 }
 
-const config = { materia: { Noop: { type: "utility", utility: "noop" } }, loadouts: {}, activeLoadout: "default" } as PiMateriaConfig;
+const config = { materia: { Noop: { utility: "noop" } }, loadouts: {}, activeLoadout: "default" } as PiMateriaConfig;
 
 describe("workflow transitions", () => {
   test("domain routing treats satisfied as the reserved canonical control field", () => {
@@ -115,25 +115,25 @@ describe("workflow transitions", () => {
       },
     });
 
-    expect(resolveEmptyLoopExhaustionTarget(cast, current, "Legacy-Done")).toBe("Socket-3");
+    expect(resolveEmptyLoopExhaustionTarget(cast, current, "Unused-Done")).toBe("Socket-3");
 
     const noExitCast = state({
       data: { workItems: [] },
       pipeline: { entry: socket("Socket-1"), sockets: { "Socket-2": current }, loops: { work: { sockets: ["Socket-2"] } } },
     });
-    expect(resolveEmptyLoopExhaustionTarget(noExitCast, current, "Legacy-Done")).toBe("end");
+    expect(resolveEmptyLoopExhaustionTarget(noExitCast, current, "Unused-Done")).toBe("end");
   });
 
-  test("legacy advance.done fallback is migration-only when no loop metadata owns the socket", () => {
-    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "Legacy-Done", when: "satisfied" } });
+  test("advance exhaustion without loop metadata falls through to end", () => {
+    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" } });
     const cast = state({ data: { workItems: [{ id: "one" }] }, pipeline: { entry: socket("Socket-1"), sockets: { "Socket-2": current }, loops: {} } });
 
-    expect(applyAdvance(cast, current, { satisfied: true })).toBe("Legacy-Done");
+    expect(applyAdvance(cast, current, { satisfied: true })).toBe("end");
   });
 
   test("same-item satisfied and not_satisfied edges continue routing when advance does not exhaust", () => {
     const current = socket("Socket-2", {
-      advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
+      advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" },
       edges: [{ when: "not_satisfied", to: "Socket-2" }, { when: "satisfied", to: "Socket-3" }],
     });
     const cast = state({ data: { workItems: [{ id: "one" }, { id: "two" }] }, pipeline: { entry: socket("Socket-1"), sockets: { "Socket-2": current, "Socket-3": socket("Socket-3") }, loops: { work: { sockets: ["Socket-2"] } } } });

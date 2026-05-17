@@ -6,7 +6,7 @@ import { validatePipelineGraph } from "../src/graph/graphValidation.js";
 import {
   buildLoopExitIndex,
   classifyGraphTarget,
-  resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback,
+  resolveIndexedLoopExhaustionTarget,
   TERMINAL_GRAPH_TARGET,
 } from "../src/graph/graphSemantics.js";
 import { materializeLoadoutLoopSemantics } from "../src/graph/loopSemantics.js";
@@ -24,7 +24,8 @@ const materia = {
 } satisfies PiMateriaConfig["materia"];
 
 function socket(id: string, config: Partial<ResolvedMateriaSocket["socket"]> = {}): ResolvedMateriaSocket {
-  return { id, socket: { id, type: "utility", utility: "noop", ...config } } as ResolvedMateriaSocket;
+  const socketConfig = { materia: "Noop", ...config } as ResolvedMateriaSocket["socket"];
+  return { id, socket: socketConfig, materiaId: socketConfig.materia, materia: { type: "utility", utility: "noop" } } as ResolvedMateriaSocket;
 }
 
 function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
@@ -81,9 +82,9 @@ function uiAuthoredLoopLoadout(): Loadout {
     id: "UiLoop",
     entry: "Socket-7",
     sockets: {
-      "Socket-7": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
-      "Socket-8": { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied", done: "end" }, edges: [{ when: "not_satisfied", to: "Socket-7" }] },
-      "Socket-9": { type: "agent", materia: "Narrate" },
+      "Socket-7": { materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
+      "Socket-8": { materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied", done: "end" }, edges: [{ when: "not_satisfied", to: "Socket-7" }] },
+      "Socket-9": { materia: "Narrate" },
     },
     loops: {
       work: {
@@ -96,11 +97,11 @@ function uiAuthoredLoopLoadout(): Loadout {
 }
 
 describe("cross-boundary structured loop semantics regressions", () => {
-  test("shared semantics and runtime route loop exhaustion through canonical exits before legacy advance.done", () => {
+  test("shared semantics and runtime route loop exhaustion through canonical exits", () => {
     const index = buildLoopExitIndex({ work: { sockets: ["Socket-2"], exits: [{ id: "post-loop", from: "Socket-2", condition: "satisfied", targetSocketId: "Socket-3" }] } });
-    expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Socket-2", "Legacy-Done", { reason: "post-final-item", satisfied: true })).toBe("Socket-3");
+    expect(resolveIndexedLoopExhaustionTarget(index, "Socket-2", { reason: "post-final-item", satisfied: true })).toBe("Socket-3");
 
-    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "Legacy-Done", when: "satisfied" } });
+    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" } });
     const cast = state({
       data: { workItems: [{ id: "one" }] },
       pipeline: {
@@ -115,7 +116,7 @@ describe("cross-boundary structured loop semantics regressions", () => {
   });
 
   test("loop exhaustion and empty-loop entry fall through to terminal end when no canonical exit route matches", () => {
-    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "Legacy-Done", when: "satisfied" } });
+    const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" } });
     const cast = state({
       data: { workItems: [{ id: "one" }] },
       pipeline: { entry: socket("Socket-1"), sockets: { "Socket-2": current }, loops: { work: { sockets: ["Socket-2"] } } },
@@ -134,9 +135,9 @@ describe("cross-boundary structured loop semantics regressions", () => {
     const graph: MateriaPipelineConfig = {
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" }, edges: [{ when: "not_satisfied", to: "Socket-2" }, { when: "satisfied", to: "Socket-3" }] },
-        "Socket-3": { type: "agent", materia: "Narrate" },
+        "Socket-1": { materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Maintain", parse: "json", advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" }, edges: [{ when: "not_satisfied", to: "Socket-2" }, { when: "satisfied", to: "Socket-3" }] },
+        "Socket-3": { materia: "Narrate" },
       },
       loops: { work: { sockets: ["Socket-2"], exits: [{ id: "bad", from: "Socket-2", condition: "satisfied", targetSocketId: "Socket-99" }] } },
     };
@@ -156,10 +157,10 @@ describe("cross-boundary structured loop semantics regressions", () => {
     const loadout: MateriaPipelineConfig = {
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
-        "Socket-3": { type: "agent", materia: "Maintain", edges: [{ when: "not_satisfied", to: "Socket-2" }] },
-        "Socket-4": { type: "agent", materia: "Narrate" },
+        "Socket-1": { materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
+        "Socket-3": { materia: "Maintain", edges: [{ when: "not_satisfied", to: "Socket-2" }] },
+        "Socket-4": { materia: "Narrate" },
       },
       loops: { work: { sockets: ["Socket-2", "Socket-3"], consumes: { from: "Socket-1", output: "workItems" }, exit: { from: "Socket-3", when: "satisfied", to: "Socket-4" } } },
     };
@@ -171,21 +172,21 @@ describe("cross-boundary structured loop semantics regressions", () => {
     expect(validatePipelineGraph(loadout, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).toEqual({ ok: true, errors: [] });
   });
 
-  test("normalization accepts legacy advance.done:end as compatibility input without mutating the source", () => {
-    const legacy: MateriaPipelineConfig = {
+  test("normalization preserves current advance metadata without mutating the source", () => {
+    const current: MateriaPipelineConfig = {
       entry: "Socket-1",
       sockets: {
-        "Socket-1": { type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { type: "agent", materia: "Maintain", advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied", done: "end" } },
+        "Socket-1": { materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Maintain", advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" } },
       },
       loops: { work: { sockets: ["Socket-2"] } },
     };
-    const before = JSON.stringify(legacy);
+    const before = JSON.stringify(current);
 
-    const { loadout } = normalizeLoadedLoadout(legacy, materia);
+    const { loadout } = normalizeLoadedLoadout(current, materia);
 
-    expect(JSON.stringify(legacy)).toBe(before);
-    expect(loadout.sockets["Socket-2"].advance?.done).toBe("end");
+    expect(JSON.stringify(current)).toBe(before);
+    expect(loadout.sockets["Socket-2"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
     expect(loadout.loops?.work.exits).toBeUndefined();
   });
 

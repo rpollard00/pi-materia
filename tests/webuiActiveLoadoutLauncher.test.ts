@@ -20,8 +20,8 @@ async function harnessWithConfig(prefix: string) {
   await writeFile(configuredPath, JSON.stringify({
     activeLoadout: "Web-Test-A",
     loadouts: {
-      "Web-Test-A": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } },
-      "Web-Test-B": { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Auto-Eval" } } },
+      "Web-Test-A": { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } },
+      "Web-Test-B": { entry: "Socket-1", sockets: { "Socket-1": { materia: "Auto-Eval" } } },
     },
   }), "utf8");
   const harness = new FakePiHarness(cwd);

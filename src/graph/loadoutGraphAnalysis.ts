@@ -165,7 +165,7 @@ function generatorOutputForSocket(socket: AnalyzeableSocket | undefined, materia
 }
 
 function isMateriaSocket(socket: AnalyzeableSocket | undefined): socket is AnalyzeableSocket & { materia: string } {
-  return (socket?.type === "agent" || socket?.type === "utility") && typeof socket.materia === "string";
+  return typeof socket?.materia === "string";
 }
 
 function cloneValue<T>(value: T): T {

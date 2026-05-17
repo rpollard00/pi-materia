@@ -3,7 +3,7 @@ import type { MateriaLoopConfig, MateriaLoopExitRouteConfig, MateriaLoopExitRout
 export interface LoopExitRouteResolutionOptions {
   /**
    * Socket id of the loop member that is completing as the loop exit. When not
-   * provided, loop.exit.from is used as the legacy/default exit source if set.
+   * provided, loop.exit.from is used as the configured exit source if set.
    */
   from?: string;
   /**
@@ -23,8 +23,7 @@ export interface LoopExitRouteResolutionOptions {
  * - satisfied === undefined: `always`, then no route.
  *
  * The resolver only reads the canonical `satisfied` boolean supplied by the
- * caller. It never infers outcomes from legacy `passed`, feedback, missing, or
- * arbitrary payload fields. Validation enforces one route per condition per
+ * caller. It never infers outcomes from non-canonical payload fields. Validation enforces one route per condition per
  * loop-exit source; if unvalidated metadata is passed, the first route in
  * metadata order for the selected condition/source is returned deterministically.
  */

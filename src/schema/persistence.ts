@@ -7,8 +7,7 @@ import type { LoadoutSource, LoadoutUserLockState, MateriaConfig, MateriaLoopCon
  * Persistence/schema anti-corruption adapters.
  *
  * `sockets` is the canonical external spelling for loadout JSON handled by
- * these adapters. Socket fields are required by canonical validation; legacy
- * socket-collection aliases are not adapted at this boundary.
+ * these adapters. Socket fields are required by canonical validation.
  */
 
 export interface CurrentPersistedConfig {
@@ -108,17 +107,8 @@ export function domainLoadoutToPipelineConfig(loadout: Loadout): MateriaPipeline
   };
 }
 
-export class CurrentPersistedConfigError extends Error {}
-
 export function normalizePersistedConfigForApplication<T extends Partial<PiMateriaConfig>>(config: T): T {
-  rejectMigrationMetadata(config as Record<string, unknown>, "Materia config");
   return parseCurrentPersistedConfig(config as CurrentPersistedConfig) as T;
-}
-
-export function rejectMigrationMetadata(config: Record<string, unknown>, label: string): void {
-  for (const key of ["piMateria", "schemaVersion", "migrations", "appliedMigrations"]) {
-    if (key in config) throw new CurrentPersistedConfigError(`${label} configures migration metadata field ${key}.`);
-  }
 }
 
 export function normalizePersistedLoadoutForApplication(value: unknown, materia: Record<string, Pick<MateriaConfig, "type">> = {}): unknown {
@@ -131,7 +121,6 @@ export function normalizePersistedLoadoutForApplication(value: unknown, materia:
 }
 
 export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Partial<PiMateriaConfig> {
-  rejectMigrationMetadata(config as Record<string, unknown>, "Materia config");
   const materia = isPlainObject(config.materia) ? config.materia as PiMateriaConfig["materia"] : undefined;
   return {
     ...(config.artifactDir !== undefined ? { artifactDir: config.artifactDir } : {}),
@@ -170,7 +159,7 @@ export function serializeCurrentProfileConfig(profile: MateriaProfileConfig): Cu
 export function validatePersistedHandoffPayload(value: unknown, path = "handoff"): DomainResult<HandoffObject> {
   if (!isPlainObject(value)) return { ok: false, issues: [{ path, message: "handoff payload must be an object" }] };
   const issues: DomainIssue[] = [];
-  if ("tasks" in value && !("workItems" in value)) issues.push({ path: `${path}.tasks`, message: "legacy tasks are not canonical persisted work; use workItems" });
+  if ("tasks" in value && !("workItems" in value)) issues.push({ path: `${path}.tasks`, message: "tasks are not canonical persisted work; use workItems" });
   if ("workItems" in value && !Array.isArray(value.workItems)) issues.push({ path: `${path}.workItems`, message: "workItems must be an array when present" });
   const reserved = validateReservedHandoffFields(value, path);
   if (!reserved.ok) issues.push(...reserved.issues);
@@ -207,26 +196,16 @@ function rejectPersistedSocketTypes(sockets: Record<string, unknown>, path: stri
 }
 
 function materializeRuntimeSockets(sockets: Record<string, unknown>, materia: Record<string, Pick<MateriaConfig, "type">>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(sockets).map(([id, socket]) => {
-    const copy = cloneRecord(socket) as Record<string, unknown>;
-    const materiaId = typeof copy.materia === "string" ? copy.materia : undefined;
-    const type = materiaId ? materia[materiaId]?.type : undefined;
-    return [id, { ...copy, type: type === "utility" ? "utility" : "agent" }];
-  }));
+  return Object.fromEntries(Object.entries(sockets).map(([id, socket]) => [id, cloneRecord(socket)]));
 }
 
 function serializeCanonicalSockets(sockets: Record<SocketId, LoadoutSocket> | Record<string, MateriaPipelineSocketConfig>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(sockets).map(([id, socket]) => {
     const copy = cloneRecord(socket) as unknown as Record<string, unknown>;
-    delete copy.type;
     delete copy.utility;
     delete copy.command;
     delete copy.params;
     delete copy.timeoutMs;
-    if (socket.type === "utility") {
-      delete copy.parse;
-      delete copy.assign;
-    }
     return [id, copy];
   }));
 }
@@ -246,6 +225,7 @@ function parseLoop(value: unknown, path: string, issues: DomainIssue[]): Loadout
     return { sockets: [] };
   }
   const rawSockets = value.sockets;
+  if ("label" in value) issues.push({ path: `${path}.label`, message: "persisted loops must not configure label" });
   if (!Array.isArray(rawSockets) || !rawSockets.every((item) => typeof item === "string")) issues.push({ path: `${path}.sockets`, message: "loop must define a sockets string array" });
   return {
     sockets: Array.isArray(rawSockets) ? rawSockets.filter((item): item is string => typeof item === "string") : [],

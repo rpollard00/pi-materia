@@ -5,9 +5,7 @@ import {
   remapGraphTargetPreservingTerminal,
   resolveCanonicalLoopExhaustionTarget,
   resolveIndexedLoopExhaustionTarget,
-  resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback,
   resolveIndexedLoopExitRouteTarget,
-  resolveLoopExhaustionTargetWithLegacyAdvanceDoneFallback,
   TERMINAL_GRAPH_TARGET,
 } from "../src/graph/graphSemantics.js";
 import type { MateriaLoopConfig } from "../src/types.js";
@@ -34,7 +32,6 @@ describe("graph semantics helpers", () => {
   test("resolves canonical loop exhaustion to a loop exit route or terminal fallback", () => {
     const loop: MateriaLoopConfig = {
       sockets: ["Socket-2", "Socket-3"],
-      exit: { from: "Socket-3", when: "satisfied", to: "end" },
       exits: [
         { id: "retry-summary", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-2" },
         { id: "summary", from: "Socket-3", condition: "satisfied", targetSocketId: "Socket-4" },
@@ -58,19 +55,8 @@ describe("graph semantics helpers", () => {
     expect(resolveIndexedLoopExitRouteTarget(index, "Socket-3", { reason: "post-final-item" })).toBe("Socket-4");
     expect(resolveIndexedLoopExitRouteTarget(index, "Socket-2", { reason: "post-final-item" })).toBeUndefined();
     expect(resolveIndexedLoopExhaustionTarget(index, "Socket-2", { reason: "empty-loop" })).toBe("end");
-    expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Socket-3", "Socket-9", { reason: "post-final-item" })).toBe("Socket-4");
-    expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Socket-2", "Socket-9", { reason: "post-final-item" })).toBe("end");
-    expect(resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(index, "Legacy-Socket", "Socket-9", { reason: "post-final-item" })).toBe("Socket-9");
-  });
-
-  test("isolates legacy advance.done compatibility fallback behind a named helper", () => {
-    const loop: MateriaLoopConfig = {
-      sockets: ["Socket-2"],
-      exits: [{ id: "canonical", from: "Socket-2", condition: "always", targetSocketId: "Socket-4" }],
-    };
-
-    expect(resolveLoopExhaustionTargetWithLegacyAdvanceDoneFallback(loop, "Socket-9", { reason: "post-final-item", from: "Socket-2" })).toBe("Socket-4");
-    expect(resolveLoopExhaustionTargetWithLegacyAdvanceDoneFallback(undefined, "Socket-9", { reason: "post-final-item" })).toBe("Socket-9");
-    expect(resolveLoopExhaustionTargetWithLegacyAdvanceDoneFallback(undefined, undefined, { reason: "post-final-item" })).toBe("end");
+    expect(resolveIndexedLoopExhaustionTarget(index, "Socket-3", { reason: "post-final-item" })).toBe("Socket-4");
+    expect(resolveIndexedLoopExhaustionTarget(index, "Socket-2", { reason: "post-final-item" })).toBe("end");
+    expect(resolveIndexedLoopExhaustionTarget(index, "Unowned-Socket", { reason: "post-final-item" })).toBe("end");
   });
 });

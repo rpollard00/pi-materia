@@ -24,7 +24,7 @@ async function makeHarness(compaction?: unknown): Promise<FakePiHarness> {
     artifactDir: ".pi/pi-materia",
     ...(compaction === undefined ? {} : { compaction }),
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build", next: "end" } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", edges: [{ when: 'always', to: 'end' }] } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia prompt" } },
   }, null, 2));
   const harness = new FakePiHarness(cwd);

@@ -3,7 +3,6 @@ import { normalizePipelineGraph } from "../graph/graphValidation.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, materializeCanonicalSockets } from "./loadoutAccessors.js";
 import { analyzeLoadoutGraph, type LoadoutGraphAnalysis } from "../graph/loadoutGraphAnalysis.js";
 import { materializeLoadoutLoopSemantics } from "../graph/loopSemantics.js";
-import { normalizeLegacyLoopRoutingCompatibilityInPlace } from "./loopCompatibility.js";
 import type { MateriaConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, MateriaSocketLayoutConfig, PiMateriaConfig } from "../types.js";
 
 export interface NormalizedLoadoutResult<TLoadout extends MateriaPipelineConfig = MateriaPipelineConfig> {
@@ -26,7 +25,6 @@ export function normalizeLoadedLoadout<TLoadout extends MateriaPipelineConfig>(l
   const normalized = materializeCanonicalSockets(normalizePipelineGraph(loadout) as TLoadout, materia as Record<string, Pick<MateriaConfig, "type">>);
   normalizeLoadoutSocketKinds(normalized);
   normalizeLoadoutLayout(normalized);
-  normalizeLegacyLoopRoutingCompatibilityInPlace(normalized);
   const analysis = analyzeLoadoutGraph(normalized, materia);
   return { loadout: normalized, analysis };
 }
@@ -83,10 +81,8 @@ function normalizeLoadoutLayout(loadout: MateriaPipelineConfig): void {
 
   for (const id of loadoutSocketIds(loadout).sort((a, b) => a.localeCompare(b))) {
     const socket = getLoadoutSocket(loadout, id);
-    const authoritative = existingSockets[id];
-    const fallback = socket?.layout;
-    const source = isSocketLayout(authoritative) ? authoritative : isSocketLayout(fallback) ? fallback : undefined;
-    if (source) socketLayouts[id] = { ...(typeof source.x === "number" ? { x: source.x } : {}), ...(typeof source.y === "number" ? { y: source.y } : {}) };
+    const source = existingSockets[id] ?? (socket as { layout?: unknown } | undefined)?.layout;
+    if (isSocketLayout(source)) socketLayouts[id] = { ...(typeof source.x === "number" ? { x: source.x } : {}), ...(typeof source.y === "number" ? { y: source.y } : {}) };
     if (socket && "layout" in socket) delete socket.layout;
   }
 
@@ -103,9 +99,8 @@ function pruneLoadoutLayout(loadout: MateriaPipelineConfig): void {
 
 function pruneCanonicalUtilitySocketFields(loadout: MateriaPipelineConfig): void {
   for (const [, socket] of loadoutSocketEntries(loadout)) {
-    if (socket.type !== "utility") continue;
     const canonicalSocket = socket as unknown as Record<string, unknown>;
-    for (const key of ["utility", "command", "params", "timeoutMs", "parse", "assign"]) delete canonicalSocket[key];
+    for (const key of ["utility", "command", "params", "timeoutMs"]) delete canonicalSocket[key];
   }
 }
 
@@ -130,7 +125,7 @@ function normalizeGeneratorPipelineSockets(loadout: MateriaPipelineConfig, mater
 }
 
 function isMateriaSocket(socket: MateriaPipelineSocketConfig): socket is MateriaPipelineSocketConfig & { materia: string } {
-  return (socket.type === "agent" || socket.type === "utility") && typeof socket.materia === "string";
+  return typeof socket.materia === "string";
 }
 
 function isSocketLayout(value: unknown): value is MateriaSocketLayoutConfig {

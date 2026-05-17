@@ -158,7 +158,7 @@ export interface DragPayload {
   fromSocket?: string;
 }
 
-export type LoadoutEdgeKind = 'normal' | 'legacy-next' | 'loop-exit';
+export type LoadoutEdgeKind = 'normal' | 'loop-exit';
 
 export interface LoadoutEdge {
   id: string;

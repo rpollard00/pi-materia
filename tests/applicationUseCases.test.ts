@@ -10,7 +10,7 @@ function loaded(activeLoadout = "default"): LoadedConfig {
 }
 
 function pipeline(): ResolvedMateriaPipeline {
-  return { entry: { id: "Socket-1", socket: { type: "utility", utility: "noop" } }, sockets: { "Socket-1": { id: "Socket-1", socket: { type: "utility", utility: "noop" } } } };
+  return { entry: { id: "Socket-1", socket: { utility: "noop" } }, sockets: { "Socket-1": { id: "Socket-1", socket: { utility: "noop" } } } };
 }
 
 function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
@@ -121,7 +121,7 @@ describe("application use cases", () => {
           Review: { prompt: "review" },
         },
         loadouts: {
-          Review: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Review" } } },
+          Review: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Review" } } },
         },
       },
     };
@@ -170,9 +170,9 @@ describe("application use cases", () => {
       id: "Hojo-Consult",
       entry: "Socket-7",
       sockets: {
-        "Socket-7": { socketKind: "entry", type: "agent", materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
-        "Socket-8": { socketKind: "normal", type: "agent", materia: "Review", advance: { cursor: "items", items: "$.items", done: "end" }, edges: [{ when: "satisfied", to: "Socket-9" }] },
-        "Socket-9": { socketKind: "normal", type: "agent", materia: "Build" },
+        "Socket-7": { socketKind: "entry", materia: "Build", edges: [{ when: "always", to: "Socket-8" }] },
+        "Socket-8": { socketKind: "normal", materia: "Review", advance: { cursor: "items", items: "$.items", done: "end" }, edges: [{ when: "satisfied", to: "Socket-9" }] },
+        "Socket-9": { socketKind: "normal", materia: "Build" },
       },
       loops: {
         consult: {
@@ -247,7 +247,7 @@ describe("application use cases", () => {
         activeLoadout: "Review",
         artifactDir: artifactRoot,
         materia: { Build: { prompt: "build" }, Review: { prompt: "review" } },
-        loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Review" } } } },
+        loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Review" } } } },
       },
     };
     const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: (_cwd, artifactDir) => artifactDir ?? artifactRoot };
@@ -275,7 +275,7 @@ describe("application use cases", () => {
     let started = false;
     const artifactRoot = await mkdtemp(path.join(os.tmpdir(), "pi-materia-link-missing-"));
     const configs: ConfigRepository = {
-      async load() { return { source: "/repo/materia.json", config: { activeLoadout: "Review", artifactDir: artifactRoot, materia: { Build: { prompt: "build" } }, loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "Build" } } } } } }; },
+      async load() { return { source: "/repo/materia.json", config: { activeLoadout: "Review", artifactDir: artifactRoot, materia: { Build: { prompt: "build" } }, loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } } } } }; },
       async saveActiveLoadout() { return ""; },
       resolveArtifactRoot: (_cwd, artifactDir) => artifactDir ?? artifactRoot,
     };

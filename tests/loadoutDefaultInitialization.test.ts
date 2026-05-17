@@ -9,7 +9,7 @@ import { FakePiHarness } from "./fakePi.js";
 const minimalLoadout = (id?: string) => ({
   ...(id ? { id } : {}),
   entry: "Socket-1",
-  sockets: { "Socket-1": { type: "agent" as const, materia: "Build" } },
+  sockets: { "Socket-1": { materia: "Build" } },
 });
 
 describe("plugin default loadout initialization", () => {

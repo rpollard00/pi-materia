@@ -151,10 +151,10 @@ function loadoutForMateriaTarget(target: ResolvedLinkTarget, source: LinkGraphSo
   if ((definition as { type?: unknown }).type === "utility") {
     return {
       entry: "Socket-1",
-      sockets: { "Socket-1": { type: "utility", materia: target.id } },
-    };
+      sockets: { "Socket-1": { materia: target.id } },
+    } as unknown as Loadout;
   }
-  return { entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: target.id, ...copyParseField(definition) } } };
+  return { entry: "Socket-1", sockets: { "Socket-1": { materia: target.id, ...copyParseField(definition) } } } as unknown as Loadout;
 }
 
 function loadoutForLoadoutTarget(target: ResolvedLinkTarget, source: LinkGraphSource, issues: DomainIssue[]): Loadout | undefined {
@@ -203,16 +203,12 @@ function remapSocket(socket: LoadoutSocket, socketMap: Map<SocketId, SocketId>):
     ...(socket.edges ? { edges: socket.edges.map((edge) => ({ ...edge, to: remapGraphTarget(edge.to, socketMap) })) } : {}),
     ...(socket.foreach ? { foreach: { ...socket.foreach, ...(socket.foreach.done ? { done: remapGraphTarget(socket.foreach.done, socketMap) } : {}) } } : {}),
     ...(socket.advance ? { advance: { ...socket.advance, ...(socket.advance.done ? { done: remapGraphTarget(socket.advance.done, socketMap) } : {}) } } : {}),
-    ...(socket.type === "agent" && socket.assign ? { assign: { ...socket.assign } } : {}),
+    ...(socket.assign ? { assign: { ...socket.assign } } : {}),
   };
-  if (remapped.type === "utility") {
-    delete (remapped as unknown as Record<string, unknown>).utility;
-    delete (remapped as unknown as Record<string, unknown>).command;
-    delete (remapped as unknown as Record<string, unknown>).params;
-    delete (remapped as unknown as Record<string, unknown>).timeoutMs;
-    delete (remapped as unknown as Record<string, unknown>).parse;
-    delete (remapped as unknown as Record<string, unknown>).assign;
-  }
+  delete (remapped as unknown as Record<string, unknown>).utility;
+  delete (remapped as unknown as Record<string, unknown>).command;
+  delete (remapped as unknown as Record<string, unknown>).params;
+  delete (remapped as unknown as Record<string, unknown>).timeoutMs;
   return remapped;
 }
 

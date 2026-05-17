@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CURRENT_PI_MATERIA_SCHEMA_VERSION } from "../src/config/migrations.js";
 import piMateria from "../src/index.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -30,11 +29,11 @@ function multiTurnConfig(overrides: Record<string, unknown> = {}) {
       Test: {
         entry: "Socket-1",
         sockets: {
-          "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
+          "Socket-1": { materia: "Plan", parse: "json", assign: { tasks: "$.tasks" } },
         },
       },
     },
-    materia: { Plan: { tools: "readOnly", prompt: "Collaborative planner", multiTurn: true, ...overrides } },
+    materia: { Plan: { type: "agent", tools: "readOnly", prompt: "Collaborative planner", multiTurn: true, ...overrides } },
   };
 }
 
@@ -46,22 +45,22 @@ function singleTurnConfig() {
       Test: {
         entry: "Socket-1",
         sockets: {
-          "Socket-1": { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "Socket-2" },
-          "Socket-2": { type: "agent", materia: "Build" },
+          "Socket-1": { materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: 'always', to: 'Socket-2' }] },
+          "Socket-2": { materia: "Build" },
         },
       },
     },
     materia: {
-      Plan: { tools: "readOnly", prompt: "Plan once" },
-      Build: { tools: "coding", prompt: "Build once\n\nBuild {{state.tasks.0.title}}" },
+      Plan: { type: "agent", tools: "readOnly", prompt: "Plan once" },
+      Build: { type: "agent", tools: "coding", prompt: "Build once\n\nBuild {{state.tasks.0.title}}" },
     },
   };
 }
 
 function multiTurnWithDownstreamConfig(parse: "json" | "text") {
   const plan = parse === "json"
-    ? { type: "agent", materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, next: "Socket-2" }
-    : { type: "agent", materia: "Plan", parse: "text", assign: { summary: "$" }, next: "Socket-2" };
+    ? { materia: "Plan", parse: "json", assign: { tasks: "$.tasks" }, edges: [{ when: 'always', to: 'Socket-2' }] }
+    : { materia: "Plan", parse: "text", assign: { summary: "$" }, edges: [{ when: 'always', to: 'Socket-2' }] };
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
@@ -70,13 +69,13 @@ function multiTurnWithDownstreamConfig(parse: "json" | "text") {
         entry: "Socket-1",
         sockets: {
           "Socket-1": plan,
-          "Socket-2": { type: "agent", materia: "Build" },
+          "Socket-2": { materia: "Build" },
         },
       },
     },
     materia: {
-      Plan: { tools: "readOnly", prompt: "Collaborative planner", multiTurn: true },
-      Build: { tools: "coding", prompt: "Build downstream\n\nTasks={{state.tasks}} Summary={{state.summary}} Last={{lastOutput}}" },
+      Plan: { type: "agent", tools: "readOnly", prompt: "Collaborative planner", multiTurn: true },
+      Build: { type: "agent", tools: "coding", prompt: "Build downstream\n\nTasks={{state.tasks}} Summary={{state.summary}} Last={{lastOutput}}" },
     },
   };
 }
@@ -88,16 +87,16 @@ function loadoutSwitchingConfig() {
     loadouts: {
       Single: {
         entry: "Socket-1",
-        sockets: { "Socket-1": { type: "agent", materia: "PlanSingle", parse: "json", assign: { tasks: "$.tasks" } } },
+        sockets: { "Socket-1": { materia: "PlanSingle", parse: "json", assign: { tasks: "$.tasks" } } },
       },
       Interactive: {
         entry: "Socket-1",
-        sockets: { "Socket-1": { type: "agent", materia: "PlanInteractive", parse: "json", assign: { tasks: "$.tasks" } } },
+        sockets: { "Socket-1": { materia: "PlanInteractive", parse: "json", assign: { tasks: "$.tasks" } } },
       },
     },
     materia: {
-      PlanSingle: { tools: "readOnly", prompt: "Plan once" },
-      PlanInteractive: { tools: "readOnly", prompt: "Plan with refinements", multiTurn: true },
+      PlanSingle: { type: "agent", tools: "readOnly", prompt: "Plan once" },
+      PlanInteractive: { type: "agent", tools: "readOnly", prompt: "Plan with refinements", multiTurn: true },
     },
   };
 }
@@ -124,7 +123,9 @@ describe("native multi-turn runtime", () => {
     const finalPlan = '{"summary":"Plan","workItems":[{"id":"1","title":"Ship it","description":"Do the work","acceptance":["Done"],"context":{"architecture":"","constraints":[],"dependencies":[],"risks":[]}}],"guidance":{},"decisions":[],"risks":[],"satisfied":true,"feedback":"","missing":[]}';
 
     await harness.runCommand("materia", "loadout Planning-Consult");
-    expect(JSON.parse(await readFile(path.join(harness.cwd, ".pi", "pi-materia.json"), "utf8"))).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult", piMateria: { schemaVersion: CURRENT_PI_MATERIA_SCHEMA_VERSION } });
+    const savedLoadoutChoice = JSON.parse(await readFile(path.join(harness.cwd, ".pi", "pi-materia.json"), "utf8"));
+    expect(savedLoadoutChoice).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult" });
+    expect(savedLoadoutChoice.piMateria).toBeUndefined();
 
     await harness.runCommand("materia", "cast build the feature");
     const plannerStartedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;

@@ -18,7 +18,7 @@ async function makeHarness(options: { socketId?: string; materia?: string } = {}
       Test: {
         entry: socketId,
         sockets: {
-          [socketId]: { type: "agent", materia },
+          [socketId]: { materia },
         },
       },
     },

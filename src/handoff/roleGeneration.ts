@@ -142,7 +142,7 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
   if (!generates) return "Generator role: none configured.";
   const canonical = CANONICAL_WORK_ITEMS_GENERATOR_CONFIG;
   const legacyNote = generates.output !== canonical.output || generates.itemType !== canonical.itemType
-    ? "Legacy generator metadata from the request is migration-only and must not be copied into the generated prompt."
+    ? "Legacy generator metadata from the request is obsolete and must not be copied into the generated prompt."
     : undefined;
   return [
     "Generator role: produce the canonical workItems list for downstream loop regions.",

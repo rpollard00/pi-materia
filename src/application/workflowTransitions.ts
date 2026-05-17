@@ -2,7 +2,7 @@ import { selectMatchingEdge } from "../domain/routing.js";
 import { HANDOFF_SATISFIED_FIELD } from "../handoff/handoffContract.js";
 import { canonicalOutgoingEdges } from "../graph/graphValidation.js";
 import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
-import { loopExitIndexForPipeline, resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback } from "../graph/graphSemantics.js";
+import { loopExitIndexForPipeline, resolveIndexedLoopExhaustionTarget } from "../graph/graphSemantics.js";
 import { effectiveResolvedSocketConfig, resolvedSocketConfig } from "../runtime/resolvedMateria.js";
 export { resolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaCastState, MateriaEdgeCondition, MateriaEdgeConfig, PiMateriaConfig, ResolvedMateriaSocket } from "../types.js";
@@ -25,15 +25,15 @@ export function applyAdvance(state: MateriaCastState, socket: ResolvedMateriaSoc
   state.currentItemKey = undefined;
   state.currentItemLabel = undefined;
   if (next < items.length) return undefined;
-  return resolveRuntimeLoopExhaustionTargetWithLegacyAdvanceDoneFallback(state, socket.id, advance.done, parsed);
+  return resolveRuntimeLoopExhaustionTarget(state, socket.id, parsed);
 }
 
-export function resolveEmptyLoopExhaustionTarget(state: MateriaCastState, socket: ResolvedMateriaSocket, legacyDone: string | undefined): string {
-  return resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(loopExitIndexForPipeline(state.pipeline), socket.id, legacyDone, { reason: "empty-loop" });
+export function resolveEmptyLoopExhaustionTarget(state: MateriaCastState, socket: ResolvedMateriaSocket, _done: string | undefined): string {
+  return resolveIndexedLoopExhaustionTarget(loopExitIndexForPipeline(state.pipeline), socket.id, { reason: "empty-loop" });
 }
 
-function resolveRuntimeLoopExhaustionTargetWithLegacyAdvanceDoneFallback(state: MateriaCastState, from: string, legacyAdvanceDone: string | undefined, parsed: unknown): string {
-  return resolveIndexedLoopExhaustionTargetWithLegacyAdvanceDoneFallback(loopExitIndexForPipeline(state.pipeline), from, legacyAdvanceDone, { reason: "post-final-item", satisfied: canonicalSatisfiedOutcome(state, parsed) });
+function resolveRuntimeLoopExhaustionTarget(state: MateriaCastState, from: string, parsed: unknown): string {
+  return resolveIndexedLoopExhaustionTarget(loopExitIndexForPipeline(state.pipeline), from, { reason: "post-final-item", satisfied: canonicalSatisfiedOutcome(state, parsed) });
 }
 
 export function canonicalSatisfiedOutcome(state: MateriaCastState, parsed: unknown): boolean | undefined {

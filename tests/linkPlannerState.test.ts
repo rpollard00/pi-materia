@@ -8,7 +8,7 @@ function target(order: number): ResolvedLinkTarget {
 
 const virtualLoadout: VirtualLoadoutSpec = {
   metadata: { id: "virtual-link-materia-M0", name: "Linked: M0", version: 1, targets: [target(0)], remappings: [], stitching: [] },
-  loadout: { id: "virtual-link-materia-M0", entry: "Socket-1", sockets: { "Socket-1": { type: "agent", materia: "M0" } } },
+  loadout: { id: "virtual-link-materia-M0", entry: "Socket-1", sockets: { "Socket-1": { materia: "M0" } } },
 };
 
 describe("/materia link planner and chain state", () => {
