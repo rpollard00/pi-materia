@@ -221,7 +221,22 @@ A utility materia may set `generator: true` when a deterministic script should p
 
 ## Bundled utility scripts
 
-The default config defines `Ignore-Artifacts` and `Detect-VCS` as command-backed utility materia that run the shipped `ensure-ignored.mjs` and `detect-vcs.mjs` scripts. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Legacy ids `ensureArtifactsIgnored` and `detectVcs` are migration-only aliases, not canonical shipped ids.
+The default config defines `Ignore-Artifacts` and `Detect-VCS` as shipped-script utility materia that run `ensure-ignored.mjs` and `detect-vcs.mjs` through profile-resolved copies. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Legacy ids `ensureArtifactsIgnored` and `detectVcs`, legacy aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `legacyUtilityVcsDetect...` are migration-only input, not canonical shipped ids.
+
+## Migration boundary and profile verification
+
+Legacy utility config is accepted at the raw persisted-config boundary so migrations can rewrite it. Runtime validation intentionally rejects utility sockets that still carry executable socket fields. After migration, utility sockets should look like `{ "type": "utility", "materia": "Detect-VCS" }`, while the referenced utility materia owns `script`/`command`, `params`, `parse`, `assign`, and `timeoutMs`.
+
+To verify this machine's profile and bundled defaults no longer reference old utility forms or source-checkout script paths:
+
+1. Inspect `config/default.json` and the active profile config (`${PI_MATERIA_PROFILE_DIR:-~/.config}/pi/pi-materia/config.json`, depending on your profile override).
+2. Confirm shipped utility materia ids are `Detect-VCS` and `Ignore-Artifacts`.
+3. Confirm loadout utility sockets reference those ids with `materia` and do not include socket-local `utility`, `command`, `script`, `params`, `parse`, `assign`, or `timeoutMs`.
+4. Search for migration-only ids/aliases: `detectVcs`, `ensureArtifactsIgnored`, `vcs.detect`, `project.ensureIgnored`, and `legacyUtility`.
+5. Search for absolute source-checkout paths such as `/home/reese/projects/pi-materia`; shipped utilities should resolve through the profile `utilities/` directory instead.
+6. Run `bun test tests/defaultUtilityMateria.test.ts tests/configMigrations.test.ts tests/config.test.ts tests/utilityNative.test.ts` and `npm run pack:dry-run` before publishing or depending on packaged shipped utilities.
+
+The audit helper used during the migration work is recorded under `.pi/pi-materia/<cast-id>/utility-config-audit.mjs` artifacts when available; it is read-only and reports exact JSON pointers for stale persisted and effective migrated config.
 
 ## Local testing
 

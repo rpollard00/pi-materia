@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { PiMateriaConfig } from "../src/types.js";
 
@@ -66,5 +66,14 @@ describe("bundled utility materia defaults", () => {
     expect(packageJson.files).toContain("config/utilities/*.mjs");
     expect(packageJson.files).not.toContain(".pi/pi-materia");
     expect(packageJson.files).not.toContain(".pi/pi-materia/**");
+  });
+
+  test("package manifest and shipped utility sources support dry-run packaging checks", async () => {
+    const packageJson = JSON.parse(await readFile(path.resolve("package.json"), "utf8")) as { files?: string[]; scripts?: Record<string, string> };
+
+    expect(packageJson.files).toEqual(expect.arrayContaining(["config/default.json", "config/utilities/*.mjs", "docs/*.md"]));
+    expect(packageJson.scripts?.["pack:dry-run"]).toBe("npm pack --dry-run");
+    await expect(access(path.resolve("config", "utilities", "detect-vcs.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "ensure-ignored.mjs"))).resolves.toBeNull();
   });
 });

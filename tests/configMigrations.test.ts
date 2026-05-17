@@ -188,6 +188,11 @@ describe("pi-materia config migrations", () => {
     expect(config.materia.detectVcs).toMatchObject({ type: "utility", utility: "vcs.detect", parse: "json", assign: { vcs: "$" } });
     expect(result.audit["/user.json"].join("\n")).toContain("preserved shipped utility behavior as detectVcs because Detect-VCS is custom");
     expect(result.audit["/user.json"].join("\n")).toContain("conflict: canonical utility materia Detect-VCS differs from shipped VCS detector behavior");
+
+    layers[0].changed = false;
+    const snapshot = JSON.stringify(config);
+    migrateConfigLayers(layers);
+    expect(JSON.stringify(config)).toBe(snapshot);
   });
 
   it("repoints known inline utility aliases even when the layer has no materia block", () => {
@@ -237,6 +242,11 @@ describe("pi-materia config migrations", () => {
     expect(materiaId).toMatch(/^legacyUtilityUtilitiesCustomToolPy|^legacyUtilityCustomToolPy|^legacyUtility/);
     expect(config.materia[materiaId]).toMatchObject({ type: "utility", script: "./custom-tool.py", parse: "json", assign: { custom: "$" }, timeoutMs: 77 });
     expect(config.loadouts?.Legacy.sockets["Socket-1"]).toEqual({ type: "utility", materia: materiaId, limits: { turns: 1 } });
+
+    layers[0].changed = false;
+    const snapshot = JSON.stringify(config);
+    migrateConfigLayers(layers);
+    expect(JSON.stringify(config)).toBe(snapshot);
   });
 
   it("preserves rollback-compatible profile migration audit metadata when normalizing and migrating", async () => {

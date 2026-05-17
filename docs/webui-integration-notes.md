@@ -41,10 +41,10 @@ Important TypeScript interfaces are in `src/types.ts`:
 - `MateriaPipelineConfig`: `{ entry, sockets }`.
 - `MateriaPipelineSocketConfig`: agent or utility socket.
 - `MateriaAgentSocketConfig`: `type: "agent"`, `materia`, plus common routing fields.
-- `MateriaUtilitySocketConfig`: `type: "utility"`, `utility` or `command`, optional `params` and `timeoutMs`, plus common routing fields.
-- Common routing/editable graph fields: `parse`, `assign`, `next`, `edges`, `foreach`, `advance`, and `limits`.
+- `MateriaUtilitySocketConfig`: `type: "utility"`, `materia`, plus graph placement/routing fields. Socket-local `utility`, `command`, `script`, `params`, `parse`, `assign`, and `timeoutMs` are migration-only legacy input, not canonical WebUI output.
+- Common routing/editable graph fields: `next`, `edges`, `foreach`, `advance`, and `limits`; generator normalization may materialize parse/assignment internally, but authored utility behavior belongs on top-level utility materia.
 - `MateriaEdgeConfig`: `when`, `to`, `maxTraversals`.
-- `MateriaConfig`: `tools`, `prompt`, optional `model`, optional `thinking`, and optional `multiTurn`.
+- `MateriaConfig`: discriminated agent or utility materia. Agent materia configure `tools`, `prompt`, optional `model`, optional `thinking`, and optional `multiTurn`; utility materia configure `script`/`command` behavior, params, parse/assign defaults, label/group/color, timeout, and optional generator metadata.
 
 `src/runtime/pipeline.ts` resolves the active loadout with `getEffectivePipelineConfig()` and validates target links. `renderGrid()` is the current textual visualization and should remain a regression oracle for the WebUI graph.
 

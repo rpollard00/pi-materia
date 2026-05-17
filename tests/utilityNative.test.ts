@@ -42,6 +42,46 @@ function utilityConfig(socket: Record<string, unknown>, extraSockets: Record<str
 }
 
 describe("native utility socket execution", () => {
+  test("canonical shipped utility materia executes through profile-resolved script copies", async () => {
+    const temp = await mkdtemp(path.join(tmpdir(), "pi-materia-utility-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    const profileDir = path.join(temp, "profile");
+    process.env.PI_MATERIA_PROFILE_DIR = profileDir;
+    try {
+      const harness = await makeHarness({
+        artifactDir: ".pi/pi-materia",
+        activeLoadout: "Test",
+        loadouts: {
+          Test: {
+            entry: "Socket-1",
+            sockets: { "Socket-1": { type: "utility", materia: "Ignore-Artifacts", next: "end" } },
+          },
+        },
+        materia: {
+          "Ignore-Artifacts": {
+            type: "utility",
+            script: { kind: "shippedUtility", name: "ensure-ignored.mjs", runtime: "node" },
+            params: { patterns: [".pi/pi-materia/"] },
+            parse: "json",
+            assign: { artifactIgnore: "$" },
+          },
+        },
+      });
+
+      await harness.runCommand("materia", "cast canonical shipped utility");
+
+      const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: { artifactIgnore?: { ok?: boolean; file?: string } } };
+      expect(state.phase).toBe("complete");
+      expect(state.data?.artifactIgnore?.ok).toBe(true);
+      expect(state.data?.artifactIgnore?.file).toBe(path.join(harness.cwd, ".gitignore"));
+      await expect(readFile(path.join(profileDir, "utilities", "ensure-ignored.mjs"), "utf8")).resolves.toContain("JSON.parse");
+      await expect(readFile(path.join(profileDir, "utilities", ".pi-materia-shipped-utilities.json"), "utf8")).resolves.toContain("ensure-ignored.mjs");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("project.ensureIgnored adds configured patterns without duplicates", async () => {
     const harness = await makeHarness(utilityConfig({ utility: "project.ensureIgnored", parse: "json", params: { patterns: [".pi/pi-materia/", "dist/"] }, assign: { ignored: "$.patterns" } }));
 

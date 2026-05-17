@@ -122,7 +122,7 @@ The important invariant is that every generator stage in the pipeline consumes a
 
 ## Utility materia and generator/consumer styling
 
-Built-in setup/discovery steps such as `ensureArtifactsIgnored` and `detectVcs` are first-class utility materia. They appear in the WebUI palette under the Utility group and can be placed in sockets like agent materia. Palette-created utility sockets render and execute through the same graph runtime as generated utility sockets.
+Bundled setup/discovery steps such as `Ignore-Artifacts` and `Detect-VCS` are first-class utility materia. They appear in the WebUI palette under the Utility group and can be placed in sockets like agent materia. Palette-created utility sockets render and execute through the same graph runtime as generated utility sockets; old ids such as `ensureArtifactsIgnored` and `detectVcs` are migration-only aliases.
 
 Generator materia are marked with a **Generator** badge. Sockets inside loop regions are marked as **Loop consumer** instead of labeling arbitrary loop members as iterators. The badge is the accessible cue; the overlay preserves the materia's configured base color.
 

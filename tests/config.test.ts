@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config/config.js";
+import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { CURRENT_PI_MATERIA_SCHEMA_VERSION } from "../src/config/migrations.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
@@ -57,6 +58,14 @@ describe("layered config loading and persistence", () => {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
     }
+  });
+
+  test("rejects unsafe shipped utility script names during profile resolution", async () => {
+    const profileDir = await mkdtemp(path.join(tmpdir(), "pi-materia-shipped-unsafe-"));
+
+    expect(() => resolveShippedUtilityScriptPath(profileDir, { kind: "shippedUtility", name: "../detect-vcs.mjs", runtime: "node" })).toThrow(/Invalid shipped utility script name/);
+    expect(() => resolveShippedUtilityScriptPath(profileDir, { kind: "shippedUtility", name: "nested/detect-vcs.mjs", runtime: "node" })).toThrow(/Invalid shipped utility script name/);
+    expect(() => resolveShippedUtilityScriptPath(profileDir, { kind: "shippedUtility", name: "detect-vcs.js", runtime: "node" })).toThrow(/Invalid shipped utility script name/);
   });
 
   test("preserves modified profile utility scripts by resolving shipped updates to a hash-suffixed copy", async () => {
