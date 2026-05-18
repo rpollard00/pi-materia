@@ -1,3 +1,4 @@
+import type { QuestBoard } from "../domain/questBoard.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
 
 export interface ConfigRepository {
@@ -55,6 +56,13 @@ export interface Logger {
   info?(message: string, details?: Record<string, unknown>): void;
   warn?(message: string, details?: Record<string, unknown>): void;
   error?(message: string, details?: Record<string, unknown>): void;
+}
+
+export interface QuestBoardRepository {
+  /** Stable project-local board path, currently <cwd>/.pi/pi-materia/quest-board.json. */
+  readonly boardPath: string;
+  loadOrCreate(): Promise<QuestBoard>;
+  save(board: QuestBoard): Promise<void>;
 }
 
 export interface EnvironmentLookup {
