@@ -41,7 +41,7 @@ export interface CastStartOptions {
 }
 
 export interface CastLifecyclePort<TSession = unknown, TPi = unknown> {
-  start(pi: TPi, session: TSession, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: CastStartOptions): Promise<void>;
+  start(pi: TPi, session: TSession, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: CastStartOptions): Promise<MateriaCastState | void>;
   continue(pi: TPi, session: TSession, state: MateriaCastState): Promise<void>;
   resume(pi: TPi, session: TSession, castId: string): Promise<void>;
   revive(pi: TPi, session: TSession, castId: string): Promise<void>;

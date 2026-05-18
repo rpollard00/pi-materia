@@ -75,7 +75,7 @@ function toolScopeWarningContext(state: MateriaCastState, socket: ResolvedMateri
   };
 }
 
-export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> }): Promise<void> {
+export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> }): Promise<MateriaCastState> {
   const config = loaded.config;
   const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
   const castId = safeTimestamp();
@@ -122,6 +122,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   updateWidget(ctx, state, { replaceOwner: true });
   ctx.ui.notify(`pi-materia cast started. Artifacts: ${runDir}`, "info");
   await startSocket(pi, ctx, state, pipeline.entry);
+  return state;
 }
 
 export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {

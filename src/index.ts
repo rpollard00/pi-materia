@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type CastStateRepository } from "./application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStateRepository } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
+import type { QuestBoard } from "./domain/questBoard.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
@@ -8,6 +10,8 @@ import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference } from 
 import { ensureMateriaWebUi } from "./webui/service.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
+import { FileQuestBoardRepository, QuestBoardPersistenceError } from "./infrastructure/index.js";
+import { renderQuestAdded, renderQuestStarted, renderQuestStatus, renderQuestStopped } from "./presentation/questBoard.js";
 export { renderCastList } from "./infrastructure/index.js";
 
 export default function piMateria(pi: ExtensionAPI) {
@@ -18,6 +22,9 @@ export default function piMateria(pi: ExtensionAPI) {
   const loadoutUseCases = new LoadoutUseCases({ configs: adapters.configs, pipeline: adapters.pipeline, logger: adapters.logger });
   const castCatalogUseCases = new CastCatalogUseCases({ configs: adapters.configs, states: adapters.states, artifacts: adapters.artifacts });
   const castExecutionUseCases = new CastExecutionUseCases({ states: adapters.states, context: adapters.context, agentTurns: adapters.agentTurns, lifecycle: adapters.lifecycle, statusPresenter: adapters.statusPresenter, loadouts: loadoutUseCases, configs: adapters.configs, pipeline: adapters.pipeline });
+  const createQuestBoardRepository = (cwd: string) => new FileQuestBoardRepository(cwd);
+  const createQuestRunnerUseCases = (cwd: string, boards = createQuestBoardRepository(cwd)) => new QuestRunnerUseCases({ boards, casts: castExecutionUseCases, loadouts: loadoutUseCases, states: adapters.states, logger: adapters.logger });
+  const autoAdvanceCwds = new Set<string>();
 
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
@@ -40,12 +47,27 @@ export default function piMateria(pi: ExtensionAPI) {
 
   pi.on("agent_end", async (event, ctx) => {
     activeContext = ctx;
+    const before = adapters.states.loadActive(ctx);
     await castExecutionUseCases.handleAgentEnd(pi, event, ctx);
+    const after = adapters.states.loadActive(ctx);
+    if (before?.active && after && after.castId === before.castId && !after.active) {
+      const boards = createQuestBoardRepository(ctx.cwd);
+      if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state: after, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds });
+    }
   });
 
   pi.on("session_start", async (_event, ctx) => {
     activeContext = ctx;
     await initializeDefaultLoadoutPreference(ctx, getConfiguredConfigPath(), pi);
+    const boards = createQuestBoardRepository(ctx.cwd);
+    if (existsSync(boards.boardPath)) {
+      try {
+        const reconciled = await createQuestRunnerUseCases(ctx.cwd, boards).reconcileOnSessionStart();
+        if (reconciled.reconciled.length > 0) ctx.ui.notify(`pi-materia quest runner blocked ${reconciled.reconciled.length} stale running quest(s) after session restart. Use /materia quest status before resuming automation.`, "warning");
+      } catch (error) {
+        ctx.ui.notify(`pi-materia quest reconciliation failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    }
     const state = adapters.states.loadActive(ctx);
     if (!state?.active) return;
     ctx.ui.setStatus("materia", adapters.statusPresenter.statusLabel(state));
@@ -58,12 +80,19 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, link, recast, revive, casts, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: cast, link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states),
     handler: async (args, ctx) => {
       activeContext = ctx;
       const trimmedArgs = args.trimStart();
       const [subcommand, ...rest] = trimmedArgs.trim().split(/\s+/).filter(Boolean);
+
+      if (subcommand === "quest") {
+        const questArgs = trimmedArgs.replace(/^quest(?:\s+|$)/, "");
+        if (!isNonBlockingQuestCommand(questArgs)) await ctx.waitForIdle();
+        await handleQuestCommand({ args: questArgs, ctx, pi, useCases: createQuestRunnerUseCases(ctx.cwd), loadouts: loadoutUseCases, configuredPath: getConfiguredConfigPath(), autoAdvanceGuard: autoAdvanceCwds });
+        return;
+      }
 
       if (subcommand === "ui") {
         try {
@@ -185,6 +214,8 @@ export default function piMateria(pi: ExtensionAPI) {
         updateWidget(ctx, state.runState);
         ctx.ui.setStatus("materia", undefined);
         ctx.ui.notify(`pi-materia cast ${state.castId} aborted.`, "warning");
+        const boards = createQuestBoardRepository(ctx.cwd);
+        if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds });
         return;
       }
 
@@ -252,6 +283,196 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 }
 
+interface QuestCommandInput {
+  args: string;
+  ctx: ExtensionContext;
+  pi: ExtensionAPI;
+  useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>;
+  loadouts: LoadoutUseCases;
+  configuredPath?: string;
+  autoAdvanceGuard: Set<string>;
+}
+
+async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
+  const tokens = tokenizeCommandArgs(input.args);
+  const action = tokens[0] ?? "status";
+  const rest = tokens.slice(1);
+
+  if (action === "status" || action === "list") {
+    await showQuestStatus(input);
+    return;
+  }
+
+  if (action === "stop") {
+    if (rest.length > 0) {
+      input.ctx.ui.notify("Usage: /materia quest stop", "error");
+      return;
+    }
+    try {
+      const board = await input.useCases.stopRunner();
+      sendQuestMessage(input.pi, renderQuestStopped(board), "stop");
+      input.ctx.ui.notify("pi-materia quest runner stopped. Active casts were not aborted.", "info");
+    } catch (error) {
+      notifyQuestError(input.ctx, "stop", error);
+    }
+    return;
+  }
+
+  if (action === "add") {
+    const parsed = parseQuestAddArgs(rest);
+    if (!parsed.ok) {
+      input.ctx.ui.notify(parsed.error, "error");
+      return;
+    }
+    try {
+      if (parsed.loadoutOverride) await input.loadouts.loadForCast(input.ctx.cwd, input.configuredPath, parsed.loadoutOverride);
+      const { quest } = await input.useCases.addQuest({ prompt: parsed.prompt, ...(parsed.loadoutOverride ? { loadoutOverride: parsed.loadoutOverride } : {}) });
+      const status = await input.useCases.getStatus(input.ctx);
+      sendQuestMessage(input.pi, renderQuestAdded(quest, status.boardPath), "add");
+      input.ctx.ui.notify(`Added pi-materia quest ${quest.id}.`, "info");
+    } catch (error) {
+      notifyQuestError(input.ctx, "add", error);
+    }
+    return;
+  }
+
+  if (action === "run" || action === "start") {
+    if (rest.length > 1) {
+      input.ctx.ui.notify(`Usage: /materia quest ${action} [id]`, "error");
+      return;
+    }
+    const questId = rest[0];
+    autoStartMateriaWebUi({ ctx: input.ctx, pi: input.pi, configuredPath: input.configuredPath });
+    try {
+      const result = action === "start"
+        ? await input.useCases.enableRunner({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, ...(questId ? { questId } : {}) })
+        : await input.useCases.runQuest({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, ...(questId ? { questId } : {}) });
+      if (!result) {
+        const status = await input.useCases.getStatus(input.ctx);
+        input.ctx.ui.notify(questStartNotFoundMessage(status.board.quests.length, questId), "error");
+        return;
+      }
+      sendQuestMessage(input.pi, renderQuestStarted(result, action), action);
+      input.ctx.ui.notify(`pi-materia quest ${result.quest.id} launched as cast ${result.state.castId}.`, "info");
+      if (action === "start" && !result.state.active) {
+        if (!input.autoAdvanceGuard.has(input.ctx.cwd)) {
+          input.autoAdvanceGuard.add(input.ctx.cwd);
+          try {
+            await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, board: result.board });
+          } finally {
+            input.autoAdvanceGuard.delete(input.ctx.cwd);
+          }
+        }
+      }
+    } catch (error) {
+      notifyQuestError(input.ctx, action, error);
+    }
+    return;
+  }
+
+  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest add [--loadout <name>] <prompt>, /materia quest run [id], /materia quest start [id], or /materia quest stop", "error");
+}
+
+async function showQuestStatus(input: QuestCommandInput): Promise<void> {
+  try {
+    const status = await input.useCases.getStatus(input.ctx);
+    sendQuestMessage(input.pi, renderQuestStatus(status), "status");
+  } catch (error) {
+    notifyQuestError(input.ctx, "status", error);
+  }
+}
+
+async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx: ExtensionContext; state: MateriaCastState; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; guard: Set<string> }): Promise<void> {
+  if (input.guard.has(input.ctx.cwd)) return;
+  input.guard.add(input.ctx.cwd);
+  try {
+    const settled = await input.useCases.handleCastSettled({
+      castId: input.state.castId,
+      state: input.state,
+      message: input.state.runState?.lastMessage,
+      error: input.state.failedReason,
+    });
+    if (!settled.quest) return;
+    if (!settled.board.runner.enabled) return;
+    await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, board: settled.board });
+  } catch (error) {
+    notifyQuestError(input.ctx, "auto-advance", error);
+  } finally {
+    input.guard.delete(input.ctx.cwd);
+  }
+}
+
+async function autoAdvanceQuestBoard(input: { pi: ExtensionAPI; ctx: ExtensionContext; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; board: QuestBoard }): Promise<void> {
+  const started = await input.useCases.autoAdvanceNext({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, board: input.board });
+  if (!started) return;
+  sendQuestMessage(input.pi, renderQuestStarted(started, "start"), "auto-advance");
+  input.ctx.ui.notify(`pi-materia quest ${started.quest.id} auto-launched as cast ${started.state.castId}.`, "info");
+}
+
+function sendQuestMessage(pi: ExtensionAPI, lines: string[], eventType: string): void {
+  pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "quest", materiaName: "orchestrator", eventType } });
+}
+
+function questStartNotFoundMessage(totalQuests: number, questId?: string): string {
+  if (questId) return `No pending pi-materia quest found with id ${questId}.`;
+  if (totalQuests === 0) return "The pi-materia quest board is empty. Add a quest with /materia quest add <prompt> first.";
+  return "No pending pi-materia quests are available.";
+}
+
+function notifyQuestError(ctx: ExtensionContext, action: string, error: unknown): void {
+  if (error instanceof ActiveCastConflictError) {
+    ctx.ui.notify(`A pi-materia cast is already active (${error.castId}). Use /materia status or /materia abort.`, "error");
+    return;
+  }
+  if (error instanceof ActiveQuestConflictError) {
+    ctx.ui.notify(`A pi-materia quest is already running (${error.questId}). Use /materia quest status.`, "error");
+    return;
+  }
+  if (error instanceof QuestBoardPersistenceError) {
+    ctx.ui.notify(error.message, "error");
+    return;
+  }
+  ctx.ui.notify(`pi-materia quest ${action} failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+}
+
+function parseQuestAddArgs(tokens: string[]): { ok: true; prompt: string; loadoutOverride?: string } | { ok: false; error: string } {
+  let loadoutOverride: string | undefined;
+  const promptTokens: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === "--loadout") {
+      const value = tokens[index + 1];
+      if (!value || value.startsWith("--")) return { ok: false, error: "Usage: /materia quest add [--loadout <name>] <prompt>" };
+      loadoutOverride = value;
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--loadout=")) {
+      const value = token.slice("--loadout=".length).trim();
+      if (!value) return { ok: false, error: "Usage: /materia quest add [--loadout <name>] <prompt>" };
+      loadoutOverride = value;
+      continue;
+    }
+    if (token.startsWith("--")) return { ok: false, error: `Unknown /materia quest add option ${token}.` };
+    promptTokens.push(token);
+  }
+  const prompt = promptTokens.join(" ").trim();
+  if (!prompt) return { ok: false, error: "Usage: /materia quest add [--loadout <name>] <prompt>" };
+  return { ok: true, prompt, ...(loadoutOverride ? { loadoutOverride } : {}) };
+}
+
+function tokenizeCommandArgs(args: string): string[] {
+  return args.match(/"(?:\\"|[^"])*"|'(?:\\'|[^'])*'|\S+/g)?.map((token) => {
+    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) return token.slice(1, -1);
+    return token;
+  }) ?? [];
+}
+
+function isNonBlockingQuestCommand(args: string): boolean {
+  const action = tokenizeCommandArgs(args)[0] ?? "status";
+  return action === "status" || action === "list" || action === "stop";
+}
+
 function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | undefined, statesRepository: Pick<CastStateRepository<ExtensionContext>, "listResumable" | "listRevivable">): Array<{ value: string; label: string; description?: string }> | null {
   const trimmedStart = prefix.trimStart();
   const tokens = trimmedStart.split(/\s+/).filter(Boolean);
@@ -266,6 +487,16 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
     const subcommands = materiaSubcommands();
     const matching = subcommands.filter((value) => value.startsWith(tokens[0]));
     return matching.length ? matching.map((value) => ({ value, label: value })) : null;
+  }
+
+  if (tokens[0] === "quest") {
+    const questSubcommands = ["status", "add", "run", "start", "stop", "list"];
+    if (tokens.length === 1 && endsWithWhitespace) return questSubcommands.map((value) => ({ value: `quest ${value}`, label: value }));
+    if (tokens.length === 2 && !endsWithWhitespace) {
+      const matching = questSubcommands.filter((value) => value.startsWith(tokens[1] ?? ""));
+      return matching.length ? matching.map((value) => ({ value: `quest ${value}`, label: value })) : null;
+    }
+    return null;
   }
 
   if ((tokens[0] !== "recast" && tokens[0] !== "revive") || !ctx) return null;
@@ -283,7 +514,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
 }
 
 function materiaSubcommands(): string[] {
-  return ["cast", "link", "recast", "revive", "casts", "grid", "loadout", "ui", "status", "continue", "abort"];
+  return ["cast", "link", "recast", "revive", "casts", "quest", "grid", "loadout", "ui", "status", "continue", "abort"];
 }
 
 function shouldAutoStartWebUi(subcommand: string | undefined): boolean {

@@ -155,6 +155,27 @@ describe("quest board domain", () => {
     expect(stopped.quests[0]?.status).toBe("running");
   });
 
+  test("serializes and validates a completed quest board round trip", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const completed = completeQuest(started.value, {
+      questId: "q-1",
+      castId: "cast-1",
+      now: t3,
+      result: { status: "succeeded", message: "done", runDirectory: ".pi/pi-materia/cast-1", metadata: { immediateTerminal: true } },
+    });
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+
+    const parsed = JSON.parse(JSON.stringify(completed.value));
+    const validated = validateQuestBoard(parsed);
+
+    expect(validated.ok).toBe(true);
+    if (validated.ok) expect(validated.value).toEqual(completed.value);
+  });
+
   test("validates malformed persisted board shapes and invalid running invariants", () => {
     const board = boardWithTwoQuests();
     const startedOne = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
@@ -164,7 +185,7 @@ describe("quest board domain", () => {
       ...startedOne.value,
       runner: { enabled: true, activeQuestId: "q-2" },
       quests: [
-        startedOne.value.quests[0]!,
+        { ...startedOne.value.quests[0]!, attempts: -1, lastResult: { status: "running" as never, castId: "", finishedAt: "" } },
         { ...startedOne.value.quests[1]!, status: "running", currentCastId: "cast-2", attempts: 1 },
       ],
     };
@@ -172,7 +193,12 @@ describe("quest board domain", () => {
     const validated = validateQuestBoard(invalid);
     expect(validated.ok).toBe(false);
     if (!validated.ok) {
-      expect(validated.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["questBoard.quests"]));
+      expect(validated.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining([
+        "questBoard.quests",
+        "questBoard.quests.0.attempts",
+        "questBoard.quests.0.lastResult.status",
+        "questBoard.quests.0.lastResult.castId",
+      ]));
     }
   });
 });

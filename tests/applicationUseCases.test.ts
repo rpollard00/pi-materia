@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ActiveCastConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter } from "../src/application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter, type QuestBoardRepository } from "../src/application/index.js";
+import { createEmptyQuestBoard, type QuestBoard } from "../src/domain/questBoard.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../src/types.js";
 
 function loaded(activeLoadout = "default"): LoadedConfig {
@@ -393,6 +394,166 @@ describe("application use cases", () => {
 
     await expect(useCases.startLinkedCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: "Build without delimiter" })).rejects.toThrow("missing prompt delimiter");
     expect(started).toBe(false);
+  });
+
+  test("quest runner adds and starts a pending quest with metadata", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    let active: MateriaCastState | undefined;
+    let startOptions: unknown;
+    const casts = {
+      startCast: async (input: Parameters<CastExecutionUseCases<string, string>["startCast"]>[0]) => {
+        startOptions = input.options;
+        active = state({ castId: "cast-quest", request: input.request });
+        return { loaded: loaded(), pipeline: pipeline(), state: active };
+      },
+    };
+    const runner = new QuestRunnerUseCases({ boards, casts, loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) }, states: { loadActive: () => active }, clock: { now: () => "2026-01-01T00:00:01.000Z" }, ids: { nextId: () => "quest-1" } });
+
+    await runner.addQuest({ prompt: "Build the quest runner", loadoutOverride: "Auto" });
+    const result = await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+
+    expect(result?.quest.status).toBe("running");
+    expect(result?.quest.currentCastId).toBe("cast-quest");
+    expect(startOptions).toMatchObject({ initialData: { quest: { questId: "quest-1", title: "Build the quest runner", loadoutOverride: "Auto" } }, startEventDetails: { quest: { questId: "quest-1" } } });
+  });
+
+  test("quest runner blocks starts when a cast or quest is already active", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    const runner = new QuestRunnerUseCases({ boards, casts: { startCast: async () => { throw new Error("must not start"); } }, loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) }, states: { loadActive: () => state({ castId: "active-cast" }) }, clock: { now: () => "2026-01-01T00:00:01.000Z" }, ids: { nextId: () => "quest-1" } });
+    await runner.addQuest({ prompt: "blocked by active cast" });
+
+    await expect(runner.runNext({ pi: "pi", session: "session", cwd: "/repo" })).rejects.toBeInstanceOf(ActiveCastConflictError);
+
+    board = { ...board, runner: { enabled: false }, quests: [{ ...board.quests[0]!, status: "running", currentCastId: "cast-running", lastCastId: "cast-running" }] };
+    const runnerWithRunningQuest = new QuestRunnerUseCases({ boards, casts: { startCast: async () => { throw new Error("must not start"); } }, loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) }, states: { loadActive: () => undefined }, clock: { now: () => "2026-01-01T00:00:02.000Z" }, ids: { nextId: () => "quest-2" } });
+    await expect(runnerWithRunningQuest.runQuest({ pi: "pi", session: "session", cwd: "/repo", questId: "quest-1" })).rejects.toBeInstanceOf(ActiveQuestConflictError);
+  });
+
+  test("quest runner records immediate terminal casts and startup failures", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    const terminal = state({ castId: "cast-done", active: false, phase: "complete", socketState: "complete", data: { quest: { questId: "quest-1", effectiveLoadoutName: "Auto", effectiveLoadoutId: "auto-id" } } });
+    const runner = new QuestRunnerUseCases({ boards, casts: { startCast: async () => ({ loaded: loaded(), pipeline: pipeline(), state: terminal, effectiveLoadout: { requestedLoadoutOverride: "Auto", effectiveLoadoutName: "Auto", effectiveLoadoutId: "auto-id" } }) }, loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) }, states: { loadActive: () => undefined }, clock: { now: () => "2026-01-01T00:00:01.000Z" }, ids: { nextId: () => "quest-1" } });
+
+    await runner.addQuest({ prompt: "finish immediately", loadoutOverride: "Auto" });
+    const result = await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+    expect(result?.quest.status).toBe("succeeded");
+    expect(result?.quest.lastResult).toMatchObject({ status: "succeeded", castId: "cast-done", effectiveLoadoutName: "Auto", effectiveLoadoutId: "auto-id" });
+
+    board = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const failingRunner = new QuestRunnerUseCases({ boards, casts: { startCast: async () => { throw new Error("boom"); } }, loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) }, states: { loadActive: () => undefined }, clock: { now: () => "2026-01-01T00:00:02.000Z" }, ids: { nextId: () => "quest-fail" } });
+    await failingRunner.addQuest({ prompt: "fail to start" });
+    await expect(failingRunner.runNext({ pi: "pi", session: "session", cwd: "/repo" })).rejects.toThrow("boom");
+    expect(board.quests[0]).toMatchObject({ status: "blocked", lastError: { message: "boom", code: "cast_start_failed" } });
+  });
+
+  test("quest runner settles completed casts with result metadata and auto-advances when enabled", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    let active: MateriaCastState | undefined;
+    const starts: string[] = [];
+    const runner = new QuestRunnerUseCases({
+      boards,
+      casts: {
+        startCast: async (input: Parameters<CastExecutionUseCases<string, string>["startCast"]>[0]) => {
+          starts.push(input.request);
+          active = state({ castId: `cast-${starts.length}`, request: input.request, runDir: `/repo/.pi/pi-materia/cast-${starts.length}`, artifactRoot: "/repo/.pi/pi-materia" });
+          return { loaded: loaded(), pipeline: pipeline(), state: active };
+        },
+      },
+      loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) },
+      states: { loadActive: () => active },
+      clock: { now: () => "2026-01-01T00:00:01.000Z" },
+      ids: { nextId: () => `quest-${board.quests.length + 1}` },
+    });
+
+    await runner.addQuest({ prompt: "first quest" });
+    await runner.addQuest({ prompt: "second quest" });
+    const first = await runner.enableRunner({ pi: "pi", session: "session", cwd: "/repo" });
+    active = state({ castId: first!.state.castId, active: false, phase: "complete", socketState: "complete", runDir: "/repo/.pi/pi-materia/cast-1", artifactRoot: "/repo/.pi/pi-materia", runState: { ...first!.state.runState, lastMessage: "Cast complete." } });
+
+    const settled = await runner.handleCastSettled({ castId: first!.state.castId, state: active });
+    const advanced = await runner.autoAdvanceNext({ pi: "pi", session: "session", cwd: "/repo", board: settled.board });
+
+    expect(settled.quest).toMatchObject({ status: "succeeded", lastResult: { status: "succeeded", castId: "cast-1", message: "Cast complete.", runDirectory: "/repo/.pi/pi-materia/cast-1", artifactDirectory: "/repo/.pi/pi-materia" } });
+    expect(advanced?.quest).toMatchObject({ id: "quest-2", status: "running", currentCastId: "cast-2" });
+    expect(starts).toEqual(["first quest", "second quest"]);
+  });
+
+  test("quest runner does not auto-advance after stop disables the runner", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    let active: MateriaCastState | undefined;
+    let starts = 0;
+    const runner = new QuestRunnerUseCases({
+      boards,
+      casts: { startCast: async () => { starts += 1; active = state({ castId: `cast-${starts}` }); return { loaded: loaded(), pipeline: pipeline(), state: active }; } },
+      loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) },
+      states: { loadActive: () => active },
+      clock: { now: () => "2026-01-01T00:00:01.000Z" },
+      ids: { nextId: () => `quest-${board.quests.length + 1}` },
+    });
+
+    await runner.addQuest({ prompt: "first" });
+    await runner.addQuest({ prompt: "second" });
+    const first = await runner.enableRunner({ pi: "pi", session: "session", cwd: "/repo" });
+    await runner.stopRunner();
+    active = state({ castId: first!.state.castId, active: false, phase: "complete", socketState: "complete" });
+    const settled = await runner.handleCastSettled({ castId: first!.state.castId, state: active });
+
+    await expect(runner.autoAdvanceNext({ pi: "pi", session: "session", cwd: "/repo", board: settled.board })).resolves.toBeUndefined();
+    expect(starts).toBe(1);
+    expect(board.quests[1]).toMatchObject({ status: "pending" });
+  });
+
+  test("quest runner status and no-pending starts are explicit", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    const runner = new QuestRunnerUseCases({
+      boards,
+      casts: { startCast: async () => { throw new Error("must not start without pending quests"); } },
+      loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) },
+      states: { loadActive: () => state({ castId: "active-cast" }) },
+      clock: { now: () => "2026-01-01T00:00:01.000Z" },
+      ids: { nextId: () => "quest-1" },
+    });
+
+    await expect(runner.runNext({ pi: "pi", session: "session", cwd: "/repo" })).resolves.toBeUndefined();
+    const status = await runner.getStatus("session");
+
+    expect(status.boardPath).toBe("/repo/.pi/pi-materia/quest-board.json");
+    expect(status.pendingCount).toBe(0);
+    expect(status.activeCast?.castId).toBe("active-cast");
+  });
+
+  test("quest runner maps failed terminal casts and reconciles stale running quests as blocked", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    let active: MateriaCastState | undefined;
+    const runner = new QuestRunnerUseCases({
+      boards,
+      casts: { startCast: async () => { active = state({ castId: "cast-failed" }); return { loaded: loaded(), pipeline: pipeline(), state: active }; } },
+      loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) },
+      states: { loadActive: () => active },
+      clock: { now: () => "2026-01-01T00:00:01.000Z" },
+      ids: { nextId: () => `quest-${board.quests.length + 1}` },
+    });
+
+    await runner.addQuest({ prompt: "will fail" });
+    const started = await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+    active = state({ castId: started!.state.castId, active: false, phase: "failed", socketState: "failed", failedReason: "agent failed" });
+    const settled = await runner.handleCastSettled({ castId: started!.state.castId, state: active });
+    expect(settled.quest).toMatchObject({ status: "failed", lastResult: { status: "failed", error: "agent failed" }, lastError: { message: "agent failed" } });
+
+    await runner.addQuest({ prompt: "stale after restart" });
+    active = undefined;
+    await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+    const reconciled = await runner.reconcileOnSessionStart();
+
+    expect(reconciled.reconciled).toHaveLength(1);
+    expect(reconciled.reconciled[0]).toMatchObject({ status: "blocked", lastError: { code: "stale_running_quest" } });
   });
 
   test("configuredConfigPath prefers flag over environment", () => {

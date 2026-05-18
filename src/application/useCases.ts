@@ -1,12 +1,13 @@
 import type { LoadedConfig, MateriaCastState, MateriaPipelineConfig, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 import { resolveLoadoutSelection } from "../loadout/defaultLoadoutResolver.js";
-import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "./ports.js";
+import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStartOptions, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter, QuestBoardRepository } from "./ports.js";
 import { compileLinkPlan, createConfigLinkGraphSource } from "../link/compiler.js";
 import { loadPreviousCastContext } from "../link/contextLoader.js";
 import { parseLinkCommandArguments } from "../link/parser.js";
 import { createLinkCastStateData, createLinkPlan, createLinkRuntimeState } from "../link/planner.js";
 import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/resolver.js";
 import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData } from "../link/types.js";
+import { addQuest, completeQuest, enableQuestRunner, failRunningQuest, findNextPendingQuest, startQuest, stopQuestRunner, type Quest, type QuestBoard, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
 
 export interface LoadoutUseCasesDeps {
@@ -136,14 +137,14 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     return this.deps.agentTurns.handleAgentEnd(pi, event, session);
   }
 
-  async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string; loadoutOverride?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout }> {
+  async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string; loadoutOverride?: string; options?: CastStartOptions }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout; state?: MateriaCastState }> {
     const active = this.deps.states.loadActive(input.session);
     if (active?.active) throw new ActiveCastConflictError(active.castId);
     const prepared = await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.loadoutOverride);
-    await this.deps.lifecycle.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request, prepared.effectiveLoadout ? {
-      startEventDetails: { loadoutOverride: prepared.effectiveLoadout },
-    } : undefined);
-    return prepared;
+    const options = withEffectiveLoadoutInitialData(mergeCastStartOptions(input.options, prepared.effectiveLoadout ? { startEventDetails: { loadoutOverride: prepared.effectiveLoadout } } : undefined), prepared.effectiveLoadout);
+    const startedState = await this.deps.lifecycle.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request, options);
+    const state = startedState ?? this.deps.states.loadActive(input.session);
+    return { ...prepared, ...(state ? { state } : {}) };
   }
 
   async startLinkedCast(input: { pi: TPi; session: TSession; cwd: string; argumentsText: string; rawCommand?: string; configuredPath?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; link: LinkCastStateData }> {
@@ -216,6 +217,242 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   statusLabel(state: MateriaCastState): string {
     return this.deps.statusPresenter.statusLabel(state);
   }
+}
+
+export interface QuestRunnerClock {
+  now(): string;
+}
+
+export interface QuestRunnerIdGenerator {
+  nextId(): string;
+}
+
+export interface QuestRunnerUseCasesDeps<TSession = unknown, TPi = unknown> {
+  boards: QuestBoardRepository;
+  casts: Pick<CastExecutionUseCases<TSession, TPi>, "startCast">;
+  loadouts: Pick<LoadoutUseCases, "loadForCast">;
+  states: Pick<CastStateRepository<TSession>, "loadActive">;
+  clock?: QuestRunnerClock;
+  ids?: QuestRunnerIdGenerator;
+  logger?: Logger;
+}
+
+export interface QuestStatusSnapshot {
+  board: QuestBoard;
+  boardPath: string;
+  activeCast?: MateriaCastState;
+  activeQuest?: Quest;
+  pendingCount: number;
+  runningQuest?: Quest;
+}
+
+export interface QuestStartResult {
+  board: QuestBoard;
+  quest: Quest;
+  state: MateriaCastState;
+  effectiveLoadout?: EffectiveCastLoadout;
+}
+
+export interface HandleQuestCastSettledInput {
+  castId: string;
+  status?: QuestTerminalStatus;
+  state?: MateriaCastState;
+  message?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
+  private readonly clock: QuestRunnerClock;
+  private readonly ids: QuestRunnerIdGenerator;
+
+  constructor(private readonly deps: QuestRunnerUseCasesDeps<TSession, TPi>) {
+    this.clock = deps.clock ?? { now: () => new Date().toISOString() };
+    this.ids = deps.ids ?? { nextId: () => `quest-${Date.now().toString(36)}` };
+  }
+
+  async addQuest(input: { title?: string; prompt: string; loadoutOverride?: string }): Promise<{ board: QuestBoard; quest: Quest }> {
+    const board = await this.deps.boards.loadOrCreate();
+    const now = this.clock.now();
+    const result = addQuest(board, { id: this.ids.nextId(), title: input.title?.trim() || deriveQuestTitle(input.prompt), prompt: input.prompt, now, ...(input.loadoutOverride ? { loadoutOverride: input.loadoutOverride } : {}) });
+    if (!result.ok) throw new QuestBoardValidationError(result.issues);
+    await this.deps.boards.save(result.value);
+    return { board: result.value, quest: result.value.quests[result.value.quests.length - 1]! };
+  }
+
+  async getStatus(session?: TSession): Promise<QuestStatusSnapshot> {
+    const board = await this.deps.boards.loadOrCreate();
+    const activeCast = session === undefined ? undefined : this.deps.states.loadActive(session);
+    const runningQuest = board.quests.find((quest) => quest.status === "running");
+    const activeQuest = board.runner.activeQuestId ? board.quests.find((quest) => quest.id === board.runner.activeQuestId) : runningQuest;
+    return { board, boardPath: this.deps.boards.boardPath, ...(activeCast ? { activeCast } : {}), ...(activeQuest ? { activeQuest } : {}), pendingCount: board.quests.filter((quest) => quest.status === "pending").length, ...(runningQuest ? { runningQuest } : {}) };
+  }
+
+  async runNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string }): Promise<QuestStartResult | undefined> {
+    return this.runQuest({ ...input, enableRunner: false });
+  }
+
+  async runQuest(input: { pi: TPi; session: TSession; cwd: string; questId?: string; configuredPath?: string; enableRunner?: boolean }): Promise<QuestStartResult | undefined> {
+    const board = await this.deps.boards.loadOrCreate();
+    const prepared = input.enableRunner ? enableQuestRunner(board, this.clock.now()) : board;
+    if (input.enableRunner) await this.deps.boards.save(prepared);
+    const quest = input.questId ? prepared.quests.find((candidate) => candidate.id === input.questId) : findNextPendingQuest(prepared);
+    if (!quest) return undefined;
+    return this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board: prepared, quest });
+  }
+
+  async enableRunner(input: { pi: TPi; session: TSession; cwd: string; questId?: string; configuredPath?: string }): Promise<QuestStartResult | undefined> {
+    return this.runQuest({ ...input, enableRunner: true });
+  }
+
+  async stopRunner(): Promise<QuestBoard> {
+    const board = await this.deps.boards.loadOrCreate();
+    const next = stopQuestRunner(board, this.clock.now());
+    await this.deps.boards.save(next);
+    return next;
+  }
+
+  async handleCastSettled(input: HandleQuestCastSettledInput): Promise<{ board: QuestBoard; quest?: Quest }> {
+    const board = await this.deps.boards.loadOrCreate();
+    const quest = board.quests.find((candidate) => candidate.status === "running" && candidate.currentCastId === input.castId);
+    if (!quest) return { board };
+    const now = this.clock.now();
+    const status = input.status ?? terminalQuestStatusFromCast(input.state);
+    const result = completeQuest(board, { questId: quest.id, castId: input.castId, now, result: buildQuestRunResult({ status, now, input, quest }) });
+    if (!result.ok) throw new QuestBoardValidationError(result.issues);
+    await this.deps.boards.save(result.value);
+    return { board: result.value, quest: result.value.quests.find((candidate) => candidate.id === quest.id) };
+  }
+
+  async autoAdvanceNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board?: QuestBoard }): Promise<QuestStartResult | undefined> {
+    const board = input.board ?? await this.deps.boards.loadOrCreate();
+    if (!board.runner.enabled) return undefined;
+    const active = this.deps.states.loadActive(input.session);
+    if (active?.active) return undefined;
+    if (board.quests.some((quest) => quest.status === "running")) return undefined;
+    const quest = findNextPendingQuest(board);
+    if (!quest) return undefined;
+    return this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board, quest });
+  }
+
+  async reconcileOnSessionStart(): Promise<{ board: QuestBoard; reconciled: Quest[] }> {
+    const board = await this.deps.boards.loadOrCreate();
+    let next = board;
+    const reconciled: Quest[] = [];
+    for (const quest of board.quests.filter((candidate) => candidate.status === "running")) {
+      const result = failRunningQuest(next, { questId: quest.id, now: this.clock.now(), status: "blocked", message: "Quest was running when the Pi session started; reconcile manually before resuming automation.", code: "stale_running_quest" });
+      if (!result.ok) throw new QuestBoardValidationError(result.issues);
+      next = result.value;
+      const updated = next.quests.find((candidate) => candidate.id === quest.id);
+      if (updated) reconciled.push(updated);
+    }
+    if (reconciled.length > 0) await this.deps.boards.save(next);
+    return { board: next, reconciled };
+  }
+
+  private async startPendingQuest(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board: QuestBoard; quest: Quest }): Promise<QuestStartResult> {
+    const active = this.deps.states.loadActive(input.session);
+    if (active?.active) throw new ActiveCastConflictError(active.castId);
+    const running = input.board.quests.find((quest) => quest.status === "running");
+    if (running) throw new ActiveQuestConflictError(running.id);
+    if (input.quest.status !== "pending") throw new Error(`Quest ${input.quest.id} is ${input.quest.status}, not pending.`);
+
+    await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.quest.loadoutOverride);
+    let started: Awaited<ReturnType<CastExecutionUseCases<TSession, TPi>["startCast"]>>;
+    try {
+      started = await this.deps.casts.startCast({ pi: input.pi, session: input.session, cwd: input.cwd, request: input.quest.prompt, configuredPath: input.configuredPath, loadoutOverride: input.quest.loadoutOverride, options: questCastStartOptions(input.quest) });
+    } catch (error) {
+      const failed = recordQuestStartupFailure(input.board, input.quest, this.clock.now(), error);
+      await this.deps.boards.save(failed);
+      throw error;
+    }
+
+    const state = started.state ?? this.deps.states.loadActive(input.session);
+    if (!state) throw new Error(`Quest ${input.quest.id} started a cast but no cast state was returned.`);
+    let board = input.board;
+    const startResult = startQuest(board, { questId: input.quest.id, castId: state.castId, now: this.clock.now() });
+    if (!startResult.ok) throw new QuestBoardValidationError(startResult.issues);
+    board = startResult.value;
+    await this.deps.boards.save(board);
+
+    if (!state.active) {
+      const settled = await this.handleCastSettled({ castId: state.castId, state, metadata: { immediateTerminal: true } });
+      board = settled.board;
+    }
+
+    const quest = board.quests.find((candidate) => candidate.id === input.quest.id)!;
+    return { board, quest, state, ...(started.effectiveLoadout ? { effectiveLoadout: started.effectiveLoadout } : {}) };
+  }
+}
+
+export class ActiveQuestConflictError extends Error {
+  readonly code = "active_quest_conflict";
+  constructor(readonly questId: string) {
+    super(`Cannot start quest because quest ${questId} is already running.`);
+  }
+}
+
+export class QuestBoardValidationError extends Error {
+  readonly code = "quest_board_validation";
+  constructor(readonly issues: DomainIssue[]) {
+    super(`Invalid quest board transition: ${formatDomainIssues(issues)}`);
+  }
+}
+
+function questCastStartOptions(quest: Quest): CastStartOptions {
+  const metadata = { questId: quest.id, title: quest.title, ...(quest.loadoutOverride ? { loadoutOverride: quest.loadoutOverride } : {}) };
+  return { initialData: { quest: metadata }, startEventDetails: { quest: metadata } };
+}
+
+function deriveQuestTitle(prompt: string): string {
+  const normalized = prompt.trim().replace(/\s+/g, " ");
+  return normalized.length > 60 ? `${normalized.slice(0, 57)}...` : normalized || "Untitled quest";
+}
+
+function terminalQuestStatusFromCast(state?: MateriaCastState): QuestTerminalStatus {
+  if (!state) return "blocked";
+  if (state.phase === "complete" || state.socketState === "complete") return "succeeded";
+  if (state.phase === "failed" || state.socketState === "failed") return "failed";
+  return state.active ? "blocked" : "failed";
+}
+
+function buildQuestRunResult(input: { status: QuestTerminalStatus; now: string; input: HandleQuestCastSettledInput; quest: Quest }): Omit<QuestRunResult, "castId" | "finishedAt"> & Partial<Pick<QuestRunResult, "castId" | "finishedAt">> {
+  const state = input.input.state;
+  const questMetadata = isRecord(state?.data.quest) ? state.data.quest : undefined;
+  return {
+    status: input.status,
+    castId: input.input.castId,
+    finishedAt: input.now,
+    ...(input.input.message ?? state?.runState?.lastMessage ? { message: input.input.message ?? state?.runState?.lastMessage } : {}),
+    ...(input.input.error ?? state?.failedReason ? { error: input.input.error ?? state?.failedReason } : {}),
+    ...(state?.runDir ? { runDirectory: state.runDir } : {}),
+    ...(state?.artifactRoot ? { artifactDirectory: state.artifactRoot } : {}),
+    ...(input.quest.loadoutOverride ? { requestedLoadoutOverride: input.quest.loadoutOverride } : {}),
+    ...(typeof questMetadata?.effectiveLoadoutName === "string" ? { effectiveLoadoutName: questMetadata.effectiveLoadoutName } : {}),
+    ...(typeof questMetadata?.effectiveLoadoutId === "string" ? { effectiveLoadoutId: questMetadata.effectiveLoadoutId } : {}),
+    ...(input.input.metadata ? { metadata: input.input.metadata } : {}),
+  };
+}
+
+function recordQuestStartupFailure(board: QuestBoard, quest: Quest, now: string, error: unknown): QuestBoard {
+  const message = error instanceof Error ? error.message : String(error);
+  const nextQuest: Quest = { ...quest, status: "blocked", updatedAt: now, lastError: { message, occurredAt: now, code: "cast_start_failed" } };
+  return { ...board, updatedAt: now, quests: board.quests.map((candidate) => candidate.id === quest.id ? nextQuest : candidate) };
+}
+
+function mergeCastStartOptions(left?: CastStartOptions, right?: CastStartOptions): CastStartOptions | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return { initialData: { ...(left.initialData ?? {}), ...(right.initialData ?? {}) }, startEventDetails: { ...(left.startEventDetails ?? {}), ...(right.startEventDetails ?? {}) } };
+}
+
+function withEffectiveLoadoutInitialData(options: CastStartOptions | undefined, effectiveLoadout?: EffectiveCastLoadout): CastStartOptions | undefined {
+  if (!effectiveLoadout || !options?.initialData || !isRecord(options.initialData.quest)) return options;
+  return { ...options, initialData: { ...options.initialData, quest: { ...options.initialData.quest, requestedLoadoutOverride: effectiveLoadout.requestedLoadoutOverride, effectiveLoadoutName: effectiveLoadout.effectiveLoadoutName, ...(effectiveLoadout.effectiveLoadoutId ? { effectiveLoadoutId: effectiveLoadout.effectiveLoadoutId } : {}) } } };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export class LinkCommandValidationError extends Error {

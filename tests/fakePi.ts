@@ -86,6 +86,7 @@ export class FakePiHarness {
   compactError: Error | undefined;
   contextUsage: { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
   waitForIdleCalls = 0;
+  waitForIdleError: Error | undefined;
   activeTools: string[] = ["read", "grep", "find", "ls", "bash", "edit", "write"];
   allTools: Array<{ name: string }> = this.activeTools.map((name) => ({ name }));
   models: Array<{ provider: string; id: string; name?: string; api?: string; [key: string]: unknown }> = [];
@@ -183,7 +184,7 @@ export class FakePiHarness {
       model: this.activeModel,
       isIdle: () => this.idle,
       signal: undefined,
-      abort: () => undefined,
+      abort: () => { this.operationLog.push("abort"); },
       hasPendingMessages: () => false,
       shutdown: () => undefined,
       getContextUsage: () => this.contextUsage,
@@ -196,6 +197,8 @@ export class FakePiHarness {
       getSystemPrompt: () => "",
       waitForIdle: async () => {
         this.waitForIdleCalls += 1;
+        this.operationLog.push("waitForIdle");
+        if (this.waitForIdleError) throw this.waitForIdleError;
       },
       newSession: async () => ({ cancelled: false }),
       fork: async () => ({ cancelled: false }),

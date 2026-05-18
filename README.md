@@ -63,6 +63,10 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 /materia ui
 /materia cast implement the next small feature
 /materia link [--from <cast-id>] <target> [<target> ...] -- <prompt>
+/materia quest add [--loadout <name-or-id>] <prompt>
+/materia quest run [quest-id]
+/materia quest start [quest-id]
+/materia quest stop
 /materia recast [cast-id]
 /materia revive [cast-id]
 /materia casts
@@ -85,6 +89,8 @@ Illustrative linked-run examples:
 ```
 
 Unprefixed targets are allowed only when they do not collide with another materia/loadout name; use `materia:<name>` or `loadout:<name>` to disambiguate. See [link semantics](docs/link-semantics.md) for the v1 contract, detailed examples, troubleshooting, ambiguity rules, and non-goals.
+
+Use `/materia quest` to manage a project-local quest board at `.pi/pi-materia/quest-board.json`. `quest run` starts one pending quest, while `quest start` enables auto-advance through pending quests until `quest stop` disables future starts. Per-quest `--loadout` overrides apply only to the cast being launched and do not mutate the active loadout. See [Quest board](docs/quest-board.md) for storage, autonomy, single-writer, and restart behavior.
 
 Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current socket. pi-materia also performs bounded same-socket automatic recovery for safe agent-turn failures before a socket has accepted output, applied assignments, advanced routes, or started another socket. Context-window/token-limit failures compact first, then retry the same active prompt. Other safe provider/runtime turn failures may retry by resending the same active prompt without compaction. Plain transient WebSocket transport failures preserve the awaiting state instead of immediately resending, so the current Pi turn can settle or be manually recast if needed. Utility failures and post-advance failures are not automatically retried.
 
