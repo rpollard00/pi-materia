@@ -1,0 +1,186 @@
+import { describe, expect, test } from "bun:test";
+import {
+  addQuest,
+  completeQuest,
+  createQuestBoard,
+  enableQuestRunner,
+  failRunningQuest,
+  findNextPendingQuest,
+  startQuest,
+  stopQuestRunner,
+  validateQuestBoard,
+  type QuestBoard,
+} from "../src/domain/index.js";
+
+const t0 = "2026-01-01T00:00:00.000Z";
+const t1 = "2026-01-01T00:01:00.000Z";
+const t2 = "2026-01-01T00:02:00.000Z";
+const t3 = "2026-01-01T00:03:00.000Z";
+
+describe("quest board domain", () => {
+  test("creates an empty board with runner state", () => {
+    const board = createQuestBoard({ now: t0 });
+
+    expect(board).toEqual({
+      version: 1,
+      createdAt: t0,
+      updatedAt: t0,
+      runner: { enabled: false },
+      quests: [],
+    });
+    expect(validateQuestBoard(board).ok).toBe(true);
+  });
+
+  test("adds ordered pending quests without generating ids or timestamps", () => {
+    const board = createQuestBoard({ now: t0 });
+    const first = addQuest(board, { id: "q-1", title: "First", prompt: "Do the first thing", now: t1, loadoutOverride: "autonomous" });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const second = addQuest(first.value, { id: "q-2", title: "Second", prompt: "Do the second thing", now: t2 });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    expect(second.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2"]);
+    expect(second.value.quests[0]).toMatchObject({
+      id: "q-1",
+      status: "pending",
+      attempts: 0,
+      loadoutOverride: "autonomous",
+      createdAt: t1,
+      updatedAt: t1,
+    });
+    expect(findNextPendingQuest(second.value)?.id).toBe("q-1");
+  });
+
+  test("rejects duplicate quest ids", () => {
+    const added = addQuest(createQuestBoard({ now: t0 }), { id: "q-1", title: "First", prompt: "Do it", now: t1 });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+
+    const duplicate = addQuest(added.value, { id: "q-1", title: "Again", prompt: "Do again", now: t2 });
+    expect(duplicate.ok).toBe(false);
+    if (!duplicate.ok) expect(duplicate.issues[0]?.path).toBe("quest.id");
+  });
+
+  test("starts a pending quest and prevents a second running quest", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    expect(started.value.runner.activeQuestId).toBe("q-1");
+    expect(started.value.quests[0]).toMatchObject({
+      status: "running",
+      currentCastId: "cast-1",
+      lastCastId: "cast-1",
+      attempts: 1,
+    });
+
+    const secondStart = startQuest(started.value, { questId: "q-2", castId: "cast-2", now: t3 });
+    expect(secondStart.ok).toBe(false);
+    if (!secondStart.ok) expect(secondStart.issues[0]?.message).toContain("already running");
+  });
+
+  test("does not start non-pending quests", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const completed = completeQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, result: { status: "succeeded" } });
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+
+    const restart = startQuest(completed.value, { questId: "q-1", castId: "cast-2", now: t3 });
+    expect(restart.ok).toBe(false);
+    if (!restart.ok) expect(restart.issues[0]?.message).toContain("not pending");
+  });
+
+  test("completes running quests only with matching cast ids", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    const wrongCast = completeQuest(started.value, { questId: "q-1", castId: "other-cast", now: t3, result: { status: "succeeded" } });
+    expect(wrongCast.ok).toBe(false);
+    if (!wrongCast.ok) expect(wrongCast.issues[0]?.path).toBe("castId");
+
+    const completed = completeQuest(started.value, {
+      questId: "q-1",
+      castId: "cast-1",
+      now: t3,
+      result: { status: "succeeded", message: "done", artifactDirectory: ".pi/pi-materia/run" },
+    });
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+    expect(completed.value.runner.activeQuestId).toBeUndefined();
+    expect(completed.value.quests[0]).toMatchObject({
+      status: "succeeded",
+      currentCastId: undefined,
+      lastCastId: "cast-1",
+      lastResult: { status: "succeeded", castId: "cast-1", finishedAt: t3, message: "done" },
+    });
+  });
+
+  test("records failed or blocked terminal metadata for running quest startup/lifecycle failures", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    const blocked = failRunningQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, status: "blocked", message: "stale after restart", code: "stale" });
+    expect(blocked.ok).toBe(true);
+    if (!blocked.ok) return;
+    expect(blocked.value.quests[0]).toMatchObject({
+      status: "blocked",
+      currentCastId: undefined,
+      lastError: { message: "stale after restart", occurredAt: t3, castId: "cast-1", code: "stale" },
+      lastResult: { status: "blocked", castId: "cast-1", finishedAt: t3, error: "stale after restart" },
+    });
+  });
+
+  test("toggles runner state without aborting active quest state", () => {
+    const board = boardWithTwoQuests();
+    const enabled = enableQuestRunner(board, t1);
+    expect(enabled.runner).toMatchObject({ enabled: true, lastStartedAt: t1 });
+
+    const started = startQuest(enabled, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const stopped = stopQuestRunner(started.value, t3);
+
+    expect(stopped.runner.enabled).toBe(false);
+    expect(stopped.runner.activeQuestId).toBe("q-1");
+    expect(stopped.quests[0]?.status).toBe("running");
+  });
+
+  test("validates malformed persisted board shapes and invalid running invariants", () => {
+    const board = boardWithTwoQuests();
+    const startedOne = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(startedOne.ok).toBe(true);
+    if (!startedOne.ok) return;
+    const invalid: QuestBoard = {
+      ...startedOne.value,
+      runner: { enabled: true, activeQuestId: "q-2" },
+      quests: [
+        startedOne.value.quests[0]!,
+        { ...startedOne.value.quests[1]!, status: "running", currentCastId: "cast-2", attempts: 1 },
+      ],
+    };
+
+    const validated = validateQuestBoard(invalid);
+    expect(validated.ok).toBe(false);
+    if (!validated.ok) {
+      expect(validated.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["questBoard.quests"]));
+    }
+  });
+});
+
+function boardWithTwoQuests(): QuestBoard {
+  const first = addQuest(createQuestBoard({ now: t0 }), { id: "q-1", title: "First", prompt: "Do one", now: t1 });
+  if (!first.ok) throw new Error("failed to add first quest");
+  const second = addQuest(first.value, { id: "q-2", title: "Second", prompt: "Do two", now: t1 });
+  if (!second.ok) throw new Error("failed to add second quest");
+  return second.value;
+}
