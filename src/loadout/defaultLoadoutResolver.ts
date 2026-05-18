@@ -39,11 +39,16 @@ export function resolveDefaultLoadout(
   };
 }
 
+export interface LoadoutReferenceResolution {
+  loadoutName: string;
+  loadoutId?: string;
+}
+
 export function resolveLoadoutReference(
   requestedLoadout: string,
   loadouts: Loadouts,
   sources: Record<string, MateriaConfigLayerScope> = {},
-): { loadoutName: string; loadoutId?: string } | null {
+): LoadoutReferenceResolution | null {
   const requested = requestedLoadout.trim();
   if (!requested) return null;
   const byExactName = findExactName(loadouts, sources, requested);
@@ -51,6 +56,14 @@ export function resolveLoadoutReference(
   const byExactId = findBestExactId(loadouts, sources, requested);
   if (byExactId?.loadoutName) return { loadoutName: byExactId.loadoutName, ...(byExactId.loadoutId ? { loadoutId: byExactId.loadoutId } : {}) };
   return null;
+}
+
+export function resolveLoadoutSelection(
+  requestedLoadout: string,
+  loadouts: Loadouts,
+  sources: Record<string, MateriaConfigLayerScope> = {},
+): LoadoutReferenceResolution | null {
+  return resolveLoadoutReference(requestedLoadout, loadouts, sources) ?? resolveSourcePrefixedLoadout(requestedLoadout, loadouts, sources);
 }
 
 function findExactName(loadouts: Loadouts, sources: Record<string, MateriaConfigLayerScope>, name: string): DefaultLoadoutResolution | null {
@@ -67,8 +80,19 @@ function findBestExactId(loadouts: Loadouts, sources: Record<string, MateriaConf
   return name && isPlainObject(loadout) ? { loadoutName: name, loadoutId: loadoutId(loadout) ?? synthesizedLoadoutId(sources[name], name) } : null;
 }
 
+function resolveSourcePrefixedLoadout(loadoutName: string, loadouts: Loadouts, sources: Record<string, MateriaConfigLayerScope> = {}): LoadoutReferenceResolution | null {
+  const [source, id] = loadoutName.split(":", 2);
+  if (!isLoadoutSource(source) || !id) return null;
+  const entry = Object.keys(loadouts ?? {}).find((name) => sources[name] === source && name.toLowerCase() === id);
+  return entry ? { loadoutName: entry, loadoutId: loadoutName } : null;
+}
+
 function sourceRank(source: MateriaConfigLayerScope | undefined): number {
   return source ? SOURCE_RANK[source] : SOURCE_RANK.default;
+}
+
+function isLoadoutSource(value: string | undefined): value is MateriaConfigLayerScope {
+  return value === "default" || value === "user" || value === "project" || value === "explicit";
 }
 
 function synthesizedLoadoutId(source: MateriaConfigLayerScope | undefined, name: string): string {

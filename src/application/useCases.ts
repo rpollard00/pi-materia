@@ -1,4 +1,5 @@
 import type { LoadedConfig, MateriaCastState, MateriaPipelineConfig, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
+import { resolveLoadoutSelection } from "../loadout/defaultLoadoutResolver.js";
 import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "./ports.js";
 import { compileLinkPlan, createConfigLinkGraphSource } from "../link/compiler.js";
 import { loadPreviousCastContext } from "../link/contextLoader.js";
@@ -12,6 +13,12 @@ export interface LoadoutUseCasesDeps {
   configs: ConfigRepository;
   pipeline: PipelinePresenter;
   logger?: Logger;
+}
+
+export interface EffectiveCastLoadout {
+  requestedLoadoutOverride: string;
+  effectiveLoadoutName: string;
+  effectiveLoadoutId?: string;
 }
 
 export class LoadoutUseCases {
@@ -36,11 +43,43 @@ export class LoadoutUseCases {
     return { loaded, writtenPath };
   }
 
-  async loadForCast(cwd: string, configuredPath?: string): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline }> {
+  async loadForCast(cwd: string, configuredPath?: string, loadoutOverride?: string): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout }> {
     const loaded = await this.deps.configs.load(cwd, configuredPath);
-    const pipeline = this.deps.pipeline.resolve(loaded.config);
-    return { loaded, pipeline };
+    const effectiveLoadout = resolveCastLoadoutOverride(loaded, loadoutOverride);
+    const castLoaded = effectiveLoadout ? createLoadoutOverrideLoadedConfig(loaded, effectiveLoadout) : loaded;
+    const pipeline = this.deps.pipeline.resolve(castLoaded.config);
+    return { loaded: castLoaded, pipeline, ...(effectiveLoadout ? { effectiveLoadout } : {}) };
   }
+}
+
+function resolveCastLoadoutOverride(loaded: LoadedConfig, loadoutOverride?: string): EffectiveCastLoadout | undefined {
+  const requestedLoadoutOverride = loadoutOverride?.trim();
+  if (!requestedLoadoutOverride) return undefined;
+  const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
+  if (loadoutNames.length === 0) {
+    throw new Error(`Cannot override Materia loadout because this config does not define any loadouts.`);
+  }
+  const resolved = resolveLoadoutSelection(requestedLoadoutOverride, loaded.config.loadouts, loaded.loadoutSources);
+  if (!resolved) {
+    throw new Error(`Unknown Materia loadout override "${requestedLoadoutOverride}". Available loadouts: ${loadoutNames.join(", ")}.`);
+  }
+  return {
+    requestedLoadoutOverride,
+    effectiveLoadoutName: resolved.loadoutName,
+    ...(resolved.loadoutId ? { effectiveLoadoutId: resolved.loadoutId } : {}),
+  };
+}
+
+function createLoadoutOverrideLoadedConfig(loaded: LoadedConfig, effectiveLoadout: EffectiveCastLoadout): LoadedConfig {
+  return {
+    ...loaded,
+    source: `${loaded.source}#loadout-override:${effectiveLoadout.effectiveLoadoutId ?? effectiveLoadout.effectiveLoadoutName}`,
+    config: {
+      ...loaded.config,
+      activeLoadout: effectiveLoadout.effectiveLoadoutName,
+      ...(effectiveLoadout.effectiveLoadoutId ? { activeLoadoutId: effectiveLoadout.effectiveLoadoutId } : { activeLoadoutId: undefined }),
+    },
+  };
 }
 
 export class ActiveCastConflictError extends Error {
@@ -97,11 +136,13 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     return this.deps.agentTurns.handleAgentEnd(pi, event, session);
   }
 
-  async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline }> {
+  async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string; loadoutOverride?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout }> {
     const active = this.deps.states.loadActive(input.session);
     if (active?.active) throw new ActiveCastConflictError(active.castId);
-    const prepared = await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath);
-    await this.deps.lifecycle.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request);
+    const prepared = await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.loadoutOverride);
+    await this.deps.lifecycle.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request, prepared.effectiveLoadout ? {
+      startEventDetails: { loadoutOverride: prepared.effectiveLoadout },
+    } : undefined);
     return prepared;
   }
 

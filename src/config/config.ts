@@ -10,7 +10,7 @@ import { normalizeMateriaCatalog, validateLoadoutMateriaReferences } from "../do
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
-import { resolveDefaultLoadout, resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
+import { resolveDefaultLoadout, resolveLoadoutSelection } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState } from "../types.js";
@@ -138,7 +138,7 @@ export async function saveActiveLoadout(cwd: string, loadoutName: string, config
   if (loadoutNames.length === 0) {
     throw new Error(`Cannot change Materia loadout because this config does not define any loadouts.`);
   }
-  const resolvedLoadout = resolveLoadoutReference(loadoutName, loaded.config.loadouts, loaded.loadoutSources) ?? resolveSourcePrefixedLoadout(loadoutName, loaded.config.loadouts, loaded.loadoutSources);
+  const resolvedLoadout = resolveLoadoutSelection(loadoutName, loaded.config.loadouts, loaded.loadoutSources);
   const resolvedLoadoutName = resolvedLoadout?.loadoutName ?? null;
   if (!resolvedLoadoutName) {
     throw new Error(`Unknown Materia loadout "${loadoutName}". Available loadouts: ${loadoutNames.join(", ")}.`);
@@ -345,13 +345,6 @@ async function writeProfileConfig(profile: MateriaProfileConfig): Promise<string
   const file = await ensureUserProfileConfig();
   await writeJsonAtomic(file, serializeCurrentProfileConfig(profile));
   return file;
-}
-
-function resolveSourcePrefixedLoadout(loadoutName: string, loadouts: PiMateriaConfig["loadouts"] | undefined, sources: Record<string, MateriaConfigLayerScope> | undefined): { loadoutName: string; loadoutId?: string } | null {
-  const [source, id] = loadoutName.split(":", 2);
-  if (!isLoadoutSource(source) || !id) return null;
-  const entry = Object.keys(loadouts ?? {}).find((name) => sources?.[name] === source && name.toLowerCase() === id);
-  return entry ? { loadoutName: entry, loadoutId: loadoutName } : null;
 }
 
 function findLoadoutId(loadouts: PiMateriaConfig["loadouts"] | undefined, name: string): string | undefined {

@@ -59,6 +59,87 @@ describe("application use cases", () => {
     expect(calls).toContain("save:/repo:default:custom.json");
   });
 
+  test("loadForCast applies loadout override in memory without saving", async () => {
+    let saves = 0;
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      loadoutSources: { Alpha: "project", Beta: "user" },
+      config: {
+        activeLoadout: "Alpha",
+        activeLoadoutId: "project:alpha",
+        materia: {},
+        loadouts: {
+          Alpha: { id: "project:alpha", entry: "Socket-1", sockets: {} },
+          Beta: { id: "user:beta", entry: "Socket-2", sockets: {} },
+        },
+      },
+    };
+    const presenter: PipelinePresenter = {
+      resolve(config) { return { entry: { id: config.activeLoadout === "Beta" ? "Socket-2" : "Socket-1", socket: { utility: "noop" } }, sockets: {} }; },
+      renderGrid: () => [],
+      renderLoadoutList: () => [],
+    };
+    const useCases = new LoadoutUseCases({
+      configs: { async load() { return configLoaded; }, async saveActiveLoadout() { saves += 1; return "written"; }, resolveArtifactRoot: () => "artifacts" },
+      pipeline: presenter,
+    });
+
+    const result = await useCases.loadForCast("/repo", undefined, "user:beta");
+
+    expect(result.loaded).not.toBe(configLoaded);
+    expect(result.loaded.config).not.toBe(configLoaded.config);
+    expect(result.loaded.config.activeLoadout).toBe("Beta");
+    expect(result.loaded.config.activeLoadoutId).toBe("user:beta");
+    expect(result.effectiveLoadout).toEqual({ requestedLoadoutOverride: "user:beta", effectiveLoadoutName: "Beta", effectiveLoadoutId: "user:beta" });
+    expect(result.pipeline.entry.id).toBe("Socket-2");
+    expect(configLoaded.config.activeLoadout).toBe("Alpha");
+    expect(configLoaded.config.activeLoadoutId).toBe("project:alpha");
+    expect(saves).toBe(0);
+  });
+
+  test("loadForCast rejects unknown loadout overrides before cast start", async () => {
+    const useCases = new LoadoutUseCases({
+      configs: { async load() { return loaded("Alpha"); }, async saveActiveLoadout() { throw new Error("must not save"); }, resolveArtifactRoot: () => "artifacts" },
+      pipeline: { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] },
+    });
+
+    await expect(useCases.loadForCast("/repo", undefined, "Missing")).rejects.toThrow('Unknown Materia loadout override "Missing"');
+  });
+
+  test("startCast records effective loadout override in cast start details", async () => {
+    let started: { loaded: LoadedConfig; options?: { startEventDetails?: Record<string, unknown> } } | undefined;
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      config: {
+        activeLoadout: "Alpha",
+        materia: {},
+        loadouts: {
+          Alpha: { id: "alpha-id", entry: "Socket-1", sockets: {} },
+          Beta: { id: "beta-id", entry: "Socket-1", sockets: {} },
+        },
+      },
+    };
+    const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { throw new Error("must not save"); }, resolveArtifactRoot: () => "" };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async (_pi, _session, loadedArg, _pipeline, _request, options) => { started = { loaded: loadedArg, options }; }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    const result = await useCases.startCast({ pi: "pi", session: "session", cwd: "/repo", request: "ship", loadoutOverride: "Beta" });
+
+    expect(result.effectiveLoadout).toEqual({ requestedLoadoutOverride: "Beta", effectiveLoadoutName: "Beta", effectiveLoadoutId: "beta-id" });
+    expect(started?.loaded.config.activeLoadout).toBe("Beta");
+    expect(started?.options?.startEventDetails?.loadoutOverride).toEqual(result.effectiveLoadout);
+    expect(configLoaded.config.activeLoadout).toBe("Alpha");
+  });
+
   test("selectActiveLoadout rejects active casts before writing", async () => {
     let wrote = false;
     const useCases = new LoadoutUseCases({
