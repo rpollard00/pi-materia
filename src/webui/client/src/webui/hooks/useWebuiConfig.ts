@@ -635,7 +635,7 @@ export function useWebuiConfig() {
       throw new Error(description);
     }
 
-    const configToSave = buildConfigToSave(normalizedDraft, deletedLoadoutNames);
+    const configToSave = buildConfigToSave(normalizedDraft, deletedLoadoutNames, loadoutSources);
     let result: Awaited<ReturnType<typeof saveConfig>>;
     try {
       result = await saveConfig(saveTarget, configToSave);

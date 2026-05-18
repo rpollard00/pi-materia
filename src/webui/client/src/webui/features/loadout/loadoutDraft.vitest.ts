@@ -130,6 +130,46 @@ describe('loadout draft mutations', () => {
     expect(config.loadouts.Beta).toMatchObject({ entry: 'Socket-1' });
   });
 
+  it('omits source-less shipped defaults and their deletion markers using loadoutSources', () => {
+    const frozen = deepFreeze({
+      ...config,
+      loadouts: { ...config.loadouts, Alpha: { ...config.loadouts.Alpha } },
+    } satisfies MateriaConfig);
+    const payload = buildConfigToSave(frozen, ['Alpha', 'Beta'], { Alpha: 'default', Beta: 'user' });
+
+    expect(payload.loadouts?.Alpha).toBeUndefined();
+    expect(payload.loadouts?.Beta).toBeNull();
+  });
+
+  it('includes source-less user and project loadouts identified by loadoutSources', () => {
+    const frozen = deepFreeze({
+      ...config,
+      loadouts: {
+        Alpha: { ...config.loadouts.Alpha },
+        Beta: { ...config.loadouts.Beta },
+      },
+    } satisfies MateriaConfig);
+    const payload = buildConfigToSave(frozen, [], { Alpha: 'user', Beta: 'project' });
+
+    expect(payload.loadouts?.Alpha).toMatchObject({ entry: 'Socket-1' });
+    expect(payload.loadouts?.Beta).toMatchObject({ entry: 'Socket-1' });
+  });
+
+  it('saves a renamed duplicate of source-less Hojo-Consult without posting the default original', () => {
+    const hojoConfig = {
+      activeLoadout: 'Hojo-Consult',
+      loadouts: {
+        'Hojo-Consult': { entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+      },
+    } satisfies MateriaConfig;
+    const duplicated = duplicateLoadoutDraft({ config: hojoConfig, name: 'Hojo-Consult', nextName: 'Hojo-Consult Copy', makeId: () => 'user:hojo-2:test' });
+    const renamed = renameLoadoutDraft({ config: duplicated, activeLoadoutName: 'Hojo-Consult Copy', nextName: 'Hojo 2' });
+    const payload = buildConfigToSave(renamed, [], { 'Hojo-Consult': 'default' });
+
+    expect(payload.loadouts?.['Hojo-Consult']).toBeUndefined();
+    expect(payload.loadouts?.['Hojo 2']).toMatchObject({ id: 'user:hojo-2:test', source: 'user', lockState: 'unlocked' });
+  });
+
   it('migrates socket layout into loadout layout before save', () => {
     const payload = buildConfigToSave({
       loadouts: {

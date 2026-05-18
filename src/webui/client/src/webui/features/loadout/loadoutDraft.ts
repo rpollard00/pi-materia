@@ -142,13 +142,28 @@ export function deletedLoadoutNamesAfterRename({
   return [...withoutRevertedTarget, previousName];
 }
 
-export function buildConfigToSave(normalizedDraft: MateriaConfig, deletedLoadoutNames: string[]) {
+export function resolvedLoadoutSource(
+  name: string,
+  loadout: PipelineConfig | undefined,
+  loadoutSources: Record<string, LoadoutSourceScope> = {},
+): LoadoutSourceScope | undefined {
+  return loadoutSources[name] ?? loadout?.source;
+}
+
+export function buildConfigToSave(
+  normalizedDraft: MateriaConfig,
+  deletedLoadoutNames: string[],
+  loadoutSources: Record<string, LoadoutSourceScope> = {},
+) {
   const preparedDraft = canonicalizeUtilitySocketReferences(normalizeMateriaConfigEdges(normalizedDraft));
   assertValidLoadoutSaveSemantics(preparedDraft);
   const loadouts: Record<string, PipelineConfig | null> = Object.fromEntries(
-    Object.entries(preparedDraft.loadouts ?? {}).filter(([, loadout]) => loadout?.source !== 'default'),
+    Object.entries(preparedDraft.loadouts ?? {}).filter(([name, loadout]) => resolvedLoadoutSource(name, loadout, loadoutSources) !== 'default'),
   );
-  for (const name of deletedLoadoutNames) loadouts[name] = null;
+  for (const name of deletedLoadoutNames) {
+    if (loadoutSources[name] === 'default') continue;
+    loadouts[name] = null;
+  }
   return fromWebUiConfigDto({ ...preparedDraft, loadouts } as never) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
 }
 
