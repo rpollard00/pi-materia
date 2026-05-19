@@ -2,7 +2,9 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import piMateria from "../src/index.js";
+import piMateria, { parseQuestListArgs } from "../src/index.js";
+import { findNextPendingQuest, type Quest, type QuestBoard, type QuestStatus } from "../src/domain/questBoard.js";
+import { selectQuestList } from "../src/presentation/questBoard.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown = questConfig()): Promise<FakePiHarness> {
@@ -52,6 +54,89 @@ async function readBoard(harness: FakePiHarness): Promise<any> {
   return JSON.parse(await readFile(path.join(harness.cwd, ".pi", "pi-materia", "quest-board.json"), "utf8"));
 }
 
+function makeQuest(id: string, status: QuestStatus, title = id): Quest {
+  const timestamp = "2026-05-19T00:00:00.000Z";
+  return {
+    id,
+    title,
+    prompt: title,
+    status,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    attempts: status === "pending" ? 0 : 1,
+    ...(status === "running" ? { currentCastId: `cast-${id}`, lastCastId: `cast-${id}` } : {}),
+    ...(status === "succeeded" || status === "failed" || status === "blocked" ? { lastCastId: `cast-${id}` } : {}),
+  };
+}
+
+function makeQuestBoard(quests: Quest[]): QuestBoard {
+  const runningQuest = quests.find((quest) => quest.status === "running");
+  return {
+    version: 1,
+    createdAt: "2026-05-19T00:00:00.000Z",
+    updatedAt: "2026-05-19T00:00:00.000Z",
+    runner: { enabled: false, ...(runningQuest ? { activeQuestId: runningQuest.id } : {}) },
+    quests,
+  };
+}
+
+async function seedBoard(harness: FakePiHarness, quests: Quest[]): Promise<void> {
+  const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+  await mkdir(boardDir, { recursive: true });
+  await writeFile(path.join(boardDir, "quest-board.json"), JSON.stringify(makeQuestBoard(quests), null, 2));
+}
+
+function listEntryLines(message: string): string[] {
+  return message.split("\n").filter((line) => line.startsWith("- quest-"));
+}
+
+describe("/materia quest list parsing", () => {
+  test("defaults to pending with limit 10", () => {
+    expect(parseQuestListArgs([])).toEqual({ ok: true, args: { filter: "pending", limit: 10 } });
+  });
+
+  test("accepts explicit filters and limit forms", () => {
+    expect(parseQuestListArgs(["pending"])).toEqual({ ok: true, args: { filter: "pending", limit: 10 } });
+    expect(parseQuestListArgs(["all", "--limit", "25"])).toEqual({ ok: true, args: { filter: "all", limit: 25 } });
+    expect(parseQuestListArgs(["--limit=3", "succeeded"])).toEqual({ ok: true, args: { filter: "succeeded", limit: 3 } });
+    expect(parseQuestListArgs(["failed", "--limit=1"])).toEqual({ ok: true, args: { filter: "failed", limit: 1 } });
+  });
+
+  test("rejects unknown filters, unknown options, and invalid limits", () => {
+    expect(parseQuestListArgs(["blocked"]).ok).toBe(false);
+    expect(parseQuestListArgs(["--foo"]).ok).toBe(false);
+    expect(parseQuestListArgs(["--limit", "0"]).ok).toBe(false);
+    expect(parseQuestListArgs(["--limit=-1"]).ok).toBe(false);
+    expect(parseQuestListArgs(["--limit", "1.5"]).ok).toBe(false);
+    expect(parseQuestListArgs(["--limit", String(Number.MAX_SAFE_INTEGER + 1)]).ok).toBe(false);
+  });
+});
+
+describe("quest list selection", () => {
+  test("filters, limits, and orders pending quests using the next pending selector", () => {
+    const board = makeQuestBoard([
+      makeQuest("quest-succeeded", "succeeded", "Already done"),
+      makeQuest("quest-next", "pending", "Next pending quest"),
+      makeQuest("quest-later", "pending", "Later pending quest"),
+      makeQuest("quest-failed", "failed", "Failed quest"),
+      makeQuest("quest-blocked", "blocked", "Blocked quest"),
+      makeQuest("quest-running", "running", "Running quest"),
+    ]);
+
+    const next = findNextPendingQuest(board);
+    const pending = selectQuestList(board, { filter: "pending", limit: 10 });
+    expect(next?.id).toBe("quest-next");
+    expect(pending.quests.map((quest) => quest.id)).toEqual(["quest-next", "quest-later"]);
+    expect(pending.quests[0]?.id).toBe(next?.id);
+    expect(pending.totalMatchingCount).toBe(2);
+
+    expect(selectQuestList(board, { filter: "pending", limit: 1 }).quests.map((quest) => quest.id)).toEqual(["quest-next"]);
+    expect(selectQuestList(board, { filter: "all", limit: 10 }).quests.map((quest) => quest.status)).toEqual(["succeeded", "pending", "pending", "failed", "blocked", "running"]);
+    expect(selectQuestList(board, { filter: "succeeded", limit: 10 }).quests.map((quest) => quest.id)).toEqual(["quest-succeeded"]);
+    expect(selectQuestList(board, { filter: "failed", limit: 10 }).quests.map((quest) => quest.id)).toEqual(["quest-failed"]);
+  });
+});
+
 describe("/materia quest command interface", () => {
   test("registers quest in description and completions", async () => {
     const harness = await makeHarness();
@@ -62,6 +147,90 @@ describe("/materia quest command interface", () => {
     const questCompletions = harness.getCommandCompletions("materia", "quest ")?.map((completion) => completion.value);
     expect(questCompletions).toContain("quest add");
     expect(questCompletions).toContain("quest runonce");
+  });
+
+  test("list defaults to pending quests with limit 10 and does not wait for idle", async () => {
+    const harness = await makeHarness();
+    harness.idle = false;
+    await seedBoard(
+      harness,
+      Array.from({ length: 12 }, (_, index) => makeQuest(`quest-pending-${index + 1}`, "pending", `Pending quest ${index + 1}`)),
+    );
+
+    await harness.runCommand("materia", "quest list");
+
+    const message = latestMateriaMessage(harness);
+    expect(harness.waitForIdleCalls).toBe(0);
+    expect(message).toContain("pi-materia quest list");
+    expect(message).toContain("Filter: pending");
+    expect(message).toContain("Showing: 10 of 12 matching quest(s) (limit 10)");
+    expect(listEntryLines(message)).toHaveLength(10);
+    expect(message).toContain("quest-pending-1 [pending] Pending quest 1");
+    expect(message).toContain("quest-pending-10 [pending] Pending quest 10");
+    expect(message).not.toContain("quest-pending-11 [pending] Pending quest 11");
+  });
+
+  test("list supports explicit filters", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [
+      makeQuest("quest-pending", "pending", "Pending quest"),
+      makeQuest("quest-succeeded", "succeeded", "Succeeded quest"),
+      makeQuest("quest-failed", "failed", "Failed quest"),
+      makeQuest("quest-blocked", "blocked", "Blocked quest"),
+      makeQuest("quest-running", "running", "Running quest"),
+    ]);
+
+    await harness.runCommand("materia", "quest list pending");
+    expect(latestMateriaMessage(harness)).toContain("Showing: 1 of 1 matching quest(s) (limit 10)");
+    expect(latestMateriaMessage(harness)).toContain("quest-pending [pending] Pending quest");
+
+    await harness.runCommand("materia", "quest list succeeded");
+    expect(latestMateriaMessage(harness)).toContain("quest-succeeded [succeeded] Succeeded quest");
+    expect(latestMateriaMessage(harness)).not.toContain("quest-failed [failed] Failed quest");
+
+    await harness.runCommand("materia", "quest list failed");
+    expect(latestMateriaMessage(harness)).toContain("quest-failed [failed] Failed quest");
+    expect(latestMateriaMessage(harness)).not.toContain("quest-blocked [blocked] Blocked quest");
+
+    await harness.runCommand("materia", "quest list all");
+    const allMessage = latestMateriaMessage(harness);
+    expect(allMessage).toContain("Filter: all");
+    expect(allMessage).toContain("Showing: 5 of 5 matching quest(s) (limit 10)");
+    expect(allMessage).toContain("quest-pending [pending] Pending quest");
+    expect(allMessage).toContain("quest-succeeded [succeeded] Succeeded quest");
+    expect(allMessage).toContain("quest-failed [failed] Failed quest");
+    expect(allMessage).toContain("quest-blocked [blocked] Blocked quest");
+    expect(allMessage).toContain("quest-running [running] Running quest");
+  });
+
+  test("list applies custom limit after filtering and pending ordering", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [
+      makeQuest("quest-done", "succeeded", "Done quest"),
+      makeQuest("quest-next", "pending", "Next pending quest"),
+      makeQuest("quest-later", "pending", "Later pending quest"),
+      makeQuest("quest-last", "pending", "Last pending quest"),
+    ]);
+
+    await harness.runCommand("materia", "quest list pending --limit 2");
+
+    const message = latestMateriaMessage(harness);
+    expect(message).toContain("Showing: 2 of 3 matching quest(s) (limit 2)");
+    expect(listEntryLines(message)).toEqual([
+      "- quest-next [pending] Next pending quest",
+      "- quest-later [pending] Later pending quest",
+    ]);
+  });
+
+  test("list reports invalid filter and invalid limit notifications", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "quest list blocked");
+    await harness.runCommand("materia", "quest list --limit nope");
+
+    const errors = harness.notifications.filter((notification) => notification.type === "error").map((notification) => notification.message);
+    expect(errors.some((message) => message.includes("Unknown /materia quest list filter blocked"))).toBe(true);
+    expect(errors.some((message) => message.includes("Limit must be a positive safe integer"))).toBe(true);
   });
 
   test("status shows board details and does not wait for idle", async () => {
@@ -257,6 +426,8 @@ describe("/materia quest command interface", () => {
     await harness.runCommand("materia", "quest add --loadout");
     await harness.runCommand("materia", "quest add --loadout Missing Build with missing loadout");
     await harness.runCommand("materia", "quest run missing-id");
+    await harness.runCommand("materia", "quest list blocked");
+    await harness.runCommand("materia", "quest list --limit 0");
     await harness.runCommand("materia", "quest wat");
 
     const errors = harness.notifications.filter((notification) => notification.type === "error").map((notification) => notification.message);
@@ -264,6 +435,8 @@ describe("/materia quest command interface", () => {
     expect(errors.some((message) => message.includes("Usage: /materia quest add"))).toBe(true);
     expect(errors.some((message) => message.includes('Unknown Materia loadout override "Missing"'))).toBe(true);
     expect(errors.some((message) => message.includes("No pending pi-materia quest found with id missing-id"))).toBe(true);
+    expect(errors.some((message) => message.includes("Unknown /materia quest list filter blocked"))).toBe(true);
+    expect(errors.some((message) => message.includes("Limit must be a positive safe integer"))).toBe(true);
     expect(errors.some((message) => message.includes("/materia quest runonce [id]"))).toBe(true);
   });
 

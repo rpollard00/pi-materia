@@ -96,6 +96,15 @@ export interface FailRunningQuestInput {
   metadata?: Record<string, unknown>;
 }
 
+export type QuestMovePlacement = "first" | "before" | "after";
+
+export interface MovePendingQuestInput {
+  questId: string;
+  placement: QuestMovePlacement;
+  targetId?: string;
+  now?: string;
+}
+
 export function createQuestBoard(input: CreateQuestBoardInput): QuestBoard {
   return {
     version: QUEST_BOARD_SCHEMA_VERSION,
@@ -148,8 +157,81 @@ export function stopQuestRunner(board: QuestBoard, now: string): QuestBoard {
   };
 }
 
+export function normalizeQuestBoard(board: QuestBoard): DomainResult<QuestBoard> {
+  const validated = validateQuestBoard(board, "questBoard");
+  if (!validated.ok) return validated;
+
+  // QuestBoard.quests is an array, so its relative pending-quest order is the
+  // only persisted pending-order source. Normalization intentionally preserves
+  // that visible order and does not write a parallel order list that could drift.
+  return ok({
+    ...validated.value,
+    quests: validated.value.quests.slice(),
+  });
+}
+
+export function getOrderedQuestView(board: QuestBoard): Quest[] {
+  const activeQuest = getActiveQuest(board);
+  const pendingQuests = board.quests.filter((quest) => quest.status === "pending");
+  return activeQuest === undefined ? pendingQuests : [activeQuest, ...pendingQuests.filter((quest) => quest.id !== activeQuest.id)];
+}
+
 export function findNextPendingQuest(board: QuestBoard): Quest | undefined {
   return board.quests.find((quest) => quest.status === "pending");
+}
+
+export function movePendingQuest(board: QuestBoard, input: MovePendingQuestInput): DomainResult<QuestBoard> {
+  const normalized = normalizeQuestBoard(board);
+  if (!normalized.ok) return normalized;
+
+  const issues: DomainIssue[] = [];
+  const source = normalized.value.quests.find((quest) => quest.id === input.questId);
+  if (source === undefined) issues.push({ path: "questId", message: `quest '${input.questId}' does not exist` });
+  else if (source.status !== "pending") issues.push({ path: "quest.status", message: `quest '${source.id}' is ${source.status}, not pending` });
+
+  if (!isMovePlacement(input.placement)) {
+    issues.push({ path: "placement", message: "placement must be first, before, or after" });
+  }
+
+  const needsTarget = input.placement === "before" || input.placement === "after";
+  if (input.placement === "first" && input.targetId !== undefined) {
+    issues.push({ path: "targetId", message: "target id is not allowed when placement is first" });
+  } else if (needsTarget && input.targetId === undefined) {
+    issues.push({ path: "targetId", message: `target id is required when placement is ${input.placement}` });
+  }
+
+  let target: Quest | undefined;
+  if (input.targetId !== undefined) {
+    target = normalized.value.quests.find((quest) => quest.id === input.targetId);
+    if (target === undefined) issues.push({ path: "targetId", message: `quest '${input.targetId}' does not exist` });
+    else if (target.status !== "pending") issues.push({ path: "target.status", message: `quest '${target.id}' is ${target.status}, not pending` });
+    if (input.targetId === input.questId) issues.push({ path: "targetId", message: "target quest must be different from moved quest" });
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  const pendingIds = normalized.value.quests.filter((quest) => quest.status === "pending").map((quest) => quest.id);
+  const reorderedPendingIds = pendingIds.filter((id) => id !== input.questId);
+  let insertIndex = 0;
+  if (input.placement === "before" || input.placement === "after") {
+    const targetIndex = reorderedPendingIds.indexOf(input.targetId!);
+    insertIndex = input.placement === "after" ? targetIndex + 1 : targetIndex;
+  }
+  reorderedPendingIds.splice(insertIndex, 0, input.questId);
+
+  if (sameOrder(pendingIds, reorderedPendingIds)) return ok(normalized.value);
+
+  const pendingById = new Map(normalized.value.quests.filter((quest) => quest.status === "pending").map((quest) => [quest.id, quest]));
+  const reorderedPendingQuests = reorderedPendingIds.map((id) => pendingById.get(id)).filter((quest): quest is Quest => quest !== undefined);
+  let nextPendingIndex = 0;
+  const quests = normalized.value.quests.map((quest) => {
+    if (quest.status !== "pending") return quest;
+    const nextQuest = reorderedPendingQuests[nextPendingIndex];
+    nextPendingIndex += 1;
+    return nextQuest ?? quest;
+  });
+
+  return ok({ ...normalized.value, updatedAt: input.now ?? normalized.value.updatedAt, quests });
 }
 
 export function startQuest(board: QuestBoard, input: StartQuestInput): DomainResult<QuestBoard> {
@@ -358,6 +440,22 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function replaceAt<T>(items: readonly T[], index: number, value: T): T[] {
   return items.map((item, itemIndex) => (itemIndex === index ? value : item));
+}
+
+function getActiveQuest(board: QuestBoard): Quest | undefined {
+  if (board.runner.activeQuestId !== undefined) {
+    const active = board.quests.find((quest) => quest.id === board.runner.activeQuestId);
+    if (active !== undefined) return active;
+  }
+  return board.quests.find((quest) => quest.status === "running");
+}
+
+function isMovePlacement(value: unknown): value is QuestMovePlacement {
+  return value === "first" || value === "before" || value === "after";
+}
+
+function sameOrder(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function issue(path: string, message: string): DomainResult<never> {

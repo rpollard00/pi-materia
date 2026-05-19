@@ -43,6 +43,15 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 5. Edit an existing prompt materia and confirm graph links, layout, and inserted metadata on the socket are preserved. If it has a saved model that is not currently available in Pi, confirm only that saved value appears with an unavailable label so saving unchanged preserves it.
 6. For an agent materia, choose **Custom** tools, select a known tool, add a freeform extension-style tool name that is not currently registered, and save. Confirm the editor shows an unavailable-tool warning instead of blocking save, the saved JSON keeps the configured name, and the runtime warning explains that unavailable custom tools are skipped until registered.
 
+## Quests pane
+
+1. Open the **Quests** tab and confirm the left quest log shows any active/running quest at the top with the star marker and accessible active label.
+2. Add two pending quests with `/materia quest add ...` and refresh the pane; confirm pending quests appear after the active quest in execution order, with long prompts summarized in the sidebar and full prompt text available in the detail area.
+3. Complete or seed a succeeded quest and confirm it appears in the sidebar's completed section instead of the active/pending list.
+4. Seed or encounter a failed/blocked quest and confirm it is hidden by default except for the collapsed/count affordance.
+5. Use the WebUI add form: choose the default/no-override option or a configured loadout, enter a prompt, submit, and confirm the prompt clears, success feedback names the created quest, and the new pending quest appears after refresh.
+6. Submit an empty prompt and confirm the form preserves input state and reports an accessible validation error without adding a quest.
+
 ## Role prompt generator
 
 1. In the materia editor, type existing text into the prompt field and enter a concise role brief in **Generate role prompt from brief**.

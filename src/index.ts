@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { ActiveCastConflictError, ActiveQuestConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStateRepository, type QuestStartResult } from "./application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStateRepository, type QuestStartResult } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
@@ -10,8 +10,11 @@ import { ensureMateriaWebUi } from "./webui/service.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError } from "./infrastructure/index.js";
-import { renderQuestAdded, renderQuestStarted, renderQuestStatus, renderQuestStopped } from "./presentation/questBoard.js";
+import { renderQuestAdded, renderQuestList, renderQuestStarted, renderQuestStatus, renderQuestStopped, type QuestListFilter, type QuestListOptions } from "./presentation/questBoard.js";
 export { renderCastList } from "./infrastructure/index.js";
+export type { QuestListFilter, QuestListOptions } from "./presentation/questBoard.js";
+
+type QuestListArgs = QuestListOptions;
 
 export default function piMateria(pi: ExtensionAPI) {
   registerMateriaRenderer(pi);
@@ -79,7 +82,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: cast, autocast, link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states),
     handler: async (args, ctx) => {
       activeContext = ctx;
@@ -106,6 +109,33 @@ export default function piMateria(pi: ExtensionAPI) {
           pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused, startedAt: Date.now() });
         } catch (error) {
           ctx.ui.notify(`pi-materia ui failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
+
+      if (subcommand === "autocast") {
+        const argumentsText = trimmedArgs.replace(/^autocast(?:\s+|$)/, "");
+        try {
+          const { loaded, pipeline, autocast, effectiveLoadout } = await castExecutionUseCases.startAutoCast({ pi, session: ctx, cwd: ctx.cwd, argumentsText, rawCommand: `/materia ${trimmedArgs.trim()}`, configuredPath: getConfiguredConfigPath() });
+          autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath() });
+          ctx.ui.notify(`pi-materia autocast config: ${loaded.source}`, "info");
+          if (autocast.mode === "loadout") {
+            ctx.ui.notify(`pi-materia autocast temporary loadout: ${effectiveLoadout?.effectiveLoadoutName ?? autocast.requestedTarget}`, "info");
+          } else {
+            ctx.ui.notify(`pi-materia autocast virtual materia loadout: ${autocast.resolvedMateria.id}`, "info");
+          }
+          ctx.ui.notify(`pi-materia grid entry: ${pipeline.entry.id}`, "info");
+        } catch (error) {
+          if (error instanceof ActiveCastConflictError) {
+            ctx.ui.notify(`A pi-materia cast is already active (${error.castId}). Use /materia status or /materia abort.`, "error");
+            return;
+          }
+          if (error instanceof AutoCastCommandValidationError) {
+            ctx.ui.notify(error.message, "error");
+            return;
+          }
+          ctx.ui.setStatus("materia", "failed");
+          ctx.ui.notify(`pi-materia autocast failed to start: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
         return;
       }
@@ -256,7 +286,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (only after same-socket recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (only after same-socket recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -297,8 +327,18 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
   const action = tokens[0] ?? "status";
   const rest = tokens.slice(1);
 
-  if (action === "status" || action === "list") {
+  if (action === "status") {
     await showQuestStatus(input);
+    return;
+  }
+
+  if (action === "list") {
+    const parsed = parseQuestListArgs(rest);
+    if (!parsed.ok) {
+      input.ctx.ui.notify(parsed.error, "error");
+      return;
+    }
+    await showQuestList(input, parsed.args);
     return;
   }
 
@@ -387,7 +427,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
-  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest add [--loadout <name>] <prompt>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
+  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest list [pending|all|succeeded|failed] [--limit <n>], /materia quest add [--loadout <name>] <prompt>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
 }
 
 async function showQuestStatus(input: QuestCommandInput): Promise<void> {
@@ -396,6 +436,15 @@ async function showQuestStatus(input: QuestCommandInput): Promise<void> {
     sendQuestMessage(input.pi, renderQuestStatus(status), "status");
   } catch (error) {
     notifyQuestError(input.ctx, "status", error);
+  }
+}
+
+async function showQuestList(input: QuestCommandInput, args: QuestListArgs): Promise<void> {
+  try {
+    const status = await input.useCases.getStatus(input.ctx);
+    sendQuestMessage(input.pi, renderQuestList(status, args), "list");
+  } catch (error) {
+    notifyQuestError(input.ctx, "list", error);
   }
 }
 
@@ -471,6 +520,52 @@ function notifyQuestError(ctx: ExtensionContext, action: string, error: unknown)
   ctx.ui.notify(`pi-materia quest ${action} failed: ${error instanceof Error ? error.message : String(error)}`, "error");
 }
 
+export function parseQuestListArgs(tokens: string[]): { ok: true; args: QuestListArgs } | { ok: false; error: string } {
+  const usage = "Usage: /materia quest list [pending|all|succeeded|failed] [--limit <n>]";
+  const filters = new Set<QuestListFilter>(["pending", "all", "succeeded", "failed"]);
+  let filter: QuestListFilter = "pending";
+  let sawFilter = false;
+  let limit = 10;
+  let sawLimit = false;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === "--limit") {
+      if (sawLimit) return { ok: false, error: `${usage}. Specify --limit only once.` };
+      const value = tokens[index + 1];
+      if (!value || value.startsWith("--")) return { ok: false, error: usage };
+      const parsed = parsePositiveSafeInteger(value);
+      if (!parsed.ok) return { ok: false, error: `${usage}. Limit must be a positive safe integer.` };
+      limit = parsed.value;
+      sawLimit = true;
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--limit=")) {
+      if (sawLimit) return { ok: false, error: `${usage}. Specify --limit only once.` };
+      const parsed = parsePositiveSafeInteger(token.slice("--limit=".length));
+      if (!parsed.ok) return { ok: false, error: `${usage}. Limit must be a positive safe integer.` };
+      limit = parsed.value;
+      sawLimit = true;
+      continue;
+    }
+    if (token.startsWith("--")) return { ok: false, error: `Unknown /materia quest list option ${token}. ${usage}` };
+    if (!filters.has(token as QuestListFilter)) return { ok: false, error: `Unknown /materia quest list filter ${token}. Expected pending, all, succeeded, or failed.` };
+    if (sawFilter) return { ok: false, error: `${usage}. Specify at most one filter.` };
+    filter = token as QuestListFilter;
+    sawFilter = true;
+  }
+
+  return { ok: true, args: { filter, limit } };
+}
+
+function parsePositiveSafeInteger(value: string): { ok: true; value: number } | { ok: false } {
+  if (!/^[1-9]\d*$/.test(value)) return { ok: false };
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) return { ok: false };
+  return { ok: true, value: parsed };
+}
+
 function parseQuestAddArgs(tokens: string[]): { ok: true; prompt: string; loadoutOverride?: string } | { ok: false; error: string } {
   let loadoutOverride: string | undefined;
   const promptTokens: string[] = [];
@@ -532,6 +627,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
       const matching = questSubcommands.filter((value) => value.startsWith(tokens[1] ?? ""));
       return matching.length ? matching.map((value) => ({ value: `quest ${value}`, label: value })) : null;
     }
+    if (tokens[1] === "list") return questListCompletions(tokens, endsWithWhitespace);
     return null;
   }
 
@@ -549,8 +645,19 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
   return completions.length ? completions : null;
 }
 
+function questListCompletions(tokens: string[], endsWithWhitespace: boolean): Array<{ value: string; label: string; description?: string }> | null {
+  const filters = ["pending", "all", "succeeded", "failed"];
+  if (tokens.length === 2 && endsWithWhitespace) return filters.map((filter) => ({ value: `quest list ${filter}`, label: filter }));
+  if (tokens.length === 3 && !endsWithWhitespace) {
+    const matching = filters.filter((filter) => filter.startsWith(tokens[2] ?? ""));
+    return matching.length ? matching.map((filter) => ({ value: `quest list ${filter}`, label: filter })) : null;
+  }
+  if (tokens.length === 3 && endsWithWhitespace) return [{ value: `quest list ${tokens[2]} --limit `, label: "--limit", description: "Limit number of quests shown" }];
+  return null;
+}
+
 function materiaSubcommands(): string[] {
-  return ["cast", "link", "recast", "revive", "casts", "quest", "grid", "loadout", "ui", "status", "continue", "abort"];
+  return ["cast", "autocast", "link", "recast", "revive", "casts", "quest", "grid", "loadout", "ui", "status", "continue", "abort"];
 }
 
 function shouldAutoStartWebUi(subcommand: string | undefined): boolean {

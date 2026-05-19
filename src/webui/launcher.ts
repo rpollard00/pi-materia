@@ -1,16 +1,18 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveRoleGenerationModelPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
+import { addQuest as addQuestToBoard } from "../domain/questBoard.js";
+import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
 
 export interface MateriaWebUiLaunchResult {
   url: string;
@@ -141,6 +143,8 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       setDefaultLoadout: createDefaultLoadoutSetter(ctx, configuredPath),
       getRoleGenerationPreference: async () => ({ model: await getRoleGenerationModelPreference() }),
       setRoleGenerationPreference: async (model) => ({ model: await saveRoleGenerationModelPreference(model) }),
+      getQuestBoard: () => readQuestBoardSnapshot(cwd),
+      addQuest: (input) => addWebUiQuest(cwd, configuredPath, input),
       generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
       modelCatalog: createPiModelCatalogSource(ctx, pi),
     },
@@ -259,6 +263,55 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
       };
     }
   };
+}
+
+async function readQuestBoardSnapshot(cwd: string): Promise<MateriaQuestBoardSource> {
+  const boards = new FileQuestBoardRepository(cwd);
+  return { boardPath: boards.boardPath, board: await boards.loadOrCreate() };
+}
+
+async function addWebUiQuest(cwd: string, configuredPath: string | undefined, input: MateriaAddQuestInput): Promise<MateriaAddQuestResult> {
+  try {
+    const prompt = input.prompt.trim();
+    if (!prompt) return { ok: false, code: "validation_failed", message: "Quest prompt is required." };
+
+    const loadoutOverride = input.loadoutOverride?.trim();
+    if (loadoutOverride) {
+      const loaded = await loadConfig(cwd, configuredPath);
+      const resolved = resolveLoadoutReference(loadoutOverride, loaded.config.loadouts, loaded.loadoutSources);
+      if (!resolved) {
+        const names = Object.keys(loaded.config.loadouts ?? {});
+        return {
+          ok: false,
+          code: "invalid_loadout",
+          message: names.length
+            ? `Unknown Materia loadout "${loadoutOverride}". Available loadouts: ${names.join(", ")}.`
+            : "Cannot add quest with a loadout override because this config does not define any loadouts.",
+        };
+      }
+    }
+
+    const boards = new FileQuestBoardRepository(cwd);
+    const board = await boards.loadOrCreate();
+    const now = new Date().toISOString();
+    const result = addQuestToBoard(board, {
+      id: `quest-${randomUUID()}`,
+      title: deriveWebUiQuestTitle(prompt),
+      prompt,
+      now,
+      ...(loadoutOverride ? { loadoutOverride } : {}),
+    });
+    if (!result.ok) return { ok: false, code: "validation_failed", message: result.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ") };
+    await boards.save(result.value);
+    return { ok: true, boardPath: boards.boardPath, board: result.value, quest: result.value.quests[result.value.quests.length - 1]! };
+  } catch (error) {
+    return { ok: false, code: "unavailable", message: `Could not add quest: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+function deriveWebUiQuestTitle(prompt: string): string {
+  const firstLine = prompt.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "WebUI quest";
+  return firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
 }
 
 function createPiModelCatalogSource(ctx: ExtensionContext, pi?: ExtensionAPI): MateriaModelCatalogSource {

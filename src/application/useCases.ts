@@ -1,12 +1,12 @@
 import type { LoadedConfig, MateriaCastState, MateriaPipelineConfig, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 import { resolveLoadoutSelection } from "../loadout/defaultLoadoutResolver.js";
 import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStartOptions, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter, QuestBoardRepository } from "./ports.js";
-import { compileLinkPlan, createConfigLinkGraphSource } from "../link/compiler.js";
+import { compileLinkPlan, compileVirtualLoadoutFromResolvedTargets, createConfigLinkGraphSource } from "../link/compiler.js";
 import { loadPreviousCastContext } from "../link/contextLoader.js";
 import { parseLinkCommandArguments } from "../link/parser.js";
 import { createLinkCastStateData, createLinkPlan, createLinkRuntimeState } from "../link/planner.js";
 import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/resolver.js";
-import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData } from "../link/types.js";
+import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData, type LinkTargetRef, type ResolvedMateriaLinkTarget, type VirtualLoadoutMetadata } from "../link/types.js";
 import { addQuest, completeQuest, enableQuestRunner, failRunningQuest, findNextPendingQuest, startQuest, stopQuestRunner, type Quest, type QuestBoard, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
 
@@ -21,6 +21,25 @@ export interface EffectiveCastLoadout {
   effectiveLoadoutName: string;
   effectiveLoadoutId?: string;
 }
+
+export type AutoCastMode = "loadout" | "materia";
+
+export interface AutoCastLoadoutMetadata {
+  mode: "loadout";
+  requestedTarget: string;
+  activeLoadoutChanged: false;
+  effectiveLoadout: { name: string; id?: string };
+}
+
+export interface AutoCastMateriaMetadata {
+  mode: "materia";
+  requestedTarget: string;
+  activeLoadoutChanged: false;
+  resolvedMateria: { id: string; name?: string };
+  virtualLoadout: VirtualLoadoutMetadata;
+}
+
+export type AutoCastMetadata = AutoCastLoadoutMetadata | AutoCastMateriaMetadata;
 
 export class LoadoutUseCases {
   constructor(private readonly deps: LoadoutUseCasesDeps) {}
@@ -83,6 +102,47 @@ function createLoadoutOverrideLoadedConfig(loaded: LoadedConfig, effectiveLoadou
   };
 }
 
+type ParsedAutoCastArguments =
+  | { mode: "loadout"; rawTarget: string; name: string; prompt: string }
+  | { mode: "materia"; rawTarget: string; name: string; prompt: string };
+
+function parseAutoCastArguments(argumentsText: string): ParsedAutoCastArguments | undefined {
+  const normalized = argumentsText.trim();
+  if (!normalized) return undefined;
+  const match = normalized.match(/^(\S+)\s+([\s\S]+)$/);
+  if (!match) return undefined;
+  const rawTarget = match[1]!.trim();
+  const prompt = match[2]!.trim();
+  if (!rawTarget || !prompt) return undefined;
+
+  const separator = rawTarget.indexOf(":");
+  if (separator > 0) {
+    const prefix = rawTarget.slice(0, separator);
+    const name = rawTarget.slice(separator + 1).trim();
+    if (!name) return undefined;
+    if (prefix === "materia") return { mode: "materia", rawTarget, name, prompt };
+    if (prefix === "loadout") return { mode: "loadout", rawTarget, name, prompt };
+    return { mode: "loadout", rawTarget, name: rawTarget, prompt };
+  }
+
+  return { mode: "loadout", rawTarget, name: rawTarget, prompt };
+}
+
+function createVirtualAutoCastLoadedConfig(loaded: LoadedConfig, virtualLoadoutId: string, virtualLoadout: MateriaPipelineConfig): LoadedConfig {
+  const config: PiMateriaConfig = {
+    ...loaded.config,
+    activeLoadout: virtualLoadoutId,
+    activeLoadoutId: virtualLoadoutId,
+    loadouts: { ...(loaded.config.loadouts ?? {}), [virtualLoadoutId]: virtualLoadout },
+  };
+  return { ...loaded, source: `${loaded.source}#${virtualLoadoutId}`, config };
+}
+
+function virtualAutoCastLoadoutId(materiaId: string): string {
+  const safe = materiaId.trim().replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "materia";
+  return `virtual-autocast-materia-${safe}`;
+}
+
 export class ActiveCastConflictError extends Error {
   readonly code = "active_cast_conflict";
   constructor(readonly castId: string) {
@@ -138,13 +198,35 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   }
 
   async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string; loadoutOverride?: string; options?: CastStartOptions }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout; state?: MateriaCastState }> {
-    const active = this.deps.states.loadActive(input.session);
-    if (active?.active) throw new ActiveCastConflictError(active.castId);
+    this.assertNoActiveCast(input.session);
     const prepared = await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.loadoutOverride);
     const options = withEffectiveLoadoutInitialData(mergeCastStartOptions(input.options, prepared.effectiveLoadout ? { startEventDetails: { loadoutOverride: prepared.effectiveLoadout } } : undefined), prepared.effectiveLoadout);
-    const startedState = await this.deps.lifecycle.start(input.pi, input.session, prepared.loaded, prepared.pipeline, input.request, options);
-    const state = startedState ?? this.deps.states.loadActive(input.session);
+    const state = await this.startPreparedCast({ pi: input.pi, session: input.session, loaded: prepared.loaded, pipeline: prepared.pipeline, request: input.request, options });
     return { ...prepared, ...(state ? { state } : {}) };
+  }
+
+  async startAutoCast(input: { pi: TPi; session: TSession; cwd: string; argumentsText: string; rawCommand?: string; configuredPath?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; autocast: AutoCastMetadata; effectiveLoadout?: EffectiveCastLoadout; state?: MateriaCastState }> {
+    this.assertNoActiveCast(input.session);
+    const parsed = parseAutoCastArguments(input.argumentsText);
+    if (!parsed) throw new AutoCastCommandValidationError("Usage: /materia autocast <loadout|materia:name> <prompt>");
+
+    if (parsed.mode === "materia") {
+      return this.startMateriaAutoCast(input, parsed);
+    }
+
+    const loaded = await this.deps.configs.load(input.cwd, input.configuredPath);
+    const effectiveLoadout = resolveCastLoadoutOverride(loaded, parsed.name);
+    if (!effectiveLoadout) throw new AutoCastCommandValidationError("Usage: /materia autocast <loadout|materia:name> <prompt>");
+    const castLoaded = createLoadoutOverrideLoadedConfig(loaded, effectiveLoadout);
+    const pipeline = this.deps.pipeline.resolve(castLoaded.config);
+    const autocast: AutoCastLoadoutMetadata = {
+      mode: "loadout",
+      requestedTarget: parsed.rawTarget,
+      activeLoadoutChanged: false,
+      effectiveLoadout: { name: effectiveLoadout.effectiveLoadoutName, ...(effectiveLoadout.effectiveLoadoutId ? { id: effectiveLoadout.effectiveLoadoutId } : {}) },
+    };
+    const state = await this.startPreparedCast({ pi: input.pi, session: input.session, loaded: castLoaded, pipeline, request: parsed.prompt, options: { initialData: { autocast }, startEventDetails: { autocast } } });
+    return { loaded: castLoaded, pipeline, autocast, effectiveLoadout, ...(state ? { state } : {}) };
   }
 
   async startLinkedCast(input: { pi: TPi; session: TSession; cwd: string; argumentsText: string; rawCommand?: string; configuredPath?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; link: LinkCastStateData }> {
@@ -176,11 +258,57 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     const initialData: Record<string, unknown> = { link };
     if (runtime.previousCastContext) initialData[PREVIOUS_CAST_CONTEXT_STATE_KEY] = runtime.previousCastContext;
 
-    await this.deps.lifecycle.start(input.pi, input.session, linkedLoaded, pipeline, parsed.value.prompt, {
-      initialData,
-      startEventDetails: { link: { invocation: link.plan.invocation, targets: link.plan.targets, virtualLoadout: link.virtualLoadout, ...(link.fromCastId ? { fromCastId: link.fromCastId } : {}) } },
+    await this.startPreparedCast({
+      pi: input.pi,
+      session: input.session,
+      loaded: linkedLoaded,
+      pipeline,
+      request: parsed.value.prompt,
+      options: {
+        initialData,
+        startEventDetails: { link: { invocation: link.plan.invocation, targets: link.plan.targets, virtualLoadout: link.virtualLoadout, ...(link.fromCastId ? { fromCastId: link.fromCastId } : {}) } },
+      },
     });
     return { loaded: linkedLoaded, pipeline, link };
+  }
+
+  private async startMateriaAutoCast(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string }, parsed: ParsedAutoCastArguments & { mode: "materia" }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; autocast: AutoCastMateriaMetadata; state?: MateriaCastState }> {
+    const loaded = await this.deps.configs.load(input.cwd, input.configuredPath);
+    const registry = createConfigLinkTargetRegistry(loaded.config);
+    const materia = registry.getMateria(parsed.name);
+    if (!materia) throw new AutoCastCommandValidationError(`Unknown Materia ${JSON.stringify(parsed.name)}.`);
+
+    const targetRef: LinkTargetRef = { order: 0, raw: parsed.rawTarget, prefix: "materia", name: parsed.name };
+    const target: ResolvedMateriaLinkTarget = { order: 0, requested: targetRef, kind: "materia", id: materia.id, ...(materia.displayName ? { displayName: materia.displayName } : {}) };
+    const virtualId = virtualAutoCastLoadoutId(materia.id);
+    const compiled = compileVirtualLoadoutFromResolvedTargets({
+      targets: [target],
+      source: createConfigLinkGraphSource({ materia: loaded.config.materia, loadouts: loaded.config.loadouts }),
+      virtualLoadout: { id: virtualId, name: `Autocast virtual loadout: ${materia.displayName ?? materia.id}` },
+    });
+    if (!compiled.ok) throw new AutoCastCommandValidationError(formatDomainIssues(compiled.issues));
+
+    const virtualLoaded = createVirtualAutoCastLoadedConfig(loaded, compiled.value.metadata.id, compiled.value.loadout as MateriaPipelineConfig);
+    const pipeline = this.deps.pipeline.resolve(virtualLoaded.config);
+    const autocast: AutoCastMateriaMetadata = {
+      mode: "materia",
+      requestedTarget: parsed.rawTarget,
+      activeLoadoutChanged: false,
+      resolvedMateria: { id: materia.id, ...(materia.displayName ? { name: materia.displayName } : {}) },
+      virtualLoadout: compiled.value.metadata,
+    };
+    const state = await this.startPreparedCast({ pi: input.pi, session: input.session, loaded: virtualLoaded, pipeline, request: parsed.prompt, options: { initialData: { autocast }, startEventDetails: { autocast } } });
+    return { loaded: virtualLoaded, pipeline, autocast, ...(state ? { state } : {}) };
+  }
+
+  private assertNoActiveCast(session: TSession): void {
+    const active = this.deps.states.loadActive(session);
+    if (active?.active) throw new ActiveCastConflictError(active.castId);
+  }
+
+  private async startPreparedCast(input: { pi: TPi; session: TSession; loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; request: string; options?: CastStartOptions }): Promise<MateriaCastState | undefined> {
+    const startedState = await this.deps.lifecycle.start(input.pi, input.session, input.loaded, input.pipeline, input.request, input.options);
+    return startedState ?? this.deps.states.loadActive(input.session);
   }
 
   async continueCast(pi: TPi, session: TSession): Promise<void> {
@@ -502,6 +630,13 @@ function withEffectiveLoadoutInitialData(options: CastStartOptions | undefined, 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export class AutoCastCommandValidationError extends Error {
+  readonly code = "autocast_command_validation";
+  constructor(message: string) {
+    super(message);
+  }
 }
 
 export class LinkCommandValidationError extends Error {

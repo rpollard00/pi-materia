@@ -16,11 +16,20 @@ The file-backed repository creates `.pi/pi-materia/` and an empty board when the
 
 Writes use a temporary file in the same directory followed by rename. This is atomic-enough for the initial vertical slice, but there is no inter-process lock: run only one Pi session that writes a project's quest board at a time. Concurrent sessions may race and the last rename may win.
 
+## WebUI workflow
+
+The WebUI **Quests** pane is another interface over this same project-local board, not a separate queue. Its quest log shows the active/running quest first, then pending quests in execution order; succeeded quests are grouped in a separate completed section, and failed or blocked quests are hidden from the default log.
+
+Use the WebUI add form to append a pending quest with a prompt and optional loadout override. WebUI-added quests are saved to `.pi/pi-materia/quest-board.json`; they do not change active/default loadout preferences and do not by themselves enable, disable, or force-wake the runner. An enabled runner will pick them up on its next normal wake or after the current quest settles; otherwise use the CLI quest commands below when you are ready to launch queued work.
+
+The single-writer limitation above still applies when using the WebUI: avoid writing the same project's quest board from multiple Pi sessions at once.
+
 ## Commands
 
 ```text
 /materia quest
 /materia quest status
+/materia quest list [pending|all|succeeded|failed] [--limit <n>]
 /materia quest add [--loadout <name-or-id>] <prompt>
 /materia quest run [quest-id]
 /materia quest runonce [quest-id]
@@ -29,6 +38,7 @@ Writes use a temporary file in the same directory followed by rename. This is at
 ```
 
 - `quest` / `quest status` show runner state, the active quest if any, pending counts, recent results, the storage path, and short help.
+- `quest list` shows quests from the board. With no filter it shows pending quests, ordered with the next scheduled quest first, and limits output to 10 quests. Use `pending`, `all`, `succeeded`, or `failed` to choose a filter, and `--limit <n>` to show a different positive number. `all` includes every stored status, including running and blocked quests; `failed` shows only failed quests.
 - `quest add` appends a pending quest. The first slice derives a concise title from the prompt.
 - `quest run` enables the project-local continuous runner and starts the requested quest, or the next pending quest. While enabled, the runner drains pending quests back-to-back until the queue is empty, an active cast is waiting, a launch fails, or `quest stop` is issued.
 - `quest run` with no pending quest still enables the runner and reports that it is waiting; a later wakeup can start the next pending quest without another `run` command.
@@ -41,6 +51,8 @@ Examples:
 ```text
 /materia quest add Add tests for the parser
 /materia quest add --loadout Full-Auto Implement the CLI help
+/materia quest list                # pending quests, next scheduled first, max 10 by default
+/materia quest list all --limit 20 # show up to 20 quests of any stored status
 /materia quest run                 # continuous runner; drains pending quests until stopped
 /materia quest runonce             # launch one pending quest only
 /materia quest start               # compatibility alias for continuous run

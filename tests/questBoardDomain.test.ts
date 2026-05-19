@@ -6,6 +6,9 @@ import {
   enableQuestRunner,
   failRunningQuest,
   findNextPendingQuest,
+  getOrderedQuestView,
+  movePendingQuest,
+  normalizeQuestBoard,
   startQuest,
   stopQuestRunner,
   validateQuestBoard,
@@ -155,6 +158,79 @@ describe("quest board domain", () => {
     expect(stopped.quests[0]?.status).toBe("running");
   });
 
+  test("normalizes array-backed boards without adding a parallel order store", () => {
+    const board = boardWithThreeQuests();
+    const normalized = normalizeQuestBoard(board);
+
+    expect(normalized.ok).toBe(true);
+    if (!normalized.ok) return;
+    expect(normalized.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2", "q-3"]);
+    expect("pendingOrder" in normalized.value).toBe(false);
+  });
+
+  test("ordered quest view pins the active quest before canonical pending order", () => {
+    const board = boardWithThreeQuests();
+    const started = startQuest(board, { questId: "q-2", castId: "cast-2", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    expect(getOrderedQuestView(started.value).map((quest) => quest.id)).toEqual(["q-2", "q-1", "q-3"]);
+  });
+
+  test("moves pending quests within the canonical quest array order", () => {
+    const board = boardWithThreeQuests();
+    const movedAfter = movePendingQuest(board, { questId: "q-1", placement: "after", targetId: "q-3", now: t3 });
+    expect(movedAfter.ok).toBe(true);
+    if (!movedAfter.ok) return;
+    expect(movedAfter.value.quests.map((quest) => quest.id)).toEqual(["q-2", "q-3", "q-1"]);
+    expect(movedAfter.value.updatedAt).toBe(t3);
+
+    const movedBefore = movePendingQuest(movedAfter.value, { questId: "q-1", placement: "before", targetId: "q-2", now: t3 });
+    expect(movedBefore.ok).toBe(true);
+    if (!movedBefore.ok) return;
+    expect(movedBefore.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2", "q-3"]);
+
+    const movedFirst = movePendingQuest(movedBefore.value, { questId: "q-3", placement: "first", now: t3 });
+    expect(movedFirst.ok).toBe(true);
+    if (!movedFirst.ok) return;
+    expect(movedFirst.value.quests.map((quest) => quest.id)).toEqual(["q-3", "q-1", "q-2"]);
+  });
+
+  test("handles no-op pending moves deterministically", () => {
+    const board = boardWithThreeQuests();
+    const moved = movePendingQuest(board, { questId: "q-1", placement: "first", now: t3 });
+
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2", "q-3"]);
+    expect(moved.value.updatedAt).toBe(board.updatedAt);
+  });
+
+  test("rejects invalid pending quest moves without mutating the board", () => {
+    const board = boardWithThreeQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    const activeMove = movePendingQuest(started.value, { questId: "q-1", placement: "first", now: t3 });
+    expect(activeMove.ok).toBe(false);
+    if (!activeMove.ok) expect(activeMove.issues[0]?.message).toContain("not pending");
+    expect(started.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2", "q-3"]);
+
+    const missingTarget = movePendingQuest(started.value, { questId: "q-2", placement: "before", targetId: "missing", now: t3 });
+    expect(missingTarget.ok).toBe(false);
+    if (!missingTarget.ok) expect(missingTarget.issues[0]?.path).toBe("targetId");
+
+    const nonPendingTarget = movePendingQuest(started.value, { questId: "q-2", placement: "after", targetId: "q-1", now: t3 });
+    expect(nonPendingTarget.ok).toBe(false);
+    if (!nonPendingTarget.ok) expect(nonPendingTarget.issues.map((issue) => issue.path)).toContain("target.status");
+
+    const duplicateBoard: QuestBoard = { ...board, quests: [board.quests[0]!, { ...board.quests[0]! }] };
+    const duplicateMove = movePendingQuest(duplicateBoard, { questId: "q-1", placement: "first", now: t3 });
+    expect(duplicateMove.ok).toBe(false);
+    if (!duplicateMove.ok) expect(duplicateMove.issues.map((issue) => issue.message).join(" ")).toContain("duplicate quest id");
+  });
+
   test("serializes and validates a completed quest board round trip", () => {
     const board = boardWithTwoQuests();
     const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
@@ -209,4 +285,11 @@ function boardWithTwoQuests(): QuestBoard {
   const second = addQuest(first.value, { id: "q-2", title: "Second", prompt: "Do two", now: t1 });
   if (!second.ok) throw new Error("failed to add second quest");
   return second.value;
+}
+
+function boardWithThreeQuests(): QuestBoard {
+  const board = boardWithTwoQuests();
+  const third = addQuest(board, { id: "q-3", title: "Third", prompt: "Do three", now: t1 });
+  if (!third.ok) throw new Error("failed to add third quest");
+  return third.value;
 }

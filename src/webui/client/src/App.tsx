@@ -6,6 +6,7 @@ import { StageApplyPanel } from './webui/features/loadout/StageApplyPanel.js';
 import { LoadoutGraphPanel } from './webui/features/loadout/LoadoutGraphPanel.js';
 import { MateriaEditorPanel } from './webui/features/materia-editor/MateriaEditorPanel.js';
 import { MonitorPanel } from './webui/features/monitor/MonitorPanel.js';
+import { QuestPanel } from './webui/features/quests/QuestPanel.js';
 import { useAppNavigation } from './webui/hooks/useAppNavigation.js';
 import { emitLoadoutStatusToast, type LoadoutStatusOptions, type LoadoutStatusToastIntent } from './webui/utils/loadoutNotifications.js';
 import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
@@ -315,6 +316,7 @@ export function App() {
         </div>
       )}
       materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} toolRegistry={monitor?.toolRegistry} />}
+      questWorkspace={<QuestPanel persistedLoadouts={persistedLoadouts} />}
       monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorSocket={currentMonitorSocket} elapsed={elapsed} />}
     />
   );

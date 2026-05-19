@@ -1,11 +1,14 @@
 import type { MateriaConfig, PipelineConfig } from '../../loadoutModel.js';
 import type {
   ActiveLoadoutResponse,
+  AddQuestRequest,
+  AddQuestResponse,
   ConfigResponse,
   DefaultLoadoutResponse,
   GeneratedListOutputConfig,
   ModelCatalogResponse,
   MonitorSnapshot,
+  QuestBoardResponse,
   RoleGenerationPreferenceResponse,
   RoleGenerationPreferenceSavePayload,
   RoleGenerationResponse,
@@ -65,6 +68,18 @@ export async function getModels(): Promise<ModelCatalogResponse> {
 
 export async function getMonitorSnapshot(): Promise<MonitorSnapshot> {
   return (await fetchJson<MonitorSnapshot>('/api/monitor')).body;
+}
+
+export async function getQuests(): Promise<QuestBoardResponse> {
+  return (await fetchJson<QuestBoardResponse>('/api/quests')).body;
+}
+
+export async function addQuest(payload: AddQuestRequest): Promise<ApiResponse<AddQuestResponse>> {
+  return fetchJson<AddQuestResponse>('/api/quests', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getRoleGenerationPreference(): Promise<ApiResponse<RoleGenerationPreferenceResponse>> {

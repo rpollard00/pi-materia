@@ -6,6 +6,7 @@ import { sendJson } from './http.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
 import { handleMonitorEventsRoute, handleMonitorSnapshotRoute } from './monitor.js';
 import { handleProfileRoleGenerationRoute } from './profileRoleGeneration.js';
+import { handleQuestRoute } from './quests.js';
 import { handleRoleGenerationRoute } from './roleGeneration.js';
 import { serveStatic } from './static.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -14,6 +15,7 @@ import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaGetRoleGenerationPreferenceCallback, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
+import type { MateriaAddQuestResult, MateriaQuestBoardSource, MateriaAddQuestInput } from './quests.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
 
@@ -28,6 +30,8 @@ export interface MateriaWebUiRouteDeps {
     setDefaultLoadout?: MateriaSetDefaultLoadoutCallback;
     getRoleGenerationPreference?: MateriaGetRoleGenerationPreferenceCallback;
     setRoleGenerationPreference?: MateriaSetRoleGenerationPreferenceCallback;
+    getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
+    addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
     generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
     modelCatalog?: MateriaModelCatalogSource;
   };
@@ -78,6 +82,11 @@ export async function handleMateriaWebUiRequest(req: IncomingMessage, res: Serve
 
   if (req.url?.startsWith('/api/loadout/default')) {
     await handleDefaultLoadoutRoute(req, res, { setDefaultLoadout: deps.session?.setDefaultLoadout });
+    return;
+  }
+
+  if (req.url?.startsWith('/api/quests')) {
+    await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest });
     return;
   }
 

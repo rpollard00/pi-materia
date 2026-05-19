@@ -11,6 +11,7 @@ export interface AppShellProps {
   onSelectTab: (tab: MateriaTabId) => void;
   loadoutWorkspace: ReactNode;
   materiaEditorWorkspace: ReactNode;
+  questWorkspace: ReactNode;
   monitorWorkspace: ReactNode;
 }
 
@@ -22,6 +23,7 @@ export function AppShell({
   onSelectTab,
   loadoutWorkspace,
   materiaEditorWorkspace,
+  questWorkspace,
   monitorWorkspace,
 }: AppShellProps) {
   return (
@@ -35,6 +37,8 @@ export function AppShell({
           {selectedTab === 'loadout' && loadoutWorkspace}
 
           {selectedTab === 'materia-editor' && materiaEditorWorkspace}
+
+          {selectedTab === 'quests' && questWorkspace}
 
           {selectedTab === 'monitor' && monitorWorkspace}
         </section>

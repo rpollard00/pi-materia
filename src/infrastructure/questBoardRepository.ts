@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createEmptyQuestBoard, validateQuestBoard, type QuestBoard } from "../domain/questBoard.js";
+import { createEmptyQuestBoard, normalizeQuestBoard, validateQuestBoard, type QuestBoard } from "../domain/questBoard.js";
 import { issuesToMessage, type DomainIssue } from "../domain/result.js";
 import type { QuestBoardRepository } from "../application/ports.js";
 
@@ -60,16 +60,37 @@ export class FileQuestBoardRepository implements QuestBoardRepository {
     if (!validated.ok) {
       throw new QuestBoardPersistenceError(`Quest board ${this.boardPath} is invalid: ${issuesToMessage(validated.issues)}`, { file: this.boardPath, issues: validated.issues });
     }
-    return validated.value;
+    const normalized = normalizeQuestBoard(validated.value);
+    if (!normalized.ok) {
+      throw new QuestBoardPersistenceError(`Quest board ${this.boardPath} could not be normalized: ${issuesToMessage(normalized.issues)}`, { file: this.boardPath, issues: normalized.issues });
+    }
+    return normalized.value;
   }
 
   async save(board: QuestBoard): Promise<void> {
-    const validated = validateQuestBoard(board, "questBoard");
+    const normalized = normalizeQuestBoard(board);
+    if (!normalized.ok) {
+      throw new QuestBoardPersistenceError(`Refusing to write invalid quest board ${this.boardPath}: ${issuesToMessage(normalized.issues)}`, { file: this.boardPath, issues: normalized.issues });
+    }
+    const validated = validateQuestBoard(normalized.value, "questBoard");
     if (!validated.ok) {
       throw new QuestBoardPersistenceError(`Refusing to write invalid quest board ${this.boardPath}: ${issuesToMessage(validated.issues)}`, { file: this.boardPath, issues: validated.issues });
     }
     await writeJsonAtomic(this.boardPath, validated.value);
   }
+}
+
+export async function loadQuestBoard(repository: QuestBoardRepository): Promise<QuestBoard> {
+  const board = await repository.loadOrCreate();
+  const normalized = normalizeQuestBoard(board);
+  if (!normalized.ok) throw new QuestBoardPersistenceError(`Quest board ${repository.boardPath} could not be normalized: ${issuesToMessage(normalized.issues)}`, { file: repository.boardPath, issues: normalized.issues });
+  return normalized.value;
+}
+
+export async function saveQuestBoard(repository: QuestBoardRepository, board: QuestBoard): Promise<void> {
+  const normalized = normalizeQuestBoard(board);
+  if (!normalized.ok) throw new QuestBoardPersistenceError(`Refusing to write invalid quest board ${repository.boardPath}: ${issuesToMessage(normalized.issues)}`, { file: repository.boardPath, issues: normalized.issues });
+  await repository.save(normalized.value);
 }
 
 export function getProjectQuestBoardPath(cwd: string): string {

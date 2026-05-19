@@ -5,6 +5,44 @@ import { describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
 import { FakePiHarness } from "./fakePi.js";
 
+function autocastConfig() {
+  return {
+    activeLoadout: "ReviewOnly",
+    materia: {
+      Build: { prompt: "Build the requested change.", tools: "coding" },
+      Maintain: { prompt: "Maintain the requested change.", tools: "coding" },
+      Review: { prompt: "Review the prior output.", tools: "coding" },
+    },
+    loadouts: {
+      ReviewOnly: {
+        entry: "Socket-1",
+        sockets: { "Socket-1": { materia: "Review" } },
+      },
+      "Command-Auto": {
+        entry: "Socket-2",
+        sockets: { "Socket-2": { materia: "Build" } },
+      },
+    },
+  };
+}
+
+async function makeAutocastHarness(config: unknown = autocastConfig()): Promise<{ harness: FakePiHarness; configFile: string }> {
+  const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-autocast-command-"));
+  const configFile = path.join(dir, ".pi", "pi-materia.json");
+  await mkdir(path.dirname(configFile), { recursive: true });
+  await writeFile(configFile, JSON.stringify(config), "utf8");
+  const harness = new FakePiHarness(dir);
+  piMateria(harness.pi);
+  return { harness, configFile };
+}
+
+async function waitForNotification(harness: FakePiHarness, predicate: (message: string) => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (harness.notifications.some((notification) => predicate(notification.message))) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 describe("FakePiHarness", () => {
   test("captures Pi extension primitives without provider or real session access", async () => {
     const harness = new FakePiHarness(process.cwd());
@@ -208,6 +246,92 @@ describe("FakePiHarness", () => {
     expect(stateEntry?.data?.link).toMatchObject({ plan: { invocation: { command: "/materia link" }, targets: [{ kind: "materia", id: "Build" }, { kind: "loadout", id: "ReviewOnly" }] }, virtualLoadout: { name: "Linked virtual loadout: Build → ReviewOnly" } });
     expect(stateEntry?.pipeline?.entry?.id).toBe("Socket-1");
     expect(JSON.parse(await readFile(configFile, "utf8")).activeLoadout).toBe("ReviewOnly");
+  });
+
+  test("registers /materia autocast and starts a temporary named loadout cast", async () => {
+    const { harness, configFile } = await makeAutocastHarness();
+
+    expect(harness.commands.get("materia")?.description).toContain("autocast");
+    expect(harness.getCommandCompletions("materia", "auto")?.map((completion) => completion.value)).toContain("autocast");
+    await harness.runCommand("materia", "autocast Command-Auto implement temporary build");
+
+    expect(harness.waitForIdleCalls).toBe(0);
+    await waitForNotification(harness, (message) => message.includes("Materia WebUI"));
+    expect(harness.notifications.some((entry) => entry.message.includes("Materia WebUI") && !entry.message.includes("failed"))).toBe(true);
+    expect(harness.widgets.get("materia-webui")?.content?.join("\n")).toContain("WebUI");
+    expect(harness.operationLog).toContain("triggerTurn");
+    expect(harness.sessionName).toContain("materia: implement temporary build");
+    expect(harness.notifications.some((entry) => entry.message.includes("pi-materia autocast temporary loadout: Command-Auto"))).toBe(true);
+    expect(harness.notifications.some((entry) => entry.message.includes("active loadout set"))).toBe(false);
+    const stateEntry = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-cast-state")?.data as { data?: Record<string, unknown>; request?: string; pipeline?: { entry?: { id?: string } } } | undefined;
+    expect(stateEntry?.request).toBe("implement temporary build");
+    expect(stateEntry?.pipeline?.entry?.id).toBe("Socket-2");
+    expect(stateEntry?.data?.autocast).toMatchObject({ mode: "loadout", requestedTarget: "Command-Auto", activeLoadoutChanged: false, effectiveLoadout: { name: "Command-Auto" } });
+    expect(stateEntry?.data?.link).toBeUndefined();
+    expect(JSON.parse(await readFile(configFile, "utf8")).activeLoadout).toBe("ReviewOnly");
+    expect(harness.appendedEntries.some((entry) => entry.customType === "pi-materia-active-loadout-changed")).toBe(false);
+  });
+
+  test("starts /materia autocast with a single-materia virtual loadout", async () => {
+    const { harness, configFile } = await makeAutocastHarness();
+
+    await harness.runCommand("materia", "autocast materia:Maintain fix drift");
+
+    expect(harness.waitForIdleCalls).toBe(0);
+    expect(harness.operationLog).toContain("triggerTurn");
+    expect(harness.notifications.some((entry) => entry.message.includes("pi-materia autocast virtual materia loadout: Maintain"))).toBe(true);
+    const stateEntry = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-cast-state")?.data as { data?: Record<string, unknown>; request?: string; pipeline?: { entry?: { id?: string } } } | undefined;
+    expect(stateEntry?.request).toBe("fix drift");
+    expect(stateEntry?.data?.autocast).toMatchObject({
+      mode: "materia",
+      requestedTarget: "materia:Maintain",
+      activeLoadoutChanged: false,
+      resolvedMateria: { id: "Maintain" },
+      virtualLoadout: {
+        name: "Autocast virtual loadout: Maintain",
+        targets: [{ kind: "materia", id: "Maintain" }],
+        remappings: [{ targetOrder: 0, fromSocketId: "Socket-1", toSocketId: "Socket-1" }],
+        stitching: [],
+      },
+    });
+    expect(stateEntry?.data?.link).toBeUndefined();
+    expect(JSON.parse(await readFile(configFile, "utf8")).activeLoadout).toBe("ReviewOnly");
+  });
+
+  test("reports /materia autocast usage and validation errors without starting", async () => {
+    const cases = [
+      { command: "autocast", message: "Usage: /materia autocast <loadout|materia:name> <prompt>" },
+      { command: "autocast Command-Auto", message: "Usage: /materia autocast <loadout|materia:name> <prompt>" },
+      { command: "autocast Missing do it", message: "Unknown Materia loadout" },
+      { command: "autocast materia:Missing do it", message: "Unknown Materia" },
+    ];
+
+    for (const { command, message } of cases) {
+      const { harness, configFile } = await makeAutocastHarness();
+      await harness.runCommand("materia", command);
+      expect(harness.notifications.at(-1)?.type).toBe("error");
+      expect(harness.notifications.at(-1)?.message).toContain(message);
+      expect(harness.operationLog).not.toContain("triggerTurn");
+      expect(harness.appendedEntries.find((entry) => entry.customType === "pi-materia-cast-state")).toBeUndefined();
+      expect(JSON.parse(await readFile(configFile, "utf8")).activeLoadout).toBe("ReviewOnly");
+    }
+  });
+
+  test("reports /materia autocast active-cast conflicts without switching loadouts", async () => {
+    const { harness, configFile } = await makeAutocastHarness({
+      ...autocastConfig(),
+      activeLoadout: "Command-Auto",
+    });
+
+    await harness.runCommand("materia", "cast start an active build");
+    const startsBefore = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").length;
+    await harness.runCommand("materia", "autocast ReviewOnly try while active");
+
+    expect(harness.notifications.at(-1)?.type).toBe("error");
+    expect(harness.notifications.at(-1)?.message).toContain("already active");
+    expect(harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state")).toHaveLength(startsBefore);
+    expect(JSON.parse(await readFile(configFile, "utf8")).activeLoadout).toBe("Command-Auto");
+    expect(harness.appendedEntries.some((entry) => entry.customType === "pi-materia-active-loadout-changed")).toBe(false);
   });
 
   test("reports /materia link validation errors without starting a partial cast", async () => {

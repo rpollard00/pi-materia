@@ -15,6 +15,15 @@ export interface LinkCompilationResult {
   virtualLoadout: VirtualLoadoutSpec;
 }
 
+export interface CompileVirtualLoadoutFromResolvedTargetsInput {
+  /** Ordered, already-resolved targets to compile into one executable graph. */
+  targets: ResolvedLinkTarget[];
+  /** Read-only source for materia and loadout definitions referenced by targets. */
+  source: LinkGraphSource;
+  /** Caller-owned identity for the ephemeral virtual loadout. */
+  virtualLoadout: { id: string; name: string };
+}
+
 export interface LinkGraphSource {
   getMateria(id: string): MateriaDefinition | MateriaConfig | undefined;
   getLoadout(id: string): Loadout | MateriaPipelineConfig | undefined;
@@ -72,21 +81,33 @@ export function createConfigLinkGraphSource(input: { materia?: Record<string, Ma
 }
 
 export function compileLinkPlan(input: LinkCompilationInput, source: LinkGraphSource): DomainResult<LinkCompilationResult> {
+  const result = compileVirtualLoadoutFromResolvedTargets({
+    targets: input.plan.targets ?? [],
+    source,
+    virtualLoadout: { id: virtualLoadoutId(input.plan), name: virtualLoadoutName(input.plan) },
+  });
+  if (!result.ok) return result;
+
+  input.plan.lineage.virtualLoadout = result.value.metadata;
+  return ok({ virtualLoadout: result.value });
+}
+
+export function compileVirtualLoadoutFromResolvedTargets(input: CompileVirtualLoadoutFromResolvedTargetsInput): DomainResult<VirtualLoadoutSpec> {
   const issues: DomainIssue[] = [];
-  const targets = input.plan.targets ?? [];
+  const targets = input.targets ?? [];
   if (targets.length === 0) return { ok: false, issues: [{ path: "link.targets", message: "link plan must include at least one resolved target" }] };
 
   const fragments: CompiledFragment[] = [];
   let nextSocketOrdinal = 1;
   for (const target of targets) {
-    const fragment = expandTarget(target, source, nextSocketOrdinal, issues);
+    const fragment = expandTarget(target, input.source, nextSocketOrdinal, issues);
     if (!fragment) continue;
     nextSocketOrdinal += Object.keys(fragment.loadout.sockets).length;
     fragments.push(fragment);
   }
   if (issues.length > 0) return { ok: false, issues };
 
-  const virtual: Loadout = { id: virtualLoadoutId(input.plan), entry: fragments[0]!.loadout.entry, sockets: {}, loops: {} };
+  const virtual: Loadout = { id: input.virtualLoadout.id, entry: fragments[0]!.loadout.entry, sockets: {}, loops: {} };
   const remappings: LinkTargetRemapping[] = [];
   for (const fragment of fragments) {
     Object.assign(virtual.sockets, fragment.loadout.sockets);
@@ -117,17 +138,19 @@ export function compileLinkPlan(input: LinkCompilationInput, source: LinkGraphSo
   if (cycleIssue) return { ok: false, issues: [cycleIssue] };
 
   const metadata = {
-    id: virtualLoadoutId(input.plan),
-    name: virtualLoadoutName(input.plan),
+    id: input.virtualLoadout.id,
+    name: input.virtualLoadout.name,
     version: LINK_METADATA_VERSION,
-    targets,
+    targets: cloneResolvedTargets(targets),
     remappings,
     stitching,
   };
 
-  const virtualLoadout: VirtualLoadoutSpec = { metadata, loadout: validation.value };
-  input.plan.lineage.virtualLoadout = metadata;
-  return ok({ virtualLoadout });
+  return ok({ metadata, loadout: validation.value });
+}
+
+function cloneResolvedTargets(targets: ResolvedLinkTarget[]): ResolvedLinkTarget[] {
+  return targets.map((target) => ({ ...target, requested: { ...target.requested } }) as ResolvedLinkTarget);
 }
 
 function expandTarget(target: ResolvedLinkTarget, source: LinkGraphSource, socketStart: number, issues: DomainIssue[]): CompiledFragment | undefined {

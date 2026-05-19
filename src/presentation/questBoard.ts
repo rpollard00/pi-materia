@@ -1,5 +1,59 @@
-import type { Quest, QuestBoard } from "../domain/questBoard.js";
+import { findNextPendingQuest, type Quest, type QuestBoard } from "../domain/questBoard.js";
 import type { QuestStatusSnapshot, QuestStartResult } from "../application/useCases.js";
+
+export type QuestListFilter = "pending" | "all" | "succeeded" | "failed";
+
+export interface QuestListOptions {
+  filter: QuestListFilter;
+  limit: number;
+}
+
+export interface QuestListSelection {
+  filter: QuestListFilter;
+  limit: number;
+  quests: Quest[];
+  totalMatchingCount: number;
+}
+
+export function selectQuestList(board: QuestBoard, options: QuestListOptions): QuestListSelection {
+  const matching = filterListQuests(board, options.filter);
+  const ordered = options.filter === "pending" ? orderPendingQuests(board, matching) : matching;
+  return {
+    filter: options.filter,
+    limit: options.limit,
+    quests: ordered.slice(0, options.limit),
+    totalMatchingCount: ordered.length,
+  };
+}
+
+export function renderQuestList(snapshot: QuestStatusSnapshot, options: QuestListOptions): string[] {
+  const selection = selectQuestList(snapshot.board, options);
+  const lines = [
+    "pi-materia quest list",
+    `Storage: ${snapshot.boardPath}`,
+    `Filter: ${selection.filter}`,
+    `Showing: ${selection.quests.length} of ${selection.totalMatchingCount} matching quest(s) (limit ${selection.limit})`,
+  ];
+
+  if (selection.quests.length === 0) {
+    lines.push(`No ${selection.filter} pi-materia quests found.`);
+    return lines;
+  }
+
+  for (const quest of selection.quests) lines.push(`- ${formatQuestSummary(quest)}`);
+  return lines;
+}
+
+function filterListQuests(board: QuestBoard, filter: QuestListFilter): Quest[] {
+  if (filter === "all") return board.quests.slice();
+  return board.quests.filter((quest) => quest.status === filter);
+}
+
+function orderPendingQuests(board: QuestBoard, pendingQuests: Quest[]): Quest[] {
+  const next = findNextPendingQuest(board);
+  if (!next) return pendingQuests;
+  return [next, ...pendingQuests.filter((quest) => quest.id !== next.id)];
+}
 
 export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
   const board = snapshot.board;
@@ -23,7 +77,7 @@ export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
     lines.push("Recent results: none");
   }
 
-  lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | run [id] | runonce [id] | start [id] | stop | status");
+  lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | /materia quest list [pending|all|succeeded|failed] [--limit <n>] | run [id] | runonce [id] | start [id] | stop | status");
   lines.push("Run: run enables continuous back-to-back processing; runonce launches one pending quest only; start is a compatibility alias for run.");
   lines.push("Stop: stop disables future auto-advance without aborting the active cast.");
   return lines;

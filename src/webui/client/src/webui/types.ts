@@ -148,6 +148,96 @@ export interface ToolRegistrySnapshot {
   warnings?: string[];
 }
 
+export type QuestStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'blocked';
+
+export interface QuestRunnerState {
+  enabled: boolean;
+  activeQuestId?: string;
+  lastStartedAt?: string;
+  lastStoppedAt?: string;
+}
+
+export interface QuestRunResultSummary {
+  status: Exclude<QuestStatus, 'pending' | 'running'>;
+  castId: string;
+  finishedAt: string;
+  message?: string;
+  error?: string;
+  artifactDirectory?: string;
+  runDirectory?: string;
+  requestedLoadoutOverride?: string;
+  effectiveLoadoutId?: string;
+  effectiveLoadoutName?: string;
+}
+
+export interface QuestRunErrorSummary {
+  message: string;
+  occurredAt: string;
+  castId?: string;
+  code?: string;
+}
+
+export interface QuestSummary {
+  id: string;
+  title: string;
+  prompt: string;
+  promptPreview: string;
+  status: QuestStatus;
+  attempts: number;
+  loadoutOverride?: string;
+  createdAt: string;
+  updatedAt: string;
+  currentCastId?: string;
+  lastCastId?: string;
+  lastResult?: QuestRunResultSummary;
+  lastError?: QuestRunErrorSummary;
+}
+
+export interface QuestCounts {
+  total: number;
+  pending: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  blocked: number;
+  completed: number;
+  terminal: number;
+}
+
+export interface QuestBoardResponse {
+  ok?: boolean;
+  boardPath?: string;
+  runner?: QuestRunnerState;
+  counts?: QuestCounts;
+  activeQuest?: QuestSummary;
+  runningQuest?: QuestSummary;
+  pendingQuests?: QuestSummary[];
+  completedQuests?: QuestSummary[];
+  failedQuests?: QuestSummary[];
+  quests?: QuestSummary[];
+  status?: {
+    statuses?: QuestStatus[];
+    activeQuestId?: string;
+    updatedAt?: string;
+    generatedAt?: string;
+  };
+  error?: string | { code?: string; message?: string };
+  code?: string;
+}
+
+export interface AddQuestRequest {
+  prompt: string;
+  loadoutOverride?: string;
+}
+
+export interface AddQuestResponse {
+  ok?: boolean;
+  quest?: QuestSummary;
+  board?: QuestBoardResponse;
+  error?: string | { code?: string; message?: string };
+  code?: string;
+}
+
 export interface MonitorSnapshot {
   ok?: boolean;
   sessionKey?: string;
@@ -270,7 +360,7 @@ export interface SocketRegionSelectionDragState {
   currentY: number;
 }
 
-export type MateriaTabId = 'loadout' | 'materia-editor' | 'monitor';
+export type MateriaTabId = 'loadout' | 'materia-editor' | 'quests' | 'monitor';
 
 export type GeneratedListOutputConfig = NonNullable<NonNullable<MateriaConfig['materia']>[string]['generates']>;
 

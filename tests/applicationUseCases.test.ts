@@ -107,6 +107,127 @@ describe("application use cases", () => {
     await expect(useCases.loadForCast("/repo", undefined, "Missing")).rejects.toThrow('Unknown Materia loadout override "Missing"');
   });
 
+  test("autocast starts a temporary loadout without saving or switching active loadout", async () => {
+    let saves = 0;
+    let started: { loaded: LoadedConfig; request: string; options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> } } | undefined;
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      config: {
+        activeLoadout: "Review",
+        materia: { Build: { prompt: "build" }, Review: { prompt: "review" } },
+        loadouts: {
+          Review: { id: "review-id", entry: "Socket-1", sockets: { "Socket-1": { materia: "Review" } } },
+          "Full-Auto": { id: "full-auto-id", entry: "Socket-2", sockets: { "Socket-2": { materia: "Build" } } },
+        },
+      },
+    };
+    const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { saves += 1; return "written"; }, resolveArtifactRoot: () => "" };
+    const presenter: PipelinePresenter = {
+      resolve(config) { return { entry: { id: config.activeLoadout === "Full-Auto" ? "Socket-2" : "Socket-1", socket: { utility: "noop" } }, sockets: {} }; },
+      renderGrid: () => [],
+      renderLoadoutList: () => [],
+    };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async (_pi, _session, loadedArg, _pipeline, request, options) => { started = { loaded: loadedArg, request, options }; }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    const result = await (useCases as unknown as { startAutoCast(input: { pi: string; session: string; cwd: string; argumentsText: string; rawCommand?: string }): Promise<{ effectiveLoadout?: unknown; autocast: unknown }> }).startAutoCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: "Full-Auto implement it", rawCommand: "/materia autocast Full-Auto implement it" });
+
+    expect(started?.request).toBe("implement it");
+    expect(started?.loaded.config.activeLoadout).toBe("Full-Auto");
+    expect(started?.loaded.config.activeLoadoutId).toBe("full-auto-id");
+    expect(result.effectiveLoadout).toEqual({ requestedLoadoutOverride: "Full-Auto", effectiveLoadoutName: "Full-Auto", effectiveLoadoutId: "full-auto-id" });
+    expect(started?.options?.initialData?.autocast).toMatchObject({ mode: "loadout", requestedTarget: "Full-Auto", activeLoadoutChanged: false, effectiveLoadout: { name: "Full-Auto", id: "full-auto-id" } });
+    expect(started?.options?.startEventDetails?.autocast).toMatchObject({ mode: "loadout", requestedTarget: "Full-Auto", activeLoadoutChanged: false });
+    expect(started?.options?.initialData?.link).toBeUndefined();
+    expect(started?.options?.startEventDetails?.link).toBeUndefined();
+    expect(configLoaded.config.activeLoadout).toBe("Review");
+    expect(configLoaded.config.activeLoadoutId).toBeUndefined();
+    expect(saves).toBe(0);
+  });
+
+  test("autocast creates a single-materia virtual loadout without link metadata", async () => {
+    let started: { loaded: LoadedConfig; request: string; options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> } } | undefined;
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      config: {
+        activeLoadout: "Review",
+        materia: { Maintain: { prompt: "maintain", tools: "coding" }, Review: { prompt: "review" } },
+        loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Review" } } } },
+      },
+    };
+    const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { throw new Error("must not save"); }, resolveArtifactRoot: () => "" };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async (_pi, _session, loadedArg, _pipeline, request, options) => { started = { loaded: loadedArg, request, options }; }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+
+    await (useCases as unknown as { startAutoCast(input: { pi: string; session: string; cwd: string; argumentsText: string; rawCommand?: string }): Promise<unknown> }).startAutoCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText: "materia:Maintain fix drift", rawCommand: "/materia autocast materia:Maintain fix drift" });
+
+    expect(started?.request).toBe("fix drift");
+    expect(started?.loaded.config.activeLoadout).toStartWith("virtual-autocast-");
+    const activeLoadout = started?.loaded.config.loadouts?.[started.loaded.config.activeLoadout!];
+    expect(activeLoadout?.entry).toBe("Socket-1");
+    expect(activeLoadout?.sockets?.["Socket-1"]?.materia).toBe("Maintain");
+    expect(started?.options?.initialData?.autocast).toMatchObject({
+      mode: "materia",
+      requestedTarget: "materia:Maintain",
+      activeLoadoutChanged: false,
+      resolvedMateria: { id: "Maintain" },
+      virtualLoadout: {
+        name: "Autocast virtual loadout: Maintain",
+        targets: [{ kind: "materia", id: "Maintain" }],
+        remappings: [{ targetOrder: 0, fromSocketId: "Socket-1", toSocketId: "Socket-1" }],
+        stitching: [],
+      },
+    });
+    expect(started?.options?.startEventDetails?.autocast).toMatchObject({ mode: "materia", requestedTarget: "materia:Maintain", activeLoadoutChanged: false, resolvedMateria: { id: "Maintain" } });
+    expect(started?.options?.initialData?.link).toBeUndefined();
+    expect(started?.options?.startEventDetails?.link).toBeUndefined();
+    expect(configLoaded.config.activeLoadout).toBe("Review");
+    expect(configLoaded.config.loadouts).toEqual({ Review: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Review" } } } });
+  });
+
+  test("autocast rejects invalid targets and active-cast conflicts before lifecycle start", async () => {
+    let started = false;
+    const configLoaded: LoadedConfig = {
+      source: "/repo/materia.json",
+      config: { activeLoadout: "Review", materia: { Maintain: { prompt: "maintain" } }, loadouts: { Review: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Maintain" } } } } },
+    };
+    const configs: ConfigRepository = { async load() { return configLoaded; }, async saveActiveLoadout() { throw new Error("must not save"); }, resolveArtifactRoot: () => "" };
+    const presenter: PipelinePresenter = { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] };
+    const makeUseCases = (active?: MateriaCastState) => new CastExecutionUseCases({
+      states: { loadActive: () => active, listLatest: () => [], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle: { start: async () => { started = true; }, continue: async () => undefined, resume: async () => undefined, revive: async () => undefined, clear: () => undefined },
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: new LoadoutUseCases({ configs, pipeline: presenter }),
+      configs,
+      pipeline: presenter,
+    });
+    const startAutoCast = (useCases: CastExecutionUseCases<string, string>, argumentsText: string) => (useCases as unknown as { startAutoCast(input: { pi: string; session: string; cwd: string; argumentsText: string }): Promise<unknown> }).startAutoCast({ pi: "pi", session: "session", cwd: "/repo", argumentsText });
+
+    await expect(startAutoCast(makeUseCases(), "Missing do it")).rejects.toThrow("Unknown Materia loadout");
+    await expect(startAutoCast(makeUseCases(), "materia:Missing do it")).rejects.toThrow("Unknown Materia");
+    await expect(startAutoCast(makeUseCases(state({ castId: "active-cast" })), "Review do it")).rejects.toBeInstanceOf(ActiveCastConflictError);
+    expect(started).toBe(false);
+  });
+
   test("startCast records effective loadout override in cast start details", async () => {
     let started: { loaded: LoadedConfig; options?: { startEventDetails?: Record<string, unknown> } } | undefined;
     const configLoaded: LoadedConfig = {

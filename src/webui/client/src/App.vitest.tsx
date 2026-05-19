@@ -5,6 +5,7 @@ import { App } from './App.js';
 import { normalizeMateriaConfigEdges, type PipelineConfig } from './loadoutModel.js';
 import { fromWebUiLoadoutDto } from '../../loadoutDto.js';
 import { resetToastStoreForTests } from './toast/index.js';
+import type { QuestBoardResponse, QuestSummary } from './webui/types.js';
 import { formatLoopDisplayLabel, getLoopExitBadges, getLoopMemberships, getLoopRegions, layoutSockets, routeLoadoutEdges } from './webui/utils/graphLayout.js';
 
 const testConfig = {
@@ -150,6 +151,111 @@ async function findToastAlert() {
   const alerts = await screen.findAllByRole('alert');
   return alerts.find((alert) => alert.getAttribute('data-toast-variant')) ?? alerts[0];
 }
+
+const questTime = '2026-05-19T19:00:00.000Z';
+
+function questSummary(overrides: Partial<QuestSummary> & Pick<QuestSummary, 'id' | 'title' | 'status'>): QuestSummary {
+  const prompt = overrides.prompt ?? overrides.title;
+  return {
+    prompt,
+    promptPreview: prompt,
+    attempts: overrides.status === 'pending' ? 0 : 1,
+    createdAt: questTime,
+    updatedAt: questTime,
+    ...overrides,
+  };
+}
+
+function questBoardResponse(quests: QuestSummary[]): QuestBoardResponse {
+  const runningQuest = quests.find((quest) => quest.status === 'running');
+  return {
+    ok: true,
+    boardPath: '/tmp/project/.pi/pi-materia/quest-board.json',
+    runner: { enabled: true, ...(runningQuest ? { activeQuestId: runningQuest.id } : {}) },
+    activeQuest: runningQuest,
+    runningQuest,
+    pendingQuests: quests.filter((quest) => quest.status === 'pending'),
+    completedQuests: quests.filter((quest) => quest.status === 'succeeded'),
+    failedQuests: quests.filter((quest) => quest.status === 'failed' || quest.status === 'blocked'),
+    quests,
+    counts: {
+      total: quests.length,
+      pending: quests.filter((quest) => quest.status === 'pending').length,
+      running: quests.filter((quest) => quest.status === 'running').length,
+      succeeded: quests.filter((quest) => quest.status === 'succeeded').length,
+      failed: quests.filter((quest) => quest.status === 'failed').length,
+      blocked: quests.filter((quest) => quest.status === 'blocked').length,
+      completed: quests.filter((quest) => quest.status === 'succeeded').length,
+      terminal: quests.filter((quest) => quest.status === 'succeeded' || quest.status === 'failed' || quest.status === 'blocked').length,
+    },
+    status: { statuses: ['pending', 'running', 'succeeded', 'failed', 'blocked'], updatedAt: questTime, generatedAt: questTime, ...(runningQuest ? { activeQuestId: runningQuest.id } : {}) },
+  };
+}
+
+function createQuestFetchMock(initialQuests: QuestSummary[]) {
+  let quests = [...initialQuests];
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (input === '/api/config') return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    if (input === '/api/quests' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body));
+      const created = questSummary({ id: 'quest-added', title: body.prompt, prompt: body.prompt, promptPreview: body.prompt, status: 'pending', loadoutOverride: body.loadoutOverride });
+      quests = [...quests, created];
+      return new Response(JSON.stringify({ ok: true, quest: created, board: questBoardResponse(quests) }));
+    }
+    if (input === '/api/quests') return new Response(JSON.stringify(questBoardResponse(quests)));
+    return new Response(JSON.stringify({ ok: true }));
+  });
+}
+
+describe('Materia quests pane', () => {
+  it('opens from the Quests tab and groups active, pending, completed, and hidden failed quests', async () => {
+    const fetchMock = createQuestFetchMock([
+      questSummary({ id: 'quest-active', title: 'Defeat the dragon', prompt: 'Defeat the dragon in the old keep', promptPreview: 'Defeat the dragon in the old keep', status: 'running' }),
+      questSummary({ id: 'quest-pending-1', title: 'Gather moon herbs', status: 'pending' }),
+      questSummary({ id: 'quest-pending-2', title: 'Forge silver key', status: 'pending' }),
+      questSummary({ id: 'quest-complete', title: 'Light the beacon', status: 'succeeded' }),
+      questSummary({ id: 'quest-failed', title: 'Sneak past sentries', status: 'failed' }),
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    expect(await screen.findByRole('heading', { name: 'Quests' })).toBeTruthy();
+    const questLog = screen.getByRole('complementary', { name: 'Quest Log' });
+    const activeCard = within(questLog).getByRole('button', { name: 'Active quest: Defeat the dragon' });
+    expect(activeCard.textContent).toContain('★');
+    expect(within(activeCard).getByLabelText('Active quest')).toBeTruthy();
+    expect(within(questLog).getByRole('heading', { name: 'Active & Pending' })).toBeTruthy();
+    expect(within(questLog).getByRole('button', { name: 'Pending quest: Gather moon herbs' })).toBeTruthy();
+    expect(within(questLog).getByRole('button', { name: 'Pending quest: Forge silver key' })).toBeTruthy();
+    expect(within(questLog).getByRole('heading', { name: 'Completed' })).toBeTruthy();
+    expect(within(questLog).getByRole('button', { name: 'Completed quest: Light the beacon' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Failed quest: Sneak past sentries' })).toBeNull();
+    expect(within(questLog).getByRole('button', { name: /Failed \/ blocked hidden/ }).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('submits the add quest form and refreshes the quest log', async () => {
+    const fetchMock = createQuestFetchMock([]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    fireEvent.change(await screen.findByLabelText('Loadout override'), { target: { value: 'Full-Auto' } });
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Rescue the villager' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add quest' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/quests', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'Rescue the villager', loadoutOverride: 'Full-Auto' }),
+    })));
+    expect(await screen.findByText('Added quest: Rescue the villager')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pending quest: Rescue the villager' })).toBeTruthy();
+    expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('');
+    await waitFor(() => expect(document.querySelector('[data-toast-variant="success"]')?.textContent).toContain('Quest added'));
+  });
+});
 
 describe('Materia loadout grid editor', () => {
   it('renders active and available loadouts with staged save controls', async () => {

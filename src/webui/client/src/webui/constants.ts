@@ -42,6 +42,7 @@ export const loopAccentPalette = [
 export const materiaTabs: Array<{ id: MateriaTabId; label: string; description: string }> = [
   { id: 'loadout', label: 'Loadout', description: 'Loadout selector, visual grid, palette, and apply controls' },
   { id: 'materia-editor', label: 'Materia Editor', description: 'Create and edit materia definitions' },
+  { id: 'quests', label: 'Quests', description: 'Quest log, active work, and pending quest creation' },
   { id: 'monitor', label: 'Monitoring', description: 'Live cast telemetry and artifacts' },
 ];
 
