@@ -4,7 +4,7 @@ import type { MateriaConfig } from '../../../loadoutModel.js';
 import { materiaSavedEventName } from '../../constants.js';
 import { generateMateriaRole, saveConfig } from '../../api/index.js';
 import { useModelCatalog } from '../../hooks/useModelCatalog.js';
-import type { MateriaFormState, MateriaSavedEventDetail, MateriaTabId } from '../../types.js';
+import type { LoadoutSourceScope, MateriaFormState, MateriaSavedEventDetail, MateriaTabId } from '../../types.js';
 import {
   buildMateriaPatch,
   canonicalWorkItemsGeneratorConfig,
@@ -16,6 +16,7 @@ import {
   selectedCatalogModel,
   thinkingSelectOptions,
 } from '../../utils/modelCatalog.js';
+import { buildMateriaSelectorItems, getMateriaEditPolicy, type MateriaSelectorItem } from './materiaEditPolicy.js';
 
 function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
   window.dispatchEvent(new CustomEvent<MateriaSavedEventDetail>(materiaSavedEventName, { detail }));
@@ -23,6 +24,8 @@ function dispatchMateriaSavedEvent(detail: MateriaSavedEventDetail) {
 
 export interface UseMateriaEditorControllerOptions {
   materia: MateriaConfig['materia'];
+  materiaSources: Record<string, LoadoutSourceScope>;
+  defaultMateriaIds: string[];
   selectedTab: MateriaTabId;
   status: string;
   setStatus: (status: string) => void;
@@ -30,6 +33,10 @@ export interface UseMateriaEditorControllerOptions {
 }
 
 export interface MateriaEditorController {
+  metadata: {
+    materiaSources: Record<string, LoadoutSourceScope>;
+    defaultMateriaIds: string[];
+  };
   form: {
     editableDefinitionIds: string[];
     materiaForm: MateriaFormState;
@@ -37,6 +44,13 @@ export interface MateriaEditorController {
     editMateria: (id: string) => void;
     handleMateriaModelChange: (model: string) => void;
     resetMateriaEditorForm: () => void;
+  };
+  selector: {
+    items: MateriaSelectorItem[];
+    selectedPolicy: MateriaSelectorItem | undefined;
+    duplicateMateria: (id: string) => void;
+    setMateriaLockState: (id: string, lockState: 'locked' | 'unlocked') => Promise<void>;
+    deleteMateria: (id: string) => Promise<void>;
   };
   modelOptions: {
     activeModelDescription?: string | null;
@@ -69,7 +83,7 @@ export interface MateriaEditorController {
   };
 }
 
-export function useMateriaEditorController({ materia, selectedTab, status, setStatus, reloadConfig }: UseMateriaEditorControllerOptions): MateriaEditorController {
+export function useMateriaEditorController({ materia, materiaSources, defaultMateriaIds, selectedTab, status, setStatus, reloadConfig }: UseMateriaEditorControllerOptions): MateriaEditorController {
   const [materiaForm, setMateriaForm] = useState<MateriaFormState>(() => emptyMateriaForm());
   const [originalMateriaModelSettings, setOriginalMateriaModelSettings] = useState<{ editingSocketId: string; model: string; thinking: string } | undefined>();
   const { modelCatalog, modelCatalogStatus, modelCatalogError } = useModelCatalog(selectedTab);
@@ -79,6 +93,7 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
   const [generatedRolePrompt, setGeneratedRolePrompt] = useState('');
   const [roleGenerationError, setRoleGenerationError] = useState('');
   const [roleGenerating, setRoleGenerating] = useState(false);
+  const [pendingReloadSelection, setPendingReloadSelection] = useState<{ id: string; deletedSource: LoadoutSourceScope | undefined } | null>(null);
 
   useEffect(() => {
     if (!materiaColorOpen) return;
@@ -120,11 +135,24 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
   }, [reloadConfig]);
 
   const editableDefinitionIds = useMemo(() => Object.keys(materia ?? {}).sort((a, b) => a.localeCompare(b)), [materia]);
+  const selectorItems = useMemo(() => buildMateriaSelectorItems(materia, materiaSources, defaultMateriaIds), [materia, materiaSources, defaultMateriaIds]);
+  const selectedPolicy = useMemo(() => selectorItems.find((item) => item.id === materiaForm.editingSocketId), [selectorItems, materiaForm.editingSocketId]);
   const modelOptions = useMemo(() => modelSelectOptions(modelCatalog, originalMateriaModelSettings), [modelCatalog, originalMateriaModelSettings]);
   const thinkingOptions = useMemo(() => thinkingSelectOptions(modelCatalog, materiaForm, originalMateriaModelSettings), [modelCatalog, materiaForm.editingSocketId, materiaForm.model, materiaForm.thinking, originalMateriaModelSettings]);
   const activeModelDescription = modelCatalog.activeModel?.label ?? modelCatalog.activeModelValue;
   const selectedModel = selectedCatalogModel(modelCatalog, materiaForm.model);
   const thinkingLevelsForSelection = selectedModel?.supportedThinkingLevels ?? [];
+
+  useEffect(() => {
+    if (!pendingReloadSelection) return;
+    const { id, deletedSource } = pendingReloadSelection;
+    const definition = materia?.[id];
+    const currentSource = getMateriaEditPolicy({ id, definition, source: materiaSources[id], defaultMateriaIds }).source;
+    if (definition && currentSource === deletedSource) return;
+    if (definition) editMateria(id);
+    else resetMateriaEditorForm();
+    setPendingReloadSelection(null);
+  }, [materia, materiaSources, defaultMateriaIds, pendingReloadSelection]);
 
   function resetMateriaEditorForm() {
     setMateriaForm(emptyMateriaForm());
@@ -139,17 +167,18 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
     }));
   }
 
-  function editMateria(id: string) {
+  function formStateForMateria(id: string, options: { duplicate?: boolean } = {}): MateriaFormState | undefined {
     const definition = materia?.[id];
-    if (!definition) return;
+    if (!definition) return undefined;
     const isUtility = definition.type === 'utility';
     const generator = isGeneratorMateria(definition);
     const savedModel = isUtility ? '' : String(definition.model ?? '').trim();
     const savedThinking = isUtility ? '' : String(definition.thinking ?? '').trim();
-    setOriginalMateriaModelSettings({ editingSocketId: id, model: savedModel, thinking: savedThinking });
-    setMateriaForm({
-      editingSocketId: id,
-      name: id,
+    const policy = getMateriaEditPolicy({ id, definition, source: materiaSources[id], defaultMateriaIds });
+    const name = options.duplicate ? uniqueMateriaCopyName(id) : id;
+    return {
+      editingSocketId: options.duplicate ? '' : id,
+      name,
       behavior: isUtility ? 'tool' : 'prompt',
       label: String(definition.label ?? ''),
       description: String(definition.description ?? ''),
@@ -167,9 +196,40 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
       params: isUtility ? JSON.stringify(definition.params ?? {}, null, 2) : '{}',
       assign: isUtility ? JSON.stringify(definition.assign ?? {}, null, 2) : '{}',
       timeoutMs: isUtility && definition.timeoutMs !== undefined ? String(definition.timeoutMs) : '',
-      persistScope: 'user',
-    });
-    setStatus(`Editing reusable materia definition ${id}. Save the staged form to update definitions only.`);
+      persistScope: options.duplicate ? 'user' : policy.saveScope,
+    };
+  }
+
+  function uniqueMateriaCopyName(id: string): string {
+    const base = `${id} Copy`;
+    if (!materia?.[base]) return base;
+    for (let index = 2; index < 1000; index += 1) {
+      const candidate = `${base} ${index}`;
+      if (!materia?.[candidate]) return candidate;
+    }
+    return `${base} ${Date.now()}`;
+  }
+
+  function editMateria(id: string) {
+    const definition = materia?.[id];
+    const nextForm = formStateForMateria(id);
+    if (!definition || !nextForm) return;
+    const isUtility = definition.type === 'utility';
+    const savedModel = isUtility ? '' : String(definition.model ?? '').trim();
+    const savedThinking = isUtility ? '' : String(definition.thinking ?? '').trim();
+    setOriginalMateriaModelSettings({ editingSocketId: id, model: savedModel, thinking: savedThinking });
+    setMateriaForm(nextForm);
+    const policy = getMateriaEditPolicy({ id, definition, source: materiaSources[id], defaultMateriaIds });
+    const scopeText = policy.source === 'default' ? 'as a user override draft' : `from ${policy.saveScope} scope`;
+    setStatus(`Editing reusable materia definition ${id} ${scopeText}. Save the staged form to update definitions only.`);
+  }
+
+  function duplicateMateria(id: string) {
+    const nextForm = formStateForMateria(id, { duplicate: true });
+    if (!nextForm) return;
+    setOriginalMateriaModelSettings(undefined);
+    setMateriaForm(nextForm);
+    setStatus(`Duplicated ${id} as ${nextForm.name}. Save the staged form to create it.`);
   }
 
   async function generateRolePrompt() {
@@ -211,15 +271,70 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
     setStatus('Applied generated role prompt to the form. Save when ready.');
   }
 
+  function responseError(body: { error?: string | { message?: string } }, fallback: string): string {
+    return typeof body.error === 'string' ? body.error : body.error?.message ?? fallback;
+  }
+
+  async function setMateriaLockState(id: string, lockState: 'locked' | 'unlocked') {
+    const definition = materia?.[id];
+    const policy = getMateriaEditPolicy({ id, definition, source: materiaSources[id], defaultMateriaIds });
+    if (!definition || !policy.canToggleLock) {
+      setStatus(policy.lockTitle);
+      return;
+    }
+    try {
+      const target = policy.saveScope;
+      setStatus(`${lockState === 'locked' ? 'Locking' : 'Unlocking'} materia ${id} in ${target} scope…`);
+      const { response, body } = await saveConfig(target, { materia: { [id]: { lockState } } });
+      if (!response.ok || body.ok === false) throw new Error(responseError(body, 'Materia lock update failed'));
+      await reloadConfig({ preserveLoadoutEdits: true, readyStatus: `${lockState === 'locked' ? 'Locked' : 'Unlocked'} materia ${id}. Loadout draft edits were left unchanged.` });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function deleteMateria(id: string) {
+    const definition = materia?.[id];
+    const policy = getMateriaEditPolicy({ id, definition, source: materiaSources[id], defaultMateriaIds });
+    if (!definition || !policy.canDelete) {
+      setStatus(policy.deleteTitle);
+      return;
+    }
+    try {
+      const target = policy.saveScope;
+      setStatus(`Deleting materia ${id} from ${target} scope…`);
+      const { response, body } = await saveConfig(target, { materia: { [id]: null } });
+      if (!response.ok || body.ok === false) throw new Error(responseError(body, 'Materia delete failed'));
+      if (materiaForm.editingSocketId === id) setPendingReloadSelection({ id, deletedSource: policy.source });
+      await reloadConfig({
+        preserveLoadoutEdits: true,
+        readyStatus: `Deleted materia ${id} from ${target} scope.`,
+      });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async function saveMateriaForm() {
     try {
-      const patch = buildMateriaPatch(materiaForm);
       const savedName = materiaForm.name.trim();
+      const selectedId = materiaForm.editingSocketId;
+      if (selectedId && selectedId === savedName) {
+        const definition = materia?.[selectedId];
+        const policy = getMateriaEditPolicy({ id: selectedId, definition, source: materiaSources[selectedId], defaultMateriaIds });
+        if (!policy.canSave) throw new Error(policy.saveBlockedReason ?? `Materia definition ${selectedId} cannot be saved.`);
+      }
+      const patch = buildMateriaPatch(materiaForm);
       const savedBehavior = materiaForm.behavior;
       const target = materiaForm.persistScope;
-      setStatus(`Saving reusable ${savedBehavior} materia to ${target} scope…`);
+      const effectiveSource = savedName ? materiaSources[savedName] : undefined;
+      if (effectiveSource && effectiveSource !== target && effectiveSource !== 'default') {
+        setStatus(`Saving ${savedName} to ${target} scope while ${effectiveSource} remains the effective definition…`);
+      } else {
+        setStatus(`Saving reusable ${savedBehavior} materia to ${target} scope…`);
+      }
       const { response, body } = await saveConfig(target, patch);
-      if (!response.ok || body.ok === false) throw new Error(body.error ?? 'Materia save failed');
+      if (!response.ok || body.ok === false) throw new Error(responseError(body, 'Materia save failed'));
       const scope = body.target ?? target;
       dispatchMateriaSavedEvent({ id: savedName, name: savedName, behavior: savedBehavior, requestedScope: target, scope });
       resetMateriaEditorForm();
@@ -229,7 +344,9 @@ export function useMateriaEditorController({ materia, selectedTab, status, setSt
   }
 
   return {
+    metadata: { materiaSources, defaultMateriaIds },
     form: { editableDefinitionIds, materiaForm, setMateriaForm, editMateria, handleMateriaModelChange, resetMateriaEditorForm },
+    selector: { items: selectorItems, selectedPolicy, duplicateMateria, setMateriaLockState, deleteMateria },
     modelOptions: {
       activeModelDescription,
       modelCatalog,

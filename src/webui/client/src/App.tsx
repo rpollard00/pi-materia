@@ -31,12 +31,14 @@ export function App() {
     commitEditingLoadoutRename,
     createLoadout,
     defaultLoadoutId,
+    defaultMateriaIds,
     deleteLoadout: deleteLoadoutDraft,
     draftConfig,
     duplicateLoadout,
     isDirty,
     loadoutNameInput,
     loadoutSources,
+    materiaSources,
     loadouts,
     persistedLoadouts,
     runtimeActiveLoadoutId,
@@ -133,7 +135,7 @@ export function App() {
     finishSocketRegionSelection,
     cancelSocketRegionSelection,
   } = socketInteractions;
-  const materiaEditorController = useMateriaEditorController({ materia, selectedTab, status, setStatus, reloadConfig });
+  const materiaEditorController = useMateriaEditorController({ materia, materiaSources, defaultMateriaIds, selectedTab, status, setStatus, reloadConfig });
 
   const graphMutation = useLoadoutGraphMutationController({
     activeLoadout: editingLoadout,

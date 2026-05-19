@@ -18,7 +18,7 @@ export interface CurrentPersistedConfig {
   loadouts?: Record<string, CurrentPersistedLoadout | null>;
   activeLoadoutId?: string;
   activeLoadout?: string;
-  materia?: PiMateriaConfig["materia"];
+  materia?: Record<string, MateriaConfig | null>;
 }
 
 export interface CurrentPersistedProfileConfig {

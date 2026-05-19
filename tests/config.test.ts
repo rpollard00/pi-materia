@@ -216,6 +216,111 @@ describe("layered config loading and persistence", () => {
     }
   });
 
+  test("reports materia sources and default materia ids across config layers", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-sources-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const projectFile = path.join(cwd, ".pi", "pi-materia.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await mkdir(profile, { recursive: true });
+      await writeFile(getUserMateriaAssetPath(), JSON.stringify({
+        materia: {
+          Build: { prompt: "user build override" },
+          UserOnly: { tools: "none", prompt: "user only" },
+        },
+      }), "utf8");
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(projectFile, JSON.stringify({
+        materia: { ProjectOnly: { tools: "none", prompt: "project only" } },
+      }), "utf8");
+
+      const loaded = await loadConfig(cwd);
+
+      expect(loaded.materiaSources?.Build).toBe("user");
+      expect(loaded.materiaSources?.UserOnly).toBe("user");
+      expect(loaded.materiaSources?.ProjectOnly).toBe("project");
+      expect(loaded.defaultMateriaIds).toContain("Build");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("deletes writable materia overrides without persisting tombstones and falls back to defaults", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-delete-materia-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, { materia: { Build: { tools: "coding", prompt: "user build override" } } as never });
+      expect((await loadConfig(cwd)).materiaSources?.Build).toBe("user");
+
+      await saveMateriaConfigPatch(cwd, { materia: { Build: null } as never });
+
+      const raw = JSON.parse(await readFile(getUserMateriaAssetPath(), "utf8"));
+      expect(raw.materia?.Build).toBeUndefined();
+      const reloaded = await loadConfig(cwd);
+      expect(reloaded.config.materia.Build).toBeDefined();
+      expect(reloaded.materiaSources?.Build).toBe("default");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("rejects deleting built-in-only materia from writable config", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-delete-default-materia-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await expect(saveMateriaConfigPatch(cwd, { materia: { Build: null } as never })).rejects.toThrow("Cannot delete shipped default Materia definition");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("validates materia lockState for agent and utility definitions", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-lockstate-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, { materia: { Agent: { tools: "none", prompt: "agent", lockState: "locked" } } as never });
+      await saveMateriaConfigPatch(cwd, { materia: { Utility: { utility: "project.noop", lockState: "unlocked" } } as never });
+      await expect(saveMateriaConfigPatch(cwd, { materia: { BadAgent: { tools: "none", prompt: "agent", lockState: "bad" } } as never })).rejects.toThrow("invalid lockState");
+      await expect(saveMateriaConfigPatch(cwd, { materia: { BadUtility: { utility: "project.noop", lockState: "bad" } } as never })).rejects.toThrow("invalid lockState");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("rejects content saves to locked materia while allowing lock metadata and deletion", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-locked-content-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, { materia: { Agent: { tools: "none", prompt: "agent", lockState: "locked" } } as never });
+      await expect(saveMateriaConfigPatch(cwd, { materia: { Agent: { prompt: "changed" } } as never })).rejects.toThrow("Unlock it before saving content changes");
+
+      await saveMateriaConfigPatch(cwd, { materia: { Agent: { lockState: "unlocked" } } as never });
+      let loaded = await loadConfig(cwd);
+      expect(loaded.config.materia.Agent).toMatchObject({ prompt: "agent", lockState: "unlocked" });
+
+      await saveMateriaConfigPatch(cwd, { materia: { Agent: { lockState: "locked" } } as never });
+      await saveMateriaConfigPatch(cwd, { materia: { Agent: null } as never });
+      loaded = await loadConfig(cwd);
+      expect(loaded.config.materia.Agent).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("persists loadout deletion markers for non-default loadouts in the writable layer", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-delete-loadout-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));

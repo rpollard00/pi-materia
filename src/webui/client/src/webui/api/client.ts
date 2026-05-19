@@ -16,7 +16,10 @@ export interface ApiResponse<TBody> {
   body: TBody;
 }
 
-export type SaveConfigPayload = Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
+export type SaveConfigPayload = Omit<MateriaConfig, 'loadouts' | 'materia'> & {
+  loadouts?: Record<string, PipelineConfig | null>;
+  materia?: Record<string, NonNullable<MateriaConfig['materia']>[string] | Partial<NonNullable<MateriaConfig['materia']>[string]> | null>;
+};
 
 async function fetchJson<TBody>(input: RequestInfo | URL, init?: RequestInit): Promise<ApiResponse<TBody>> {
   const response = init === undefined ? await fetch(input) : await fetch(input, init);

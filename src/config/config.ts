@@ -13,7 +13,7 @@ import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutSelection } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
-import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState } from "../types.js";
+import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
@@ -49,6 +49,8 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const profile = await loadProfileConfig();
   const config = await mergeConfigLayers(partials);
   const loadoutSources = buildLoadoutSources(partials, loadedLayers, new Set(Object.keys(partials[0]?.loadouts ?? {})));
+  const materiaSources = buildMateriaSources(partials, loadedLayers);
+  const defaultMateriaIds = Object.keys(partials[0]?.materia ?? {});
   const materiaCommandSources = buildMateriaCommandSources(partials, loadedLayers);
   resolveUtilityExecutionBindings(config, materiaCommandSources, loadedLayers);
   const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
@@ -57,6 +59,8 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
     source: loadedLayers.map((layer) => layer.path).join(" < "),
     layers,
     loadoutSources,
+    materiaSources,
+    defaultMateriaIds,
     defaultLoadoutId: defaultLoadout.loadoutId,
     ...(defaultLoadout.warning ? { defaultLoadoutWarning: defaultLoadout.warning } : {}),
   };
@@ -110,13 +114,15 @@ export async function clearStaleDefaultLoadoutPreference(cwd: string, configured
   return true;
 }
 
-export async function saveMateriaConfigPatch(cwd: string, patch: Partial<PiMateriaConfig>, options: { target?: MateriaSaveTarget; configuredPath?: string } = {}): Promise<string> {
+export async function saveMateriaConfigPatch(cwd: string, patch: MateriaConfigPatch, options: { target?: MateriaSaveTarget; configuredPath?: string } = {}): Promise<string> {
   rejectObsoleteConfigFields(patch as Record<string, unknown>, "patch");
   const target = options.target ?? "user";
   const file = getWritableConfigPath(cwd, options.configuredPath, target);
   rejectDefaultLoadoutDeletes(patch);
   rejectReadonlyDefaultLoadoutSaves(patch);
   const existing = existsSync(file) ? await readConfigPartial(file) : {};
+  rejectProtectedMateriaDeletes(patch, existing);
+  rejectLockedMateriaContentSaves(patch, existing);
   const next = mergeConfigPatch(existing, patch);
   if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
   next.loadouts = normalizeLoadoutsForSave(next.loadouts, next.materia as Record<string, MateriaConfig> | undefined);
@@ -394,7 +400,7 @@ function normalizeConfigRuntimeSockets(config: PiMateriaConfig): PiMateriaConfig
   };
 }
 
-function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: Partial<PiMateriaConfig>): Partial<PiMateriaConfig> {
+function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: MateriaConfigPatch): Partial<PiMateriaConfig> {
   return {
     ...base,
     ...patch,
@@ -419,6 +425,22 @@ function buildLoadoutSources(partials: Partial<PiMateriaConfig>[], layers: Mater
       } else if (isPlainObject(loadout)) {
         if (protectedLoadoutNames.has(name) && scope !== "default") continue;
         sources[name] = isLoadoutSource(loadout.source) ? loadout.source : scope;
+      }
+    }
+  });
+  return sources;
+}
+
+function buildMateriaSources(partials: Partial<PiMateriaConfig>[], layers: MateriaConfigLayer[]): Record<string, MateriaConfigLayerScope> {
+  const sources: Record<string, MateriaConfigLayerScope> = {};
+  partials.forEach((partial, index) => {
+    const scope = layers[index]?.scope;
+    if (!scope || !isPlainObject(partial.materia)) return;
+    for (const [id, definition] of Object.entries(partial.materia as Record<string, unknown>)) {
+      if (definition === null) {
+        if (sources[id] !== "default") delete sources[id];
+      } else if (isPlainObject(definition)) {
+        sources[id] = scope;
       }
     }
   });
@@ -510,10 +532,14 @@ function hasLoadoutSocketMap(loadout: Record<string, unknown>): boolean {
   return loadout.sockets !== undefined;
 }
 
-function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria: Partial<PiMateriaConfig>["materia"]): Record<string, MateriaConfig> {
+function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria: Partial<PiMateriaConfig>["materia"] | MateriaConfigPatch["materia"]): Record<string, MateriaConfig> {
   if (!parsedMateria) return baseMateria;
   const merged: Record<string, MateriaConfig> = { ...baseMateria };
   for (const [name, materia] of Object.entries(parsedMateria as Record<string, unknown>)) {
+    if (materia === null) {
+      delete merged[name];
+      continue;
+    }
     if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
     const next = { ...(baseMateria[name] ?? {}), ...materia } as Record<string, unknown>;
     for (const [key, value] of Object.entries(materia)) {
@@ -539,7 +565,7 @@ function withoutDeletedLoadoutMarkers(config: Partial<PiMateriaConfig>): Partial
   };
 }
 
-function rejectDefaultLoadoutDeletes(patch: Partial<PiMateriaConfig>): void {
+function rejectDefaultLoadoutDeletes(patch: Pick<MateriaConfigPatch, "loadouts">): void {
   if (!patch.loadouts) return;
   const defaultLoadoutNames = new Set(Object.keys(JSON.parse(readFileSync(getBundledDefaultConfigPath(), "utf8")).loadouts ?? {}));
   for (const [name, loadout] of Object.entries(patch.loadouts as Record<string, unknown>)) {
@@ -547,7 +573,30 @@ function rejectDefaultLoadoutDeletes(patch: Partial<PiMateriaConfig>): void {
   }
 }
 
-function rejectReadonlyDefaultLoadoutSaves(patch: Partial<PiMateriaConfig>): void {
+function rejectProtectedMateriaDeletes(patch: MateriaConfigPatch, existing: Partial<PiMateriaConfig>): void {
+  if (!patch.materia) return;
+  const defaultMateriaIds = new Set(Object.keys(JSON.parse(readFileSync(getBundledDefaultConfigPath(), "utf8")).materia ?? {}));
+  const existingMateria = existing.materia as Record<string, unknown> | undefined;
+  for (const [name, materia] of Object.entries(patch.materia as Record<string, unknown>)) {
+    if (materia === null && defaultMateriaIds.has(name) && !Object.prototype.hasOwnProperty.call(existingMateria ?? {}, name)) {
+      throw new Error(`Cannot delete shipped default Materia definition "${name}".`);
+    }
+  }
+}
+
+function rejectLockedMateriaContentSaves(patch: MateriaConfigPatch, existing: Partial<PiMateriaConfig>): void {
+  if (!patch.materia || !isPlainObject(existing.materia)) return;
+  const existingMateria = existing.materia as Record<string, unknown>;
+  for (const [name, materiaPatch] of Object.entries(patch.materia as Record<string, unknown>)) {
+    if (materiaPatch === null || !isPlainObject(materiaPatch)) continue;
+    const current = existingMateria[name];
+    if (!isPlainObject(current) || current.lockState !== "locked") continue;
+    const contentKeys = Object.keys(materiaPatch).filter((key) => key !== "lockState");
+    if (contentKeys.length > 0) throw new Error(`Materia definition "${name}" is locked. Unlock it before saving content changes.`);
+  }
+}
+
+function rejectReadonlyDefaultLoadoutSaves(patch: Pick<MateriaConfigPatch, "loadouts">): void {
   if (!patch.loadouts) return;
   for (const [name, loadout] of Object.entries(patch.loadouts as Record<string, unknown>)) {
     if (!isPlainObject(loadout)) continue;
@@ -582,6 +631,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
   for (const [name, materia] of Object.entries(materiaConfig as Record<string, unknown>)) {
     if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
     if ("systemPrompt" in materia) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
+    validateMateriaLockState(name, materia.lockState);
     const type = ensureMateriaDefinitionType(materia);
     if (type === "utility") {
       validateUtilityMateria(name, materia);
@@ -646,6 +696,15 @@ function validateLegacyGeneratorDeclaration(name: string, generates: unknown): v
 function validateMateriaParseMode(name: string, parse: unknown): void {
   if (parse === undefined) return;
   if (parse !== "text" && parse !== "json") throw new Error(`Materia "${name}" has unsupported parse mode "${String(parse)}". Expected "text" or "json".`);
+}
+
+function validateMateriaLockState(name: string, lockState: unknown): void {
+  if (lockState === undefined) return;
+  if (!isMateriaLockState(lockState)) throw new Error(`Materia "${name}" has invalid lockState. Expected "locked" or "unlocked".`);
+}
+
+function isMateriaLockState(value: unknown): value is MateriaUserLockState {
+  return value === "locked" || value === "unlocked";
 }
 
 function validateUtilityCommandMateria(name: string, command: unknown): void {

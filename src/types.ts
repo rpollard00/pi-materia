@@ -20,6 +20,8 @@ export interface LoadedConfig {
   source: string;
   layers?: MateriaConfigLayer[];
   loadoutSources?: Record<string, MateriaConfigLayerScope>;
+  materiaSources?: Record<string, MateriaConfigLayerScope>;
+  defaultMateriaIds?: string[];
   /** Validated user preference for the default loadout. Missing or stale values are exposed as null. */
   defaultLoadoutId?: string | null;
   /** Human-readable warning when a configured default preference could not be resolved exactly. */
@@ -29,6 +31,10 @@ export interface LoadedConfig {
 export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
 export type LoadoutSource = MateriaConfigLayerScope;
 export type LoadoutUserLockState = "locked" | "unlocked";
+export type MateriaUserLockState = "locked" | "unlocked";
+export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia"> & {
+  materia?: Record<string, Partial<MateriaConfig> | null>;
+};
 
 export interface MateriaConfigLayer {
   scope: MateriaConfigLayerScope;
@@ -515,6 +521,8 @@ export interface MateriaDefinitionMetadata {
   parse?: MateriaParseMode;
   /** Marks this materia as a generator; runtime resolves the canonical workItems contract. */
   generator?: boolean;
+  /** User-controlled lock state for editable materia definitions. */
+  lockState?: MateriaUserLockState;
   /** Generated list metadata. Prefer generator: true for the standard workItems contract. */
   generates?: MateriaGeneratorConfig;
 }

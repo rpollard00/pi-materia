@@ -41,6 +41,8 @@ export interface LoadedConfigResponse {
   config?: MateriaConfig;
   source?: string;
   loadoutSources?: Record<string, LoadoutSourceScope>;
+  materiaSources?: Record<string, LoadoutSourceScope>;
+  defaultMateriaIds?: string[];
   defaultLoadoutId?: string | null;
 }
 
@@ -49,6 +51,8 @@ export interface ConfigResponse {
   config?: MateriaConfig | LoadedConfigResponse;
   source?: string;
   loadoutSources?: Record<string, LoadoutSourceScope>;
+  materiaSources?: Record<string, LoadoutSourceScope>;
+  defaultMateriaIds?: string[];
   defaultLoadoutId?: string | null;
 }
 
@@ -57,6 +61,11 @@ export interface ActiveLoadoutResponse {
   activeLoadout?: string;
   activeLoadoutId?: string;
   config?: MateriaConfig | LoadedConfigResponse;
+  source?: string;
+  loadoutSources?: Record<string, LoadoutSourceScope>;
+  materiaSources?: Record<string, LoadoutSourceScope>;
+  defaultMateriaIds?: string[];
+  defaultLoadoutId?: string | null;
   message?: string;
   error?: string | { code?: string; message?: string };
 }

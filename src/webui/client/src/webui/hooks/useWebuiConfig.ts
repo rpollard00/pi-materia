@@ -30,17 +30,32 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isLoadedConfigResponse(value: unknown): value is LoadedConfigResponse {
-  return isObjectRecord(value) && isObjectRecord(value.config) && ('source' in value || 'loadoutSources' in value || !('loadouts' in value));
+  return isObjectRecord(value) && isObjectRecord(value.config) && ('source' in value || 'loadoutSources' in value || 'materiaSources' in value || 'defaultMateriaIds' in value || !('loadouts' in value));
+}
+
+function isLoadoutSourceScope(value: unknown): value is LoadoutSourceScope {
+  return value === 'default' || value === 'user' || value === 'project' || value === 'explicit';
+}
+
+function normalizeSourceMap(value: unknown): Record<string, LoadoutSourceScope> {
+  if (!isObjectRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, LoadoutSourceScope] => isLoadoutSourceScope(entry[1])));
+}
+
+function normalizeDefaultIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0))];
 }
 
 function normalizeConfigSnapshot(
   payload: ConfigResponse | ActiveLoadoutResponse | MateriaConfig | LoadedConfigResponse | undefined,
   fallback?: MateriaConfig,
-): { config: MateriaConfig; source?: string; loadoutSources?: Record<string, LoadoutSourceScope>; defaultLoadoutId?: string | null } {
+): { config: MateriaConfig; source?: string; loadoutSources: Record<string, LoadoutSourceScope>; materiaSources: Record<string, LoadoutSourceScope>; defaultMateriaIds: string[]; defaultLoadoutId?: string | null } {
   const wrapper = isLoadedConfigResponse(payload) ? payload : undefined;
   const response = isObjectRecord(payload) ? payload as ConfigResponse : undefined;
   const rawConfig = wrapper?.config ?? response?.config ?? payload ?? {};
-  const unwrappedConfig = isLoadedConfigResponse(rawConfig) ? rawConfig.config ?? {} : rawConfig;
+  const nestedWrapper = isLoadedConfigResponse(rawConfig) ? rawConfig : undefined;
+  const unwrappedConfig = nestedWrapper?.config ?? rawConfig;
   const config = normalizeMateriaConfigEdges(unwrappedConfig as MateriaConfig);
   if ((!config.loadouts || Object.keys(config.loadouts).length === 0) && fallback?.loadouts) {
     config.loadouts = cloneConfig(fallback.loadouts);
@@ -48,16 +63,25 @@ function normalizeConfigSnapshot(
   if (!config.materia && fallback?.materia) config.materia = cloneConfig(fallback.materia);
   return {
     config,
-    source: wrapper?.source ?? response?.source,
-    loadoutSources: wrapper?.loadoutSources ?? response?.loadoutSources,
-    defaultLoadoutId: wrapper?.defaultLoadoutId ?? response?.defaultLoadoutId,
+    source: wrapper?.source ?? response?.source ?? nestedWrapper?.source,
+    loadoutSources: normalizeSourceMap(wrapper?.loadoutSources ?? response?.loadoutSources ?? nestedWrapper?.loadoutSources),
+    materiaSources: normalizeSourceMap(wrapper?.materiaSources ?? response?.materiaSources ?? nestedWrapper?.materiaSources),
+    defaultMateriaIds: normalizeDefaultIds(wrapper?.defaultMateriaIds ?? response?.defaultMateriaIds ?? nestedWrapper?.defaultMateriaIds),
+    defaultLoadoutId: wrapper?.defaultLoadoutId ?? response?.defaultLoadoutId ?? nestedWrapper?.defaultLoadoutId,
   };
 }
 
-async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope>; defaultLoadoutId: string | null }> {
+async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope>; materiaSources: Record<string, LoadoutSourceScope>; defaultMateriaIds: string[]; defaultLoadoutId: string | null }> {
   const body = await getConfig();
   const snapshot = normalizeConfigSnapshot(body);
-  return { config: snapshot.config, source: snapshot.source ?? 'unknown', loadoutSources: snapshot.loadoutSources ?? {}, defaultLoadoutId: snapshot.defaultLoadoutId ?? null };
+  return {
+    config: snapshot.config,
+    source: snapshot.source ?? 'unknown',
+    loadoutSources: snapshot.loadoutSources,
+    materiaSources: snapshot.materiaSources,
+    defaultMateriaIds: snapshot.defaultMateriaIds,
+    defaultLoadoutId: snapshot.defaultLoadoutId ?? null,
+  };
 }
 
 function activeLoadoutMessage(body: ActiveLoadoutResponse): string {
@@ -214,6 +238,8 @@ export function useWebuiConfig() {
   const draftConfigRef = useRef<MateriaConfig | undefined>(undefined);
   const [source, setSource] = useState<string>('loading');
   const [loadoutSources, setLoadoutSources] = useState<Record<string, LoadoutSourceScope>>({});
+  const [materiaSources, setMateriaSources] = useState<Record<string, LoadoutSourceScope>>({});
+  const [defaultMateriaIds, setDefaultMateriaIds] = useState<string[]>([]);
   const [deletedLoadoutNames, setDeletedLoadoutNames] = useState<string[]>([]);
   const [loadoutNameInput, setLoadoutNameInput] = useState('');
   const [viewedLoadoutName, setViewedLoadoutName] = useState<string | undefined>();
@@ -338,7 +364,9 @@ export function useWebuiConfig() {
     setViewedLoadoutName(nextViewedName);
     setLoadoutNameInput(nextViewedName ?? '');
     setSource(loaded.source);
-    setLoadoutSources(loaded.loadoutSources ?? {});
+    setLoadoutSources(loaded.loadoutSources);
+    setMateriaSources(loaded.materiaSources);
+    setDefaultMateriaIds(loaded.defaultMateriaIds);
     const nextPersistedLoadouts = buildLoadouts(normalizedLoaded);
     setDefaultLoadoutId(hasLoadoutId(nextPersistedLoadouts, loaded.defaultLoadoutId) ? loaded.defaultLoadoutId : null);
     if (!preserveLoadoutEdits) setDeletedLoadoutNames([]);
@@ -357,6 +385,8 @@ export function useWebuiConfig() {
       setLoadoutNameInput(fallback.activeLoadout ?? '');
       setSource('demo');
       setLoadoutSources({ 'Demo Loadout': 'default' });
+      setMateriaSources({});
+      setDefaultMateriaIds([]);
       setDefaultLoadoutId(null);
     });
     return () => {
@@ -463,7 +493,9 @@ export function useWebuiConfig() {
       const nextConfig = normalizeMateriaConfigEdges({ ...snapshot.config, activeLoadout: activeName ?? snapshot.config.activeLoadout ?? name, activeLoadoutId: snapshot.config.activeLoadoutId ?? activeLoadoutId });
       setBaselineConfig(nextConfig);
       if (snapshot.source) setSource(snapshot.source);
-      if (snapshot.loadoutSources) setLoadoutSources(snapshot.loadoutSources);
+      setLoadoutSources(snapshot.loadoutSources);
+      setMateriaSources(snapshot.materiaSources);
+      setDefaultMateriaIds(snapshot.defaultMateriaIds);
       setStatus(readyStatus);
     } else {
       await reloadConfig({ preserveLoadoutEdits: true, readyStatus });
@@ -712,6 +744,8 @@ export function useWebuiConfig() {
     isDirty,
     loadoutNameInput,
     loadoutSources,
+    materiaSources,
+    defaultMateriaIds,
     applyExternalRuntimeActiveLoadout,
     loadouts,
     persistedActiveLoadoutName,
