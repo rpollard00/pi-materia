@@ -1,0 +1,189 @@
+import { EllipsisVertical, Lock, Plus, Unlock } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import type { LoadoutSourceScope } from '../../types.js';
+import type { MateriaLockState, MateriaSelectorItem } from './materiaEditPolicy.js';
+
+export interface MateriaSelectorSidebarProps {
+  items: MateriaSelectorItem[];
+  selectedId?: string;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+  onDuplicate: (id: string) => void;
+  onToggleLock: (id: string, lockState: MateriaLockState) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
+}
+
+interface MateriaActionsMenuProps {
+  item: MateriaSelectorItem;
+  onDuplicate: (id: string) => void;
+  onToggleLock: (id: string, lockState: MateriaLockState) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
+}
+
+function stopMenuEvent(event: ReactMouseEvent | KeyboardEvent) {
+  event.stopPropagation();
+}
+
+function sourceLabel(source: LoadoutSourceScope | undefined): string {
+  if (source === 'default') return 'Built-In';
+  if (source === 'user') return 'User';
+  if (source === 'project') return 'Project';
+  if (source === 'explicit') return 'Explicit';
+  return 'Unsaved';
+}
+
+function sourceTitle(item: MateriaSelectorItem): string {
+  const source = sourceLabel(item.source);
+  if (item.isOverriddenBuiltIn) return `${source} override of built-in materia`;
+  if (item.isBuiltIn) return 'Built-in materia';
+  return `${source} materia`;
+}
+
+function lockMenuLabel(item: MateriaSelectorItem): string {
+  return item.lockState === 'locked' ? 'Unlock' : 'Lock';
+}
+
+function nextLockState(item: MateriaSelectorItem): MateriaLockState {
+  return item.lockState === 'locked' ? 'unlocked' : 'locked';
+}
+
+function runAction(action: () => void | Promise<void>) {
+  void action();
+}
+
+function MateriaActionsMenu({ item, onDuplicate, onToggleLock, onDelete }: MateriaActionsMenuProps) {
+  const reactId = useId();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuId = `materia-actions-${reactId.replace(/:/g, '')}`;
+  const lockDisabled = !item.canToggleLock;
+  const deleteDisabled = !item.canDelete;
+  const duplicateTitle = `Duplicate ${item.id}`;
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  function closeAndRun(action: () => void | Promise<void>) {
+    setOpen(false);
+    runAction(action);
+  }
+
+  return (
+    <div className="materia-selector-actions-menu" ref={menuRef} onClick={stopMenuEvent} onKeyDown={stopMenuEvent}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="materia-selector-actions-trigger"
+        aria-label={`Actions for ${item.id}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        title={`Actions for ${item.id}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        <EllipsisVertical className="materia-selector-icon" aria-hidden="true" focusable="false" />
+      </button>
+      {open && (
+        <div id={menuId} className="materia-selector-actions-popover" role="menu" aria-label={`Actions for ${item.id}`}>
+          <button type="button" role="menuitem" title={duplicateTitle} onClick={() => closeAndRun(() => onDuplicate(item.id))}>
+            Duplicate
+          </button>
+          <button type="button" role="menuitem" disabled={lockDisabled} title={item.lockTitle} onClick={() => closeAndRun(() => onToggleLock(item.id, nextLockState(item)))}>
+            {lockMenuLabel(item)}
+          </button>
+          <button type="button" role="menuitem" className="materia-selector-actions-destructive" disabled={deleteDisabled} title={item.deleteTitle} onClick={() => closeAndRun(() => onDelete(item.id))}>
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onDuplicate, onToggleLock, onDelete }: MateriaSelectorSidebarProps) {
+  return (
+    <aside className="fantasy-panel materia-selector-sidebar p-4" aria-label="Materia selector">
+      <div className="materia-selector-header">
+        <div>
+          <p className="materia-selector-eyebrow">materia catalog</p>
+          <h2 className="materia-selector-title">Materia</h2>
+        </div>
+        <button type="button" className="materia-button materia-selector-new-button" onClick={onNew}>
+          <Plus className="materia-selector-icon" aria-hidden="true" focusable="false" />
+          New
+        </button>
+      </div>
+
+      <div className="materia-selector-list" role="list" aria-label="Available materia">
+        {items.length === 0 ? (
+          <p className="materia-selector-empty">No reusable materia definitions are available.</p>
+        ) : (
+          items.map((item) => {
+            const selected = item.id === selectedId;
+            const LockIcon = item.lockState === 'locked' ? Lock : Unlock;
+            return (
+              <div
+                key={item.id}
+                className={`materia-selector-row${selected ? ' materia-selector-row-active' : ''}${item.lockState === 'locked' ? ' materia-selector-row-locked' : ''}`}
+                role="listitem"
+              >
+                <button type="button" className="materia-selector-row-select" onClick={() => onSelect(item.id)} title={`${item.id} — ${sourceTitle(item)}`} aria-current={selected ? 'true' : undefined}>
+                  <span className="materia-selector-row-main">
+                    <span className="materia-selector-row-title">
+                      <span className="materia-selector-row-label">{item.label || item.id}</span>
+                      <span className="materia-selector-row-id">{item.id}</span>
+                    </span>
+                    {item.description && <span className="materia-selector-row-description">{item.description}</span>}
+                  </span>
+                  <span className="materia-selector-row-meta" aria-label="Materia metadata">
+                    <span className="materia-selector-badge materia-selector-badge-type">{item.type}</span>
+                    {item.group && <span className="materia-selector-badge materia-selector-badge-group">{item.group}</span>}
+                    <span className={`materia-selector-badge materia-selector-badge-source materia-selector-badge-source-${item.source ?? 'unsaved'}`} title={sourceTitle(item)}>{sourceLabel(item.source)}</span>
+                    {item.isOverriddenBuiltIn && <span className="materia-selector-badge materia-selector-badge-override" title="Overrides built-in materia">Override</span>}
+                    {item.isBuiltIn && !item.isOverriddenBuiltIn && <span className="materia-selector-badge materia-selector-badge-built-in" title="Built-in materia">Built-In</span>}
+                    {item.lockState === 'locked' && <span className="materia-selector-badge materia-selector-badge-locked" title="Locked materia">Locked</span>}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="materia-selector-lock-indicator"
+                  aria-label={item.lockTitle}
+                  aria-disabled={!item.canToggleLock}
+                  title={item.lockTitle}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (item.canToggleLock) runAction(() => onToggleLock(item.id, nextLockState(item)));
+                  }}
+                >
+                  <LockIcon className="materia-selector-icon" aria-hidden="true" focusable="false" />
+                </button>
+                <MateriaActionsMenu item={item} onDuplicate={onDuplicate} onToggleLock={onToggleLock} onDelete={onDelete} />
+              </div>
+            );
+          })
+        )}
+      </div>
+    </aside>
+  );
+}

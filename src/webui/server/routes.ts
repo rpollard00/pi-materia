@@ -5,6 +5,7 @@ import { handleHealthRoute } from './health.js';
 import { sendJson } from './http.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
 import { handleMonitorEventsRoute, handleMonitorSnapshotRoute } from './monitor.js';
+import { handleProfileRoleGenerationRoute } from './profileRoleGeneration.js';
 import { handleRoleGenerationRoute } from './roleGeneration.js';
 import { serveStatic } from './static.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -12,6 +13,7 @@ import type { MateriaSetActiveLoadoutCallback } from './activeLoadout.js';
 import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
+import type { MateriaGetRoleGenerationPreferenceCallback, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
 
@@ -24,6 +26,8 @@ export interface MateriaWebUiRouteDeps {
     saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
     setActiveLoadout?: MateriaSetActiveLoadoutCallback;
     setDefaultLoadout?: MateriaSetDefaultLoadoutCallback;
+    getRoleGenerationPreference?: MateriaGetRoleGenerationPreferenceCallback;
+    setRoleGenerationPreference?: MateriaSetRoleGenerationPreferenceCallback;
     generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
     modelCatalog?: MateriaModelCatalogSource;
   };
@@ -74,6 +78,14 @@ export async function handleMateriaWebUiRequest(req: IncomingMessage, res: Serve
 
   if (req.url?.startsWith('/api/loadout/default')) {
     await handleDefaultLoadoutRoute(req, res, { setDefaultLoadout: deps.session?.setDefaultLoadout });
+    return;
+  }
+
+  if (req.url?.startsWith('/api/profile/role-generation')) {
+    await handleProfileRoleGenerationRoute(req, res, {
+      getRoleGenerationPreference: deps.session?.getRoleGenerationPreference,
+      setRoleGenerationPreference: deps.session?.setRoleGenerationPreference,
+    });
     return;
   }
 

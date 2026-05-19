@@ -77,10 +77,29 @@ export interface DefaultLoadoutResponse {
   error?: string | { code?: string; message?: string };
 }
 
+export interface RoleGenerationModelResolution {
+  requestedModel: string | null;
+  effectiveModel: string | null;
+  fallback: boolean;
+  warnings: string[];
+}
+
 export interface RoleGenerationResponse {
   ok?: boolean;
   prompt?: string;
   error?: string | { message?: string };
+  warnings?: string[];
+  modelResolution?: RoleGenerationModelResolution;
+}
+
+export interface RoleGenerationPreferenceResponse {
+  ok?: boolean;
+  model?: string | null;
+  error?: string | { code?: string; message?: string };
+}
+
+export interface RoleGenerationPreferenceSavePayload {
+  model: string | null;
 }
 
 export interface ModelCatalogModel {

@@ -6,6 +6,7 @@ import type { MateriaSetActiveLoadoutCallback } from './activeLoadout.js';
 import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
+import type { MateriaGetRoleGenerationPreferenceCallback, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
 
@@ -15,6 +16,7 @@ import type { MateriaWebUiSessionSnapshot } from './session.js';
 export { buildMateriaModelCatalog } from './modelCatalog.js';
 export type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 export type { MateriaModelCatalogModel, MateriaModelCatalogResponse, MateriaModelCatalogSource } from './modelCatalog.js';
+export type { MateriaGetRoleGenerationPreferenceCallback, MateriaRoleGenerationPreference, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
 export type { MateriaGeneratorConfig, MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 export type { MateriaSetActiveLoadoutCallback, MateriaSetActiveLoadoutFailureCode, MateriaSetActiveLoadoutResult } from './activeLoadout.js';
 export type { MateriaSetDefaultLoadoutCallback, MateriaSetDefaultLoadoutFailureCode, MateriaSetDefaultLoadoutResult } from './defaultLoadout.js';
@@ -37,6 +39,9 @@ export interface MateriaWebUiServerOptions {
     setActiveLoadout?: MateriaSetActiveLoadoutCallback;
     /** User preference callback for the durable default loadout. */
     setDefaultLoadout?: MateriaSetDefaultLoadoutCallback;
+    /** User profile preference for isolated role-generation model selection. */
+    getRoleGenerationPreference?: MateriaGetRoleGenerationPreferenceCallback;
+    setRoleGenerationPreference?: MateriaSetRoleGenerationPreferenceCallback;
     generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
     modelCatalog?: MateriaModelCatalogSource;
   };

@@ -6,7 +6,7 @@ interface RoleGenerationSectionProps {
 
 export function RoleGenerationSection({ roleGeneration }: RoleGenerationSectionProps) {
   const {
-    generatedRolePrompt, roleBrief, roleGenerating, roleGenerationError, applyGeneratedRolePrompt,
+    generatedRolePrompt, generationModel, roleBrief, roleGenerating, roleGenerationError, roleGenerationWarnings, applyGeneratedRolePrompt,
     discardGeneratedRolePrompt, generateRolePrompt, setRoleBrief,
   } = roleGeneration;
 
@@ -16,9 +16,10 @@ export function RoleGenerationSection({ roleGeneration }: RoleGenerationSectionP
         <label className="graph-field">Generate role prompt from brief
           <textarea data-testid="role-generation-brief" className="min-h-16" value={roleBrief} onChange={(event) => setRoleBrief(event.target.value)} placeholder="Describe the persona, responsibilities, constraints, and style for this materia…" />
         </label>
-        <button type="button" className="materia-button" data-testid="generate-role-prompt" disabled={roleGenerating || !roleBrief.trim()} onClick={() => { void generateRolePrompt(); }}>{roleGenerating ? 'Generating…' : generatedRolePrompt ? 'Regenerate' : 'Generate'}</button>
+        <button type="button" className="materia-button" data-testid="generate-role-prompt" disabled={roleGenerating || generationModel.saving || !roleBrief.trim()} onClick={() => { void generateRolePrompt(); }}>{roleGenerating ? 'Generating…' : generatedRolePrompt ? 'Regenerate' : 'Generate'}</button>
       </div>
       {roleGenerationError && <p className="mt-3 text-sm text-rose-200" role="alert" data-testid="role-generation-error">{roleGenerationError}</p>}
+      {roleGenerationWarnings.length > 0 && <p className="mt-3 text-sm text-amber-200" role="status" data-testid="role-generation-warning">{roleGenerationWarnings.join(' ')}</p>}
       {generatedRolePrompt && (
         <div className="mt-4 rounded-xl border border-cyan-200/20 bg-black/30 p-4" data-testid="role-generation-preview">
           <p className="text-xs uppercase tracking-[0.24em] text-cyan-200">Generated preview</p>

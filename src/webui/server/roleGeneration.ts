@@ -4,8 +4,9 @@ import { errorMessage, isPlainObject, readJsonBody, sendJson } from './http.js';
 export type MateriaGeneratorConfig = { output: string; items?: string; listType: 'array'; itemType: string; as?: string; cursor?: string; done?: string };
 export const CANONICAL_WORK_ITEMS_GENERATOR_CONFIG: MateriaGeneratorConfig = { output: 'workItems', items: 'state.workItems', listType: 'array', itemType: 'workItem', as: 'workItem', cursor: 'workItemIndex', done: 'end' };
 export type MateriaRolePromptGenerationRequest = { brief: string; generates?: MateriaGeneratorConfig | null };
+export type MateriaRoleGenerationModelResolution = { requestedModel: string | null; effectiveModel: string | null; fallback: boolean; warnings: string[] };
 export type MateriaRolePromptGenerationResult =
-  | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true }
+  | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true; warnings?: string[]; modelResolution?: MateriaRoleGenerationModelResolution }
   | { ok: false; error: string; code: 'invalid_brief' | 'disabled' | 'generation_failed' };
 
 export interface RoleGenerationRouteDeps {
@@ -107,6 +108,8 @@ export async function handleRoleGenerationRoute(req: IncomingMessage, res: Serve
       api: result.api,
       thinking: result.thinking,
       isolated: result.isolated,
+      warnings: result.warnings ?? result.modelResolution?.warnings ?? [],
+      modelResolution: result.modelResolution,
     });
   } catch (error) {
     const message = errorMessage(error);

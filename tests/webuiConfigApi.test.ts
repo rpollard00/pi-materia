@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
 });
 
-async function startTestServer(saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>) {
+async function startTestServer(saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>, getConfig?: () => Promise<unknown>) {
   const staticDir = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-config-"));
   const created = createMateriaWebUiServer({
     staticDir,
@@ -32,6 +32,7 @@ async function startTestServer(saveConfig?: (patch: MateriaConfigPatch, target: 
         uiStartedAt: Date.now(),
         now: Date.now(),
       }),
+      getConfig,
       saveConfig,
     },
   });
@@ -52,6 +53,28 @@ async function postConfig(baseUrl: string, body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+describe("GET /api/config", () => {
+  test("returns materia source and default metadata from loaded config", async () => {
+    const baseUrl = await startTestServer(undefined, async () => ({
+      source: "test",
+      config: { materia: { Build: { tools: "coding", prompt: "build" } } },
+      materiaSources: { Build: "user" },
+      defaultMateriaIds: ["Build"],
+    }));
+
+    const response = await fetch(`${baseUrl}/api/config`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      source: "test",
+      config: { materia: { Build: { tools: "coding", prompt: "build" } } },
+      materiaSources: { Build: "user" },
+      defaultMateriaIds: ["Build"],
+    });
+  });
+});
 
 describe("POST /api/config", () => {
   test("accepts socket-first WebUI loadout payloads", async () => {

@@ -39,7 +39,7 @@ function parseCustomTools(raw: string): string[] {
 
 export function MateriaEditorSettingsSection({ form, modelOptions: modelSection, colorPicker, toolRegistry }: MateriaEditorSettingsSectionProps) {
   const {
-    editableDefinitionIds, materiaForm, setMateriaForm, editMateria, handleMateriaModelChange, resetMateriaEditorForm,
+    materiaForm, setMateriaForm, handleMateriaModelChange,
   } = form;
   const {
     activeModelDescription, modelCatalog, modelCatalogError, modelCatalogStatus, modelOptions, selectedModel,
@@ -50,12 +50,6 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
     <section className="materia-form-section materia-settings-section" aria-label="Materia settings">
       <p className="materia-form-section-title">Settings</p>
       <div className="materia-compact-grid">
-        <label className="graph-field">Edit existing
-          <select data-testid="edit-materia-select" value={materiaForm.editingSocketId} onChange={(event) => event.target.value ? editMateria(event.target.value) : resetMateriaEditorForm()}>
-            <option value="">new materia…</option>
-            {editableDefinitionIds.map((id) => <option key={id} value={id}>{id}</option>)}
-          </select>
-        </label>
         <label className="graph-field">Name
           <input data-testid="materia-name" value={materiaForm.name} onChange={(event) => setMateriaForm({ ...materiaForm, name: event.target.value })} placeholder="Critique" />
         </label>

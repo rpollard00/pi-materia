@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch } from "../src/config/config.js";
+import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch, saveRoleGenerationModelPreference } from "../src/config/config.js";
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
@@ -178,6 +178,64 @@ describe("layered config loading and persistence", () => {
     }
   });
 
+  test("saves and clears role-generation model preference without replacing sibling fields", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        roleGeneration: {
+          enabled: false,
+          thinking: "high",
+          extraInstructions: "Keep it focused.",
+          useReadOnlyProjectContext: true,
+        },
+      }), "utf8");
+
+      await expect(saveRoleGenerationModelPreference("  openai-codex/gpt-5.5  ")).resolves.toBe("openai-codex/gpt-5.5");
+      const saved = await loadProfileConfig();
+      expect(saved.roleGeneration).toEqual({
+        enabled: false,
+        model: "openai-codex/gpt-5.5",
+        thinking: "high",
+        extraInstructions: "Keep it focused.",
+        useReadOnlyProjectContext: true,
+      });
+      expect((await readdir(dir)).some((entry) => entry.endsWith(".tmp"))).toBe(false);
+
+      await expect(saveRoleGenerationModelPreference("   ")).resolves.toBe(null);
+      const cleared = await loadProfileConfig();
+      expect(cleared.roleGeneration).toEqual({
+        enabled: false,
+        thinking: "high",
+        extraInstructions: "Keep it focused.",
+        useReadOnlyProjectContext: true,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("rejects invalid role-generation model preference before modifying profile", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({ roleGeneration: { model: "provider/existing", enabled: false } }), "utf8");
+      const before = await readFile(getUserProfileConfigPath(), "utf8");
+
+      await expect(saveRoleGenerationModelPreference("unqualified-model")).rejects.toThrow(/provider-qualified/);
+
+      expect(await readFile(getUserProfileConfigPath(), "utf8")).toBe(before);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("loads user, project, and explicit config with explicit taking precedence", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-layered-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
@@ -263,6 +321,44 @@ describe("layered config loading and persistence", () => {
       const reloaded = await loadConfig(cwd);
       expect(reloaded.config.materia.Build).toBeDefined();
       expect(reloaded.materiaSources?.Build).toBe("default");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("deletes custom materia only when loadouts remain valid or a fallback exists", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-delete-custom-materia-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const projectFile = path.join(cwd, ".pi", "pi-materia.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await mkdir(profile, { recursive: true });
+      await writeFile(getUserMateriaAssetPath(), JSON.stringify({
+        materia: { FallbackCustom: { tools: "none", prompt: "user fallback" } },
+      }), "utf8");
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(projectFile, JSON.stringify({
+        materia: {
+          ReferencedOnly: { tools: "none", prompt: "referenced" },
+          FallbackCustom: { tools: "coding", prompt: "project override" },
+          UnusedCustom: { tools: "none", prompt: "unused" },
+        },
+        loadouts: {
+          UsesCustom: { entry: "Socket-1", sockets: { "Socket-1": { materia: "ReferencedOnly" }, "Socket-2": { materia: "FallbackCustom" } } },
+        },
+      }), "utf8");
+
+      await expect(saveMateriaConfigPatch(cwd, { materia: { ReferencedOnly: null } as never }, { target: "project" })).rejects.toThrow(/unknown materia "ReferencedOnly"/);
+
+      await saveMateriaConfigPatch(cwd, { materia: { UnusedCustom: null } as never }, { target: "project" });
+      expect((await loadConfig(cwd)).config.materia.UnusedCustom).toBeUndefined();
+
+      await saveMateriaConfigPatch(cwd, { materia: { FallbackCustom: null } as never }, { target: "project" });
+      const reloaded = await loadConfig(cwd);
+      expect(reloaded.config.materia.FallbackCustom?.prompt).toBe("user fallback");
+      expect(reloaded.materiaSources?.FallbackCustom).toBe("user");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

@@ -17,6 +17,7 @@ function fakeCtx(branch: unknown[] = []): ExtensionContext {
     modelRegistry: {
       find: (provider: string, id: string) => provider === overrideModel.provider && id === overrideModel.id ? overrideModel : undefined,
       getAll: () => [activeModel, overrideModel],
+      getAvailable: () => [activeModel, overrideModel],
     },
     sessionManager: {
       getBranch: () => branch,
@@ -59,6 +60,8 @@ describe("Materia role prompt generation service", () => {
       provider: "active-provider",
       api: "active-api",
       thinking: "high",
+      warnings: [],
+      modelResolution: { requestedModel: null, effectiveModel: "active-provider/active-model", fallback: false, warnings: [] },
     });
   });
 
@@ -97,11 +100,10 @@ describe("Materia role prompt generation service", () => {
     expect(prompt).toContain("legacy placement-specific outputs such as tasks");
   });
 
-  test("applies roleGeneration model and thinking overrides", () => {
-    const settings = resolveRoleGenerationSettings(fakePi("low"), fakeCtx(), {
+  test("applies available roleGeneration model and thinking overrides", async () => {
+    const settings = await resolveRoleGenerationSettings(fakePi("low"), fakeCtx(), {
       enabled: true,
-      provider: "override-provider",
-      model: "role-model",
+      model: "override-provider/role-model",
       thinking: "minimal",
       api: "profile-api",
     });
@@ -111,6 +113,60 @@ describe("Materia role prompt generation service", () => {
     expect(settings.provider).toBe("override-provider");
     expect(settings.api).toBe("profile-api");
     expect(settings.thinking).toBe("minimal");
+    expect(settings.modelResolution).toEqual({ requestedModel: "override-provider/role-model", effectiveModel: "override-provider/role-model", fallback: false, warnings: [] });
+  });
+
+  test("falls back to Active Pi model when saved roleGeneration model is unavailable", async () => {
+    const result = await generateMateriaRolePrompt(fakePi("medium"), fakeCtx(), { brief: "writer" }, {
+      profile: { enabled: true, model: "missing-provider/missing-model" },
+      generator: async ({ settings }) => {
+        expect(settings.model).toBe(activeModel);
+        return "You are a writer.";
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      prompt: "You are a writer.",
+      model: "active-provider/active-model",
+      warnings: ["Saved generation model is unavailable; using Active Pi Model."],
+      modelResolution: { requestedModel: "missing-provider/missing-model", effectiveModel: "active-provider/active-model", fallback: true },
+    });
+  });
+
+  test("falls back to Active Pi model when model registry validation fails", async () => {
+    const ctx = fakeCtx() as ExtensionContext & { modelRegistry: { getAvailable: () => never } };
+    ctx.modelRegistry.getAvailable = () => { throw new Error("registry unavailable"); };
+
+    const result = await generateMateriaRolePrompt(fakePi(), ctx, { brief: "writer" }, {
+      profile: { enabled: true, model: "override-provider/role-model" },
+      generator: async ({ settings }) => {
+        expect(settings.model).toBe(activeModel);
+        return "You are a writer.";
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      warnings: ["Saved generation model is unavailable; using Active Pi Model."],
+      modelResolution: { requestedModel: "override-provider/role-model", effectiveModel: "active-provider/active-model", fallback: true },
+    });
+  });
+
+  test("falls back to Active Pi model for unqualified saved roleGeneration model without throwing", async () => {
+    const result = await generateMateriaRolePrompt(fakePi(), fakeCtx(), { brief: "writer" }, {
+      profile: { enabled: true, model: "role-model" },
+      generator: async ({ settings }) => {
+        expect(settings.model).toBe(activeModel);
+        return "You are a writer.";
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      warnings: ["Saved generation model is unavailable; using Active Pi Model."],
+      modelResolution: { requestedModel: "role-model", effectiveModel: "active-provider/active-model", fallback: true },
+    });
   });
 
   test("does not mutate the active WebUI session branch", async () => {

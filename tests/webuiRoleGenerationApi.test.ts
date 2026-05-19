@@ -132,6 +132,31 @@ describe("POST /api/generate/materia-role", () => {
     expect(calls).toBe(0);
   });
 
+  test("propagates generation warnings and model resolution metadata", async () => {
+    const baseUrl = await startTestServer(async () => ({
+      ok: true,
+      prompt: "Write carefully.",
+      isolated: true,
+      model: "active/provider",
+      warnings: ["Saved generation model is unavailable; using Active Pi Model."],
+      modelResolution: { requestedModel: "stale/model", effectiveModel: "active/provider", fallback: true, warnings: ["Saved generation model is unavailable; using Active Pi Model."] },
+    }));
+
+    const response = await fetch(`${baseUrl}/api/generate/materia-role`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ brief: "writer role" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      prompt: "Write carefully.",
+      warnings: ["Saved generation model is unavailable; using Active Pi Model."],
+      modelResolution: { requestedModel: "stale/model", effectiveModel: "active/provider", fallback: true },
+    });
+  });
+
   test("maps role generation service failures to JSON error responses", async () => {
     const baseUrl = await startTestServer(async () => ({ ok: false, code: "generation_failed", error: "model unavailable" }));
 

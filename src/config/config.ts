@@ -114,6 +114,32 @@ export async function clearStaleDefaultLoadoutPreference(cwd: string, configured
   return true;
 }
 
+export function normalizeRoleGenerationModelPreference(model: string | null | undefined): string | null {
+  const trimmed = typeof model === "string" ? model.trim() : null;
+  return trimmed || null;
+}
+
+export function isProviderQualifiedModelId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+export async function getRoleGenerationModelPreference(): Promise<string | null> {
+  return normalizeRoleGenerationModelPreference((await loadProfileConfig()).roleGeneration?.model);
+}
+
+export async function saveRoleGenerationModelPreference(model: string | null): Promise<string | null> {
+  const nextModel = normalizeRoleGenerationModelPreference(model);
+  if (nextModel && !isProviderQualifiedModelId(nextModel)) {
+    throw new Error('Invalid role-generation model. Expected a provider-qualified model id such as "provider/model".');
+  }
+  const profile = await loadProfileConfig();
+  const roleGeneration = { ...(profile.roleGeneration ?? defaultRoleGenerationProfileConfig()) };
+  if (nextModel) roleGeneration.model = nextModel;
+  else delete roleGeneration.model;
+  await writeProfileConfig({ ...profile, roleGeneration });
+  return nextModel;
+}
+
 export async function saveMateriaConfigPatch(cwd: string, patch: MateriaConfigPatch, options: { target?: MateriaSaveTarget; configuredPath?: string } = {}): Promise<string> {
   rejectObsoleteConfigFields(patch as Record<string, unknown>, "patch");
   const target = options.target ?? "user";

@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, ty
 import { isGeneratorMateria } from '../../../../../../graph/generator.js';
 import type { MateriaConfig } from '../../../loadoutModel.js';
 import { materiaSavedEventName } from '../../constants.js';
-import { generateMateriaRole, saveConfig } from '../../api/index.js';
+import { generateMateriaRole, getRoleGenerationPreference, saveConfig, saveRoleGenerationPreference } from '../../api/index.js';
+import { activeModelOptionLabel } from '../../constants.js';
 import { useModelCatalog } from '../../hooks/useModelCatalog.js';
-import type { LoadoutSourceScope, MateriaFormState, MateriaSavedEventDetail, MateriaTabId } from '../../types.js';
+import type { LoadoutSourceScope, MateriaFormState, MateriaSavedEventDetail, MateriaTabId, RoleGenerationModelResolution, SelectOption } from '../../types.js';
 import {
   buildMateriaPatch,
   canonicalWorkItemsGeneratorConfig,
@@ -72,7 +73,22 @@ export interface MateriaEditorController {
     setRoleBrief: Dispatch<SetStateAction<string>>;
     generatedRolePrompt: string;
     roleGenerationError: string;
+    roleGenerationWarnings: string[];
+    roleGenerationModelResolution: RoleGenerationModelResolution | null;
     roleGenerating: boolean;
+    generationModel: {
+      selectedModel: string;
+      persistedModel: string | null;
+      stalePreferenceWarning: string;
+      availableOptions: SelectOption[];
+      activeModelLabel: string;
+      activeModelDetail: string;
+      preferenceStatus: 'idle' | 'loading' | 'ready' | 'error';
+      preferenceError: string;
+      saving: boolean;
+      saveError: string;
+      changeModel: (model: string) => Promise<void>;
+    };
     generateRolePrompt: () => Promise<void>;
     applyGeneratedRolePrompt: () => void;
     discardGeneratedRolePrompt: () => void;
@@ -92,7 +108,15 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
   const [roleBrief, setRoleBrief] = useState('');
   const [generatedRolePrompt, setGeneratedRolePrompt] = useState('');
   const [roleGenerationError, setRoleGenerationError] = useState('');
+  const [roleGenerationWarnings, setRoleGenerationWarnings] = useState<string[]>([]);
+  const [roleGenerationModelResolution, setRoleGenerationModelResolution] = useState<RoleGenerationModelResolution | null>(null);
   const [roleGenerating, setRoleGenerating] = useState(false);
+  const [generationPreferenceStatus, setGenerationPreferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [persistedGenerationModel, setPersistedGenerationModel] = useState<string | null>(null);
+  const [generationPreferenceError, setGenerationPreferenceError] = useState('');
+  const [generationModelSaving, setGenerationModelSaving] = useState(false);
+  const [generationModelSaveError, setGenerationModelSaveError] = useState('');
+  const roleGenerationPreferenceRequestedRef = useRef(false);
   const [pendingReloadSelection, setPendingReloadSelection] = useState<{ id: string; deletedSource: LoadoutSourceScope | undefined } | null>(null);
 
   useEffect(() => {
@@ -113,6 +137,27 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [materiaColorOpen]);
+
+  useEffect(() => {
+    if (selectedTab !== 'materia-editor' || roleGenerationPreferenceRequestedRef.current) return;
+    roleGenerationPreferenceRequestedRef.current = true;
+    let cancelled = false;
+    setGenerationPreferenceStatus('loading');
+    setGenerationPreferenceError('');
+    getRoleGenerationPreference().then(({ response, body }) => {
+      if (cancelled) return;
+      const errorMessage = typeof body.error === 'string' ? body.error : body.error?.message;
+      if (!response.ok || body.ok === false) throw new Error(errorMessage ?? 'Role-generation preference request failed.');
+      setPersistedGenerationModel(typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null);
+      setGenerationPreferenceStatus('ready');
+    }).catch((error) => {
+      if (cancelled) return;
+      setPersistedGenerationModel(null);
+      setGenerationPreferenceStatus('error');
+      setGenerationPreferenceError(error instanceof Error ? error.message : String(error));
+    });
+    return () => { cancelled = true; };
+  }, [selectedTab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,6 +187,29 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
   const activeModelDescription = modelCatalog.activeModel?.label ?? modelCatalog.activeModelValue;
   const selectedModel = selectedCatalogModel(modelCatalog, materiaForm.model);
   const thinkingLevelsForSelection = selectedModel?.supportedThinkingLevels ?? [];
+  const activeGenerationModelLabel = modelCatalog.activeModel?.label ?? activeModelOptionLabel;
+  const activeGenerationModelDetail = modelCatalog.activeModelValue ?? modelCatalog.activeModel?.value ?? '';
+  const generationModelOptions = useMemo<SelectOption[]>(() => {
+    const options: SelectOption[] = [{ value: '', label: activeGenerationModelDetail ? `${activeModelOptionLabel} (${activeGenerationModelDetail})` : activeModelOptionLabel }];
+    const seen = new Set<string>();
+    for (const model of modelCatalog.models) {
+      if (!model.value || seen.has(model.value)) continue;
+      seen.add(model.value);
+      options.push({ value: model.value, label: model.label });
+    }
+    const savedModel = persistedGenerationModel?.trim();
+    if (savedModel && !seen.has(savedModel) && modelCatalogStatus !== 'ready') {
+      options.push({ value: savedModel, label: `${savedModel} (saved preference)`, unavailable: true });
+    }
+    return options;
+  }, [activeGenerationModelDetail, modelCatalog.models, modelCatalogStatus, persistedGenerationModel]);
+  const savedGenerationModelAvailable = Boolean(persistedGenerationModel && modelCatalog.models.some((model) => model.value === persistedGenerationModel));
+  const staleGenerationModelWarning = persistedGenerationModel && modelCatalogStatus === 'ready' && !savedGenerationModelAvailable
+    ? 'Saved generation model is unavailable; using Active Pi Model.'
+    : '';
+  const selectedGenerationModel = persistedGenerationModel
+    ? (modelCatalogStatus === 'ready' ? (savedGenerationModelAvailable ? persistedGenerationModel : '') : persistedGenerationModel)
+    : '';
 
   useEffect(() => {
     if (!pendingReloadSelection) return;
@@ -232,22 +300,53 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
     setStatus(`Duplicated ${id} as ${nextForm.name}. Save the staged form to create it.`);
   }
 
+  async function changeGenerationModel(model: string) {
+    const nextModel = model.trim() || null;
+    if (generationModelSaving) return;
+    setGenerationModelSaving(true);
+    setGenerationModelSaveError('');
+    try {
+      const { response, body } = await saveRoleGenerationPreference({ model: nextModel });
+      if (!response.ok || body.ok === false) throw new Error(responseError(body, 'Role-generation model preference save failed'));
+      const savedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
+      setPersistedGenerationModel(savedModel);
+      setGenerationPreferenceStatus('ready');
+      setGenerationPreferenceError('');
+      setStatus(savedModel ? `Saved prompt-generation model preference: ${savedModel}.` : 'Prompt generation will use the Active Pi Model.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setGenerationModelSaveError(message);
+      setStatus(`Prompt-generation model preference save failed: ${message}`);
+    } finally {
+      setGenerationModelSaving(false);
+    }
+  }
+
   async function generateRolePrompt() {
     const brief = roleBrief.trim();
     if (!brief) {
       setRoleGenerationError('Describe the desired role before generating a prompt.');
       return;
     }
+    if (generationModelSaving) {
+      setRoleGenerationError('Wait for the prompt-generation model preference to finish saving before generating.');
+      return;
+    }
     setRoleGenerating(true);
     setRoleGenerationError('');
+    setRoleGenerationWarnings([]);
+    setRoleGenerationModelResolution(null);
     setStatus('Generating Materia role prompt preview…');
     try {
       const generates = materiaForm.generator ? canonicalWorkItemsGeneratorConfig() : null;
       const { response, body } = await generateMateriaRole(brief, generates);
       const errorMessage = typeof body.error === 'string' ? body.error : body.error?.message;
       if (!response.ok || body.ok === false || typeof body.prompt !== 'string') throw new Error(errorMessage ?? 'Materia role generation failed.');
+      const warnings = Array.isArray(body.warnings) ? body.warnings.filter((warning): warning is string => typeof warning === 'string' && Boolean(warning.trim())) : [];
       setGeneratedRolePrompt(body.prompt);
-      setStatus('Generated role prompt preview. Review it before applying.');
+      setRoleGenerationWarnings(warnings);
+      setRoleGenerationModelResolution(body.modelResolution ?? null);
+      setStatus(warnings.length ? `Generated role prompt preview with warning: ${warnings.join(' ')}` : 'Generated role prompt preview. Review it before applying.');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRoleGenerationError(message);
@@ -260,6 +359,8 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
   function discardGeneratedRolePrompt() {
     setGeneratedRolePrompt('');
     setRoleGenerationError('');
+    setRoleGenerationWarnings([]);
+    setRoleGenerationModelResolution(null);
     setStatus('Discarded generated role prompt preview.');
   }
 
@@ -268,6 +369,8 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
     setMateriaForm((current) => ({ ...current, prompt: generatedRolePrompt }));
     setGeneratedRolePrompt('');
     setRoleGenerationError('');
+    setRoleGenerationWarnings([]);
+    setRoleGenerationModelResolution(null);
     setStatus('Applied generated role prompt to the form. Save when ready.');
   }
 
@@ -363,7 +466,22 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
       setRoleBrief,
       generatedRolePrompt,
       roleGenerationError,
+      roleGenerationWarnings,
+      roleGenerationModelResolution,
       roleGenerating,
+      generationModel: {
+        selectedModel: selectedGenerationModel,
+        persistedModel: persistedGenerationModel,
+        stalePreferenceWarning: staleGenerationModelWarning,
+        availableOptions: generationModelOptions,
+        activeModelLabel: activeGenerationModelLabel,
+        activeModelDetail: activeGenerationModelDetail,
+        preferenceStatus: generationPreferenceStatus,
+        preferenceError: generationPreferenceError,
+        saving: generationModelSaving,
+        saveError: generationModelSaveError,
+        changeModel: changeGenerationModel,
+      },
       generateRolePrompt,
       applyGeneratedRolePrompt,
       discardGeneratedRolePrompt,

@@ -6,6 +6,8 @@ import type {
   GeneratedListOutputConfig,
   ModelCatalogResponse,
   MonitorSnapshot,
+  RoleGenerationPreferenceResponse,
+  RoleGenerationPreferenceSavePayload,
   RoleGenerationResponse,
   SaveTarget,
 } from '../types.js';
@@ -63,6 +65,18 @@ export async function getModels(): Promise<ModelCatalogResponse> {
 
 export async function getMonitorSnapshot(): Promise<MonitorSnapshot> {
   return (await fetchJson<MonitorSnapshot>('/api/monitor')).body;
+}
+
+export async function getRoleGenerationPreference(): Promise<ApiResponse<RoleGenerationPreferenceResponse>> {
+  return fetchJson<RoleGenerationPreferenceResponse>('/api/profile/role-generation');
+}
+
+export async function saveRoleGenerationPreference(payload: RoleGenerationPreferenceSavePayload): Promise<ApiResponse<RoleGenerationPreferenceResponse>> {
+  return fetchJson<RoleGenerationPreferenceResponse>('/api/profile/role-generation', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function generateMateriaRole(brief: string, generates: GeneratedListOutputConfig | null): Promise<ApiResponse<RoleGenerationResponse>> {

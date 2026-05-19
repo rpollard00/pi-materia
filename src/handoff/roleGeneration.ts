@@ -13,8 +13,15 @@ export interface MateriaRolePromptGenerationRequest {
   generates?: MateriaGeneratorConfig | null;
 }
 
+export interface MateriaRoleGenerationModelResolution {
+  requestedModel: string | null;
+  effectiveModel: string | null;
+  fallback: boolean;
+  warnings: string[];
+}
+
 export type MateriaRolePromptGenerationResult =
-  | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true }
+  | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true; warnings?: string[]; modelResolution: MateriaRoleGenerationModelResolution }
   | { ok: false; error: string; code: "invalid_brief" | "disabled" | "generation_failed" };
 
 export interface MateriaRolePromptGenerationSettings {
@@ -23,6 +30,8 @@ export interface MateriaRolePromptGenerationSettings {
   provider?: string;
   api?: string;
   thinking?: ThinkingLevel;
+  warnings?: string[];
+  modelResolution: MateriaRoleGenerationModelResolution;
 }
 
 export interface MateriaRolePromptGeneratorInput {
@@ -55,7 +64,7 @@ export async function generateMateriaRolePrompt(
   if (profile.enabled === false) return { ok: false, code: "disabled", error: "Materia role prompt generation is disabled in the profile config." };
 
   try {
-    const settings = resolveRoleGenerationSettings(pi, ctx, profile);
+    const settings = await resolveRoleGenerationSettings(pi, ctx, profile);
     const prompt = (await (options.generator ?? defaultMateriaRolePromptGenerator)({
       brief: validation.brief,
       generates: request.generates ?? null,
@@ -72,6 +81,8 @@ export async function generateMateriaRolePrompt(
       provider: settings.provider,
       api: settings.api,
       thinking: settings.thinking,
+      warnings: settings.warnings,
+      modelResolution: settings.modelResolution,
     };
   } catch (error) {
     return { ok: false, code: "generation_failed", error: error instanceof Error ? error.message : String(error) };
@@ -86,20 +97,66 @@ export function validateMateriaRoleBrief(brief: unknown): { ok: true; brief: str
   return { ok: true, brief: trimmed };
 }
 
-export function resolveRoleGenerationSettings(
+export async function resolveRoleGenerationSettings(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   profile: MateriaRoleGenerationProfileConfig,
-): MateriaRolePromptGenerationSettings {
+): Promise<MateriaRolePromptGenerationSettings> {
   const active = getActiveModelInfo(pi, ctx);
-  const model = resolveRoleGenerationModel(ctx, profile) ?? active.model;
+  const choice = await resolveRoleGenerationModelChoice(ctx, profile, active.model);
+  const model = choice.model;
   const thinking = normalizeRoleGenerationThinking(profile.thinking) ?? active.thinking;
   return {
     model,
     modelLabel: model ? `${model.provider}/${model.id}` : active.modelId,
-    provider: model?.provider ?? profile.provider ?? active.provider,
+    provider: model?.provider ?? active.provider,
     api: profile.api ?? model?.api ?? active.api,
     thinking,
+    warnings: choice.resolution.warnings,
+    modelResolution: choice.resolution,
+  };
+}
+
+export interface ResolvedRoleGenerationModelChoice {
+  model?: Model<Api>;
+  resolution: MateriaRoleGenerationModelResolution;
+}
+
+export async function resolveRoleGenerationModelChoice(
+  ctx: ExtensionContext,
+  profile: MateriaRoleGenerationProfileConfig,
+  activeModel: Model<Api> | undefined,
+): Promise<ResolvedRoleGenerationModelChoice> {
+  const requestedModel = profile.model?.trim() || null;
+  const activeLabel = activeModel ? `${activeModel.provider}/${activeModel.id}` : null;
+  const fallback = (warnings: string[]): ResolvedRoleGenerationModelChoice => ({
+    model: activeModel,
+    resolution: { requestedModel, effectiveModel: activeLabel, fallback: requestedModel !== null, warnings },
+  });
+
+  if (!requestedModel) return fallback([]);
+
+  const unavailableWarning = 'Saved generation model is unavailable; using Active Pi Model.';
+  const qualified = parseProviderAndModel(requestedModel);
+  if (!qualified) return fallback([unavailableWarning]);
+
+  let available: Model<Api>[] | undefined;
+  try {
+    const getAvailable = (ctx.modelRegistry as unknown as { getAvailable?: () => Model<Api>[] | Promise<Model<Api>[]> } | undefined)?.getAvailable;
+    if (typeof getAvailable !== "function") return fallback([unavailableWarning]);
+    const result = await getAvailable.call(ctx.modelRegistry);
+    if (!Array.isArray(result)) return fallback([unavailableWarning]);
+    available = result;
+  } catch {
+    return fallback([unavailableWarning]);
+  }
+
+  const matches = available.filter((model) => model.provider === qualified.provider && model.id === qualified.modelId);
+  if (matches.length !== 1) return fallback([unavailableWarning]);
+  const model = matches[0];
+  return {
+    model,
+    resolution: { requestedModel, effectiveModel: `${model.provider}/${model.id}`, fallback: false, warnings: [] },
   };
 }
 
@@ -156,21 +213,6 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
     legacyNote,
     "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt must use the canonical handoff envelope and put generated units of work in workItems, not in reserved evaluator/route fields or legacy placement-specific outputs such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
   ].filter(Boolean).join("\n");
-}
-
-function resolveRoleGenerationModel(ctx: ExtensionContext, profile: MateriaRoleGenerationProfileConfig): Model<Api> | undefined {
-  const modelText = profile.model?.trim();
-  const providerText = profile.provider?.trim();
-  if (!modelText) return undefined;
-  const registry = ctx.modelRegistry;
-  const qualified = parseProviderAndModel(modelText);
-  const provider = qualified?.provider ?? providerText;
-  const modelId = qualified?.modelId ?? modelText;
-  if (provider) return registry.find(provider, modelId) as Model<Api> | undefined;
-  const matches = registry.getAll().filter((model) => model.id === modelId || `${model.provider}/${model.id}` === modelText);
-  if (matches.length === 1) return matches[0] as Model<Api>;
-  if (matches.length > 1) throw new Error(`Role generation model "${modelText}" is ambiguous; configure roleGeneration.provider or use provider/modelId.`);
-  throw new Error(`Unknown role generation model "${modelText}".`);
 }
 
 function parseProviderAndModel(value: string): { provider: string; modelId: string } | undefined {

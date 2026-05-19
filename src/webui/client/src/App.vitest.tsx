@@ -133,6 +133,19 @@ function openLoadoutActions(name: string) {
   fireEvent.click(within(loadoutCard(name)).getByLabelText('Loadout actions'));
 }
 
+async function clickMateriaSelectorRow(id: string) {
+  await screen.findByRole('complementary', { name: 'Materia selector' });
+  const rowButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.materia-selector-row-select'))
+    .find((button) => button.querySelector('.materia-selector-row-id')?.textContent === id);
+  if (!rowButton) throw new Error(`Missing materia selector row ${id}`);
+  fireEvent.click(rowButton);
+}
+
+async function materiaSelectorIds() {
+  await screen.findByRole('complementary', { name: 'Materia selector' });
+  return Array.from(document.querySelectorAll<HTMLElement>('.materia-selector-row-id')).map((element) => element.textContent ?? '');
+}
+
 async function findToastAlert() {
   const alerts = await screen.findAllByRole('alert');
   return alerts.find((alert) => alert.getAttribute('data-toast-variant')) ?? alerts[0];
@@ -2546,7 +2559,8 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/config' && (call[1] as RequestInit | undefined)?.method !== 'POST').length).toBeGreaterThanOrEqual(2));
     expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
-    expect(Array.from((screen.getByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value)).toContain('Critique');
+    expect(await materiaSelectorIds()).toContain('Critique');
+    expect(screen.queryByTestId('edit-materia-select')).toBeNull();
     await openTab('Loadout');
     expect(await screen.findByTestId('palette-Critique')).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
@@ -2576,7 +2590,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await clickMateriaSelectorRow('Build');
     const modelSelect = screen.getByTestId('materia-model') as HTMLSelectElement;
     await waitFor(() => expect(Array.from(modelSelect.options).map((option) => option.value)).toContain('current/missing-model'));
     expect(Array.from(modelSelect.options).map((option) => option.value)).toEqual(['', 'openai/gpt-review', 'anthropic/haiku', 'current/missing-model']);
@@ -2618,7 +2632,7 @@ describe('Materia loadout grid editor', () => {
     const modelSelect = await screen.findByTestId('materia-model') as HTMLSelectElement;
     const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
     await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'low', 'medium']));
-    fireEvent.change(screen.getByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await clickMateriaSelectorRow('Build');
     await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'high', 'xhigh']));
     expect(thinkingSelect.value).toBe('xhigh');
 
@@ -2643,7 +2657,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
+    await clickMateriaSelectorRow('planner');
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
     expect(screen.queryByTestId('materia-generated-output')).toBeNull();
     expect(screen.queryByText(/Generated List/)).toBeNull();
@@ -2656,7 +2670,7 @@ describe('Materia loadout grid editor', () => {
     expect(body.config.materia.planner.generator).toBe(true);
     expect(body.config.materia.planner.generates).toBeNull();
 
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'interactivePlan' } });
+    await clickMateriaSelectorRow('interactivePlan');
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitForConfigPostCount(fetchMock, 2);
@@ -2664,7 +2678,7 @@ describe('Materia loadout grid editor', () => {
     expect(body.config.materia.interactivePlan.generator).toBe(true);
     expect(body.config.materia.interactivePlan.generates).toBeNull();
 
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await clickMateriaSelectorRow('Build');
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', false);
     fireEvent.click(screen.getByTestId('materia-generator'));
     expect(screen.getByTestId('materia-generator')).toHaveProperty('checked', true);
@@ -2675,7 +2689,7 @@ describe('Materia loadout grid editor', () => {
     expect(body.config.materia.Build.generator).toBe(true);
     expect(body.config.materia.Build.generates).toBeNull();
 
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
+    await clickMateriaSelectorRow('planner');
     fireEvent.click(screen.getByTestId('materia-generator'));
     fireEvent.click(screen.getByTestId('save-materia-form'));
     await waitForConfigPostCount(fetchMock, 4);
@@ -2744,7 +2758,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'planner' } });
+    await clickMateriaSelectorRow('planner');
     fireEvent.change(screen.getByTestId('role-generation-brief'), { target: { value: 'Planner prompt' } });
     fireEvent.click(screen.getByTestId('generate-role-prompt'));
 
@@ -2872,9 +2886,9 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    const select = await screen.findByTestId('edit-materia-select') as HTMLSelectElement;
-    const initialOptions = Array.from(select.options).map((option) => option.value);
-    expect(initialOptions).toEqual(['', 'Build', 'DetachedMateria', 'PromptDef', 'RunTests']);
+    const initialOptions = await materiaSelectorIds();
+    expect(screen.queryByTestId('edit-materia-select')).toBeNull();
+    expect(initialOptions).toEqual(['Build', 'DetachedMateria', 'PromptDef', 'RunTests']);
     expect(initialOptions).not.toContain('SocketOnly');
     expect(initialOptions).not.toContain('OtherSocket');
 
@@ -2884,7 +2898,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('palette-SocketOnly')).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: /Alternate/ }));
     await openTab('Materia Editor');
-    const afterLoadoutSwitch = Array.from((await screen.findByTestId('edit-materia-select') as HTMLSelectElement).options).map((option) => option.value);
+    const afterLoadoutSwitch = await materiaSelectorIds();
     expect(afterLoadoutSwitch).toEqual(initialOptions);
   });
 
@@ -2906,15 +2920,15 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'RunTests' } });
+    await clickMateriaSelectorRow('RunTests');
     expect(screen.getByTestId('materia-name')).toHaveProperty('value', 'RunTests');
     expect(screen.getByTestId('materia-behavior')).toHaveProperty('value', 'tool');
     expect(screen.getByTestId('materia-utility')).toHaveProperty('value', 'shell');
     expect(screen.getByTestId('materia-command')).toHaveProperty('value', 'npm test');
     expect(screen.getByTestId('materia-params')).toHaveProperty('value', JSON.stringify({ ci: true }, null, 2));
     expect(screen.getByTestId('materia-timeout')).toHaveProperty('value', '90000');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/config', '/api/models']);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(['/api/config', '/api/models', '/api/profile/role-generation']);
   });
 
   it('edits custom tool allowlists distinctly from presets', async () => {
@@ -2928,7 +2942,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Auto-Eval' } });
+    await clickMateriaSelectorRow('Auto-Eval');
     expect(screen.getByTestId('materia-tools')).toHaveProperty('value', 'custom');
     expect(screen.getByTestId('materia-custom-tools-panel').classList.contains('materia-custom-tools')).toBe(true);
     expect(screen.getByTestId('materia-tool-card-grid').classList.contains('materia-tool-card-grid')).toBe(true);
@@ -2954,7 +2968,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await clickMateriaSelectorRow('Build');
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'custom' } });
     fireEvent.change(screen.getByTestId('materia-custom-tools'), { target: { value: 'read, bsh' } });
     expect(screen.getByTestId('materia-tool-registry-status').textContent).toContain('Live Pi tool registry unavailable');
@@ -2986,7 +3000,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await clickMateriaSelectorRow('Build');
     await waitFor(() => expect(screen.getByTestId('materia-tool-extensionTool')).toBeTruthy());
     expect(screen.getByTestId('materia-tool-extensionTool')).toHaveProperty('checked', true);
     expect(screen.getByTestId('materia-tool-extensionTool').closest('.materia-tool-card')?.textContent).toContain('Live Pi tool registered for this session.');
@@ -3011,7 +3025,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await openTab('Materia Editor');
-    fireEvent.change(await screen.findByTestId('edit-materia-select'), { target: { value: 'Build' } });
+    await clickMateriaSelectorRow('Build');
     expect(screen.getByTestId('materia-output-format')).toHaveProperty('value', 'json');
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Build with extra care.' } });
     fireEvent.change(screen.getByTestId('materia-tools'), { target: { value: 'readOnly' } });

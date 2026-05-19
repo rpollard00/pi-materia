@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMateriaWebUiServer, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
-import { clearStaleDefaultLoadoutPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch } from "../config/config.js";
+import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveRoleGenerationModelPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
@@ -139,6 +139,8 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
       setDefaultLoadout: createDefaultLoadoutSetter(ctx, configuredPath),
+      getRoleGenerationPreference: async () => ({ model: await getRoleGenerationModelPreference() }),
+      setRoleGenerationPreference: async (model) => ({ model: await saveRoleGenerationModelPreference(model) }),
       generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
       modelCatalog: createPiModelCatalogSource(ctx, pi),
     },
