@@ -23,24 +23,28 @@ Writes use a temporary file in the same directory followed by rename. This is at
 /materia quest status
 /materia quest add [--loadout <name-or-id>] <prompt>
 /materia quest run [quest-id]
+/materia quest runonce [quest-id]
 /materia quest start [quest-id]
 /materia quest stop
 ```
 
 - `quest` / `quest status` show runner state, the active quest if any, pending counts, recent results, the storage path, and short help.
 - `quest add` appends a pending quest. The first slice derives a concise title from the prompt.
-- `quest run` starts the requested quest, or the next pending quest, once. It does **not** enable future auto-advance.
-- `quest start` enables the runner and starts the requested quest, or the next pending quest. When that quest completes, the runner starts the next pending quest while it remains enabled.
-- `quest stop` disables future auto-advance. It does not abort the currently active cast; use `/materia abort` if you want to stop that cast.
+- `quest run` enables the project-local continuous runner and starts the requested quest, or the next pending quest. While enabled, the runner drains pending quests back-to-back until the queue is empty, an active cast is waiting, a launch fails, or `quest stop` is issued.
+- `quest run` with no pending quest still enables the runner and reports that it is waiting; a later wakeup can start the next pending quest without another `run` command.
+- `quest runonce` starts only the requested quest, or the next pending quest, and leaves the runner enabled/stopped flag unchanged. With no pending quest, it reports that no pending quest is available.
+- `quest start` is a compatibility/legacy alias for `quest run`; it enables the same continuous runner behavior.
+- `quest stop` disables future quest launches. It is graceful: it does not abort or interrupt the currently active cast, and the stop takes effect after that quest records completion or failure.
 
 Examples:
 
 ```text
 /materia quest add Add tests for the parser
 /materia quest add --loadout Full-Auto Implement the CLI help
-/materia quest run
-/materia quest start
-/materia quest stop
+/materia quest run                 # continuous runner; drains pending quests until stopped
+/materia quest runonce             # launch one pending quest only
+/materia quest start               # compatibility alias for continuous run
+/materia quest stop                # stop after the current quest cast settles
 ```
 
 ## Loadout overrides
@@ -49,7 +53,7 @@ Examples:
 
 ## Autonomous loadouts
 
-The runner can only progress autonomously through casts that can finish without mandatory user approval. Loadouts containing multi-turn materia that pause for `/materia continue` will still pause. Use a fully autonomous loadout for unattended quest queues.
+The runner can only progress autonomously through casts that can finish without mandatory user approval. Loadouts containing multi-turn materia that pause for `/materia continue` will still pause inside the active cast for materia/user interaction. Use a fully autonomous loadout for unattended quest queues.
 
 ## Completion, auto-advance, and restart behavior
 
@@ -59,9 +63,11 @@ Quest success is based on cast lifecycle status, not on handoff fields such as `
 - failed or aborted casts mark quests `failed`;
 - stale running quests discovered on session start are conservatively marked `blocked`.
 
-When the runner is enabled and no cast/quest is active, pi-materia auto-starts the next pending quest after a quest-launched cast settles. If `/materia quest stop` was run while a quest cast was active, that cast may still complete and record its result, but no next quest starts.
+When the continuous runner is enabled and no cast/quest is active, pi-materia auto-starts the next pending quest after a quest-launched cast settles. The runner is event-driven and project-local: it wakes from quest commands and quest-cast settlement; it is not a daemon and it does not add inter-process locking beyond the single-writer board convention above. If no pending quest exists when `quest run` is issued, the runner remains enabled and waiting instead of stopping.
 
-On Pi session start, pi-materia reconciles stale running quests and warns the user instead of spawning surprise work. Check `/materia quest status` and explicitly run or start the runner again when ready.
+If `/materia quest stop` was run while a quest cast was active, that cast may still complete or fail and record its result, but no next quest starts. The current cast is not interrupted by `quest stop`.
+
+On Pi session start, pi-materia reconciles stale running quests and warns the user instead of spawning surprise work. Check `/materia quest status` and explicitly run the runner again when ready; `quest start` is still accepted as a compatibility alias for `quest run`.
 
 ## Verification
 

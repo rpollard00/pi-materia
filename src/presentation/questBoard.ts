@@ -23,7 +23,9 @@ export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
     lines.push("Recent results: none");
   }
 
-  lines.push("Help: /materia quest add [--loadout <name>] <prompt> | run [id] | start [id] | stop | status");
+  lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | run [id] | runonce [id] | start [id] | stop | status");
+  lines.push("Run: run enables continuous back-to-back processing; runonce launches one pending quest only; start is a compatibility alias for run.");
+  lines.push("Stop: stop disables future auto-advance without aborting the active cast.");
   return lines;
 }
 
@@ -36,13 +38,31 @@ export function renderQuestAdded(quest: Quest, boardPath: string): string[] {
   ];
 }
 
-export function renderQuestStarted(result: QuestStartResult, mode: "run" | "start"): string[] {
+export type QuestStartRenderMode = "run" | "runonce" | "start" | "auto-advance";
+
+export function renderQuestStarted(result: QuestStartResult, mode: QuestStartRenderMode): string[] {
+  const action = questStartAction(mode);
   return [
-    `${mode === "start" ? "Started quest runner and launched" : "Launched"} quest ${result.quest.id}: ${result.quest.title}`,
+    `${action} quest ${result.quest.id}: ${result.quest.title}`,
     `Cast: ${result.state.castId}`,
     `Runner: ${result.board.runner.enabled ? "enabled" : "stopped"}`,
+    `Mode: ${questStartModeDescription(mode)}`,
     ...(result.effectiveLoadout ? [`Loadout: ${result.effectiveLoadout.effectiveLoadoutName}${result.effectiveLoadout.effectiveLoadoutId ? ` (${result.effectiveLoadout.effectiveLoadoutId})` : ""}`] : []),
   ];
+}
+
+function questStartAction(mode: QuestStartRenderMode): string {
+  if (mode === "runonce") return "Launched";
+  if (mode === "start") return "Started continuous quest runner (start alias) and launched";
+  if (mode === "auto-advance") return "Auto-advanced continuous quest runner and launched";
+  return "Started continuous quest runner and launched";
+}
+
+function questStartModeDescription(mode: QuestStartRenderMode): string {
+  if (mode === "runonce") return "one-shot runonce; runner state unchanged";
+  if (mode === "start") return "continuous run via start compatibility alias; auto-advances while enabled";
+  if (mode === "auto-advance") return "continuous auto-advance; use /materia quest stop to prevent future launches";
+  return "continuous run; auto-advances while enabled until /materia quest stop";
 }
 
 export function renderQuestStopped(board: QuestBoard): string[] {

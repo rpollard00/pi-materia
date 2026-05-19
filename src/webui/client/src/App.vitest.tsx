@@ -2784,6 +2784,110 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('materia-prompt')).toHaveProperty('value', 'Manual prompt');
   });
 
+  it('defaults the prompt-generation model picker to Active Pi Model and lists available models', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [{ value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: [] }] }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: null }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const select = await screen.findByTestId('generation-model-select') as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe(''));
+    expect(within(select).getByRole('option', { name: 'Active Pi Model (openai/gpt-active)' })).toBeTruthy();
+    expect(within(select).getByRole('option', { name: 'GPT Alt' })).toHaveProperty('value', 'openai/gpt-alt');
+  });
+
+  it('persists selected prompt-generation models through the profile preference API', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/profile/role-generation' && init?.method === 'PATCH') return new Response(JSON.stringify({ ok: true, model: 'openai/gpt-alt' }));
+      if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [{ value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: [] }] }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: null }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const select = await screen.findByTestId('generation-model-select') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'openai/gpt-alt' } });
+
+    await waitFor(() => expect(select.value).toBe('openai/gpt-alt'));
+    expect(fetchMock).toHaveBeenCalledWith('/api/profile/role-generation', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ model: 'openai/gpt-alt' }),
+    }));
+  });
+
+  it('shows stale prompt-generation model warnings without clearing the saved preference', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [{ value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: [] }] }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: 'openai/missing' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const select = await screen.findByTestId('generation-model-select') as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe(''));
+    expect((await screen.findByTestId('generation-model-stale-warning')).textContent).toContain('Saved generation model is unavailable');
+    expect(fetchMock.mock.calls.some((call) => call[0] === '/api/profile/role-generation' && (call[1] as RequestInit | undefined)?.method === 'PATCH')).toBe(false);
+  });
+
+  it('surfaces prompt-generation model save failures without hiding the brief', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/profile/role-generation' && init?.method === 'PATCH') return new Response(JSON.stringify({ ok: false, error: { message: 'profile disk unavailable' } }), { status: 500 });
+      if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [{ value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: [] }] }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: null }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const brief = await screen.findByTestId('role-generation-brief');
+    fireEvent.change(brief, { target: { value: 'A careful reviewer materia' } });
+    fireEvent.change(screen.getByTestId('generation-model-select'), { target: { value: 'openai/gpt-alt' } });
+
+    expect((await screen.findByTestId('generation-model-save-error')).textContent).toContain('profile disk unavailable');
+    expect(screen.getByTestId('role-generation-brief')).toHaveProperty('value', 'A careful reviewer materia');
+  });
+
+  it('displays role generation fallback warnings and effective model metadata with generated output', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/generate/materia-role') {
+        expect(JSON.parse(String(init?.body)).brief).toBe('A careful reviewer materia');
+        return new Response(JSON.stringify({
+          ok: true,
+          prompt: 'Generated fallback prompt',
+          warnings: ['Saved generation model is unavailable; using Active Pi Model.'],
+          modelResolution: { requestedModel: 'openai/missing', effectiveModel: 'openai/gpt-active', fallback: true, warnings: ['Saved generation model is unavailable; using Active Pi Model.'] },
+        }));
+      }
+      if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [{ value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: [] }] }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: 'openai/missing' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    fireEvent.change(await screen.findByTestId('role-generation-brief'), { target: { value: 'A careful reviewer materia' } });
+    fireEvent.click(screen.getByTestId('generate-role-prompt'));
+
+    expect((await screen.findByTestId('role-generation-preview')).textContent).toContain('Generated fallback prompt');
+    expect(screen.getByTestId('role-generation-warning').textContent).toContain('Saved generation model is unavailable');
+    expect(screen.getByTestId('role-generation-effective-model').textContent).toContain('openai/gpt-active');
+  });
+
   it('creates prompt materia in current pipeline configs without materializing loadouts', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));

@@ -65,6 +65,7 @@ WebUI implementation inspection notes for future `/materia ui` work live in [doc
 /materia link [--from <cast-id>] <target> [<target> ...] -- <prompt>
 /materia quest add [--loadout <name-or-id>] <prompt>
 /materia quest run [quest-id]
+/materia quest runonce [quest-id]
 /materia quest start [quest-id]
 /materia quest stop
 /materia recast [cast-id]
@@ -90,7 +91,7 @@ Illustrative linked-run examples:
 
 Unprefixed targets are allowed only when they do not collide with another materia/loadout name; use `materia:<name>` or `loadout:<name>` to disambiguate. See [link semantics](docs/link-semantics.md) for the v1 contract, detailed examples, troubleshooting, ambiguity rules, and non-goals.
 
-Use `/materia quest` to manage a project-local quest board at `.pi/pi-materia/quest-board.json`. `quest run` starts one pending quest, while `quest start` enables auto-advance through pending quests until `quest stop` disables future starts. Per-quest `--loadout` overrides apply only to the cast being launched and do not mutate the active loadout. See [Quest board](docs/quest-board.md) for storage, autonomy, single-writer, and restart behavior.
+Use `/materia quest` to manage a project-local quest board at `.pi/pi-materia/quest-board.json`. `quest run` starts continuous back-to-back quest processing and keeps the project-local runner enabled until `quest stop`; `quest runonce` launches only one pending quest without changing the runner state, and `quest start` remains a compatibility alias for continuous `run`. Per-quest `--loadout` overrides apply only to the cast being launched and do not mutate the active loadout. See [Quest board](docs/quest-board.md) for storage, autonomy, graceful stop-after-current behavior, single-writer, and restart behavior.
 
 Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current socket. pi-materia also performs bounded same-socket automatic recovery for safe agent-turn failures before a socket has accepted output, applied assignments, advanced routes, or started another socket. Context-window/token-limit failures compact first, then retry the same active prompt. Other safe provider/runtime turn failures may retry by resending the same active prompt without compaction. Plain transient WebSocket transport failures preserve the awaiting state instead of immediately resending, so the current Pi turn can settle or be manually recast if needed. Utility failures and post-advance failures are not automatically retried.
 
@@ -100,7 +101,9 @@ Use `/materia ui` to explicitly start or reuse a background WebUI server scoped 
 
 In the WebUI loadout editor, create generator-driven loops by selecting the sockets that form a cycle with shift-click or a drag-selection box, then clicking **Create Loop**. The selected cycle must have exactly one inbound edge from a materia marked `generator: true`; generator sockets parse JSON and produce canonical `workItems`, including when one generator feeds another generator. Structured loops use normal edges for same-item flow, `advance` for cursor advancement/exhaustion detection, `loops.<id>.exits` for post-exhaustion socket routes, and terminal `end` when no exit route matches. See [Graph semantics](docs/graph-semantics.md#generator-and-loop-consumer-regions), [Loop semantics](docs/loop-semantics.md) for the configuration contract, executable loop-exit examples, and current iterator and output notes.
 
-In the WebUI materia editor, the **Generate role prompt from brief** panel can draft prompt instructions for a prompt materia. Enter a short description of the role, click **Generate**, review the generated preview, then either **Regenerate**, **Discard**, or explicitly **Apply to prompt field**. Generation calls `POST /api/generate/materia-role` from the session-scoped WebUI server and uses an isolated in-memory context, so it does not append to or mutate the active Pi chat. Existing prompt text is not overwritten until you choose Apply.
+In the WebUI materia editor, the **Generate role prompt from brief** panel can draft prompt instructions for a prompt materia. Enter a short description of the role, choose the prompt-generation model, click **Generate**, review the generated preview, then either **Regenerate**, **Discard**, or explicitly **Apply to prompt field**. Generation calls `POST /api/generate/materia-role` from the session-scoped WebUI server and uses an isolated in-memory context, so it does not append to or mutate the active Pi chat. Existing prompt text is not overwritten until you choose Apply.
+
+The prompt-generation model picker is separate from the materia runtime **Model** dropdown. Its default is **Active Pi Model**, which stores no `roleGeneration.model` preference and uses the current Pi session model. Choosing another available provider-qualified model persists that user preference in `~/.config/pi/pi-materia/config.json` under `roleGeneration.model` (or in `PI_MATERIA_PROFILE_DIR/config.json` when that override is set). If the saved generation model is unavailable in a later session, the WebUI shows a non-blocking warning and generation falls back to **Active Pi Model** at runtime without deleting the saved preference.
 
 The same editor uses dropdowns for agent materia **Model** and **Thinking**. **Active Pi Model** saves no `model` override and uses the current Pi session model; **Active Pi Thinking** saves no `thinking` override and uses the current Pi thinking setting. Other model choices come from Pi's configured and credentialed model registry for the launching session. Thinking choices are derived from the selected model, or from the active Pi model when **Active Pi Model** is selected. When editing an existing materia whose saved model is no longer available, the dropdown includes only that saved value with an unavailable label so it can be preserved by saving unchanged; unavailable models are not offered as general choices for new selections. Existing saved thinking values that are not supported by the selected model can likewise be preserved only while editing that unchanged saved value.
 
@@ -124,7 +127,7 @@ pi-materia layers config from lowest to highest precedence:
 4. `MATERIA_CONFIG=/path/to/config.json`
 5. `--materia-config /path/to/config.json`
 
-The user profile directory and `~/.config/pi/pi-materia/config.json` are created on demand for WebUI/profile preferences such as `webui.autoOpenBrowser`, `webui.preferredPort`, and `defaultSaveTarget`. Set `PI_MATERIA_PROFILE_DIR` to override the profile directory. Optional `roleGeneration` preferences are normalized safely before use: `enabled` (default `true`), `model`, `provider`, `api`, `thinking`, `extraInstructions`, and `useReadOnlyProjectContext` (default `false`). Invalid role-generation fields are ignored with a warning. Omit `model`/`provider`/`api`/`thinking` to use Pi's active generation settings; set them to make isolated Materia role prompt generation use a specific profile override.
+The user profile directory and `~/.config/pi/pi-materia/config.json` are created on demand for WebUI/profile preferences such as `webui.autoOpenBrowser`, `webui.preferredPort`, `defaultSaveTarget`, and the prompt-generation model picker. Set `PI_MATERIA_PROFILE_DIR` to override the profile directory. Optional `roleGeneration` preferences are normalized safely before use: `enabled` (default `true`), `model`, `thinking`, `extraInstructions`, and `useReadOnlyProjectContext` (default `false`). Invalid role-generation fields are ignored with a warning. Omit `roleGeneration.model` to use **Active Pi Model** for isolated Materia role prompt generation. When present, `roleGeneration.model` should be a provider-qualified model string such as `openai-codex/gpt-5.5`; it is obsolete-safe, so unavailable saved values fall back to **Active Pi Model** at runtime and produce a warning instead of being deleted automatically.
 
 Example profile config (`~/.config/pi/pi-materia/config.json`):
 
@@ -134,8 +137,7 @@ Example profile config (`~/.config/pi/pi-materia/config.json`):
   "defaultSaveTarget": "user",
   "roleGeneration": {
     "enabled": true,
-    "provider": "openai-codex",
-    "model": "gpt-5.5",
+    "model": "openai-codex/gpt-5.5",
     "thinking": "medium",
     "extraInstructions": "Prefer concise operational instructions for generated Materia roles.",
     "useReadOnlyProjectContext": false
@@ -143,7 +145,7 @@ Example profile config (`~/.config/pi/pi-materia/config.json`):
 }
 ```
 
-You can also use a provider-qualified model string, such as `"model": "openai-codex/gpt-5.5"`; in that case `provider` is optional.
+Leave `roleGeneration.model` unset to keep the **Active Pi Model** default; the WebUI model picker writes or clears only that optional profile preference and preserves other `roleGeneration` settings.
 
 CLI config example:
 

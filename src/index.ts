@@ -1,8 +1,7 @@
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { ActiveCastConflictError, ActiveQuestConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStateRepository } from "./application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStateRepository, type QuestStartResult } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
-import type { QuestBoard } from "./domain/questBoard.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
@@ -330,6 +329,9 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
       const status = await input.useCases.getStatus(input.ctx);
       sendQuestMessage(input.pi, renderQuestAdded(quest, status.boardPath), "add");
       input.ctx.ui.notify(`Added pi-materia quest ${quest.id}.`, "info");
+      if (status.board.runner.enabled) {
+        await drainQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, guard: input.autoAdvanceGuard });
+      }
     } catch (error) {
       notifyQuestError(input.ctx, "add", error);
     }
@@ -344,25 +346,18 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     const questId = rest[0];
     autoStartMateriaWebUi({ ctx: input.ctx, pi: input.pi, configuredPath: input.configuredPath });
     try {
-      const result = action === "start"
-        ? await input.useCases.enableRunner({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, ...(questId ? { questId } : {}) })
-        : await input.useCases.runQuest({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, ...(questId ? { questId } : {}) });
-      if (!result) {
-        const status = await input.useCases.getStatus(input.ctx);
-        input.ctx.ui.notify(questStartNotFoundMessage(status.board.quests.length, questId), "error");
-        return;
-      }
-      sendQuestMessage(input.pi, renderQuestStarted(result, action), action);
-      input.ctx.ui.notify(`pi-materia quest ${result.quest.id} launched as cast ${result.state.castId}.`, "info");
-      if (action === "start" && !result.state.active) {
-        if (!input.autoAdvanceGuard.has(input.ctx.cwd)) {
-          input.autoAdvanceGuard.add(input.ctx.cwd);
-          try {
-            await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, board: result.board });
-          } finally {
-            input.autoAdvanceGuard.delete(input.ctx.cwd);
-          }
+      if (input.autoAdvanceGuard.has(input.ctx.cwd)) return;
+      input.autoAdvanceGuard.add(input.ctx.cwd);
+      try {
+        const result = await input.useCases.runContinuous({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, ...(questId ? { questId } : {}) });
+        const started = result.started[0];
+        if (!started) {
+          input.ctx.ui.notify(result.reason === "not_found" ? questStartNotFoundMessage(result.board.quests.length, questId) : "pi-materia quest runner enabled and waiting for pending quests.", result.reason === "not_found" ? "error" : "info");
+          return;
         }
+        sendQuestStartedMessages({ pi: input.pi, ctx: input.ctx, started: result.started, firstMode: action });
+      } finally {
+        input.autoAdvanceGuard.delete(input.ctx.cwd);
       }
     } catch (error) {
       notifyQuestError(input.ctx, action, error);
@@ -370,7 +365,29 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
-  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest add [--loadout <name>] <prompt>, /materia quest run [id], /materia quest start [id], or /materia quest stop", "error");
+  if (action === "runonce") {
+    if (rest.length > 1) {
+      input.ctx.ui.notify("Usage: /materia quest runonce [id]", "error");
+      return;
+    }
+    const questId = rest[0];
+    autoStartMateriaWebUi({ ctx: input.ctx, pi: input.pi, configuredPath: input.configuredPath });
+    try {
+      const result = await input.useCases.runOnce({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, ...(questId ? { questId } : {}) });
+      if (!result) {
+        const status = await input.useCases.getStatus(input.ctx);
+        input.ctx.ui.notify(questStartNotFoundMessage(status.board.quests.length, questId), "error");
+        return;
+      }
+      sendQuestMessage(input.pi, renderQuestStarted(result, "runonce"), "runonce");
+      input.ctx.ui.notify(`pi-materia quest ${result.quest.id} launched as cast ${result.state.castId}.`, "info");
+    } catch (error) {
+      notifyQuestError(input.ctx, action, error);
+    }
+    return;
+  }
+
+  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest add [--loadout <name>] <prompt>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
 }
 
 async function showQuestStatus(input: QuestCommandInput): Promise<void> {
@@ -394,7 +411,7 @@ async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx
     });
     if (!settled.quest) return;
     if (!settled.board.runner.enabled) return;
-    await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, board: settled.board });
+    await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath });
   } catch (error) {
     notifyQuestError(input.ctx, "auto-advance", error);
   } finally {
@@ -402,11 +419,30 @@ async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx
   }
 }
 
-async function autoAdvanceQuestBoard(input: { pi: ExtensionAPI; ctx: ExtensionContext; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; board: QuestBoard }): Promise<void> {
-  const started = await input.useCases.autoAdvanceNext({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, board: input.board });
-  if (!started) return;
-  sendQuestMessage(input.pi, renderQuestStarted(started, "start"), "auto-advance");
-  input.ctx.ui.notify(`pi-materia quest ${started.quest.id} auto-launched as cast ${started.state.castId}.`, "info");
+async function autoAdvanceQuestBoard(input: { pi: ExtensionAPI; ctx: ExtensionContext; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string }): Promise<void> {
+  const result = await input.useCases.drainEnabledRunner({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath });
+  sendQuestStartedMessages({ pi: input.pi, ctx: input.ctx, started: result.started, firstMode: "auto-advance" });
+}
+
+async function drainQuestBoard(input: { pi: ExtensionAPI; ctx: ExtensionContext; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; guard: Set<string> }): Promise<void> {
+  if (input.guard.has(input.ctx.cwd)) return;
+  input.guard.add(input.ctx.cwd);
+  try {
+    await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath });
+  } catch (error) {
+    notifyQuestError(input.ctx, "auto-advance", error);
+  } finally {
+    input.guard.delete(input.ctx.cwd);
+  }
+}
+
+function sendQuestStartedMessages(input: { pi: ExtensionAPI; ctx: ExtensionContext; started: QuestStartResult[]; firstMode: "run" | "start" | "auto-advance" }): void {
+  input.started.forEach((started, index) => {
+    if (!started) return;
+    const mode = index === 0 ? input.firstMode : "auto-advance";
+    sendQuestMessage(input.pi, renderQuestStarted(started, mode), mode);
+    input.ctx.ui.notify(mode === "auto-advance" ? `pi-materia quest ${started.quest.id} auto-launched as cast ${started.state.castId}.` : `pi-materia quest ${started.quest.id} launched as cast ${started.state.castId}.`, "info");
+  });
 }
 
 function sendQuestMessage(pi: ExtensionAPI, lines: string[], eventType: string): void {
@@ -490,7 +526,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
   }
 
   if (tokens[0] === "quest") {
-    const questSubcommands = ["status", "add", "run", "start", "stop", "list"];
+    const questSubcommands = ["status", "add", "run", "runonce", "start", "stop", "list"];
     if (tokens.length === 1 && endsWithWhitespace) return questSubcommands.map((value) => ({ value: `quest ${value}`, label: value }));
     if (tokens.length === 2 && !endsWithWhitespace) {
       const matching = questSubcommands.filter((value) => value.startsWith(tokens[1] ?? ""));

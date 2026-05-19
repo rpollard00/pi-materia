@@ -426,9 +426,9 @@ describe("application use cases", () => {
 
     await expect(runner.runNext({ pi: "pi", session: "session", cwd: "/repo" })).rejects.toBeInstanceOf(ActiveCastConflictError);
 
-    board = { ...board, runner: { enabled: false }, quests: [{ ...board.quests[0]!, status: "running", currentCastId: "cast-running", lastCastId: "cast-running" }] };
+    board = { ...board, runner: { enabled: false }, quests: [{ ...board.quests[0]!, status: "running", currentCastId: "cast-running", lastCastId: "cast-running" }, { ...board.quests[0]!, id: "quest-2", status: "pending", currentCastId: undefined, lastCastId: undefined }] };
     const runnerWithRunningQuest = new QuestRunnerUseCases({ boards, casts: { startCast: async () => { throw new Error("must not start"); } }, loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) }, states: { loadActive: () => undefined }, clock: { now: () => "2026-01-01T00:00:02.000Z" }, ids: { nextId: () => "quest-2" } });
-    await expect(runnerWithRunningQuest.runQuest({ pi: "pi", session: "session", cwd: "/repo", questId: "quest-1" })).rejects.toBeInstanceOf(ActiveQuestConflictError);
+    await expect(runnerWithRunningQuest.runOnce({ pi: "pi", session: "session", cwd: "/repo", questId: "quest-2" })).rejects.toBeInstanceOf(ActiveQuestConflictError);
   });
 
   test("quest runner records immediate terminal casts and startup failures", async () => {

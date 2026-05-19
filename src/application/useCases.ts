@@ -253,6 +253,22 @@ export interface QuestStartResult {
   effectiveLoadout?: EffectiveCastLoadout;
 }
 
+export type QuestRunContinuousReason = QuestDrainReason;
+
+export interface QuestRunContinuousResult {
+  board: QuestBoard;
+  started: QuestStartResult[];
+  reason?: QuestRunContinuousReason;
+}
+
+export type QuestDrainReason = "runner_stopped" | "active_cast" | "running_quest" | "waiting" | "not_found" | "safety_limit";
+
+export interface QuestDrainResult {
+  board: QuestBoard;
+  started: QuestStartResult[];
+  reason?: QuestDrainReason;
+}
+
 export interface HandleQuestCastSettledInput {
   castId: string;
   status?: QuestTerminalStatus;
@@ -289,20 +305,25 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
   }
 
   async runNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string }): Promise<QuestStartResult | undefined> {
-    return this.runQuest({ ...input, enableRunner: false });
+    return this.runOnce(input);
   }
 
-  async runQuest(input: { pi: TPi; session: TSession; cwd: string; questId?: string; configuredPath?: string; enableRunner?: boolean }): Promise<QuestStartResult | undefined> {
+  async runOnce(input: { pi: TPi; session: TSession; cwd: string; questId?: string; configuredPath?: string }): Promise<QuestStartResult | undefined> {
     const board = await this.deps.boards.loadOrCreate();
-    const prepared = input.enableRunner ? enableQuestRunner(board, this.clock.now()) : board;
-    if (input.enableRunner) await this.deps.boards.save(prepared);
-    const quest = input.questId ? prepared.quests.find((candidate) => candidate.id === input.questId) : findNextPendingQuest(prepared);
+    const quest = selectPendingQuest(board, input.questId);
     if (!quest) return undefined;
-    return this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board: prepared, quest });
+    return this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board, quest });
+  }
+
+  async runContinuous(input: { pi: TPi; session: TSession; cwd: string; questId?: string; configuredPath?: string }): Promise<QuestRunContinuousResult> {
+    const board = await this.deps.boards.loadOrCreate();
+    const prepared = enableQuestRunner(board, this.clock.now());
+    await this.deps.boards.save(prepared);
+    return this.drainEnabledRunner({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, ...(input.questId ? { firstQuestId: input.questId } : {}) });
   }
 
   async enableRunner(input: { pi: TPi; session: TSession; cwd: string; questId?: string; configuredPath?: string }): Promise<QuestStartResult | undefined> {
-    return this.runQuest({ ...input, enableRunner: true });
+    return (await this.runContinuous(input)).started[0];
   }
 
   async stopRunner(): Promise<QuestBoard> {
@@ -325,14 +346,36 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
   }
 
   async autoAdvanceNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board?: QuestBoard }): Promise<QuestStartResult | undefined> {
-    const board = input.board ?? await this.deps.boards.loadOrCreate();
-    if (!board.runner.enabled) return undefined;
-    const active = this.deps.states.loadActive(input.session);
-    if (active?.active) return undefined;
-    if (board.quests.some((quest) => quest.status === "running")) return undefined;
-    const quest = findNextPendingQuest(board);
-    if (!quest) return undefined;
-    return this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board, quest });
+    return (await this.drainEnabledRunner({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board: input.board, maxStarts: 1 })).started[0];
+  }
+
+  async drainEnabledRunner(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board?: QuestBoard; firstQuestId?: string; maxStarts?: number }): Promise<QuestDrainResult> {
+    let board = input.board ?? await this.deps.boards.loadOrCreate();
+    const started: QuestStartResult[] = [];
+    const maxStarts = input.maxStarts ?? Math.max(1, board.quests.filter((quest) => quest.status === "pending").length + 1);
+    let firstQuestId = input.firstQuestId;
+
+    for (let iteration = 0; iteration < maxStarts; iteration += 1) {
+      board = await this.deps.boards.loadOrCreate();
+      if (!board.runner.enabled) return { board, started, reason: "runner_stopped" };
+
+      const active = this.deps.states.loadActive(input.session);
+      if (active?.active) return { board, started, reason: "active_cast" };
+      if (board.quests.some((quest) => quest.status === "running")) return { board, started, reason: "running_quest" };
+
+      const quest = selectPendingQuest(board, firstQuestId);
+      if (!quest) return { board, started, reason: firstQuestId ? "not_found" : "waiting" };
+      firstQuestId = undefined;
+
+      const result = await this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board, quest });
+      started.push(result);
+      board = result.board;
+
+      if (result.state.active) return { board, started, reason: "active_cast" };
+    }
+
+    board = await this.deps.boards.loadOrCreate();
+    return { board, started, reason: "safety_limit" };
   }
 
   async reconcileOnSessionStart(): Promise<{ board: QuestBoard; reconciled: Quest[] }> {
@@ -432,6 +475,12 @@ function buildQuestRunResult(input: { status: QuestTerminalStatus; now: string; 
     ...(typeof questMetadata?.effectiveLoadoutId === "string" ? { effectiveLoadoutId: questMetadata.effectiveLoadoutId } : {}),
     ...(input.input.metadata ? { metadata: input.input.metadata } : {}),
   };
+}
+
+function selectPendingQuest(board: QuestBoard, questId?: string): Quest | undefined {
+  if (!questId) return findNextPendingQuest(board);
+  const quest = board.quests.find((candidate) => candidate.id === questId);
+  return quest?.status === "pending" ? quest : undefined;
 }
 
 function recordQuestStartupFailure(board: QuestBoard, quest: Quest, now: string, error: unknown): QuestBoard {
