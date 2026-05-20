@@ -15,6 +15,22 @@ function agentSocket(overrides: Partial<ResolvedMateriaAgentSocket> = {}): Resol
   } as ResolvedMateriaAgentSocket;
 }
 
+const REDUNDANT_SOCKET_CONTRACT_SNIPPETS = [
+  "pi-materia canonical handoff JSON contract",
+  "generic handoff envelope when applicable",
+  "legacy placement terminology",
+  "Reserved evaluator/route fields are owned",
+  "Legacy names such as \"passed\"",
+  "\"satisfied\" is the canonical boolean control field",
+];
+
+function expectSocketPromptOmitsRedundantContractBoilerplate(prompt: string): void {
+  expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+  for (const snippet of REDUNDANT_SOCKET_CONTRACT_SNIPPETS) {
+    expect(prompt).not.toContain(snippet);
+  }
+}
+
 function defaultMateriaPrompt(name: string): string {
   const raw = JSON.parse(readFileSync(path.resolve("config", "default.json"), "utf8")) as { materia?: Record<string, { prompt?: string }> };
   const prompt = raw.materia?.[name]?.prompt;
@@ -71,7 +87,7 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Global guidance JSON");
   });
 
-  test("generator JSON sockets receive canonical workItems and evaluator route-field instructions", () => {
+  test("generator JSON sockets receive concise canonical workItems placement instructions", () => {
     const socket = agentSocket({
       socket: { materia: "Plan", parse: "json" },
       materia: { tools: "readOnly", prompt: "Plan work.", generator: true },
@@ -80,9 +96,24 @@ describe("application prompt assembly", () => {
 
     expect(prompt).toContain("Generator socket adapter context");
     expect(prompt).toContain("expose generated output as workItems");
-    expect(prompt).toContain("Reserved evaluator/route fields");
-    expect(prompt).toContain('"satisfied"');
-    expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(prompt).toContain("Emit top-level workItems");
+    expect(prompt).toContain("Generated output assignment");
+    expect(prompt).toContain("Final output format: Return only JSON");
+    expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
+  });
+
+  test("non-generator JSON sockets keep only concise JSON-only final output guidance", () => {
+    const socket = agentSocket({
+      socket: { materia: "Check", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Evaluate the current result." },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(prompt).toContain("Final output format: Return only JSON for this socket adapter");
+    expect(prompt).toContain("Use the runtime-provided canonical handoff envelope");
+    expect(prompt).not.toContain("Generator socket adapter context");
+    expect(prompt).not.toContain("Emit top-level workItems");
+    expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });
 
   test("multi-turn refinement stays conversational until continue finalization", () => {
@@ -94,7 +125,8 @@ describe("application prompt assembly", () => {
 
     expect(prompt).toContain("Current multi-turn mode: refinement conversation");
     expect(prompt).toContain("/materia continue is the only way to finalize");
-    expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(prompt).not.toContain("Final output format: Return only JSON");
+    expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });
 
   test("/materia continue finalization includes synthetic context and canonical JSON contract", () => {
@@ -107,7 +139,9 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Materia isolated context.");
     expect(prompt).toContain("Command-triggered finalization");
     expect(prompt).toContain("Canonical handoff contract context:");
-    expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(prompt).toContain("The canonical envelope fields are summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing");
+    expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");
     expect(prompt).toContain("Final output format: Return only JSON for this socket");
   });
 

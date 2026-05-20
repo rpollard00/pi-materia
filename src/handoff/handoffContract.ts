@@ -56,10 +56,7 @@ export const HANDOFF_CONTRACT_PROMPT_TEXT = [
 ].join("\n");
 
 export function formatHandoffJsonFinalInstruction(): string {
-  return [
-    "Final output format: Return only JSON for this socket adapter, with no markdown fences, prose, or extra commentary. Follow the central handoff contract below; if local prompt wording or adapter metadata mentions legacy placement fields such as tasks, interpret that context and still emit generated work units as workItems. Preserve and augment useful existing envelope context from Generic cast data or Previous output when applicable.",
-    HANDOFF_CONTRACT_PROMPT_TEXT,
-  ].join("\n\n");
+  return "Final output format: Return only JSON for this socket adapter, with no markdown fences, prose, or extra commentary. Use the runtime-provided canonical handoff envelope and preserve useful existing envelope context from Generic cast data or Previous output when applicable.";
 }
 
 export const HANDOFF_CONTRACT_DOC_TEXT = [

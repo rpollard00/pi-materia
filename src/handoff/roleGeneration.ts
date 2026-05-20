@@ -4,7 +4,6 @@ import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { loadProfileConfig } from "../config/config.js";
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "../graph/generator.js";
-import { HANDOFF_CONTRACT_PROMPT_TEXT } from "./handoffContract.js";
 import { getActiveModelInfo } from "../config/modelSettings.js";
 import type { MateriaGeneratorConfig, MateriaRoleGenerationProfileConfig } from "../types.js";
 
@@ -186,8 +185,7 @@ export function buildRoleGenerationPrompt(
     "You generate concise pi-materia role prompt instructions.",
     "Return only the role prompt text to place in a Materia config `prompt` field.",
     "The prompt should define the agent's responsibilities, operating style, constraints, and expected output behavior.",
-    "When the generated role prompt asks for JSON or handoff output, it must instruct the materia to follow this central contract instead of inventing a local JSON contract:",
-    HANDOFF_CONTRACT_PROMPT_TEXT,
+    "When the generated role prompt asks for JSON or handoff output, tell the materia to follow the runtime-provided canonical handoff JSON contract instead of embedding a local schema.",
     "Do not include markdown fences, commentary about generation, or UI instructions.",
     roleGenerationContext(generates),
     profile.extraInstructions ? `Additional operator instructions:\n${profile.extraInstructions}` : undefined,
@@ -198,21 +196,16 @@ export function buildRoleGenerationPrompt(
 function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefined): string {
   if (!generates) return "Generator role: none configured.";
   const canonical = CANONICAL_WORK_ITEMS_GENERATOR_CONFIG;
-  const legacyNote = generates.output !== canonical.output || generates.itemType !== canonical.itemType
-    ? "Legacy generator metadata from the request is obsolete and must not be copied into the generated prompt."
-    : undefined;
   return [
-    "Generator role: produce the canonical workItems list for downstream loop regions.",
-    `- canonical output key: ${canonical.output}`,
+    "Generator role: produce a workItems list for downstream loop regions.",
+    `- output key: ${canonical.output}`,
     `- list type: ${canonical.listType}`,
     `- item type: ${canonical.itemType}`,
     `- items path: state.${canonical.output}`,
-    `- work item alias: ${canonical.as}`,
     `- cursor: ${canonical.cursor}`,
     `- done behavior: ${canonical.done}`,
-    legacyNote,
-    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt must use the canonical handoff envelope and put generated units of work in workItems, not in reserved evaluator/route fields or legacy placement-specific outputs such as tasks. Preserve and augment existing envelope context when refining or evaluating JSON output.",
-  ].filter(Boolean).join("\n");
+    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt should place generated units of work in workItems and otherwise refer to the runtime-provided handoff contract.",
+  ].join("\n");
 }
 
 function parseProviderAndModel(value: string): { provider: string; modelId: string } | undefined {

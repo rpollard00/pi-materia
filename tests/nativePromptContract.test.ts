@@ -3,14 +3,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
-import {
-  HANDOFF_CONTRACT_PROMPT_TEXT,
-  HANDOFF_ENVELOPE_FIELDS,
-  HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
-  HANDOFF_WORK_ITEMS_FIELD,
-  formatHandoffEnvelopeShape,
-  formatHandoffWorkItemShape,
-} from "../src/handoff/handoffContract.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
@@ -38,21 +30,16 @@ function promptMessages(harness: FakePiHarness): string[] {
     .map((message) => String(message.content));
 }
 
-function expectPromptIncludesCentralHandoffContract(prompt: string): void {
-  expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
-  expect(prompt).toContain(formatHandoffEnvelopeShape());
-  expect(prompt).toContain(formatHandoffWorkItemShape());
-  expect(prompt).toContain(`Generated units of work belong in ${HANDOFF_WORK_ITEMS_FIELD}, never tasks`);
-  for (const field of HANDOFF_ENVELOPE_FIELDS) expect(prompt).toContain(field);
-  for (const legacyAlias of HANDOFF_LEGACY_NON_CANONICAL_ALIASES) {
-    expect(prompt).toContain(`Legacy names such as ${JSON.stringify(legacyAlias)} are not canonical handoff fields`);
-  }
+function expectPromptIncludesConciseJsonFinalInstruction(prompt: string): void {
+  expect(prompt).toContain("Final output format: Return only JSON for this socket");
+  expect(prompt).toContain("Use the runtime-provided canonical handoff envelope");
+  expect(prompt).not.toContain("pi-materia canonical handoff JSON contract:");
   expect(prompt).not.toContain('"tasks":');
   expect(prompt).not.toContain("tasks:");
 }
 
 function expectPromptOmitsJsonOnlyHandoffContract(prompt: string): void {
-  expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+  expect(prompt).not.toContain("pi-materia canonical handoff JSON contract:");
   expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");
   expect(prompt).not.toContain("generic handoff envelope");
   expect(prompt).not.toContain("Final output format: Return only JSON");
@@ -68,9 +55,9 @@ describe("native JSON prompt handoff contract guidance", () => {
     const [prompt] = promptMessages(harness);
     expect(prompt).toContain("You are the pi-materia planning materia");
     expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
-    expectPromptIncludesCentralHandoffContract(prompt);
+    expectPromptIncludesConciseJsonFinalInstruction(prompt);
     expect(prompt).toContain("Final output format: Return only JSON for this socket");
-    expect(prompt).toContain("emit generated work units as workItems");
+    expect(prompt).toContain("Emit top-level workItems");
   });
 
   test("injects current workItem and global guidance into plain-text agent socket prompts", async () => {
@@ -147,12 +134,13 @@ describe("native JSON prompt handoff contract guidance", () => {
     const firstPrompt = promptMessages(harness).at(-1) ?? "";
     expect(firstPrompt).toContain("Generator socket adapter context");
     expect(firstPrompt).toContain("generated-output stage");
-    expect(firstPrompt).toContain("Return only the canonical handoff JSON envelope");
+    expect(firstPrompt).toContain("Return JSON only and expose generated output as workItems");
     expect(firstPrompt).toContain("expose generated output as workItems");
     expect(firstPrompt).toContain("must come from $.workItems");
-    expect(firstPrompt).toContain("Reserved evaluator/route fields");
-    expect(firstPrompt).toContain("Compatibility note: any legacy generates metadata is obsolete");
-    expectPromptIncludesCentralHandoffContract(firstPrompt);
+    expect(firstPrompt).toContain("Emit top-level workItems");
+    expect(firstPrompt).not.toContain("Reserved evaluator/route fields");
+    expect(firstPrompt).not.toContain("Compatibility note: any legacy generates metadata is obsolete");
+    expectPromptIncludesConciseJsonFinalInstruction(firstPrompt);
 
     harness.appendAssistantMessage(JSON.stringify({
       summary: "planned",
@@ -170,8 +158,8 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(secondPrompt).toContain("Refine upstream work items.");
     expect(secondPrompt).toContain("Upstream generated workItems JSON for this generator stage");
     expect(secondPrompt).toContain('"id": "api"');
-    expect(secondPrompt).toContain("transform/refine them into a new canonical workItems array");
-    expect(secondPrompt).toContain("must still output another JSON-parsed canonical handoff envelope with workItems");
+    expect(secondPrompt).toContain("transform/refine them into a new top-level workItems array");
+    expect(secondPrompt).not.toContain("must still output another JSON-parsed canonical handoff envelope with workItems");
     expect(secondPrompt).not.toContain('"tasks":');
   });
 
@@ -224,11 +212,11 @@ describe("native JSON prompt handoff contract guidance", () => {
 
     const [prompt] = promptMessages(harness);
     expect(prompt).toContain("Return { \"satisfied\": true }.");
-    expectPromptIncludesCentralHandoffContract(prompt);
-    expect(prompt).toContain("generic handoff envelope");
-    expect(prompt).toContain("emit generated work units as workItems");
-    expect(prompt).toContain("Preserve and augment useful existing envelope context");
-    expect(prompt).toContain('"satisfied" is the canonical boolean control field');
+    expectPromptIncludesConciseJsonFinalInstruction(prompt);
+    expect(prompt).not.toContain("generic handoff envelope");
+    expect(prompt).not.toContain("emit generated work units as workItems");
+    expect(prompt).toContain("preserve useful existing envelope context");
+    expect(prompt).not.toContain('"satisfied" is the canonical boolean control field');
   });
 
   test("injects the central handoff contract only on multi-turn JSON finalization", async () => {
@@ -265,9 +253,9 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(finalizationPrompt).toContain("Canonical handoff contract context:");
     expect(finalizationPrompt).toContain("Synthetic context exposure policy");
     expect(finalizationPrompt).toContain("Do not expose it during multi-turn refinement");
-    expectPromptIncludesCentralHandoffContract(finalizationPrompt);
+    expectPromptIncludesConciseJsonFinalInstruction(finalizationPrompt);
     expect(finalizationPrompt).toContain("Final output format: Return only JSON for this socket");
-    expect(finalizationPrompt).toContain("Generated units of work belong in workItems, never tasks");
+    expect(finalizationPrompt).not.toContain("Generated units of work belong in workItems, never tasks");
   });
 
   test("does not append JSON handoff contract guidance to plain-text agent sockets", async () => {

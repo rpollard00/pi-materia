@@ -1,7 +1,6 @@
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import {
   HANDOFF_CONTRACT_DOC_TEXT,
-  HANDOFF_RESERVED_EVALUATOR_FIELDS,
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../handoff/handoffContract.js";
@@ -9,12 +8,9 @@ import type { MateriaAgentConfig, MateriaCastState, ResolvedMateriaAgentSocket, 
 import { currentItem, getPath } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
-// - single-turn JSON agent sockets receive the canonical contract via singleTurnJsonFormatInstruction();
-// - multi-turn JSON agent sockets receive refinement guidance during normal turns and the
-//   same canonical contract only during /materia continue finalization;
-// - synthetic cast context may expose only concise, non-authoritative handoff-contract
-//   context for JSON sockets that are already in a final-output mode, and never during
-//   refinement; the authoritative final-output instruction remains finalFormatInstruction();
+// - synthetic cast context owns the shared handoff contract summary for JSON sockets in final-output mode;
+// - socket-local prompt suffixes stay thin: JSON-only formatting, generated-output placement,
+//   and multi-turn finalization/refinement behavior;
 // - plain-text agent sockets receive no JSON-only handoff contract unless their local prompt asks for one.
 export function buildSocketPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
   if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
@@ -75,13 +71,11 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
   if (isMultiTurnResolvedAgentSocket(socket) && state.multiTurnFinalizing !== true) return undefined;
   const upstreamWorkItems = getPath(state.data, HANDOFF_WORK_ITEMS_FIELD);
   return [
-    "Generator socket adapter context: this placement is a generated-output stage. Return only the canonical handoff JSON envelope and expose generated output as workItems.",
-    `Canonical generated output assignment: ${JSON.stringify(generator.output)} must come from $.${HANDOFF_WORK_ITEMS_FIELD}.`,
-    `Emit ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not emit generated units under tasks, work, custom generates.output names, or any other alias.`,
-    `Reserved evaluator/route fields ${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")} must not carry generator payload data.`,
+    "Generator socket adapter context: generated-output stage. Return JSON only and expose generated output as workItems.",
+    `Generated output assignment: ${JSON.stringify(generator.output)} must come from $.${HANDOFF_WORK_ITEMS_FIELD}.`,
+    `Emit top-level ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not place generated units in other fields.`,
     Array.isArray(upstreamWorkItems) ? `Upstream generated workItems JSON for this generator stage:\n${JSON.stringify(upstreamWorkItems, null, 2)}` : undefined,
-    "If upstream workItems are present, consume them as input context and transform/refine them into a new canonical workItems array; this stage must still output another JSON-parsed canonical handoff envelope with workItems.",
-    "Compatibility note: any legacy generates metadata is obsolete adapter metadata and is not an active runtime output contract.",
+    "If upstream workItems are present, consume them as input context and transform/refine them into a new top-level workItems array.",
   ].filter(Boolean).join("\n");
 }
 

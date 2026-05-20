@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import { buildRoleGenerationPrompt, generateMateriaRolePrompt, resolveRoleGenerationSettings } from "../src/handoff/roleGeneration.js";
 
 const activeModel = { provider: "active-provider", id: "active-model", name: "Active", api: "active-api" };
@@ -65,12 +64,13 @@ describe("Materia role prompt generation service", () => {
     });
   });
 
-  test("builds generator prompts with the central handoff contract guidance", () => {
+  test("builds generator prompts with concise central handoff contract guidance", () => {
     const prompt = buildRoleGenerationPrompt("create an evaluator role", { extraInstructions: "Keep it terse." });
 
-    expect(prompt).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
-    expect(prompt).toContain('"satisfied" is the canonical boolean control field');
-    expect(prompt).toContain("Legacy names such as \"passed\" are not canonical handoff fields");
+    expect(prompt).toContain("follow the runtime-provided canonical handoff JSON contract");
+    expect(prompt).toContain("instead of embedding a local schema");
+    expect(prompt).not.toContain("pi-materia canonical handoff JSON contract:");
+    expect(prompt).not.toContain("Legacy names such as \"passed\"");
     expect(prompt).toContain("Generator role: none configured.");
     expect(prompt).toContain("Additional operator instructions:\nKeep it terse.");
     expect(prompt).toContain("User brief:\ncreate an evaluator role");
@@ -87,17 +87,18 @@ describe("Materia role prompt generation service", () => {
       done: "end",
     });
 
-    expect(prompt).toContain("Generator role: produce the canonical workItems list");
-    expect(prompt).toContain("- canonical output key: workItems");
+    expect(prompt).toContain("Generator role: produce a workItems list");
+    expect(prompt).toContain("- output key: workItems");
     expect(prompt).toContain("- list type: array");
     expect(prompt).toContain("- item type: workItem");
     expect(prompt).toContain("- items path: state.workItems");
-    expect(prompt).toContain("- work item alias: workItem");
+    expect(prompt).not.toContain("- work item alias");
     expect(prompt).toContain("- cursor: workItemIndex");
     expect(prompt).toContain("- done behavior: end");
     expect(prompt).toContain("adapter metadata for assignment and iteration");
-    expect(prompt).toContain("generated role prompt must use the canonical handoff envelope");
-    expect(prompt).toContain("legacy placement-specific outputs such as tasks");
+    expect(prompt).toContain("place generated units of work in workItems");
+    expect(prompt).toContain("runtime-provided handoff contract");
+    expect(prompt).not.toContain("legacy placement-specific outputs such as tasks");
   });
 
   test("applies available roleGeneration model and thinking overrides", async () => {

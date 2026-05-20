@@ -18,9 +18,10 @@ describe("handoff contract drift regressions", () => {
     expect(HANDOFF_EDGE_CONDITIONS).toEqual(["always", "satisfied", "not_satisfied"]);
 
     const generated = buildRoleGenerationPrompt("write a JSON evaluator role");
-    expect(generated).toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
-    expect(generated).toContain("generic handoff envelope");
-    expect(generated).toContain('"satisfied" is the canonical boolean control field');
+    expect(generated).toContain("follow the runtime-provided canonical handoff JSON contract");
+    expect(generated).toContain("instead of embedding a local schema");
+    expect(generated).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
+    expect(generated).not.toContain('"satisfied" is the canonical boolean control field');
   });
 
   test("canonical docs and README examples do not resurrect legacy passed routing syntax", async () => {
