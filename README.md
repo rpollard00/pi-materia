@@ -67,6 +67,7 @@ The shipped WebUI includes a **Quests** pane for the same project-local quest bo
 /materia link [--from <cast-id>] <target> [<target> ...] -- <prompt>
 /materia quest list [pending|all|succeeded|failed] [--limit <n>]
 /materia quest add [--loadout <name-or-id>] <prompt>
+/materia quest move <quest-id-or-prefix> --first|--before <target>|--onto <target>
 /materia quest run [quest-id]
 /materia quest runonce [quest-id]
 /materia quest start [quest-id]
@@ -94,7 +95,7 @@ Illustrative linked-run examples:
 
 Unprefixed targets are allowed only when they do not collide with another materia/loadout name; use `materia:<name>` or `loadout:<name>` to disambiguate. See [link semantics](docs/link-semantics.md) for the v1 contract, detailed examples, troubleshooting, ambiguity rules, and non-goals.
 
-Use `/materia quest` to manage a project-local quest board at `.pi/pi-materia/quest-board.json`. `quest list` shows pending quests by default (max 10) and supports `pending`, `all`, `succeeded`, and `failed` filters. `quest run` starts continuous back-to-back quest processing and keeps the project-local runner enabled until `quest stop`; `quest runonce` launches only one pending quest without changing the runner state, and `quest start` remains a compatibility alias for continuous `run`. Per-quest `--loadout` overrides apply only to the cast being launched and do not mutate the active loadout. See [Quest board](docs/quest-board.md) for list filters, storage, autonomy, graceful stop-after-current behavior, single-writer, and restart behavior.
+Use `/materia quest` to manage a project-local quest board at `.pi/pi-materia/quest-board.json`. `quest list` shows pending quests by default (max 10) and supports `pending`, `all`, `succeeded`, and `failed` filters. `quest move` reorders pending quests with `--first`, `--before <target>`, or `--onto <target>` (`--onto` means after that target); quest references may be full IDs or unambiguous prefixes. `quest run` starts continuous back-to-back quest processing and keeps the project-local runner enabled until `quest stop`; `quest runonce` launches only one pending quest without changing the runner state, and `quest start` remains a compatibility alias for continuous `run`. Per-quest `--loadout` overrides apply only to the cast being launched and do not mutate the active loadout. See [Quest board](docs/quest-board.md) for list filters, storage, autonomy, graceful stop-after-current behavior, single-writer, and restart behavior.
 
 Use `/materia recast [cast-id]` to resume a failed or user-aborted cast from its current socket. pi-materia also performs bounded same-socket automatic recovery for safe agent-turn failures before a socket has accepted output, applied assignments, advanced routes, or started another socket. Context-window/token-limit failures compact first, then retry the same active prompt. Other safe provider/runtime turn failures may retry by resending the same active prompt without compaction. Plain transient WebSocket transport failures preserve the awaiting state instead of immediately resending, so the current Pi turn can settle or be manually recast if needed. Utility failures and post-advance failures are not automatically retried.
 

@@ -31,6 +31,7 @@ The single-writer limitation above still applies when using the WebUI: avoid wri
 /materia quest status
 /materia quest list [pending|all|succeeded|failed] [--limit <n>]
 /materia quest add [--loadout <name-or-id>] <prompt>
+/materia quest move <quest-id-or-prefix> --first|--before <target>|--onto <target>
 /materia quest run [quest-id]
 /materia quest runonce [quest-id]
 /materia quest start [quest-id]
@@ -40,11 +41,14 @@ The single-writer limitation above still applies when using the WebUI: avoid wri
 - `quest` / `quest status` show runner state, the active quest if any, pending counts, recent results, the storage path, and short help.
 - `quest list` shows quests from the board. With no filter it shows pending quests, ordered with the next scheduled quest first, and limits output to 10 quests. Use `pending`, `all`, `succeeded`, or `failed` to choose a filter, and `--limit <n>` to show a different positive number. `all` includes every stored status, including running and blocked quests; `failed` shows only failed quests.
 - `quest add` appends a pending quest. The first slice derives a concise title from the prompt.
+- `quest move` reorders pending quests in the canonical board order. Use `--first` to make a pending quest the next pending item below any active/running quest, `--before <target>` to place it before another pending quest, or `--onto <target>` to place it after/onto another pending quest. Exactly one placement option is accepted, and source/target references must resolve to pending quests.
 - `quest run` enables the project-local continuous runner and starts the requested quest, or the next pending quest. While enabled, the runner drains pending quests back-to-back until the queue is empty, an active cast is waiting, a launch fails, or `quest stop` is issued.
 - `quest run` with no pending quest still enables the runner and reports that it is waiting; a later wakeup can start the next pending quest without another `run` command.
 - `quest runonce` starts only the requested quest, or the next pending quest, and leaves the runner enabled/stopped flag unchanged. With no pending quest, it reports that no pending quest is available.
 - `quest start` is a compatibility/legacy alias for `quest run`; it enables the same continuous runner behavior.
 - `quest stop` disables future quest launches. It is graceful: it does not abort or interrupt the currently active cast, and the stop takes effect after that quest records completion or failure.
+
+Quest commands that accept quest references accept full quest IDs and unambiguous ID prefixes. Exact matches win over prefix matches; ambiguous or missing prefixes fail without modifying the board and include matching IDs when useful.
 
 Examples:
 
@@ -53,6 +57,9 @@ Examples:
 /materia quest add --loadout Full-Auto Implement the CLI help
 /materia quest list                # pending quests, next scheduled first, max 10 by default
 /materia quest list all --limit 20 # show up to 20 quests of any stored status
+/materia quest move abc123 --first # move a pending quest to the first pending position
+/materia quest move abc123 --before def456 # move before another pending quest
+/materia quest move abc123 --onto def456   # move after/onto another pending quest
 /materia quest run                 # continuous runner; drains pending quests until stopped
 /materia quest runonce             # launch one pending quest only
 /materia quest start               # compatibility alias for continuous run
