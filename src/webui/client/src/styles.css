@@ -1193,7 +1193,6 @@
 }
 
 .materia-selector-row-label,
-.materia-selector-row-id,
 .materia-selector-row-description {
   display: block;
   overflow: hidden;
@@ -1207,11 +1206,6 @@
   font-weight: 900;
 }
 
-.materia-selector-row-id {
-  color: rgb(165 243 252 / 0.66);
-  font-size: 0.72rem;
-  font-weight: 700;
-}
 
 .materia-selector-row-description {
   color: rgb(203 213 225 / 0.72);

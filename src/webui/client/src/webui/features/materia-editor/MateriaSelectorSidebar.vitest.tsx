@@ -42,7 +42,7 @@ const items: MateriaSelectorItem[] = [
   },
   {
     id: 'Shell',
-    label: 'Shell',
+    label: '',
     group: 'Utility',
     type: 'utility',
     description: 'Run a shell command',
@@ -91,6 +91,10 @@ describe('MateriaSelectorSidebar', () => {
     expect(within(selector).queryByText('agent')).toBeNull();
     expect(within(selector).getAllByText('Utility')).toHaveLength(1);
     expect(screen.queryByTestId('edit-materia-select')).toBeNull();
+    expect(selector.querySelector('.materia-selector-row-id')).toBeNull();
+    expect(within(selector).getByText('Review label')).toBeTruthy();
+    expect(within(selector).queryByText('Review')).toBeNull();
+    expect(within(selector).getByText('Shell')).toBeTruthy();
 
     const reviewRow = within(selector).getByTitle('Review — Project override of built-in materia');
     expect(reviewRow.getAttribute('aria-current')).toBe('true');

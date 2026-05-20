@@ -137,14 +137,16 @@ function openLoadoutActions(name: string) {
 async function clickMateriaSelectorRow(id: string) {
   await screen.findByRole('complementary', { name: 'Materia selector' });
   const rowButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.materia-selector-row-select'))
-    .find((button) => button.querySelector('.materia-selector-row-id')?.textContent === id);
+    .find((button) => button.dataset.materiaId === id);
   if (!rowButton) throw new Error(`Missing materia selector row ${id}`);
   fireEvent.click(rowButton);
 }
 
 async function materiaSelectorIds() {
   await screen.findByRole('complementary', { name: 'Materia selector' });
-  return Array.from(document.querySelectorAll<HTMLElement>('.materia-selector-row-id')).map((element) => element.textContent ?? '');
+  return Array.from(document.querySelectorAll<HTMLElement>('.materia-selector-row-select'))
+    .map((element) => element.dataset.materiaId ?? '')
+    .filter(Boolean);
 }
 
 async function findToastAlert() {

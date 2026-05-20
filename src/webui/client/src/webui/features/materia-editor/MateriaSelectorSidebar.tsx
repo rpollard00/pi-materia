@@ -204,11 +204,17 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
                 className={`materia-selector-row${selected ? ' materia-selector-row-active' : ''}${item.lockState === 'locked' ? ' materia-selector-row-locked' : ''}`}
                 role="listitem"
               >
-                <button type="button" className="materia-selector-row-select" onClick={() => onSelect(item.id)} title={`${item.id} — ${sourceTitle(item)}`} aria-current={selected ? 'true' : undefined}>
+                <button
+                  type="button"
+                  className="materia-selector-row-select"
+                  data-materia-id={item.id}
+                  onClick={() => onSelect(item.id)}
+                  title={`${item.id} — ${sourceTitle(item)}`}
+                  aria-current={selected ? 'true' : undefined}
+                >
                   <span className="materia-selector-row-main">
                     <span className="materia-selector-row-title">
                       <span className="materia-selector-row-label">{item.label || item.id}</span>
-                      <span className="materia-selector-row-id">{item.id}</span>
                     </span>
                     {item.description && <span className="materia-selector-row-description">{item.description}</span>}
                   </span>
