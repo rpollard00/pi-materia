@@ -211,7 +211,10 @@ export function normalizeQuestBoard(board: QuestBoard): DomainResult<QuestBoard>
   // only persisted pending-order source. Normalization intentionally preserves
   // that visible order and does not write a parallel order list that could drift.
   return ok({
-    ...validated.value,
+    version: validated.value.version,
+    createdAt: validated.value.createdAt,
+    updatedAt: validated.value.updatedAt,
+    runner: { ...validated.value.runner },
     quests: validated.value.quests.slice(),
   });
 }

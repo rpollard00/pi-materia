@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeEmptySocket, type PipelineConfig } from '../../loadoutModel.js';
-import { formatLoopDisplayLabel, getLoopRegions } from './graphLayout.js';
+import type { LoadoutEdge, PositionedSocket, RoutedLoadoutEdge } from '../types.js';
+import { formatLoopDisplayLabel, getLoopRegions, routeLoadoutEdges } from './graphLayout.js';
 
 function qControlXs(cyclePath: string): number[] {
   return Array.from(cyclePath.matchAll(/Q\s+(-?\d+(?:\.\d+)?)\s+-?\d+(?:\.\d+)?/g)).map((match) => Number(match[1]));
@@ -8,6 +9,21 @@ function qControlXs(cyclePath: string): number[] {
 
 function positioned(ids: string[]) {
   return new Map(ids.map((id, index) => [id, { id, x: index * 240, y: 120 }])) as Parameters<typeof getLoopRegions>[1];
+}
+
+function positionedSockets(ids: string[]) {
+  return new Map(ids.map((id, index) => [id, { id, socket: makeEmptySocket(), index, x: index * 240, y: 120 }])) as Map<string, PositionedSocket>;
+}
+
+function cubicRoute(route: RoutedLoadoutEdge) {
+  const numbers = route.path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  expect(numbers).toHaveLength(8);
+  return {
+    start: { x: numbers[0]!, y: numbers[1]! },
+    sourceControl: { x: numbers[2]!, y: numbers[3]! },
+    targetControl: { x: numbers[4]!, y: numbers[5]! },
+    end: { x: numbers[6]!, y: numbers[7]! },
+  };
 }
 
 const loopLoadout = {
@@ -25,6 +41,34 @@ const loopLoadout = {
     },
   },
 } satisfies PipelineConfig;
+
+describe('loadout edge routing', () => {
+  it('separates reciprocal same-row edges while preserving their directions', () => {
+    const edges: LoadoutEdge[] = [
+      { id: 'Socket-1:always:Socket-2', from: 'Socket-1', to: 'Socket-2', when: 'always', kind: 'normal', edgeIndex: 0 },
+      { id: 'Socket-2:always:Socket-1', from: 'Socket-2', to: 'Socket-1', when: 'always', kind: 'normal', edgeIndex: 0 },
+    ];
+
+    const routed = routeLoadoutEdges(edges, positionedSockets(['Socket-1', 'Socket-2']));
+    expect(routed.map((route) => route.edge.id)).toEqual(['Socket-1:always:Socket-2', 'Socket-2:always:Socket-1']);
+    expect(routed.map((route) => ({ from: route.edge.from, to: route.edge.to }))).toEqual([
+      { from: 'Socket-1', to: 'Socket-2' },
+      { from: 'Socket-2', to: 'Socket-1' },
+    ]);
+
+    const forward = cubicRoute(routed[0]!);
+    const reverse = cubicRoute(routed[1]!);
+    const centerLineY = (forward.start.y + forward.end.y + reverse.start.y + reverse.end.y) / 4;
+    const labelCenterLineY = centerLineY - 10;
+
+    expect(forward.sourceControl.y - centerLineY).toBeLessThan(0);
+    expect(forward.targetControl.y - centerLineY).toBeLessThan(0);
+    expect(reverse.sourceControl.y - centerLineY).toBeGreaterThan(0);
+    expect(reverse.targetControl.y - centerLineY).toBeGreaterThan(0);
+    expect(forward.labelY - labelCenterLineY).toBeLessThan(0);
+    expect(reverse.labelY - labelCenterLineY).toBeGreaterThan(0);
+  });
+});
 
 describe('loop display labels', () => {
   it('derives loop labels from member materia names for the loop panel', () => {

@@ -340,6 +340,26 @@ describe("/materia quest command interface", () => {
     await harness.runCommand("materia", "quest move ef56 --first");
     board = await readBoard(harness);
     expect(board.quests.map((quest: any) => quest.id)).toEqual(["quest-ef56gh78", "quest-cd34ef56", "quest-ab12cd34"]);
+
+    await harness.runCommand("materia", "quest move ab12 --before cd34");
+    board = await readBoard(harness);
+    expect(board.quests.map((quest: any) => quest.id)).toEqual(["quest-ef56gh78", "quest-ab12cd34", "quest-cd34ef56"]);
+    expect(latestMateriaMessage(harness)).toContain("Moved quest quest-ab12cd34 before quest-cd34ef56");
+  });
+
+  test("move rejects mutually exclusive placement options before writing", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [
+      makeQuest("quest-ab12cd34", "pending", "First quest"),
+      makeQuest("quest-cd34ef56", "pending", "Second quest"),
+    ]);
+
+    await harness.runCommand("materia", "quest move ab12 --first --onto cd34");
+
+    const board = await readBoard(harness);
+    expect(board.quests.map((quest: any) => quest.id)).toEqual(["quest-ab12cd34", "quest-cd34ef56"]);
+    const errors = harness.notifications.filter((notification) => notification.type === "error").map((notification) => notification.message);
+    expect(errors.some((message) => message.includes("exactly one placement option"))).toBe(true);
   });
 
   test("move rejects ambiguous, missing, and non-pending quest references without writing", async () => {

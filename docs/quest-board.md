@@ -22,6 +22,8 @@ The WebUI **Quests** pane is another interface over this same project-local boar
 
 Use the WebUI add form to append a pending quest with a prompt and optional loadout override. WebUI-added quests are saved to `.pi/pi-materia/quest-board.json`; they do not change active/default loadout preferences and do not by themselves enable, disable, or force-wake the runner. An enabled runner will pick them up on its next normal wake or after the current quest settles; otherwise use the CLI quest commands below when you are ready to launch queued work.
 
+Pending quests can also be reordered directly in the WebUI sidebar by dragging the `⋮⋮` handle next to a pending quest. The active/running quest remains pinned at the top and is not draggable; succeeded, failed, and blocked quests are not part of the pending order. Drop above the first pending quest to make the dragged quest the next pending item, or drop before/after another pending quest to place it relative to that target. The WebUI saves through the same reorder API as the CLI and reconciles from the canonical board response.
+
 The single-writer limitation above still applies when using the WebUI: avoid writing the same project's quest board from multiple Pi sessions at once.
 
 ## Commands
@@ -95,4 +97,5 @@ The quest board behavior is covered by focused unit and command tests. Run:
 ```text
 npm run typecheck
 npm run test
+npm run test:webui
 ```

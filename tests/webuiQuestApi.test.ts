@@ -173,12 +173,31 @@ describe("POST /api/quests/reorder", () => {
 
     const invalid = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-active", placement: "before", targetId: "quest-pending-1" }) });
     const invalidBody = await invalid.json();
+    const missing = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-missing", placement: "after", targetId: "quest-pending-1" }) });
+    const missingBody = await missing.json();
+    const missingTarget = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-1", placement: "before", targetId: "quest-missing" }) });
+    const missingTargetBody = await missingTarget.json();
     const after = await fetch(`${baseUrl}/api/quests`);
     const afterBody = await after.json();
 
     expect(invalid.status).toBe(400);
     expect(invalidBody).toEqual({ ok: false, code: "validation_failed", error: "quest.status: quest 'quest-active' is running, not pending" });
+    expect(missing.status).toBe(400);
+    expect(missingBody).toEqual({ ok: false, code: "validation_failed", error: "questId: quest 'quest-missing' does not exist" });
+    expect(missingTarget.status).toBe(400);
+    expect(missingTargetBody).toEqual({ ok: false, code: "validation_failed", error: "targetId: quest 'quest-missing' does not exist" });
     expect(afterBody.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2"]);
+  });
+
+  test("surfaces an unavailable reorder callback without returning a partial board", async () => {
+    const baseUrl = await startTestServer({ reorderQuest: async () => ({ ok: false, code: "unavailable", message: "Quest reorder API is unavailable." }) });
+
+    const response = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-1", placement: "first" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({ ok: false, code: "unavailable", error: "Quest reorder API is unavailable." });
+    expect(body.quests).toBeUndefined();
   });
 
   test("validates reorder request shape before calling the mutation callback", async () => {

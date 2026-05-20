@@ -224,6 +224,20 @@ describe("quest board domain", () => {
     expect("pendingOrder" in normalized.value).toBe(false);
   });
 
+  test("migrates legacy board shapes by preserving array order and ignoring orphan order fields", () => {
+    const board = {
+      ...boardWithThreeQuests(),
+      pendingOrder: ["orphan", "q-3", "q-1", "q-1"],
+    } as QuestBoard & { pendingOrder: string[] };
+
+    const normalized = normalizeQuestBoard(board);
+
+    expect(normalized.ok).toBe(true);
+    if (!normalized.ok) return;
+    expect(normalized.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2", "q-3"]);
+    expect("pendingOrder" in normalized.value).toBe(false);
+  });
+
   test("ordered quest view pins the active quest before canonical pending order", () => {
     const board = boardWithThreeQuests();
     const started = startQuest(board, { questId: "q-2", castId: "cast-2", now: t2 });
