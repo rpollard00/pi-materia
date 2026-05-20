@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext } from "../src/application/promptAssembly.js";
-import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
+import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
 function agentSocket(overrides: Partial<ResolvedMateriaAgentSocket> = {}): ResolvedMateriaAgentSocket {
@@ -99,6 +99,7 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Emit top-level workItems");
     expect(prompt).toContain("Generated output assignment");
     expect(prompt).toContain("Final output format: Return only JSON");
+    expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });
 
@@ -111,6 +112,7 @@ describe("application prompt assembly", () => {
 
     expect(prompt).toContain("Final output format: Return only JSON for this socket adapter");
     expect(prompt).toContain("Use the runtime-provided canonical handoff envelope");
+    expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain("Generator socket adapter context");
     expect(prompt).not.toContain("Emit top-level workItems");
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
@@ -140,6 +142,7 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Command-triggered finalization");
     expect(prompt).toContain("Canonical handoff contract context:");
     expect(prompt).toContain("The canonical envelope fields are summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing");
+    expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");
     expect(prompt).toContain("Final output format: Return only JSON for this socket");
@@ -181,7 +184,8 @@ describe("application prompt assembly", () => {
 
     expect(prompt).toContain("If state.previousCastContext is missing or empty");
     expect(prompt).toContain("satisfied false");
-    expect(prompt).toContain('missing containing "state.previousCastContext"');
+    expect(prompt).toContain('feedback as one concise diagnostic string');
+    expect(prompt).toContain('missing as an array containing "state.previousCastContext"');
     expect(prompt).toContain("Do not invent lineage");
   });
 

@@ -56,6 +56,8 @@ Generator-to-generator pipelines behave like iterator transforms: the upstream g
 - `feedback` and `missing` are reserved evaluator fields.
 - Reserved evaluator/route fields must not be repurposed by general payload logic.
 - When present, `satisfied` must be a JSON boolean (`true` or `false`).
+- When present, `feedback` must be a JSON string.
+- When present, `missing` must be a JSON array of missing items.
 - Sockets whose graph control flow depends on `satisfied` or `not_satisfied` must return `satisfied`.
 - Do not use current aliases such as `passed` as routing fields. They are not canonical handoff fields.
 

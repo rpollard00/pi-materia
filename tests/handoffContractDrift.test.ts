@@ -30,6 +30,9 @@ describe("handoff contract drift regressions", () => {
     const checkedDocs = `${docs}\n${readme}`;
 
     expect(docs).toContain("`satisfied` is the canonical routing field");
+    expect(docs).toContain("When present, `satisfied` must be a JSON boolean (`true` or `false`).");
+    expect(docs).toContain("When present, `feedback` must be a JSON string.");
+    expect(docs).toContain("When present, `missing` must be a JSON array of missing items.");
     expect(docs).toContain("`workItems`, not `tasks`");
     expect(docs).toContain('{ "when": "satisfied", "to": "Maintain" }');
     expect(docs).toContain('{ "when": "not_satisfied", "to": "Build"');
@@ -64,7 +67,7 @@ describe("handoff contract drift regressions", () => {
     const prompt = String(rawDefault.materia?.["Auto-Eval"]?.prompt ?? "");
 
     expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
-    expect(prompt).toContain("Set satisfied, feedback, and missing");
+    expect(prompt).toContain("Set satisfied as a boolean, feedback as one concise string, and missing as an array of missing items");
     expect(prompt).toContain("do not emit tasks");
     expect(prompt).not.toContain('"passed": boolean');
 
@@ -82,6 +85,10 @@ describe("handoff contract drift regressions", () => {
     expect(gitMaintainPrompt).toContain("runtime-provided canonical handoff JSON contract");
     expect(maintainPrompt).not.toContain("return JSON with shape");
     expect(gitMaintainPrompt).not.toContain("return JSON with shape");
+
+    const chainContextPrompt = String(rawDefault.materia?.["Chain-Context"]?.prompt ?? "");
+    expect(chainContextPrompt).toContain("feedback as one concise diagnostic string");
+    expect(chainContextPrompt).toContain("missing as an array containing");
 
     const bundledPromptText = [plannerPrompt, interactivePrompt, prompt, maintainPrompt, gitMaintainPrompt].join("\n");
     expect(bundledPromptText).not.toContain("Return only the runtime-provided canonical handoff JSON object");
@@ -102,6 +109,10 @@ describe("handoff contract drift regressions", () => {
     for (const field of HANDOFF_RESERVED_EVALUATOR_FIELDS) {
       expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain(JSON.stringify(field));
     }
+
+    const feedbackTypePromptText = [bundledPromptText, chainContextPrompt].join("\n");
+    expect(feedbackTypePromptText).not.toMatch(/feedback\s+(?:as|must be|should be|is)\s+(?:an?\s+)?(?:array|list|\[\])/i);
+    expect(feedbackTypePromptText).not.toMatch(/missing\s+(?:as|must be|should be|is)\s+(?:a\s+)?(?:string|concise diagnostic)/i);
 
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
       for (const [socketName, socket] of Object.entries(loadout.sockets ?? {})) {
