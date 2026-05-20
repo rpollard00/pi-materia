@@ -65,8 +65,8 @@ describe('loadout edge routing', () => {
     expect(forward.targetControl.y - centerLineY).toBeLessThan(0);
     expect(reverse.sourceControl.y - centerLineY).toBeGreaterThan(0);
     expect(reverse.targetControl.y - centerLineY).toBeGreaterThan(0);
-    expect(forward.labelY - labelCenterLineY).toBeLessThan(0);
-    expect(reverse.labelY - labelCenterLineY).toBeGreaterThan(0);
+    expect(routed[0]!.labelY - labelCenterLineY).toBeLessThan(0);
+    expect(routed[1]!.labelY - labelCenterLineY).toBeGreaterThan(0);
   });
 });
 

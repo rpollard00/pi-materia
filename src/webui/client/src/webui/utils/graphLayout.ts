@@ -290,7 +290,7 @@ export function rectanglesIntersect(a: { x: number; y: number; width: number; he
 }
 
 function edgeOrderKey(edge: LoadoutEdge) {
-  return `${edge.from}\u0000${edge.to}\u0000${edge.edgeIndex ?? -1}\u0000${edge.when ?? ''}`;
+  return `${edge.from}\u0000${edge.to}\u0000${edge.edgeIndex ?? -1}\u0000${edge.when ?? ''}\u0000${edge.id}`;
 }
 
 function orderedLane(edges: LoadoutEdge[], edge: LoadoutEdge, spacing: number) {
@@ -426,6 +426,12 @@ function perpendicularOffset(source: SocketAnchorPoint, target: SocketAnchorPoin
   return { x: -dy / length * lane, y: dx / length * lane };
 }
 
+function laneForEdgeDirection(edge: LoadoutEdge, lane: number) {
+  if (edge.from === edge.to) return lane;
+  const [canonicalFrom, canonicalTo] = [edge.from, edge.to].sort();
+  return edge.from === canonicalFrom && edge.to === canonicalTo ? lane : -lane;
+}
+
 function curvedRoute(source: SocketAnchorPoint, target: SocketAnchorPoint, lane: number) {
   const distance = Math.hypot(target.x - source.x, target.y - source.y);
   const lead = Math.max(32, Math.min(96, distance * 0.38));
@@ -486,7 +492,7 @@ export function routeLoadoutEdges(edges: LoadoutEdge[], positions: Map<string, P
     const lane = orderedLane(laneGroups.get(edge.id) ?? [edge], edge, 30);
     const isSelfLoop = edge.from === edge.to;
     const anchors = chooseSocketAnchors(edge, from, to);
-    const route = isSelfLoop ? selfLoopRoute(from, lane) : curvedRoute(anchors.source, anchors.target, lane);
+    const route = isSelfLoop ? selfLoopRoute(from, lane) : curvedRoute(anchors.source, anchors.target, laneForEdgeDirection(edge, lane));
     const backward = !isSelfLoop && anchors.source.side === 'left' && anchors.target.side === 'right';
 
     return {
