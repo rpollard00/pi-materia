@@ -6,6 +6,7 @@ import { sendJson } from './http.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
 import { handleMonitorEventsRoute, handleMonitorSnapshotRoute } from './monitor.js';
 import { handleProfileRoleGenerationRoute } from './profileRoleGeneration.js';
+import { handleQuestRoute } from './quests.js';
 import { handleRoleGenerationRoute } from './roleGeneration.js';
 import { serveStatic } from './static.js';
 // Ordered dispatcher for the WebUI HTTP surface. Keep startsWith checks and
@@ -46,6 +47,10 @@ export async function handleMateriaWebUiRequest(req, res, deps) {
     }
     if (req.url?.startsWith('/api/loadout/default')) {
         await handleDefaultLoadoutRoute(req, res, { setDefaultLoadout: deps.session?.setDefaultLoadout });
+        return;
+    }
+    if (req.url?.startsWith('/api/quests')) {
+        await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest, reorderQuest: deps.session?.reorderQuest });
         return;
     }
     if (req.url?.startsWith('/api/profile/role-generation')) {
