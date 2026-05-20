@@ -24,8 +24,14 @@ function stopMenuEvent(event: ReactMouseEvent | KeyboardEvent) {
   event.stopPropagation();
 }
 
+interface MateriaSelectorBadge {
+  label: string;
+  title: string;
+  className: string;
+}
+
 function sourceLabel(source: LoadoutSourceScope | undefined): string {
-  if (source === 'default') return 'Built-In';
+  if (source === 'default') return 'Built-in';
   if (source === 'user') return 'User';
   if (source === 'project') return 'Project';
   if (source === 'explicit') return 'Explicit';
@@ -37,6 +43,53 @@ function sourceTitle(item: MateriaSelectorItem): string {
   if (item.isOverriddenBuiltIn) return `${source} override of built-in materia`;
   if (item.isBuiltIn) return 'Built-in materia';
   return `${source} materia`;
+}
+
+function getGroupBadge(item: MateriaSelectorItem): MateriaSelectorBadge | null {
+  if (!item.group) return null;
+  return {
+    label: item.group,
+    title: `${item.group} materia group`,
+    className: 'materia-selector-badge materia-selector-badge-group',
+  };
+}
+
+function getOriginStatusBadge(item: MateriaSelectorItem): MateriaSelectorBadge {
+  if (item.isOverriddenBuiltIn) {
+    return {
+      label: 'Customized',
+      title: sourceTitle(item),
+      className: `materia-selector-badge materia-selector-badge-source materia-selector-badge-source-${item.source ?? 'unsaved'} materia-selector-badge-customized`,
+    };
+  }
+
+  if (item.isBuiltIn) {
+    return {
+      label: 'Built-in',
+      title: sourceTitle(item),
+      className: 'materia-selector-badge materia-selector-badge-source materia-selector-badge-built-in',
+    };
+  }
+
+  return {
+    label: 'Custom',
+    title: sourceTitle(item),
+    className: `materia-selector-badge materia-selector-badge-source materia-selector-badge-source-${item.source ?? 'unsaved'} materia-selector-badge-custom`,
+  };
+}
+
+function getLockedBadge(item: MateriaSelectorItem): MateriaSelectorBadge | null {
+  if (item.lockState !== 'locked') return null;
+  return {
+    label: 'Locked',
+    title: 'Locked materia',
+    className: 'materia-selector-badge materia-selector-badge-locked',
+  };
+}
+
+function renderBadge(badge: MateriaSelectorBadge | null) {
+  if (!badge) return null;
+  return <span className={badge.className} title={badge.title}>{badge.label}</span>;
 }
 
 function lockMenuLabel(item: MateriaSelectorItem): string {
@@ -142,6 +195,9 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
           items.map((item) => {
             const selected = item.id === selectedId;
             const LockIcon = item.lockState === 'locked' ? Lock : Unlock;
+            const groupBadge = getGroupBadge(item);
+            const originStatusBadge = getOriginStatusBadge(item);
+            const lockedBadge = getLockedBadge(item);
             return (
               <div
                 key={item.id}
@@ -157,12 +213,9 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
                     {item.description && <span className="materia-selector-row-description">{item.description}</span>}
                   </span>
                   <span className="materia-selector-row-meta" aria-label="Materia metadata">
-                    <span className="materia-selector-badge materia-selector-badge-type">{item.type}</span>
-                    {item.group && <span className="materia-selector-badge materia-selector-badge-group">{item.group}</span>}
-                    <span className={`materia-selector-badge materia-selector-badge-source materia-selector-badge-source-${item.source ?? 'unsaved'}`} title={sourceTitle(item)}>{sourceLabel(item.source)}</span>
-                    {item.isOverriddenBuiltIn && <span className="materia-selector-badge materia-selector-badge-override" title="Overrides built-in materia">Override</span>}
-                    {item.isBuiltIn && !item.isOverriddenBuiltIn && <span className="materia-selector-badge materia-selector-badge-built-in" title="Built-in materia">Built-In</span>}
-                    {item.lockState === 'locked' && <span className="materia-selector-badge materia-selector-badge-locked" title="Locked materia">Locked</span>}
+                    {renderBadge(groupBadge)}
+                    {renderBadge(originStatusBadge)}
+                    {renderBadge(lockedBadge)}
                   </span>
                 </button>
                 <button

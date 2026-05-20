@@ -373,7 +373,7 @@ The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: t
   "materia": {
     "Ignore-Artifacts": { "type": "utility", "script": { "kind": "shippedUtility", "name": "ensure-ignored.mjs", "runtime": "node" }, "parse": "json", "params": { "patterns": [".pi/pi-materia/"] }, "assign": { "artifactIgnore": "$" } },
     "Detect-VCS": { "type": "utility", "script": { "kind": "shippedUtility", "name": "detect-vcs.mjs", "runtime": "node" }, "parse": "json", "assign": { "vcs": "$" } },
-    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return the generic handoff envelope with shape: { \"summary\": string, \"workItems\": [{ \"id\": string, \"title\": string, \"description\": string, \"acceptance\": string[], \"context\": { \"architecture\": string, \"constraints\": string[], \"dependencies\": string[], \"risks\": string[] } }], \"guidance\": {}, \"decisions\": [], \"risks\": [], \"satisfied\": true, \"feedback\": \"\", \"missing\": [] }. Use workItems, not tasks. Request: {{request}}" },
+    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return JSON using the runtime-provided canonical handoff contract; generated units belong in workItems. Request: {{request}}" },
     "Build": { "tools": "coding", "prompt": "Implement exactly the assigned workItem using adapter-provided guidance." }
   }
 }

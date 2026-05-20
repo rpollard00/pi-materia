@@ -40,6 +40,24 @@ const items: MateriaSelectorItem[] = [
     canToggleLock: true,
     lockTitle: 'Unlock Review',
   },
+  {
+    id: 'Shell',
+    label: 'Shell',
+    group: 'Utility',
+    type: 'utility',
+    description: 'Run a shell command',
+    source: 'user',
+    isBuiltIn: false,
+    isOverriddenBuiltIn: false,
+    lockState: 'unlocked',
+    saveScope: 'user',
+    canSave: true,
+    saveBlockedReason: null,
+    canDelete: true,
+    deleteTitle: 'Delete Shell from user scope',
+    canToggleLock: true,
+    lockTitle: 'Lock Shell',
+  },
 ];
 
 afterEach(() => {
@@ -48,7 +66,7 @@ afterEach(() => {
 });
 
 describe('MateriaSelectorSidebar', () => {
-  it('renders source, override, built-in, and locked badges with accessible row actions', () => {
+  it('renders concise group, origin status, and locked badges with accessible row actions', () => {
     const onSelect = vi.fn();
     render(
       <MateriaSelectorSidebar
@@ -64,10 +82,14 @@ describe('MateriaSelectorSidebar', () => {
 
     const selector = screen.getByRole('complementary', { name: 'Materia selector' });
     expect(within(selector).getByRole('button', { name: 'New' })).toBeTruthy();
-    expect(within(selector).getAllByText('Built-In').length).toBeGreaterThanOrEqual(1);
-    expect(within(selector).getByText('Project')).toBeTruthy();
-    expect(within(selector).getByText('Override')).toBeTruthy();
+    expect(within(selector).getByText('Built-in')).toBeTruthy();
+    expect(within(selector).getByText('Customized').getAttribute('title')).toBe('Project override of built-in materia');
+    expect(within(selector).getByText('Custom').getAttribute('title')).toBe('User materia');
     expect(within(selector).getByText('Locked')).toBeTruthy();
+    expect(within(selector).queryByText('Project')).toBeNull();
+    expect(within(selector).queryByText('Override')).toBeNull();
+    expect(within(selector).queryByText('agent')).toBeNull();
+    expect(within(selector).getAllByText('Utility')).toHaveLength(1);
     expect(screen.queryByTestId('edit-materia-select')).toBeNull();
 
     const reviewRow = within(selector).getByTitle('Review — Project override of built-in materia');

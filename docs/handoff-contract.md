@@ -38,6 +38,10 @@ Generated units of work use `workItems`, not `tasks`. pi-materia intentionally d
 
 JSON sockets should preserve useful existing `summary`, `workItems`, `guidance`, `decisions`, and `risks` context, augmenting it when possible. The output should be the object only: no markdown fences, prose, or extra commentary. Plain text sockets (`"parse": "text"`) do not use this JSON handoff contract.
 
+## Prompt layering
+
+Prompt assembly exposes the shared handoff summary through synthetic cast context for JSON sockets that are ready to produce final output. Socket-local prompt suffixes should stay thin: JSON-only formatting, generated-output placement in `workItems`, upstream `workItems` context for generator transforms, and multi-turn finalization/refinement guidance. Do not copy this full envelope schema into generated socket prompts or role-generation prompts; refer to the runtime-provided canonical handoff contract instead.
+
 ## Generator pipeline contract
 
 Materia marked `generator: true` produce generated work through the same handoff envelope. Their canonical output is always the top-level `workItems` array. A generator socket, including a generator upstream of another generator, must use JSON parsing and expose `workItems` (for example, `"assign": { "workItems": "$.workItems" }`).

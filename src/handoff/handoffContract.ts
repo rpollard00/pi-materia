@@ -42,6 +42,9 @@ export function formatHandoffWorkItemShape(): string {
   return formatDomainHandoffWorkItemShape();
 }
 
+// Shared contract prose belongs in docs and synthetic cast context. Socket-local
+// prompt suffixes should reference it and add only adapter-specific constraints
+// such as JSON-only output or generator workItems placement.
 export const HANDOFF_CONTRACT_PROMPT_TEXT = [
   "pi-materia canonical handoff JSON contract:",
   `- JSON-parsed agent materia should return the generic handoff envelope when applicable: ${formatHandoffEnvelopeShape()}.`,
