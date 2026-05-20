@@ -84,24 +84,36 @@ describe('MateriaSelectorSidebar', () => {
     );
 
     const selector = screen.getByRole('complementary', { name: 'Materia selector' });
+    const rowSelects = Array.from(selector.querySelectorAll<HTMLButtonElement>('.materia-selector-row-select'));
+    const rowFor = (id: string) => {
+      const row = rowSelects.find((button) => button.dataset.materiaId === id);
+      if (!row) throw new Error(`Missing selector row ${id}`);
+      return row;
+    };
+    const buildRow = rowFor('Build');
+    const reviewRow = rowFor('Review');
+    const shellRow = rowFor('Shell');
+
     expect(within(selector).getByRole('button', { name: 'New' })).toBeTruthy();
-    expect(within(selector).getByText('Built-in')).toBeTruthy();
-    expect(within(selector).getByText('Customized').getAttribute('title')).toBe('Project override of built-in materia');
-    expect(within(selector).getByText('Custom').getAttribute('title')).toBe('User materia');
-    expect(within(selector).getByText('Locked')).toBeTruthy();
-    expect(within(selector).queryByText('Project')).toBeNull();
-    expect(within(selector).queryByText('Override')).toBeNull();
+    expect(within(buildRow).getByText('Built-in').getAttribute('title')).toBe('Built-in materia');
+    expect(within(reviewRow).getByText('Customized').getAttribute('title')).toBe('Project override of built-in materia');
+    expect(within(shellRow).getByText('Custom').getAttribute('title')).toBe('User materia');
+    expect(within(reviewRow).getByText('Locked')).toBeTruthy();
+    expect(within(reviewRow).queryByText('Project')).toBeNull();
+    expect(within(reviewRow).queryByText('Override')).toBeNull();
+    expect(within(selector).queryByText('Agent')).toBeNull();
     expect(within(selector).queryByText('agent')).toBeNull();
-    expect(within(selector).getAllByText('Utility')).toHaveLength(1);
+    expect(selector.querySelector('.materia-selector-badge-type')).toBeNull();
+    expect(within(shellRow).getAllByText('Utility')).toHaveLength(1);
     expect(screen.queryByTestId('edit-materia-select')).toBeNull();
     expect(selector.querySelector('.materia-selector-row-id')).toBeNull();
     expect(selector.querySelectorAll('.materia-selector-row-orb .materia-orb-small')).toHaveLength(items.length);
-    expect(selector.querySelector('.materia-color-purple')?.getAttribute('title')).toBe('Review label materia color');
-    expect(within(selector).getByText('Review label')).toBeTruthy();
-    expect(within(selector).queryByText('Review')).toBeNull();
-    expect(within(selector).getByText('Shell')).toBeTruthy();
+    expect(reviewRow.querySelector('.materia-color-purple')?.getAttribute('title')).toBe('Review label materia color');
+    expect(within(reviewRow).getByText('Review label')).toBeTruthy();
+    expect(within(reviewRow).queryByText('Review')).toBeNull();
+    expect(within(shellRow).getByText('Shell')).toBeTruthy();
 
-    const reviewRow = within(selector).getByTitle('Review — Project override of built-in materia');
+    expect(reviewRow.getAttribute('title')).toBe('Review — Project override of built-in materia');
     expect(reviewRow.getAttribute('aria-current')).toBe('true');
     fireEvent.click(reviewRow);
     expect(onSelect).toHaveBeenCalledWith('Review');
