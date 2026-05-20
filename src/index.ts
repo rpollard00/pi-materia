@@ -10,6 +10,7 @@ import { ensureMateriaWebUi } from "./webui/service.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError } from "./infrastructure/index.js";
+import type { QuestMovePlacement } from "./domain/questBoard.js";
 import { renderQuestAdded, renderQuestList, renderQuestStarted, renderQuestStatus, renderQuestStopped, type QuestListFilter, type QuestListOptions } from "./presentation/questBoard.js";
 export { renderCastList } from "./infrastructure/index.js";
 export type { QuestListFilter, QuestListOptions } from "./presentation/questBoard.js";
@@ -342,6 +343,23 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
+  if (action === "move") {
+    const parsed = parseQuestMoveArgs(rest);
+    if (!parsed.ok) {
+      input.ctx.ui.notify(parsed.error, "error");
+      return;
+    }
+    try {
+      const result = await input.useCases.moveQuest(parsed.args);
+      const targetText = result.target ? ` ${parsed.args.placement} ${result.target.id}` : " first";
+      sendQuestMessage(input.pi, [`Moved quest ${result.quest.id}${targetText}.`, "Pending quest order updated in .pi/pi-materia/quest-board.json."], "move");
+      input.ctx.ui.notify(`Moved pi-materia quest ${result.quest.id}${targetText}.`, "info");
+    } catch (error) {
+      notifyQuestError(input.ctx, "move", error);
+    }
+    return;
+  }
+
   if (action === "stop") {
     if (rest.length > 0) {
       input.ctx.ui.notify("Usage: /materia quest stop", "error");
@@ -427,7 +445,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
-  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest list [pending|all|succeeded|failed] [--limit <n>], /materia quest add [--loadout <name>] <prompt>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
+  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest list [pending|all|succeeded|failed] [--limit <n>], /materia quest add [--loadout <name>] <prompt>, /materia quest move <quest> --first|--before <target>|--onto <target>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
 }
 
 async function showQuestStatus(input: QuestCommandInput): Promise<void> {
@@ -566,6 +584,55 @@ function parsePositiveSafeInteger(value: string): { ok: true; value: number } | 
   return { ok: true, value: parsed };
 }
 
+export function parseQuestMoveArgs(tokens: string[]): { ok: true; args: { questRef: string; placement: QuestMovePlacement; targetRef?: string } } | { ok: false; error: string } {
+  const usage = "Usage: /materia quest move <quest> --first|--before <target>|--onto <target> (--onto means after target). Quest IDs accept unambiguous prefixes.";
+  const questRef = tokens[0];
+  if (!questRef || questRef.startsWith("--")) return { ok: false, error: usage };
+  let placement: QuestMovePlacement | undefined;
+  let targetRef: string | undefined;
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    const setPlacement = (next: QuestMovePlacement, target?: string): { ok: true } | { ok: false; error: string } => {
+      if (placement !== undefined) return { ok: false, error: `${usage} Specify exactly one placement option.` };
+      placement = next;
+      targetRef = target;
+      return { ok: true };
+    };
+    if (token === "--first") {
+      const set = setPlacement("first");
+      if (!set.ok) return set;
+      continue;
+    }
+    if (token === "--before" || token === "--onto") {
+      const value = tokens[index + 1];
+      if (!value || value.startsWith("--")) return { ok: false, error: usage };
+      const set = setPlacement(token === "--before" ? "before" : "after", value);
+      if (!set.ok) return set;
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--before=")) {
+      const value = token.slice("--before=".length).trim();
+      if (!value) return { ok: false, error: usage };
+      const set = setPlacement("before", value);
+      if (!set.ok) return set;
+      continue;
+    }
+    if (token.startsWith("--onto=")) {
+      const value = token.slice("--onto=".length).trim();
+      if (!value) return { ok: false, error: usage };
+      const set = setPlacement("after", value);
+      if (!set.ok) return set;
+      continue;
+    }
+    return { ok: false, error: token.startsWith("--") ? `Unknown /materia quest move option ${token}. ${usage}` : usage };
+  }
+
+  if (placement === undefined) return { ok: false, error: usage };
+  return { ok: true, args: { questRef, placement, ...(targetRef ? { targetRef } : {}) } };
+}
+
 function parseQuestAddArgs(tokens: string[]): { ok: true; prompt: string; loadoutOverride?: string } | { ok: false; error: string } {
   let loadoutOverride: string | undefined;
   const promptTokens: string[] = [];
@@ -621,7 +688,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
   }
 
   if (tokens[0] === "quest") {
-    const questSubcommands = ["status", "add", "run", "runonce", "start", "stop", "list"];
+    const questSubcommands = ["status", "add", "run", "runonce", "start", "stop", "list", "move"];
     if (tokens.length === 1 && endsWithWhitespace) return questSubcommands.map((value) => ({ value: `quest ${value}`, label: value }));
     if (tokens.length === 2 && !endsWithWhitespace) {
       const matching = questSubcommands.filter((value) => value.startsWith(tokens[1] ?? ""));

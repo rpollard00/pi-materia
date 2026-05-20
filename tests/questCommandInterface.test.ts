@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import piMateria, { parseQuestListArgs } from "../src/index.js";
+import piMateria, { parseQuestListArgs, parseQuestMoveArgs } from "../src/index.js";
 import { findNextPendingQuest, type Quest, type QuestBoard, type QuestStatus } from "../src/domain/questBoard.js";
 import { selectQuestList } from "../src/presentation/questBoard.js";
 import { FakePiHarness } from "./fakePi.js";
@@ -89,6 +89,17 @@ async function seedBoard(harness: FakePiHarness, quests: Quest[]): Promise<void>
 function listEntryLines(message: string): string[] {
   return message.split("\n").filter((line) => line.startsWith("- quest-"));
 }
+
+describe("/materia quest move parsing", () => {
+  test("accepts exactly one placement option", () => {
+    expect(parseQuestMoveArgs(["quest-a", "--first"])).toEqual({ ok: true, args: { questRef: "quest-a", placement: "first" } });
+    expect(parseQuestMoveArgs(["abc", "--before", "def"])).toEqual({ ok: true, args: { questRef: "abc", placement: "before", targetRef: "def" } });
+    expect(parseQuestMoveArgs(["abc", "--onto=def"])).toEqual({ ok: true, args: { questRef: "abc", placement: "after", targetRef: "def" } });
+    expect(parseQuestMoveArgs(["abc", "--first", "--onto", "def"]).ok).toBe(false);
+    expect(parseQuestMoveArgs(["abc", "--onto"]).ok).toBe(false);
+    expect(parseQuestMoveArgs(["abc"]).ok).toBe(false);
+  });
+});
 
 describe("/materia quest list parsing", () => {
   test("defaults to pending with limit 10", () => {
@@ -310,6 +321,45 @@ describe("/materia quest command interface", () => {
     expect(board.runner.enabled).toBe(true);
     expect(board.quests[0]).toMatchObject({ status: "succeeded", attempts: 1 });
     expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(true);
+  });
+
+  test("moves pending quests using unambiguous quest prefixes", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [
+      makeQuest("quest-ab12cd34", "pending", "First quest"),
+      makeQuest("quest-cd34ef56", "pending", "Second quest"),
+      makeQuest("quest-ef56gh78", "pending", "Third quest"),
+    ]);
+
+    await harness.runCommand("materia", "quest move ab12 --onto cd34");
+
+    let board = await readBoard(harness);
+    expect(board.quests.map((quest: any) => quest.id)).toEqual(["quest-cd34ef56", "quest-ab12cd34", "quest-ef56gh78"]);
+    expect(latestMateriaMessage(harness)).toContain("Moved quest quest-ab12cd34 after quest-cd34ef56");
+
+    await harness.runCommand("materia", "quest move ef56 --first");
+    board = await readBoard(harness);
+    expect(board.quests.map((quest: any) => quest.id)).toEqual(["quest-ef56gh78", "quest-cd34ef56", "quest-ab12cd34"]);
+  });
+
+  test("move rejects ambiguous, missing, and non-pending quest references without writing", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [
+      makeQuest("quest-ab12cd34", "pending", "First quest"),
+      makeQuest("quest-ab99zz00", "pending", "Second quest"),
+      makeQuest("quest-done", "succeeded", "Done quest"),
+    ]);
+
+    await harness.runCommand("materia", "quest move ab --first");
+    await harness.runCommand("materia", "quest move missing --first");
+    await harness.runCommand("materia", "quest move ab12 --before done");
+
+    const board = await readBoard(harness);
+    expect(board.quests.map((quest: any) => quest.id)).toEqual(["quest-ab12cd34", "quest-ab99zz00", "quest-done"]);
+    const errors = harness.notifications.filter((notification) => notification.type === "error").map((notification) => notification.message);
+    expect(errors.some((message) => message.includes("ambiguous") && message.includes("quest-ab12cd34") && message.includes("quest-ab99zz00"))).toBe(true);
+    expect(errors.some((message) => message.includes("no quest matches reference 'missing'"))).toBe(true);
+    expect(errors.some((message) => message.includes("quest 'quest-done' is succeeded, not pending"))).toBe(true);
   });
 
   test("runonce with no pending quests reports unavailable without enabling runner", async () => {

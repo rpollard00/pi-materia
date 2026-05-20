@@ -77,7 +77,8 @@ export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
     lines.push("Recent results: none");
   }
 
-  lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | /materia quest list [pending|all|succeeded|failed] [--limit <n>] | run [id] | runonce [id] | start [id] | stop | status");
+  lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | /materia quest list [pending|all|succeeded|failed] [--limit <n>] | move <quest> --first|--before <target>|--onto <target> | run [id] | runonce [id] | start [id] | stop | status");
+  lines.push("Move: --onto means after target; quest IDs accept unambiguous prefixes.");
   lines.push("Run: run enables continuous back-to-back processing; runonce launches one pending quest only; start is a compatibility alias for run.");
   lines.push("Stop: stop disables future auto-advance without aborting the active cast.");
   return lines;

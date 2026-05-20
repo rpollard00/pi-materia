@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -11,7 +11,7 @@ import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, l
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
-import { addQuest as addQuestToBoard } from "../domain/questBoard.js";
+import { addQuest as addQuestToBoard, generateUniqueQuestId } from "../domain/questBoard.js";
 import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
 
 export interface MateriaWebUiLaunchResult {
@@ -294,8 +294,10 @@ async function addWebUiQuest(cwd: string, configuredPath: string | undefined, in
     const boards = new FileQuestBoardRepository(cwd);
     const board = await boards.loadOrCreate();
     const now = new Date().toISOString();
+    const id = generateUniqueQuestId(board);
+    if (!id.ok) return { ok: false, code: "validation_failed", message: id.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ") };
     const result = addQuestToBoard(board, {
-      id: `quest-${randomUUID()}`,
+      id: id.value,
       title: deriveWebUiQuestTitle(prompt),
       prompt,
       now,

@@ -7,7 +7,7 @@ import { parseLinkCommandArguments } from "../link/parser.js";
 import { createLinkCastStateData, createLinkPlan, createLinkRuntimeState } from "../link/planner.js";
 import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/resolver.js";
 import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData, type LinkTargetRef, type ResolvedMateriaLinkTarget, type VirtualLoadoutMetadata } from "../link/types.js";
-import { addQuest, completeQuest, enableQuestRunner, failRunningQuest, findNextPendingQuest, startQuest, stopQuestRunner, type Quest, type QuestBoard, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
+import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, resolveQuestRef, startQuest, stopQuestRunner, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
 
 export interface LoadoutUseCasesDeps {
@@ -412,13 +412,15 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
 
   constructor(private readonly deps: QuestRunnerUseCasesDeps<TSession, TPi>) {
     this.clock = deps.clock ?? { now: () => new Date().toISOString() };
-    this.ids = deps.ids ?? { nextId: () => `quest-${Date.now().toString(36)}` };
+    this.ids = deps.ids ?? { nextId: () => createShortRandomQuestId() };
   }
 
   async addQuest(input: { title?: string; prompt: string; loadoutOverride?: string }): Promise<{ board: QuestBoard; quest: Quest }> {
     const board = await this.deps.boards.loadOrCreate();
     const now = this.clock.now();
-    const result = addQuest(board, { id: this.ids.nextId(), title: input.title?.trim() || deriveQuestTitle(input.prompt), prompt: input.prompt, now, ...(input.loadoutOverride ? { loadoutOverride: input.loadoutOverride } : {}) });
+    const id = generateUniqueQuestId(board, { nextId: () => this.ids.nextId() });
+    if (!id.ok) throw new QuestBoardValidationError(id.issues);
+    const result = addQuest(board, { id: id.value, title: input.title?.trim() || deriveQuestTitle(input.prompt), prompt: input.prompt, now, ...(input.loadoutOverride ? { loadoutOverride: input.loadoutOverride } : {}) });
     if (!result.ok) throw new QuestBoardValidationError(result.issues);
     await this.deps.boards.save(result.value);
     return { board: result.value, quest: result.value.quests[result.value.quests.length - 1]! };
@@ -430,6 +432,18 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     const runningQuest = board.quests.find((quest) => quest.status === "running");
     const activeQuest = board.runner.activeQuestId ? board.quests.find((quest) => quest.id === board.runner.activeQuestId) : runningQuest;
     return { board, boardPath: this.deps.boards.boardPath, ...(activeCast ? { activeCast } : {}), ...(activeQuest ? { activeQuest } : {}), pendingCount: board.quests.filter((quest) => quest.status === "pending").length, ...(runningQuest ? { runningQuest } : {}) };
+  }
+
+  async moveQuest(input: { questRef: string; placement: QuestMovePlacement; targetRef?: string }): Promise<{ board: QuestBoard; quest: Quest; target?: Quest }> {
+    const board = await this.deps.boards.loadOrCreate();
+    const quest = resolveQuestRef(board, input.questRef);
+    if (!quest.ok) throw new QuestBoardValidationError(quest.issues);
+    const target = input.targetRef === undefined ? undefined : resolveQuestRef(board, input.targetRef);
+    if (target !== undefined && !target.ok) throw new QuestBoardValidationError(target.issues);
+    const moved = movePendingQuest(board, { questId: quest.value.id, placement: input.placement, ...(target?.value ? { targetId: target.value.id } : {}), now: this.clock.now() });
+    if (!moved.ok) throw new QuestBoardValidationError(moved.issues);
+    await this.deps.boards.save(moved.value);
+    return { board: moved.value, quest: quest.value, ...(target?.value ? { target: target.value } : {}) };
   }
 
   async runNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string }): Promise<QuestStartResult | undefined> {
@@ -607,8 +621,9 @@ function buildQuestRunResult(input: { status: QuestTerminalStatus; now: string; 
 
 function selectPendingQuest(board: QuestBoard, questId?: string): Quest | undefined {
   if (!questId) return findNextPendingQuest(board);
-  const quest = board.quests.find((candidate) => candidate.id === questId);
-  return quest?.status === "pending" ? quest : undefined;
+  const resolved = resolveQuestRef(board, questId);
+  if (!resolved.ok) return undefined;
+  return resolved.value.status === "pending" ? resolved.value : undefined;
 }
 
 function recordQuestStartupFailure(board: QuestBoard, quest: Quest, now: string, error: unknown): QuestBoard {

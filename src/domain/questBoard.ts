@@ -98,6 +98,15 @@ export interface FailRunningQuestInput {
 
 export type QuestMovePlacement = "first" | "before" | "after";
 
+export const QUEST_ID_PREFIX = "quest-";
+export const DEFAULT_RANDOM_QUEST_ID_LENGTH = 8;
+export const DEFAULT_QUEST_ID_MAX_ATTEMPTS = 64;
+
+export interface GenerateQuestIdOptions {
+  nextId?: () => string;
+  maxAttempts?: number;
+}
+
 export interface MovePendingQuestInput {
   questId: string;
   placement: QuestMovePlacement;
@@ -116,6 +125,43 @@ export function createQuestBoard(input: CreateQuestBoardInput): QuestBoard {
 }
 
 export const createEmptyQuestBoard = createQuestBoard;
+
+export function createShortRandomQuestId(length = DEFAULT_RANDOM_QUEST_ID_LENGTH): string {
+  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+  let randomPart = "";
+  for (let index = 0; index < length; index += 1) {
+    randomPart += alphabet[Math.floor(Math.random() * alphabet.length)] ?? "0";
+  }
+  return `${QUEST_ID_PREFIX}${randomPart}`;
+}
+
+export function generateUniqueQuestId(board: QuestBoard, options: GenerateQuestIdOptions = {}): DomainResult<string> {
+  const nextId = options.nextId ?? createShortRandomQuestId;
+  const maxAttempts = options.maxAttempts ?? DEFAULT_QUEST_ID_MAX_ATTEMPTS;
+  const existingIds = new Set(board.quests.map((quest) => quest.id));
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const candidate = nextId();
+    if (!isNonEmptyString(candidate)) return issue("quest.id", "generated quest id must be non-empty");
+    if (!existingIds.has(candidate)) return ok(candidate);
+  }
+  return issue("quest.id", `could not generate a unique quest id after ${maxAttempts} attempts`);
+}
+
+export function resolveQuestRef(board: QuestBoard, ref: string): DomainResult<Quest> {
+  const trimmed = ref.trim();
+  if (!trimmed) return issue("questRef", "quest reference is required");
+
+  const exact = board.quests.find((quest) => quest.id === trimmed);
+  if (exact !== undefined) return ok(exact);
+
+  const matches = board.quests.filter((quest) => quest.id.startsWith(trimmed) || (quest.id.startsWith(QUEST_ID_PREFIX) && quest.id.slice(QUEST_ID_PREFIX.length).startsWith(trimmed)));
+  if (matches.length === 1) return ok(matches[0]!);
+  if (matches.length === 0) return issue("questRef", `no quest matches reference '${trimmed}'`);
+
+  const listed = matches.slice(0, 8).map((quest) => quest.id).join(", ");
+  const suffix = matches.length > 8 ? `, and ${matches.length - 8} more` : "";
+  return issue("questRef", `quest reference '${trimmed}' is ambiguous; matches: ${listed}${suffix}`);
+}
 
 export function addQuest(board: QuestBoard, input: AddQuestInput): DomainResult<QuestBoard> {
   const issues: DomainIssue[] = [];

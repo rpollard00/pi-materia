@@ -5,10 +5,13 @@ import {
   createQuestBoard,
   enableQuestRunner,
   failRunningQuest,
+  createShortRandomQuestId,
   findNextPendingQuest,
+  generateUniqueQuestId,
   getOrderedQuestView,
   movePendingQuest,
   normalizeQuestBoard,
+  resolveQuestRef,
   startQuest,
   stopQuestRunner,
   validateQuestBoard,
@@ -54,6 +57,59 @@ describe("quest board domain", () => {
       updatedAt: t1,
     });
     expect(findNextPendingQuest(second.value)?.id).toBe("q-1");
+  });
+
+  test("creates short random quest ids suitable for display", () => {
+    expect(createShortRandomQuestId()).toMatch(/^quest-[0-9a-z]{8}$/);
+  });
+
+  test("generates collision-checked short random quest ids", () => {
+    const board = boardWithTwoQuests();
+    const generated = generateUniqueQuestId(board, { nextId: sequence("q-1", "quest-ab12cd34") });
+
+    expect(generated.ok).toBe(true);
+    if (!generated.ok) return;
+    expect(generated.value).toBe("quest-ab12cd34");
+  });
+
+  test("fails quest id generation after repeated collisions", () => {
+    const board = boardWithTwoQuests();
+    const generated = generateUniqueQuestId(board, { nextId: () => "q-1", maxAttempts: 2 });
+
+    expect(generated.ok).toBe(false);
+    if (!generated.ok) expect(generated.issues[0]?.message).toContain("could not generate a unique quest id");
+  });
+
+  test("resolves quest references by exact id, displayed short id, and unique prefix", () => {
+    const board = createQuestBoard({ now: t0 });
+    const first = addQuest(board, { id: "quest-ab12cd34", title: "Short", prompt: "Do it", now: t1 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = addQuest(first.value, { id: "legacy-full-id", title: "Legacy", prompt: "Do more", now: t1 });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    expect(resolveQuestRef(second.value, "quest-ab12cd34")).toMatchObject({ ok: true, value: { id: "quest-ab12cd34" } });
+    expect(resolveQuestRef(second.value, "ab12cd34")).toMatchObject({ ok: true, value: { id: "quest-ab12cd34" } });
+    expect(resolveQuestRef(second.value, "legacy-full")).toMatchObject({ ok: true, value: { id: "legacy-full-id" } });
+  });
+
+  test("rejects ambiguous and missing quest references with clear matches", () => {
+    const board = createQuestBoard({ now: t0 });
+    const first = addQuest(board, { id: "quest-ab12cd34", title: "First", prompt: "Do it", now: t1 });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = addQuest(first.value, { id: "quest-ab99zz00", title: "Second", prompt: "Do more", now: t1 });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    const ambiguous = resolveQuestRef(second.value, "ab");
+    expect(ambiguous.ok).toBe(false);
+    if (!ambiguous.ok) expect(ambiguous.issues[0]?.message).toContain("quest-ab12cd34, quest-ab99zz00");
+
+    const missing = resolveQuestRef(second.value, "missing");
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.issues[0]?.message).toContain("no quest matches");
   });
 
   test("rejects duplicate quest ids", () => {
@@ -285,6 +341,11 @@ function boardWithTwoQuests(): QuestBoard {
   const second = addQuest(first.value, { id: "q-2", title: "Second", prompt: "Do two", now: t1 });
   if (!second.ok) throw new Error("failed to add second quest");
   return second.value;
+}
+
+function sequence(...values: string[]): () => string {
+  let index = 0;
+  return () => values[Math.min(index++, values.length - 1)]!;
 }
 
 function boardWithThreeQuests(): QuestBoard {
