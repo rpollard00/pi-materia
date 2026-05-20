@@ -10,6 +10,7 @@ const items: MateriaSelectorItem[] = [
     group: 'core',
     type: 'agent',
     description: 'Built-in builder',
+    color: 'materia-color-green',
     source: 'default',
     isBuiltIn: true,
     isOverriddenBuiltIn: false,
@@ -28,6 +29,7 @@ const items: MateriaSelectorItem[] = [
     group: 'qa',
     type: 'agent',
     description: 'Project reviewer',
+    color: 'materia-color-purple',
     source: 'project',
     isBuiltIn: true,
     isOverriddenBuiltIn: true,
@@ -46,6 +48,7 @@ const items: MateriaSelectorItem[] = [
     group: 'Utility',
     type: 'utility',
     description: 'Run a shell command',
+    color: 'materia-color-cyan',
     source: 'user',
     isBuiltIn: false,
     isOverriddenBuiltIn: false,
@@ -92,6 +95,8 @@ describe('MateriaSelectorSidebar', () => {
     expect(within(selector).getAllByText('Utility')).toHaveLength(1);
     expect(screen.queryByTestId('edit-materia-select')).toBeNull();
     expect(selector.querySelector('.materia-selector-row-id')).toBeNull();
+    expect(selector.querySelectorAll('.materia-selector-row-orb .materia-orb-small')).toHaveLength(items.length);
+    expect(selector.querySelector('.materia-color-purple')?.getAttribute('title')).toBe('Review label materia color');
     expect(within(selector).getByText('Review label')).toBeTruthy();
     expect(within(selector).queryByText('Review')).toBeNull();
     expect(within(selector).getByText('Shell')).toBeTruthy();

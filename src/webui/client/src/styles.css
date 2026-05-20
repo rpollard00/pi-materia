@@ -1062,6 +1062,8 @@
 .materia-selector-header,
 .materia-selector-row,
 .materia-selector-row-select,
+.materia-selector-row-orb,
+.materia-selector-row-content,
 .materia-selector-row-main,
 .materia-selector-row-title,
 .materia-selector-row-meta,
@@ -1171,6 +1173,9 @@
 
 .materia-selector-row-select {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.65rem;
   max-width: 100%;
   overflow: hidden;
   border: 0;
@@ -1180,6 +1185,23 @@
   text-align: left;
   color: inherit;
   cursor: pointer;
+}
+
+.materia-selector-row-orb {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.materia-selector-row-orb .materia-orb-small {
+  --materia-orb-small-size: 1.45rem;
+}
+
+.materia-selector-row-content {
+  display: grid;
+  min-width: 0;
 }
 
 .materia-selector-row-main {

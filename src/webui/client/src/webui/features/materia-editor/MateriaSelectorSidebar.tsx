@@ -1,5 +1,6 @@
 import { EllipsisVertical, Lock, Plus, Unlock } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { Orb } from '../../components/Orb.js';
 import type { LoadoutSourceScope } from '../../types.js';
 import type { MateriaLockState, MateriaSelectorItem } from './materiaEditPolicy.js';
 
@@ -212,16 +213,21 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
                   title={`${item.id} — ${sourceTitle(item)}`}
                   aria-current={selected ? 'true' : undefined}
                 >
-                  <span className="materia-selector-row-main">
-                    <span className="materia-selector-row-title">
-                      <span className="materia-selector-row-label">{item.label || item.id}</span>
-                    </span>
-                    {item.description && <span className="materia-selector-row-description">{item.description}</span>}
+                  <span className="materia-selector-row-orb" aria-hidden="true">
+                    <Orb color={item.color} label={`${item.label || item.id} materia color`} small />
                   </span>
-                  <span className="materia-selector-row-meta" aria-label="Materia metadata">
-                    {renderBadge(groupBadge)}
-                    {renderBadge(originStatusBadge)}
-                    {renderBadge(lockedBadge)}
+                  <span className="materia-selector-row-content">
+                    <span className="materia-selector-row-main">
+                      <span className="materia-selector-row-title">
+                        <span className="materia-selector-row-label">{item.label || item.id}</span>
+                      </span>
+                      {item.description && <span className="materia-selector-row-description">{item.description}</span>}
+                    </span>
+                    <span className="materia-selector-row-meta" aria-label="Materia metadata">
+                      {renderBadge(groupBadge)}
+                      {renderBadge(originStatusBadge)}
+                      {renderBadge(lockedBadge)}
+                    </span>
                   </span>
                 </button>
                 <button

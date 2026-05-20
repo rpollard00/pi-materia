@@ -1,4 +1,4 @@
-import type { MateriaBehaviorConfig } from '../../../loadoutModel.js';
+import { resolveMateriaColor, type MateriaBehaviorConfig } from '../../../loadoutModel.js';
 import type { LoadoutSourceScope, SaveTarget } from '../../types.js';
 
 export type MateriaLockState = 'locked' | 'unlocked';
@@ -30,6 +30,7 @@ export interface MateriaSelectorItem extends MateriaEditPolicy {
   group: string;
   type: 'agent' | 'utility' | 'unknown';
   description: string;
+  color: string;
 }
 
 function writableSource(source: LoadoutSourceScope | undefined): SaveTarget | undefined {
@@ -77,6 +78,7 @@ export function buildMateriaSelectorItems(
         group: String(definition.group ?? ''),
         type,
         description: String(definition.description ?? ''),
+        color: resolveMateriaColor(id, materia),
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id));
