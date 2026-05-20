@@ -2244,6 +2244,95 @@
   gap: 0.55rem;
 }
 
+.quest-pending-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.quest-pending-row::before,
+.quest-pending-row::after {
+  position: absolute;
+  right: 0.25rem;
+  left: 2.65rem;
+  z-index: 2;
+  height: 2px;
+  border-radius: 999px;
+  background: rgb(34 211 238 / 0.9);
+  box-shadow: 0 0 14px rgb(34 211 238 / 0.6);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+}
+
+.quest-pending-row::before { top: -0.32rem; }
+.quest-pending-row::after { bottom: -0.32rem; }
+.quest-pending-drop-before::before,
+.quest-pending-drop-after::after { opacity: 1; }
+
+.quest-pending-row-dragging {
+  opacity: 0.58;
+}
+
+.quest-drag-handle {
+  display: inline-grid;
+  width: 2rem;
+  min-height: 100%;
+  place-items: center;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(103 232 249 / 0.22);
+  background: rgb(2 6 23 / 0.42);
+  color: rgb(165 243 252 / 0.72);
+  cursor: grab;
+  font-weight: 950;
+  letter-spacing: -0.26em;
+  user-select: none;
+}
+
+.quest-drag-handle:active {
+  cursor: grabbing;
+}
+
+.quest-drag-handle:focus-visible,
+.quest-drag-handle:hover {
+  border-color: rgb(103 232 249 / 0.55);
+  color: rgb(224 242 254);
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(34 211 238 / 0.12);
+}
+
+.quest-drop-zone {
+  display: none;
+  border-radius: 0.8rem;
+  border: 1px dashed rgb(103 232 249 / 0.34);
+  padding: 0.35rem 0.65rem;
+  color: rgb(165 243 252 / 0.72);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.quest-card-list:has(.quest-pending-row-dragging) .quest-drop-zone,
+.quest-drop-zone-active {
+  display: block;
+}
+
+.quest-drop-zone-active {
+  border-color: rgb(34 211 238 / 0.74);
+  background: rgb(8 47 73 / 0.42);
+  color: rgb(224 242 254);
+}
+
+.quest-reorder-status {
+  margin: 0;
+  color: rgb(165 243 252 / 0.72);
+  font-size: 0.78rem;
+}
+
 .quest-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

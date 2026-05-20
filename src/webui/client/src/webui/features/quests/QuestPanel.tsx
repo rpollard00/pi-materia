@@ -27,7 +27,7 @@ interface QuestPanelProps {
 }
 
 export function QuestPanel({ persistedLoadouts = {} }: QuestPanelProps) {
-  const { board, loading, error, refresh, add, submitting } = useQuestBoard();
+  const { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting } = useQuestBoard();
   const [selectedQuestId, setSelectedQuestId] = useState<string>();
 
   const grouped = useMemo(() => {
@@ -84,7 +84,9 @@ export function QuestPanel({ persistedLoadouts = {} }: QuestPanelProps) {
           completedQuests={grouped.completedQuests}
           failedQuests={grouped.failedQuests}
           selectedQuestId={selectedQuestId}
+          reorderSubmitting={reorderSubmitting}
           onSelectQuest={setSelectedQuestId}
+          onReorderQuest={reorder}
         />
         <QuestDetail quest={selectedQuest} boardPath={board?.boardPath} loading={loading} error={error} onRefresh={() => { void refresh(); }} />
       </div>

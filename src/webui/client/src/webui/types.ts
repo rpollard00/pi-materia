@@ -238,6 +238,14 @@ export interface AddQuestResponse {
   code?: string;
 }
 
+export type QuestReorderPlacement = 'first' | 'before' | 'after';
+
+export interface ReorderQuestRequest {
+  questId: string;
+  placement: QuestReorderPlacement;
+  targetId?: string;
+}
+
 export interface MonitorSnapshot {
   ok?: boolean;
   sessionKey?: string;

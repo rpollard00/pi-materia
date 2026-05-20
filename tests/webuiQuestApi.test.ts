@@ -2,8 +2,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, type QuestBoard } from "../src/domain/questBoard.js";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult } from "../src/webui/server/index.js";
+import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, movePendingQuest, type QuestBoard } from "../src/domain/questBoard.js";
+import { issuesToMessage } from "../src/domain/result.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult } from "../src/webui/server/index.js";
 
 type StartedServer = ReturnType<typeof createMateriaWebUiServer>["server"];
 
@@ -33,6 +34,7 @@ function questBoardFixture(): QuestBoard {
 async function startTestServer(options: {
   board?: QuestBoard;
   addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
+  reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
   getQuestBoardThrows?: boolean;
 } = {}) {
   const projectDir = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-quests-"));
@@ -57,6 +59,14 @@ async function startTestServer(options: {
         if (!result.ok) return { ok: false, code: "validation_failed", message: "domain validation failed" };
         board = result.value;
         return { ok: true, boardPath, board, quest: board.quests.at(-1)! };
+      }),
+      reorderQuest: options.reorderQuest ?? (async (input) => {
+        const result = movePendingQuest(board, { ...input, now: "2026-05-19T20:01:00.000Z" });
+        if (!result.ok) return { ok: false, code: "validation_failed", message: issuesToMessage(result.issues) };
+        board = result.value;
+        const quest = board.quests.find((candidate) => candidate.id === input.questId)!;
+        const target = input.targetId ? board.quests.find((candidate) => candidate.id === input.targetId) : undefined;
+        return { ok: true, boardPath, board, quest, ...(target ? { target } : {}) };
       }),
     },
   });
@@ -131,5 +141,56 @@ describe("POST /api/quests", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ ok: false, code: "invalid_loadout", error: "Unknown Materia loadout \"Missing\"." });
+  });
+});
+
+describe("POST /api/quests/reorder", () => {
+  test("moves a pending quest and returns the canonical board response", async () => {
+    const baseUrl = await startTestServer();
+
+    const response = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-2", placement: "first" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-2", "quest-pending-1"]);
+    expect(body.quests.map((quest: { id: string }) => quest.id)).toEqual(["quest-active", "quest-pending-2", "quest-pending-1", "quest-complete", "quest-failed"]);
+    expect(body.status.updatedAt).toBe("2026-05-19T20:01:00.000Z");
+  });
+
+  test("moves a pending quest after another pending quest", async () => {
+    const baseUrl = await startTestServer();
+
+    const response = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-1", placement: "after", targetId: "quest-pending-2" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-2", "quest-pending-1"]);
+  });
+
+  test("rejects invalid reorder requests without modifying board order", async () => {
+    const baseUrl = await startTestServer();
+
+    const invalid = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-active", placement: "before", targetId: "quest-pending-1" }) });
+    const invalidBody = await invalid.json();
+    const after = await fetch(`${baseUrl}/api/quests`);
+    const afterBody = await after.json();
+
+    expect(invalid.status).toBe(400);
+    expect(invalidBody).toEqual({ ok: false, code: "validation_failed", error: "quest.status: quest 'quest-active' is running, not pending" });
+    expect(afterBody.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2"]);
+  });
+
+  test("validates reorder request shape before calling the mutation callback", async () => {
+    let called = false;
+    const baseUrl = await startTestServer({ reorderQuest: async () => { called = true; return { ok: false, code: "unavailable", message: "should not be called" }; } });
+
+    const missingTarget = await fetch(`${baseUrl}/api/quests/reorder`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-1", placement: "sideways" }) });
+    const getNotAllowed = await fetch(`${baseUrl}/api/quests/reorder`);
+
+    expect(missingTarget.status).toBe(400);
+    expect(await missingTarget.json()).toEqual({ ok: false, error: "Quest placement must be first, before, or after." });
+    expect(getNotAllowed.status).toBe(405);
+    expect(called).toBe(false);
   });
 });

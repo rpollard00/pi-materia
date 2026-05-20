@@ -61,15 +61,28 @@ export interface MateriaAddQuestInput {
   loadoutOverride?: string;
 }
 
-export type MateriaAddQuestFailureCode = 'invalid_loadout' | 'unavailable' | 'validation_failed';
+export type MateriaQuestReorderPlacement = 'first' | 'before' | 'after';
+
+export interface MateriaReorderQuestInput {
+  questId: string;
+  placement: MateriaQuestReorderPlacement;
+  targetId?: string;
+}
+
+export type MateriaQuestMutationFailureCode = 'invalid_loadout' | 'unavailable' | 'validation_failed';
 
 export type MateriaAddQuestResult =
   | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
-  | { ok: false; code: MateriaAddQuestFailureCode; message: string };
+  | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
+
+export type MateriaReorderQuestResult =
+  | { ok: true; boardPath: string; board: QuestBoard; quest: Quest; target?: Quest }
+  | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
 
 export interface MateriaQuestRouteDeps {
   getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
   addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
+  reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
 }
 
 export interface MateriaQuestSummary {
@@ -145,6 +158,10 @@ export interface MateriaAddQuestResponse {
 }
 
 export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  if (req.url?.startsWith('/api/quests/reorder')) {
+    await handleReorderQuestRoute(req, res, deps);
+    return;
+  }
   if (req.method === 'GET') {
     await handleGetQuestsRoute(res, deps);
     return;
@@ -153,7 +170,7 @@ export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse
     await handlePostQuestRoute(req, res, deps);
     return;
   }
-  sendJson(res, 405, { ok: false, error: 'Use GET to read quests or POST to add a quest.' });
+  sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, or POST /api/quests/reorder to reorder quests.' });
 }
 
 export async function handleGetQuestsRoute(res: ServerResponse, deps: MateriaQuestRouteDeps) {
@@ -190,6 +207,38 @@ export async function handlePostQuestRoute(req: IncomingMessage, res: ServerResp
   } catch (error) {
     sendJson(res, 400, { ok: false, error: errorMessage(error) });
   }
+}
+
+export async function handleReorderQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { ok: false, error: 'Use POST to reorder quests.' });
+    return;
+  }
+  if (!deps.reorderQuest) {
+    sendJson(res, 503, { ok: false, error: 'Quest reorder API is unavailable for this server.' });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    if (!isPlainObject(body)) throw new Error('Expected JSON object body.');
+    const questId = typeof body.questId === 'string' ? body.questId.trim() : '';
+    if (!questId) throw new Error('Quest id is required.');
+    const placement = typeof body.placement === 'string' ? body.placement.trim() : '';
+    if (!isQuestReorderPlacement(placement)) throw new Error('Quest placement must be first, before, or after.');
+    const rawTargetId = typeof body.targetId === 'string' ? body.targetId.trim() : undefined;
+    const result = await deps.reorderQuest({ questId, placement, ...(rawTargetId ? { targetId: rawTargetId } : {}) });
+    if (!result.ok) {
+      sendJson(res, result.code === 'unavailable' ? 503 : 400, { ok: false, code: result.code, error: result.message });
+      return;
+    }
+    sendJson(res, 200, mapQuestBoardResponse(result));
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: errorMessage(error) });
+  }
+}
+
+function isQuestReorderPlacement(value: string): value is MateriaQuestReorderPlacement {
+  return value === 'first' || value === 'before' || value === 'after';
 }
 
 export function mapQuestBoardResponse(source: MateriaQuestBoardSource): MateriaQuestBoardResponse {

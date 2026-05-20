@@ -15,7 +15,7 @@ import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaGetRoleGenerationPreferenceCallback, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
-import type { MateriaAddQuestResult, MateriaQuestBoardSource, MateriaAddQuestInput } from './quests.js';
+import type { MateriaAddQuestResult, MateriaQuestBoardSource, MateriaAddQuestInput, MateriaReorderQuestInput, MateriaReorderQuestResult } from './quests.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
 
@@ -32,6 +32,7 @@ export interface MateriaWebUiRouteDeps {
     setRoleGenerationPreference?: MateriaSetRoleGenerationPreferenceCallback;
     getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
     addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
+    reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
     generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
     modelCatalog?: MateriaModelCatalogSource;
   };
@@ -86,7 +87,7 @@ export async function handleMateriaWebUiRequest(req: IncomingMessage, res: Serve
   }
 
   if (req.url?.startsWith('/api/quests')) {
-    await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest });
+    await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest, reorderQuest: deps.session?.reorderQuest });
     return;
   }
 
