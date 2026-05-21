@@ -359,6 +359,11 @@ describe("native same-socket recovery", () => {
     let events = await readEvents(harness);
     expect(events.filter((event) => event.type === "socket_complete")).toHaveLength(0);
     expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(0);
+    const recoveryStart = events.find((event) => event.type === "same_socket_recovery_start");
+    expect(recoveryStart?.data).toMatchObject({ recoveryKind: "json_output_repair", validationKind: "json_parse", excerptLength: 630, excerptTruncated: true, attempt: 1, maxAttempts: 1, socket: "Socket-1" });
+    expect(recoveryStart?.data).not.toHaveProperty("invalidOutputExcerpt");
+    expect(latestState.runState.lastMessage).toContain("previous JSON output was invalid");
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("previous JSON output was invalid"))).toBe(true);
     expectJsonRepairRetryPrompt(promptMessages(harness).at(-1)?.content, {
       error: "Pre-commit output validation failed for socket \"Socket-1\"",
       excerpt: "{ not json",
@@ -379,6 +384,7 @@ describe("native same-socket recovery", () => {
     expect(events.filter((event) => event.type === "socket_complete" && event.data.socket === "Socket-1")).toHaveLength(1);
     expect(events.filter((event) => event.type === "socket_complete" && event.data.socket === "Socket-2")).toHaveLength(1);
     expect(events.some((event) => event.type === "same_socket_recovery_start" && String(event.data.error).includes("Pre-commit output validation failed"))).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_retry" && event.data.recoveryKind === "json_output_repair" && event.data.validationKind === "json_parse" && event.data.excerptLength === 630)).toBe(true);
   });
 
   test("handoff validation failures from an agent retry before graph advancement", async () => {

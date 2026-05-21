@@ -79,6 +79,29 @@ describe("same-socket recovery workflow", () => {
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
   });
 
+  test("json output repair recovery records bounded telemetry and user-facing status", async () => {
+    const state = makeState();
+    state.jsonOutputRepair = {
+      validationKind: "json_parse",
+      errorMessage: "Invalid JSON output",
+      invalidOutputExcerpt: "{ not json }",
+      excerptLength: 12,
+      truncated: true,
+    };
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("Pre-commit output validation failed"), makeDeps(events, calls), { entryId: "entry-json", allowGenericTurnFailure: true });
+
+    expect(recovered).toBe(true);
+    expect(state.runState.lastMessage).toContain("previous JSON output was invalid");
+    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry"]);
+    expect(events[0].data).toMatchObject({ reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "json_parse", excerptLength: 12, excerptTruncated: true, attempt: 1, maxAttempts: 1, socket: "Socket-1" });
+    expect(events[0].data).not.toHaveProperty("invalidOutputExcerpt");
+    expect(events[1].data).toMatchObject({ reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "json_parse", excerptLength: 12, excerptTruncated: true, attempt: 1, maxAttempts: 1, socket: "Socket-1" });
+    expect(calls.some((call) => call.startsWith("notify:") && call.includes("previous JSON output was invalid"))).toBe(true);
+  });
+
   test("generic turn failures require opt-in and resend directly without recovery actions", async () => {
     const state = makeState();
     const events: Array<{ type: string; data: Record<string, unknown> }> = [];
@@ -107,6 +130,32 @@ describe("same-socket recovery workflow", () => {
     expect(state.active).toBe(false);
     expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "context_window", attempts: 1, effectiveMaxAttempts: 1, socket: "Socket-1", mode: "normal" });
     expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "context_window", attempts: 1, entryId: "entry-2" } });
+    expect(calls).toContain("failCast:true");
+  });
+
+  test("json output repair exhaustion preserves revivable metadata and specific failure message", async () => {
+    const state = makeState();
+    state.jsonOutputRepair = {
+      validationKind: "handoff_validation",
+      errorMessage: "reserved control field failed",
+      invalidOutputExcerpt: "{\"satisfied\":\"yes\"}",
+      excerptLength: 19,
+      truncated: false,
+    };
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("first invalid envelope"), deps, { allowGenericTurnFailure: true });
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("second invalid envelope"), deps, { entryId: "entry-json-2", allowGenericTurnFailure: true });
+
+    expect(recovered).toBe(true);
+    expect(state.active).toBe(false);
+    expect(state.failedReason).toContain("JSON output repair retry exhausted");
+    expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "handoff_validation", excerptLength: 19, socket: "Socket-1" });
+    expect(state.recoveryExhaustion?.failedReason).toBe(state.failedReason);
+    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "handoff_validation", excerptLength: 19, entryId: "entry-json-2" } });
+    expect(events.at(-1)?.data).not.toHaveProperty("invalidOutputExcerpt");
     expect(calls).toContain("failCast:true");
   });
 

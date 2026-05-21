@@ -289,6 +289,10 @@ export interface MateriaRecoveryExhaustion {
   failedReason: string;
   socket?: string;
   itemKey?: string;
+  recoveryKind?: "json_output_repair";
+  validationKind?: MateriaJsonOutputValidationKind;
+  excerptLength?: number;
+  excerptTruncated?: boolean;
   mode: "normal" | "refinement" | "finalization";
   exhaustedAt: number;
 }
