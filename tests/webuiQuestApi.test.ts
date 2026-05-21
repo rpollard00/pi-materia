@@ -227,8 +227,12 @@ describe("POST /api/quests/reorder", () => {
 });
 
 describe("POST /api/quests/requeue", () => {
-  test("requeues a failed quest and returns the canonical board response", async () => {
-    const baseUrl = await startTestServer();
+  test("requeues a failed quest to the bottom and returns the canonical board response", async () => {
+    const board = questBoardFixture();
+    const failedQuest = board.quests.find((quest) => quest.id === "quest-failed")!;
+    board.quests = board.quests.filter((quest) => quest.id !== "quest-failed");
+    board.quests.splice(1, 0, failedQuest);
+    const baseUrl = await startTestServer({ board });
 
     const response = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-failed" }) });
     const body = await response.json();
@@ -237,6 +241,7 @@ describe("POST /api/quests/requeue", () => {
     expect(body.ok).toBe(true);
     expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2", "quest-failed"]);
     expect(body.failedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-blocked"]);
+    expect(body.quests.map((quest: { id: string }) => quest.id)).toEqual(["quest-active", "quest-pending-1", "quest-pending-2", "quest-complete", "quest-blocked", "quest-failed"]);
     expect(body.quests.find((quest: { id: string; status: string; lastError?: unknown }) => quest.id === "quest-failed")).toMatchObject({ id: "quest-failed", status: "pending", lastError: { message: "Guard spotted the party" } });
     expect(body.status.updatedAt).toBe("2026-05-19T20:02:00.000Z");
   });

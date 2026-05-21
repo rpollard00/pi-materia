@@ -82,7 +82,7 @@ export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
   }
 
   lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | /materia quest default-loadout [<name-or-id>|--clear] | /materia quest list [pending|all|succeeded|failed] [--limit <n>] | move <quest> --first|--before <target>|--onto <target> | requeue <quest> | unblock <quest> | unfail <quest> | run [id] | runonce [id] | start [id] | stop | status");
-  lines.push("Move: --onto means after target; quest IDs accept unambiguous prefixes. Requeue: failed/blocked quest IDs accept unambiguous prefixes.");
+  lines.push("Move: --onto means after target; quest IDs accept unambiguous prefixes. Requeue/unblock/unfail: failed/blocked quests move to the bottom of the queue.");
   lines.push("Run: run enables continuous back-to-back processing; runonce launches one pending quest only; start is a compatibility alias for run.");
   lines.push("Stop: stop disables future auto-advance without aborting the active cast.");
   return lines;
@@ -101,6 +101,7 @@ export function renderQuestRequeued(quest: Quest, boardPath: string): string[] {
   return [
     `Requeued quest ${quest.id}: ${quest.title}`,
     `Status: ${quest.status}`,
+    "Position: bottom of the queue",
     `Storage: ${boardPath}`,
   ];
 }

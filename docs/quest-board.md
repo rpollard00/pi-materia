@@ -22,7 +22,7 @@ The WebUI **Quests** pane is another interface over this same project-local boar
 
 Use the WebUI add form to append a pending quest with a prompt and optional loadout override. WebUI-added quests are saved to `.pi/pi-materia/quest-board.json`; they do not change active/default loadout preferences and do not by themselves enable, disable, or force-wake the runner. An enabled runner will pick them up on its next normal wake or after the current quest settles; otherwise use the CLI quest commands below when you are ready to launch queued work.
 
-When a failed or blocked quest is selected in the WebUI, its detail view can requeue it back to pending. Like the CLI command, this is only valid for failed/blocked quests and preserves attempts plus historical result/error metadata.
+When a failed or blocked quest is selected in the WebUI, its detail view can requeue it back to pending at the bottom of the queue/list. Like the CLI command, this is only valid for failed/blocked quests and preserves attempts plus historical result/error metadata.
 
 Pending quests can also be reordered directly in the WebUI sidebar by dragging the `⋮⋮` handle next to a pending quest. The active/running quest remains pinned at the top and is not draggable; succeeded, failed, and blocked quests are not part of the pending order. Drop above the first pending quest to make the dragged quest the next pending item, or drop before/after another pending quest to place it relative to that target. The WebUI saves through the same reorder API as the CLI and reconciles from the canonical board response.
 
@@ -51,7 +51,7 @@ The single-writer limitation above still applies when using the WebUI: avoid wri
 - `quest default-loadout` shows the separate quest default loadout preference. `quest default-loadout <name-or-id>` sets it using normal exact loadout name/id resolution. `quest default-loadout --clear` stores an explicit cleared value; it does not change the active loadout or the regular cast default.
 - `quest add` appends a pending quest. The first slice derives a concise title from the prompt.
 - `quest move` reorders pending quests in the canonical board order. Use `--first` to make a pending quest the next pending item below any active/running quest, `--before <target>` to place it before another pending quest, or `--onto <target>` to place it after/onto another pending quest. Exactly one placement option is accepted, and source/target references must resolve to pending quests.
-- `quest requeue <quest-id-or-prefix>` changes a failed or blocked quest back to `pending` so it can run again. It rejects pending, running, and succeeded quests, preserves attempts plus historical result/error metadata, and clears stale running-only state. `quest unblock` and `quest unfail` are discoverability aliases for the same requeue operation.
+- `quest requeue <quest-id-or-prefix>` changes a failed or blocked quest back to `pending` at the bottom of the queue so it can run again after existing pending quests. It rejects pending, running, and succeeded quests, preserves attempts plus historical result/error metadata, and clears stale running-only state. `quest unblock` and `quest unfail` are discoverability aliases for the same requeue operation and use the same bottom-of-queue placement.
 - `quest run` enables the project-local continuous runner and starts the requested quest, or the next pending quest. While enabled, the runner drains pending quests back-to-back until the queue is empty, an active cast is waiting, a launch fails, or `quest stop` is issued.
 - `quest run` with no pending quest still enables the runner and reports that it is waiting; a later wakeup can start the next pending quest without another `run` command.
 - `quest runonce` starts only the requested quest, or the next pending quest, and leaves the runner enabled/stopped flag unchanged. With no pending quest, it reports that no pending quest is available.
@@ -72,9 +72,9 @@ Examples:
 /materia quest move abc123 --first # move a pending quest to the first pending position
 /materia quest move abc123 --before def456 # move before another pending quest
 /materia quest move abc123 --onto def456   # move after/onto another pending quest
-/materia quest requeue abc123      # set a failed/blocked quest back to pending
-/materia quest unblock abc123      # alias for requeue
-/materia quest unfail abc123       # alias for requeue
+/materia quest requeue abc123      # set a failed/blocked quest pending at the queue bottom
+/materia quest unblock abc123      # alias for requeue; moves to queue bottom
+/materia quest unfail abc123       # alias for requeue; moves to queue bottom
 /materia quest run                 # continuous runner; drains pending quests until stopped
 /materia quest runonce             # launch one pending quest only
 /materia quest start               # compatibility alias for continuous run

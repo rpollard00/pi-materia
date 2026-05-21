@@ -495,10 +495,11 @@ describe("/materia quest command interface", () => {
     expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(true);
   });
 
-  test("requeues failed and blocked quests by id or unambiguous prefix", async () => {
+  test("requeues failed and blocked quests by id or unambiguous prefix at the queue bottom", async () => {
     const harness = await makeHarness();
     await seedBoard(harness, [
       { ...makeQuest("quest-failedabcd", "failed", "Failed quest"), lastError: { message: "old failure", occurredAt: "2026-05-19T00:05:00.000Z" } },
+      makeQuest("quest-pendingabcd", "pending", "Existing pending quest"),
       makeQuest("quest-blockedwxyz", "blocked", "Blocked quest"),
     ]);
 
@@ -506,12 +507,15 @@ describe("/materia quest command interface", () => {
     await harness.runCommand("materia", "quest unblock quest-blockedwxyz");
 
     const board = await readBoard(harness);
-    expect(board.quests.map((quest: any) => quest.status)).toEqual(["pending", "pending"]);
-    expect(board.quests[0].attempts).toBe(1);
-    expect(board.quests[0].lastCastId).toBe("cast-quest-failedabcd");
-    expect(board.quests[0].lastError).toEqual({ message: "old failure", occurredAt: "2026-05-19T00:05:00.000Z" });
-    expect(board.quests[0].currentCastId).toBeUndefined();
+    expect(board.quests.map((quest: any) => quest.id)).toEqual(["quest-pendingabcd", "quest-failedabcd", "quest-blockedwxyz"]);
+    expect(board.quests.map((quest: any) => quest.status)).toEqual(["pending", "pending", "pending"]);
+    const failedQuest = board.quests.find((quest: any) => quest.id === "quest-failedabcd");
+    expect(failedQuest.attempts).toBe(1);
+    expect(failedQuest.lastCastId).toBe("cast-quest-failedabcd");
+    expect(failedQuest.lastError).toEqual({ message: "old failure", occurredAt: "2026-05-19T00:05:00.000Z" });
+    expect(failedQuest.currentCastId).toBeUndefined();
     expect(latestMateriaMessage(harness)).toContain("Requeued quest quest-blockedwxyz");
+    expect(latestMateriaMessage(harness)).toContain("bottom of the queue");
     expect(harness.notifications.some((notification) => notification.message.includes("Requeued pi-materia quest quest-failedabcd"))).toBe(true);
   });
 
