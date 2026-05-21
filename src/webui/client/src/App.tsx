@@ -207,7 +207,6 @@ export function App() {
             runtimeActiveLoadoutId={runtimeActiveLoadoutId}
             defaultLoadoutId={defaultLoadoutId}
             questDefaultLoadoutId={questDefaultLoadoutId}
-            questDefaultLoadoutWarning={questDefaultLoadoutWarning}
             persistedLoadouts={persistedLoadouts}
             loadoutSources={loadoutSources}
             canDeleteLoadout={canDeleteLoadout}

@@ -245,7 +245,7 @@ describe('LoadoutListPanel', () => {
     expect(onSwitchEditingLoadout).not.toHaveBeenCalled();
   });
 
-  it('shows and updates quest default controls separately from the regular default star', async () => {
+  it('keeps quest default row affordances without rendering the relocated dropdown', async () => {
     const onSetDefaultLoadout = vi.fn(async (name: string) => name);
     const onSetQuestDefaultLoadout = vi.fn(async (name: string | null) => name);
     renderPanel({ defaultLoadoutId: 'Beta', questDefaultLoadoutId: 'Gamma', onSetDefaultLoadout, onSetQuestDefaultLoadout });
@@ -254,13 +254,7 @@ describe('LoadoutListPanel', () => {
     expect(within(cardFor('Beta')).queryByLabelText('Quest default loadout')).toBeNull();
     expect(within(cardFor('Gamma')).getByLabelText('Quest default loadout')).toBeTruthy();
     expect(within(cardFor('Gamma')).queryByLabelText('Default loadout')).toBeNull();
-    const questDefaultSelect = screen.getByRole('combobox', { name: 'Quest default loadout' });
-    expect(questDefaultSelect).toHaveProperty('value', 'Gamma');
-
-    fireEvent.change(questDefaultSelect, { target: { value: '' } });
-    await waitFor(() => expect(onSetQuestDefaultLoadout).toHaveBeenCalledWith(null));
-    expect(onSetDefaultLoadout).not.toHaveBeenCalled();
-    expect(screen.getByRole('status').textContent).toContain('Quest default loadout cleared');
+    expect(screen.queryByRole('combobox', { name: 'Quest default loadout' })).toBeNull();
 
     fireEvent.click(within(cardFor('Alpha')).getByLabelText('Loadout actions'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Set as Quest Default' }));

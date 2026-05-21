@@ -64,6 +64,60 @@ function utilityJsonConfig() {
   };
 }
 
+function utilityHandoffValidationConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Broken-Handoff", edges: [{ when: "always", to: "end" }] } } } },
+    materia: { "Broken-Handoff": { type: "utility", utility: "echo", parse: "json", params: { output: { satisfied: "yes", result: "utility-invalid" } } } },
+  };
+}
+
+function jsonAgentWithDownstreamConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "Socket-1",
+        sockets: {
+          "Socket-1": { materia: "Build", parse: "json", assign: { result: "$.result" }, edges: [{ when: "always", to: "Socket-2" }] },
+          "Socket-2": { materia: "Downstream", edges: [{ when: "always", to: "end" }] },
+        },
+      },
+    },
+    materia: {
+      Build: { tools: "coding", prompt: "Build materia" },
+      Downstream: { type: "utility", utility: "echo", parse: "json", params: { output: { downstream: "ran" } }, assign: { downstream: "$.downstream" } },
+    },
+  };
+}
+
+function satisfiedRouteAgentConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "Socket-1",
+        sockets: {
+          "Socket-1": {
+            materia: "Build",
+            parse: "json",
+            assign: { result: "$.result" },
+            edges: [{ when: "satisfied", to: "Socket-2" }, { when: "not_satisfied", to: "end" }],
+          },
+          "Socket-2": { materia: "Downstream", edges: [{ when: "always", to: "end" }] },
+        },
+      },
+    },
+    materia: {
+      Build: { tools: "coding", prompt: "Build materia" },
+      Downstream: { type: "utility", utility: "echo", parse: "json", params: { output: { downstream: "ran" } }, assign: { downstream: "$.downstream" } },
+    },
+  };
+}
+
 function foreachConfig() {
   return {
     artifactDir: ".pi/pi-materia",
@@ -93,6 +147,20 @@ function foreachConfig() {
 
 function promptMessages(harness: FakePiHarness): any[] {
   return harness.sentMessages.map(({ message }) => message as any).filter((message) => message.customType === "pi-materia-prompt");
+}
+
+function latestCastState(harness: FakePiHarness): any {
+  return harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+}
+
+function expectJsonRepairRetryPrompt(prompt: string | undefined, expected: { error: string; excerpt: string; omitted?: string }) {
+  expect(typeof prompt).toBe("string");
+  const promptText = prompt ?? "";
+  expect(promptText).toMatch(/previous (final )?(JSON|handoff).*invalid|invalid (JSON|handoff|envelope)/i);
+  expect(promptText).toContain(expected.error);
+  expect(promptText).toMatch(/return only corrected JSON|return only JSON/i);
+  expect(promptText).toContain(expected.excerpt);
+  if (expected.omitted) expect(promptText).not.toContain(expected.omitted);
 }
 
 describe("native same-socket recovery", () => {
@@ -269,35 +337,52 @@ describe("native same-socket recovery", () => {
   });
 
   test("invalid JSON from an agent retries before graph advancement and can then succeed", async () => {
-    const harness = await makeHarness(jsonAgentConfig());
+    const harness = await makeHarness(jsonAgentWithDownstreamConfig());
     await harness.runCommand("materia", "cast invalid json retry");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+    const invalidOutput = `{ not json ${"x".repeat(700)} OMITTED_TAIL`;
 
-    harness.appendAssistantMessage("{ not json");
+    harness.appendAssistantMessage(invalidOutput);
     await harness.emit("agent_end", { messages: [] });
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
-    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    let latestState = latestCastState(harness);
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.data.result).toBeUndefined();
+    expect(latestState.data.downstream).toBeUndefined();
     expect(latestState.lastJson).toBeUndefined();
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
+
+    let events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_complete")).toHaveLength(0);
+    expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(0);
+    expectJsonRepairRetryPrompt(promptMessages(harness).at(-1)?.content, {
+      error: "Pre-commit output validation failed for socket \"Socket-1\"",
+      excerpt: "{ not json",
+      omitted: "OMITTED_TAIL",
+    });
 
     harness.appendAssistantMessage('{"result":"ok"}');
     await harness.emit("agent_end", { messages: [] });
 
-    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    latestState = latestCastState(harness);
     expect(latestState.active).toBe(false);
     expect(latestState.data.result).toBe("ok");
-    const events = await readEvents(harness);
-    expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure" && String(event.data.error).includes("Pre-commit output validation failed"))).toBe(true);
+    expect(latestState.data.downstream).toBe("ran");
+    expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 1 });
+    events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-1")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "socket_complete" && event.data.socket === "Socket-1")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "socket_complete" && event.data.socket === "Socket-2")).toHaveLength(1);
+    expect(events.some((event) => event.type === "same_socket_recovery_start" && String(event.data.error).includes("Pre-commit output validation failed"))).toBe(true);
   });
 
   test("handoff validation failures from an agent retry before graph advancement", async () => {
-    const harness = await makeHarness(jsonAgentConfig());
+    const harness = await makeHarness(satisfiedRouteAgentConfig());
     await harness.runCommand("materia", "cast handoff validation retry");
 
     harness.appendAssistantMessage('{"satisfied":"yes","result":"invalid control"}');
@@ -305,14 +390,59 @@ describe("native same-socket recovery", () => {
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
-    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    let latestState = latestCastState(harness);
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.data.result).toBeUndefined();
+    expect(latestState.data.downstream).toBeUndefined();
     expect(latestState.lastJson).toBeUndefined();
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    let events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_complete")).toHaveLength(0);
+    expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(0);
+    expectJsonRepairRetryPrompt(promptMessages(harness).at(-1)?.content, {
+      error: "reserved control field \"satisfied\" must be a boolean when present",
+      excerpt: '{"satisfied":"yes"',
+    });
+
+    harness.appendAssistantMessage('{"satisfied":true,"result":"ok"}');
+    await harness.emit("agent_end", { messages: [] });
+
+    latestState = latestCastState(harness);
+    expect(latestState.active).toBe(false);
+    expect(latestState.data.result).toBe("ok");
+    expect(latestState.data.downstream).toBe("ran");
+    expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 1 });
+    events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-1")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "socket_complete" && event.data.socket === "Socket-1")).toHaveLength(1);
+  });
+
+  test("missing required satisfied handoff field retries without advancing satisfied/not_satisfied routes", async () => {
+    const harness = await makeHarness(satisfiedRouteAgentConfig());
+    await harness.runCommand("materia", "cast missing satisfied retry");
+
+    harness.appendAssistantMessage('{"result":"missing control"}');
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
+    const latestState = latestCastState(harness);
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.currentSocketId).toBe("Socket-1");
+    expect(latestState.data.result).toBeUndefined();
+    expect(latestState.data.downstream).toBeUndefined();
+    expect(latestState.lastJson).toBeUndefined();
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
     const events = await readEvents(harness);
     expect(events.filter((event) => event.type === "socket_complete")).toHaveLength(0);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure" && String(event.data.error).includes("Pre-commit output validation failed"))).toBe(true);
+    expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(0);
+    expectJsonRepairRetryPrompt(promptMessages(harness).at(-1)?.content, {
+      error: "must include reserved boolean field \"satisfied\"",
+      excerpt: '{"result":"missing control"}',
+    });
   });
 
   test("utility socket output validation failures fail fast without generic retry", async () => {
@@ -321,11 +451,23 @@ describe("native same-socket recovery", () => {
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(0);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
-    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    let latestState = latestCastState(harness);
     expect(latestState.active).toBe(false);
     expect(latestState.socketState).toBe("failed");
     expect(latestState.failedReason).toContain("Pre-commit output validation failed");
-    const events = await readEvents(harness);
+    let events = await readEvents(harness);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+
+    const handoffHarness = await makeHarness(utilityHandoffValidationConfig());
+    await handoffHarness.runCommand("materia", "cast utility handoff fail");
+
+    expect(handoffHarness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(0);
+    expect(handoffHarness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    latestState = latestCastState(handoffHarness);
+    expect(latestState.active).toBe(false);
+    expect(latestState.socketState).toBe("failed");
+    expect(latestState.failedReason).toContain("reserved control field \"satisfied\" must be a boolean when present");
+    events = await readEvents(handoffHarness);
     expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
   });
 

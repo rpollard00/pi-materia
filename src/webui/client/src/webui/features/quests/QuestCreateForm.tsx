@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { AddQuestRequest, AddQuestResponse } from '../../types.js';
 import { toast } from '../../../toast/index.js';
+import { QuestDefaultLoadoutSelector } from './QuestDefaultLoadoutSelector.js';
 
 export interface QuestDefaultLoadoutProps {
   questDefaultLoadoutId: string | null;
@@ -20,7 +21,7 @@ function questCreatedLabel(response: AddQuestResponse): string {
   return quest?.title || quest?.id || 'new quest';
 }
 
-export function QuestCreateForm({ persistedLoadouts, onAddQuest, submitting }: QuestCreateFormProps) {
+export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout, onAddQuest, submitting }: QuestCreateFormProps) {
   const [loadoutOverride, setLoadoutOverride] = useState('');
   const [prompt, setPrompt] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
@@ -77,6 +78,13 @@ export function QuestCreateForm({ persistedLoadouts, onAddQuest, submitting }: Q
       </div>
 
       <div className="quest-create-fields">
+        <QuestDefaultLoadoutSelector
+          persistedLoadouts={persistedLoadouts}
+          questDefaultLoadoutId={questDefaultLoadoutId}
+          questDefaultLoadoutWarning={questDefaultLoadoutWarning}
+          setQuestDefaultLoadout={setQuestDefaultLoadout}
+        />
+
         <label className="quest-form-field" htmlFor="quest-loadout-override">
           <span>Loadout override</span>
           <select

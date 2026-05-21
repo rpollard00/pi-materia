@@ -194,10 +194,16 @@ function questBoardResponse(quests: QuestSummary[]): QuestBoardResponse {
   };
 }
 
-function createQuestFetchMock(initialQuests: QuestSummary[]) {
+function createQuestFetchMock(initialQuests: QuestSummary[], config: typeof testConfig = testConfig, initialQuestDefaultLoadoutId: string | null = null) {
   let quests = [...initialQuests];
+  let questDefaultLoadoutId = initialQuestDefaultLoadoutId;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (input === '/api/config') return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    if (input === '/api/config') return new Response(JSON.stringify({ ok: true, source: 'test', config, questDefaultLoadoutId }));
+    if (input === '/api/loadout/quest-default-loadout' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as { name: string | null };
+      questDefaultLoadoutId = body.name;
+      return new Response(JSON.stringify({ ok: true, questDefaultLoadoutId, message: questDefaultLoadoutId ? `Quest default loadout set to ${questDefaultLoadoutId}.` : 'Quest default loadout cleared.' }));
+    }
     if (input === '/api/quests' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body));
       const created = questSummary({ id: 'quest-added', title: body.prompt, prompt: body.prompt, promptPreview: body.prompt, status: 'pending', loadoutOverride: body.loadoutOverride });
@@ -237,7 +243,57 @@ describe('Materia quests pane', () => {
     expect(within(questLog).getByRole('button', { name: /Failed \/ blocked hidden/ }).getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('submits the add quest form and refreshes the quest log', async () => {
+  it('renders the Quest default loadout selector before the per-quest Loadout override selector', async () => {
+    const fetchMock = createQuestFetchMock([]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    const questDefaultSelect = await screen.findByRole('combobox', { name: 'Quest default loadout' });
+    const loadoutOverrideSelect = screen.getByRole('combobox', { name: /Loadout override/ });
+    expect(questDefaultSelect.compareDocumentPosition(loadoutOverrideSelect) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('changes the Quest default loadout using the selected stable loadout id', async () => {
+    const config = structuredClone(testConfig);
+    config.loadouts['Planning-Consult'].id = 'user:planning-consult';
+    const fetchMock = createQuestFetchMock([], config);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Quest default loadout' }), { target: { value: 'user:planning-consult' } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/loadout/quest-default-loadout', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ name: 'user:planning-consult' }),
+    })));
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active' || call[0] === '/api/loadout/default')).toHaveLength(0);
+  });
+
+  it('clears the Quest default loadout using the existing quest default endpoint with null', async () => {
+    const config = structuredClone(testConfig);
+    config.loadouts['Planning-Consult'].id = 'user:planning-consult';
+    const fetchMock = createQuestFetchMock([], config, 'user:planning-consult');
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    const questDefaultSelect = await screen.findByRole('combobox', { name: 'Quest default loadout' });
+    const clearOption = within(questDefaultSelect).getByRole('option', { name: /Cleared/i }) as HTMLOptionElement;
+    fireEvent.change(questDefaultSelect, { target: { value: clearOption.value } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/loadout/quest-default-loadout', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ name: null }),
+    })));
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active' || call[0] === '/api/loadout/default')).toHaveLength(0);
+  });
+
+  it('submits the add quest form and refreshes the quest log without changing quest default loadout', async () => {
     const fetchMock = createQuestFetchMock([]);
     vi.stubGlobal('fetch', fetchMock);
 
@@ -252,6 +308,7 @@ describe('Materia quests pane', () => {
       method: 'POST',
       body: JSON.stringify({ prompt: 'Rescue the villager', loadoutOverride: 'Full-Auto' }),
     })));
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/quest-default-loadout')).toHaveLength(0);
     expect(await screen.findByText('Added quest: Rescue the villager')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Pending quest: quest-added: Rescue the villager' })).toBeTruthy();
     expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('');

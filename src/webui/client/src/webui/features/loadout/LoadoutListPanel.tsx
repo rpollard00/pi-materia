@@ -12,7 +12,6 @@ export interface LoadoutListPanelProps {
   runtimeActiveLoadoutId: string | undefined;
   defaultLoadoutId: string | null;
   questDefaultLoadoutId?: string | null;
-  questDefaultLoadoutWarning?: string;
   persistedLoadouts: Record<string, PipelineConfig>;
   loadoutSources: Record<string, LoadoutSourceScope>;
   canDeleteLoadout: (name: string) => boolean;
@@ -177,11 +176,10 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, isQuestDe
   );
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, questDefaultLoadoutId = null, questDefaultLoadoutWarning, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetQuestDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, questDefaultLoadoutId = null, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetQuestDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const [questDefaultChangePending, setQuestDefaultChangePending] = useState(false);
-  const [questDefaultChangeMessage, setQuestDefaultChangeMessage] = useState('');
   const persistedRows = buildLoadoutSelectorViewModels(persistedLoadouts, defaultLoadoutId, runtimeActiveLoadoutId).filter(({ loadout }) => Boolean(loadout.id));
   const loadoutRows = buildLoadoutSelectorViewModels(loadouts, defaultLoadoutId, runtimeActiveLoadoutId);
 
@@ -201,16 +199,14 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
     }
   }
 
-  async function changeQuestDefaultLoadout(loadoutId: string | null, displayName?: string) {
+  async function changeQuestDefaultLoadout(loadoutId: string | null) {
     const nextId = loadoutId?.trim() || null;
     if (nextId === questDefaultLoadoutId || questDefaultChangePending) return;
     setQuestDefaultChangePending(true);
-    setQuestDefaultChangeMessage(nextId ? `Setting quest default loadout to ${displayName ?? nextId}…` : 'Clearing quest default loadout…');
     try {
-      const savedDefault = await onSetQuestDefaultLoadout(nextId);
-      setQuestDefaultChangeMessage(savedDefault ? `Quest default loadout is now ${displayName ?? savedDefault}.` : 'Quest default loadout cleared; quests fall back to the active loadout.');
-    } catch (error) {
-      setQuestDefaultChangeMessage(error instanceof Error ? error.message : String(error));
+      await onSetQuestDefaultLoadout(nextId);
+    } catch {
+      // The shared config hook reports quest-default persistence failures via the app status/toast surface.
     } finally {
       setQuestDefaultChangePending(false);
     }
@@ -235,21 +231,6 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
         </select>
       </label>
       {activeChangeMessage && <p className="mb-3 text-xs text-slate-300" role="status">{activeChangeMessage}</p>}
-      <label className="mb-3 block text-xs uppercase tracking-[0.18em] text-cyan-200">
-        Quest default loadout
-        <select
-          className="mt-1 w-full rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-sm normal-case tracking-normal text-cyan-100 disabled:opacity-60"
-          value={questDefaultLoadoutId ?? ''}
-          disabled={questDefaultChangePending || persistedRows.length === 0}
-          onChange={(event) => void changeQuestDefaultLoadout(event.target.value || null, event.currentTarget.selectedOptions[0]?.textContent ?? undefined)}
-          aria-label="Quest default loadout"
-          title="Quest runner default. Per-quest overrides still take precedence; clearing falls back to the active loadout."
-        >
-          <option value="">Cleared / use active loadout fallback</option>
-          {persistedRows.map(({ name, loadout }) => <option key={loadout.id} value={loadout.id}>{name}</option>)}
-        </select>
-      </label>
-      {(questDefaultChangeMessage || questDefaultLoadoutWarning) && <p className="mb-3 text-xs text-slate-300" role="status">{questDefaultChangeMessage || questDefaultLoadoutWarning}</p>}
       <div className="space-y-2" role="list" aria-label="Available loadouts">
         {loadoutRows.map(({ name, loadout, isDefault, isRuntimeActive }) => {
           const sourceScope = loadoutSources[name] ?? 'user';
@@ -305,7 +286,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                 lockAction={lockAction}
                 onSetRuntimeActive={() => void changeRuntimeActiveLoadout(loadout.id ?? '', name)}
                 onSetDefault={() => void onSetDefaultLoadout(loadout.id ?? '').catch(() => undefined)}
-                onSetQuestDefault={() => void changeQuestDefaultLoadout(loadout.id ?? '', name)}
+                onSetQuestDefault={() => void changeQuestDefaultLoadout(loadout.id ?? '')}
                 onToggleLock={onToggleLoadoutLock}
                 onDuplicate={onDuplicateLoadout}
                 onDelete={onDeleteLoadout}
