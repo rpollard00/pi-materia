@@ -308,9 +308,10 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 
   try {
     const socket = currentSocketOrThrow(state);
-    // Multi-turn pausing is materia-driven: if the resolved agent materia omits
-    // multiTurn, even an interactive planning socket completes and advances.
-    // Keep this generic runtime gate materia-name agnostic.
+    // Runtime contract: non-multiTurn agent sockets complete on agent_end and
+    // immediately parse/assign/route into the next socket. Only resolved
+    // multiTurn agent sockets pause here, and they complete only after the
+    // explicit /materia continue finalization turn below.
     if (isMultiTurnResolvedAgentSocket(socket)) {
       if (wasAwaitingFinalization) {
         state.multiTurnFinalizing = false;
