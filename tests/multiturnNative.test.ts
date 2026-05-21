@@ -646,10 +646,27 @@ describe("native multi-turn runtime", () => {
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only JSON");
     harness.appendAssistantMessage("still not json");
     await harness.emit("agent_end", { messages: [] });
-    const failedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(failedState.active).toBe(false);
-    expect(failedState.socketState).toBe("failed");
-    expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for socket \"Socket-1\"");
+    const retryingState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(retryingState.active).toBe(true);
+    expect(retryingState.awaitingResponse).toBe(true);
+    expect(retryingState.socketState).toBe("awaiting_agent_response");
+    expect(retryingState.multiTurnFinalizing).toBe(true);
+    expect(retryingState.currentSocketId).toBe("Socket-1");
+    expect(retryingState.lastJson).toBeUndefined();
+    expect(retryingState.data.tasks).toBeUndefined();
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("previous JSON output was invalid"))).toBe(true);
+    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Your previous final JSON response was invalid");
+    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only corrected JSON");
+    const retryEvents = await readRunEvents(retryingState);
+    expect(retryEvents.filter((event) => event.type === "socket_complete")).toHaveLength(0);
+    expect(retryEvents.some((event) => event.type === "same_socket_recovery_start" && event.data.recoveryKind === "json_output_repair" && event.data.validationKind === "json_parse")).toBe(true);
+
+    harness.appendAssistantMessage('{"tasks":[{"title":"fixed"}]}');
+    await harness.emit("agent_end", { messages: [] });
+    const completedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(completedState.active).toBe(false);
+    expect(completedState.socketState).toBe("complete");
+    expect(completedState.data.tasks[0].title).toBe("fixed");
   });
 
   test("/materia continue bypasses the generic idle wait only for paused multi-turn finalization", async () => {
