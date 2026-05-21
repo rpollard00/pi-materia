@@ -45,6 +45,21 @@ describe("/materia link compiler", () => {
     });
   });
 
+  test("compileLinkPlan delegates to the shared virtual-loadout compiler result", () => {
+    const targets = [target(0, "materia", "Build"), target(1, "materia", "Eval")];
+    const inputPlan = plan(targets);
+    const source = createConfigLinkGraphSource({ materia });
+
+    const linked = compileLinkPlan({ plan: inputPlan }, source);
+    const direct = compileVirtualLoadoutFromResolvedTargets({ targets, source, virtualLoadout: { id: "virtual-link-materia-Build-materia-Eval", name: "Linked virtual loadout: Build → Eval" } });
+
+    expect(linked.ok).toBe(true);
+    expect(direct.ok).toBe(true);
+    if (!linked.ok || !direct.ok) return;
+    expect(linked.value.virtualLoadout).toEqual(direct.value);
+    expect(inputPlan.lineage.virtualLoadout).toMatchObject(direct.value.metadata);
+  });
+
   test("single-materia helper preserves agent socket defaults", () => {
     const defaultedMateria = {
       Planner: { id: "Planner", type: "agent", behavior: { id: "Planner" }, tools: "none", prompt: "plan", parse: "json", assign: { workItems: "$.workItems" } },

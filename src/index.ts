@@ -84,7 +84,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: cast, autocast, link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states),
     handler: async (args, ctx) => {
       activeContext = ctx;
@@ -122,9 +122,10 @@ export default function piMateria(pi: ExtensionAPI) {
           autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath() });
           ctx.ui.notify(`pi-materia autocast config: ${loaded.source}`, "info");
           if (autocast.mode === "loadout") {
-            ctx.ui.notify(`pi-materia autocast temporary loadout: ${effectiveLoadout?.effectiveLoadoutName ?? autocast.requestedTarget}`, "info");
+            ctx.ui.notify(`pi-materia autocast temporary loadout: ${effectiveLoadout?.effectiveLoadoutName ?? autocast.requestedTarget} (active loadout unchanged)`, "info");
           } else {
-            ctx.ui.notify(`pi-materia autocast virtual materia loadout: ${autocast.resolvedMateria.id}`, "info");
+            const materiaName = autocast.resolvedMateria.name ?? autocast.resolvedMateria.id;
+            ctx.ui.notify(`pi-materia autocast virtual materia loadout: ${materiaName} (${autocast.virtualLoadout.name}; active loadout unchanged)`, "info");
           }
           ctx.ui.notify(`pi-materia grid entry: ${pipeline.entry.id}`, "info");
         } catch (error) {
