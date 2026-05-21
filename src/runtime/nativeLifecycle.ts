@@ -38,8 +38,13 @@ export { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 const DEFAULT_MAX_SOCKET_VISITS = 25;
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
+type AdvancementOrigin = "initial" | "command" | "agent_end";
+type PromptDispatchMode = "immediate" | "defer-agent-trigger";
+
 type AdvancementLifecycleDiagnostics = {
   finalizedMultiTurn?: boolean;
+  origin?: AdvancementOrigin;
+  promptDispatch?: PromptDispatchMode;
   sourceSocketId?: string;
   sourceSocketVisit?: number;
   sourceMateriaName?: string;
@@ -50,7 +55,23 @@ type AdvancementLifecycleDiagnostics = {
 const deferredPromptDispatchKeys = new Set<string>();
 
 function advancementDiagnosticsEnabled(diagnostics?: AdvancementLifecycleDiagnostics): boolean {
-  return Boolean(diagnostics?.finalizedMultiTurn || process.env.PI_MATERIA_ADVANCEMENT_DEBUG?.trim());
+  return Boolean(diagnostics?.finalizedMultiTurn || diagnostics?.origin === "agent_end" || process.env.PI_MATERIA_ADVANCEMENT_DEBUG?.trim());
+}
+
+function agentEndAdvancementDiagnostics(state: MateriaCastState, socket: ResolvedMateriaSocket, options: { finalizedMultiTurn?: boolean } = {}): AdvancementLifecycleDiagnostics {
+  return {
+    finalizedMultiTurn: options.finalizedMultiTurn,
+    origin: "agent_end",
+    promptDispatch: "defer-agent-trigger",
+    sourceSocketId: socket.id,
+    sourceSocketVisit: socketVisit(state, socket.id),
+    sourceMateriaName: socketMateriaName(socket),
+    dispatchTriggerMode: "deferred-triggerTurn",
+  };
+}
+
+function shouldDeferAgentPromptDispatch(diagnostics?: AdvancementLifecycleDiagnostics): boolean {
+  return diagnostics?.origin === "agent_end" && diagnostics.promptDispatch === "defer-agent-trigger";
 }
 
 function contextIdleState(ctx: ExtensionContext): boolean | string {
@@ -80,6 +101,8 @@ async function appendAdvancementDiagnostic(ctx: ExtensionContext, state: Materia
     awaitingResponse: state.awaitingResponse,
     multiTurnFinalizing: state.multiTurnFinalizing,
     nextSocketTarget: diagnostics?.nextSocketTarget,
+    origin: diagnostics?.origin,
+    promptDispatch: diagnostics?.promptDispatch,
     dispatchTriggerMode: diagnostics?.dispatchTriggerMode,
     isIdle: contextIdleState(ctx),
     ...details,
@@ -362,7 +385,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     // explicit /materia continue finalization turn below.
     if (isMultiTurnResolvedAgentSocket(socket)) {
       if (wasAwaitingFinalization) {
-        const diagnostics: AdvancementLifecycleDiagnostics = { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceSocketVisit: socketVisit(state, socket.id), sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "deferred-triggerTurn" };
+        const diagnostics = agentEndAdvancementDiagnostics(state, socket, { finalizedMultiTurn: true });
         await appendAdvancementDiagnostic(ctx, state, "finalized_multi_turn_handle_entry", diagnostics, { boundary: "sync_state_advancement" });
         state.multiTurnFinalizing = false;
         setCurrentSocketState(state, "idle");
@@ -383,7 +406,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       ctx.ui.notify(`pi-materia multi-turn socket "${socket.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
       return;
     }
-    await completeSocket(pi, ctx, state, text, latest.entry.id);
+    await completeSocket(pi, ctx, state, text, latest.entry.id, { diagnostics: agentEndAdvancementDiagnostics(state, socket) });
   } catch (error) {
     state.active = false;
     state.phase = "failed";
@@ -405,7 +428,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean; diagnostics?: AdvancementLifecycleDiagnostics } = {}): Promise<void> {
   const config = await loadConfigFromState(state);
   const socket = currentSocketOrThrow(state);
-  const diagnostics = options.diagnostics ?? (options.finalizedMultiTurn ? { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceSocketVisit: socketVisit(state, socket.id), sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "deferred-triggerTurn" } : undefined);
+  const diagnostics = options.diagnostics ?? (options.finalizedMultiTurn ? agentEndAdvancementDiagnostics(state, socket, { finalizedMultiTurn: true }) : undefined);
   await appendAdvancementDiagnostic(ctx, state, "socket_completion_entry", diagnostics, { boundary: "sync_state_advancement", entryId });
   if (isMultiTurnResolvedAgentSocket(socket) && !options.finalizedMultiTurn) {
     throw new Error(`Internal multi-turn state error for socket "${socket.id}": completion requires explicit /materia continue finalization.`);
@@ -469,7 +492,7 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   await appendAdvancementDiagnostic(ctx, state, "next_socket_start_entry", nextDiagnostics, { boundary: "sync_state_advancement", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket) });
   const hasItem = setCurrentItem(state, socket);
   const loop = loopIteratorForSocket(state.pipeline, socket.id);
-  if (loop && !hasItem) return await advanceToSocket(pi, ctx, state, resolveEmptyLoopExhaustionTarget(state, socket, loop.done), "foreach-empty");
+  if (loop && !hasItem) return await advanceToSocket(pi, ctx, state, resolveEmptyLoopExhaustionTarget(state, socket, loop.done), "foreach-empty", nextDiagnostics);
   enforceSocketVisitLimit(state, socket, config);
   const attempt = startTaskAttempt(state, socket.id);
 
@@ -504,7 +527,7 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
     saveCastState(pi, state);
     try {
       const result = await executeUtilitySocket(state, socket);
-      await completeSocket(pi, ctx, state, result.output, result.entryId);
+      await completeSocket(pi, ctx, state, result.output, result.entryId, { diagnostics: nextDiagnostics });
     } catch (error) {
       await failCast(pi, ctx, state, error, `utility:${socket.id}:${socketVisit(state, socket.id)}`);
     }
@@ -524,7 +547,7 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   saveCastState(pi, state);
   await updateSocketToolScope(pi, ctx, state, socket);
   const dispatch = () => sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket), { diagnostics: nextDiagnostics });
-  if (nextDiagnostics?.dispatchTriggerMode === "deferred-triggerTurn") {
+  if (shouldDeferAgentPromptDispatch(nextDiagnostics)) {
     const scheduled = await scheduleDeferredPromptDispatch(pi, ctx, state, socket, dispatch, nextDiagnostics);
     if (scheduled) {
       await appendAdvancementDiagnostic(ctx, state, "dispatch_scheduling", nextDiagnostics, { boundary: "async_prompt_dispatch_attempt", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), dispatchTriggerMode: "deferred-triggerTurn", idempotencyKey: deferredPromptDispatchKey(state, socket, nextDiagnostics) });
@@ -545,7 +568,7 @@ async function scheduleDeferredPromptDispatch(pi: ExtensionAPI, ctx: ExtensionCo
   const idempotencyKey = deferredPromptDispatchKey(state, socket, diagnostics);
   if (deferredPromptDispatchKeys.has(idempotencyKey)) {
     await appendAdvancementDiagnostic(ctx, state, "deferred_dispatch_duplicate_skipped", diagnostics, { boundary: "deferred_prompt_dispatch", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), idempotencyKey });
-    await appendEvent(state.runState, "deferred_dispatch_duplicate_skipped", { diagnostic: true, castId: state.castId, socket: socket.id, materia: socketMateriaName(socket), sourceSocketId: diagnostics?.sourceSocketId, sourceSocketVisit: diagnostics?.sourceSocketVisit, idempotencyKey });
+    await appendEvent(state.runState, "deferred_dispatch_duplicate_skipped", { diagnostic: true, castId: state.castId, socket: socket.id, materia: socketMateriaName(socket), sourceSocketId: diagnostics?.sourceSocketId, sourceSocketVisit: diagnostics?.sourceSocketVisit, origin: diagnostics?.origin, promptDispatch: diagnostics?.promptDispatch, idempotencyKey });
     return false;
   }
   deferredPromptDispatchKeys.add(idempotencyKey);
@@ -554,6 +577,11 @@ async function scheduleDeferredPromptDispatch(pi: ExtensionAPI, ctx: ExtensionCo
   setTimeout(() => {
     void (async () => {
       try {
+        if (!isCurrentDeferredDispatchTarget(ctx, state, socket)) {
+          await appendAdvancementDiagnostic(ctx, state, "deferred_dispatch_stale_skipped", diagnostics, { boundary: "deferred_prompt_dispatch", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), idempotencyKey });
+          await appendEvent(state.runState, "deferred_dispatch_stale_skipped", { diagnostic: true, castId: state.castId, socket: socket.id, materia: socketMateriaName(socket), sourceSocketId: diagnostics?.sourceSocketId, sourceSocketVisit: diagnostics?.sourceSocketVisit, origin: diagnostics?.origin, promptDispatch: diagnostics?.promptDispatch, idempotencyKey });
+          return;
+        }
         await appendAdvancementDiagnostic(ctx, state, "deferred_dispatch_execution", diagnostics, { boundary: "deferred_prompt_dispatch", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), idempotencyKey });
         await dispatch();
       } catch (error) {
@@ -570,6 +598,15 @@ async function scheduleDeferredPromptDispatch(pi: ExtensionAPI, ctx: ExtensionCo
     })();
   }, 0);
   return true;
+}
+
+function isCurrentDeferredDispatchTarget(ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket): boolean {
+  const activeState = loadActiveCastState(ctx);
+  return activeState?.active === true
+    && activeState.castId === state.castId
+    && currentSocketId(activeState) === socket.id
+    && activeState.awaitingResponse === true
+    && currentSocketState(activeState) === "awaiting_agent_response";
 }
 
 async function executeUtilitySocket(state: MateriaCastState, socket: ResolvedMateriaUtilitySocket): Promise<{ output: string; entryId: string }> {
