@@ -24,6 +24,7 @@ export interface CurrentPersistedConfig {
 export interface CurrentPersistedProfileConfig {
   webui?: MateriaProfileConfig["webui"];
   defaultLoadoutId?: string | null;
+  questDefaultLoadoutId?: string | null;
   defaultSaveTarget?: MateriaProfileConfig["defaultSaveTarget"];
   roleGeneration?: MateriaProfileConfig["roleGeneration"];
 }
@@ -151,6 +152,7 @@ export function serializeCurrentProfileConfig(profile: MateriaProfileConfig): Cu
   return {
     ...(profile.webui !== undefined ? { webui: cloneRecord(profile.webui) } : {}),
     ...(profile.defaultLoadoutId !== undefined ? { defaultLoadoutId: profile.defaultLoadoutId } : {}),
+    ...(profile.questDefaultLoadoutId !== undefined ? { questDefaultLoadoutId: profile.questDefaultLoadoutId } : {}),
     ...(profile.defaultSaveTarget !== undefined ? { defaultSaveTarget: profile.defaultSaveTarget } : {}),
     ...(profile.roleGeneration !== undefined ? { roleGeneration: cloneRecord(profile.roleGeneration) } : {}),
   };

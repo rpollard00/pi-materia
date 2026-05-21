@@ -26,6 +26,10 @@ export interface LoadedConfig {
   defaultLoadoutId?: string | null;
   /** Human-readable warning when a configured default preference could not be resolved exactly. */
   defaultLoadoutWarning?: string;
+  /** Validated profile preference for autonomous quest launches. Missing or stale values are exposed as null. */
+  questDefaultLoadoutId?: string | null;
+  /** Human-readable warning when a configured quest default preference could not be resolved exactly. */
+  questDefaultLoadoutWarning?: string;
 }
 
 export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
@@ -54,6 +58,8 @@ export interface MateriaProfileConfig {
   };
   /** Durable user preference used only to initialize the runtime active loadout. */
   defaultLoadoutId?: string | null;
+  /** Durable profile preference used for autonomous quest launches; null means explicitly cleared. */
+  questDefaultLoadoutId?: string | null;
   defaultSaveTarget?: "user" | "project";
   roleGeneration?: MateriaRoleGenerationProfileConfig;
 }

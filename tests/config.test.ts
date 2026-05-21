@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch, saveRoleGenerationModelPreference } from "../src/config/config.js";
+import { clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../src/config/config.js";
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
@@ -26,9 +26,70 @@ describe("layered config loading and persistence", () => {
       const raw = JSON.parse(await readFile(getUserProfileConfigPath(), "utf8"));
 
       expect(profile.defaultSaveTarget).toBe("user");
+      expect(profile.questDefaultLoadoutId).toBe("default:full-auto");
       expect(profile.roleGeneration).toEqual({ enabled: true, useReadOnlyProjectContext: false });
       expect(raw.webui.autoOpenBrowser).toBe(false);
+      expect(raw.questDefaultLoadoutId).toBe("default:full-auto");
       expect(raw.roleGeneration.enabled).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("normalizes legacy and cleared quest default loadout profile preferences independently", async () => {
+    const temp = await mkdtemp(path.join(tmpdir(), "pi-materia-quest-default-"));
+    const cwd = path.join(temp, "project");
+    const profileDir = path.join(temp, "profile");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profileDir;
+    try {
+      await mkdir(cwd, { recursive: true });
+      await mkdir(profileDir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({ defaultLoadoutId: "default:planning-consult", defaultSaveTarget: "user" }), "utf8");
+
+      const migrated = await loadConfig(cwd);
+      expect(migrated.defaultLoadoutId).toBe("default:planning-consult");
+      expect(migrated.questDefaultLoadoutId).toBe("default:full-auto");
+      expect(migrated.defaultLoadoutWarning).toBeUndefined();
+      expect(migrated.questDefaultLoadoutWarning).toBeUndefined();
+
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({ defaultLoadoutId: "default:planning-consult", questDefaultLoadoutId: null, defaultSaveTarget: "user" }), "utf8");
+      const cleared = await loadConfig(cwd);
+      expect(cleared.defaultLoadoutId).toBe("default:planning-consult");
+      expect(cleared.questDefaultLoadoutId).toBeNull();
+      expect(cleared.questDefaultLoadoutWarning).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("saves and clears stale quest default loadout preferences separately from the regular default", async () => {
+    const temp = await mkdtemp(path.join(tmpdir(), "pi-materia-quest-default-save-"));
+    const cwd = path.join(temp, "project");
+    const profileDir = path.join(temp, "profile");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profileDir;
+    try {
+      await mkdir(cwd, { recursive: true });
+      await mkdir(profileDir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({ defaultLoadoutId: "default:planning-consult", questDefaultLoadoutId: "Missing", defaultSaveTarget: "user" }), "utf8");
+
+      const stale = await loadConfig(cwd);
+      expect(stale.defaultLoadoutId).toBe("default:planning-consult");
+      expect(stale.questDefaultLoadoutId).toBeNull();
+      expect(stale.questDefaultLoadoutWarning).toContain("Configured quest default Materia loadout \"Missing\" was not found");
+
+      expect(await clearStaleQuestDefaultLoadoutPreference(cwd)).toBe(true);
+      const afterClear = await loadProfileConfig();
+      expect(afterClear.defaultLoadoutId).toBe("default:planning-consult");
+      expect(afterClear.questDefaultLoadoutId).toBeNull();
+
+      expect(await saveQuestDefaultLoadoutPreference(cwd, "Full-Auto")).toBe("default:full-auto");
+      const afterSave = await loadProfileConfig();
+      expect(afterSave.defaultLoadoutId).toBe("default:planning-consult");
+      expect(afterSave.questDefaultLoadoutId).toBe("default:full-auto");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

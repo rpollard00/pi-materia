@@ -54,6 +54,7 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const materiaCommandSources = buildMateriaCommandSources(partials, loadedLayers);
   resolveUtilityExecutionBindings(config, materiaCommandSources, loadedLayers);
   const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
+  const questDefaultLoadout = resolveQuestDefaultLoadout(profile.questDefaultLoadoutId, config.loadouts, loadoutSources);
   return {
     config,
     source: loadedLayers.map((layer) => layer.path).join(" < "),
@@ -63,6 +64,8 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
     defaultMateriaIds,
     defaultLoadoutId: defaultLoadout.loadoutId,
     ...(defaultLoadout.warning ? { defaultLoadoutWarning: defaultLoadout.warning } : {}),
+    questDefaultLoadoutId: questDefaultLoadout.loadoutId,
+    ...(questDefaultLoadout.warning ? { questDefaultLoadoutWarning: questDefaultLoadout.warning } : {}),
   };
 }
 
@@ -111,6 +114,30 @@ export async function clearStaleDefaultLoadoutPreference(cwd: string, configured
   const profile = await loadProfileConfig();
   if (!profile.defaultLoadoutId || loaded.defaultLoadoutId) return false;
   await writeProfileConfig({ ...profile, defaultLoadoutId: null });
+  return true;
+}
+
+export async function saveQuestDefaultLoadoutPreference(cwd: string, loadoutName: string | null, configuredPath?: string): Promise<string | null> {
+  const loaded = await loadConfig(cwd, configuredPath);
+  const requestedDefault = loadoutName?.trim() || null;
+  const resolvedDefault = requestedDefault ? resolveQuestDefaultLoadout(requestedDefault, loaded.config.loadouts, loaded.loadoutSources) : { loadoutId: null };
+  const nextDefault = resolvedDefault.loadoutId;
+  if (requestedDefault && !nextDefault) {
+    const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
+    throw new Error(loadoutNames.length
+      ? `Unknown quest default Materia loadout "${requestedDefault}". Available loadouts: ${loadoutNames.join(", ")}.`
+      : "Cannot set a quest default Materia loadout because this config does not define any loadouts.");
+  }
+  const profile = await loadProfileConfig();
+  await writeProfileConfig({ ...profile, questDefaultLoadoutId: nextDefault });
+  return nextDefault;
+}
+
+export async function clearStaleQuestDefaultLoadoutPreference(cwd: string, configuredPath?: string): Promise<boolean> {
+  const loaded = await loadConfig(cwd, configuredPath);
+  const profile = await loadProfileConfig();
+  if (!profile.questDefaultLoadoutId || loaded.questDefaultLoadoutId) return false;
+  await writeProfileConfig({ ...profile, questDefaultLoadoutId: null });
   return true;
 }
 
@@ -289,8 +316,10 @@ function stableLoadoutId(scope: MateriaConfigLayerScope, displayName: string): s
   return `${scope}:${slug}`;
 }
 
+const BUILTIN_FULL_AUTO_LOADOUT_ID = "default:full-auto";
+
 function defaultProfileConfig(): MateriaProfileConfig {
-  return { webui: { autoOpenBrowser: false }, defaultLoadoutId: null, defaultSaveTarget: "user", roleGeneration: defaultRoleGenerationProfileConfig() };
+  return { webui: { autoOpenBrowser: false }, defaultLoadoutId: null, questDefaultLoadoutId: BUILTIN_FULL_AUTO_LOADOUT_ID, defaultSaveTarget: "user", roleGeneration: defaultRoleGenerationProfileConfig() };
 }
 
 function defaultRoleGenerationProfileConfig(): MateriaRoleGenerationProfileConfig {
@@ -310,6 +339,12 @@ function normalizeProfileConfig(parsed: Record<string, unknown>, file: string): 
     if (parsed.defaultLoadoutId === null) profile.defaultLoadoutId = null;
     else if (typeof parsed.defaultLoadoutId === "string" && parsed.defaultLoadoutId.trim()) profile.defaultLoadoutId = parsed.defaultLoadoutId.trim();
     else warnInvalidProfileConfig(file, "Ignoring invalid defaultLoadoutId. Expected a non-empty string or null.");
+  }
+
+  if (parsed.questDefaultLoadoutId !== undefined) {
+    if (parsed.questDefaultLoadoutId === null) profile.questDefaultLoadoutId = null;
+    else if (typeof parsed.questDefaultLoadoutId === "string" && parsed.questDefaultLoadoutId.trim()) profile.questDefaultLoadoutId = parsed.questDefaultLoadoutId.trim();
+    else warnInvalidProfileConfig(file, "Ignoring invalid questDefaultLoadoutId. Expected a non-empty string or null.");
   }
 
   if (parsed.defaultSaveTarget !== undefined) {
@@ -359,6 +394,25 @@ function normalizeRoleGenerationProfileConfig(value: unknown, file: string): Mat
   }
 
   return config;
+}
+
+function resolveQuestDefaultLoadout(
+  requestedQuestDefault: string | null | undefined,
+  loadouts: PiMateriaConfig["loadouts"],
+  sources: Record<string, MateriaConfigLayerScope> = {},
+): ReturnType<typeof resolveDefaultLoadout> {
+  const requested = requestedQuestDefault?.trim();
+  if (!requested) return { loadoutName: null, loadoutId: null };
+  const resolved = resolveDefaultLoadout(requested, loadouts, sources);
+  if (resolved.loadoutId || !resolved.warning) return resolved;
+  const available = Object.keys(loadouts ?? {});
+  return {
+    loadoutName: null,
+    loadoutId: null,
+    warning: available.length
+      ? `Configured quest default Materia loadout "${requested}" was not found; quest launches will fall back to the current active loadout. Available loadouts: ${available.join(", ")}.`
+      : `Configured quest default Materia loadout "${requested}" was not found because no loadouts are configured; quest launches will fall back to the current active loadout.`,
+  };
 }
 
 function warnInvalidProfileConfig(file: string, message: string): void {
