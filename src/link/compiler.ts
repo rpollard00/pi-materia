@@ -171,13 +171,21 @@ function loadoutForMateriaTarget(target: ResolvedLinkTarget, source: LinkGraphSo
     issues.push({ path: `link.targets.${target.order}`, message: `cannot compile unknown materia ${JSON.stringify(target.id)}` });
     return undefined;
   }
-  if ((definition as { type?: unknown }).type === "utility") {
-    return {
-      entry: "Socket-1",
-      sockets: { "Socket-1": { materia: target.id } },
-    } as unknown as Loadout;
-  }
-  return { entry: "Socket-1", sockets: { "Socket-1": { materia: target.id, ...copyParseField(definition) } } } as unknown as Loadout;
+  return {
+    entry: "Socket-1",
+    sockets: { "Socket-1": materializeMateriaTargetSocket(target.id, definition) },
+  };
+}
+
+function materializeMateriaTargetSocket(materiaId: string, definition: MateriaDefinition | MateriaConfig): LoadoutSocket {
+  const isUtility = (definition as { type?: unknown; utility?: unknown; command?: unknown; script?: unknown }).type === "utility"
+    || (definition as { utility?: unknown; command?: unknown; script?: unknown }).utility !== undefined
+    || (definition as { utility?: unknown; command?: unknown; script?: unknown }).command !== undefined
+    || (definition as { utility?: unknown; command?: unknown; script?: unknown }).script !== undefined;
+  return {
+    materia: materiaId,
+    ...(!isUtility ? { ...copyParseField(definition), ...copyStringRecordField(definition, "assign") } : {}),
+  };
 }
 
 function loadoutForLoadoutTarget(target: ResolvedLinkTarget, source: LinkGraphSource, issues: DomainIssue[]): Loadout | undefined {
@@ -308,16 +316,8 @@ function copyParseField(value: unknown): { parse?: "text" | "json" } {
   return parse === "text" || parse === "json" ? { parse } : {};
 }
 
-function copyRecordField<T extends string>(value: unknown, field: T): Record<T, Record<string, unknown>> | {} {
-  const record = (value as Record<T, unknown>)[field];
-  return record && typeof record === "object" && !Array.isArray(record) ? { [field]: { ...record as Record<string, unknown> } } as Record<T, Record<string, unknown>> : {};
-}
-
 function copyStringRecordField<T extends string>(value: unknown, field: T): Record<T, Record<string, string>> | {} {
   const record = (value as Record<T, unknown>)[field];
   return record && typeof record === "object" && !Array.isArray(record) && Object.values(record).every((entry) => typeof entry === "string") ? { [field]: { ...record as Record<string, string> } } as Record<T, Record<string, string>> : {};
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-}

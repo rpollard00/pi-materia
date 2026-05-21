@@ -137,6 +137,8 @@ function createLoadoutOverrideLoadedConfig(loaded: LoadedConfig, effectiveLoadou
     source: `${loaded.source}#loadout-override:${effectiveLoadout.effectiveLoadoutId ?? effectiveLoadout.effectiveLoadoutName}`,
     config: {
       ...loaded.config,
+      materia: { ...loaded.config.materia },
+      loadouts: { ...(loaded.config.loadouts ?? {}) },
       activeLoadout: effectiveLoadout.effectiveLoadoutName,
       ...(effectiveLoadout.effectiveLoadoutId ? { activeLoadoutId: effectiveLoadout.effectiveLoadoutId } : { activeLoadoutId: undefined }),
     },
@@ -172,6 +174,7 @@ function parseAutoCastArguments(argumentsText: string): ParsedAutoCastArguments 
 function createVirtualAutoCastLoadedConfig(loaded: LoadedConfig, virtualLoadoutId: string, virtualLoadout: MateriaPipelineConfig): LoadedConfig {
   const config: PiMateriaConfig = {
     ...loaded.config,
+    materia: { ...loaded.config.materia },
     activeLoadout: virtualLoadoutId,
     activeLoadoutId: virtualLoadoutId,
     loadouts: { ...(loaded.config.loadouts ?? {}), [virtualLoadoutId]: virtualLoadout },
@@ -247,9 +250,9 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   }
 
   async startAutoCast(input: { pi: TPi; session: TSession; cwd: string; argumentsText: string; rawCommand?: string; configuredPath?: string }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; autocast: AutoCastMetadata; effectiveLoadout?: EffectiveCastLoadout; state?: MateriaCastState }> {
-    this.assertNoActiveCast(input.session);
     const parsed = parseAutoCastArguments(input.argumentsText);
     if (!parsed) throw new AutoCastCommandValidationError("Usage: /materia autocast <loadout|materia:name> <prompt>");
+    this.assertNoActiveCast(input.session);
 
     if (parsed.mode === "materia") {
       return this.startMateriaAutoCast(input, parsed);

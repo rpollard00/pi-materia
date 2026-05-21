@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { compileLinkPlan, createConfigLinkGraphSource } from "../src/link/compiler.js";
-import type { DomainResult } from "../src/domain/result.js";
-import { LINK_COMMAND_NAME, LINK_METADATA_VERSION, type LinkPlan, type ResolvedLinkTarget, type VirtualLoadoutSpec } from "../src/link/types.js";
+import { compileLinkPlan, compileVirtualLoadoutFromResolvedTargets, createConfigLinkGraphSource } from "../src/link/compiler.js";
+import { LINK_COMMAND_NAME, LINK_METADATA_VERSION, type LinkPlan, type ResolvedLinkTarget } from "../src/link/types.js";
 import type { Loadout } from "../src/domain/loadout.js";
 import type { MateriaCatalog } from "../src/domain/materia.js";
 
@@ -26,15 +25,7 @@ function plan(targets: ResolvedLinkTarget[]): LinkPlan {
 }
 
 describe("/materia link compiler", () => {
-  test("exports a shared virtual-loadout compiler usable by single-materia autocast", async () => {
-    const compilerModule = await import("../src/link/compiler.js");
-    const compileVirtualLoadoutFromResolvedTargets = (compilerModule as unknown as {
-      compileVirtualLoadoutFromResolvedTargets?: (input: { targets: ResolvedLinkTarget[]; source: ReturnType<typeof createConfigLinkGraphSource>; virtualLoadout: { id: string; name: string } }) => DomainResult<VirtualLoadoutSpec | { virtualLoadout: VirtualLoadoutSpec }>;
-    }).compileVirtualLoadoutFromResolvedTargets;
-
-    expect(typeof compileVirtualLoadoutFromResolvedTargets).toBe("function");
-    if (!compileVirtualLoadoutFromResolvedTargets) return;
-
+  test("exports a shared virtual-loadout compiler usable by single-materia autocast", () => {
     const targets = [target(0, "materia", "Build")];
     const result = compileVirtualLoadoutFromResolvedTargets({
       targets,
@@ -44,14 +35,33 @@ describe("/materia link compiler", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const spec = "virtualLoadout" in result.value ? result.value.virtualLoadout : result.value;
-    expect(spec.loadout).toEqual({ id: "virtual-autocast-materia-Build", entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", parse: "json" } } });
-    expect(spec.metadata).toMatchObject({
+    expect(result.value.loadout).toEqual({ id: "virtual-autocast-materia-Build", entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", parse: "json" } } });
+    expect(result.value.metadata).toMatchObject({
       id: "virtual-autocast-materia-Build",
       name: "Autocast virtual loadout: Build",
       targets,
       remappings: [{ targetOrder: 0, fromSocketId: "Socket-1", toSocketId: "Socket-1" }],
       stitching: [],
+    });
+  });
+
+  test("single-materia helper preserves agent socket defaults", () => {
+    const defaultedMateria = {
+      Planner: { id: "Planner", type: "agent", behavior: { id: "Planner" }, tools: "none", prompt: "plan", parse: "json", assign: { workItems: "$.workItems" } },
+    } as unknown as MateriaCatalog;
+
+    const result = compileVirtualLoadoutFromResolvedTargets({
+      targets: [target(0, "materia", "Planner")],
+      source: createConfigLinkGraphSource({ materia: defaultedMateria }),
+      virtualLoadout: { id: "virtual-single-planner", name: "Single Planner" },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.loadout).toEqual({
+      id: "virtual-single-planner",
+      entry: "Socket-1",
+      sockets: { "Socket-1": { materia: "Planner", parse: "json", assign: { workItems: "$.workItems" } } },
     });
   });
 
