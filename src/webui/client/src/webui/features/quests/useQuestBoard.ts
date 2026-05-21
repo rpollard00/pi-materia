@@ -123,7 +123,7 @@ function normalizeRunner(value: unknown): QuestRunnerState {
   };
 }
 
-function normalizeQuestBoardResponse(value: unknown): QuestBoardResponse | undefined {
+export function normalizeQuestBoardResponse(value: unknown): QuestBoardResponse | undefined {
   if (!isRecord(value) || value.ok === false) return undefined;
   const quests = normalizeQuestList(value.quests);
   const activeQuest = normalizeQuestSummary(value.activeQuest);

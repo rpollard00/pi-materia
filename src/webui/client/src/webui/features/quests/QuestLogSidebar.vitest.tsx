@@ -1,7 +1,9 @@
 import React from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { QuestDetail } from './QuestDetail.js';
 import { QuestLogSidebar } from './QuestLogSidebar.js';
+import { normalizeQuestBoardResponse } from './useQuestBoard.js';
 import type { QuestSummary } from '../../types.js';
 
 function quest(id: string, status: QuestSummary['status'], title: string): QuestSummary {
@@ -17,6 +19,20 @@ function quest(id: string, status: QuestSummary['status'], title: string): Quest
   };
 }
 
+function completedQuestWithDivergentCasts(): QuestSummary {
+  return {
+    ...quest('quest-completed-cast', 'succeeded', 'Completed cast quest'),
+    currentCastId: 'cast-current-viewer',
+    lastCastId: 'cast-legacy-last',
+    lastResult: {
+      status: 'succeeded',
+      castId: 'cast-result-completion',
+      finishedAt: '2026-05-19T01:00:00.000Z',
+      message: 'Quest completed successfully.',
+    },
+  };
+}
+
 function dataTransfer(id: string) {
   const store = new Map<string, string>();
   store.set('text/plain', id);
@@ -29,6 +45,70 @@ function dataTransfer(id: string) {
 }
 
 afterEach(() => cleanup());
+
+describe('Quest completed cast display coverage', () => {
+  test('quest detail Last result shows the cast the quest completed in from lastResult', () => {
+    render(<QuestDetail quest={completedQuestWithDivergentCasts()} onRefresh={vi.fn()} />);
+
+    const resultPanel = screen.getByRole('heading', { name: 'Last result' }).closest('.quest-result-panel');
+    expect(resultPanel).not.toBeNull();
+    expect(within(resultPanel as HTMLElement).getByText('Quest completed successfully.')).not.toBeNull();
+    expect(within(resultPanel as HTMLElement).getByText('Completed in cast cast-result-completion')).not.toBeNull();
+    expect(within(resultPanel as HTMLElement).queryByText(/cast-legacy-last/)).toBeNull();
+    expect(within(resultPanel as HTMLElement).queryByText(/cast-current-viewer/)).toBeNull();
+  });
+
+  test('completed quest cards visibly include the completion cast id', () => {
+    render(
+      <QuestLogSidebar
+        pendingQuests={[]}
+        completedQuests={[completedQuestWithDivergentCasts()]}
+        failedQuests={[]}
+        onSelectQuest={vi.fn()}
+      />,
+    );
+
+    const completedSection = screen.getByRole('heading', { name: 'Completed' }).closest('.quest-log-section');
+    expect(completedSection).not.toBeNull();
+    expect(within(completedSection as HTMLElement).getByText('Completed cast quest')).not.toBeNull();
+    expect(within(completedSection as HTMLElement).getByText('Completed in cast cast-result-completion')).not.toBeNull();
+    expect(within(completedSection as HTMLElement).queryByText(/cast-legacy-last/)).toBeNull();
+    expect(within(completedSection as HTMLElement).queryByText(/cast-current-viewer/)).toBeNull();
+  });
+
+  test('quest board normalization preserves completed quest lastResult cast id', () => {
+    const normalized = normalizeQuestBoardResponse({
+      ok: true,
+      quests: [],
+      pendingQuests: [],
+      failedQuests: [],
+      completedQuests: [
+        {
+          id: 'quest-completed-cast',
+          title: 'Completed cast quest',
+          prompt: 'Complete the cast attribution quest',
+          promptPreview: 'Complete the cast attribution quest',
+          status: 'succeeded',
+          attempts: 1,
+          createdAt: '2026-05-19T00:00:00.000Z',
+          updatedAt: '2026-05-19T01:00:00.000Z',
+          currentCastId: 'cast-current-viewer',
+          lastCastId: 'cast-legacy-last',
+          lastResult: {
+            status: 'succeeded',
+            castId: 'cast-result-completion',
+            finishedAt: '2026-05-19T01:00:00.000Z',
+            message: 'Quest completed successfully.',
+          },
+        },
+      ],
+    });
+
+    expect(normalized?.completedQuests?.[0]?.currentCastId).toBe('cast-current-viewer');
+    expect(normalized?.completedQuests?.[0]?.lastCastId).toBe('cast-legacy-last');
+    expect(normalized?.completedQuests?.[0]?.lastResult?.castId).toBe('cast-result-completion');
+  });
+});
 
 describe('QuestLogSidebar quest reordering', () => {
   test('renders active quest pinned above pending quests and only pending quests get drag handles', () => {
