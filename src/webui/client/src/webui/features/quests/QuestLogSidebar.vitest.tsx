@@ -128,7 +128,7 @@ describe('Quest completed cast display coverage', () => {
 
     const completedSection = screen.getByRole('heading', { name: 'Completed' }).closest('.quest-log-section');
     expect(completedSection).not.toBeNull();
-    expect(within(completedSection as HTMLElement).getByText('Completed cast quest')).not.toBeNull();
+    expect(within(completedSection as HTMLElement).getByText('quest-completed-cast: Completed cast quest prompt')).not.toBeNull();
     expect(within(completedSection as HTMLElement).getByText('Completed in cast cast-result-completion')).not.toBeNull();
     expect(within(completedSection as HTMLElement).queryByText(/cast-legacy-last/)).toBeNull();
     expect(within(completedSection as HTMLElement).queryByText(/cast-current-viewer/)).toBeNull();
@@ -184,11 +184,11 @@ describe('QuestLogSidebar quest reordering', () => {
     const activePending = screen.getByLabelText('Active & Pending');
     const buttons = within(activePending).getAllByRole('button');
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
-      'Active quest: Active quest',
+      'Active quest: quest-active: Active quest prompt',
       'Drag First pending to reorder pending quests',
-      'Pending quest: First pending',
+      'Pending quest: quest-pending-1: First pending prompt',
       'Drag Second pending to reorder pending quests',
-      'Pending quest: Second pending',
+      'Pending quest: quest-pending-2: Second pending prompt',
     ]);
     expect(screen.queryByLabelText('Drag Active quest to reorder pending quests')).toBeNull();
   });
@@ -228,7 +228,7 @@ describe('QuestLogSidebar quest reordering', () => {
       />,
     );
 
-    const targetRow = screen.getByLabelText('Pending quest: Beta').closest('.quest-pending-row')!;
+    const targetRow = screen.getByLabelText('Pending quest: quest-b: Beta prompt').closest('.quest-pending-row')!;
     vi.spyOn(targetRow, 'getBoundingClientRect').mockReturnValue({ top: 0, height: 100, bottom: 100, left: 0, right: 100, width: 100, x: 0, y: 0, toJSON: () => ({}) });
     const transfer = dataTransfer('quest-a');
     fireEvent.dragStart(screen.getByLabelText('Drag Alpha to reorder pending quests'), { dataTransfer: transfer });
