@@ -2425,6 +2425,14 @@
   font-size: 0.78rem;
 }
 
+.quest-card-result-cast {
+  display: block;
+  margin-top: 0.25rem;
+  color: rgb(165 243 252 / 0.86);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
 .quest-active-badge,
 .quest-status-pill {
   display: inline-flex;
@@ -2561,8 +2569,14 @@
 }
 
 .quest-result-time,
+.quest-result-cast,
 .quest-board-path {
   font-size: 0.8rem;
+}
+
+.quest-result-cast {
+  color: rgb(165 243 252 / 0.86);
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {

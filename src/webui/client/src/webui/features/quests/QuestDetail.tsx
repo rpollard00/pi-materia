@@ -1,4 +1,5 @@
 import type { QuestSummary } from '../../types.js';
+import { resultCastLabel } from './questResultCast.js';
 
 interface QuestDetailProps {
   quest?: QuestSummary;
@@ -44,6 +45,7 @@ export function QuestDetail({ quest, boardPath, loading = false, error, onRefres
   const createdAt = formatDate(quest.createdAt);
   const updatedAt = formatDate(quest.updatedAt);
   const finishedAt = formatDate(quest.lastResult?.finishedAt);
+  const resultCast = resultCastLabel(quest);
 
   return (
     <section className="quest-detail fantasy-panel" aria-labelledby="quest-detail-title">
@@ -74,6 +76,7 @@ export function QuestDetail({ quest, boardPath, loading = false, error, onRefres
         <div className="quest-result-panel">
           <h4>Last result</h4>
           <p>{quest.lastResult.message || quest.lastResult.error || `Finished as ${quest.lastResult.status}.`}</p>
+          {resultCast ? <p className="quest-result-cast">{resultCast}</p> : null}
           {finishedAt ? <p className="quest-result-time">Finished {finishedAt}</p> : null}
         </div>
       ) : null}
