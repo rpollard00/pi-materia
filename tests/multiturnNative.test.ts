@@ -214,6 +214,11 @@ describe("native multi-turn runtime", () => {
     expect(autoPlanStartedState.socketState).toBe("awaiting_agent_response");
     expect(autoPlanStartedState.awaitingResponse).toBe(true);
     expect(autoPlanStartedState.multiTurnFinalizing).not.toBe(true);
+    const autoPlanPrompt = harness.sentMessages
+      .map(({ message }) => message as any)
+      .find((message) => message.customType === "pi-materia-prompt" && message.details?.socketId === "Socket-3" && message.details?.materiaName === "Auto-Plan");
+    expect(autoPlanPrompt?.content).not.toContain("/materia continue");
+    expect(harness.notifications.map(({ message }) => message).join("\n")).not.toContain("/materia continue");
 
     harness.appendAssistantMessage(JSON.stringify(autoPlanEnvelope));
     await harness.emit("agent_end", { messages: [] });
@@ -227,6 +232,7 @@ describe("native multi-turn runtime", () => {
     expect(autoArchitectState.multiTurnFinalizing).not.toBe(true);
     expect(autoArchitectState.data.workItems).toEqual([workItem]);
     expect(autoArchitectState.data.tasks).toBeUndefined();
+    expect(harness.notifications.map(({ message }) => message).join("\n")).not.toContain("/materia continue");
 
     const statesAfterPlan = harness.appendedEntries
       .filter((entry) => entry.customType === "pi-materia-cast-state")
@@ -307,6 +313,14 @@ describe("native multi-turn runtime", () => {
     expect(autoArchitectState.currentSocketId).toBe("Socket-8");
     expect(autoArchitectState.currentMateria).toBe("Auto-Architect");
     expect(autoArchitectState.socketState).toBe("awaiting_agent_response");
+    expect(autoArchitectState.awaitingResponse).toBe(true);
+    expect(autoArchitectState.multiTurnFinalizing).not.toBe(true);
+    const statesAfterPlan = harness.appendedEntries
+      .filter((entry) => entry.customType === "pi-materia-cast-state")
+      .map((entry) => entry.data as any);
+    expect(statesAfterPlan.some((state) => state.currentSocketId === "Socket-3" && state.socketState === "awaiting_user_refinement")).toBe(false);
+    expect(statesAfterPlan.some((state) => state.currentSocketId === "Socket-8" && state.socketState === "awaiting_user_refinement")).toBe(false);
+    expect(statesAfterPlan.some((state) => ["Socket-3", "Socket-8"].includes(state.currentSocketId) && state.multiTurnFinalizing === true)).toBe(false);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
 
     await flushDeferredDispatch();
@@ -329,6 +343,12 @@ describe("native multi-turn runtime", () => {
     expect(buildState.currentItemKey).toBe("WI-1");
     expect(buildState.data.currentWorkItem).toEqual(workItem);
     expect(buildState.data.workItem).toEqual(workItem);
+    expect(buildState.multiTurnFinalizing).not.toBe(true);
+    const statesAfterArchitect = harness.appendedEntries
+      .filter((entry) => entry.customType === "pi-materia-cast-state")
+      .map((entry) => entry.data as any);
+    expect(statesAfterArchitect.some((state) => state.currentSocketId === "Socket-4" && state.socketState === "awaiting_user_refinement")).toBe(false);
+    expect(statesAfterArchitect.some((state) => ["Socket-3", "Socket-8", "Socket-4"].includes(state.currentSocketId) && state.multiTurnFinalizing === true)).toBe(false);
 
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
     expect(harness.sentMessages.filter(({ message }) => {
@@ -349,6 +369,7 @@ describe("native multi-turn runtime", () => {
     expect(harness.waitForIdleCalls).toBe(0);
     expect(harness.operationLog).not.toContain("waitForIdle");
     expect(harness.userMessages.map(({ content }) => content)).not.toContain(".");
+    expect(harness.notifications.map(({ message }) => message).join("\n")).not.toContain("/materia continue");
   });
 
   test("finalized Interactive-Plan /materia continue auto-dispatches the Build prompt", async () => {

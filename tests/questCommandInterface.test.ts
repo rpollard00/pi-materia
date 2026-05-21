@@ -423,6 +423,7 @@ describe("/materia quest command interface", () => {
 
     const board = await readBoard(harness);
     expect(board.runner.enabled).toBe(true);
+    expect(board.runner.activeQuestId).toBe(board.quests[1].id);
     expect(board.quests.map((quest: any) => quest.status)).toEqual(["succeeded", "running"]);
     expect(board.quests[0].currentCastId).toBeUndefined();
     expect(board.quests[0].lastCastId).toBeTruthy();
@@ -435,6 +436,10 @@ describe("/materia quest command interface", () => {
     expect(activeState?.currentMateria).toBe("Build");
     expect(activeState?.socketState).toBe("awaiting_agent_response");
     expect(activeState?.awaitingResponse).toBe(true);
+    expect(activeState?.multiTurnFinalizing).not.toBe(true);
+    expect(activeState?.data.quest).toMatchObject({ questId: board.quests[1].id, title: "Second agent quest" });
+    expect(activeState?.currentItemKey).toBe(board.quests[1].id);
+    expect(activeState?.currentItemLabel).toBe("Second agent quest");
 
     expect(triggeredPromptMessages(harness)).toHaveLength(promptsBeforeAgentEnd);
     expect(harness.suppressedTriggerTurnSends).toHaveLength(0);
@@ -443,6 +448,15 @@ describe("/materia quest command interface", () => {
     expect(harness.operationLog.filter((operation) => operation === "waitForIdle")).toHaveLength(waitsBeforeRun + 1);
 
     await flushDeferredDispatch();
+
+    const boardAfterDispatch = await readBoard(harness);
+    const activeStateAfterDispatch = loadActiveCastState(harness.ctx);
+    expect(boardAfterDispatch.runner.activeQuestId).toBe(board.quests[1].id);
+    expect(boardAfterDispatch.quests.map((quest: any) => quest.status)).toEqual(["succeeded", "running"]);
+    expect(boardAfterDispatch.quests[0].currentCastId).toBeUndefined();
+    expect(boardAfterDispatch.quests[1].currentCastId).toBe(board.quests[1].currentCastId);
+    expect(activeStateAfterDispatch?.castId).toBe(boardAfterDispatch.quests[1].currentCastId);
+    expect(activeStateAfterDispatch?.socketState).toBe("awaiting_agent_response");
 
     const triggeredPrompts = triggeredPromptMessages(harness);
     expect(triggeredPrompts).toHaveLength(promptsBeforeAgentEnd + 1);
