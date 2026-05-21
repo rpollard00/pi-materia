@@ -706,7 +706,11 @@ function recordQuestStartupFailure(board: QuestBoard, quest: Quest, now: string,
 function mergeCastStartOptions(left?: CastStartOptions, right?: CastStartOptions): CastStartOptions | undefined {
   if (!left) return right;
   if (!right) return left;
-  return { initialData: { ...(left.initialData ?? {}), ...(right.initialData ?? {}) }, startEventDetails: { ...(left.startEventDetails ?? {}), ...(right.startEventDetails ?? {}) } };
+  return {
+    initialData: { ...(left.initialData ?? {}), ...(right.initialData ?? {}) },
+    startEventDetails: { ...(left.startEventDetails ?? {}), ...(right.startEventDetails ?? {}) },
+    initialPromptDispatch: right.initialPromptDispatch ?? left.initialPromptDispatch,
+  };
 }
 
 function withEffectiveLoadoutInitialData(options: CastStartOptions | undefined, effectiveLoadout?: EffectiveCastLoadout): CastStartOptions | undefined {

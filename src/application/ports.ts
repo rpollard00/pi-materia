@@ -33,11 +33,15 @@ export interface CastAgentTurnPort<TSession = unknown, TPi = unknown, TAgentEven
   handleAgentEnd(pi: TPi, event: TAgentEvent, session: TSession): Promise<void>;
 }
 
+export type InitialPromptDispatchPolicy = "immediate" | "defer-agent-trigger";
+
 export interface CastStartOptions {
   /** Optional shared cast data to seed before the first socket starts. */
   initialData?: Record<string, unknown>;
   /** Optional extra details recorded on the normal cast_start event. */
   startEventDetails?: Record<string, unknown>;
+  /** Transient policy for dispatching the first agent prompt of a new cast. */
+  initialPromptDispatch?: InitialPromptDispatchPolicy;
 }
 
 export interface CastLifecyclePort<TSession = unknown, TPi = unknown> {

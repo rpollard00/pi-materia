@@ -7,6 +7,7 @@ import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
+import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
@@ -66,6 +67,19 @@ function agentEndAdvancementDiagnostics(state: MateriaCastState, socket: Resolve
     sourceSocketId: socket.id,
     sourceSocketVisit: socketVisit(state, socket.id),
     sourceMateriaName: socketMateriaName(socket),
+    dispatchTriggerMode: "deferred-triggerTurn",
+  };
+}
+
+function castStartInitialPromptDiagnostics(state: MateriaCastState, entry: ResolvedMateriaSocket, options?: CastStartOptions): AdvancementLifecycleDiagnostics | undefined {
+  if (options?.initialPromptDispatch !== "defer-agent-trigger") return undefined;
+  return {
+    origin: "agent_end",
+    promptDispatch: "defer-agent-trigger",
+    sourceSocketId: "cast_start",
+    sourceSocketVisit: 0,
+    sourceMateriaName: socketMateriaName(entry),
+    nextSocketTarget: entry.id,
     dispatchTriggerMode: "deferred-triggerTurn",
   };
 }
@@ -146,7 +160,7 @@ function toolScopeWarningContext(state: MateriaCastState, socket: ResolvedMateri
   };
 }
 
-export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> }): Promise<MateriaCastState> {
+export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: CastStartOptions): Promise<MateriaCastState> {
   const config = loaded.config;
   const artifactRoot = resolveArtifactRoot(ctx.cwd, config.artifactDir);
   const castId = safeTimestamp();
@@ -192,7 +206,7 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   saveCastState(pi, state);
   updateWidget(ctx, state, { replaceOwner: true });
   ctx.ui.notify(`pi-materia cast started. Artifacts: ${runDir}`, "info");
-  await startSocket(pi, ctx, state, pipeline.entry);
+  await startSocket(pi, ctx, state, pipeline.entry, castStartInitialPromptDiagnostics(state, pipeline.entry, options));
   return state;
 }
 
@@ -774,7 +788,7 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
     display: false,
     details: { phase: state.phase, socketId: currentSocketId(state), materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, materiaModel: state.currentMateriaModel },
   }, { triggerTurn: true });
-  await appendAdvancementDiagnostic(ctx, state, "dispatch_execution_exit", diagnostics, { boundary: "async_prompt_dispatch_attempt", dispatchTriggerMode: "immediate-triggerTurn" });
+  await appendAdvancementDiagnostic(ctx, state, "dispatch_execution_exit", diagnostics, { boundary: "async_prompt_dispatch_attempt", dispatchTriggerMode: diagnostics?.dispatchTriggerMode ?? "immediate-triggerTurn" });
 }
 
 export async function prepareAgentStartSystemPrompt(input: { pi: ExtensionAPI; session: ExtensionContext; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined> {
