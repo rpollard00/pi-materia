@@ -249,6 +249,8 @@ export interface MateriaCastState {
   recoveryAllowances?: Record<string, MateriaRecoveryAllowance>;
   /** Structured terminal metadata for casts failed by same-socket recovery exhaustion. */
   recoveryExhaustion?: MateriaRecoveryExhaustion;
+  /** Bounded metadata for the next same-socket retry after invalid final JSON output. */
+  jsonOutputRepair?: MateriaJsonOutputRepairContext;
   taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
   lastOutput?: string;
@@ -261,6 +263,16 @@ export interface MateriaRecoveryAllowance {
   originalMaxAttempts: number;
   effectiveMaxAttempts: number;
   reviveCount: number;
+}
+
+export type MateriaJsonOutputValidationKind = "json_parse" | "handoff_validation";
+
+export interface MateriaJsonOutputRepairContext {
+  validationKind: MateriaJsonOutputValidationKind;
+  errorMessage: string;
+  invalidOutputExcerpt: string;
+  excerptLength: number;
+  truncated: boolean;
 }
 
 export type MateriaRecoveryReason = "context_window" | "turn_failure";

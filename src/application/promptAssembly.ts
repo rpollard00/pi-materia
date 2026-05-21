@@ -4,7 +4,7 @@ import {
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../handoff/handoffContract.js";
-import type { MateriaAgentConfig, MateriaCastState, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
+import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { currentItem, getPath } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
@@ -50,6 +50,47 @@ export function jsonHandoffContractInstruction(socket: ResolvedMateriaSocket): s
 export function finalFormatInstruction(socket: ResolvedMateriaSocket): string {
   if (!isAgentResolvedSocket(socket)) return "";
   return jsonHandoffContractInstruction(socket) ?? "Final output format: return the final plain-text implementation summary for this socket. Do not emit routing JSON or evaluator control fields unless the local socket prompt explicitly asks for them.";
+}
+
+export interface JsonOutputRepairPromptInput {
+  validationKind: MateriaJsonOutputValidationKind;
+  errorMessage: string;
+  invalidOutputExcerpt: string;
+  originalFinalOutputInstructions: string;
+}
+
+export function buildJsonOutputRepairPrompt(input: JsonOutputRepairPromptInput): string {
+  const label = input.validationKind === "json_parse" ? "JSON parse" : "canonical handoff envelope validation";
+  return [
+    `Your previous final JSON response was invalid (${label} failed). Regenerate the final response now.`,
+    `Validation error: ${input.errorMessage}`,
+    "Bounded excerpt of your invalid output:",
+    "```text",
+    input.invalidOutputExcerpt,
+    "```",
+    "Return only corrected JSON. Do not include markdown fences, prose, commentary, or explanations.",
+    "Preserve the required final JSON-only and canonical handoff contract for this socket:",
+    input.originalFinalOutputInstructions,
+  ].join("\n");
+}
+
+export function buildJsonOutputRepairRetryPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {
+  if (!state.jsonOutputRepair || !isFinalJsonOutputSocket(state, socket)) return undefined;
+  const contextState = { ...state, lastAssistantText: undefined, lastOutput: undefined };
+  return materiaPrompt(socket.materia, state, [
+    buildSyntheticCastContext(contextState),
+    buildJsonOutputRepairPrompt({
+      validationKind: state.jsonOutputRepair.validationKind,
+      errorMessage: state.jsonOutputRepair.errorMessage,
+      invalidOutputExcerpt: state.jsonOutputRepair.invalidOutputExcerpt,
+      originalFinalOutputInstructions: finalFormatInstruction(socket),
+    }),
+  ]);
+}
+
+export function isFinalJsonOutputSocket(state: MateriaCastState, socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
+  if (!isAgentResolvedSocket(socket) || resolvedSocketConfig(socket).parse !== "json") return false;
+  return !isMultiTurnResolvedAgentSocket(socket) || state.multiTurnFinalizing === true;
 }
 
 export function socketAdapterContextInstruction(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {

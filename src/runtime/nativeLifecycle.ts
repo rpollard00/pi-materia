@@ -6,7 +6,7 @@ import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
-import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
@@ -19,7 +19,7 @@ import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryAc
 import { validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
-import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
+import type { LoadedConfig, MateriaCastState, MateriaJsonOutputValidationKind, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
 import { createRunState, recordUsageModelSelection } from "../telemetry/usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility } from "../utilities/utilityRegistry.js";
@@ -457,16 +457,16 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
       parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: socket.socket });
     } catch (error) {
       const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
-      if (isMultiTurnResolvedAgentSocket(socket) && options.finalizedMultiTurn) {
-        throw validationError;
-      }
       if (isAgentResolvedSocket(socket)) {
+        if (options.finalizedMultiTurn) state.multiTurnFinalizing = true;
+        state.jsonOutputRepair = buildJsonOutputRepairContext(text, validationError, classifyJsonOutputValidationKind(error));
         const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
         if (recovered) return;
         throw nonRecoverableTurnError(state, validationError);
       }
       throw validationError;
     }
+    state.jsonOutputRepair = undefined;
     state.lastJson = parsed;
     await recordSocketParsedJson({ state, socketId: socket.id, visit: socketVisit(state, socket.id), parsed });
   }
@@ -707,10 +707,34 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
 }
 
 function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {
-  if (state.activeTurnPrompt) return state.activeTurnPrompt;
   const socket = currentSocketOrThrow(state);
+  const jsonRepairPrompt = buildJsonOutputRepairRetryPrompt(state, socket);
+  if (jsonRepairPrompt) return jsonRepairPrompt;
+  if (state.activeTurnPrompt) return state.activeTurnPrompt;
   if (recoveryTurnMode(state) === "finalization") return buildMultiTurnFinalizationPrompt(state, socket);
   return buildSocketPrompt(state, socket);
+}
+
+const JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS = 600;
+
+function buildJsonOutputRepairContext(text: string, error: Error, validationKind: MateriaJsonOutputValidationKind): NonNullable<MateriaCastState["jsonOutputRepair"]> {
+  const invalidOutputExcerpt = boundedInvalidOutputExcerpt(text, JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS);
+  return {
+    validationKind,
+    errorMessage: error.message,
+    invalidOutputExcerpt,
+    excerptLength: invalidOutputExcerpt.length,
+    truncated: text.length > invalidOutputExcerpt.length,
+  };
+}
+
+function boundedInvalidOutputExcerpt(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n…[truncated ${text.length - maxChars} character(s)]`;
+}
+
+function classifyJsonOutputValidationKind(error: unknown): MateriaJsonOutputValidationKind {
+  return errorMessage(error).startsWith("Invalid JSON output") ? "json_parse" : "handoff_validation";
 }
 
 async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string, options: { preserveRecoveryExhaustion?: boolean } = {}): Promise<void> {
