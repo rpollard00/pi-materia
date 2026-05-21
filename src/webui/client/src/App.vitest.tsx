@@ -225,15 +225,15 @@ describe('Materia quests pane', () => {
 
     expect(await screen.findByRole('heading', { name: 'Quests' })).toBeTruthy();
     const questLog = screen.getByRole('complementary', { name: 'Quest Log' });
-    const activeCard = within(questLog).getByRole('button', { name: 'Active quest: Defeat the dragon' });
+    const activeCard = within(questLog).getByRole('button', { name: 'Active quest: quest-active: Defeat the dragon in the old keep' });
     expect(activeCard.textContent).toContain('★');
     expect(within(activeCard).getByLabelText('Active quest')).toBeTruthy();
     expect(within(questLog).getByRole('heading', { name: 'Active & Pending' })).toBeTruthy();
-    expect(within(questLog).getByRole('button', { name: 'Pending quest: Gather moon herbs' })).toBeTruthy();
-    expect(within(questLog).getByRole('button', { name: 'Pending quest: Forge silver key' })).toBeTruthy();
+    expect(within(questLog).getByRole('button', { name: 'Pending quest: quest-pending-1: Gather moon herbs' })).toBeTruthy();
+    expect(within(questLog).getByRole('button', { name: 'Pending quest: quest-pending-2: Forge silver key' })).toBeTruthy();
     expect(within(questLog).getByRole('heading', { name: 'Completed' })).toBeTruthy();
-    expect(within(questLog).getByRole('button', { name: 'Completed quest: Light the beacon' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Failed quest: Sneak past sentries' })).toBeNull();
+    expect(within(questLog).getByRole('button', { name: 'Completed quest: quest-complete: Light the beacon' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Failed quest: quest-failed: Sneak past sentries' })).toBeNull();
     expect(within(questLog).getByRole('button', { name: /Failed \/ blocked hidden/ }).getAttribute('aria-expanded')).toBe('false');
   });
 
@@ -253,7 +253,7 @@ describe('Materia quests pane', () => {
       body: JSON.stringify({ prompt: 'Rescue the villager', loadoutOverride: 'Full-Auto' }),
     })));
     expect(await screen.findByText('Added quest: Rescue the villager')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Pending quest: Rescue the villager' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pending quest: quest-added: Rescue the villager' })).toBeTruthy();
     expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('');
     await waitFor(() => expect(document.querySelector('[data-toast-variant="success"]')?.textContent).toContain('Quest added'));
   });
