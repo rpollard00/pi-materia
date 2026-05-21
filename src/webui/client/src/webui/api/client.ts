@@ -9,6 +9,7 @@ import type {
   ModelCatalogResponse,
   MonitorSnapshot,
   QuestBoardResponse,
+  QuestDefaultLoadoutResponse,
   ReorderQuestRequest,
   RoleGenerationPreferenceResponse,
   RoleGenerationPreferenceSavePayload,
@@ -55,6 +56,14 @@ export async function setActiveLoadout(name: string): Promise<ApiResponse<Active
 
 export async function setDefaultLoadout(name: string | null): Promise<ApiResponse<DefaultLoadoutResponse>> {
   return fetchJson<DefaultLoadoutResponse>('/api/loadout/default', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function setQuestDefaultLoadout(name: string | null): Promise<ApiResponse<QuestDefaultLoadoutResponse>> {
+  return fetchJson<QuestDefaultLoadoutResponse>('/api/loadout/quest-default-loadout', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),

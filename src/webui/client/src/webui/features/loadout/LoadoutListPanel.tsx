@@ -1,4 +1,4 @@
-import { EllipsisVertical, Lock, Star, Unlock, type LucideIcon } from 'lucide-react';
+import { EllipsisVertical, Flag, Lock, Star, Unlock, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { LoadoutSourceScope } from '../../types.js';
@@ -11,6 +11,8 @@ export interface LoadoutListPanelProps {
   editingLoadoutName: string | undefined;
   runtimeActiveLoadoutId: string | undefined;
   defaultLoadoutId: string | null;
+  questDefaultLoadoutId?: string | null;
+  questDefaultLoadoutWarning?: string;
   persistedLoadouts: Record<string, PipelineConfig>;
   loadoutSources: Record<string, LoadoutSourceScope>;
   canDeleteLoadout: (name: string) => boolean;
@@ -19,6 +21,7 @@ export interface LoadoutListPanelProps {
   onDeleteLoadout: (name: string) => void;
   onDuplicateLoadout: (name: string) => void;
   onSetDefaultLoadout: (loadoutId: string) => Promise<string | null>;
+  onSetQuestDefaultLoadout: (loadoutId: string | null) => Promise<string | null>;
   onSetRuntimeActiveLoadout: (loadoutId: string) => Promise<string>;
   getLoadoutLockEligibility: (name: string, lockState: LoadoutLockState) => LoadoutLockEligibility;
   onToggleLoadoutLock: (name: string, lockState: LoadoutLockState) => boolean;
@@ -49,13 +52,16 @@ interface LoadoutActionsMenuProps {
   name: string;
   isRuntimeActive: boolean;
   isDefaultLoadout: boolean;
+  isQuestDefaultLoadout: boolean;
   canSetRuntimeActive: boolean;
   canSetDefault: boolean;
+  canSetQuestDefault: boolean;
   deleteDisabled: boolean;
   deleteTitle: string;
   lockAction: LoadoutLockAction;
   onSetRuntimeActive: (name: string) => void;
   onSetDefault: (name: string) => void;
+  onSetQuestDefault: (name: string) => void;
   onToggleLock: (name: string, lockState: LoadoutLockState) => void;
   onDuplicate: (name: string) => void;
   onDelete: (name: string) => void;
@@ -96,7 +102,7 @@ function loadoutLockAction(loadout: PipelineConfig, scope: LoadoutSourceScope, e
   return { iconKey: 'unlock', label: 'Lock edits', title: eligibility.reason ?? 'Lock edits', menuLabel: 'Lock edits', nextState: 'locked', disabled: !eligibility.eligible };
 }
 
-function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRuntimeActive, canSetDefault, deleteDisabled, deleteTitle, lockAction, onSetRuntimeActive, onSetDefault, onToggleLock, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
+function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, isQuestDefaultLoadout, canSetRuntimeActive, canSetDefault, canSetQuestDefault, deleteDisabled, deleteTitle, lockAction, onSetRuntimeActive, onSetDefault, onSetQuestDefault, onToggleLock, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -153,6 +159,9 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRun
           <button type="button" role="menuitem" disabled={!canSetDefault} title={isDefaultLoadout ? 'This loadout is already the default.' : undefined} onClick={() => runAction(onSetDefault)}>
             {isDefaultLoadout ? 'Default loadout' : 'Set as Default'}
           </button>
+          <button type="button" role="menuitem" disabled={!canSetQuestDefault} title={isQuestDefaultLoadout ? 'This loadout is already the quest default loadout.' : undefined} onClick={() => runAction(onSetQuestDefault)}>
+            {isQuestDefaultLoadout ? 'Quest default loadout' : 'Set as Quest Default'}
+          </button>
           <button type="button" role="menuitem" disabled={lockAction.disabled} title={lockAction.title} onClick={() => runAction((loadoutName) => onToggleLock(loadoutName, lockAction.nextState))}>
             {lockAction.menuLabel}
           </button>
@@ -168,9 +177,11 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, canSetRun
   );
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, questDefaultLoadoutId = null, questDefaultLoadoutWarning, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetQuestDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
+  const [questDefaultChangePending, setQuestDefaultChangePending] = useState(false);
+  const [questDefaultChangeMessage, setQuestDefaultChangeMessage] = useState('');
   const persistedRows = buildLoadoutSelectorViewModels(persistedLoadouts, defaultLoadoutId, runtimeActiveLoadoutId).filter(({ loadout }) => Boolean(loadout.id));
   const loadoutRows = buildLoadoutSelectorViewModels(loadouts, defaultLoadoutId, runtimeActiveLoadoutId);
 
@@ -187,6 +198,21 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
       setActiveChangeMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setActiveChangePending(false);
+    }
+  }
+
+  async function changeQuestDefaultLoadout(loadoutId: string | null, displayName?: string) {
+    const nextId = loadoutId?.trim() || null;
+    if (nextId === questDefaultLoadoutId || questDefaultChangePending) return;
+    setQuestDefaultChangePending(true);
+    setQuestDefaultChangeMessage(nextId ? `Setting quest default loadout to ${displayName ?? nextId}…` : 'Clearing quest default loadout…');
+    try {
+      const savedDefault = await onSetQuestDefaultLoadout(nextId);
+      setQuestDefaultChangeMessage(savedDefault ? `Quest default loadout is now ${displayName ?? savedDefault}.` : 'Quest default loadout cleared; quests fall back to the active loadout.');
+    } catch (error) {
+      setQuestDefaultChangeMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setQuestDefaultChangePending(false);
     }
   }
 
@@ -209,6 +235,21 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
         </select>
       </label>
       {activeChangeMessage && <p className="mb-3 text-xs text-slate-300" role="status">{activeChangeMessage}</p>}
+      <label className="mb-3 block text-xs uppercase tracking-[0.18em] text-cyan-200">
+        Quest default loadout
+        <select
+          className="mt-1 w-full rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-sm normal-case tracking-normal text-cyan-100 disabled:opacity-60"
+          value={questDefaultLoadoutId ?? ''}
+          disabled={questDefaultChangePending || persistedRows.length === 0}
+          onChange={(event) => void changeQuestDefaultLoadout(event.target.value || null, event.currentTarget.selectedOptions[0]?.textContent ?? undefined)}
+          aria-label="Quest default loadout"
+          title="Quest runner default. Per-quest overrides still take precedence; clearing falls back to the active loadout."
+        >
+          <option value="">Cleared / use active loadout fallback</option>
+          {persistedRows.map(({ name, loadout }) => <option key={loadout.id} value={loadout.id}>{name}</option>)}
+        </select>
+      </label>
+      {(questDefaultChangeMessage || questDefaultLoadoutWarning) && <p className="mb-3 text-xs text-slate-300" role="status">{questDefaultChangeMessage || questDefaultLoadoutWarning}</p>}
       <div className="space-y-2" role="list" aria-label="Available loadouts">
         {loadoutRows.map(({ name, loadout, isDefault, isRuntimeActive }) => {
           const sourceScope = loadoutSources[name] ?? 'user';
@@ -216,6 +257,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const deleteDisabled = !canDeleteLoadout(name);
           const persisted = Boolean(persistedLoadouts[name]?.id);
           const isDefaultLoadout = isDefault;
+          const isQuestDefaultLoadout = Boolean(questDefaultLoadoutId) && loadout.id === questDefaultLoadoutId;
           const nextLockState = loadout.lockState === 'locked' ? 'unlocked' : 'locked';
           const lockAction = loadoutLockAction(loadout, sourceScope, getLoadoutLockEligibility(name, nextLockState));
           const LockIcon = loadoutLockIcons[lockAction.iconKey];
@@ -227,6 +269,11 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                   {isDefaultLoadout && (
                     <span className="loadout-default-indicator" role="img" aria-label="Default loadout" title="Default loadout">
                       <Star className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
+                    </span>
+                  )}
+                  {isQuestDefaultLoadout && (
+                    <span className="loadout-quest-default-indicator" role="img" aria-label="Quest default loadout" title="Quest default loadout">
+                      <Flag className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
                     </span>
                   )}
                   {isRuntimeActive && <span className="loadout-active-indicator" aria-label="Runtime active loadout" title="Active loadout" />}
@@ -249,13 +296,16 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                 name={name}
                 isRuntimeActive={isRuntimeActive}
                 isDefaultLoadout={isDefaultLoadout}
+                isQuestDefaultLoadout={isQuestDefaultLoadout}
                 canSetRuntimeActive={persisted && !isRuntimeActive && !activeChangePending}
                 canSetDefault={persisted && !isDefaultLoadout}
+                canSetQuestDefault={persisted && !isQuestDefaultLoadout && !questDefaultChangePending}
                 deleteDisabled={deleteDisabled}
                 deleteTitle={defaultLoadout ? 'Built-In loadouts cannot be deleted.' : deleteDisabled ? 'Create or keep another loadout before deleting this one.' : `Delete ${name}`}
                 lockAction={lockAction}
                 onSetRuntimeActive={() => void changeRuntimeActiveLoadout(loadout.id ?? '', name)}
                 onSetDefault={() => void onSetDefaultLoadout(loadout.id ?? '').catch(() => undefined)}
+                onSetQuestDefault={() => void changeQuestDefaultLoadout(loadout.id ?? '', name)}
                 onToggleLock={onToggleLoadoutLock}
                 onDuplicate={onDuplicateLoadout}
                 onDelete={onDeleteLoadout}

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../src/config/config.js";
+import { clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../src/config/config.js";
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
@@ -59,6 +59,37 @@ describe("layered config loading and persistence", () => {
       expect(cleared.defaultLoadoutId).toBe("default:planning-consult");
       expect(cleared.questDefaultLoadoutId).toBeNull();
       expect(cleared.questDefaultLoadoutWarning).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("persists regular and quest default loadout preferences independently", async () => {
+    const temp = await mkdtemp(path.join(tmpdir(), "pi-materia-independent-defaults-"));
+    const cwd = path.join(temp, "project");
+    const profileDir = path.join(temp, "profile");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profileDir;
+    try {
+      await mkdir(cwd, { recursive: true });
+      await mkdir(profileDir, { recursive: true });
+
+      await saveDefaultLoadoutPreference(cwd, "Planning-Consult");
+      await saveQuestDefaultLoadoutPreference(cwd, "Full-Auto");
+      const afterBoth = await loadProfileConfig();
+      expect(afterBoth.defaultLoadoutId).toBe("default:planning-consult");
+      expect(afterBoth.questDefaultLoadoutId).toBe("default:full-auto");
+
+      await saveQuestDefaultLoadoutPreference(cwd, null);
+      const afterQuestClear = await loadProfileConfig();
+      expect(afterQuestClear.defaultLoadoutId).toBe("default:planning-consult");
+      expect(afterQuestClear.questDefaultLoadoutId).toBeNull();
+
+      await saveDefaultLoadoutPreference(cwd, "Hojo-Consult");
+      const afterRegularChange = await loadProfileConfig();
+      expect(afterRegularChange.defaultLoadoutId).toBe("default:hojo-consult");
+      expect(afterRegularChange.questDefaultLoadoutId).toBeNull();
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

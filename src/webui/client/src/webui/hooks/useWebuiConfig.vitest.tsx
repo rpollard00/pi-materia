@@ -71,6 +71,8 @@ function ConfigProbe() {
       <output aria-label="active-socket-ids">{Object.keys(config.activeLoadout?.sockets ?? {}).join(',')}</output>
       <output aria-label="runtime-active-loadout-id">{config.runtimeActiveLoadoutId ?? ''}</output>
       <output aria-label="default-loadout">{config.defaultLoadoutId ?? ''}</output>
+      <output aria-label="quest-default-loadout">{config.questDefaultLoadoutId ?? ''}</output>
+      <output aria-label="quest-default-warning">{config.questDefaultLoadoutWarning ?? ''}</output>
       <output aria-label="toast-count">{String(toasts.length)}</output>
       <output aria-label="toasts">{JSON.stringify(toasts)}</output>
       <output aria-label="draft">{JSON.stringify(config.draftConfig)}</output>
@@ -81,6 +83,8 @@ function ConfigProbe() {
       <button type="button" onClick={() => void config.setRuntimeActiveLoadout('Hojo-Consult')}>set active Hojo-Consult</button>
       <button type="button" onClick={() => config.applyExternalRuntimeActiveLoadout('Hojo-Consult', 'Hojo-Consult')}>external active Hojo-Consult</button>
       <button type="button" onClick={() => void config.setDefaultLoadout('Hojo-Consult')}>set default Hojo-Consult</button>
+      <button type="button" onClick={() => void config.setQuestDefaultLoadout('Full-Auto')}>set quest default Full-Auto</button>
+      <button type="button" onClick={() => void config.setQuestDefaultLoadout(null)}>clear quest default</button>
       <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
       <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
       <button type="button" onClick={() => config.duplicateLoadout('Alpha')}>duplicate Alpha</button>
@@ -489,6 +493,47 @@ describe('useWebuiConfig', () => {
         variant: 'success',
       }),
     ]);
+  });
+
+  it('reads, sets, and clears quest default loadout separately from the regular default', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/loadout/quest-default-loadout' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { name: string | null };
+        if (body.name === null) return new Response(JSON.stringify({ ok: true, questDefaultLoadoutId: null, message: 'Quest default loadout cleared.' }));
+        expect(body).toEqual({ name: 'Full-Auto' });
+        return new Response(JSON.stringify({ ok: true, questDefaultLoadoutId: 'Full-Auto', message: 'Quest default loadout set to Full-Auto.' }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        source: 'default < user < project',
+        config: reportedLayeredConfig,
+        loadoutSources: { 'Full-Auto': 'default', 'Hojo-Consult': 'user' },
+        defaultLoadoutId: 'Hojo-Consult',
+        questDefaultLoadoutId: 'Full-Auto',
+        questDefaultLoadoutWarning: 'old warning',
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('quest-default-loadout').textContent).toBe('Full-Auto'));
+    expect(screen.getByLabelText('default-loadout').textContent).toBe('Hojo-Consult');
+    expect(screen.getByLabelText('quest-default-warning').textContent).toBe('old warning');
+
+    fireEvent.click(screen.getByRole('button', { name: 'clear quest default' }));
+
+    await waitFor(() => expect(screen.getByLabelText('quest-default-loadout').textContent).toBe(''));
+    expect(screen.getByLabelText('default-loadout').textContent).toBe('Hojo-Consult');
+    expect(fetchMock).toHaveBeenCalledWith('/api/loadout/quest-default-loadout', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: null }) }));
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/default')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'set quest default Full-Auto' }));
+
+    await waitFor(() => expect(screen.getByLabelText('quest-default-loadout').textContent).toBe('Full-Auto'));
+    expect(screen.getByLabelText('default-loadout').textContent).toBe('Hojo-Consult');
+    expect(fetchMock).toHaveBeenCalledWith('/api/loadout/quest-default-loadout', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'Full-Auto' }) }));
   });
 
   it('persists default changes separately from runtime active loadout changes', async () => {

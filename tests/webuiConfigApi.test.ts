@@ -61,6 +61,9 @@ describe("GET /api/config", () => {
       config: { materia: { Build: { tools: "coding", prompt: "build" } } },
       materiaSources: { Build: "user" },
       defaultMateriaIds: ["Build"],
+      defaultLoadoutId: "default:planning-consult",
+      questDefaultLoadoutId: "default:full-auto",
+      questDefaultLoadoutWarning: undefined,
     }));
 
     const response = await fetch(`${baseUrl}/api/config`);
@@ -72,6 +75,8 @@ describe("GET /api/config", () => {
       config: { materia: { Build: { tools: "coding", prompt: "build" } } },
       materiaSources: { Build: "user" },
       defaultMateriaIds: ["Build"],
+      defaultLoadoutId: "default:planning-consult",
+      questDefaultLoadoutId: "default:full-auto",
     });
   });
 });

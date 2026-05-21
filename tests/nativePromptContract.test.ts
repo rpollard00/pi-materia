@@ -30,6 +30,10 @@ function promptMessages(harness: FakePiHarness): string[] {
     .map((message) => String(message.content));
 }
 
+async function flushDeferredDispatch(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function expectPromptIncludesConciseJsonFinalInstruction(prompt: string): void {
   expect(prompt).toContain("Final output format: Return only JSON for this socket");
   expect(prompt).toContain("Use the runtime-provided canonical handoff envelope");
@@ -153,6 +157,7 @@ describe("native JSON prompt handoff contract guidance", () => {
       missing: [],
     }));
     await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
 
     const secondPrompt = promptMessages(harness).at(-1) ?? "";
     expect(secondPrompt).toContain("Refine upstream work items.");

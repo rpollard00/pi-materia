@@ -63,7 +63,7 @@ export function QuestCreateForm({ persistedLoadouts, onAddQuest, submitting }: Q
         <div>
           <p className="quest-kicker">New Quest</p>
           <h3 id="quest-create-title">Add to the quest log</h3>
-          <p>Append a pending quest for the runner to pick up. This does not change your active or default loadout.</p>
+          <p>Append a pending quest for the runner to pick up. This does not change your active, regular default, or quest default loadout.</p>
         </div>
         <button className="quest-submit-button" type="submit" disabled={submitting}>
           {submitting ? 'Adding…' : 'Add quest'}
@@ -79,11 +79,14 @@ export function QuestCreateForm({ persistedLoadouts, onAddQuest, submitting }: Q
             onChange={(event) => setLoadoutOverride(event.target.value)}
             disabled={submitting}
           >
-            <option value="">No override / default runner loadout</option>
+            <option value="">No override — use quest default, then active fallback</option>
             {loadoutOptions.map(([name, loadout]) => (
               <option key={name} value={name}>{loadout.id && loadout.id !== name ? `${name} (${loadout.id})` : name}</option>
             ))}
           </select>
+          <span className="mt-1 block text-[0.68rem] normal-case tracking-normal text-slate-400">
+            Leave blank to use the quest default runner loadout. If the quest default is cleared or unavailable, the runner falls back to the active loadout.
+          </span>
         </label>
 
         <label className="quest-form-field quest-prompt-field" htmlFor="quest-prompt">

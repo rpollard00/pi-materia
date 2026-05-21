@@ -88,7 +88,7 @@
   min-width: 0;
   max-width: 100%;
   flex: 1 1 auto;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   column-gap: 0.25rem;
 }
@@ -102,6 +102,7 @@
 }
 
 .loadout-default-indicator,
+.loadout-quest-default-indicator,
 .loadout-lock-indicator,
 .loadout-active-indicator {
   display: inline-flex;
@@ -114,6 +115,11 @@
 .loadout-default-indicator {
   color: rgb(250 204 21);
   filter: drop-shadow(0 0 5px rgb(250 204 21 / 0.42));
+}
+
+.loadout-quest-default-indicator {
+  color: rgb(196 181 253);
+  filter: drop-shadow(0 0 5px rgb(196 181 253 / 0.42));
 }
 
 .loadout-icon {

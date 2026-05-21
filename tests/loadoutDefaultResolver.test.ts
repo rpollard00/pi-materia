@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveDefaultLoadout, resolveLoadoutReference } from "../src/loadout/defaultLoadoutResolver.js";
+import { resolveDefaultLoadout, resolveLoadoutReference, resolveQuestDefaultLoadout } from "../src/loadout/defaultLoadoutResolver.js";
 import type { PiMateriaConfig } from "../src/types.js";
 
 const loadout = (id: string) => ({ id, entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } });
@@ -46,5 +46,25 @@ describe("default loadout resolution", () => {
     };
 
     expect(resolveLoadoutReference("Hojo", loadouts, { "Hojo-Consult": "default", Hojo: "user" })).toEqual({ loadoutName: "Hojo", loadoutId: "user:hojo" });
+  });
+
+  test("stale quest defaults produce quest-specific warnings without changing regular default resolution", () => {
+    const loadouts: PiMateriaConfig["loadouts"] = {
+      Interactive: loadout("user:interactive"),
+      "Full-Auto": loadout("default:full-auto"),
+    };
+    const sources = { Interactive: "user", "Full-Auto": "default" } as const;
+
+    const regularDefault = resolveDefaultLoadout("user:interactive", loadouts, sources);
+    const staleQuestDefault = resolveQuestDefaultLoadout("missing-quest-default", loadouts, sources);
+
+    expect(regularDefault).toEqual({ loadoutName: "Interactive", loadoutId: "user:interactive" });
+    expect(staleQuestDefault.loadoutName).toBeNull();
+    expect(staleQuestDefault.loadoutId).toBeNull();
+    expect(staleQuestDefault.warning).toContain('Configured quest default Materia loadout "missing-quest-default" was not found');
+    expect(staleQuestDefault.warning).toContain("quest launches will fall back to the current active loadout");
+    expect(staleQuestDefault.warning).not.toContain("keeping the current active loadout");
+
+    expect(resolveDefaultLoadout("user:interactive", loadouts, sources)).toEqual(regularDefault);
   });
 });

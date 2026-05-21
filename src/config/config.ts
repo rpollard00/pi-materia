@@ -10,7 +10,7 @@ import { normalizeMateriaCatalog, validateLoadoutMateriaReferences } from "../do
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
-import { resolveDefaultLoadout, resolveLoadoutSelection } from "../loadout/defaultLoadoutResolver.js";
+import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoadout } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
@@ -394,25 +394,6 @@ function normalizeRoleGenerationProfileConfig(value: unknown, file: string): Mat
   }
 
   return config;
-}
-
-function resolveQuestDefaultLoadout(
-  requestedQuestDefault: string | null | undefined,
-  loadouts: PiMateriaConfig["loadouts"],
-  sources: Record<string, MateriaConfigLayerScope> = {},
-): ReturnType<typeof resolveDefaultLoadout> {
-  const requested = requestedQuestDefault?.trim();
-  if (!requested) return { loadoutName: null, loadoutId: null };
-  const resolved = resolveDefaultLoadout(requested, loadouts, sources);
-  if (resolved.loadoutId || !resolved.warning) return resolved;
-  const available = Object.keys(loadouts ?? {});
-  return {
-    loadoutName: null,
-    loadoutId: null,
-    warning: available.length
-      ? `Configured quest default Materia loadout "${requested}" was not found; quest launches will fall back to the current active loadout. Available loadouts: ${available.join(", ")}.`
-      : `Configured quest default Materia loadout "${requested}" was not found because no loadouts are configured; quest launches will fall back to the current active loadout.`,
-  };
 }
 
 function warnInvalidProfileConfig(file: string, message: string): void {

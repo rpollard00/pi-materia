@@ -32,6 +32,7 @@ The single-writer limitation above still applies when using the WebUI: avoid wri
 /materia quest
 /materia quest status
 /materia quest list [pending|all|succeeded|failed] [--limit <n>]
+/materia quest default-loadout [<name-or-id>|--clear]
 /materia quest add [--loadout <name-or-id>] <prompt>
 /materia quest move <quest-id-or-prefix> --first|--before <target>|--onto <target>
 /materia quest run [quest-id]
@@ -42,6 +43,7 @@ The single-writer limitation above still applies when using the WebUI: avoid wri
 
 - `quest` / `quest status` show runner state, the active quest if any, pending counts, recent results, the storage path, and short help.
 - `quest list` shows quests from the board. With no filter it shows pending quests, ordered with the next scheduled quest first, and limits output to 10 quests. Use `pending`, `all`, `succeeded`, or `failed` to choose a filter, and `--limit <n>` to show a different positive number. `all` includes every stored status, including running and blocked quests; `failed` shows only failed quests.
+- `quest default-loadout` shows the separate quest default loadout preference. `quest default-loadout <name-or-id>` sets it using normal exact loadout name/id resolution. `quest default-loadout --clear` stores an explicit cleared value; it does not change the active loadout or the regular cast default.
 - `quest add` appends a pending quest. The first slice derives a concise title from the prompt.
 - `quest move` reorders pending quests in the canonical board order. Use `--first` to make a pending quest the next pending item below any active/running quest, `--before <target>` to place it before another pending quest, or `--onto <target>` to place it after/onto another pending quest. Exactly one placement option is accepted, and source/target references must resolve to pending quests.
 - `quest run` enables the project-local continuous runner and starts the requested quest, or the next pending quest. While enabled, the runner drains pending quests back-to-back until the queue is empty, an active cast is waiting, a launch fails, or `quest stop` is issued.
@@ -56,6 +58,8 @@ Examples:
 
 ```text
 /materia quest add Add tests for the parser
+/materia quest default-loadout Full-Auto
+/materia quest default-loadout --clear
 /materia quest add --loadout Full-Auto Implement the CLI help
 /materia quest list                # pending quests, next scheduled first, max 10 by default
 /materia quest list all --limit 20 # show up to 20 quests of any stored status
@@ -68,9 +72,19 @@ Examples:
 /materia quest stop                # stop after the current quest cast settles
 ```
 
-## Loadout overrides
+## Quest default loadout and overrides
 
-`--loadout` is per-cast. pi-materia resolves the override using normal loadout name/id semantics before starting the quest cast, then creates an in-memory loaded config for that cast only. It does not call active-loadout persistence and does not mutate project, user, or explicit config files. Quest result metadata records the requested/effective loadout when available.
+Quest launches use loadouts in this order:
+
+1. a per-quest `--loadout <name-or-id>` override;
+2. the persisted **quest default loadout** preference;
+3. the current active loadout as a safe fallback.
+
+The quest default is separate from the regular cast default loadout so interactive casts can keep a planning-oriented default while the quest runner stays autonomous. New profiles and migrated profiles that do not yet have `questDefaultLoadoutId` are initialized to the built-in `Full-Auto` stable id when that loadout is resolvable. Setting `/materia quest default-loadout --clear` stores `null` as an explicit cleared value; pi-materia preserves that clear and uses the active loadout fallback instead of repopulating `Full-Auto`.
+
+`--loadout` remains per-cast and has highest precedence. pi-materia resolves the override using normal loadout name/id semantics before starting the quest cast, then creates an in-memory loaded config for that cast only. It does not call active-loadout, regular-default, or quest-default persistence and does not mutate project, user, or explicit config files. Quest result metadata records the requested/effective loadout when available.
+
+The quest board file remains backward compatible: existing `.pi/pi-materia/quest-board.json` records do not need a quest default field, and the preference lives in the profile/config state rather than on each quest record.
 
 ## Autonomous loadouts
 

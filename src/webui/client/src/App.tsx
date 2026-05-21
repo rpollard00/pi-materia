@@ -32,6 +32,8 @@ export function App() {
     commitEditingLoadoutRename,
     createLoadout,
     defaultLoadoutId,
+    questDefaultLoadoutId,
+    questDefaultLoadoutWarning,
     defaultMateriaIds,
     deleteLoadout: deleteLoadoutDraft,
     draftConfig,
@@ -49,6 +51,7 @@ export function App() {
     saveTarget,
     getLoadoutLockEligibility,
     setDefaultLoadout,
+    setQuestDefaultLoadout,
     setLoadoutNameInput,
     setLoadoutLockState,
     setRuntimeActiveLoadout,
@@ -203,6 +206,8 @@ export function App() {
             editingLoadoutName={editingLoadoutName}
             runtimeActiveLoadoutId={runtimeActiveLoadoutId}
             defaultLoadoutId={defaultLoadoutId}
+            questDefaultLoadoutId={questDefaultLoadoutId}
+            questDefaultLoadoutWarning={questDefaultLoadoutWarning}
             persistedLoadouts={persistedLoadouts}
             loadoutSources={loadoutSources}
             canDeleteLoadout={canDeleteLoadout}
@@ -211,6 +216,7 @@ export function App() {
             onDeleteLoadout={deleteLoadout}
             onDuplicateLoadout={duplicateLoadout}
             onSetDefaultLoadout={setDefaultLoadout}
+            onSetQuestDefaultLoadout={setQuestDefaultLoadout}
             onSetRuntimeActiveLoadout={setRuntimeActiveLoadout}
             getLoadoutLockEligibility={getLoadoutLockEligibility}
             onToggleLoadoutLock={setLoadoutLockState}

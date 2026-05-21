@@ -24,6 +24,10 @@ function promptMessages(harness: FakePiHarness): string[] {
     .map((message) => String(message.content));
 }
 
+async function flushDeferredDispatch(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe("core plugin characterization", () => {
   test.serial("loads the active loadout, starts a cast, assembles prompt context, and writes cast artifacts", async () => {
     const harness = await makeCoreHarness({
@@ -112,6 +116,7 @@ describe("core plugin characterization", () => {
     }));
 
     await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
 
     const state = loadActiveCastState(harness.ctx);
     expect(state?.active).toBe(true);

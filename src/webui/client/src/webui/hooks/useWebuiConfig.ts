@@ -8,7 +8,7 @@ import {
 import { getLoadoutEditPolicy, type LoadoutUserLockState } from '../../../../../domain/loadout.js';
 import { toast } from '../../toast/index.js';
 import { emitLoadoutStatusToast, type LoadoutStatusOptions, type LoadoutStatusToastIntent } from '../utils/loadoutNotifications.js';
-import { getConfig, saveConfig, setActiveLoadout, setDefaultLoadout as persistDefaultLoadout } from '../api/index.js';
+import { getConfig, saveConfig, setActiveLoadout, setDefaultLoadout as persistDefaultLoadout, setQuestDefaultLoadout as persistQuestDefaultLoadout } from '../api/index.js';
 import { buildLoadouts } from '../utils/graphLayout.js';
 import { cloneConfig } from '../utils/forms.js';
 import type { ActiveLoadoutResponse, ConfigResponse, LoadedConfigResponse, LoadoutSourceScope, SaveTarget } from '../types.js';
@@ -50,7 +50,7 @@ function normalizeDefaultIds(value: unknown): string[] {
 function normalizeConfigSnapshot(
   payload: ConfigResponse | ActiveLoadoutResponse | MateriaConfig | LoadedConfigResponse | undefined,
   fallback?: MateriaConfig,
-): { config: MateriaConfig; source?: string; loadoutSources: Record<string, LoadoutSourceScope>; materiaSources: Record<string, LoadoutSourceScope>; defaultMateriaIds: string[]; defaultLoadoutId?: string | null } {
+): { config: MateriaConfig; source?: string; loadoutSources: Record<string, LoadoutSourceScope>; materiaSources: Record<string, LoadoutSourceScope>; defaultMateriaIds: string[]; defaultLoadoutId?: string | null; defaultLoadoutWarning?: string; questDefaultLoadoutId?: string | null; questDefaultLoadoutWarning?: string } {
   const wrapper = isLoadedConfigResponse(payload) ? payload : undefined;
   const response = isObjectRecord(payload) ? payload as ConfigResponse : undefined;
   const rawConfig = wrapper?.config ?? response?.config ?? payload ?? {};
@@ -68,10 +68,13 @@ function normalizeConfigSnapshot(
     materiaSources: normalizeSourceMap(wrapper?.materiaSources ?? response?.materiaSources ?? nestedWrapper?.materiaSources),
     defaultMateriaIds: normalizeDefaultIds(wrapper?.defaultMateriaIds ?? response?.defaultMateriaIds ?? nestedWrapper?.defaultMateriaIds),
     defaultLoadoutId: wrapper?.defaultLoadoutId ?? response?.defaultLoadoutId ?? nestedWrapper?.defaultLoadoutId,
+    defaultLoadoutWarning: wrapper?.defaultLoadoutWarning ?? response?.defaultLoadoutWarning ?? nestedWrapper?.defaultLoadoutWarning,
+    questDefaultLoadoutId: wrapper?.questDefaultLoadoutId ?? response?.questDefaultLoadoutId ?? nestedWrapper?.questDefaultLoadoutId,
+    questDefaultLoadoutWarning: wrapper?.questDefaultLoadoutWarning ?? response?.questDefaultLoadoutWarning ?? nestedWrapper?.questDefaultLoadoutWarning,
   };
 }
 
-async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope>; materiaSources: Record<string, LoadoutSourceScope>; defaultMateriaIds: string[]; defaultLoadoutId: string | null }> {
+async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: string; loadoutSources: Record<string, LoadoutSourceScope>; materiaSources: Record<string, LoadoutSourceScope>; defaultMateriaIds: string[]; defaultLoadoutId: string | null; defaultLoadoutWarning?: string; questDefaultLoadoutId: string | null; questDefaultLoadoutWarning?: string }> {
   const body = await getConfig();
   const snapshot = normalizeConfigSnapshot(body);
   return {
@@ -81,6 +84,9 @@ async function fetchMateriaConfig(): Promise<{ config: MateriaConfig; source: st
     materiaSources: snapshot.materiaSources,
     defaultMateriaIds: snapshot.defaultMateriaIds,
     defaultLoadoutId: snapshot.defaultLoadoutId ?? null,
+    defaultLoadoutWarning: snapshot.defaultLoadoutWarning,
+    questDefaultLoadoutId: snapshot.questDefaultLoadoutId ?? null,
+    questDefaultLoadoutWarning: snapshot.questDefaultLoadoutWarning,
   };
 }
 
@@ -250,6 +256,8 @@ export function useWebuiConfig() {
     setStatus(message);
   };
   const [defaultLoadoutId, setDefaultLoadoutId] = useState<string | null>(null);
+  const [questDefaultLoadoutId, setQuestDefaultLoadoutId] = useState<string | null>(null);
+  const [questDefaultLoadoutWarning, setQuestDefaultLoadoutWarning] = useState<string | undefined>();
 
   useEffect(() => {
     draftConfigRef.current = draftConfig;
@@ -369,6 +377,8 @@ export function useWebuiConfig() {
     setDefaultMateriaIds(loaded.defaultMateriaIds);
     const nextPersistedLoadouts = buildLoadouts(normalizedLoaded);
     setDefaultLoadoutId(hasLoadoutId(nextPersistedLoadouts, loaded.defaultLoadoutId) ? loaded.defaultLoadoutId : null);
+    setQuestDefaultLoadoutId(hasLoadoutId(nextPersistedLoadouts, loaded.questDefaultLoadoutId) ? loaded.questDefaultLoadoutId : null);
+    setQuestDefaultLoadoutWarning(loaded.questDefaultLoadoutWarning);
     if (!preserveLoadoutEdits) setDeletedLoadoutNames([]);
     setStatus(readyStatus);
   }
@@ -388,6 +398,8 @@ export function useWebuiConfig() {
       setMateriaSources({});
       setDefaultMateriaIds([]);
       setDefaultLoadoutId(null);
+      setQuestDefaultLoadoutId(null);
+      setQuestDefaultLoadoutWarning(undefined);
     });
     return () => {
       cancelled = true;
@@ -399,6 +411,49 @@ export function useWebuiConfig() {
     setViewedLoadoutName(name);
     setLoadoutNameInput(name);
     return true;
+  }
+
+  async function setQuestDefaultLoadout(loadoutId: string | null) {
+    const nextDefault = loadoutId?.trim() || null;
+    setStatus(nextDefault ? `Setting quest default loadout to ${nextDefault}…` : 'Clearing quest default loadout…');
+    let result: Awaited<ReturnType<typeof persistQuestDefaultLoadout>>;
+    try {
+      result = await persistQuestDefaultLoadout(nextDefault);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(`Quest default loadout change failed: ${message}`);
+      toast({
+        id: 'quest-default-loadout-error',
+        title: 'Could not update quest default loadout',
+        description: `The quest default loadout preference was not changed. Try again or check the WebUI server: ${message}`,
+        variant: 'error',
+      });
+      throw error;
+    }
+    const { response, body } = result;
+    if (!response.ok || body.ok === false) {
+      const message = defaultLoadoutMessage(body);
+      setStatus(`Quest default loadout change failed: ${message}`);
+      toast({
+        id: 'quest-default-loadout-error',
+        title: 'Could not update quest default loadout',
+        description: `The quest default loadout preference was not changed. ${message}`,
+        variant: 'error',
+      });
+      throw new Error(message);
+    }
+    const savedDefault = body.questDefaultLoadoutId ?? null;
+    setQuestDefaultLoadoutId(savedDefault);
+    setQuestDefaultLoadoutWarning(undefined);
+    const readyStatus = body.message ?? (savedDefault ? `Quest default loadout set to ${savedDefault}.` : 'Quest default loadout cleared.');
+    setStatus(readyStatus);
+    toast({
+      id: `quest-default-loadout-success:${savedDefault ?? 'none'}`,
+      title: savedDefault ? 'Quest default loadout updated' : 'Quest default loadout cleared',
+      description: readyStatus,
+      variant: 'success',
+    });
+    return savedDefault;
   }
 
   async function setDefaultLoadout(loadoutId: string | null) {
@@ -496,6 +551,8 @@ export function useWebuiConfig() {
       setLoadoutSources(snapshot.loadoutSources);
       setMateriaSources(snapshot.materiaSources);
       setDefaultMateriaIds(snapshot.defaultMateriaIds);
+      setQuestDefaultLoadoutId(hasLoadoutId(buildLoadouts(nextConfig), snapshot.questDefaultLoadoutId) ? snapshot.questDefaultLoadoutId ?? null : null);
+      setQuestDefaultLoadoutWarning(snapshot.questDefaultLoadoutWarning);
       setStatus(readyStatus);
     } else {
       await reloadConfig({ preserveLoadoutEdits: true, readyStatus });
@@ -705,6 +762,7 @@ export function useWebuiConfig() {
     });
     const deletedLoadoutIds = new Set(deletedLoadoutNames.map((name) => loadoutIdForName(baselineConfig?.loadouts ?? {}, name)).filter((id): id is string => Boolean(id)));
     const deletedDefaultLoadoutId = defaultLoadoutId && deletedLoadoutIds.has(defaultLoadoutId) ? defaultLoadoutId : null;
+    const deletedQuestDefaultLoadoutId = questDefaultLoadoutId && deletedLoadoutIds.has(questDefaultLoadoutId) ? questDefaultLoadoutId : null;
     const readyStatus = `Saved staged loadout edits to ${body.target ?? saveTarget} scope.`;
     setStatus(readyStatus);
     toast({
@@ -723,6 +781,15 @@ export function useWebuiConfig() {
         // default even if preference cleanup could not be persisted.
       }
     }
+    if (deletedQuestDefaultLoadoutId) {
+      try {
+        await setQuestDefaultLoadout(null);
+      } catch {
+        // The loadout delete has already been saved. Keep the local quest
+        // preference state unchanged so render-time validation suppresses the
+        // stale quest marker until reload/startup validation catches up.
+      }
+    }
   }
 
   return {
@@ -738,6 +805,8 @@ export function useWebuiConfig() {
     commitEditingLoadoutRename,
     createLoadout,
     defaultLoadoutId,
+    questDefaultLoadoutId,
+    questDefaultLoadoutWarning,
     deleteLoadout,
     duplicateLoadout,
     draftConfig,
@@ -757,6 +826,7 @@ export function useWebuiConfig() {
     saveTarget,
     getLoadoutLockEligibility: getTargetLoadoutLockEligibility,
     setDefaultLoadout,
+    setQuestDefaultLoadout,
     setLoadoutNameInput,
     setPersistedActiveLoadout: setRuntimeActiveLoadout,
     setRuntimeActiveLoadout,

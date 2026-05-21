@@ -45,6 +45,10 @@ async function readUsage(harness: FakePiHarness): Promise<any> {
   return JSON.parse(await readCastFile(harness, "usage.json"));
 }
 
+async function flushDeferredDispatch(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function twoAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
@@ -125,6 +129,7 @@ describe("native per-materia model settings", () => {
     await harness.runCommand("materia", "cast mixed materia models");
     harness.appendAssistantMessage("build complete");
     await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
 
     expect(harness.setModelCalls).toEqual([
       { provider: "anthropic", id: "claude-test", name: "Claude Test", api: "anthropic" },

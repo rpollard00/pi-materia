@@ -39,6 +39,25 @@ export function resolveDefaultLoadout(
   };
 }
 
+export function resolveQuestDefaultLoadout(
+  requestedQuestDefault: string | null | undefined,
+  loadouts: Loadouts,
+  sources: Record<string, MateriaConfigLayerScope> = {},
+): DefaultLoadoutResolution {
+  const requested = requestedQuestDefault?.trim();
+  if (!requested) return { loadoutName: null, loadoutId: null };
+  const resolved = resolveDefaultLoadout(requested, loadouts, sources);
+  if (resolved.loadoutId || !resolved.warning) return resolved;
+  const available = Object.keys(loadouts ?? {});
+  return {
+    loadoutName: null,
+    loadoutId: null,
+    warning: available.length
+      ? `Configured quest default Materia loadout "${requested}" was not found; quest launches will fall back to the current active loadout. Available loadouts: ${available.join(", ")}.`
+      : `Configured quest default Materia loadout "${requested}" was not found because no loadouts are configured; quest launches will fall back to the current active loadout.`,
+  };
+}
+
 export interface LoadoutReferenceResolution {
   loadoutName: string;
   loadoutId?: string;

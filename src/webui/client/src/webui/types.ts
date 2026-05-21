@@ -44,6 +44,9 @@ export interface LoadedConfigResponse {
   materiaSources?: Record<string, LoadoutSourceScope>;
   defaultMateriaIds?: string[];
   defaultLoadoutId?: string | null;
+  defaultLoadoutWarning?: string;
+  questDefaultLoadoutId?: string | null;
+  questDefaultLoadoutWarning?: string;
 }
 
 export interface ConfigResponse {
@@ -54,6 +57,9 @@ export interface ConfigResponse {
   materiaSources?: Record<string, LoadoutSourceScope>;
   defaultMateriaIds?: string[];
   defaultLoadoutId?: string | null;
+  defaultLoadoutWarning?: string;
+  questDefaultLoadoutId?: string | null;
+  questDefaultLoadoutWarning?: string;
 }
 
 export interface ActiveLoadoutResponse {
@@ -66,6 +72,9 @@ export interface ActiveLoadoutResponse {
   materiaSources?: Record<string, LoadoutSourceScope>;
   defaultMateriaIds?: string[];
   defaultLoadoutId?: string | null;
+  defaultLoadoutWarning?: string;
+  questDefaultLoadoutId?: string | null;
+  questDefaultLoadoutWarning?: string;
   message?: string;
   error?: string | { code?: string; message?: string };
 }
@@ -73,6 +82,13 @@ export interface ActiveLoadoutResponse {
 export interface DefaultLoadoutResponse {
   ok?: boolean;
   defaultLoadoutId?: string | null;
+  message?: string;
+  error?: string | { code?: string; message?: string };
+}
+
+export interface QuestDefaultLoadoutResponse {
+  ok?: boolean;
+  questDefaultLoadoutId?: string | null;
   message?: string;
   error?: string | { code?: string; message?: string };
 }

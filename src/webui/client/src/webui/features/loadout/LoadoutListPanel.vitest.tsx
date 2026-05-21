@@ -17,6 +17,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutListPanel>>
     editingLoadoutName: 'Alpha',
     runtimeActiveLoadoutId: 'Alpha',
     defaultLoadoutId: 'Beta',
+    questDefaultLoadoutId: null,
     persistedLoadouts: loadouts,
     loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'user' },
     canDeleteLoadout: () => true,
@@ -25,6 +26,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutListPanel>>
     onDeleteLoadout: vi.fn(),
     onDuplicateLoadout: vi.fn(),
     onSetDefaultLoadout: vi.fn(async (name: string) => name),
+    onSetQuestDefaultLoadout: vi.fn(async (name: string | null) => name),
     onSetRuntimeActiveLoadout: vi.fn(async (name: string) => name),
     getLoadoutLockEligibility: vi.fn(() => ({ eligible: true, reason: null })),
     onToggleLoadoutLock: vi.fn(() => true),
@@ -241,6 +243,29 @@ describe('LoadoutListPanel', () => {
     expect(onDuplicateLoadout).toHaveBeenCalledWith('Gamma');
     expect(onDeleteLoadout).toHaveBeenCalledWith('Gamma');
     expect(onSwitchEditingLoadout).not.toHaveBeenCalled();
+  });
+
+  it('shows and updates quest default controls separately from the regular default star', async () => {
+    const onSetDefaultLoadout = vi.fn(async (name: string) => name);
+    const onSetQuestDefaultLoadout = vi.fn(async (name: string | null) => name);
+    renderPanel({ defaultLoadoutId: 'Beta', questDefaultLoadoutId: 'Gamma', onSetDefaultLoadout, onSetQuestDefaultLoadout });
+
+    expect(within(cardFor('Beta')).getByLabelText('Default loadout')).toBeTruthy();
+    expect(within(cardFor('Beta')).queryByLabelText('Quest default loadout')).toBeNull();
+    expect(within(cardFor('Gamma')).getByLabelText('Quest default loadout')).toBeTruthy();
+    expect(within(cardFor('Gamma')).queryByLabelText('Default loadout')).toBeNull();
+    const questDefaultSelect = screen.getByRole('combobox', { name: 'Quest default loadout' });
+    expect(questDefaultSelect).toHaveProperty('value', 'Gamma');
+
+    fireEvent.change(questDefaultSelect, { target: { value: '' } });
+    await waitFor(() => expect(onSetQuestDefaultLoadout).toHaveBeenCalledWith(null));
+    expect(onSetDefaultLoadout).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toContain('Quest default loadout cleared');
+
+    fireEvent.click(within(cardFor('Alpha')).getByLabelText('Loadout actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Set as Quest Default' }));
+    await waitFor(() => expect(onSetQuestDefaultLoadout).toHaveBeenCalledWith('Alpha'));
+    expect(onSetDefaultLoadout).not.toHaveBeenCalled();
   });
 
   it('keeps menu interactions from selecting the card and separates active from default actions', async () => {
@@ -474,7 +499,7 @@ describe('LoadoutListPanel', () => {
     const css = readFileSync('src/webui/client/src/styles.css', 'utf8');
     expect(css).toMatch(/\.loadout-card\s*{(?=[^}]*gap: 0\.25rem;)(?=[^}]*padding: 0;)\s*[^}]*}/s);
     expect(css).toMatch(/\.loadout-card-select\s*{(?=[^}]*flex: 1 1 auto;)(?=[^}]*overflow: hidden;)(?=[^}]*white-space: nowrap;)\s*[^}]*}/s);
-    expect(css).toMatch(/\.loadout-card-select \.loadout-card-title\s*{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto auto;[^}]*column-gap: 0\.25rem;/s);
+    expect(css).toMatch(/\.loadout-card-select \.loadout-card-title\s*{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto auto auto;[^}]*column-gap: 0\.25rem;/s);
     expect(css).toMatch(/\.loadout-card-name\s*{[^}]*min-width: 0;[^}]*max-width: none;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   });
 

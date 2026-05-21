@@ -9,6 +9,7 @@ import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown = questConfig()): Promise<FakePiHarness> {
   process.env.PI_MATERIA_PROFILE_DIR = await mkdtemp(path.join(tmpdir(), "pi-materia-quest-profile-"));
+  await writeFile(path.join(process.env.PI_MATERIA_PROFILE_DIR, "config.json"), JSON.stringify({ questDefaultLoadoutId: null }, null, 2));
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-quest-command-"));
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(config, null, 2));
@@ -21,6 +22,7 @@ function questConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
+    questDefaultLoadoutId: null,
     loadouts: {
       Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Done" } } },
       Other: { entry: "Socket-1", sockets: { "Socket-1": { materia: "OtherDone" } } },
@@ -36,6 +38,7 @@ function agentQuestConfig() {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
+    questDefaultLoadoutId: null,
     loadouts: {
       Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build" } } },
     },
@@ -256,6 +259,33 @@ describe("/materia quest command interface", () => {
     expect(latestMateriaMessage(harness)).toContain("Storage:");
     expect(latestMateriaMessage(harness)).toContain("Commands: /materia quest add");
     expect(latestMateriaMessage(harness)).toContain("runonce launches one pending quest only");
+  });
+
+  test("shows, sets, clears, and reports errors for quest default-loadout independently", async () => {
+    const harness = await makeHarness();
+
+    expect(harness.getCommandCompletions("materia", "quest d")?.map((completion) => completion.value)).toContain("quest default-loadout");
+    expect(harness.getCommandCompletions("materia", "quest default-loadout ")?.map((completion) => completion.value)).toContain("quest default-loadout --clear");
+
+    await harness.runCommand("materia", "quest default-loadout");
+    expect(latestMateriaMessage(harness)).toContain("pi-materia quest default loadout");
+    expect(latestMateriaMessage(harness)).toContain("Quest default loadout: cleared");
+
+    await harness.runCommand("materia", "quest default-loadout Other");
+    expect(latestMateriaMessage(harness)).toContain("Quest default loadout: project:other");
+    expect(harness.notifications.some((notification) => notification.message.includes("quest default loadout set to project:other"))).toBe(true);
+
+    await harness.runCommand("materia", "quest status");
+    expect(latestMateriaMessage(harness)).toContain("Active loadout: Test");
+    expect(latestMateriaMessage(harness)).toContain("Regular default loadout:");
+    expect(latestMateriaMessage(harness)).toContain("Quest default loadout: project:other");
+
+    await harness.runCommand("materia", "quest default-loadout Missing");
+    expect(harness.notifications.at(-1)).toMatchObject({ type: "error" });
+    expect(harness.notifications.at(-1)?.message).toContain('Unknown quest default Materia loadout "Missing"');
+
+    await harness.runCommand("materia", "quest default-loadout --clear");
+    expect(latestMateriaMessage(harness)).toContain("Quest default loadout: cleared");
   });
 
   test("adds a pending quest with optional loadout override", async () => {
