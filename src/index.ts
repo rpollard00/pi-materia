@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStateRepository, type QuestStartResult } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";

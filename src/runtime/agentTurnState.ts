@@ -1,4 +1,4 @@
-import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { MateriaAgentConfig, MateriaCastState } from "../types.js";
 import { resolveToolScope, type ResolvedToolScope } from "../domain/toolScope.js";
 import { addUsage, extractMessageModelInfo, extractUsage } from "../telemetry/usage.js";

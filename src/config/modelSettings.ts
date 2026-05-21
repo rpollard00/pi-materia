@@ -1,6 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { supportsXhigh, type Api, type Model } from "@mariozechner/pi-ai";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 
 export interface ActiveModelInfo {
   model?: Model<Api>;
@@ -292,7 +292,7 @@ function thinkingLevelMapFor(model: Record<string, unknown>): Record<string, unk
 
 function safelySupportsXhigh(model: Model<Api>): boolean {
   try {
-    return supportsXhigh(model);
+    return getSupportedThinkingLevels(model).includes("xhigh");
   } catch {
     return false;
   }

@@ -42,9 +42,9 @@ This same shape is what would aggregate into summaries such as the reported `312
 
 The installed Pi provider code for OpenAI/Codex responses constructs assistant usage from raw response usage and then calls model-registry pricing:
 
-- `@mariozechner/pi-ai/dist/providers/openai-responses-shared.js` maps raw `response.usage.input_tokens`, `output_tokens`, `input_tokens_details.cached_tokens`, and `total_tokens` into `usage.input`, `usage.output`, `usage.cacheRead`, and `usage.totalTokens`.
-- `@mariozechner/pi-ai/dist/models.js` calculates `usage.cost.{input,output,cacheRead,cacheWrite,total}` as USD from configured per-million-token model costs.
-- `@mariozechner/pi-ai/dist/providers/openai-codex-responses.js` can additionally apply a service-tier multiplier, then recomputes total from components.
+- `@earendil-works/pi-ai/dist/providers/openai-responses-shared.js` maps raw `response.usage.input_tokens`, `output_tokens`, `input_tokens_details.cached_tokens`, and `total_tokens` into `usage.input`, `usage.output`, `usage.cacheRead`, and `usage.totalTokens`.
+- `@earendil-works/pi-ai/dist/models.js` calculates `usage.cost.{input,output,cacheRead,cacheWrite,total}` as USD from configured per-million-token model costs.
+- `@earendil-works/pi-ai/dist/providers/openai-codex-responses.js` can additionally apply a service-tier multiplier, then recomputes total from components.
 
 So, for the observed `openai-codex/gpt-5.5` path, costs do not arrive from the Codex subscription API as cents or microdollars. Pi estimates USD from token counts.
 

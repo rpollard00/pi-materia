@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildSyntheticCastContext } from "../application/promptAssembly.js";
 import { recordSocketOutput as recordSocketOutputFile, recordSocketRefinement, writeContextArtifact as writeContextArtifactFile } from "../infrastructure/castArtifacts.js";
 import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";

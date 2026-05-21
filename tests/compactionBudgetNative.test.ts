@@ -27,7 +27,7 @@ describe("native compaction request budgeting audit", () => {
   test("pre-turn usage can be below threshold while isolated prompt/context add large request material", async () => {
     const harness = await makeHarness(singleAgentConfig());
     const largeGrepLikeOutput = [
-      "grep /getArgumentCompletions/ in ~/.nvm/versions/node/v22.15.0/lib/node_modules/@mariozechner/pi-coding-agent (**/*.{ts,md}) limit 50",
+      "grep /getArgumentCompletions/ in ~/.nvm/versions/node/v22.15.0/lib/node_modules/@earendil-works/pi-coding-agent (**/*.{ts,md}) limit 50",
       "dist/core/extensions/types.d.ts:772: getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;",
       "docs/extensions.md:1395: getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {",
       "x".repeat(50_000),
@@ -73,7 +73,7 @@ describe("native compaction request budgeting audit", () => {
 
     const hiddenPrompt = harness.sentMessages.map(({ message }) => message as any).find((message) => message.customType === "pi-materia-prompt")?.content as string;
     const largeToolResult = [
-      "grep /getArgumentCompletions/ in ~/.nvm/versions/node/v22.15.0/lib/node_modules/@mariozechner/pi-coding-agent (**/*.{ts,md}) limit 50",
+      "grep /getArgumentCompletions/ in ~/.nvm/versions/node/v22.15.0/lib/node_modules/@earendil-works/pi-coding-agent (**/*.{ts,md}) limit 50",
       "dist/core/extensions/types.d.ts:772: getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;",
       "docs/extensions.md:1395: getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {",
       "tool-result-body".repeat(4_000),

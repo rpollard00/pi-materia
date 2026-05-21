@@ -1,6 +1,6 @@
 import path from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry } from "@earendil-works/pi-coding-agent";
 
 export type FakeEventName = Parameters<ExtensionAPI["on"]>[0];
 

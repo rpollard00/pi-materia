@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   currentCastSocketId,
   currentCastSocketState,

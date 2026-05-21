@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
 import { buildIsolatedMateriaContext, continueNativeCast, handleAgentEnd, materiaStatusLabel, prepareAgentStartSystemPrompt, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
 import { clearCastState } from "../infrastructure/castStateRepository.js";
