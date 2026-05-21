@@ -1,5 +1,9 @@
 import { errorMessage, isPlainObject, readJsonBody, sendJson } from './http.js';
 export async function handleQuestRoute(req, res, deps) {
+    if (req.url?.startsWith('/api/quests/requeue')) {
+        await handleRequeueQuestRoute(req, res, deps);
+        return;
+    }
     if (req.url?.startsWith('/api/quests/reorder')) {
         await handleReorderQuestRoute(req, res, deps);
         return;
@@ -47,6 +51,33 @@ export async function handlePostQuestRoute(req, res, deps) {
         }
         const board = mapQuestBoardResponse(result);
         sendJson(res, 200, { ok: true, quest: mapQuest(result.quest), board });
+    }
+    catch (error) {
+        sendJson(res, 400, { ok: false, error: errorMessage(error) });
+    }
+}
+export async function handleRequeueQuestRoute(req, res, deps) {
+    if (req.method !== 'POST') {
+        sendJson(res, 405, { ok: false, error: 'Use POST to requeue quests.' });
+        return;
+    }
+    if (!deps.requeueQuest) {
+        sendJson(res, 503, { ok: false, error: 'Quest requeue API is unavailable for this server.' });
+        return;
+    }
+    try {
+        const body = await readJsonBody(req);
+        if (!isPlainObject(body))
+            throw new Error('Expected JSON object body.');
+        const questId = typeof body.questId === 'string' ? body.questId.trim() : '';
+        if (!questId)
+            throw new Error('Quest id is required.');
+        const result = await deps.requeueQuest({ questId });
+        if (!result.ok) {
+            sendJson(res, result.code === 'unavailable' ? 503 : 400, { ok: false, code: result.code, error: result.message });
+            return;
+        }
+        sendJson(res, 200, mapQuestBoardResponse(result));
     }
     catch (error) {
         sendJson(res, 400, { ok: false, error: errorMessage(error) });

@@ -49,8 +49,9 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 2. Add two pending quests with `/materia quest add ...` and refresh the pane; confirm pending quests appear after the active quest in execution order, with long prompts summarized in the sidebar and full prompt text available in the detail area.
 3. Complete or seed a succeeded quest and confirm it appears in the sidebar's completed section instead of the active/pending list.
 4. Seed or encounter a failed/blocked quest and confirm it is hidden by default except for the collapsed/count affordance.
-5. Use the WebUI add form: choose the default/no-override option or a configured loadout, enter a prompt, submit, and confirm the prompt clears, success feedback names the created quest, and the new pending quest appears after refresh.
-6. Submit an empty prompt and confirm the form preserves input state and reports an accessible validation error without adding a quest.
+5. Select a failed or blocked quest, click **Requeue**, and confirm it becomes pending in the active/pending list while attempts and historical result/error details remain available for audit context.
+6. Use the WebUI add form: choose the default/no-override option or a configured loadout, enter a prompt, submit, and confirm the prompt clears, success feedback names the created quest, and the new pending quest appears after refresh.
+7. Submit an empty prompt and confirm the form preserves input state and reports an accessible validation error without adding a quest.
 
 ## Role prompt generator
 

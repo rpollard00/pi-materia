@@ -55,7 +55,7 @@ export async function handleMateriaWebUiRequest(req, res, deps) {
         return;
     }
     if (req.url?.startsWith('/api/quests')) {
-        await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest, reorderQuest: deps.session?.reorderQuest });
+        await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest, reorderQuest: deps.session?.reorderQuest, requeueQuest: deps.session?.requeueQuest });
         return;
     }
     if (req.url?.startsWith('/api/profile/role-generation')) {
