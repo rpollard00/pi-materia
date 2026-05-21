@@ -161,6 +161,12 @@ function recentFinishedQuests(board: QuestBoard, limit: number): Quest[] {
 }
 
 function formatQuestSummary(quest: Quest): string {
-  const cast = quest.currentCastId ?? quest.lastCastId;
+  const cast = questSummaryCastId(quest);
   return `${quest.id} [${quest.status}] ${quest.title}${cast ? ` (cast ${cast})` : ""}`;
+}
+
+function questSummaryCastId(quest: Quest): string | undefined {
+  if (quest.status === "running") return quest.currentCastId ?? quest.lastCastId;
+  if (quest.status === "succeeded" || quest.status === "failed" || quest.status === "blocked") return quest.lastResult?.castId ?? quest.lastCastId;
+  return undefined;
 }

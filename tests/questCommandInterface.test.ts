@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria, { parseQuestListArgs, parseQuestMoveArgs } from "../src/index.js";
 import { findNextPendingQuest, type Quest, type QuestBoard, type QuestStatus } from "../src/domain/questBoard.js";
-import { selectQuestList } from "../src/presentation/questBoard.js";
+import { renderQuestList, renderQuestStatus, selectQuestList } from "../src/presentation/questBoard.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown = questConfig()): Promise<FakePiHarness> {
@@ -148,6 +148,69 @@ describe("quest list selection", () => {
     expect(selectQuestList(board, { filter: "all", limit: 10 }).quests.map((quest) => quest.status)).toEqual(["succeeded", "pending", "pending", "failed", "blocked", "running"]);
     expect(selectQuestList(board, { filter: "succeeded", limit: 10 }).quests.map((quest) => quest.id)).toEqual(["quest-succeeded"]);
     expect(selectQuestList(board, { filter: "failed", limit: 10 }).quests.map((quest) => quest.id)).toEqual(["quest-failed"]);
+  });
+});
+
+describe("quest presentation", () => {
+  test("status recent results prefer completion result cast over last cast", () => {
+    const completed = {
+      ...makeQuest("quest-done", "succeeded", "Completed quest"),
+      lastCastId: "cast-started-before-retry",
+      lastResult: {
+        status: "succeeded" as const,
+        castId: "cast-completed-result",
+        finishedAt: "2026-05-19T00:30:00.000Z",
+      },
+      updatedAt: "2026-05-19T00:30:00.000Z",
+    };
+    const board = makeQuestBoard([completed]);
+
+    const message = renderQuestStatus({ board, boardPath: "/tmp/quest-board.json", pendingCount: 0 }).join("\n");
+
+    expect(message).toContain("Recent results:");
+    expect(message).toContain("- quest-done [succeeded] Completed quest (cast cast-completed-result) at 2026-05-19T00:30:00.000Z");
+    expect(message).not.toContain("cast-started-before-retry");
+  });
+
+  test("list summaries use current casts for running quests and result casts for terminal quests", () => {
+    const running = {
+      ...makeQuest("quest-running", "running", "Running quest"),
+      currentCastId: "cast-current-running",
+      lastCastId: "cast-previous-running",
+    };
+    const succeeded = {
+      ...makeQuest("quest-succeeded", "succeeded", "Succeeded quest"),
+      lastCastId: "cast-fallback-succeeded",
+      lastResult: {
+        status: "succeeded" as const,
+        castId: "cast-result-succeeded",
+        finishedAt: "2026-05-19T00:30:00.000Z",
+      },
+    };
+    const failed = {
+      ...makeQuest("quest-failed", "failed", "Failed quest"),
+      lastCastId: "cast-fallback-failed",
+      lastResult: {
+        status: "failed" as const,
+        castId: "cast-result-failed",
+        finishedAt: "2026-05-19T00:40:00.000Z",
+      },
+    };
+    const pending = makeQuest("quest-pending", "pending", "Pending quest");
+    const board = makeQuestBoard([running, succeeded, failed, pending]);
+
+    const allMessage = renderQuestList({ board, boardPath: "/tmp/quest-board.json", pendingCount: 1, activeQuest: running }, { filter: "all", limit: 10 }).join("\n");
+    const succeededMessage = renderQuestList({ board, boardPath: "/tmp/quest-board.json", pendingCount: 1, activeQuest: running }, { filter: "succeeded", limit: 10 }).join("\n");
+
+    expect(allMessage).toContain("- quest-running [running] Running quest (cast cast-current-running)");
+    expect(allMessage).toContain("- quest-succeeded [succeeded] Succeeded quest (cast cast-result-succeeded)");
+    expect(allMessage).toContain("- quest-failed [failed] Failed quest (cast cast-result-failed)");
+    expect(allMessage).toContain("- quest-pending [pending] Pending quest");
+    expect(succeededMessage).toContain("- quest-succeeded [succeeded] Succeeded quest (cast cast-result-succeeded)");
+    expect(allMessage).not.toContain("cast-previous-running");
+    expect(allMessage).not.toContain("cast-fallback-succeeded");
+    expect(allMessage).not.toContain("cast-fallback-failed");
+    expect(allMessage.match(/\(cast cast-result-succeeded\)/g)).toHaveLength(1);
   });
 });
 
