@@ -14,9 +14,9 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
-async function makeBundledDefaultHarness(): Promise<FakePiHarness> {
+async function makeBundledDefaultHarness(options?: ConstructorParameters<typeof FakePiHarness>[1]): Promise<FakePiHarness> {
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bundled-"));
-  const harness = new FakePiHarness(cwd);
+  const harness = new FakePiHarness(cwd, options);
   piMateria(harness.pi);
   return harness;
 }
@@ -245,6 +245,70 @@ describe("native multi-turn runtime", () => {
     expect(harness.userMessages).toHaveLength(0);
     expect(harness.operationLog).not.toContain("waitForIdle");
     expect(harness.notifications.map(({ message }) => message).join("\n")).not.toContain("/materia continue");
+  });
+
+  test("strict Full-Auto dispatches Build after Auto-Architect without an external wakeup", async () => {
+    const harness = await makeBundledDefaultHarness({ strictTriggerTurnDuringAgentEnd: true });
+    const workItem = {
+      id: "WI-1",
+      title: "Ship it",
+      description: "Implement the requested feature",
+      acceptance: ["Feature is implemented", "Regression test passes"],
+      context: { architecture: "Keep it simple", constraints: [], dependencies: [], risks: [] },
+    };
+    const autoPlanEnvelope = {
+      summary: "Plan",
+      workItems: [workItem],
+      guidance: { note: "Use top-level workItems" },
+      decisions: [],
+      risks: [],
+      satisfied: true,
+      feedback: "",
+      missing: [],
+    };
+    const architectEnvelope = { ...autoPlanEnvelope, summary: "Architected plan", decisions: ["Keep boundaries small"] };
+
+    await harness.runCommand("materia", "cast build the feature");
+    harness.appendAssistantMessage(JSON.stringify(autoPlanEnvelope));
+    await harness.emit("agent_end", { messages: [] });
+
+    const autoArchitectState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(autoArchitectState.active).toBe(true);
+    expect(autoArchitectState.currentSocketId).toBe("Socket-8");
+    expect(autoArchitectState.currentMateria).toBe("Auto-Architect");
+    expect(autoArchitectState.socketState).toBe("awaiting_agent_response");
+
+    harness.appendAssistantMessage(JSON.stringify(architectEnvelope));
+    await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
+
+    const buildState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(buildState.active).toBe(true);
+    expect(buildState.currentSocketId).toBe("Socket-4");
+    expect(buildState.currentMateria).toBe("Build");
+    expect(buildState.socketState).toBe("awaiting_agent_response");
+    expect(buildState.awaitingResponse).toBe(true);
+    expect(buildState.currentItemKey).toBe("WI-1");
+    expect(buildState.data.currentWorkItem).toEqual(workItem);
+    expect(buildState.data.workItem).toEqual(workItem);
+
+    const buildPrompts = harness.sentMessages.filter(({ message }) => {
+      const prompt = message as any;
+      return prompt.customType === "pi-materia-prompt" && prompt.details?.socketId === "Socket-4" && prompt.details?.materiaName === "Build";
+    });
+    if (buildPrompts.length === 0) {
+      expect(harness.suppressedTriggerTurnSends).toEqual(expect.arrayContaining([
+        expect.objectContaining({ target: expect.objectContaining({ socketId: "Socket-4", materiaName: "Build" }) }),
+      ]));
+    }
+    expect(buildPrompts).toHaveLength(1);
+    expect((buildPrompts[0].options as { triggerTurn?: boolean } | undefined)?.triggerTurn).toBe(true);
+    expect((buildPrompts[0].message as any).content).toContain("Materia active materia (Socket-4):");
+    expect((buildPrompts[0].message as any).content).toContain("Current workItem JSON");
+    expect(harness.userMessages).toHaveLength(0);
+    expect(harness.waitForIdleCalls).toBe(0);
+    expect(harness.operationLog).not.toContain("waitForIdle");
+    expect(harness.userMessages.map(({ content }) => content)).not.toContain(".");
   });
 
   test("finalized Interactive-Plan /materia continue auto-dispatches the Build prompt", async () => {

@@ -19,6 +19,28 @@ export interface FakeCommandContext extends ExtensionContext {
   waitForIdle(): Promise<void>;
 }
 
+export interface FakePiHarnessOptions {
+  /**
+   * Simulate Pi's unsafe scheduling window by dropping triggerTurn sends made
+   * while an agent_end handler is active. Defaults to false so existing tests
+   * keep the permissive fake behavior unless they opt in.
+   */
+  strictTriggerTurnDuringAgentEnd?: boolean;
+}
+
+export interface SuppressedTriggerTurnSend {
+  event: "agent_end";
+  message: unknown;
+  options: unknown;
+  target?: {
+    socketId?: string;
+    materiaName?: string;
+    socket?: string;
+    materia?: string;
+    [key: string]: unknown;
+  };
+}
+
 let nextId = 1;
 
 function entryBase(type: string, parentId: string | null): { type: string; id: string; parentId: string | null; timestamp: string } {
@@ -73,6 +95,7 @@ export class FakePiHarness {
   readonly commands = new Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string; description?: string }> | null; handler: (args: string, ctx: FakeCommandContext) => Promise<void> }>();
   readonly flags = new Map<string, boolean | string | undefined>();
   readonly sentMessages: Array<{ message: unknown; options?: unknown }> = [];
+  readonly suppressedTriggerTurnSends: SuppressedTriggerTurnSend[] = [];
   readonly userMessages: Array<{ content: unknown; options?: unknown }> = [];
   readonly appendedEntries: Array<{ customType: string; data?: unknown }> = [];
   readonly widgets = new Map<string, { content: string[] | undefined; options?: unknown }>();
@@ -94,8 +117,9 @@ export class FakePiHarness {
   thinkingLevel = "none";
   sessionName: string | undefined;
   idle = true;
+  private agentEndHandlerDepth = 0;
 
-  constructor(cwd = process.cwd()) {
+  constructor(cwd = process.cwd(), private readonly options: FakePiHarnessOptions = {}) {
     process.env.PI_MATERIA_PROFILE_DIR ??= path.join(tmpdir(), `pi-materia-fake-profile-${process.pid}`);
     this.cwd = cwd;
     this.sessionManager = new FakeSessionManager(cwd);
@@ -115,7 +139,13 @@ export class FakePiHarness {
       getFlag: (name: string) => this.flags.get(name),
       registerMessageRenderer: (customType: string, renderer: unknown) => this.registeredRenderers.set(customType, renderer),
       sendMessage: (message: unknown, options?: unknown) => {
-        if ((options as { triggerTurn?: boolean } | undefined)?.triggerTurn) this.operationLog.push("triggerTurn");
+        const triggerTurn = (options as { triggerTurn?: boolean } | undefined)?.triggerTurn === true;
+        if (triggerTurn && this.options.strictTriggerTurnDuringAgentEnd && this.agentEndHandlerDepth > 0) {
+          this.operationLog.push("suppressedTriggerTurnDuringAgentEnd");
+          this.suppressedTriggerTurnSends.push({ event: "agent_end", message, options, target: this.extractTriggerTurnTarget(message) });
+          return;
+        }
+        if (triggerTurn) this.operationLog.push("triggerTurn");
         this.sentMessages.push({ message, options });
         const custom = message as { customType?: string; content?: string | unknown[]; display?: boolean; details?: unknown };
         if (custom.customType) this.sessionManager.appendCustomMessage({ customType: custom.customType, content: custom.content ?? "", display: Boolean(custom.display), details: custom.details });
@@ -206,10 +236,30 @@ export class FakePiHarness {
     } as unknown as FakeCommandContext;
   }
 
+  private extractTriggerTurnTarget(message: unknown): SuppressedTriggerTurnSend["target"] {
+    const details = (message as { details?: unknown } | undefined)?.details;
+    if (!details || typeof details !== "object") return undefined;
+    const target = details as Record<string, unknown>;
+    return {
+      ...target,
+      socketId: typeof target.socketId === "string" ? target.socketId : undefined,
+      materiaName: typeof target.materiaName === "string" ? target.materiaName : undefined,
+      socket: typeof target.socket === "string" ? target.socket : undefined,
+      materia: typeof target.materia === "string" ? target.materia : undefined,
+    };
+  }
+
   async emit(event: string, payload: unknown = {}): Promise<unknown[]> {
     const handlers = this.events.get(event) ?? [];
     const results: unknown[] = [];
-    for (const handler of handlers) results.push(await handler(payload as never, this.ctx));
+    for (const handler of handlers) {
+      if (event === "agent_end") this.agentEndHandlerDepth += 1;
+      try {
+        results.push(await handler(payload as never, this.ctx));
+      } finally {
+        if (event === "agent_end") this.agentEndHandlerDepth -= 1;
+      }
+    }
     return results;
   }
 

@@ -44,6 +44,44 @@ async function waitForNotification(harness: FakePiHarness, predicate: (message: 
 }
 
 describe("FakePiHarness", () => {
+  test("strict triggerTurn mode suppresses and records sends made during agent_end", async () => {
+    const harness = new FakePiHarness(process.cwd(), { strictTriggerTurnDuringAgentEnd: true });
+
+    harness.pi.on("agent_end", () => {
+      harness.pi.sendMessage(
+        { customType: "pi-materia-prompt", content: "Build now", display: true, details: { socketId: "Socket-4", materiaName: "Build" } },
+        { triggerTurn: true },
+      );
+    });
+
+    await harness.emit("agent_end");
+
+    expect(harness.sentMessages).toHaveLength(0);
+    expect(harness.suppressedTriggerTurnSends).toHaveLength(1);
+    expect(harness.suppressedTriggerTurnSends[0]).toMatchObject({
+      event: "agent_end",
+      target: { socketId: "Socket-4", materiaName: "Build" },
+    });
+    expect(harness.operationLog).toContain("suppressedTriggerTurnDuringAgentEnd");
+  });
+
+  test("strict triggerTurn mode is opt-in", async () => {
+    const harness = new FakePiHarness(process.cwd());
+
+    harness.pi.on("agent_end", () => {
+      harness.pi.sendMessage(
+        { customType: "pi-materia-prompt", content: "Build now", display: true, details: { socketId: "Socket-4", materiaName: "Build" } },
+        { triggerTurn: true },
+      );
+    });
+
+    await harness.emit("agent_end");
+
+    expect(harness.sentMessages).toHaveLength(1);
+    expect(harness.suppressedTriggerTurnSends).toHaveLength(0);
+    expect(harness.operationLog).toContain("triggerTurn");
+  });
+
   test("captures Pi extension primitives without provider or real session access", async () => {
     const harness = new FakePiHarness(process.cwd());
 
