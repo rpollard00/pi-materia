@@ -78,6 +78,32 @@ describe('QuestDetail requeue action', () => {
   });
 });
 
+describe('Quest card display coverage', () => {
+  test('renders quest id and one description preview when title duplicates prompt preview', () => {
+    const repeatedRequest = 'We should make the persisted quest card display less repetitive';
+    const duplicatedQuest: QuestSummary = {
+      ...quest('quest-abc', 'pending', repeatedRequest),
+      prompt: repeatedRequest,
+      promptPreview: repeatedRequest,
+    };
+    const expectedSummary = `quest-abc: ${repeatedRequest}`;
+
+    render(
+      <QuestLogSidebar
+        pendingQuests={[duplicatedQuest]}
+        completedQuests={[]}
+        failedQuests={[]}
+        onSelectQuest={vi.fn()}
+      />,
+    );
+
+    const card = screen.getByRole('button', { name: `Pending quest: ${expectedSummary}` });
+    expect(within(card).getByText(expectedSummary)).not.toBeNull();
+    expect(within(card).queryAllByText(repeatedRequest, { exact: true })).toHaveLength(0);
+    expect((card.textContent?.match(new RegExp(repeatedRequest, 'g')) ?? [])).toHaveLength(1);
+  });
+});
+
 describe('Quest completed cast display coverage', () => {
   test('quest detail Last result shows the cast the quest completed in from lastResult', () => {
     render(<QuestDetail quest={completedQuestWithDivergentCasts()} onRefresh={vi.fn()} />);
