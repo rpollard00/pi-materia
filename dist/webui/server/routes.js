@@ -6,6 +6,7 @@ import { sendJson } from './http.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
 import { handleMonitorEventsRoute, handleMonitorSnapshotRoute } from './monitor.js';
 import { handleProfileRoleGenerationRoute } from './profileRoleGeneration.js';
+import { handleQuestDefaultLoadoutRoute } from './questDefaultLoadout.js';
 import { handleQuestRoute } from './quests.js';
 import { handleRoleGenerationRoute } from './roleGeneration.js';
 import { serveStatic } from './static.js';
@@ -47,6 +48,10 @@ export async function handleMateriaWebUiRequest(req, res, deps) {
     }
     if (req.url?.startsWith('/api/loadout/default')) {
         await handleDefaultLoadoutRoute(req, res, { setDefaultLoadout: deps.session?.setDefaultLoadout });
+        return;
+    }
+    if (req.url?.startsWith('/api/loadout/quest-default-loadout')) {
+        await handleQuestDefaultLoadoutRoute(req, res, { setQuestDefaultLoadout: deps.session?.setQuestDefaultLoadout });
         return;
     }
     if (req.url?.startsWith('/api/quests')) {

@@ -149,6 +149,7 @@ function mapRunResult(result) {
         ...(result.requestedLoadoutOverride ? { requestedLoadoutOverride: result.requestedLoadoutOverride } : {}),
         ...(result.effectiveLoadoutId ? { effectiveLoadoutId: result.effectiveLoadoutId } : {}),
         ...(result.effectiveLoadoutName ? { effectiveLoadoutName: result.effectiveLoadoutName } : {}),
+        ...(result.effectiveLoadoutSource ? { effectiveLoadoutSource: result.effectiveLoadoutSource } : {}),
     };
 }
 function mapRunError(error) {
