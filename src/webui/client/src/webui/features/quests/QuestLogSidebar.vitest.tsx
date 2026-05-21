@@ -46,6 +46,38 @@ function dataTransfer(id: string) {
 
 afterEach(() => cleanup());
 
+describe('QuestDetail requeue action', () => {
+  test('shows requeue action for failed and blocked quests only', () => {
+    const { rerender } = render(<QuestDetail quest={quest('quest-failed', 'failed', 'Failed quest')} onRefresh={vi.fn()} onRequeue={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Requeue Failed quest' })).not.toBeNull();
+
+    rerender(<QuestDetail quest={quest('quest-blocked', 'blocked', 'Blocked quest')} onRefresh={vi.fn()} onRequeue={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Requeue Blocked quest' })).not.toBeNull();
+
+    for (const status of ['pending', 'running', 'succeeded'] as const) {
+      rerender(<QuestDetail quest={quest(`quest-${status}`, status, `${status} quest`)} onRefresh={vi.fn()} onRequeue={vi.fn()} />);
+      expect(screen.queryByRole('button', { name: new RegExp(`Requeue ${status} quest`, 'i') })).toBeNull();
+    }
+  });
+
+  test('calls requeue with the selected quest id', () => {
+    const requeue = vi.fn();
+    render(<QuestDetail quest={quest('quest-failed', 'failed', 'Failed quest')} onRefresh={vi.fn()} onRequeue={requeue} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Requeue Failed quest' }));
+
+    expect(requeue).toHaveBeenCalledWith('quest-failed');
+  });
+
+  test('disables requeue action while a requeue is submitting', () => {
+    render(<QuestDetail quest={quest('quest-blocked', 'blocked', 'Blocked quest')} requeueSubmitting onRefresh={vi.fn()} onRequeue={vi.fn()} />);
+
+    const button = screen.getByRole('button', { name: 'Requeue Blocked quest' });
+    expect(button).toHaveProperty('disabled', true);
+    expect(button.textContent).toBe('Requeueing…');
+  });
+});
+
 describe('Quest completed cast display coverage', () => {
   test('quest detail Last result shows the cast the quest completed in from lastResult', () => {
     render(<QuestDetail quest={completedQuestWithDivergentCasts()} onRefresh={vi.fn()} />);

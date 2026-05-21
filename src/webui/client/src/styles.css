@@ -2473,7 +2473,8 @@
 }
 
 .quest-hidden-toggle,
-.quest-refresh-button {
+.quest-refresh-button,
+.quest-requeue-button {
   border-radius: 999px;
   border: 1px solid rgb(103 232 249 / 0.28);
   background: rgb(8 47 73 / 0.52);
@@ -2488,19 +2489,29 @@
   padding: 0.55rem 0.7rem;
 }
 
-.quest-refresh-button {
+.quest-refresh-button,
+.quest-requeue-button {
   padding: 0.55rem 0.85rem;
+}
+
+.quest-requeue-button {
+  border-color: rgb(251 191 36 / 0.42);
+  background: rgb(120 53 15 / 0.42);
+  color: rgb(254 243 199);
 }
 
 .quest-hidden-toggle:hover,
 .quest-hidden-toggle:focus-visible,
 .quest-refresh-button:hover:not(:disabled),
-.quest-refresh-button:focus-visible {
+.quest-refresh-button:focus-visible,
+.quest-requeue-button:hover:not(:disabled),
+.quest-requeue-button:focus-visible {
   background: rgb(14 116 144 / 0.42);
   outline: none;
 }
 
-.quest-refresh-button:disabled {
+.quest-refresh-button:disabled,
+.quest-requeue-button:disabled {
   cursor: wait;
   opacity: 0.68;
 }
@@ -2514,6 +2525,13 @@
   align-items: start;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.quest-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .quest-detail-meta {

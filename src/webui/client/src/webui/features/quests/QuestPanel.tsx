@@ -27,7 +27,7 @@ interface QuestPanelProps {
 }
 
 export function QuestPanel({ persistedLoadouts = {} }: QuestPanelProps) {
-  const { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting } = useQuestBoard();
+  const { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting, requeue, requeueSubmitting } = useQuestBoard();
   const [selectedQuestId, setSelectedQuestId] = useState<string>();
 
   const grouped = useMemo(() => {
@@ -88,7 +88,15 @@ export function QuestPanel({ persistedLoadouts = {} }: QuestPanelProps) {
           onSelectQuest={setSelectedQuestId}
           onReorderQuest={reorder}
         />
-        <QuestDetail quest={selectedQuest} boardPath={board?.boardPath} loading={loading} error={error} onRefresh={() => { void refresh(); }} />
+        <QuestDetail
+          quest={selectedQuest}
+          boardPath={board?.boardPath}
+          loading={loading}
+          error={error}
+          requeueSubmitting={requeueSubmitting}
+          onRefresh={() => { void refresh(); }}
+          onRequeue={(questId) => requeue({ questId })}
+        />
       </div>
     </section>
   );

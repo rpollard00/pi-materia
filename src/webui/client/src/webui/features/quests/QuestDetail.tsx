@@ -6,7 +6,9 @@ interface QuestDetailProps {
   boardPath?: string;
   loading?: boolean;
   error?: string;
+  requeueSubmitting?: boolean;
   onRefresh: () => void;
+  onRequeue?: (questId: string) => Promise<unknown> | unknown;
 }
 
 const statusLabels: Record<QuestSummary['status'], string> = {
@@ -24,7 +26,7 @@ function formatDate(value?: string): string | undefined {
   return date.toLocaleString();
 }
 
-export function QuestDetail({ quest, boardPath, loading = false, error, onRefresh }: QuestDetailProps) {
+export function QuestDetail({ quest, boardPath, loading = false, error, requeueSubmitting = false, onRefresh, onRequeue }: QuestDetailProps) {
   if (!quest) {
     return (
       <section className="quest-detail fantasy-panel" aria-labelledby="quest-detail-title">
@@ -46,6 +48,7 @@ export function QuestDetail({ quest, boardPath, loading = false, error, onRefres
   const updatedAt = formatDate(quest.updatedAt);
   const finishedAt = formatDate(quest.lastResult?.finishedAt);
   const resultCast = resultCastLabel(quest);
+  const canRequeue = quest.status === 'failed' || quest.status === 'blocked';
 
   return (
     <section className="quest-detail fantasy-panel" aria-labelledby="quest-detail-title">
@@ -54,7 +57,20 @@ export function QuestDetail({ quest, boardPath, loading = false, error, onRefres
           <p className="quest-kicker">Quest Details</p>
           <h3 id="quest-detail-title">{quest.title}</h3>
         </div>
-        <button type="button" className="quest-refresh-button" onClick={onRefresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+        <div className="quest-detail-actions">
+          {canRequeue && onRequeue ? (
+            <button
+              type="button"
+              className="quest-requeue-button"
+              onClick={() => { void onRequeue(quest.id); }}
+              disabled={requeueSubmitting}
+              aria-label={`Requeue ${quest.title}`}
+            >
+              {requeueSubmitting ? 'Requeueing…' : 'Requeue'}
+            </button>
+          ) : null}
+          <button type="button" className="quest-refresh-button" onClick={onRefresh} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+        </div>
       </div>
       {error ? <p className="quest-error" role="alert">{error}</p> : null}
 
