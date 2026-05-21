@@ -7,7 +7,7 @@ import { parseLinkCommandArguments } from "../link/parser.js";
 import { createLinkCastStateData, createLinkPlan, createLinkRuntimeState } from "../link/planner.js";
 import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/resolver.js";
 import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData, type LinkTargetRef, type ResolvedMateriaLinkTarget, type VirtualLoadoutMetadata } from "../link/types.js";
-import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, resolveQuestRef, startQuest, stopQuestRunner, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
+import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, requeueQuest, resolveQuestRef, startQuest, stopQuestRunner, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
 
 export interface LoadoutUseCasesDeps {
@@ -493,6 +493,17 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     if (!moved.ok) throw new QuestBoardValidationError(moved.issues);
     await this.deps.boards.save(moved.value);
     return { board: moved.value, quest: quest.value, ...(target?.value ? { target: target.value } : {}) };
+  }
+
+  async requeueQuest(input: { questRef: string }): Promise<{ board: QuestBoard; quest: Quest }> {
+    const board = await this.deps.boards.loadOrCreate();
+    const quest = resolveQuestRef(board, input.questRef);
+    if (!quest.ok) throw new QuestBoardValidationError(quest.issues);
+    const requeued = requeueQuest(board, { questId: quest.value.id, now: this.clock.now() });
+    if (!requeued.ok) throw new QuestBoardValidationError(requeued.issues);
+    await this.deps.boards.save(requeued.value);
+    const updatedQuest = requeued.value.quests.find((candidate) => candidate.id === quest.value.id)!;
+    return { board: requeued.value, quest: updatedQuest };
   }
 
   async runNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string }): Promise<QuestStartResult | undefined> {

@@ -236,6 +236,9 @@ describe("/materia quest command interface", () => {
     const questCompletions = harness.getCommandCompletions("materia", "quest ")?.map((completion) => completion.value);
     expect(questCompletions).toContain("quest add");
     expect(questCompletions).toContain("quest runonce");
+    expect(questCompletions).toContain("quest requeue");
+    expect(questCompletions).toContain("quest unblock");
+    expect(questCompletions).toContain("quest unfail");
   });
 
   test("list defaults to pending quests with limit 10 and does not wait for idle", async () => {
@@ -490,6 +493,71 @@ describe("/materia quest command interface", () => {
     expect(board.runner.enabled).toBe(true);
     expect(board.quests[0]).toMatchObject({ status: "succeeded", attempts: 1 });
     expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(true);
+  });
+
+  test("requeues failed and blocked quests by id or unambiguous prefix", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [
+      { ...makeQuest("quest-failedabcd", "failed", "Failed quest"), lastError: { message: "old failure", occurredAt: "2026-05-19T00:05:00.000Z" } },
+      makeQuest("quest-blockedwxyz", "blocked", "Blocked quest"),
+    ]);
+
+    await harness.runCommand("materia", "quest requeue faileda");
+    await harness.runCommand("materia", "quest unblock quest-blockedwxyz");
+
+    const board = await readBoard(harness);
+    expect(board.quests.map((quest: any) => quest.status)).toEqual(["pending", "pending"]);
+    expect(board.quests[0].attempts).toBe(1);
+    expect(board.quests[0].lastCastId).toBe("cast-quest-failedabcd");
+    expect(board.quests[0].lastError).toEqual({ message: "old failure", occurredAt: "2026-05-19T00:05:00.000Z" });
+    expect(board.quests[0].currentCastId).toBeUndefined();
+    expect(latestMateriaMessage(harness)).toContain("Requeued quest quest-blockedwxyz");
+    expect(harness.notifications.some((notification) => notification.message.includes("Requeued pi-materia quest quest-failedabcd"))).toBe(true);
+  });
+
+  test("unfail alias requeues and an enabled runner auto-advances", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [makeQuest("quest-failedabcd", "failed", "Failed quest")]);
+    const seededBoard = await readBoard(harness);
+    seededBoard.runner.enabled = true;
+    await writeFile(path.join(harness.cwd, ".pi", "pi-materia", "quest-board.json"), JSON.stringify(seededBoard, null, 2));
+
+    await harness.runCommand("materia", "quest unfail faileda");
+
+    const board = await readBoard(harness);
+    expect(board.runner.enabled).toBe(true);
+    expect(board.quests[0]).toMatchObject({ status: "succeeded", attempts: 2 });
+    expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(true);
+  });
+
+  test("requeue rejects invalid arity, invalid statuses, and ambiguous prefixes", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [
+      makeQuest("quest-pendingabcd", "pending", "Pending quest"),
+      makeQuest("quest-failedabcd", "failed", "Failed quest"),
+      makeQuest("quest-failedabzz", "failed", "Other failed quest"),
+    ]);
+
+    await harness.runCommand("materia", "quest requeue");
+    await harness.runCommand("materia", "quest requeue pendinga");
+    await harness.runCommand("materia", "quest requeue failedab");
+
+    const board = await readBoard(harness);
+    expect(board.quests.map((quest: any) => quest.status)).toEqual(["pending", "failed", "failed"]);
+    const errors = harness.notifications.filter((notification) => notification.type === "error").map((notification) => notification.message);
+    expect(errors.some((message) => message.includes("Usage: /materia quest requeue <quest-id-or-prefix>"))).toBe(true);
+    expect(errors.some((message) => message.includes("quest 'quest-pendingabcd' is pending, not failed or blocked"))).toBe(true);
+    expect(errors.some((message) => message.includes("ambiguous") && message.includes("quest-failedabcd") && message.includes("quest-failedabzz"))).toBe(true);
+  });
+
+  test("requeue waits for idle because it may auto-advance", async () => {
+    const harness = await makeHarness();
+    await seedBoard(harness, [makeQuest("quest-failedabcd", "failed", "Failed quest")]);
+    const waitsBefore = harness.waitForIdleCalls;
+
+    await harness.runCommand("materia", "quest requeue faileda");
+
+    expect(harness.waitForIdleCalls).toBe(waitsBefore + 1);
   });
 
   test("moves pending quests using unambiguous quest prefixes", async () => {

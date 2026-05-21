@@ -12,7 +12,7 @@ import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStat
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError } from "./infrastructure/index.js";
 import type { QuestMovePlacement } from "./domain/questBoard.js";
-import { renderQuestAdded, renderQuestDefaultLoadoutStatus, renderQuestList, renderQuestStarted, renderQuestStatus, renderQuestStopped, type QuestListFilter, type QuestListOptions } from "./presentation/questBoard.js";
+import { renderQuestAdded, renderQuestDefaultLoadoutStatus, renderQuestList, renderQuestRequeued, renderQuestStarted, renderQuestStatus, renderQuestStopped, type QuestListFilter, type QuestListOptions } from "./presentation/questBoard.js";
 export { renderCastList } from "./infrastructure/index.js";
 export type { QuestListFilter, QuestListOptions } from "./presentation/questBoard.js";
 
@@ -381,6 +381,25 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
+  if (action === "requeue" || action === "unblock" || action === "unfail") {
+    if (rest.length !== 1) {
+      input.ctx.ui.notify(`Usage: /materia quest ${action} <quest-id-or-prefix>`, "error");
+      return;
+    }
+    try {
+      const { board, quest } = await input.useCases.requeueQuest({ questRef: rest[0]! });
+      const status = await input.useCases.getStatus(input.ctx);
+      sendQuestMessage(input.pi, renderQuestRequeued(quest, status.boardPath), action);
+      input.ctx.ui.notify(`Requeued pi-materia quest ${quest.id}.`, "info");
+      if (board.runner.enabled) {
+        await drainQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, guard: input.autoAdvanceGuard });
+      }
+    } catch (error) {
+      notifyQuestError(input.ctx, action, error);
+    }
+    return;
+  }
+
   if (action === "add") {
     const parsed = parseQuestAddArgs(rest);
     if (!parsed.ok) {
@@ -451,7 +470,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
-  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest default-loadout [<name-or-id>|--clear], /materia quest list [pending|all|succeeded|failed] [--limit <n>], /materia quest add [--loadout <name>] <prompt>, /materia quest move <quest> --first|--before <target>|--onto <target>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
+  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest default-loadout [<name-or-id>|--clear], /materia quest list [pending|all|succeeded|failed] [--limit <n>], /materia quest add [--loadout <name>] <prompt>, /materia quest move <quest> --first|--before <target>|--onto <target>, /materia quest requeue <quest-id-or-prefix>, /materia quest unblock <quest-id-or-prefix>, /materia quest unfail <quest-id-or-prefix>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
 }
 
 async function handleQuestDefaultLoadoutCommand(input: QuestCommandInput, tokens: string[]): Promise<void> {
@@ -754,7 +773,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
   }
 
   if (tokens[0] === "quest") {
-    const questSubcommands = ["status", "add", "run", "runonce", "start", "stop", "list", "move", "default-loadout"];
+    const questSubcommands = ["status", "add", "run", "runonce", "start", "stop", "list", "move", "requeue", "unblock", "unfail", "default-loadout"];
     if (tokens.length === 1 && endsWithWhitespace) return questSubcommands.map((value) => ({ value: `quest ${value}`, label: value }));
     if (tokens.length === 2 && !endsWithWhitespace) {
       const matching = questSubcommands.filter((value) => value.startsWith(tokens[1] ?? ""));
