@@ -11,6 +11,7 @@ import {
   getOrderedQuestView,
   movePendingQuest,
   normalizeQuestBoard,
+  requeueQuest,
   resolveQuestRef,
   startQuest,
   stopQuestRunner,
@@ -197,6 +198,112 @@ describe("quest board domain", () => {
       lastError: { message: "stale after restart", occurredAt: t3, castId: "cast-1", code: "stale" },
       lastResult: { status: "blocked", castId: "cast-1", finishedAt: t3, error: "stale after restart" },
     });
+  });
+
+  test("requeues failed quests to pending while preserving audit history and array position", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-2", castId: "cast-2", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const failed = completeQuest(started.value, {
+      questId: "q-2",
+      castId: "cast-2",
+      now: t3,
+      result: { status: "failed", error: "boom", requestedLoadoutOverride: "default:full-auto", metadata: { reason: "test" } },
+    });
+    expect(failed.ok).toBe(true);
+    if (!failed.ok) return;
+    const withLoadout = { ...failed.value, quests: [failed.value.quests[0]!, { ...failed.value.quests[1]!, loadoutOverride: "autonomous" }] };
+
+    const requeued = requeueQuest(withLoadout, { questId: "q-2", now: "2026-01-01T00:04:00.000Z" });
+
+    expect(requeued.ok).toBe(true);
+    if (!requeued.ok) return;
+    expect(requeued.value.updatedAt).toBe("2026-01-01T00:04:00.000Z");
+    expect(requeued.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2"]);
+    expect(requeued.value.quests[1]).toMatchObject({
+      id: "q-2",
+      title: "Second",
+      prompt: "Do two",
+      status: "pending",
+      createdAt: t1,
+      updatedAt: "2026-01-01T00:04:00.000Z",
+      attempts: 1,
+      loadoutOverride: "autonomous",
+      lastCastId: "cast-2",
+      lastResult: { status: "failed", castId: "cast-2", finishedAt: t3, error: "boom", requestedLoadoutOverride: "default:full-auto", metadata: { reason: "test" } },
+      lastError: { message: "boom", occurredAt: t3, castId: "cast-2" },
+    });
+    expect(Object.hasOwn(requeued.value.quests[1]!, "currentCastId")).toBe(false);
+    expect(validateQuestBoard(requeued.value).ok).toBe(true);
+  });
+
+  test("requeues blocked quests and allows them to be started again", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const blocked = failRunningQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, status: "blocked", message: "needs credentials" });
+    expect(blocked.ok).toBe(true);
+    if (!blocked.ok) return;
+
+    const requeued = requeueQuest(blocked.value, { questId: "q-1", now: "2026-01-01T00:04:00.000Z" });
+    expect(requeued.ok).toBe(true);
+    if (!requeued.ok) return;
+    expect(requeued.value.quests[0]).toMatchObject({ status: "pending", updatedAt: "2026-01-01T00:04:00.000Z" });
+    expect(validateQuestBoard(requeued.value).ok).toBe(true);
+
+    const restarted = startQuest(requeued.value, { questId: "q-1", castId: "cast-2", now: "2026-01-01T00:05:00.000Z" });
+    expect(restarted.ok).toBe(true);
+    if (!restarted.ok) return;
+    expect(restarted.value.quests[0]).toMatchObject({ status: "running", currentCastId: "cast-2", attempts: 2 });
+  });
+
+  test("rejects requeue for missing quests, invalid statuses, and empty timestamps", () => {
+    const board = boardWithTwoQuests();
+    const running = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(running.ok).toBe(true);
+    if (!running.ok) return;
+    const succeeded = completeQuest(running.value, { questId: "q-1", castId: "cast-1", now: t3, result: { status: "succeeded" } });
+
+    const pendingRequeue = requeueQuest(board, { questId: "q-1", now: t3 });
+    expect(pendingRequeue.ok).toBe(false);
+    if (!pendingRequeue.ok) expect(pendingRequeue.issues[0]?.message).toContain("not failed or blocked");
+
+    const runningRequeue = requeueQuest(running.value, { questId: "q-1", now: t3 });
+    expect(runningRequeue.ok).toBe(false);
+    if (!runningRequeue.ok) expect(runningRequeue.issues[0]?.message).toContain("running, not failed or blocked");
+
+    expect(succeeded.ok).toBe(true);
+    if (succeeded.ok) {
+      const succeededRequeue = requeueQuest(succeeded.value, { questId: "q-1", now: t3 });
+      expect(succeededRequeue.ok).toBe(false);
+      if (!succeededRequeue.ok) expect(succeededRequeue.issues[0]?.message).toContain("succeeded, not failed or blocked");
+    }
+
+    const missing = requeueQuest(board, { questId: "missing", now: t3 });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.issues[0]?.message).toContain("does not exist");
+
+    const emptyTimestamp = requeueQuest(board, { questId: "q-1", now: "" });
+    expect(emptyTimestamp.ok).toBe(false);
+    if (!emptyTimestamp.ok) expect(emptyTimestamp.issues[0]?.message).toContain("timestamp is required");
+  });
+
+  test("omits stale current cast id when requeueing terminal quests", () => {
+    const base = boardWithTwoQuests();
+    const board: QuestBoard = {
+      ...base,
+      quests: [{ ...base.quests[0]!, status: "failed", attempts: 1, currentCastId: "stale-cast", lastCastId: "stale-cast" }, base.quests[1]!],
+    };
+
+    const requeued = requeueQuest(board, { questId: "q-1", now: t3 });
+
+    expect(requeued.ok).toBe(true);
+    if (!requeued.ok) return;
+    expect(requeued.value.quests[0]?.status).toBe("pending");
+    expect(Object.hasOwn(requeued.value.quests[0]!, "currentCastId")).toBe(false);
+    expect(validateQuestBoard(requeued.value).ok).toBe(true);
   });
 
   test("toggles runner state without aborting active quest state", () => {

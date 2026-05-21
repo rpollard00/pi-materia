@@ -97,6 +97,11 @@ export interface FailRunningQuestInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface RequeueQuestInput {
+  questId: string;
+  now: string;
+}
+
 export type QuestMovePlacement = "first" | "before" | "after";
 
 export const QUEST_ID_PREFIX = "quest-";
@@ -359,6 +364,29 @@ export function failRunningQuest(board: QuestBoard, input: FailRunningQuestInput
   const nextQuest: Quest = { ...quest, status, updatedAt: input.now, currentCastId: undefined, ...(castId !== undefined ? { lastCastId: castId } : {}), lastError, ...(lastResult !== undefined ? { lastResult } : {}) };
   const quests = replaceAt(board.quests, questIndex, nextQuest);
   return ok({ ...board, updatedAt: input.now, runner: { ...board.runner, activeQuestId: board.runner.activeQuestId === quest.id ? undefined : board.runner.activeQuestId }, quests });
+}
+
+export function requeueQuest(board: QuestBoard, input: RequeueQuestInput): DomainResult<QuestBoard> {
+  const issues: DomainIssue[] = [];
+  if (!isNonEmptyString(input.now)) issues.push({ path: "quest.now", message: "timestamp is required" });
+
+  const questIndex = board.quests.findIndex((quest) => quest.id === input.questId);
+  const quest = questIndex >= 0 ? board.quests[questIndex] : undefined;
+  if (quest === undefined) {
+    issues.push({ path: "questId", message: `quest '${input.questId}' does not exist` });
+  } else if (quest.status !== "failed" && quest.status !== "blocked") {
+    issues.push({ path: "quest.status", message: `quest '${quest.id}' is ${quest.status}, not failed or blocked` });
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  const { currentCastId, ...rest } = quest!;
+  void currentCastId;
+  const nextQuest: Quest = { ...rest, status: "pending", updatedAt: input.now };
+  const nextBoard: QuestBoard = { ...board, updatedAt: input.now, quests: replaceAt(board.quests, questIndex, nextQuest) };
+  const validated = validateQuestBoard(nextBoard);
+  if (!validated.ok) return validated;
+  return ok(nextBoard);
 }
 
 export function validateQuestBoard(value: unknown, path = "questBoard"): DomainResult<QuestBoard> {
