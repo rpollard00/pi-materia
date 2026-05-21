@@ -5,13 +5,13 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
-import { addQuest as addQuestToBoard, generateUniqueQuestId, movePendingQuest } from "../domain/questBoard.js";
+import { addQuest as addQuestToBoard, generateUniqueQuestId, movePendingQuest, requeueQuest } from "../domain/questBoard.js";
 import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
 import { issuesToMessage } from "../domain/result.js";
 
@@ -148,6 +148,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       getQuestBoard: () => readQuestBoardSnapshot(cwd),
       addQuest: (input) => addWebUiQuest(cwd, configuredPath, input),
       reorderQuest: (input) => reorderWebUiQuest(cwd, input),
+      requeueQuest: (input) => requeueWebUiQuest(cwd, input),
       generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
       modelCatalog: createPiModelCatalogSource(ctx, pi),
     },
@@ -347,6 +348,21 @@ async function reorderWebUiQuest(cwd: string, input: MateriaReorderQuestInput): 
     return { ok: true, boardPath: boards.boardPath, board: result.value, quest, ...(target ? { target } : {}) };
   } catch (error) {
     return { ok: false, code: "unavailable", message: `Could not reorder quest: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+async function requeueWebUiQuest(cwd: string, input: MateriaRequeueQuestInput): Promise<MateriaRequeueQuestResult> {
+  try {
+    const boards = new FileQuestBoardRepository(cwd);
+    const board = await boards.loadOrCreate();
+    const result = requeueQuest(board, { questId: input.questId, now: new Date().toISOString() });
+    if (!result.ok) return { ok: false, code: "validation_failed", message: issuesToMessage(result.issues) };
+    await boards.save(result.value);
+    const quest = result.value.quests.find((candidate) => candidate.id === input.questId);
+    if (!quest) return { ok: false, code: "validation_failed", message: `questId: quest '${input.questId}' does not exist` };
+    return { ok: true, boardPath: boards.boardPath, board: result.value, quest };
+  } catch (error) {
+    return { ok: false, code: "unavailable", message: `Could not requeue quest: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 

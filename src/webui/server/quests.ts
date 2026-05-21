@@ -70,6 +70,10 @@ export interface MateriaReorderQuestInput {
   targetId?: string;
 }
 
+export interface MateriaRequeueQuestInput {
+  questId: string;
+}
+
 export type MateriaQuestMutationFailureCode = 'invalid_loadout' | 'unavailable' | 'validation_failed';
 
 export type MateriaAddQuestResult =
@@ -80,10 +84,15 @@ export type MateriaReorderQuestResult =
   | { ok: true; boardPath: string; board: QuestBoard; quest: Quest; target?: Quest }
   | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
 
+export type MateriaRequeueQuestResult =
+  | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
+  | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
+
 export interface MateriaQuestRouteDeps {
   getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
   addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
   reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
+  requeueQuest?: (input: MateriaRequeueQuestInput) => Promise<MateriaRequeueQuestResult>;
 }
 
 export interface MateriaQuestSummary {
@@ -160,6 +169,10 @@ export interface MateriaAddQuestResponse {
 }
 
 export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  if (req.url?.startsWith('/api/quests/requeue')) {
+    await handleRequeueQuestRoute(req, res, deps);
+    return;
+  }
   if (req.url?.startsWith('/api/quests/reorder')) {
     await handleReorderQuestRoute(req, res, deps);
     return;
@@ -206,6 +219,31 @@ export async function handlePostQuestRoute(req: IncomingMessage, res: ServerResp
     }
     const board = mapQuestBoardResponse(result);
     sendJson(res, 200, { ok: true, quest: mapQuest(result.quest), board } satisfies MateriaAddQuestResponse);
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: errorMessage(error) });
+  }
+}
+
+export async function handleRequeueQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { ok: false, error: 'Use POST to requeue quests.' });
+    return;
+  }
+  if (!deps.requeueQuest) {
+    sendJson(res, 503, { ok: false, error: 'Quest requeue API is unavailable for this server.' });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    if (!isPlainObject(body)) throw new Error('Expected JSON object body.');
+    const questId = typeof body.questId === 'string' ? body.questId.trim() : '';
+    if (!questId) throw new Error('Quest id is required.');
+    const result = await deps.requeueQuest({ questId });
+    if (!result.ok) {
+      sendJson(res, result.code === 'unavailable' ? 503 : 400, { ok: false, code: result.code, error: result.message });
+      return;
+    }
+    sendJson(res, 200, mapQuestBoardResponse(result));
   } catch (error) {
     sendJson(res, 400, { ok: false, error: errorMessage(error) });
   }

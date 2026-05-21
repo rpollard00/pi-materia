@@ -2,9 +2,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, movePendingQuest, type QuestBoard } from "../src/domain/questBoard.js";
+import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, movePendingQuest, requeueQuest, type QuestBoard } from "../src/domain/questBoard.js";
 import { issuesToMessage } from "../src/domain/result.js";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult } from "../src/webui/server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult } from "../src/webui/server/index.js";
 
 type StartedServer = ReturnType<typeof createMateriaWebUiServer>["server"];
 
@@ -27,6 +27,7 @@ function questBoardFixture(): QuestBoard {
       { id: "quest-pending-2", title: "Forge silver key", prompt: "Forge silver key", status: "pending", createdAt: "2026-05-19T19:03:00.000Z", updatedAt: "2026-05-19T19:03:00.000Z", attempts: 0 },
       { id: "quest-complete", title: "Light the beacon", prompt: "Light the beacon", status: "succeeded", createdAt: "2026-05-19T19:04:00.000Z", updatedAt: "2026-05-19T19:05:00.000Z", attempts: 1, lastCastId: "cast-complete", lastResult: { status: "succeeded", castId: "cast-complete", finishedAt: "2026-05-19T19:05:00.000Z", message: "Beacon lit" } },
       { id: "quest-failed", title: "Sneak past sentries", prompt: "Sneak past sentries", status: "failed", createdAt: "2026-05-19T19:06:00.000Z", updatedAt: "2026-05-19T19:07:00.000Z", attempts: 1, lastCastId: "cast-failed", lastError: { message: "Guard spotted the party", occurredAt: "2026-05-19T19:07:00.000Z", castId: "cast-failed", code: "spotted" } },
+      { id: "quest-blocked", title: "Open sealed gate", prompt: "Open sealed gate", status: "blocked", createdAt: "2026-05-19T19:08:00.000Z", updatedAt: "2026-05-19T19:09:00.000Z", attempts: 1, lastCastId: "cast-blocked", lastResult: { status: "blocked", castId: "cast-blocked", finishedAt: "2026-05-19T19:09:00.000Z", error: "Needs a moon key" } },
     ],
   };
 }
@@ -35,6 +36,8 @@ async function startTestServer(options: {
   board?: QuestBoard;
   addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
   reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
+  requeueQuest?: (input: MateriaRequeueQuestInput) => Promise<MateriaRequeueQuestResult>;
+  includeRequeueQuest?: boolean;
   getQuestBoardThrows?: boolean;
 } = {}) {
   const projectDir = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-quests-"));
@@ -68,6 +71,15 @@ async function startTestServer(options: {
         const target = input.targetId ? board.quests.find((candidate) => candidate.id === input.targetId) : undefined;
         return { ok: true, boardPath, board, quest, ...(target ? { target } : {}) };
       }),
+      ...(options.includeRequeueQuest === false ? {} : {
+        requeueQuest: options.requeueQuest ?? (async (input) => {
+          const result = requeueQuest(board, { ...input, now: "2026-05-19T20:02:00.000Z" });
+          if (!result.ok) return { ok: false, code: "validation_failed", message: issuesToMessage(result.issues) };
+          board = result.value;
+          const quest = board.quests.find((candidate) => candidate.id === input.questId)!;
+          return { ok: true, boardPath, board, quest };
+        }),
+      }),
     },
   });
   await new Promise<void>((resolve, reject) => {
@@ -94,8 +106,8 @@ describe("GET /api/quests", () => {
     expect(body.runningQuest.id).toBe("quest-active");
     expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2"]);
     expect(body.completedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-complete"]);
-    expect(body.failedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-failed"]);
-    expect(body.counts).toMatchObject({ total: 5, pending: 2, running: 1, succeeded: 1, failed: 1, blocked: 0, completed: 1, terminal: 2 });
+    expect(body.failedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-failed", "quest-blocked"]);
+    expect(body.counts).toMatchObject({ total: 6, pending: 2, running: 1, succeeded: 1, failed: 1, blocked: 1, completed: 1, terminal: 3 });
   });
 
   test("returns a safe error envelope when quest board reads fail", async () => {
@@ -154,7 +166,7 @@ describe("POST /api/quests/reorder", () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-2", "quest-pending-1"]);
-    expect(body.quests.map((quest: { id: string }) => quest.id)).toEqual(["quest-active", "quest-pending-2", "quest-pending-1", "quest-complete", "quest-failed"]);
+    expect(body.quests.map((quest: { id: string }) => quest.id)).toEqual(["quest-active", "quest-pending-2", "quest-pending-1", "quest-complete", "quest-failed", "quest-blocked"]);
     expect(body.status.updatedAt).toBe("2026-05-19T20:01:00.000Z");
   });
 
@@ -210,6 +222,73 @@ describe("POST /api/quests/reorder", () => {
     expect(missingTarget.status).toBe(400);
     expect(await missingTarget.json()).toEqual({ ok: false, error: "Quest placement must be first, before, or after." });
     expect(getNotAllowed.status).toBe(405);
+    expect(called).toBe(false);
+  });
+});
+
+describe("POST /api/quests/requeue", () => {
+  test("requeues a failed quest and returns the canonical board response", async () => {
+    const baseUrl = await startTestServer();
+
+    const response = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-failed" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2", "quest-failed"]);
+    expect(body.failedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-blocked"]);
+    expect(body.quests.find((quest: { id: string; status: string; lastError?: unknown }) => quest.id === "quest-failed")).toMatchObject({ id: "quest-failed", status: "pending", lastError: { message: "Guard spotted the party" } });
+    expect(body.status.updatedAt).toBe("2026-05-19T20:02:00.000Z");
+  });
+
+  test("requeues a blocked quest", async () => {
+    const baseUrl = await startTestServer();
+
+    const response = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-blocked" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2", "quest-blocked"]);
+  });
+
+  test("returns 400 for missing quests and invalid quest statuses", async () => {
+    const baseUrl = await startTestServer();
+
+    const missing = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-missing" }) });
+    const invalidStatus = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-1" }) });
+
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toEqual({ ok: false, code: "validation_failed", error: "questId: quest 'quest-missing' does not exist" });
+    expect(invalidStatus.status).toBe(400);
+    expect(await invalidStatus.json()).toEqual({ ok: false, code: "validation_failed", error: "quest.status: quest 'quest-pending-1' is pending, not failed or blocked" });
+  });
+
+  test("returns 503 when the requeue callback is unavailable", async () => {
+    const baseUrl = await startTestServer({ includeRequeueQuest: false });
+
+    const response = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-failed" }) });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: "Quest requeue API is unavailable for this server." });
+  });
+
+  test("validates requeue request shape before calling the mutation callback", async () => {
+    let called = false;
+    const baseUrl = await startTestServer({ requeueQuest: async () => { called = true; return { ok: false, code: "unavailable", message: "should not be called" }; } });
+
+    const invalidJson = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+    const arrayBody = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(["quest-failed"]) });
+    const missingQuestId = await fetch(`${baseUrl}/api/quests/requeue`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "   " }) });
+    const getNotAllowed = await fetch(`${baseUrl}/api/quests/requeue`);
+
+    expect(invalidJson.status).toBe(400);
+    expect((await invalidJson.json()).ok).toBe(false);
+    expect(arrayBody.status).toBe(400);
+    expect(await arrayBody.json()).toEqual({ ok: false, error: "Expected JSON object body." });
+    expect(missingQuestId.status).toBe(400);
+    expect(await missingQuestId.json()).toEqual({ ok: false, error: "Quest id is required." });
+    expect(getNotAllowed.status).toBe(405);
+    expect(await getNotAllowed.json()).toEqual({ ok: false, error: "Use POST to requeue quests." });
     expect(called).toBe(false);
   });
 });
