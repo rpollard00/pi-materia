@@ -244,7 +244,7 @@ describe('Materia quests pane', () => {
     render(<App />);
     await openTab('Quests');
 
-    fireEvent.change(await screen.findByLabelText('Loadout override'), { target: { value: 'Full-Auto' } });
+    fireEvent.change(await screen.findByLabelText(/Loadout override/), { target: { value: 'Full-Auto' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Rescue the villager' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add quest' }));
 

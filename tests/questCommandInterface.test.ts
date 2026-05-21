@@ -3,17 +3,18 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria, { parseQuestListArgs, parseQuestMoveArgs } from "../src/index.js";
+import { loadActiveCastState } from "../src/castRuntime.js";
 import { findNextPendingQuest, type Quest, type QuestBoard, type QuestStatus } from "../src/domain/questBoard.js";
 import { renderQuestList, renderQuestStatus, selectQuestList } from "../src/presentation/questBoard.js";
-import { FakePiHarness } from "./fakePi.js";
+import { FakePiHarness, type FakePiHarnessOptions } from "./fakePi.js";
 
-async function makeHarness(config: unknown = questConfig()): Promise<FakePiHarness> {
+async function makeHarness(config: unknown = questConfig(), options: FakePiHarnessOptions = {}): Promise<FakePiHarness> {
   process.env.PI_MATERIA_PROFILE_DIR = await mkdtemp(path.join(tmpdir(), "pi-materia-quest-profile-"));
   await writeFile(path.join(process.env.PI_MATERIA_PROFILE_DIR, "config.json"), JSON.stringify({ questDefaultLoadoutId: null }, null, 2));
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-quest-command-"));
   await mkdir(path.join(cwd, ".pi"), { recursive: true });
   await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify(config, null, 2));
-  const harness = new FakePiHarness(cwd);
+  const harness = new FakePiHarness(cwd, options);
   piMateria(harness.pi);
   return harness;
 }
@@ -51,6 +52,17 @@ function agentQuestConfig() {
 function latestMateriaMessage(harness: FakePiHarness): string {
   const messages = harness.sentMessages.map(({ message }) => message as { customType?: string; content?: unknown }).filter((message) => message.customType === "pi-materia");
   return String(messages.at(-1)?.content ?? "");
+}
+
+async function flushDeferredDispatch(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function triggeredPromptMessages(harness: FakePiHarness): any[] {
+  return harness.sentMessages
+    .filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn === true)
+    .map(({ message }) => message)
+    .filter((message) => (message as { customType?: string }).customType === "pi-materia-prompt");
 }
 
 async function readBoard(harness: FakePiHarness): Promise<any> {
@@ -392,6 +404,56 @@ describe("/materia quest command interface", () => {
     expect(board.quests.map((quest: any) => quest.status)).toEqual(["succeeded", "succeeded"]);
     expect(board.quests.map((quest: any) => quest.attempts)).toEqual([1, 1]);
     expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(true);
+  });
+
+  test("continuous runner defers the next agent quest triggerTurn when auto-advancing from agent_end", async () => {
+    const harness = await makeHarness(agentQuestConfig(), { strictTriggerTurnDuringAgentEnd: true });
+    await harness.runCommand("materia", "quest add First agent quest");
+    await harness.runCommand("materia", "quest add Second agent quest");
+    const waitsBeforeRun = harness.waitForIdleCalls;
+
+    await harness.runCommand("materia", "quest run");
+
+    expect(harness.waitForIdleCalls).toBe(waitsBeforeRun + 1);
+    const promptsBeforeAgentEnd = triggeredPromptMessages(harness).length;
+    expect(promptsBeforeAgentEnd).toBe(1);
+
+    harness.appendAssistantMessage("first quest complete");
+    await harness.emit("agent_end", { messages: [] });
+
+    const board = await readBoard(harness);
+    expect(board.runner.enabled).toBe(true);
+    expect(board.quests.map((quest: any) => quest.status)).toEqual(["succeeded", "running"]);
+    expect(board.quests[0].currentCastId).toBeUndefined();
+    expect(board.quests[0].lastCastId).toBeTruthy();
+    expect(board.quests[1].currentCastId).toBeTruthy();
+    expect(board.quests[1].lastCastId).toBe(board.quests[1].currentCastId);
+
+    const activeState = loadActiveCastState(harness.ctx);
+    expect(activeState?.castId).toBe(board.quests[1].currentCastId);
+    expect(activeState?.currentSocketId).toBe("Socket-1");
+    expect(activeState?.currentMateria).toBe("Build");
+    expect(activeState?.socketState).toBe("awaiting_agent_response");
+    expect(activeState?.awaitingResponse).toBe(true);
+
+    expect(triggeredPromptMessages(harness)).toHaveLength(promptsBeforeAgentEnd);
+    expect(harness.suppressedTriggerTurnSends).toHaveLength(0);
+    expect(harness.userMessages).toHaveLength(0);
+    expect(harness.waitForIdleCalls).toBe(waitsBeforeRun + 1);
+    expect(harness.operationLog.filter((operation) => operation === "waitForIdle")).toHaveLength(waitsBeforeRun + 1);
+
+    await flushDeferredDispatch();
+
+    const triggeredPrompts = triggeredPromptMessages(harness);
+    expect(triggeredPrompts).toHaveLength(promptsBeforeAgentEnd + 1);
+    const secondQuestPrompts = triggeredPrompts.filter((message) => {
+      const details = (message as any).details;
+      return details?.socketId === "Socket-1" && details?.materiaName === "Build" && details?.itemLabel === "Second agent quest";
+    });
+    expect(secondQuestPrompts).toHaveLength(1);
+    expect(harness.suppressedTriggerTurnSends).toHaveLength(0);
+    expect(harness.userMessages).toHaveLength(0);
+    expect(harness.waitForIdleCalls).toBe(waitsBeforeRun + 1);
   });
 
   test("run with no pending quests enables runner and reports waiting", async () => {
