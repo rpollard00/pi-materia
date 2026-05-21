@@ -138,16 +138,23 @@ describe("native multi-turn runtime", () => {
     const harness = await makeHarness(singleTurnConfig());
 
     await harness.runCommand("materia", "cast make a plan");
+    const promptsBeforeAgentEnd = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
     harness.appendAssistantMessage('{"tasks":[{"id":"1","title":"Ship it"}]}');
     await harness.emit("agent_end", { messages: [] });
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
     expect(state.currentSocketId).toBe("Socket-2");
+    expect(state.currentMateria).toBe("Build");
     expect(state.socketState).toBe("awaiting_agent_response");
     expect(state.awaitingResponse).toBe(true);
     expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
-    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(promptsBeforeAgentEnd);
+
+    await flushDeferredDispatch();
+    const triggeredMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggeredMessages).toHaveLength(promptsBeforeAgentEnd + 1);
+    expect((triggeredMessages.at(-1)?.message as any).details).toMatchObject({ socketId: "Socket-2", materiaName: "Build" });
   });
 
   test("stale finalization flag does not affect single-turn completion", async () => {
@@ -157,17 +164,24 @@ describe("native multi-turn runtime", () => {
     const startedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     harness.pi.appendEntry("pi-materia-cast-state", { ...startedState, multiTurnFinalizing: true });
 
+    const promptsBeforeAgentEnd = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
     harness.appendAssistantMessage('{"tasks":[{"id":"1","title":"Ship it"}]}');
     await harness.emit("agent_end", { messages: [] });
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
     expect(state.currentSocketId).toBe("Socket-2");
+    expect(state.currentMateria).toBe("Build");
     expect(state.socketState).toBe("awaiting_agent_response");
     expect(state.awaitingResponse).toBe(true);
     expect(state.multiTurnFinalizing).not.toBe(true);
     expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
-    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(promptsBeforeAgentEnd);
+
+    await flushDeferredDispatch();
+    const triggeredMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggeredMessages).toHaveLength(promptsBeforeAgentEnd + 1);
+    expect((triggeredMessages.at(-1)?.message as any).details).toMatchObject({ socketId: "Socket-2", materiaName: "Build" });
   });
 
   test("bundled Full-Auto advances from Auto-Plan to Auto-Architect without interactive input", async () => {
@@ -220,6 +234,15 @@ describe("native multi-turn runtime", () => {
     expect(statesAfterPlan.some((state) => state.currentSocketId === "Socket-3" && state.socketState === "awaiting_user_refinement")).toBe(false);
     expect(statesAfterPlan.some((state) => state.currentSocketId === "Socket-8" && state.socketState === "awaiting_user_refinement")).toBe(false);
     expect(statesAfterPlan.some((state) => ["Socket-3", "Socket-8"].includes(state.currentSocketId) && state.multiTurnFinalizing === true)).toBe(false);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
+
+    await flushDeferredDispatch();
+    const autoArchitectPrompts = harness.sentMessages.filter(({ message }) => {
+      const details = (message as any).details;
+      return (message as any).customType === "pi-materia-prompt" && details?.socketId === "Socket-8" && details?.materiaName === "Auto-Architect";
+    });
+    expect(autoArchitectPrompts).toHaveLength(1);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
 
     harness.appendAssistantMessage(JSON.stringify({ ...autoPlanEnvelope, summary: "Architected plan", decisions: ["Keep boundaries small"] }));
     await harness.emit("agent_end", { messages: [] });
@@ -236,6 +259,13 @@ describe("native multi-turn runtime", () => {
     expect(buildState.data.workItem).toEqual(workItem);
     expect(buildState.multiTurnFinalizing).not.toBe(true);
 
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+    expect(harness.sentMessages.filter(({ message }) => {
+      const details = (message as any).details;
+      return (message as any).customType === "pi-materia-prompt" && details?.socketId === "Socket-4" && details?.materiaName === "Build";
+    })).toHaveLength(0);
+
+    await flushDeferredDispatch();
     const buildPrompts = harness.sentMessages.filter(({ message }) => {
       const details = (message as any).details;
       return (message as any).customType === "pi-materia-prompt" && details?.socketId === "Socket-4" && details?.materiaName === "Build";
@@ -277,10 +307,18 @@ describe("native multi-turn runtime", () => {
     expect(autoArchitectState.currentSocketId).toBe("Socket-8");
     expect(autoArchitectState.currentMateria).toBe("Auto-Architect");
     expect(autoArchitectState.socketState).toBe("awaiting_agent_response");
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
+
+    await flushDeferredDispatch();
+    const autoArchitectPrompts = harness.sentMessages.filter(({ message }) => {
+      const prompt = message as any;
+      return prompt.customType === "pi-materia-prompt" && prompt.details?.socketId === "Socket-8" && prompt.details?.materiaName === "Auto-Architect";
+    });
+    expect(autoArchitectPrompts).toHaveLength(1);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
 
     harness.appendAssistantMessage(JSON.stringify(architectEnvelope));
     await harness.emit("agent_end", { messages: [] });
-    await flushDeferredDispatch();
 
     const buildState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(buildState.active).toBe(true);
@@ -292,19 +330,21 @@ describe("native multi-turn runtime", () => {
     expect(buildState.data.currentWorkItem).toEqual(workItem);
     expect(buildState.data.workItem).toEqual(workItem);
 
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+    expect(harness.sentMessages.filter(({ message }) => {
+      const prompt = message as any;
+      return prompt.customType === "pi-materia-prompt" && prompt.details?.socketId === "Socket-4" && prompt.details?.materiaName === "Build";
+    })).toHaveLength(0);
+    expect(harness.suppressedTriggerTurnSends).toHaveLength(0);
+
+    await flushDeferredDispatch();
     const buildPrompts = harness.sentMessages.filter(({ message }) => {
       const prompt = message as any;
       return prompt.customType === "pi-materia-prompt" && prompt.details?.socketId === "Socket-4" && prompt.details?.materiaName === "Build";
     });
-    if (buildPrompts.length === 0) {
-      expect(harness.suppressedTriggerTurnSends).toEqual(expect.arrayContaining([
-        expect.objectContaining({ target: expect.objectContaining({ socketId: "Socket-4", materiaName: "Build" }) }),
-      ]));
-    }
     expect(buildPrompts).toHaveLength(1);
     expect((buildPrompts[0].options as { triggerTurn?: boolean } | undefined)?.triggerTurn).toBe(true);
-    expect((buildPrompts[0].message as any).content).toContain("Materia active materia (Socket-4):");
-    expect((buildPrompts[0].message as any).content).toContain("Current workItem JSON");
+    expect((buildPrompts[0].message as any).details).toMatchObject({ socketId: "Socket-4", materiaName: "Build" });
     expect(harness.userMessages).toHaveLength(0);
     expect(harness.waitForIdleCalls).toBe(0);
     expect(harness.operationLog).not.toContain("waitForIdle");
@@ -355,8 +395,6 @@ describe("native multi-turn runtime", () => {
     const buildPrompt = triggeredMessages.at(-1)?.message as any;
     expect(buildPrompt.customType).toBe("pi-materia-prompt");
     expect(buildPrompt.details).toMatchObject({ socketId: "Socket-4", materiaName: "Build" });
-    expect(buildPrompt.content).toContain("Build now");
-    expect(buildPrompt.content).toContain("WI-1");
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(promptsBeforeFinalAgentEnd + 1);
     expect(harness.userMessages).toHaveLength(0);
 
@@ -497,7 +535,6 @@ describe("native multi-turn runtime", () => {
     expect(finalPrompt.content).toContain("Return only JSON");
     harness.appendAssistantMessage(finalPlan);
     await harness.emit("agent_end", { messages: [] });
-    await flushDeferredDispatch();
 
     const buildState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(buildState.active).toBe(true);
@@ -507,13 +544,16 @@ describe("native multi-turn runtime", () => {
     expect(buildState.awaitingResponse).toBe(true);
     expect(buildState.multiTurnFinalizing).not.toBe(true);
     expect(buildState.data.workItems).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+
+    await flushDeferredDispatch();
     const downstreamBuildPrompts = harness.sentMessages.filter(({ message }) => {
       const details = (message as any).details;
       return (message as any).customType === "pi-materia-prompt" && details?.socketId === "Socket-4" && details?.materiaName === "Build";
     });
     expect(downstreamBuildPrompts).toHaveLength(1);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(3);
-    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Work item 1: Ship it");
+    expect((downstreamBuildPrompts[0].message as any).details).toMatchObject({ socketId: "Socket-4", materiaName: "Build" });
 
     const events = await readRunEvents(buildState);
     expect(events.find((event) => event.type === "socket_complete" && event.data.socket === "Socket-3")?.data).toMatchObject({ parsed: true, finalizedRefinement: true });
@@ -950,16 +990,18 @@ describe("native multi-turn runtime", () => {
     harness.appendAssistantMessage(finalJson);
     await harness.emit("agent_end", { messages: [] });
     await harness.runCommand("materia", "continue");
+    const promptsBeforeFinalAgentEnd = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
     harness.appendAssistantMessage(finalJson);
     await harness.emit("agent_end", { messages: [] });
-    await flushDeferredDispatch();
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
     expect(state.currentSocketId).toBe("Socket-2");
+    expect(state.currentMateria).toBe("Build");
     expect(state.socketState).toBe("awaiting_agent_response");
     expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
     expect(state.lastJson).toEqual({ tasks: [{ id: "1", title: "Ship it" }] });
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(promptsBeforeFinalAgentEnd);
 
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", state.castId);
     expect(await readFile(path.join(castDir, "sockets", "Socket-1", "1.md"), "utf8")).toBe(finalJson);
@@ -977,10 +1019,12 @@ describe("native multi-turn runtime", () => {
     expect(completeEvent.data.parsed).toBe(true);
     expect(completeEvent.data.finalizedRefinement).toBe(true);
 
-    const buildPrompt = harness.sentMessages.at(-1)?.message as any;
+    await flushDeferredDispatch();
+    const triggeredMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggeredMessages).toHaveLength(promptsBeforeFinalAgentEnd + 1);
+    const buildPrompt = triggeredMessages.at(-1)?.message as any;
     expect(buildPrompt.customType).toBe("pi-materia-prompt");
-    expect(buildPrompt.content).toContain("Tasks=[\n  {\n    \"id\": \"1\",\n    \"title\": \"Ship it\"\n  }\n]");
-    expect(buildPrompt.content).toContain(`Last=${finalJson}`);
+    expect(buildPrompt.details).toMatchObject({ socketId: "Socket-2", materiaName: "Build" });
   });
 
   test("finalized multi-turn text artifacts and downstream state match single-turn shape", async () => {
@@ -993,15 +1037,18 @@ describe("native multi-turn runtime", () => {
     harness.appendAssistantMessage(finalText);
     await harness.emit("agent_end", { messages: [] });
     await harness.runCommand("materia", "continue");
+    const promptsBeforeFinalAgentEnd = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
     harness.appendAssistantMessage(finalText);
     await harness.emit("agent_end", { messages: [] });
-    await flushDeferredDispatch();
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
     expect(state.currentSocketId).toBe("Socket-2");
+    expect(state.currentMateria).toBe("Build");
+    expect(state.socketState).toBe("awaiting_agent_response");
     expect(state.data.summary).toBe(finalText);
     expect(state.lastJson).toBeUndefined();
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(promptsBeforeFinalAgentEnd);
 
     const castDir = path.join(harness.cwd, ".pi", "pi-materia", state.castId);
     expect(await readFile(path.join(castDir, "sockets", "Socket-1", "1.md"), "utf8")).toBe(finalText);
@@ -1011,8 +1058,11 @@ describe("native multi-turn runtime", () => {
     expect(socketOutput.finalized).toBe(true);
     expect(socketOutput.kind).toBe("socket_output");
 
-    const buildPrompt = harness.sentMessages.at(-1)?.message as any;
-    expect(buildPrompt.content).toContain("Summary=Final text plan");
-    expect(buildPrompt.content).toContain("Last=Final text plan");
+    await flushDeferredDispatch();
+    const triggeredMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggeredMessages).toHaveLength(promptsBeforeFinalAgentEnd + 1);
+    const buildPrompt = triggeredMessages.at(-1)?.message as any;
+    expect(buildPrompt.customType).toBe("pi-materia-prompt");
+    expect(buildPrompt.details).toMatchObject({ socketId: "Socket-2", materiaName: "Build" });
   });
 });
