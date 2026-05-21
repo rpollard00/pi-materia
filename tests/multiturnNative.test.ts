@@ -118,6 +118,26 @@ describe("native multi-turn runtime", () => {
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
   });
 
+  test("stale finalization flag does not affect single-turn completion", async () => {
+    const harness = await makeHarness(singleTurnConfig());
+
+    await harness.runCommand("materia", "cast make a plan");
+    const startedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    harness.pi.appendEntry("pi-materia-cast-state", { ...startedState, multiTurnFinalizing: true });
+
+    harness.appendAssistantMessage('{"tasks":[{"id":"1","title":"Ship it"}]}');
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(state.active).toBe(true);
+    expect(state.currentSocketId).toBe("Socket-2");
+    expect(state.socketState).toBe("awaiting_agent_response");
+    expect(state.awaitingResponse).toBe(true);
+    expect(state.multiTurnFinalizing).not.toBe(true);
+    expect(state.data.tasks).toEqual([{ id: "1", title: "Ship it" }]);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
+  });
+
   test("bundled Full-Auto advances from Auto-Plan to Auto-Architect without interactive input", async () => {
     const harness = await makeBundledDefaultHarness();
     const workItem = {
@@ -227,6 +247,7 @@ describe("native multi-turn runtime", () => {
     expect(pausedState.currentMateria).toBe("Interactive-Plan");
     expect(pausedState.socketState).toBe("awaiting_user_refinement");
     expect(pausedState.awaitingResponse).toBe(false);
+    expect(pausedState.multiTurnFinalizing).not.toBe(true);
     expect(pausedState.data.workItems).toBeUndefined();
     expect(pausedState.lastAssistantText).toContain("Should docs be included too?");
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
@@ -243,15 +264,26 @@ describe("native multi-turn runtime", () => {
     expect(finalizedButPausedState.data.workItems).toBeUndefined();
     expect(finalizedButPausedState.lastAssistantText).toBe(finalPlan);
 
+    const statesBeforePlainText = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").length;
+    const promptsBeforePlainText = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
     const inputResults = await harness.emit("input", { text: "ready to continue", source: "interactive" });
     expect(inputResults.at(-1)).toBeUndefined();
     const stillPausedAfterInput = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(stillPausedAfterInput.active).toBe(true);
+    expect(stillPausedAfterInput.currentSocketId).toBe("Socket-3");
     expect(stillPausedAfterInput.socketState).toBe("awaiting_user_refinement");
+    expect(stillPausedAfterInput.awaitingResponse).toBe(false);
     expect(stillPausedAfterInput.multiTurnFinalizing).not.toBe(true);
+    expect(stillPausedAfterInput.data.workItems).toBeUndefined();
+    expect(harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state")).toHaveLength(statesBeforePlainText);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(promptsBeforePlainText);
 
     await harness.runCommand("materia", "continue");
     const commandFinalizingState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(commandFinalizingState.active).toBe(true);
+    expect(commandFinalizingState.currentSocketId).toBe("Socket-3");
     expect(commandFinalizingState.socketState).toBe("awaiting_agent_response");
+    expect(commandFinalizingState.awaitingResponse).toBe(true);
     expect(commandFinalizingState.multiTurnFinalizing).toBe(true);
     const finalPrompt = harness.sentMessages.at(-1)?.message as any;
     expect(finalPrompt.content).toContain("Command-triggered finalization");
@@ -264,7 +296,14 @@ describe("native multi-turn runtime", () => {
     expect(buildState.currentSocketId).toBe("Socket-4");
     expect(buildState.currentMateria).toBe("Build");
     expect(buildState.socketState).toBe("awaiting_agent_response");
+    expect(buildState.awaitingResponse).toBe(true);
+    expect(buildState.multiTurnFinalizing).not.toBe(true);
     expect(buildState.data.workItems).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
+    const downstreamBuildPrompts = harness.sentMessages.filter(({ message }) => {
+      const details = (message as any).details;
+      return (message as any).customType === "pi-materia-prompt" && details?.socketId === "Socket-4" && details?.materiaName === "Build";
+    });
+    expect(downstreamBuildPrompts).toHaveLength(1);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(3);
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Work item 1: Ship it");
   });
@@ -326,6 +365,9 @@ describe("native multi-turn runtime", () => {
     expect(finalizingState.active).toBe(true);
     expect(finalizingState.socketState).toBe("awaiting_agent_response");
     expect(finalizingState.multiTurnFinalizing).toBe(true);
+    expect(harness.statuses.get("materia")).toBe("Plan");
+    expect((harness.widgets.get("materia")?.content ?? []).join("\n")).toContain("› Plan active");
+    expect((harness.widgets.get("materia")?.content ?? []).join("\n")).not.toContain("waiting for refinement");
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only JSON");
     harness.appendAssistantMessage("still not json");
     await harness.emit("agent_end", { messages: [] });
@@ -333,6 +375,62 @@ describe("native multi-turn runtime", () => {
     expect(failedState.active).toBe(false);
     expect(failedState.socketState).toBe("failed");
     expect(harness.notifications.at(-1)?.message).toContain("Invalid JSON output for socket \"Socket-1\"");
+  });
+
+  test("/materia continue bypasses the generic idle wait only for paused multi-turn finalization", async () => {
+    const harness = await makeHarness(multiTurnConfig());
+
+    await harness.runCommand("materia", "cast refine a plan");
+    harness.appendAssistantMessage("ready for your refinement");
+    await harness.emit("agent_end", { messages: [] });
+
+    const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(pausedState.active).toBe(true);
+    expect(pausedState.socketState).toBe("awaiting_user_refinement");
+    expect(pausedState.awaitingResponse).toBe(false);
+
+    harness.idle = false;
+    harness.waitForIdleError = new Error("ambiguous non-idle state");
+    const waitCallsBeforeStatus = harness.waitForIdleCalls;
+    await expect(harness.runCommand("materia", "status")).rejects.toThrow("ambiguous non-idle state");
+    expect(harness.waitForIdleCalls).toBe(waitCallsBeforeStatus + 1);
+
+    const waitCallsBeforeContinue = harness.waitForIdleCalls;
+    await harness.runCommand("materia", "continue");
+    expect(harness.waitForIdleCalls).toBe(waitCallsBeforeContinue);
+
+    const finalizingState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(finalizingState.active).toBe(true);
+    expect(finalizingState.socketState).toBe("awaiting_agent_response");
+    expect(finalizingState.awaitingResponse).toBe(true);
+    expect(finalizingState.multiTurnFinalizing).toBe(true);
+    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Command-triggered finalization");
+  });
+
+  test("/materia continue reports an error instead of interrupting an active agent response", async () => {
+    const harness = await makeHarness(multiTurnConfig());
+
+    await harness.runCommand("materia", "cast refine a plan");
+    const startedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(startedState.active).toBe(true);
+    expect(startedState.socketState).toBe("awaiting_agent_response");
+    expect(startedState.awaitingResponse).toBe(true);
+
+    harness.idle = false;
+    harness.waitForIdleError = new Error("ambiguous non-idle state");
+    const waitCallsBeforeContinue = harness.waitForIdleCalls;
+    await harness.runCommand("materia", "continue");
+    expect(harness.waitForIdleCalls).toBe(waitCallsBeforeContinue);
+
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.multiTurnFinalizing).not.toBe(true);
+    expect(harness.notifications.at(-1)).toMatchObject({
+      type: "error",
+      message: "pi-materia continue failed: Materia is already awaiting a Pi agent response.",
+    });
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(1);
   });
 
   test("normal CRT refinement text does not finalize or parse paused JSON multi-turn output", async () => {
@@ -504,6 +602,9 @@ describe("native multi-turn runtime", () => {
     const refinementTurnState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(refinementTurnState.socketState).toBe("awaiting_agent_response");
     expect(refinementTurnState.awaitingResponse).toBe(true);
+    expect(harness.statuses.get("materia")).toBe("Plan");
+    expect((harness.widgets.get("materia")?.content ?? []).join("\n")).toContain("› Plan active");
+    expect((harness.widgets.get("materia")?.content ?? []).join("\n")).not.toContain("waiting for refinement");
     expect((beforeResults.at(-1) as any).systemPrompt).toContain("Materia active materia (Socket-1):\nCollaborative planner");
     expect(harness.activeTools).toEqual(["read", "grep", "find", "ls"]);
     expect(harness.setModelCalls.length).toBeGreaterThanOrEqual(2);

@@ -146,7 +146,7 @@ export default function piMateria(pi: ExtensionAPI) {
         autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath() });
       }
 
-      if (!autoStartsWebUi) await ctx.waitForIdle();
+      if (!autoStartsWebUi && !isNonBlockingMateriaCommand(subcommand)) await ctx.waitForIdle();
 
       if (subcommand === "link") {
         const argumentsText = trimmedArgs.replace(/^link(?:\s+|$)/, "");
@@ -669,6 +669,10 @@ function tokenizeCommandArgs(args: string): string[] {
 function isNonBlockingQuestCommand(args: string): boolean {
   const action = tokenizeCommandArgs(args)[0] ?? "status";
   return action === "status" || action === "list" || action === "stop";
+}
+
+function isNonBlockingMateriaCommand(subcommand: string | undefined): boolean {
+  return subcommand === "continue";
 }
 
 function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | undefined, statesRepository: Pick<CastStateRepository<ExtensionContext>, "listResumable" | "listRevivable">): Array<{ value: string; label: string; description?: string }> | null {

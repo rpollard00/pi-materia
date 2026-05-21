@@ -218,9 +218,26 @@ async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   return state;
 }
 
+function isActiveMultiTurnFinalizationTurn(state: MateriaCastState): boolean {
+  const socket = activeResolvedSocket(state);
+  return state.multiTurnFinalizing === true
+    && state.active === true
+    && state.awaitingResponse === true
+    && currentSocketState(state) === "awaiting_agent_response"
+    && Boolean(socket && isMultiTurnResolvedAgentSocket(socket));
+}
+
+function clearStaleMultiTurnFinalizing(state: MateriaCastState): boolean {
+  if (state.multiTurnFinalizing !== true || isActiveMultiTurnFinalizationTurn(state)) return false;
+  state.multiTurnFinalizing = false;
+  state.updatedAt = Date.now();
+  return true;
+}
+
 async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   const socket = currentSocketOrThrow(state);
   if (!isMultiTurnResolvedAgentSocket(socket)) {
+    state.multiTurnFinalizing = false;
     throw new Error(`Cannot finalize refinement for socket "${socket.id}" because its resolved materia is not multi-turn.`);
   }
   const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking });
@@ -239,6 +256,8 @@ async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionCo
   await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn, finalization: true });
   await updateSocketToolScope(pi, ctx, state, socket);
   saveCastState(pi, state);
+  ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
+  updateWidget(ctx, state);
   await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, socket));
 }
 
@@ -246,6 +265,8 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   const state = loadActiveCastState(ctx);
   if (!state?.active) return;
   const socketAtEnd = currentSocketOrThrow(state);
+  const clearedStaleFinalizing = clearStaleMultiTurnFinalizing(state);
+  if (clearedStaleFinalizing) saveCastState(pi, state);
   const acceptingRefinement = !state.awaitingResponse && currentSocketState(state) === "awaiting_user_refinement" && isMultiTurnResolvedAgentSocket(socketAtEnd);
   if (!state.awaitingResponse && !acceptingRefinement) return;
 
@@ -265,7 +286,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 
   const text = assistantText(latest.message);
   const agentError = assistantErrorMessage(latest.message);
-  const wasAwaitingFinalization = state.awaitingResponse && currentSocketState(state) === "awaiting_agent_response" && state.multiTurnFinalizing === true;
+  const wasAwaitingFinalization = isActiveMultiTurnFinalizationTurn(state);
   state.lastProcessedEntryId = latest.entry.id;
   state.lastAssistantText = text;
   captureUsage(state, latest.message);
@@ -314,6 +335,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   } catch (error) {
     state.active = false;
     state.phase = "failed";
+    state.multiTurnFinalizing = false;
     setCurrentSocketState(state, "failed");
     state.failedReason = error instanceof Error ? error.message : String(error);
     state.runState.lastMessage = state.failedReason;
@@ -389,8 +411,9 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   setCurrentSocketId(state, socket.id);
   state.currentMateria = socketMateriaName(socket);
   state.currentMateriaModel = undefined;
-  state.awaitingResponse = true;
+  state.awaitingResponse = isAgentResolvedSocket(socket);
   setCurrentSocketState(state, isAgentResolvedSocket(socket) ? "awaiting_agent_response" : "running_utility");
+  state.multiTurnFinalizing = false;
   state.updatedAt = Date.now();
   state.runState.currentSocketId = socket.id;
   state.runState.currentMateria = socketMateriaName(socket);
@@ -530,6 +553,7 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   if (!options.preserveRecoveryExhaustion) state.recoveryExhaustion = undefined;
   state.active = false;
   state.awaitingResponse = false;
+  state.multiTurnFinalizing = false;
   setCurrentSocketState(state, "failed");
   state.phase = "failed";
   state.failedReason = error instanceof Error ? error.message : String(error);
@@ -559,6 +583,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.active = false;
   state.phase = "complete";
   state.awaitingResponse = false;
+  state.multiTurnFinalizing = false;
   setCurrentSocketState(state, "complete");
   state.recoveryExhaustion = undefined;
   state.updatedAt = Date.now();
@@ -633,6 +658,8 @@ export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: Exte
   await appendEvent(state.runState, "context_refinement", { socket: socket.id, materia: socketMateriaName(socket), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
   await updateSocketToolScope(pi, ctx, state, socket);
   saveCastState(pi, state);
+  ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
+  updateWidget(ctx, state);
 }
 
 export const nativeTestInternals = {
