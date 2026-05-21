@@ -11,6 +11,7 @@ import type {
   QuestBoardResponse,
   QuestDefaultLoadoutResponse,
   ReorderQuestRequest,
+  RequeueQuestRequest,
   RoleGenerationPreferenceResponse,
   RoleGenerationPreferenceSavePayload,
   RoleGenerationResponse,
@@ -94,6 +95,14 @@ export async function addQuest(payload: AddQuestRequest): Promise<ApiResponse<Ad
 
 export async function reorderQuest(payload: ReorderQuestRequest): Promise<ApiResponse<QuestBoardResponse>> {
   return fetchJson<QuestBoardResponse>('/api/quests/reorder', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function requeueQuest(payload: RequeueQuestRequest): Promise<ApiResponse<QuestBoardResponse>> {
+  return fetchJson<QuestBoardResponse>('/api/quests/requeue', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),

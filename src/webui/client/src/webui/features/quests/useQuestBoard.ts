@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { addQuest as postQuest, getQuests, reorderQuest as postReorderQuest } from '../../api/index.js';
-import type { AddQuestRequest, AddQuestResponse, QuestBoardResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest } from '../../types.js';
+import { addQuest as postQuest, getQuests, reorderQuest as postReorderQuest, requeueQuest as postRequeueQuest } from '../../api/index.js';
+import type { AddQuestRequest, AddQuestResponse, QuestBoardResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest, RequeueQuestRequest } from '../../types.js';
 
 export const QUEST_BOARD_POLL_INTERVAL_MS = 5000;
 
@@ -163,10 +163,13 @@ export function useQuestBoard() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [reorderSubmitting, setReorderSubmitting] = useState(false);
+  const [requeueSubmitting, setRequeueSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const mountedRef = useRef(false);
   const refreshSeqRef = useRef(0);
+  const mutationSeqRef = useRef(0);
   const reorderSeqRef = useRef(0);
+  const requeueSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const seq = ++refreshSeqRef.current;
@@ -212,11 +215,12 @@ export function useQuestBoard() {
   }, [refresh]);
 
   const reorder = useCallback(async (payload: ReorderQuestRequest): Promise<QuestBoardResponse | undefined> => {
-    const seq = ++reorderSeqRef.current;
+    const mutationSeq = ++mutationSeqRef.current;
+    const reorderSeq = ++reorderSeqRef.current;
     setReorderSubmitting(true);
     try {
       const result = await postReorderQuest(payload);
-      if (!mountedRef.current || seq !== reorderSeqRef.current) return undefined;
+      if (!mountedRef.current || mutationSeq !== mutationSeqRef.current) return undefined;
       if (!result.response.ok || result.body.ok === false) throw new Error(responseError(result.body, `Quest reorder failed with HTTP ${result.response.status}`));
       const normalizedBoard = normalizeQuestBoardResponse(result.body);
       if (!normalizedBoard) throw new Error(responseError(result.body, 'Quest reorder response was not usable.'));
@@ -226,10 +230,33 @@ export function useQuestBoard() {
       setError(undefined);
       return normalizedBoard;
     } catch (caught) {
-      if (mountedRef.current && seq === reorderSeqRef.current) setError(caught instanceof Error ? caught.message : String(caught));
+      if (mountedRef.current && mutationSeq === mutationSeqRef.current) setError(caught instanceof Error ? caught.message : String(caught));
       return undefined;
     } finally {
-      if (mountedRef.current && seq === reorderSeqRef.current) setReorderSubmitting(false);
+      if (mountedRef.current && reorderSeq === reorderSeqRef.current) setReorderSubmitting(false);
+    }
+  }, []);
+
+  const requeue = useCallback(async (payload: RequeueQuestRequest): Promise<QuestBoardResponse | undefined> => {
+    const mutationSeq = ++mutationSeqRef.current;
+    const requeueSeq = ++requeueSeqRef.current;
+    setRequeueSubmitting(true);
+    try {
+      const result = await postRequeueQuest(payload);
+      if (!mountedRef.current || mutationSeq !== mutationSeqRef.current) return undefined;
+      if (!result.response.ok || result.body.ok === false) throw new Error(responseError(result.body, `Quest requeue failed with HTTP ${result.response.status}`));
+      const normalizedBoard = normalizeQuestBoardResponse(result.body);
+      if (!normalizedBoard) throw new Error(responseError(result.body, 'Quest requeue response was not usable.'));
+      ++refreshSeqRef.current;
+      setBoard(normalizedBoard);
+      setLoading(false);
+      setError(undefined);
+      return normalizedBoard;
+    } catch (caught) {
+      if (mountedRef.current && mutationSeq === mutationSeqRef.current) setError(caught instanceof Error ? caught.message : String(caught));
+      return undefined;
+    } finally {
+      if (mountedRef.current && requeueSeq === requeueSeqRef.current) setRequeueSubmitting(false);
     }
   }, []);
 
@@ -244,5 +271,5 @@ export function useQuestBoard() {
     };
   }, [refresh]);
 
-  return { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting };
+  return { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting, requeue, requeueSubmitting };
 }

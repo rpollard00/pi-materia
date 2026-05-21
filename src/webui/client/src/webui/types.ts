@@ -263,6 +263,10 @@ export interface ReorderQuestRequest {
   targetId?: string;
 }
 
+export interface RequeueQuestRequest {
+  questId: string;
+}
+
 export interface MonitorSnapshot {
   ok?: boolean;
   sessionKey?: string;
