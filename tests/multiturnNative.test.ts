@@ -25,6 +25,14 @@ async function flushDeferredDispatch(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function readRunEvents(state: { runDir: string }): Promise<any[]> {
+  return (await readFile(path.join(state.runDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+}
+
+function advancementStages(events: any[]): string[] {
+  return events.filter((event) => event.type === "advancement_lifecycle").map((event) => event.data.stage);
+}
+
 function multiTurnConfig(overrides: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
@@ -287,6 +295,67 @@ describe("native multi-turn runtime", () => {
     expect(buildPrompt.content).toContain("WI-1");
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(promptsBeforeFinalAgentEnd + 1);
     expect(harness.userMessages).toHaveLength(0);
+
+    const events = await readRunEvents(buildState);
+    const socketComplete = events.find((event) => event.type === "socket_complete" && event.data.socket === "Socket-3");
+    expect(socketComplete?.data).toMatchObject({ parsed: true, finalizedRefinement: true, artifact: "sockets/Socket-3/1.md" });
+    expect(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.md"), "utf8")).toBe(finalPlan);
+    expect(JSON.parse(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.json"), "utf8"))).toMatchObject({ summary: "Plan", satisfied: true });
+    const stages = advancementStages(events);
+    expect(stages).toEqual(expect.arrayContaining([
+      "finalized_multi_turn_handle_entry",
+      "socket_completion_exit",
+      "socket_advancement_entry",
+      "next_socket_start_entry",
+      "dispatch_scheduling",
+      "deferred_dispatch_execution",
+      "dispatch_execution_entry",
+      "dispatch_execution_exit",
+      "finalized_multi_turn_handle_exit",
+    ]));
+    expect(stages.indexOf("dispatch_scheduling")).toBeGreaterThan(stages.indexOf("next_socket_start_entry"));
+    expect(stages.indexOf("deferred_dispatch_execution")).toBeGreaterThan(stages.indexOf("dispatch_scheduling"));
+  });
+
+  test("duplicate finalized agent_end callbacks schedule only one deferred Build prompt", async () => {
+    const harness = await makeHarness(interactivePlanToBuildConfig());
+    const finalPlan = JSON.stringify({
+      summary: "Plan",
+      workItems: [{ id: "WI-1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }],
+      guidance: {},
+      decisions: [],
+      risks: [],
+      satisfied: true,
+      feedback: "",
+      missing: [],
+    });
+
+    await harness.runCommand("materia", "cast build the feature");
+    harness.appendAssistantMessage("Draft plan.");
+    await harness.emit("agent_end", { messages: [] });
+    await harness.runCommand("materia", "continue");
+    const promptsBeforeFinalAgentEnd = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
+    harness.appendAssistantMessage(finalPlan);
+
+    const handlers = harness.events.get("agent_end") ?? [];
+    expect(handlers).toHaveLength(1);
+    await Promise.all(handlers.map((handler) => Promise.all([handler({ messages: [] } as never, harness.ctx), handler({ messages: [] } as never, harness.ctx)])));
+    await flushDeferredDispatch();
+
+    const triggeredMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggeredMessages).toHaveLength(promptsBeforeFinalAgentEnd + 1);
+    const buildPrompts = triggeredMessages.filter(({ message }) => {
+      const prompt = message as any;
+      return prompt.customType === "pi-materia-prompt" && prompt.details?.socketId === "Socket-4" && prompt.details?.materiaName === "Build";
+    });
+    expect(buildPrompts).toHaveLength(1);
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    const events = await readRunEvents(state);
+    const duplicateSkips = events.filter((event: any) => event.type === "deferred_dispatch_duplicate_skipped");
+    expect(duplicateSkips).toHaveLength(1);
+    expect(duplicateSkips[0].data).toMatchObject({ castId: state.castId, socket: "Socket-4", materia: "Build", sourceSocketId: "Socket-3", sourceSocketVisit: 1 });
+    expect(duplicateSkips[0].data.idempotencyKey).toContain(`${state.castId}:Socket-3:1:Socket-4`);
   });
 
   test("bundled Planning-Consult pauses after planner output until /materia continue advances to Build", async () => {
@@ -381,6 +450,12 @@ describe("native multi-turn runtime", () => {
     expect(downstreamBuildPrompts).toHaveLength(1);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(3);
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Work item 1: Ship it");
+
+    const events = await readRunEvents(buildState);
+    expect(events.find((event) => event.type === "socket_complete" && event.data.socket === "Socket-3")?.data).toMatchObject({ parsed: true, finalizedRefinement: true });
+    expect(advancementStages(events)).toEqual(expect.arrayContaining(["dispatch_scheduling", "deferred_dispatch_execution", "dispatch_execution_exit"]));
+    expect(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.md"), "utf8")).toBe(finalPlan);
+    expect(JSON.parse(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.json"), "utf8"))).toMatchObject({ summary: "Plan", satisfied: true });
   });
 
   test("loadout switching changes multi-turn behavior only by selecting multi-turn materia", async () => {
