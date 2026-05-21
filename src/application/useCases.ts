@@ -413,6 +413,12 @@ export interface QuestStatusSnapshot {
   activeQuest?: Quest;
   pendingCount: number;
   runningQuest?: Quest;
+  activeLoadoutName?: string;
+  activeLoadoutId?: string;
+  defaultLoadoutId?: string | null;
+  defaultLoadoutWarning?: string;
+  questDefaultLoadoutId?: string | null;
+  questDefaultLoadoutWarning?: string;
 }
 
 export interface QuestStartResult {

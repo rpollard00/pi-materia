@@ -5,9 +5,9 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
-import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveRoleGenerationModelPreference } from "../config/config.js";
+import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
@@ -142,6 +142,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
       setDefaultLoadout: createDefaultLoadoutSetter(ctx, configuredPath),
+      setQuestDefaultLoadout: createQuestDefaultLoadoutSetter(ctx, configuredPath),
       getRoleGenerationPreference: async () => ({ model: await getRoleGenerationModelPreference() }),
       setRoleGenerationPreference: async (model) => ({ model: await saveRoleGenerationModelPreference(model) }),
       getQuestBoard: () => readQuestBoardSnapshot(cwd),
@@ -204,6 +205,26 @@ function createDefaultLoadoutSetter(ctx: ExtensionContext, configuredPath?: stri
         ok: false,
         code: "unavailable",
         message: `Could not update default loadout: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  };
+}
+
+function createQuestDefaultLoadoutSetter(ctx: ExtensionContext, configuredPath?: string): MateriaSetQuestDefaultLoadoutCallback {
+  return async (rawName: string | null): Promise<MateriaSetQuestDefaultLoadoutResult> => {
+    try {
+      const questDefaultLoadoutId = await saveQuestDefaultLoadoutPreference(ctx.cwd, rawName, configuredPath);
+      return {
+        ok: true,
+        questDefaultLoadoutId,
+        message: questDefaultLoadoutId ? `Quest default loadout set to ${questDefaultLoadoutId}.` : "Quest default loadout cleared.",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        code: message.includes("Unknown quest default Materia loadout") || message.includes("does not define any loadouts") ? "unknown_loadout" : "unavailable",
+        message: `Could not update quest default loadout: ${message}`,
       };
     }
   };

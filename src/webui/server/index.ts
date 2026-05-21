@@ -7,6 +7,7 @@ import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaGetRoleGenerationPreferenceCallback, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
+import type { MateriaSetQuestDefaultLoadoutCallback } from './questDefaultLoadout.js';
 import type { MateriaAddQuestInput, MateriaAddQuestResult, MateriaQuestBoardSource, MateriaReorderQuestInput, MateriaReorderQuestResult } from './quests.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
@@ -22,6 +23,7 @@ export type { MateriaAddQuestInput, MateriaAddQuestResponse, MateriaAddQuestResu
 export type { MateriaGeneratorConfig, MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 export type { MateriaSetActiveLoadoutCallback, MateriaSetActiveLoadoutFailureCode, MateriaSetActiveLoadoutResult } from './activeLoadout.js';
 export type { MateriaSetDefaultLoadoutCallback, MateriaSetDefaultLoadoutFailureCode, MateriaSetDefaultLoadoutResult } from './defaultLoadout.js';
+export type { MateriaSetQuestDefaultLoadoutCallback, MateriaSetQuestDefaultLoadoutFailureCode, MateriaSetQuestDefaultLoadoutResult } from './questDefaultLoadout.js';
 export type { MateriaMonitorArtifactEntry, MateriaMonitorEventEntry, MateriaToolRegistrySnapshot, MateriaWebUiSessionSnapshot } from './session.js';
 
 export interface MateriaWebUiServerOptions {
@@ -41,6 +43,8 @@ export interface MateriaWebUiServerOptions {
     setActiveLoadout?: MateriaSetActiveLoadoutCallback;
     /** User preference callback for the durable default loadout. */
     setDefaultLoadout?: MateriaSetDefaultLoadoutCallback;
+    /** User preference callback for autonomous quest runner default loadout. */
+    setQuestDefaultLoadout?: MateriaSetQuestDefaultLoadoutCallback;
     /** User profile preference for isolated role-generation model selection. */
     getRoleGenerationPreference?: MateriaGetRoleGenerationPreferenceCallback;
     setRoleGenerationPreference?: MateriaSetRoleGenerationPreferenceCallback;

@@ -6,12 +6,13 @@ import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
 import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference } from "./webui/launcher.js";
+import { loadConfig, saveQuestDefaultLoadoutPreference } from "./config/config.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError } from "./infrastructure/index.js";
 import type { QuestMovePlacement } from "./domain/questBoard.js";
-import { renderQuestAdded, renderQuestList, renderQuestStarted, renderQuestStatus, renderQuestStopped, type QuestListFilter, type QuestListOptions } from "./presentation/questBoard.js";
+import { renderQuestAdded, renderQuestDefaultLoadoutStatus, renderQuestList, renderQuestStarted, renderQuestStatus, renderQuestStopped, type QuestListFilter, type QuestListOptions } from "./presentation/questBoard.js";
 export { renderCastList } from "./infrastructure/index.js";
 export type { QuestListFilter, QuestListOptions } from "./presentation/questBoard.js";
 
@@ -333,6 +334,11 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
+  if (action === "default-loadout") {
+    await handleQuestDefaultLoadoutCommand(input, rest);
+    return;
+  }
+
   if (action === "list") {
     const parsed = parseQuestListArgs(rest);
     if (!parsed.ok) {
@@ -445,13 +451,66 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     return;
   }
 
-  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest list [pending|all|succeeded|failed] [--limit <n>], /materia quest add [--loadout <name>] <prompt>, /materia quest move <quest> --first|--before <target>|--onto <target>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
+  input.ctx.ui.notify("Usage: /materia quest [status], /materia quest default-loadout [<name-or-id>|--clear], /materia quest list [pending|all|succeeded|failed] [--limit <n>], /materia quest add [--loadout <name>] <prompt>, /materia quest move <quest> --first|--before <target>|--onto <target>, /materia quest run [id], /materia quest runonce [id], /materia quest start [id], or /materia quest stop", "error");
+}
+
+async function handleQuestDefaultLoadoutCommand(input: QuestCommandInput, tokens: string[]): Promise<void> {
+  if (tokens.length === 0) {
+    try {
+      const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+      sendQuestMessage(input.pi, renderQuestDefaultLoadoutStatus(loaded), "default-loadout");
+    } catch (error) {
+      notifyQuestError(input.ctx, "default-loadout", error);
+    }
+    return;
+  }
+
+  if (tokens.length === 1 && tokens[0] === "--clear") {
+    try {
+      await saveQuestDefaultLoadoutPreference(input.ctx.cwd, null, input.configuredPath);
+      const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+      sendQuestMessage(input.pi, renderQuestDefaultLoadoutStatus(loaded), "default-loadout");
+      input.ctx.ui.notify("pi-materia quest default loadout cleared.", "info");
+    } catch (error) {
+      notifyQuestError(input.ctx, "default-loadout", error);
+    }
+    return;
+  }
+
+  if (tokens.includes("--clear")) {
+    input.ctx.ui.notify("Usage: /materia quest default-loadout [<name-or-id>|--clear]", "error");
+    return;
+  }
+
+  const requestedLoadout = tokens.join(" ").trim();
+  if (!requestedLoadout) {
+    input.ctx.ui.notify("Usage: /materia quest default-loadout [<name-or-id>|--clear]", "error");
+    return;
+  }
+
+  try {
+    const questDefaultLoadoutId = await saveQuestDefaultLoadoutPreference(input.ctx.cwd, requestedLoadout, input.configuredPath);
+    const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+    sendQuestMessage(input.pi, renderQuestDefaultLoadoutStatus(loaded), "default-loadout");
+    input.ctx.ui.notify(`pi-materia quest default loadout set to ${questDefaultLoadoutId ?? requestedLoadout}.`, "info");
+  } catch (error) {
+    notifyQuestError(input.ctx, "default-loadout", error);
+  }
 }
 
 async function showQuestStatus(input: QuestCommandInput): Promise<void> {
   try {
     const status = await input.useCases.getStatus(input.ctx);
-    sendQuestMessage(input.pi, renderQuestStatus(status), "status");
+    const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+    sendQuestMessage(input.pi, renderQuestStatus({
+      ...status,
+      activeLoadoutName: loaded.config.activeLoadout,
+      activeLoadoutId: loaded.config.activeLoadoutId,
+      defaultLoadoutId: loaded.defaultLoadoutId ?? null,
+      ...(loaded.defaultLoadoutWarning ? { defaultLoadoutWarning: loaded.defaultLoadoutWarning } : {}),
+      questDefaultLoadoutId: loaded.questDefaultLoadoutId ?? null,
+      ...(loaded.questDefaultLoadoutWarning ? { questDefaultLoadoutWarning: loaded.questDefaultLoadoutWarning } : {}),
+    }), "status");
   } catch (error) {
     notifyQuestError(input.ctx, "status", error);
   }
@@ -668,7 +727,7 @@ function tokenizeCommandArgs(args: string): string[] {
 
 function isNonBlockingQuestCommand(args: string): boolean {
   const action = tokenizeCommandArgs(args)[0] ?? "status";
-  return action === "status" || action === "list" || action === "stop";
+  return action === "status" || action === "list" || action === "stop" || action === "default-loadout";
 }
 
 function isNonBlockingMateriaCommand(subcommand: string | undefined): boolean {
@@ -692,13 +751,14 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
   }
 
   if (tokens[0] === "quest") {
-    const questSubcommands = ["status", "add", "run", "runonce", "start", "stop", "list", "move"];
+    const questSubcommands = ["status", "add", "run", "runonce", "start", "stop", "list", "move", "default-loadout"];
     if (tokens.length === 1 && endsWithWhitespace) return questSubcommands.map((value) => ({ value: `quest ${value}`, label: value }));
     if (tokens.length === 2 && !endsWithWhitespace) {
       const matching = questSubcommands.filter((value) => value.startsWith(tokens[1] ?? ""));
       return matching.length ? matching.map((value) => ({ value: `quest ${value}`, label: value })) : null;
     }
     if (tokens[1] === "list") return questListCompletions(tokens, endsWithWhitespace);
+    if (tokens[1] === "default-loadout") return questDefaultLoadoutCompletions(tokens, endsWithWhitespace);
     return null;
   }
 
@@ -724,6 +784,12 @@ function questListCompletions(tokens: string[], endsWithWhitespace: boolean): Ar
     return matching.length ? matching.map((filter) => ({ value: `quest list ${filter}`, label: filter })) : null;
   }
   if (tokens.length === 3 && endsWithWhitespace) return [{ value: `quest list ${tokens[2]} --limit `, label: "--limit", description: "Limit number of quests shown" }];
+  return null;
+}
+
+function questDefaultLoadoutCompletions(tokens: string[], endsWithWhitespace: boolean): Array<{ value: string; label: string; description?: string }> | null {
+  if (tokens.length === 2 && endsWithWhitespace) return [{ value: "quest default-loadout --clear", label: "--clear", description: "Clear the quest default loadout preference" }];
+  if (tokens.length === 3 && !endsWithWhitespace && "--clear".startsWith(tokens[2] ?? "")) return [{ value: "quest default-loadout --clear", label: "--clear", description: "Clear the quest default loadout preference" }];
   return null;
 }
 

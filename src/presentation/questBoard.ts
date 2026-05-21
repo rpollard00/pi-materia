@@ -65,6 +65,10 @@ export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
     `Quests: ${board.quests.length} total, ${snapshot.pendingCount} pending`,
   ];
 
+  if (snapshot.activeLoadoutName !== undefined || snapshot.activeLoadoutId !== undefined) lines.push(`Active loadout: ${formatLoadoutIdentity(snapshot.activeLoadoutName, snapshot.activeLoadoutId)}`);
+  if (snapshot.defaultLoadoutId !== undefined || snapshot.defaultLoadoutWarning !== undefined) lines.push(`Regular default loadout: ${formatDefaultLoadoutState(snapshot.defaultLoadoutId, snapshot.defaultLoadoutWarning)}`);
+  if (snapshot.questDefaultLoadoutId !== undefined || snapshot.questDefaultLoadoutWarning !== undefined) lines.push(`Quest default loadout: ${formatDefaultLoadoutState(snapshot.questDefaultLoadoutId, snapshot.questDefaultLoadoutWarning)}`);
+
   if (snapshot.activeCast?.active) lines.push(`Active cast: ${snapshot.activeCast.castId} (${snapshot.activeCast.phase})`);
   if (activeQuest) lines.push(`Active quest: ${formatQuestSummary(activeQuest)}`);
   else lines.push("Active quest: none");
@@ -77,7 +81,7 @@ export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
     lines.push("Recent results: none");
   }
 
-  lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | /materia quest list [pending|all|succeeded|failed] [--limit <n>] | move <quest> --first|--before <target>|--onto <target> | run [id] | runonce [id] | start [id] | stop | status");
+  lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | /materia quest default-loadout [<name-or-id>|--clear] | /materia quest list [pending|all|succeeded|failed] [--limit <n>] | move <quest> --first|--before <target>|--onto <target> | run [id] | runonce [id] | start [id] | stop | status");
   lines.push("Move: --onto means after target; quest IDs accept unambiguous prefixes.");
   lines.push("Run: run enables continuous back-to-back processing; runonce launches one pending quest only; start is a compatibility alias for run.");
   lines.push("Stop: stop disables future auto-advance without aborting the active cast.");
@@ -120,12 +124,32 @@ function questStartModeDescription(mode: QuestStartRenderMode): string {
   return "continuous run; auto-advances while enabled until /materia quest stop";
 }
 
+export function renderQuestDefaultLoadoutStatus(input: { questDefaultLoadoutId?: string | null; questDefaultLoadoutWarning?: string }): string[] {
+  return [
+    "pi-materia quest default loadout",
+    `Quest default loadout: ${formatDefaultLoadoutState(input.questDefaultLoadoutId, input.questDefaultLoadoutWarning)}`,
+    "Set: /materia quest default-loadout <name-or-id>",
+    "Clear: /materia quest default-loadout --clear",
+  ];
+}
+
 export function renderQuestStopped(board: QuestBoard): string[] {
   return [
     "Quest runner stopped. Active casts are not aborted; use /materia abort if needed.",
     `Runner: ${board.runner.enabled ? "enabled" : "stopped"}`,
     `Pending: ${board.quests.filter((quest) => quest.status === "pending").length}`,
   ];
+}
+
+function formatLoadoutIdentity(name: string | undefined, id: string | undefined): string {
+  if (name && id && name !== id) return `${name} (${id})`;
+  return name ?? id ?? "none";
+}
+
+function formatDefaultLoadoutState(id: string | null | undefined, warning?: string): string {
+  if (warning) return `unavailable (${warning})`;
+  if (id === null) return "cleared";
+  return id ?? "unknown";
 }
 
 function recentFinishedQuests(board: QuestBoard, limit: number): Quest[] {
