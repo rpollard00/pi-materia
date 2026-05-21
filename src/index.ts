@@ -537,6 +537,9 @@ async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx
     });
     if (!settled.quest) return;
     if (!settled.board.runner.enabled) return;
+    // Pi may ignore triggerTurn calls issued from inside agent_end, even when that
+    // handler starts a new quest cast. Keep quest/cast state durable now and defer
+    // only the first prompt dispatch; do not wake the next cast with dummy input.
     await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, castOptions: input.settlementSource === "agent_end" ? { initialPromptDispatch: "defer-agent-trigger" } : undefined });
   } catch (error) {
     notifyQuestError(input.ctx, "auto-advance", error);
