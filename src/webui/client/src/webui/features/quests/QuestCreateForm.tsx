@@ -3,7 +3,13 @@ import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { AddQuestRequest, AddQuestResponse } from '../../types.js';
 import { toast } from '../../../toast/index.js';
 
-interface QuestCreateFormProps {
+export interface QuestDefaultLoadoutProps {
+  questDefaultLoadoutId: string | null;
+  questDefaultLoadoutWarning?: string;
+  setQuestDefaultLoadout: (loadoutId: string | null) => Promise<string | null>;
+}
+
+interface QuestCreateFormProps extends QuestDefaultLoadoutProps {
   persistedLoadouts: Record<string, PipelineConfig>;
   onAddQuest: (payload: AddQuestRequest) => Promise<AddQuestResponse | undefined>;
   submitting: boolean;

@@ -322,7 +322,14 @@ export function App() {
         </div>
       )}
       materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} toolRegistry={monitor?.toolRegistry} />}
-      questWorkspace={<QuestPanel persistedLoadouts={persistedLoadouts} />}
+      questWorkspace={(
+        <QuestPanel
+          persistedLoadouts={persistedLoadouts}
+          questDefaultLoadoutId={questDefaultLoadoutId}
+          questDefaultLoadoutWarning={questDefaultLoadoutWarning}
+          setQuestDefaultLoadout={setQuestDefaultLoadout}
+        />
+      )}
       monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorSocket={currentMonitorSocket} elapsed={elapsed} />}
     />
   );

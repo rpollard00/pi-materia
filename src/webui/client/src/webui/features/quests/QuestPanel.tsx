@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { QuestSummary } from '../../types.js';
-import { QuestCreateForm } from './QuestCreateForm.js';
+import { QuestCreateForm, type QuestDefaultLoadoutProps } from './QuestCreateForm.js';
 import { QuestDetail } from './QuestDetail.js';
 import { QuestLogSidebar } from './QuestLogSidebar.js';
 import { useQuestBoard } from './useQuestBoard.js';
@@ -22,11 +22,11 @@ function uniqueQuests(quests: Array<QuestSummary | undefined>): QuestSummary[] {
   return result;
 }
 
-interface QuestPanelProps {
+interface QuestPanelProps extends QuestDefaultLoadoutProps {
   persistedLoadouts?: Record<string, PipelineConfig>;
 }
 
-export function QuestPanel({ persistedLoadouts = {} }: QuestPanelProps) {
+export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout }: QuestPanelProps) {
   const { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting, requeue, requeueSubmitting } = useQuestBoard();
   const [selectedQuestId, setSelectedQuestId] = useState<string>();
 
@@ -75,7 +75,14 @@ export function QuestPanel({ persistedLoadouts = {} }: QuestPanelProps) {
         </div>
       </div>
 
-      <QuestCreateForm persistedLoadouts={persistedLoadouts} onAddQuest={add} submitting={submitting} />
+      <QuestCreateForm
+        persistedLoadouts={persistedLoadouts}
+        questDefaultLoadoutId={questDefaultLoadoutId}
+        questDefaultLoadoutWarning={questDefaultLoadoutWarning}
+        setQuestDefaultLoadout={setQuestDefaultLoadout}
+        onAddQuest={add}
+        submitting={submitting}
+      />
 
       <div className="quest-workspace-grid">
         <QuestLogSidebar
