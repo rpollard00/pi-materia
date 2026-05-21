@@ -168,6 +168,7 @@ export interface QuestRunResultSummary {
   requestedLoadoutOverride?: string;
   effectiveLoadoutId?: string;
   effectiveLoadoutName?: string;
+  effectiveLoadoutSource?: string;
 }
 
 export interface QuestRunErrorSummary {

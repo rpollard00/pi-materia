@@ -23,6 +23,7 @@ export interface QuestRunResult {
   requestedLoadoutOverride?: string;
   effectiveLoadoutId?: string;
   effectiveLoadoutName?: string;
+  effectiveLoadoutSource?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -456,6 +457,7 @@ function validateRunResult(value: unknown, path: string, issues: DomainIssue[]):
   optionalString(value.requestedLoadoutOverride, `${path}.requestedLoadoutOverride`, issues);
   optionalString(value.effectiveLoadoutId, `${path}.effectiveLoadoutId`, issues);
   optionalString(value.effectiveLoadoutName, `${path}.effectiveLoadoutName`, issues);
+  optionalString(value.effectiveLoadoutSource, `${path}.effectiveLoadoutSource`, issues);
   if (value.metadata !== undefined && !isPlainObject(value.metadata)) issues.push({ path: `${path}.metadata`, message: "metadata must be an object when provided" });
 }
 

@@ -73,6 +73,7 @@ function normalizeQuestSummary(value: unknown): QuestSummary | undefined {
         ...(optionalString(value.lastResult.requestedLoadoutOverride) ? { requestedLoadoutOverride: optionalString(value.lastResult.requestedLoadoutOverride) } : {}),
         ...(optionalString(value.lastResult.effectiveLoadoutId) ? { effectiveLoadoutId: optionalString(value.lastResult.effectiveLoadoutId) } : {}),
         ...(optionalString(value.lastResult.effectiveLoadoutName) ? { effectiveLoadoutName: optionalString(value.lastResult.effectiveLoadoutName) } : {}),
+        ...(optionalString(value.lastResult.effectiveLoadoutSource) ? { effectiveLoadoutSource: optionalString(value.lastResult.effectiveLoadoutSource) } : {}),
       };
     }
   }

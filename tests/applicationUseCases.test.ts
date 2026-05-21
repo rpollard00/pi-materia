@@ -539,6 +539,83 @@ describe("application use cases", () => {
     expect(startOptions).toMatchObject({ initialData: { quest: { questId: "quest-1", title: "Build the quest runner", loadoutOverride: "Auto" } }, startEventDetails: { quest: { questId: "quest-1" } } });
   });
 
+  test("quest runner uses quest default loadout for no-override quests and preserves override precedence", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    const sourceConfig: LoadedConfig = {
+      source: "/repo/materia.json",
+      questDefaultLoadoutId: "quest-default-id",
+      config: {
+        activeLoadout: "Interactive",
+        activeLoadoutId: "interactive-id",
+        materia: {},
+        loadouts: {
+          Interactive: { id: "interactive-id", entry: "Socket-1", sockets: {} },
+          "Quest Default": { id: "quest-default-id", entry: "Socket-2", sockets: {} },
+          Override: { id: "override-id", entry: "Socket-3", sockets: {} },
+        },
+      },
+    };
+    let loadCount = 0;
+    const loadouts = new LoadoutUseCases({
+      configs: { async load() { loadCount += 1; return sourceConfig; }, async saveActiveLoadout() { throw new Error("must not save"); }, resolveArtifactRoot: () => "artifacts" },
+      pipeline: { resolve: (config) => ({ entry: { id: config.activeLoadout === "Quest Default" ? "Socket-2" : config.activeLoadout === "Override" ? "Socket-3" : "Socket-1", socket: { utility: "noop" } }, sockets: {} }), renderGrid: () => [], renderLoadoutList: () => [] },
+    });
+    const starts: Parameters<CastExecutionUseCases<string, string>["startCast"]>[0][] = [];
+    const casts = { startCast: async (input: Parameters<CastExecutionUseCases<string, string>["startCast"]>[0]) => { starts.push(input); return { loaded: input.prepared!.loaded, pipeline: input.prepared!.pipeline, effectiveLoadout: input.prepared!.effectiveLoadout, state: state({ castId: `cast-${starts.length}`, data: input.options?.initialData ?? {} }) }; } };
+    const runner = new QuestRunnerUseCases({ boards, casts, loadouts, states: { loadActive: () => undefined }, clock: { now: () => "2026-01-01T00:00:01.000Z" }, ids: { nextId: () => `quest-${board.quests.length + 1}` } });
+
+    await runner.addQuest({ prompt: "use quest default" });
+    const defaultResult = await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+    expect(defaultResult?.effectiveLoadout).toEqual({ requestedLoadoutOverride: "quest-default-id", effectiveLoadoutName: "Quest Default", effectiveLoadoutId: "quest-default-id" });
+    expect(defaultResult?.loadoutSource).toBe("quest_default");
+    expect(starts[0]?.prepared?.loaded.config.activeLoadout).toBe("Quest Default");
+    expect(starts[0]?.options?.initialData?.quest).toMatchObject({ loadoutSource: "quest_default", effectiveLoadoutName: "Quest Default", effectiveLoadoutId: "quest-default-id" });
+
+    await runner.handleCastSettled({ castId: "cast-1", status: "succeeded" });
+    await runner.addQuest({ prompt: "use override", loadoutOverride: "Override" });
+    const overrideResult = await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+    expect(overrideResult?.effectiveLoadout).toEqual({ requestedLoadoutOverride: "Override", effectiveLoadoutName: "Override", effectiveLoadoutId: "override-id" });
+    expect(overrideResult?.loadoutSource).toBe("override");
+    expect(starts[1]?.prepared?.loaded.config.activeLoadout).toBe("Override");
+    expect(sourceConfig.config.activeLoadout).toBe("Interactive");
+    expect(sourceConfig.config.activeLoadoutId).toBe("interactive-id");
+    expect(sourceConfig.questDefaultLoadoutId).toBe("quest-default-id");
+    expect(loadCount).toBe(2);
+  });
+
+  test("quest runner falls back to active loadout for cleared or stale quest defaults", async () => {
+    let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+    const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };
+    const loadedConfigs: LoadedConfig[] = [
+      { source: "/repo/materia.json", questDefaultLoadoutId: null, config: { activeLoadout: "Interactive", activeLoadoutId: "interactive-id", materia: {}, loadouts: { Interactive: { id: "interactive-id", entry: "Socket-1", sockets: {} } } } },
+      { source: "/repo/materia.json", questDefaultLoadoutId: null, questDefaultLoadoutWarning: 'Configured quest default loadout "missing-id" could not be resolved.', config: { activeLoadout: "Interactive", activeLoadoutId: "interactive-id", materia: {}, loadouts: { Interactive: { id: "interactive-id", entry: "Socket-1", sockets: {} } } } },
+    ];
+    let loadIndex = 0;
+    const loadouts = new LoadoutUseCases({
+      configs: { async load() { return loadedConfigs[loadIndex++]!; }, async saveActiveLoadout() { throw new Error("must not save"); }, resolveArtifactRoot: () => "artifacts" },
+      pipeline: { resolve: pipeline, renderGrid: () => [], renderLoadoutList: () => [] },
+    });
+    const starts: Parameters<CastExecutionUseCases<string, string>["startCast"]>[0][] = [];
+    const casts = { startCast: async (input: Parameters<CastExecutionUseCases<string, string>["startCast"]>[0]) => { starts.push(input); return { loaded: input.prepared!.loaded, pipeline: input.prepared!.pipeline, state: state({ castId: `cast-${starts.length}`, data: input.options?.initialData ?? {} }) }; } };
+    const runner = new QuestRunnerUseCases({ boards, casts, loadouts, states: { loadActive: () => undefined }, clock: { now: () => "2026-01-01T00:00:01.000Z" }, ids: { nextId: () => `quest-${board.quests.length + 1}` } });
+
+    await runner.addQuest({ prompt: "cleared default falls back" });
+    const cleared = await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+    expect(cleared?.loadoutSource).toBe("fallback");
+    expect(cleared?.loadoutWarning).toBeUndefined();
+    expect(starts[0]?.prepared?.effectiveLoadout).toBeUndefined();
+    expect(starts[0]?.prepared?.loaded.config.activeLoadout).toBe("Interactive");
+
+    await runner.handleCastSettled({ castId: "cast-1", status: "succeeded" });
+    await runner.addQuest({ prompt: "stale default warns and falls back" });
+    const stale = await runner.runNext({ pi: "pi", session: "session", cwd: "/repo" });
+    expect(stale?.loadoutSource).toBe("fallback");
+    expect(stale?.loadoutWarning).toContain("missing-id");
+    expect(starts[1]?.options?.initialData?.quest).toMatchObject({ loadoutSource: "fallback", questDefaultLoadoutWarning: 'Configured quest default loadout "missing-id" could not be resolved.' });
+    expect(loadedConfigs[1]?.questDefaultLoadoutId).toBeNull();
+  });
+
   test("quest runner blocks starts when a cast or quest is already active", async () => {
     let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
     const boards: QuestBoardRepository = { boardPath: "/repo/.pi/pi-materia/quest-board.json", loadOrCreate: async () => board, save: async (next) => { board = next; } };

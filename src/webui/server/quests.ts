@@ -21,6 +21,7 @@ export interface QuestRunResult {
   requestedLoadoutOverride?: string;
   effectiveLoadoutId?: string;
   effectiveLoadoutName?: string;
+  effectiveLoadoutSource?: string;
 }
 
 export interface QuestRunError {
@@ -112,6 +113,7 @@ export interface MateriaQuestRunResultSummary {
   requestedLoadoutOverride?: string;
   effectiveLoadoutId?: string;
   effectiveLoadoutName?: string;
+  effectiveLoadoutSource?: string;
 }
 
 export interface MateriaQuestRunErrorSummary {
@@ -306,6 +308,7 @@ function mapRunResult(result: QuestRunResult): MateriaQuestRunResultSummary {
     ...(result.requestedLoadoutOverride ? { requestedLoadoutOverride: result.requestedLoadoutOverride } : {}),
     ...(result.effectiveLoadoutId ? { effectiveLoadoutId: result.effectiveLoadoutId } : {}),
     ...(result.effectiveLoadoutName ? { effectiveLoadoutName: result.effectiveLoadoutName } : {}),
+    ...(result.effectiveLoadoutSource ? { effectiveLoadoutSource: result.effectiveLoadoutSource } : {}),
   };
 }
 

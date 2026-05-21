@@ -22,6 +22,18 @@ export interface EffectiveCastLoadout {
   effectiveLoadoutId?: string;
 }
 
+export type QuestLaunchLoadoutSource = "override" | "quest_default" | "fallback";
+
+export interface QuestLaunchLoadoutSelection {
+  source: QuestLaunchLoadoutSource;
+  loaded: LoadedConfig;
+  pipeline: ResolvedMateriaPipeline;
+  effectiveLoadout?: EffectiveCastLoadout;
+  warning?: string;
+}
+
+export type PreparedCastLoadout = Pick<QuestLaunchLoadoutSelection, "loaded" | "pipeline" | "effectiveLoadout">;
+
 export type AutoCastMode = "loadout" | "materia";
 
 export interface AutoCastLoadoutMetadata {
@@ -70,6 +82,35 @@ export class LoadoutUseCases {
     const pipeline = this.deps.pipeline.resolve(castLoaded.config);
     return { loaded: castLoaded, pipeline, ...(effectiveLoadout ? { effectiveLoadout } : {}) };
   }
+
+  async loadForQuestCast(cwd: string, configuredPath: string | undefined, loadoutOverride?: string): Promise<QuestLaunchLoadoutSelection> {
+    const loaded = await this.deps.configs.load(cwd, configuredPath);
+    const selection = resolveQuestLaunchLoadout(loaded, loadoutOverride);
+    const castLoaded = selection.effectiveLoadout ? createLoadoutOverrideLoadedConfig(loaded, selection.effectiveLoadout) : loaded;
+    const pipeline = this.deps.pipeline.resolve(castLoaded.config);
+    return { ...selection, loaded: castLoaded, pipeline };
+  }
+}
+
+export function resolveQuestLaunchLoadout(loaded: LoadedConfig, loadoutOverride?: string): Omit<QuestLaunchLoadoutSelection, "loaded" | "pipeline"> {
+  const override = resolveCastLoadoutOverride(loaded, loadoutOverride);
+  if (override) return { source: "override", effectiveLoadout: override };
+
+  if (loaded.questDefaultLoadoutId) {
+    const resolved = resolveLoadoutSelection(loaded.questDefaultLoadoutId, loaded.config.loadouts ?? {}, loaded.loadoutSources);
+    if (resolved) {
+      return {
+        source: "quest_default",
+        effectiveLoadout: {
+          requestedLoadoutOverride: loaded.questDefaultLoadoutId,
+          effectiveLoadoutName: resolved.loadoutName,
+          ...(resolved.loadoutId ? { effectiveLoadoutId: resolved.loadoutId } : {}),
+        },
+      };
+    }
+  }
+
+  return { source: "fallback", ...(loaded.questDefaultLoadoutWarning ? { warning: loaded.questDefaultLoadoutWarning } : {}) };
 }
 
 function resolveCastLoadoutOverride(loaded: LoadedConfig, loadoutOverride?: string): EffectiveCastLoadout | undefined {
@@ -197,9 +238,9 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     return this.deps.agentTurns.handleAgentEnd(pi, event, session);
   }
 
-  async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string; loadoutOverride?: string; options?: CastStartOptions }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout; state?: MateriaCastState }> {
+  async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string; loadoutOverride?: string; prepared?: PreparedCastLoadout; options?: CastStartOptions }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout; state?: MateriaCastState }> {
     this.assertNoActiveCast(input.session);
-    const prepared = await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.loadoutOverride);
+    const prepared = input.prepared ?? await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.loadoutOverride);
     const options = withEffectiveLoadoutInitialData(mergeCastStartOptions(input.options, prepared.effectiveLoadout ? { startEventDetails: { loadoutOverride: prepared.effectiveLoadout } } : undefined), prepared.effectiveLoadout);
     const state = await this.startPreparedCast({ pi: input.pi, session: input.session, loaded: prepared.loaded, pipeline: prepared.pipeline, request: input.request, options });
     return { ...prepared, ...(state ? { state } : {}) };
@@ -358,7 +399,7 @@ export interface QuestRunnerIdGenerator {
 export interface QuestRunnerUseCasesDeps<TSession = unknown, TPi = unknown> {
   boards: QuestBoardRepository;
   casts: Pick<CastExecutionUseCases<TSession, TPi>, "startCast">;
-  loadouts: Pick<LoadoutUseCases, "loadForCast">;
+  loadouts: Pick<LoadoutUseCases, "loadForCast"> & Partial<Pick<LoadoutUseCases, "loadForQuestCast">>;
   states: Pick<CastStateRepository<TSession>, "loadActive">;
   clock?: QuestRunnerClock;
   ids?: QuestRunnerIdGenerator;
@@ -379,6 +420,8 @@ export interface QuestStartResult {
   quest: Quest;
   state: MateriaCastState;
   effectiveLoadout?: EffectiveCastLoadout;
+  loadoutSource?: QuestLaunchLoadoutSource;
+  loadoutWarning?: string;
 }
 
 export type QuestRunContinuousReason = QuestDrainReason;
@@ -542,10 +585,18 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     if (running) throw new ActiveQuestConflictError(running.id);
     if (input.quest.status !== "pending") throw new Error(`Quest ${input.quest.id} is ${input.quest.status}, not pending.`);
 
-    await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.quest.loadoutOverride);
+    let selected: QuestLaunchLoadoutSelection;
+    try {
+      selected = await this.resolveQuestCastLoadout(input.cwd, input.configuredPath, input.quest.loadoutOverride);
+    } catch (error) {
+      const failed = recordQuestStartupFailure(input.board, input.quest, this.clock.now(), error);
+      await this.deps.boards.save(failed);
+      throw error;
+    }
+
     let started: Awaited<ReturnType<CastExecutionUseCases<TSession, TPi>["startCast"]>>;
     try {
-      started = await this.deps.casts.startCast({ pi: input.pi, session: input.session, cwd: input.cwd, request: input.quest.prompt, configuredPath: input.configuredPath, loadoutOverride: input.quest.loadoutOverride, options: questCastStartOptions(input.quest) });
+      started = await this.deps.casts.startCast({ pi: input.pi, session: input.session, cwd: input.cwd, request: input.quest.prompt, configuredPath: input.configuredPath, loadoutOverride: input.quest.loadoutOverride, prepared: selected, options: questCastStartOptions(input.quest, selected) });
     } catch (error) {
       const failed = recordQuestStartupFailure(input.board, input.quest, this.clock.now(), error);
       await this.deps.boards.save(failed);
@@ -566,7 +617,13 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     }
 
     const quest = board.quests.find((candidate) => candidate.id === input.quest.id)!;
-    return { board, quest, state, ...(started.effectiveLoadout ? { effectiveLoadout: started.effectiveLoadout } : {}) };
+    return { board, quest, state, ...(started.effectiveLoadout ? { effectiveLoadout: started.effectiveLoadout } : {}), loadoutSource: selected.source, ...(selected.warning ? { loadoutWarning: selected.warning } : {}) };
+  }
+
+  private async resolveQuestCastLoadout(cwd: string, configuredPath: string | undefined, loadoutOverride?: string): Promise<QuestLaunchLoadoutSelection> {
+    if (this.deps.loadouts.loadForQuestCast) return this.deps.loadouts.loadForQuestCast(cwd, configuredPath, loadoutOverride);
+    const prepared = await this.deps.loadouts.loadForCast(cwd, configuredPath, loadoutOverride);
+    return { ...prepared, source: prepared.effectiveLoadout ? "override" : "fallback" };
   }
 }
 
@@ -584,8 +641,15 @@ export class QuestBoardValidationError extends Error {
   }
 }
 
-function questCastStartOptions(quest: Quest): CastStartOptions {
-  const metadata = { questId: quest.id, title: quest.title, ...(quest.loadoutOverride ? { loadoutOverride: quest.loadoutOverride } : {}) };
+function questCastStartOptions(quest: Quest, selection: Pick<QuestLaunchLoadoutSelection, "source" | "warning" | "effectiveLoadout">): CastStartOptions {
+  const metadata = {
+    questId: quest.id,
+    title: quest.title,
+    loadoutSource: selection.source,
+    ...(quest.loadoutOverride ? { loadoutOverride: quest.loadoutOverride } : {}),
+    ...(selection.effectiveLoadout ? { requestedLoadoutOverride: selection.effectiveLoadout.requestedLoadoutOverride, effectiveLoadoutName: selection.effectiveLoadout.effectiveLoadoutName, ...(selection.effectiveLoadout.effectiveLoadoutId ? { effectiveLoadoutId: selection.effectiveLoadout.effectiveLoadoutId } : {}) } : {}),
+    ...(selection.warning ? { questDefaultLoadoutWarning: selection.warning } : {}),
+  };
   return { initialData: { quest: metadata }, startEventDetails: { quest: metadata } };
 }
 
@@ -612,9 +676,10 @@ function buildQuestRunResult(input: { status: QuestTerminalStatus; now: string; 
     ...(input.input.error ?? state?.failedReason ? { error: input.input.error ?? state?.failedReason } : {}),
     ...(state?.runDir ? { runDirectory: state.runDir } : {}),
     ...(state?.artifactRoot ? { artifactDirectory: state.artifactRoot } : {}),
-    ...(input.quest.loadoutOverride ? { requestedLoadoutOverride: input.quest.loadoutOverride } : {}),
+    ...(typeof questMetadata?.requestedLoadoutOverride === "string" ? { requestedLoadoutOverride: questMetadata.requestedLoadoutOverride } : input.quest.loadoutOverride ? { requestedLoadoutOverride: input.quest.loadoutOverride } : {}),
     ...(typeof questMetadata?.effectiveLoadoutName === "string" ? { effectiveLoadoutName: questMetadata.effectiveLoadoutName } : {}),
     ...(typeof questMetadata?.effectiveLoadoutId === "string" ? { effectiveLoadoutId: questMetadata.effectiveLoadoutId } : {}),
+    ...(typeof questMetadata?.loadoutSource === "string" ? { effectiveLoadoutSource: questMetadata.loadoutSource } : {}),
     ...(input.input.metadata ? { metadata: input.input.metadata } : {}),
   };
 }
