@@ -80,6 +80,26 @@ function multiTurnWithDownstreamConfig(parse: "json" | "text") {
   };
 }
 
+function interactivePlanToBuildConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Planning-Consult",
+    loadouts: {
+      "Planning-Consult": {
+        entry: "Socket-3",
+        sockets: {
+          "Socket-3": { materia: "Interactive-Plan", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-4" }] },
+          "Socket-4": { materia: "Build" },
+        },
+      },
+    },
+    materia: {
+      "Interactive-Plan": { type: "agent", tools: "readOnly", prompt: "Collaboratively refine an implementation plan", multiTurn: true },
+      Build: { type: "agent", tools: "coding", prompt: "Build now\n\nWork items={{state.workItems}} Last={{lastOutput}}" },
+    },
+  };
+}
+
 function loadoutSwitchingConfig() {
   return {
     artifactDir: ".pi/pi-materia",
@@ -213,6 +233,54 @@ describe("native multi-turn runtime", () => {
     expect(harness.userMessages).toHaveLength(0);
     expect(harness.operationLog).not.toContain("waitForIdle");
     expect(harness.notifications.map(({ message }) => message).join("\n")).not.toContain("/materia continue");
+  });
+
+  test("finalized Interactive-Plan /materia continue auto-dispatches the Build prompt", async () => {
+    const harness = await makeHarness(interactivePlanToBuildConfig());
+    const finalPlan = JSON.stringify({
+      summary: "Plan",
+      workItems: [{ id: "WI-1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }],
+      guidance: {},
+      decisions: [],
+      risks: [],
+      satisfied: true,
+      feedback: "",
+      missing: [],
+    });
+
+    await harness.runCommand("materia", "cast build the feature");
+    harness.appendAssistantMessage("Draft plan that still needs refinement.");
+    await harness.emit("agent_end", { messages: [] });
+
+    const pausedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(pausedState.currentSocketId).toBe("Socket-3");
+    expect(pausedState.currentMateria).toBe("Interactive-Plan");
+    expect(pausedState.socketState).toBe("awaiting_user_refinement");
+
+    await harness.runCommand("materia", "continue");
+    const promptsBeforeFinalAgentEnd = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
+    expect(promptsBeforeFinalAgentEnd).toBe(2);
+    harness.appendAssistantMessage(finalPlan);
+    await harness.emit("agent_end", { messages: [] });
+
+    const buildState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(buildState.active).toBe(true);
+    expect(buildState.currentSocketId).toBe("Socket-4");
+    expect(buildState.currentMateria).toBe("Build");
+    expect(buildState.socketState).toBe("awaiting_agent_response");
+    expect(buildState.awaitingResponse).toBe(true);
+    expect(buildState.multiTurnFinalizing).not.toBe(true);
+    expect(buildState.data.workItems).toEqual([{ id: "WI-1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
+
+    const triggeredMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggeredMessages).toHaveLength(promptsBeforeFinalAgentEnd + 1);
+    const buildPrompt = triggeredMessages.at(-1)?.message as any;
+    expect(buildPrompt.customType).toBe("pi-materia-prompt");
+    expect(buildPrompt.details).toMatchObject({ socketId: "Socket-4", materiaName: "Build" });
+    expect(buildPrompt.content).toContain("Build now");
+    expect(buildPrompt.content).toContain("WI-1");
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(promptsBeforeFinalAgentEnd + 1);
+    expect(harness.userMessages).toHaveLength(0);
   });
 
   test("bundled Planning-Consult pauses after planner output until /materia continue advances to Build", async () => {

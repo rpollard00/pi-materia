@@ -38,6 +38,50 @@ export { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 const DEFAULT_MAX_SOCKET_VISITS = 25;
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
+type AdvancementLifecycleDiagnostics = {
+  finalizedMultiTurn?: boolean;
+  sourceSocketId?: string;
+  sourceMateriaName?: string;
+  nextSocketTarget?: string;
+  dispatchTriggerMode?: string;
+};
+
+function advancementDiagnosticsEnabled(diagnostics?: AdvancementLifecycleDiagnostics): boolean {
+  return Boolean(diagnostics?.finalizedMultiTurn || process.env.PI_MATERIA_ADVANCEMENT_DEBUG?.trim());
+}
+
+function contextIdleState(ctx: ExtensionContext): boolean | string {
+  const maybeCtx = ctx as ExtensionContext & { isIdle?: unknown };
+  if (typeof maybeCtx.isIdle !== "function") return "unavailable";
+  try {
+    return maybeCtx.isIdle();
+  } catch (error) {
+    return `error:${errorMessage(error)}`;
+  }
+}
+
+async function appendAdvancementDiagnostic(ctx: ExtensionContext, state: MateriaCastState, stage: string, diagnostics?: AdvancementLifecycleDiagnostics, details: Record<string, unknown> = {}): Promise<void> {
+  if (!advancementDiagnosticsEnabled(diagnostics)) return;
+  await appendEvent(state.runState, "advancement_lifecycle", {
+    diagnostic: true,
+    stage,
+    castId: state.castId,
+    currentSocketId: currentSocketId(state),
+    sourceSocketId: diagnostics?.sourceSocketId,
+    materiaName: state.currentMateria ?? diagnostics?.sourceMateriaName,
+    sourceMateriaName: diagnostics?.sourceMateriaName,
+    phase: state.phase,
+    socketState: currentSocketState(state),
+    active: state.active,
+    awaitingResponse: state.awaitingResponse,
+    multiTurnFinalizing: state.multiTurnFinalizing,
+    nextSocketTarget: diagnostics?.nextSocketTarget,
+    dispatchTriggerMode: diagnostics?.dispatchTriggerMode,
+    isIdle: contextIdleState(ctx),
+    ...details,
+  });
+}
+
 async function updateSocketToolScope(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket): Promise<void> {
   if (!isAgentResolvedSocket(socket)) return;
   const emittedWarnings: ToolScopeRuntimeWarning[] = [];
@@ -314,10 +358,13 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     // explicit /materia continue finalization turn below.
     if (isMultiTurnResolvedAgentSocket(socket)) {
       if (wasAwaitingFinalization) {
+        const diagnostics: AdvancementLifecycleDiagnostics = { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "immediate-triggerTurn" };
+        await appendAdvancementDiagnostic(ctx, state, "finalized_multi_turn_handle_entry", diagnostics, { boundary: "sync_state_advancement" });
         state.multiTurnFinalizing = false;
         setCurrentSocketState(state, "idle");
         saveCastState(pi, state);
-        await completeSocket(pi, ctx, state, text, latest.entry.id, { finalizedMultiTurn: true });
+        await completeSocket(pi, ctx, state, text, latest.entry.id, { finalizedMultiTurn: true, diagnostics });
+        await appendAdvancementDiagnostic(ctx, state, "finalized_multi_turn_handle_exit", diagnostics, { boundary: "sync_state_advancement" });
         return;
       }
       state.multiTurnFinalizing = false;
@@ -351,9 +398,11 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   }
 }
 
-async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean } = {}): Promise<void> {
+async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean; diagnostics?: AdvancementLifecycleDiagnostics } = {}): Promise<void> {
   const config = await loadConfigFromState(state);
   const socket = currentSocketOrThrow(state);
+  const diagnostics = options.diagnostics ?? (options.finalizedMultiTurn ? { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "immediate-triggerTurn" } : undefined);
+  await appendAdvancementDiagnostic(ctx, state, "socket_completion_entry", diagnostics, { boundary: "sync_state_advancement", entryId });
   if (isMultiTurnResolvedAgentSocket(socket) && !options.finalizedMultiTurn) {
     throw new Error(`Internal multi-turn state error for socket "${socket.id}": completion requires explicit /materia continue finalization.`);
   }
@@ -389,19 +438,31 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   await assertBudget(config, state.runState, ctx);
 
   const nextTarget = advanceTarget ?? selectNextTarget(state, socket, parsed, config);
-  await advanceToSocket(pi, ctx, state, nextTarget, entryId);
+  if (diagnostics) diagnostics.nextSocketTarget = nextTarget ?? "end";
+  const nextDiagnostics = diagnostics ? { ...diagnostics } : undefined;
+  await appendAdvancementDiagnostic(ctx, state, "socket_completion_exit", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
+  await advanceToSocket(pi, ctx, state, nextTarget, entryId, nextDiagnostics);
 }
 
-async function advanceToSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string): Promise<void> {
+async function advanceToSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string, diagnostics?: AdvancementLifecycleDiagnostics): Promise<void> {
   const target = targetId ?? "end";
-  if (target === "end") return await finishCast(pi, ctx, state, entryId, "Cast complete.");
+  const nextDiagnostics = diagnostics ? { ...diagnostics, nextSocketTarget: target } : undefined;
+  await appendAdvancementDiagnostic(ctx, state, "socket_advancement_entry", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
+  if (target === "end") {
+    await finishCast(pi, ctx, state, entryId, "Cast complete.");
+    await appendAdvancementDiagnostic(ctx, state, "socket_advancement_exit", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
+    return;
+  }
   const socket = getResolvedPipelineSocket(state.pipeline, target);
   if (!socket) throw new Error(`Unknown graph target "${target}"`);
-  await startSocket(pi, ctx, state, socket);
+  await startSocket(pi, ctx, state, socket, nextDiagnostics);
+  await appendAdvancementDiagnostic(ctx, state, "socket_advancement_exit", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
 }
 
-async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket): Promise<void> {
+async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket, diagnostics?: AdvancementLifecycleDiagnostics): Promise<void> {
   const config = await loadConfigFromState(state);
+  const nextDiagnostics = diagnostics ? { ...diagnostics, nextSocketTarget: socket.id } : undefined;
+  await appendAdvancementDiagnostic(ctx, state, "next_socket_start_entry", nextDiagnostics, { boundary: "sync_state_advancement", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket) });
   const hasItem = setCurrentItem(state, socket);
   const loop = loopIteratorForSocket(state.pipeline, socket.id);
   if (loop && !hasItem) return await advanceToSocket(pi, ctx, state, resolveEmptyLoopExhaustionTarget(state, socket, loop.done), "foreach-empty");
@@ -427,6 +488,7 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   saveCastState(pi, state);
   updateWidget(ctx, state);
   ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
+  await appendAdvancementDiagnostic(ctx, state, "next_socket_start_exit", nextDiagnostics, { boundary: "sync_state_advancement", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), agentSocket: isAgentResolvedSocket(socket) });
 
   if (!isAgentResolvedSocket(socket)) {
     state.awaitingResponse = false;
@@ -457,7 +519,8 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
   saveCastState(pi, state);
   await updateSocketToolScope(pi, ctx, state, socket);
-  await sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket));
+  await appendAdvancementDiagnostic(ctx, state, "dispatch_scheduling", nextDiagnostics, { boundary: "async_prompt_dispatch_attempt", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), dispatchTriggerMode: "immediate-triggerTurn" });
+  await sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket), { diagnostics: nextDiagnostics });
 }
 
 async function executeUtilitySocket(state: MateriaCastState, socket: ResolvedMateriaUtilitySocket): Promise<{ output: string; entryId: string }> {
@@ -600,7 +663,9 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   ctx.ui.notify(`pi-materia cast complete. ${formatUsage(state.runState.usage, state.runState.usage.costKind)}`, "info");
 }
 
-async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, prompt: string, options: { skipProactiveCompaction?: boolean } = {}): Promise<void> {
+async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, prompt: string, options: { skipProactiveCompaction?: boolean; diagnostics?: AdvancementLifecycleDiagnostics } = {}): Promise<void> {
+  const diagnostics = options.diagnostics ? { ...options.diagnostics, dispatchTriggerMode: options.diagnostics.dispatchTriggerMode ?? "immediate-triggerTurn" } : undefined;
+  await appendAdvancementDiagnostic(ctx, state, "dispatch_execution_entry", diagnostics, { boundary: "async_prompt_dispatch_attempt", promptLength: prompt.length });
   state.activeTurnPrompt = prompt;
   saveCastState(pi, state);
   if (!options.skipProactiveCompaction) await maybeRunProactiveCompaction(pi, ctx, state);
@@ -623,6 +688,7 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
     display: false,
     details: { phase: state.phase, socketId: currentSocketId(state), materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, materiaModel: state.currentMateriaModel },
   }, { triggerTurn: true });
+  await appendAdvancementDiagnostic(ctx, state, "dispatch_execution_exit", diagnostics, { boundary: "async_prompt_dispatch_attempt", dispatchTriggerMode: "immediate-triggerTurn" });
 }
 
 export async function prepareAgentStartSystemPrompt(input: { pi: ExtensionAPI; session: ExtensionContext; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined> {
