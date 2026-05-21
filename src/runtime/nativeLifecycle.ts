@@ -358,7 +358,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     // explicit /materia continue finalization turn below.
     if (isMultiTurnResolvedAgentSocket(socket)) {
       if (wasAwaitingFinalization) {
-        const diagnostics: AdvancementLifecycleDiagnostics = { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "immediate-triggerTurn" };
+        const diagnostics: AdvancementLifecycleDiagnostics = { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "deferred-triggerTurn" };
         await appendAdvancementDiagnostic(ctx, state, "finalized_multi_turn_handle_entry", diagnostics, { boundary: "sync_state_advancement" });
         state.multiTurnFinalizing = false;
         setCurrentSocketState(state, "idle");
@@ -401,7 +401,7 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
 async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean; diagnostics?: AdvancementLifecycleDiagnostics } = {}): Promise<void> {
   const config = await loadConfigFromState(state);
   const socket = currentSocketOrThrow(state);
-  const diagnostics = options.diagnostics ?? (options.finalizedMultiTurn ? { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "immediate-triggerTurn" } : undefined);
+  const diagnostics = options.diagnostics ?? (options.finalizedMultiTurn ? { finalizedMultiTurn: true, sourceSocketId: socket.id, sourceMateriaName: socketMateriaName(socket), dispatchTriggerMode: "deferred-triggerTurn" } : undefined);
   await appendAdvancementDiagnostic(ctx, state, "socket_completion_entry", diagnostics, { boundary: "sync_state_advancement", entryId });
   if (isMultiTurnResolvedAgentSocket(socket) && !options.finalizedMultiTurn) {
     throw new Error(`Internal multi-turn state error for socket "${socket.id}": completion requires explicit /materia continue finalization.`);
@@ -519,8 +519,34 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
   saveCastState(pi, state);
   await updateSocketToolScope(pi, ctx, state, socket);
-  await appendAdvancementDiagnostic(ctx, state, "dispatch_scheduling", nextDiagnostics, { boundary: "async_prompt_dispatch_attempt", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), dispatchTriggerMode: "immediate-triggerTurn" });
-  await sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket), { diagnostics: nextDiagnostics });
+  await appendAdvancementDiagnostic(ctx, state, "dispatch_scheduling", nextDiagnostics, { boundary: "async_prompt_dispatch_attempt", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), dispatchTriggerMode: nextDiagnostics?.dispatchTriggerMode ?? "immediate-triggerTurn" });
+  const dispatch = () => sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket), { diagnostics: nextDiagnostics });
+  if (nextDiagnostics?.dispatchTriggerMode === "deferred-triggerTurn") {
+    scheduleDeferredPromptDispatch(pi, ctx, state, socket, dispatch, nextDiagnostics);
+    return;
+  }
+  await dispatch();
+}
+
+function scheduleDeferredPromptDispatch(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket, dispatch: () => Promise<void>, diagnostics?: AdvancementLifecycleDiagnostics): void {
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await appendAdvancementDiagnostic(ctx, state, "deferred_dispatch_execution", diagnostics, { boundary: "deferred_prompt_dispatch", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket) });
+        await dispatch();
+      } catch (error) {
+        const message = `Deferred pi-materia prompt dispatch failed for socket "${socket.id}": ${errorMessage(error)}`;
+        console.error(message, error);
+        try {
+          await appendEvent(state.runState, "deferred_dispatch_failure", { error: errorMessage(error), socket: socket.id, materia: socketMateriaName(socket), castId: state.castId, diagnostic: true });
+          await failCast(pi, ctx, state, new Error(message), `deferred-dispatch:${socket.id}`);
+        } catch (failError) {
+          console.error(`Failed to persist deferred dispatch failure for socket "${socket.id}": ${errorMessage(failError)}`, failError);
+          ctx.ui.notify(message, "error");
+        }
+      }
+    })();
+  }, 0);
 }
 
 async function executeUtilitySocket(state: MateriaCastState, socket: ResolvedMateriaUtilitySocket): Promise<{ output: string; entryId: string }> {

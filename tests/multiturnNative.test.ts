@@ -21,6 +21,10 @@ async function makeBundledDefaultHarness(): Promise<FakePiHarness> {
   return harness;
 }
 
+async function flushDeferredDispatch(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function multiTurnConfig(overrides: Record<string, unknown> = {}) {
   return {
     artifactDir: ".pi/pi-materia",
@@ -271,7 +275,9 @@ describe("native multi-turn runtime", () => {
     expect(buildState.awaitingResponse).toBe(true);
     expect(buildState.multiTurnFinalizing).not.toBe(true);
     expect(buildState.data.workItems).toEqual([{ id: "WI-1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(promptsBeforeFinalAgentEnd);
 
+    await flushDeferredDispatch();
     const triggeredMessages = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
     expect(triggeredMessages).toHaveLength(promptsBeforeFinalAgentEnd + 1);
     const buildPrompt = triggeredMessages.at(-1)?.message as any;
@@ -358,6 +364,7 @@ describe("native multi-turn runtime", () => {
     expect(finalPrompt.content).toContain("Return only JSON");
     harness.appendAssistantMessage(finalPlan);
     await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
 
     const buildState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(buildState.active).toBe(true);
@@ -806,6 +813,7 @@ describe("native multi-turn runtime", () => {
     await harness.runCommand("materia", "continue");
     harness.appendAssistantMessage(finalJson);
     await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
@@ -848,6 +856,7 @@ describe("native multi-turn runtime", () => {
     await harness.runCommand("materia", "continue");
     harness.appendAssistantMessage(finalText);
     await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
 
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(state.active).toBe(true);
