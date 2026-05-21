@@ -383,7 +383,8 @@ export function requeueQuest(board: QuestBoard, input: RequeueQuestInput): Domai
   const { currentCastId, ...rest } = quest!;
   void currentCastId;
   const nextQuest: Quest = { ...rest, status: "pending", updatedAt: input.now };
-  const nextBoard: QuestBoard = { ...board, updatedAt: input.now, quests: replaceAt(board.quests, questIndex, nextQuest) };
+  const quests = [...board.quests.filter((_, index) => index !== questIndex), nextQuest];
+  const nextBoard: QuestBoard = { ...board, updatedAt: input.now, quests };
   const validated = validateQuestBoard(nextBoard);
   if (!validated.ok) return validated;
   return ok(nextBoard);
