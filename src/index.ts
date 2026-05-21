@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStateRepository, type QuestStartResult } from "./application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStartOptions, type CastStateRepository, type QuestStartResult } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
@@ -56,7 +56,7 @@ export default function piMateria(pi: ExtensionAPI) {
     const after = adapters.states.loadActive(ctx);
     if (before?.active && after && after.castId === before.castId && !after.active) {
       const boards = createQuestBoardRepository(ctx.cwd);
-      if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state: after, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds });
+      if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state: after, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds, settlementSource: "agent_end" });
     }
   });
 
@@ -246,7 +246,7 @@ export default function piMateria(pi: ExtensionAPI) {
         ctx.ui.setStatus("materia", undefined);
         ctx.ui.notify(`pi-materia cast ${state.castId} aborted.`, "warning");
         const boards = createQuestBoardRepository(ctx.cwd);
-        if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds });
+        if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds, settlementSource: "command" });
         return;
       }
 
@@ -525,7 +525,7 @@ async function showQuestList(input: QuestCommandInput, args: QuestListArgs): Pro
   }
 }
 
-async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx: ExtensionContext; state: MateriaCastState; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; guard: Set<string> }): Promise<void> {
+async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx: ExtensionContext; state: MateriaCastState; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; guard: Set<string>; settlementSource: "agent_end" | "command" }): Promise<void> {
   if (input.guard.has(input.ctx.cwd)) return;
   input.guard.add(input.ctx.cwd);
   try {
@@ -537,7 +537,7 @@ async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx
     });
     if (!settled.quest) return;
     if (!settled.board.runner.enabled) return;
-    await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath });
+    await autoAdvanceQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, castOptions: input.settlementSource === "agent_end" ? { initialPromptDispatch: "defer-agent-trigger" } : undefined });
   } catch (error) {
     notifyQuestError(input.ctx, "auto-advance", error);
   } finally {
@@ -545,8 +545,8 @@ async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx
   }
 }
 
-async function autoAdvanceQuestBoard(input: { pi: ExtensionAPI; ctx: ExtensionContext; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string }): Promise<void> {
-  const result = await input.useCases.drainEnabledRunner({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath });
+async function autoAdvanceQuestBoard(input: { pi: ExtensionAPI; ctx: ExtensionContext; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; castOptions?: CastStartOptions }): Promise<void> {
+  const result = await input.useCases.drainEnabledRunner({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, options: input.castOptions });
   sendQuestStartedMessages({ pi: input.pi, ctx: input.ctx, started: result.started, firstMode: "auto-advance" });
 }
 

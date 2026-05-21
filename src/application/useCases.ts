@@ -536,11 +536,11 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     return { board: result.value, quest: result.value.quests.find((candidate) => candidate.id === quest.id) };
   }
 
-  async autoAdvanceNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board?: QuestBoard }): Promise<QuestStartResult | undefined> {
-    return (await this.drainEnabledRunner({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board: input.board, maxStarts: 1 })).started[0];
+  async autoAdvanceNext(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board?: QuestBoard; options?: CastStartOptions }): Promise<QuestStartResult | undefined> {
+    return (await this.drainEnabledRunner({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board: input.board, maxStarts: 1, options: input.options })).started[0];
   }
 
-  async drainEnabledRunner(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board?: QuestBoard; firstQuestId?: string; maxStarts?: number }): Promise<QuestDrainResult> {
+  async drainEnabledRunner(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board?: QuestBoard; firstQuestId?: string; maxStarts?: number; options?: CastStartOptions }): Promise<QuestDrainResult> {
     let board = input.board ?? await this.deps.boards.loadOrCreate();
     const started: QuestStartResult[] = [];
     const maxStarts = input.maxStarts ?? Math.max(1, board.quests.filter((quest) => quest.status === "pending").length + 1);
@@ -558,7 +558,7 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
       if (!quest) return { board, started, reason: firstQuestId ? "not_found" : "waiting" };
       firstQuestId = undefined;
 
-      const result = await this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board, quest });
+      const result = await this.startPendingQuest({ pi: input.pi, session: input.session, cwd: input.cwd, configuredPath: input.configuredPath, board, quest, options: input.options });
       started.push(result);
       board = result.board;
 
@@ -584,7 +584,7 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     return { board: next, reconciled };
   }
 
-  private async startPendingQuest(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board: QuestBoard; quest: Quest }): Promise<QuestStartResult> {
+  private async startPendingQuest(input: { pi: TPi; session: TSession; cwd: string; configuredPath?: string; board: QuestBoard; quest: Quest; options?: CastStartOptions }): Promise<QuestStartResult> {
     const active = this.deps.states.loadActive(input.session);
     if (active?.active) throw new ActiveCastConflictError(active.castId);
     const running = input.board.quests.find((quest) => quest.status === "running");
@@ -602,7 +602,7 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
 
     let started: Awaited<ReturnType<CastExecutionUseCases<TSession, TPi>["startCast"]>>;
     try {
-      started = await this.deps.casts.startCast({ pi: input.pi, session: input.session, cwd: input.cwd, request: input.quest.prompt, configuredPath: input.configuredPath, loadoutOverride: input.quest.loadoutOverride, prepared: selected, options: questCastStartOptions(input.quest, selected) });
+      started = await this.deps.casts.startCast({ pi: input.pi, session: input.session, cwd: input.cwd, request: input.quest.prompt, configuredPath: input.configuredPath, loadoutOverride: input.quest.loadoutOverride, prepared: selected, options: mergeCastStartOptions(input.options, questCastStartOptions(input.quest, selected)) });
     } catch (error) {
       const failed = recordQuestStartupFailure(input.board, input.quest, this.clock.now(), error);
       await this.deps.boards.save(failed);

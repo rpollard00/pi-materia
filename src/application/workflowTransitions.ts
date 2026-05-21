@@ -61,8 +61,11 @@ export function enforceEdgeLimit(state: MateriaCastState, from: string, edge: Ma
 export function setCurrentItem(state: MateriaCastState, socket: ResolvedMateriaSocket): boolean {
   const loop = resolvedSocketConfig(socket).foreach ?? loopIteratorForSocket(state.pipeline, socket.id);
   if (!loop) {
-    state.currentItemKey = undefined;
-    state.currentItemLabel = undefined;
+    const quest = isPlainObject(state.data.quest) ? state.data.quest : undefined;
+    const questId = typeof quest?.questId === "string" ? quest.questId : undefined;
+    const questTitle = typeof quest?.title === "string" ? quest.title : undefined;
+    state.currentItemKey = questId;
+    state.currentItemLabel = questTitle ?? questId;
     return true;
   }
   const cursor = loop.cursor ?? `${socket.id}Index`;
