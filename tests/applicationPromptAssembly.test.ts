@@ -118,6 +118,10 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Required payload fields:");
     expect(prompt).toContain('"workItems" at $.workItems: array');
     expect(prompt).toContain('Include "summary" only when a concise summary is useful downstream');
+    expect(prompt).toContain("Put item-specific architecture direction in each workItem.context.architecture");
+    expect(prompt).toContain('Include top-level "guidance", "decisions", or "risks" only for cross-cutting information');
+    expect(prompt).not.toContain("architectureGuidance");
+    expect(prompt).not.toContain("top-level architecture");
     expect(prompt).not.toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });
@@ -134,6 +138,9 @@ describe("application prompt assembly", () => {
     expect(prompt).not.toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain("Generator socket adapter context");
     expect(prompt).not.toContain("Emit top-level workItems");
+    expect(prompt).not.toContain("workItem.context.architecture");
+    expect(prompt).not.toContain("architectureGuidance");
+    expect(prompt).not.toContain("top-level architecture");
     expect(prompt).not.toContain("Required payload fields:");
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });

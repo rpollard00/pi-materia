@@ -133,6 +133,7 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
     "Generator socket adapter context: generated-output stage. Return JSON only and expose generated output as workItems.",
     `Generated output assignment: ${JSON.stringify(generator.output)} must come from $.${HANDOFF_WORK_ITEMS_FIELD}.`,
     `Emit top-level ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not place generated units in other fields.`,
+    "Put item-specific architecture direction in each workItem.context.architecture; do not invent sibling architecture fields for it.",
     Array.isArray(upstreamWorkItems) ? `Upstream generated workItems JSON for this generator stage:\n${JSON.stringify(upstreamWorkItems, null, 2)}` : undefined,
     "If upstream workItems are present, consume them as input context and transform/refine them into a new top-level workItems array.",
   ].filter(Boolean).join("\n");

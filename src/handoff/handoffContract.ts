@@ -83,8 +83,10 @@ export function formatSocketOutputFinalInstruction(requirements: SocketOutputReq
   if (requiredFields.length > 0) lines.push("Required payload fields:", ...requiredFields);
 
   if (requirements.requiredFields.some((requirement) => requirement.field === HANDOFF_WORK_ITEMS_FIELD)) {
-    lines.push(`For generated or planned work, emit top-level ${JSON.stringify(HANDOFF_WORK_ITEMS_FIELD)} as an array of work-item objects; do not place generated units in tasks or other fields.`);
+    lines.push(`For generated or planned work, emit required top-level ${JSON.stringify(HANDOFF_WORK_ITEMS_FIELD)} at $.${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not place generated units in tasks or other fields.`);
+    lines.push("Put item-specific architecture direction in each workItem.context.architecture; do not invent sibling architecture fields for it.");
     lines.push(`Include ${JSON.stringify(HANDOFF_SUMMARY_FIELD)} only when a concise summary is useful downstream or explicitly requested by the local prompt.`);
+    lines.push(`Include top-level ${JSON.stringify(HANDOFF_GUIDANCE_FIELD)}, ${JSON.stringify(HANDOFF_DECISIONS_FIELD)}, or ${JSON.stringify(HANDOFF_RISKS_FIELD)} only for cross-cutting information when the local prompt explicitly requests them or this socket lists those payload paths as consumed.`);
   }
 
   const consumedPaths = requirements.consumedPayloadPaths.map((path) => `- ${path.payloadPath} for assignment to ${path.targetPath}.`);
