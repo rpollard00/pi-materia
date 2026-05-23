@@ -331,6 +331,16 @@
   pointer-events: none;
 }
 
+.loadout-loop-cycle-edge-interactive {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.loadout-loop-cycle-edge-interactive:focus-visible {
+  outline: 2px solid rgb(103 232 249 / 0.9);
+  outline-offset: 4px;
+}
+
 .loadout-loop-cycle-edge path {
   fill: none;
   stroke: color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 46%, transparent);
@@ -831,6 +841,10 @@
     linear-gradient(135deg, rgb(15 23 42 / 0.98), rgb(2 6 23 / 0.96));
   padding: 1.5rem;
   box-shadow: 0 30px 80px rgb(0 0 0 / 0.52), 0 0 42px rgb(34 211 238 / 0.14);
+}
+
+.loop-control-modal {
+  width: min(44rem, 100%);
 }
 
 .socket-action-button {

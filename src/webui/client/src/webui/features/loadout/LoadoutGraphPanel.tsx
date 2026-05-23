@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, Dispatch, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from 'react';
 import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
@@ -9,6 +10,7 @@ import {
   isEntrySocket,
   socketColor,
   type PipelineConfig,
+  type PipelineLoop,
   type PipelineSocket,
 } from '../../../loadoutModel.js';
 import { edgeConditionLabels } from '../../constants.js';
@@ -139,6 +141,18 @@ interface LoadoutGraphPanelProps {
 }
 
 export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActions, socketModal }: LoadoutGraphPanelProps) {
+  const [selectedLoopId, setSelectedLoopId] = useState<string>();
+  const activeLoadoutIdentity = viewModel.activeLoadout?.id ?? viewModel.activeLoadoutName ?? '';
+  const selectedLoop = selectedLoopId ? viewModel.activeLoadout?.loops?.[selectedLoopId] : undefined;
+
+  useEffect(() => {
+    setSelectedLoopId(undefined);
+  }, [activeLoadoutIdentity]);
+
+  useEffect(() => {
+    if (selectedLoopId && !selectedLoop) setSelectedLoopId(undefined);
+  }, [selectedLoop, selectedLoopId]);
+
   return (
     <section className="fantasy-panel loadout-graph-panel p-6">
       <GraphToolbar
@@ -181,11 +195,15 @@ export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActio
         moveSocketRegionSelection={canvasActions.moveSocketRegionSelection}
         toggleEdgeCondition={canvasActions.toggleEdgeCondition}
         toggleLoopExitCondition={canvasActions.toggleLoopExitCondition}
+        openLoopControls={setSelectedLoopId}
       />
 
-      <LoopEditorPanel
+      <LoopControlModal
         activeLoadout={viewModel.activeLoadout}
+        loop={selectedLoop}
+        loopId={selectedLoopId}
         editPolicy={viewModel.editPolicy}
+        closeLoopControls={() => setSelectedLoopId(undefined)}
         breakLoop={loopActions.breakLoop}
         clearLoopExit={loopActions.clearLoopExit}
         socketDisplayLabel={viewModel.socketDisplayLabel}
@@ -294,6 +312,7 @@ interface GraphCanvasProps {
   moveSocketRegionSelection: (event: ReactPointerEvent<HTMLDivElement>) => void;
   toggleEdgeCondition: (edge: RoutedLoadoutEdge['edge']) => void;
   toggleLoopExitCondition: (loopId: string, routeId: string) => void;
+  openLoopControls: (loopId: string) => void;
 }
 
 function GraphCanvas(props: GraphCanvasProps) {
@@ -303,7 +322,7 @@ function GraphCanvas(props: GraphCanvasProps) {
     socketLayoutDrag, editPolicy, beginSocketLayoutDrag, beginSocketRegionSelection, cancelSocketLayoutDrag,
     cancelSocketRegionSelection, dragMateria, finishSocketLayoutDrag, finishSocketRegionSelection, handleDrop,
     handleGraphDrop, handleSocketClick, moveSocketLayoutDrag, moveSocketRegionSelection, toggleEdgeCondition,
-    toggleLoopExitCondition,
+    toggleLoopExitCondition, openLoopControls,
   } = props;
 
   return (
@@ -325,6 +344,7 @@ function GraphCanvas(props: GraphCanvasProps) {
           routedEdges={routedEdges}
           toggleEdgeCondition={toggleEdgeCondition}
           toggleLoopExitCondition={toggleLoopExitCondition}
+          openLoopControls={openLoopControls}
           editPolicy={editPolicy}
           width={loadoutGraph.width}
         />
@@ -365,11 +385,12 @@ interface EdgeLayerProps {
   routedEdges: RoutedLoadoutEdge[];
   toggleEdgeCondition: (edge: RoutedLoadoutEdge['edge']) => void;
   toggleLoopExitCondition: (loopId: string, routeId: string) => void;
+  openLoopControls: (loopId: string) => void;
   editPolicy: LoadoutEditPolicy;
   width: number;
 }
 
-function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, toggleEdgeCondition, toggleLoopExitCondition, editPolicy, width }: EdgeLayerProps) {
+function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, toggleEdgeCondition, toggleLoopExitCondition, openLoopControls, editPolicy, width }: EdgeLayerProps) {
   return (
     <svg className="loadout-edge-layer" width={width} height={height} aria-label="Loadout edges">
       <defs>
@@ -380,12 +401,32 @@ function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, t
         <marker id="materia-loop-exit-edge-arrow-satisfied" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-satisfied" /></marker>
         <marker id="materia-loop-exit-edge-arrow-unsatisfied" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-unsatisfied" /></marker>
       </defs>
-      {loopRegions.map((loop) => (
-        <g key={loop.id} className="loadout-loop-cycle-edge" data-testid={`loop-cycle-edge-${loop.id}`} aria-label={`${loop.label} cycle indicator`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
-          <path d={loop.cyclePath} className="loadout-loop-cycle-edge-echo" />
-          <path d={loop.cyclePath} markerEnd="url(#materia-loop-cycle-arrow)" />
-        </g>
-      ))}
+      {loopRegions.map((loop) => {
+        const activateLoop = () => openLoopControls(loop.id);
+        return (
+          <g
+            key={loop.id}
+            className="loadout-loop-cycle-edge loadout-loop-cycle-edge-interactive"
+            data-testid={`loop-cycle-edge-${loop.id}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open controls for ${loop.label} loop`}
+            style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); activateLoop(); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.stopPropagation();
+                activateLoop();
+              }
+            }}
+          >
+            <path d={loop.cyclePath} className="loadout-loop-cycle-edge-echo" />
+            <path d={loop.cyclePath} markerEnd="url(#materia-loop-cycle-arrow)" />
+          </g>
+        );
+      })}
       {routedEdges.map(({ edge, path, labelX, labelY, labelRotate, routeClass }) => {
         const isGeneratorInput = isGeneratorOutputEdge(edge, activeLoadout, materia);
         const isLoopExitEdge = edge.kind === 'loop-exit';
@@ -418,7 +459,14 @@ function LoopRegionsLayer({ loopRegions, loopSelectionRectangle }: LoopRegionsLa
   return (
     <>
       {loopRegions.map((loop) => (
-        <div key={loop.id} className="loadout-loop-region" data-testid={`loop-region-${loop.id}`} style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px`, '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties} title={loop.summary} aria-label={`${loop.label} loop: ${loop.summary}`}>
+        <div
+          key={loop.id}
+          className="loadout-loop-region"
+          data-testid={`loop-region-${loop.id}`}
+          style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px`, '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}
+          title={loop.summary}
+          aria-label={`${loop.label} loop: ${loop.summary}`}
+        >
           <span className="loadout-loop-badge">Loop</span><span className="loadout-loop-title">{loop.label}</span><span className="loadout-loop-summary">{loop.summary}</span>
         </div>
       ))}
@@ -478,9 +526,12 @@ function SocketCard(props: SocketCardProps) {
   );
 }
 
-interface LoopEditorPanelProps {
+interface LoopControlModalProps {
   activeLoadout?: PipelineConfig;
+  loop?: PipelineLoop;
+  loopId?: string;
   editPolicy: LoadoutEditPolicy;
+  closeLoopControls: () => void;
   breakLoop: (loopId: string) => void;
   clearLoopExit: (loopId: string) => void;
   socketDisplayLabel: (socketId: string) => string;
@@ -488,28 +539,39 @@ interface LoopEditorPanelProps {
   updateLoopExit: (loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) => void;
 }
 
-function LoopEditorPanel({ activeLoadout, editPolicy, breakLoop, clearLoopExit, socketDisplayLabel, socketLabel, updateLoopExit }: LoopEditorPanelProps) {
-  if (Object.keys(activeLoadout?.loops ?? {}).length === 0) return null;
+function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopControls, breakLoop, clearLoopExit, socketDisplayLabel, socketLabel, updateLoopExit }: LoopControlModalProps) {
+  const readonlyTitle = !editPolicy.canEdit ? editPolicy.reason : undefined;
+  const exit = useMemo(() => loop ? (loop.exit ?? { from: loop.sockets[loop.sockets.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' }) : undefined, [loop]);
+
+  if (!activeLoadout || !loop || !loopId || !exit) return null;
+
+  const loopLabel = formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets);
 
   return (
-    <div className="mt-4 rounded-2xl border border-cyan-200/15 bg-slate-950/55 p-4" data-testid="loop-editor-panel">
-      <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">Loop exits</h3>
-      <p className="mt-1 text-xs text-slate-400">Loop exits are compiled into runtime parse/advance control flow on the exit source; they are not decorative metadata. Validation will block conflicting socket parse, advance, or continuation routes before save/run.</p>
-      <div className="mt-3 grid gap-3">
-        {Object.entries(activeLoadout?.loops ?? {}).map(([loopId, loop]) => {
-          const exit = loop.exit ?? { from: loop.sockets[loop.sockets.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' };
-          return (
-            <div key={loopId} className="flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200/10 bg-slate-900/60 p-3" data-testid={`loop-editor-${loopId}`}>
-              <div className="min-w-48 flex-1"><div className="font-semibold text-cyan-100">{formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets)}</div><div className="text-xs text-slate-400">Members: {loop.sockets.map(socketDisplayLabel).join(', ')}</div></div>
-              <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit source<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-source-${loopId}`} value={exit.from} disabled={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>{loop.sockets.map((socketId) => <option key={socketId} value={socketId}>{socketDisplayLabel(socketId)}</option>)}</select></label>
-              <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit condition<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-condition-${loopId}`} value={exit.when} disabled={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined} onChange={(event) => updateLoopExit(loopId, { when: event.target.value as MateriaEdgeCondition })}>{Object.entries(edgeConditionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label className="text-xs uppercase tracking-[0.16em] text-slate-400">Exit target<select className="mt-1 block rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-cyan-100" data-testid={`loop-exit-target-${loopId}`} value={exit.to} disabled={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined} onChange={(event) => updateLoopExit(loopId, { to: event.target.value })}><option value="end">end</option>{Object.keys(activeLoadout?.sockets ?? {}).map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
-              {loop.exit && <button type="button" className="materia-button-secondary" data-testid={`loop-exit-clear-${loopId}`} disabled={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined} onClick={() => clearLoopExit(loopId)}>Clear exit</button>}
-              <button type="button" className="materia-button-secondary" data-testid={`loop-break-${loopId}`} disabled={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined} onClick={() => breakLoop(loopId)}>Break loop</button>
-            </div>
-          );
-        })}
-      </div>
+    <div className="socket-action-backdrop" role="presentation" onMouseDown={closeLoopControls}>
+      <section className="socket-action-modal loop-control-modal" role="dialog" aria-modal="true" aria-labelledby="loop-control-title" data-testid="loop-control-modal" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">loop controls</p>
+            <h3 id="loop-control-title" className="mt-1 text-2xl font-black text-white">{loopLabel}</h3>
+            <p className="mt-1 text-sm text-slate-300">Members: {loop.sockets.map(socketDisplayLabel).join(', ')}</p>
+          </div>
+          <button type="button" className="materia-button-secondary" onClick={closeLoopControls}>Close</button>
+        </div>
+        {!editPolicy.canEdit && <p className="mt-4 rounded-xl border border-amber-300/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="status">{editPolicy.reason}</p>}
+        <p className="mt-4 text-sm text-slate-300">Loop exits are compiled into runtime parse/advance control flow on the exit source; they are not decorative metadata. Validation will block conflicting socket parse, advance, or continuation routes before save/run.</p>
+        <div className="mt-5 grid gap-4" data-testid={`loop-editor-${loopId}`}>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="graph-field">Exit source<select data-testid={`loop-exit-source-${loopId}`} value={exit.from} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>{loop.sockets.map((socketId) => <option key={socketId} value={socketId}>{socketDisplayLabel(socketId)}</option>)}</select></label>
+            <label className="graph-field">Exit condition<select data-testid={`loop-exit-condition-${loopId}`} value={exit.when} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => updateLoopExit(loopId, { when: event.target.value as MateriaEdgeCondition })}>{Object.entries(edgeConditionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="graph-field">Exit target<select data-testid={`loop-exit-target-${loopId}`} value={exit.to} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => updateLoopExit(loopId, { to: event.target.value })}><option value="end">end</option>{Object.keys(activeLoadout.sockets ?? {}).map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {loop.exit && <button type="button" className="materia-button-secondary" data-testid={`loop-exit-clear-${loopId}`} disabled={!editPolicy.canEdit} title={readonlyTitle} onClick={() => clearLoopExit(loopId)}>Clear exit</button>}
+            <button type="button" className="materia-button-secondary" data-testid={`loop-break-${loopId}`} disabled={!editPolicy.canEdit} title={readonlyTitle} onClick={() => breakLoop(loopId)}>Break loop</button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

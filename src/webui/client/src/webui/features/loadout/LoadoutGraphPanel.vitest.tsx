@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import type { ComponentProps } from 'react';
-import { cleanup, render, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
 import { LoadoutGraphPanel } from './LoadoutGraphPanel.js';
@@ -209,6 +209,58 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(activeLoopSocket.getAttribute('aria-current')).toBe('step');
     expect(activeLoopSocket.getAttribute('aria-label')).toContain('active session socket');
     expect(activeLoopSocket.querySelector('.materia-socket-orb-stage > .materia-socket-active-indicator')).not.toBeNull();
+  });
+
+  it('opens loop controls from the rendered loop cycle target', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: { reviewLoop: { sockets: ['Socket-1', 'Socket-2'], exit: { from: 'Socket-2', when: 'satisfied' as const, to: 'end' } } },
+    };
+    const beginSocketRegionSelection = vi.fn();
+    const { getByRole, getByTestId, queryByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        loopRegions: [{ id: 'reviewLoop', label: 'Review', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }],
+      },
+      canvasActions: { ...base.props.canvasActions, beginSocketRegionSelection },
+    });
+
+    expect(queryByTestId('loop-control-modal')).toBeNull();
+    const cycleTarget = getByTestId('loop-cycle-edge-reviewLoop');
+    expect(cycleTarget.getAttribute('role')).toBe('button');
+    expect(cycleTarget.getAttribute('aria-label')).toBe('Open controls for Review loop');
+
+    fireEvent.pointerDown(cycleTarget);
+    fireEvent.click(cycleTarget);
+
+    expect(beginSocketRegionSelection).not.toHaveBeenCalled();
+    expect(getByRole('dialog')).toBe(getByTestId('loop-control-modal'));
+    expect(getByTestId('loop-editor-reviewLoop')).not.toBeNull();
+  });
+
+  it('opens loop controls from the rendered loop cycle target with keyboard activation', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: { keyboardLoop: { sockets: ['Socket-1', 'Socket-2'] } },
+    };
+    const { getByTestId, queryByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        loopRegions: [{ id: 'keyboardLoop', label: 'Keyboard', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#a78bfa', accentSoft: 'rgba(167, 139, 250, 0.12)' }],
+      },
+    });
+
+    expect(queryByTestId('loop-control-modal')).toBeNull();
+    fireEvent.keyDown(getByTestId('loop-cycle-edge-keyboardLoop'), { key: 'Enter' });
+    expect(getByTestId('loop-editor-keyboardLoop')).not.toBeNull();
   });
 
   it('marks socket cards readonly and disables socket action mutations', () => {
