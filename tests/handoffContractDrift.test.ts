@@ -77,7 +77,8 @@ describe("handoff contract drift regressions", () => {
     expect(plannerPrompt).toContain("workItems");
     expect(plannerPrompt).not.toContain('"tasks"');
     expect(interactivePrompt).toContain("Do not emit final workItems JSON during refinement");
-    expect(interactivePrompt).toContain("return compact JSON with summary, workItems");
+    expect(interactivePrompt).toContain("return compact JSON with workItems and any socket-relevant summary");
+    expect(interactivePrompt).toContain("workItems[].context.architecture");
 
     const maintainPrompt = String(rawDefault.materia?.Maintain?.prompt ?? "");
     const gitMaintainPrompt = String(rawDefault.materia?.GitMaintain?.prompt ?? "");

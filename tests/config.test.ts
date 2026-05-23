@@ -846,6 +846,25 @@ describe("config loadouts", () => {
       color: "materia-color-cyan",
     });
     expect(rawDefault.materia?.["Auto-Architect"]?.prompt).toContain("software architect materia");
+
+    const prompts = Object.fromEntries(
+      ["Auto-Architect", "Auto-Plan", "Interactive-Plan", "Build", "Chain-Context", "Cover"].map((name) => [
+        name,
+        String(rawDefault.materia?.[name]?.prompt ?? ""),
+      ]),
+    );
+    expect(prompts["Auto-Architect"]).toContain("Refine workItems directly; put per-item architecture guidance in workItems[].context.architecture");
+    expect(prompts["Auto-Architect"]).toContain("Include top-level guidance, decisions, or risks only for cross-cutting information when the socket asks for or consumes those fields");
+    expect(prompts["Build"]).toContain("Current workItem context, if any:");
+    expect(prompts["Build"]).toContain("Global cross-cutting guidance, if any:");
+    for (const [name, prompt] of Object.entries(prompts)) {
+      if (name !== "Build") expect(prompt, name).toContain("workItems");
+      expect(prompt, name).not.toContain("architectureGuidance");
+      expect(prompt, name).not.toContain("top-level architecture");
+      expect(prompt, name).not.toContain("architecture guidance in guidance and architecture context fields");
+      expect(prompt, name).not.toContain("return JSON with shape");
+    }
+
     expect(rawDefault.materia?.["Chain-Context"]).toMatchObject({
       type: "agent",
       tools: "readOnly",
