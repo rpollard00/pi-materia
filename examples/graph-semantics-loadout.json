@@ -147,7 +147,7 @@
     },
     "Auto-Plan": {
       "tools": "readOnly",
-      "prompt": "Return compact JSON with a concise summary and ordered workItems. Use workItems, not tasks.",
+      "prompt": "Return compact JSON with a concise summary and ordered workItems. Use workItems, not tasks; put per-item architecture direction in workItems[].context.architecture.",
       "generator": true
     },
     "Build": {

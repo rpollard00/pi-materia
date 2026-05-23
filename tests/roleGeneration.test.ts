@@ -97,6 +97,8 @@ describe("Materia role prompt generation service", () => {
     expect(prompt).toContain("- done behavior: end");
     expect(prompt).toContain("adapter metadata for assignment and iteration");
     expect(prompt).toContain("place generated units of work in workItems");
+    expect(prompt).toContain("put item-specific architecture direction in workItems[].context.architecture");
+    expect(prompt).toContain("avoid architectureGuidance or top-level architecture aliases");
     expect(prompt).toContain("only useful generator payload fields");
     expect(prompt).not.toContain("legacy placement-specific outputs such as tasks");
   });

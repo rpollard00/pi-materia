@@ -11,6 +11,20 @@ import {
 } from "../src/handoff/handoffContract.js";
 import { buildRoleGenerationPrompt } from "../src/handoff/roleGeneration.js";
 
+function collectObjectKeys(value: unknown, keys = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) collectObjectKeys(item, keys);
+    return keys;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      keys.add(key);
+      collectObjectKeys(child, keys);
+    }
+  }
+  return keys;
+}
+
 describe("handoff contract drift regressions", () => {
   test("central exports remain the canonical source consumed by prompt generation", () => {
     expect(HANDOFF_SATISFIED_FIELD).toBe("satisfied");
@@ -58,8 +72,23 @@ describe("handoff contract drift regressions", () => {
     const parsedExample = JSON.parse(exampleLoadout) as { materia?: Record<string, unknown> };
     expect(parsedExample.materia?.["Auto-Plan"]).toMatchObject({ generator: true });
     expect(exampleLoadout).toContain('"workItems"');
+    expect(exampleLoadout).toContain("workItems[].context.architecture");
     expect(exampleLoadout).not.toContain('"tasks"');
     expect(exampleLoadout).not.toContain('"generates"');
+  });
+
+  test("examples avoid invented architecture aliases while showing canonical per-item placement", async () => {
+    const exampleLoadout = await readFile(path.resolve("examples", "graph-semantics-loadout.json"), "utf8");
+    const parsedExample = JSON.parse(exampleLoadout);
+    const keys = collectObjectKeys(parsedExample);
+
+    expect(exampleLoadout).toContain("workItems[].context.architecture");
+    expect(exampleLoadout).not.toContain("architectureGuidance");
+    expect(exampleLoadout).not.toContain("top-level architecture");
+    expect(keys.has("architectureGuidance")).toBe(false);
+    expect(keys.has("tasks")).toBe(false);
+    expect(keys.has("generates")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(parsedExample, "architecture")).toBe(false);
   });
 
   test("bundled default config references the central handoff contract instead of inline schema blocks", async () => {

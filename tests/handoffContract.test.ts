@@ -38,6 +38,8 @@ describe("canonical handoff contract", () => {
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("must not redefine or alias reserved evaluator/route semantics");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("legacy placement terminology");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("do not emit unrelated canonical fields just to fill an envelope");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("do not emit architectureGuidance or top-level architecture as canonical handoff fields");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("Item-specific architecture direction belongs in workItems[].context.architecture");
   });
 
   test("uses reserved field type guidance in final JSON instructions and synthetic context prose", () => {
@@ -47,6 +49,8 @@ describe("canonical handoff contract", () => {
     expect(formatHandoffJsonFinalInstruction()).toContain("Emit only fields relevant to this socket's configured placement");
     expect(formatHandoffJsonFinalInstruction()).not.toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(HANDOFF_CONTRACT_DOC_TEXT).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
+    expect(HANDOFF_CONTRACT_DOC_TEXT).toContain("Generated units belong only in top-level workItems, not task, work, architectureGuidance, top-level architecture, or other aliases");
+    expect(HANDOFF_CONTRACT_DOC_TEXT).toContain("Item-specific architecture direction belongs in workItems[].context.architecture");
   });
 
   test("normalizes partial deterministic handoff outputs without dropping local extensions", () => {

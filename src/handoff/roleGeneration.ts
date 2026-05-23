@@ -204,7 +204,7 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
     `- items path: state.${canonical.output}`,
     `- cursor: ${canonical.cursor}`,
     `- done behavior: ${canonical.done}`,
-    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt should place generated units of work in workItems and ask for only useful generator payload fields such as a concise summary plus workItems.",
+    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt should place generated units of work in workItems, put item-specific architecture direction in workItems[].context.architecture, avoid architectureGuidance or top-level architecture aliases, and ask for only useful generator payload fields such as a concise summary plus workItems.",
   ].join("\n");
 }
 

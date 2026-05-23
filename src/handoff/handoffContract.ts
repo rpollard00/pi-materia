@@ -53,7 +53,7 @@ export const HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT = [
 export const HANDOFF_CONTRACT_PROMPT_TEXT = [
   "pi-materia canonical handoff runtime state:",
   `- The runtime carries a canonical state shape for handoff context: ${formatHandoffEnvelopeShape()}. JSON sockets should emit only the fields relevant to their configured placement, routing, and assignments.`,
-  `- Generated units of work belong in workItems, never tasks. Each work item has: ${formatHandoffWorkItemShape()}.`,
+  `- Generated units of work belong in workItems, never tasks. Each work item has: ${formatHandoffWorkItemShape()}. Item-specific architecture direction belongs in workItems[].context.architecture; do not emit architectureGuidance or top-level architecture as canonical handoff fields.`,
   "- Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context when a socket is explicitly asked to refine those fields; do not emit unrelated canonical fields just to fill an envelope.",
   "- If older prompts, examples, adapter metadata, or cast state mention tasks, treat that as legacy placement terminology and still emit generated work units as workItems.",
   `- Reserved evaluator/route fields are owned by evaluator and graph-flow adapters: ${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")}. Do not repurpose them for general payload data.`,
