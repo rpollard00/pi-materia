@@ -6,9 +6,10 @@ This historical audit covered materia-to-materia JSON handoff behavior before th
 
 ## Current canonical contract
 
-- JSON-parsed sockets must emit a top-level object when routing or advancement depends on handoff fields.
-- Reserved routing/evaluation fields are `satisfied`, `feedback`, and `missing`.
-- Generated units of work are `workItems`.
+- Agent-authored JSON handoffs may emit only top-level `workItems`, `satisfied`, and `context` fields relevant to the socket.
+- `satisfied` is the reserved boolean graph-control field for routing or advancement.
+- Generated units of work are `workItems`; each agent-produced item contains only `title:string` and `context:string`.
+- Utility/script materia may emit deterministic structured data under separate configured state patches; utility state is not part of the agent handoff contract.
 - Graph edge conditions are `always`, `satisfied`, and `not_satisfied`.
 - Runtime, artifacts, usage, monitor, and persisted state use socket terminology for socket identity and state.
 
@@ -23,4 +24,4 @@ Archived examples in older planning material should not be treated as active con
 - Do not add alternate boolean routing fields.
 - Do not route generated work through any field other than `workItems`.
 - Keep prompt text, runtime validation, graph validation, tests, and WebUI copy aligned.
-- Preserve handoff reserved fields: `workItems`, `satisfied`, `feedback`, and `missing`.
+- Preserve the small agent handoff fields: `workItems`, `satisfied`, and `context`.

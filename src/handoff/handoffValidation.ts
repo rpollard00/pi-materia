@@ -1,5 +1,9 @@
 import {
+  HANDOFF_CONTEXT_FIELD,
+  HANDOFF_ENVELOPE_FIELDS,
   HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
+  HANDOFF_SATISFIED_FIELD,
+  HANDOFF_WORK_ITEMS_FIELD,
 } from "./handoffContract.js";
 import { formatHandoffWorkItemShape, parseHandoffWorkItem } from "../domain/handoff.js";
 import { deriveSocketOutputRequirements, socketConsumesSatisfied, type SocketOutputFieldType, type SocketOutputRequirements } from "./socketOutputRequirements.js";
@@ -9,6 +13,8 @@ export interface HandoffValidationOptions {
   socketId?: string;
   socket?: MateriaPipelineSocketConfig;
   requirements?: SocketOutputRequirements;
+  /** True when this JSON output was authored by an agent/model rather than a utility/script. */
+  agentOutput?: boolean;
   /** True when normalized graph semantics identify this socket as a workItems-producing generator/planner. */
   workItemsProducer?: boolean;
 }
@@ -49,7 +55,12 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
     }]);
   }
 
-  if (!requirements) return value;
+  if (options.agentOutput) validateAgentTopLevelFields(value, issues);
+
+  if (!requirements) {
+    if (issues.length > 0) throw new HandoffJsonValidationError(socketId, issues);
+    return value;
+  }
 
   const consumedPayloadPathSet = new Set(requirements.consumedPayloadPaths.map((path) => path.payloadPath));
   for (const rule of requirements.reservedFieldTypeRules) {
@@ -98,7 +109,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
     }
   }
 
-  if (requiresWorkItemsShapeValidation(requirements) && Array.isArray(value.workItems)) {
+  if (options.agentOutput && Array.isArray(value.workItems)) {
     for (const [index, workItem] of value.workItems.entries()) {
       const result = parseHandoffWorkItem(workItem, `$.workItems.${index}`);
       if (!result.ok) {
@@ -107,7 +118,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
             path: issue.path,
             expected: expectedWorkItemFieldType(issue.path),
             message: `${issue.path}: ${issue.message}; expected canonical work item shape ${formatHandoffWorkItemShape()}.`,
-            reason: "Generator and workItems-assignment sockets must emit canonical workItems. Put item-specific architecture in workItems[].context.architecture and item constraints/dependencies/risks in the matching context arrays.",
+            reason: "Generator and workItems-assignment sockets must emit canonical workItems. Agent-produced workItems contain only title:string and context:string."
           });
         }
       }
@@ -130,7 +141,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
 
   if (issues.length > 0) {
     addLegacySatisfiedHint(value, issues);
-    addArchitectureAliasHints(value, issues, requiresWorkItemsShapeValidation(requirements));
+    addArchitectureAliasHints(value, issues, options.agentOutput === true);
     throw new HandoffJsonValidationError(socketId, issues);
   }
 
@@ -148,6 +159,44 @@ export function handoffValidationIssues(error: unknown): HandoffValidationIssue[
 function formatHandoffValidationErrorMessage(socketId: string, issues: HandoffValidationIssue[]): string {
   const detail = issues.map((issue) => issue.message).join(" ");
   return `Invalid handoff JSON output for socket "${socketId}": ${detail}`;
+}
+
+function validateAgentTopLevelFields(value: Record<string, unknown>, issues: HandoffValidationIssue[]): void {
+  const allowed = new Set<string>(HANDOFF_ENVELOPE_FIELDS);
+  for (const field of Object.keys(value)) {
+    if (!allowed.has(field)) {
+      issues.push({
+        path: `$.${field}`,
+        expected: "present",
+        message: `Unexpected top-level agent handoff field ${JSON.stringify(field)}. Agent JSON handoffs may only contain ${HANDOFF_ENVELOPE_FIELDS.map((name) => JSON.stringify(name)).join(", ")}.`,
+        reason: "Utility/script structured data belongs under utility state patches, not agent handoff JSON.",
+      });
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, HANDOFF_CONTEXT_FIELD) && typeof value[HANDOFF_CONTEXT_FIELD] !== "string") {
+    issues.push({
+      path: `$.${HANDOFF_CONTEXT_FIELD}`,
+      expected: "string",
+      message: `Agent handoff field ${JSON.stringify(HANDOFF_CONTEXT_FIELD)} must be a string when present.`,
+      reason: "Agent context is accumulated as plain explanatory text for downstream prompts.",
+    });
+  }
+  if (Object.prototype.hasOwnProperty.call(value, HANDOFF_SATISFIED_FIELD) && typeof value[HANDOFF_SATISFIED_FIELD] !== "boolean") {
+    issues.push({
+      path: `$.${HANDOFF_SATISFIED_FIELD}`,
+      expected: "boolean",
+      message: `Agent handoff field ${JSON.stringify(HANDOFF_SATISFIED_FIELD)} must be a boolean when present.`,
+      reason: "The satisfied field controls satisfied/not_satisfied routing.",
+    });
+  }
+  if (Object.prototype.hasOwnProperty.call(value, HANDOFF_WORK_ITEMS_FIELD) && !Array.isArray(value[HANDOFF_WORK_ITEMS_FIELD])) {
+    issues.push({
+      path: `$.${HANDOFF_WORK_ITEMS_FIELD}`,
+      expected: "array",
+      message: `Agent handoff field ${JSON.stringify(HANDOFF_WORK_ITEMS_FIELD)} must be an array when present.`,
+      reason: "Generated work belongs in workItems as title/context objects.",
+    });
+  }
 }
 
 function addLegacySatisfiedHint(value: Record<string, unknown>, issues: HandoffValidationIssue[]): void {
@@ -182,8 +231,8 @@ function addArchitectureAliasHints(value: Record<string, unknown>, issues: Hando
   issues.push({
     path: aliases.join(", "),
     expected: "string",
-    message: `Architecture alias field ${aliases.join(", ")} is not canonical for workItems payloads. Put item-specific architecture guidance at workItems[].context.architecture instead.`,
-    reason: "Generated units belong in top-level workItems, and item-specific architecture direction belongs in each workItems[].context.architecture string, not architectureGuidance or top-level architecture aliases.",
+    message: `Architecture alias field ${aliases.join(", ")} is not canonical for workItems payloads. Put item-specific guidance in the workItems[].context string instead.`,
+    reason: "Generated units belong in top-level workItems, and agent-produced workItems contain only title:string and context:string."
   });
 }
 
@@ -192,9 +241,7 @@ function requiresWorkItemsShapeValidation(requirements: SocketOutputRequirements
 }
 
 function expectedWorkItemFieldType(path: string): SocketOutputFieldType | "present" {
-  if (path.endsWith(".acceptance") || path.endsWith(".context.constraints") || path.endsWith(".context.dependencies") || path.endsWith(".context.risks")) return "array";
-  if (path.endsWith(".context")) return "object";
-  if (path.endsWith(".id") || path.endsWith(".title") || path.endsWith(".description") || path.endsWith(".context.architecture")) return "string";
+  if (path.endsWith(".title") || path.endsWith(".context")) return "string";
   return "present";
 }
 

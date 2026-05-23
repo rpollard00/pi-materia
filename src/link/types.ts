@@ -156,7 +156,7 @@ export interface PreviousCastContext {
   request?: string;
   /** Transient runtime-only prior run directory, scoped to known artifact roots. */
   runDir?: string;
-  /** Transient runtime-only canonical handoff JSON when available. */
+  /** Transient runtime-only previous agent handoff JSON when available; limited to the small handoff contract. */
   handoff?: PreviousCastHandoff;
   /** Transient runtime-only bounded artifact previews. */
   artifacts: PreviousCastArtifactSummary[];
@@ -164,16 +164,18 @@ export interface PreviousCastContext {
   loadedAt: number;
 }
 
+export interface PreviousCastHandoffWorkItem {
+  title: string;
+  context: string;
+}
+
 export interface PreviousCastHandoff {
-  summary?: string;
-  workItems?: unknown[];
-  guidance?: Record<string, unknown>;
-  decisions?: unknown[];
-  risks?: unknown[];
+  /** Previous agent handoff fields use the same small contract: generated work units. */
+  workItems?: PreviousCastHandoffWorkItem[];
+  /** Previous agent handoff fields use the same small contract: graph-control satisfaction. */
   satisfied?: boolean;
-  feedback?: string;
-  missing?: unknown[];
-  [key: string]: unknown;
+  /** Previous agent handoff fields use the same small contract: plain-text downstream context. */
+  context?: string;
 }
 
 export interface LinkCastStateData {

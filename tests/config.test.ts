@@ -853,12 +853,12 @@ describe("config loadouts", () => {
         String(rawDefault.materia?.[name]?.prompt ?? ""),
       ]),
     );
-    expect(prompts["Auto-Architect"]).toContain("Refine workItems directly; put per-item architecture guidance in workItems[].context.architecture");
-    expect(prompts["Auto-Architect"]).toContain("Include top-level guidance, decisions, or risks only for cross-cutting information when the socket asks for or consumes those fields");
+    expect(prompts["Auto-Architect"]).toContain("Refine workItems directly; put per-item architecture guidance in each workItem.context string");
+    expect(prompts["Auto-Architect"]).toContain("Include top-level context only for useful cross-cutting information when relevant");
     expect(prompts["Build"]).toContain("Current workItem context, if any:");
     expect(prompts["Build"]).toContain("Global cross-cutting guidance, if any:");
     for (const [name, prompt] of Object.entries(prompts)) {
-      if (name !== "Build") expect(prompt, name).toContain("workItems");
+      if (name !== "Build" && name !== "Cover") expect(prompt, name).toContain("workItems");
       expect(prompt, name).not.toContain("architectureGuidance");
       expect(prompt, name).not.toContain("top-level architecture");
       expect(prompt, name).not.toContain("architecture guidance in guidance and architecture context fields");

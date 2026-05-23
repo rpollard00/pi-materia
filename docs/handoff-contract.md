@@ -1,61 +1,51 @@
 # Materia handoff JSON contract
 
-JSON-parsed materia sockets hand off reusable work context to the rest of the graph by returning a single JSON object. Sockets are the placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
+JSON-parsed agent sockets hand off reusable work context by returning a single JSON object. Sockets are placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
 
-## Canonical runtime state and sparse socket payloads
+## Agent handoff fields
 
-pi-materia carries a canonical handoff state internally. JSON-producing sockets do **not** have to emit the whole state object. Each JSON socket should return only the fields relevant to its configured role, assignments, routing, and advancement; runtime validation checks those socket-local requirements and then merges the sparse payload into canonical state.
+Agent-authored handoff JSON is intentionally small. The only top-level fields in the agent contract are:
 
-The exact canonical runtime-carried fields and their scopes are:
-
-- `summary`: optional concise cross-cutting summary of the current handoff state or generated payload.
-- `workItems`: optional top-level array of generated or refined work units. Generated units belong only here, never in `tasks`, `task`, `work`, `architectureGuidance`, top-level `architecture`, or other aliases.
-- `guidance`: optional cross-cutting guidance object/string/notes only when socket-relevant or explicitly requested; do not use it for item-specific architecture notes.
-- `decisions`: optional cross-cutting decision records only when socket-relevant or explicitly requested.
-- `risks`: optional cross-cutting risks only when socket-relevant or explicitly requested; item risks belong in `workItems[].context.risks`.
-- `satisfied`: reserved evaluator/route-owned boolean for satisfied/not_satisfied graph control.
-- `feedback`: reserved evaluator-owned string for route/evaluation feedback, not a general guidance channel.
-- `missing`: reserved evaluator-owned array of missing items, not a general guidance channel.
+- `workItems`: an optional array of generated or refined work units.
+- `satisfied`: an optional boolean reserved for `satisfied` / `not_satisfied` graph control.
+- `context`: optional explanatory text for downstream agents.
 
 Shape reference:
 
 ```json
 {
-  "summary": "string",
   "workItems": [],
-  "guidance": {},
-  "decisions": [],
-  "risks": [],
   "satisfied": true,
-  "feedback": "string",
-  "missing": []
+  "context": "plain text handoff context"
 }
 ```
 
-Generated units of work use `workItems`, not `tasks`. Generated units belong in top-level `workItems`. pi-materia intentionally does not keep a `tasks` stability layer for newly generated work units; adapters should assign and iterate `workItems` directly. Item-specific architecture direction belongs in `workItems[].context.architecture`; item constraints, dependencies, and risks belong in the matching `workItems[].context` arrays:
+Do not ask agents to emit a broad envelope. Obsolete broad-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, `missing`, or `state` are not part of the agent handoff contract.
+
+## Generated work items
+
+Generated units of work use `workItems`, not `tasks`. Each agent-produced work item contains only `title:string` and `context:string`:
 
 ```json
 {
-  "id": "stable-id",
-  "title": "short title",
-  "description": "actionable work",
-  "acceptance": ["observable criteria"],
-  "context": {
-    "architecture": "Use the existing adapter boundary; keep routing outside reusable materia.",
-    "constraints": ["Keep prompt suffixes concise"],
-    "dependencies": [],
-    "risks": ["Broad wording could make agents emit unnecessary top-level fields"]
-  }
+  "title": "Document sparse JSON payloads",
+  "context": "Explain the small agent handoff contract and update examples that still show broad envelopes."
 }
 ```
 
+Agents should not invent work item `id` values, duplicate the title into `description`, provide `acceptance` arrays, or create nested `context` objects. Runtime/UI code may derive internal loop keys such as `WI-1` from position or loop state, but those keys are not model-authored handoff fields.
+
 For model output, return the object only: no markdown fences, prose, or extra commentary. Plain text sockets (`"parse": "text"`) do not use JSON output requirements.
 
-If a JSON-parsed agent socket returns malformed JSON or a payload missing fields required by that socket, pi-materia performs a bounded same-socket repair retry before applying assignments or advancing the graph. The retry asks for corrected JSON only; utility JSON validation still fails fast.
+## Utility/script state is separate
+
+Utility and script materia are deterministic producers, not model-authored agent handoffs. When configured, they may return structured data under a top-level `state` object for shallow merging into runtime state. That utility `state` patch is separate from agent handoff fields and should not be mixed into agent-authored JSON.
+
+Graph-control fields remain outside utility state: `workItems` drives loops and `satisfied` drives routing/advancement.
 
 ## Prompt layering
 
-Prompt assembly exposes canonical runtime context through synthetic cast context for JSON sockets that are ready to produce final output. Socket-local prompt suffixes stay thin and requirement-driven: JSON-only formatting, generated-output placement in `workItems`, consumed assignment paths, routing fields such as `satisfied`, and multi-turn finalization/refinement guidance. Do not copy the full runtime state schema into generated socket prompts or role-generation prompts; describe only the socket-relevant payload fields.
+Prompt assembly should describe only the socket-relevant fields. Generator/planner prompts should ask for `workItems` with `title` and `context`. Evaluator prompts should ask for `satisfied` plus textual `context` when useful. Do not copy a full runtime state schema into role-generation prompts or socket suffixes.
 
 ## Generator pipeline contract
 
@@ -63,18 +53,12 @@ Materia marked `generator: true` produce generated work as a sparse JSON payload
 
 Generator-to-generator pipelines behave like iterator transforms: the upstream generator emits `workItems`; the downstream generator consumes that context, transforms or filters it, and emits a new payload with its own `workItems`. `workItems` is the canonical generator payload; do not author `tasks`, `task`, `work`, or custom output names for generated work.
 
-## Reserved evaluator/route fields
-
-`satisfied`, `feedback`, and `missing` are route/evaluator-owned, not general-purpose content fields.
+## Reserved route field
 
 `satisfied` is the canonical routing field.
 
 - `satisfied` is reserved by pi-materia for `satisfied` / `not_satisfied` routing and advancement.
-- `feedback` and `missing` are reserved evaluator fields.
-- Reserved evaluator/route fields must not be repurposed by general payload logic or used as general guidance channels.
 - When present, `satisfied` must be a JSON boolean (`true` or `false`).
-- When present, `feedback` must be a JSON string.
-- When present, `missing` must be a JSON array of missing items.
 - Sockets whose graph control flow depends on `satisfied` or `not_satisfied` must return `satisfied`.
 - Do not use legacy aliases such as `passed` as routing fields. They are obsolete compatibility behavior if encountered, not canonical handoff fields.
 
@@ -97,21 +81,13 @@ At runtime, `when: "satisfied"` matches only `{ "satisfied": true }`, `when: "no
 
 ```json
 {
-  "summary": "Add sparse handoff documentation.",
   "workItems": [
     {
-      "id": "docs-contract-update",
       "title": "Document sparse JSON payloads",
-      "description": "Explain canonical runtime state and socket-specific JSON outputs.",
-      "acceptance": ["Docs show compact planner and evaluator payloads"],
-      "context": {
-        "architecture": "Keep materia reusable; keep placement logic in adapters.",
-        "constraints": ["Do not emit tasks"],
-        "dependencies": [],
-        "risks": []
-      }
+      "context": "Update handoff documentation and examples to show only title/context work items."
     }
-  ]
+  ],
+  "context": "Planner found stale examples that still show broad handoff fields."
 }
 ```
 
@@ -130,21 +106,6 @@ A socket can assign that payload into cast state:
 ```json
 {
   "satisfied": false,
-  "feedback": "The README still links to stale branch syntax.",
-  "missing": ["Update README edge examples"]
-}
-```
-
-## Maintainer-style example
-
-A socket that assigns maintenance diagnostics can return only the evaluator/control field plus consumed custom fields:
-
-```json
-{
-  "satisfied": true,
-  "feedback": "Checkpoint created.",
-  "checkpointCreated": true,
-  "vcs": "jj",
-  "commands": ["jj status", "jj describe -m ...", "jj new"]
+  "context": "The README still links to stale branch syntax."
 }
 ```

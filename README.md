@@ -292,7 +292,7 @@ Example loadout excerpt where planning and evaluator materia use a cheaper model
       "tools": "readOnly",
       "model": "openai/gpt-4o-mini",
       "thinking": "low",
-      "prompt": "Return compact JSON with a concise summary and ordered workItems."
+      "prompt": "Return compact JSON with ordered workItems. Each item has title and context strings."
     },
     "Build": {
       "tools": "coding",
@@ -330,7 +330,7 @@ Generic socket mechanics:
 - `advance`: advance a configured cursor
 - `limits`: socket/edge cycle safety
 
-Materia graphs are workflow state machines, not DAGs. Loops such as `Socket-4 (Build) -> Socket-5 (Auto-Eval) -> Socket-6 (Maintain) -> Socket-4 (Build)` are valid and model repeated work-item sections/retry paths; runtime socket-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Prefer declaring a top-level Generator materia with `generator: true`, wiring its JSON socket with `parse: "json"` and an assign entry for the canonical handoff path (`"workItems": "$.workItems"`), then adding a loadout-level `loops` region with `consumes: { from, output: "workItems" }`. pi-materia derives the loop consumer iterator path from the canonical Generator config (`state.workItems`) instead of tagging arbitrary loop members as iterators. Generated units of work intentionally use `workItems`; pi-materia does not emit a `tasks` output for new generated work units. Put per-item architecture direction in `workItems[].context.architecture`, and reserve top-level `guidance`, `decisions`, and `risks` for cross-cutting data only when a socket asks for or consumes those fields. See [docs/handoff-contract.md](docs/handoff-contract.md), [docs/graph-semantics.md](docs/graph-semantics.md), and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
+Materia graphs are workflow state machines, not DAGs. Loops such as `Socket-4 (Build) -> Socket-5 (Auto-Eval) -> Socket-6 (Maintain) -> Socket-4 (Build)` are valid and model repeated work-item sections/retry paths; runtime socket-visit and edge-traversal limits bound execution instead of config validation rejecting cycles. Prefer declaring a top-level Generator materia with `generator: true`, wiring its JSON socket with `parse: "json"` and an assign entry for the canonical handoff path (`"workItems": "$.workItems"`), then adding a loadout-level `loops` region with `consumes: { from, output: "workItems" }`. pi-materia derives the loop consumer iterator path from the canonical Generator config (`state.workItems`) instead of tagging arbitrary loop members as iterators. Generated units of work intentionally use `workItems`; pi-materia does not emit a `tasks` output for new generated work units. Agent-produced work items contain `title` and `context` strings only. Top-level agent handoff fields are limited to `workItems`, `satisfied`, and `context`; deterministic utility/script state belongs separately under utility `state` output when configured. See [docs/handoff-contract.md](docs/handoff-contract.md), [docs/graph-semantics.md](docs/graph-semantics.md), and [examples/graph-semantics-loadout.json](examples/graph-semantics-loadout.json).
 
 Top-level materia define agent capabilities and behavior with `tools`, `prompt`, optional `model`, optional `thinking`, optional `multiTurn`, and optional `generator: true` for list-producing Generator materia. The bundled Auto-Eval default uses a custom tool allowlist for read-oriented tools plus `bash` so it can run evaluation commands such as tests without edit/write tools; bash can still mutate files, so prompts should direct it not to modify project files. Set `"multiTurn": true` on a materia to let any agent socket using that materia pause for interactive refinement until the user runs `/materia continue`.
 
@@ -370,7 +370,7 @@ The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: t
         "Socket-3": {
           "materia": "Interactive-Plan",
           "parse": "json",
-          "assign": { "workItems": "$.workItems", "guidance": "$.guidance" },
+          "assign": { "workItems": "$.workItems" },
           "edges": [{ "when": "always", "to": "Build" }]
         },
         "Build": { "materia": "Build", "foreach": { "items": "state.workItems", "as": "workItem", "cursor": "workItemIndex", "done": "end" }, "edges": [{ "when": "always", "to": "end" }] }
@@ -380,7 +380,7 @@ The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: t
   "materia": {
     "Ignore-Artifacts": { "type": "utility", "script": { "kind": "shippedUtility", "name": "ensure-ignored.mjs", "runtime": "node" }, "parse": "json", "params": { "patterns": [".pi/pi-materia/"] }, "assign": { "artifactIgnore": "$" } },
     "Detect-VCS": { "type": "utility", "script": { "kind": "shippedUtility", "name": "detect-vcs.mjs", "runtime": "node" }, "parse": "json", "assign": { "vcs": "$" } },
-    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return compact JSON with a concise summary and generated workItems. Request: {{request}}" },
+    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return compact JSON with generated workItems. Each item has title and context strings. Request: {{request}}" },
     "Build": { "tools": "coding", "prompt": "Implement exactly the assigned workItem using adapter-provided guidance." }
   }
 }
@@ -432,7 +432,7 @@ The bundled defaults live at `config/default.json` and set `activeLoadout` to `F
 - `Planning-Consult`: the conversational planning workflow. The planning socket uses the `Interactive-Plan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate work-item JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
 - `Hojo-Consult`: a consultative workflow that starts with the same deterministic utility setup/discovery sockets, then combines interactive planning with architecture guidance before entering the Build/Eval/Maintain loop.
 
-When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final compact JSON plan, parses the socket-relevant fields such as `summary`, `workItems`, and optional guidance, merges them into canonical runtime state, and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
+When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final compact JSON plan, parses socket-relevant fields such as `workItems` and optional `context`, merges them into runtime state, and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 
 These loadouts are defined entirely as config using top-level reusable materia prompts and utility materia plus socket adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-8`); reusable behavior and appearance stay in top-level materia definitions referenced by socket `materia` fields, while displays can add context like `Socket-4 (Build)`. The first two bundled sockets reference the command-backed utility materia `Ignore-Artifacts` and `Detect-VCS`; Loadout config and WebUI save payloads use canonical `sockets` collections for loadout membership and loop membership. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
 

@@ -32,8 +32,8 @@ describe("handoff contract drift regressions", () => {
     expect(HANDOFF_EDGE_CONDITIONS).toEqual(["always", "satisfied", "not_satisfied"]);
 
     const generated = buildRoleGenerationPrompt("write a JSON evaluator role");
-    expect(generated).toContain("describe only socket-relevant payload fields");
-    expect(generated).toContain("never ask for the entire canonical envelope");
+    expect(generated).toContain("describe only socket-relevant fields from the small contract: workItems, satisfied, and context");
+    expect(generated).not.toContain("entire canonical envelope");
     expect(generated).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(generated).not.toContain('"satisfied" is the canonical boolean control field');
   });
@@ -45,8 +45,8 @@ describe("handoff contract drift regressions", () => {
 
     expect(docs).toContain("`satisfied` is the canonical routing field");
     expect(docs).toContain("When present, `satisfied` must be a JSON boolean (`true` or `false`).");
-    expect(docs).toContain("When present, `feedback` must be a JSON string.");
-    expect(docs).toContain("When present, `missing` must be a JSON array of missing items.");
+    expect(docs).toContain("Obsolete broad-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, `missing`, or `state` are not part of the agent handoff contract.");
+    expect(docs).toContain("Utility and script materia are deterministic producers, not model-authored agent handoffs.");
     expect(docs).toContain("`workItems`, not `tasks`");
     expect(docs).toContain('{ "when": "satisfied", "to": "Maintain" }');
     expect(docs).toContain('{ "when": "not_satisfied", "to": "Build"');
@@ -72,7 +72,7 @@ describe("handoff contract drift regressions", () => {
     const parsedExample = JSON.parse(exampleLoadout) as { materia?: Record<string, unknown> };
     expect(parsedExample.materia?.["Auto-Plan"]).toMatchObject({ generator: true });
     expect(exampleLoadout).toContain('"workItems"');
-    expect(exampleLoadout).toContain("workItems[].context.architecture");
+    expect(exampleLoadout).toContain("each item has only title and context strings");
     expect(exampleLoadout).not.toContain('"tasks"');
     expect(exampleLoadout).not.toContain('"generates"');
   });
@@ -82,7 +82,8 @@ describe("handoff contract drift regressions", () => {
     const parsedExample = JSON.parse(exampleLoadout);
     const keys = collectObjectKeys(parsedExample);
 
-    expect(exampleLoadout).toContain("workItems[].context.architecture");
+    expect(exampleLoadout).toContain("title and context strings");
+    expect(exampleLoadout).not.toContain("context.architecture");
     expect(exampleLoadout).not.toContain("architectureGuidance");
     expect(exampleLoadout).not.toContain("top-level architecture");
     expect(keys.has("architectureGuidance")).toBe(false);
@@ -96,8 +97,8 @@ describe("handoff contract drift regressions", () => {
     const prompt = String(rawDefault.materia?.["Auto-Eval"]?.prompt ?? "");
 
     expect(prompt).toContain("compact JSON with evaluator fields relevant to this socket");
-    expect(prompt).toContain("Set satisfied as a boolean, feedback as one concise string, and missing as an array of missing items");
-    expect(prompt).toContain("do not emit tasks");
+    expect(prompt).toContain("Set satisfied as a boolean for the evaluation result and include concise explanatory context");
+    expect(prompt).toContain("Do not emit feedback, missing, or tasks");
     expect(prompt).not.toContain('"passed": boolean');
 
     const plannerPrompt = String(rawDefault.materia?.["Auto-Plan"]?.prompt ?? "");
@@ -106,21 +107,24 @@ describe("handoff contract drift regressions", () => {
     expect(plannerPrompt).toContain("workItems");
     expect(plannerPrompt).not.toContain('"tasks"');
     expect(interactivePrompt).toContain("Do not emit final workItems JSON during refinement");
-    expect(interactivePrompt).toContain("return compact JSON with workItems and any socket-relevant summary");
-    expect(interactivePrompt).toContain("workItems[].context.architecture");
+    expect(interactivePrompt).toContain("return compact JSON with workItems and optional socket-relevant context");
+    expect(interactivePrompt).toContain("Each workItem must contain only title:string and context:string");
 
     const maintainPrompt = String(rawDefault.materia?.Maintain?.prompt ?? "");
     const gitMaintainPrompt = String(rawDefault.materia?.GitMaintain?.prompt ?? "");
-    expect(maintainPrompt).toContain("return compact JSON with satisfied, feedback, and maintenance payload fields");
-    expect(gitMaintainPrompt).toContain("return compact JSON with satisfied, feedback, and socket-specific maintenance payload fields");
+    expect(maintainPrompt).toContain("return compact JSON with satisfied and explanatory context");
+    expect(gitMaintainPrompt).toContain("return compact JSON with satisfied and explanatory context");
     expect(maintainPrompt).not.toContain("return JSON with shape");
     expect(gitMaintainPrompt).not.toContain("return JSON with shape");
 
     const chainContextPrompt = String(rawDefault.materia?.["Chain-Context"]?.prompt ?? "");
-    expect(chainContextPrompt).toContain("feedback as one concise diagnostic string");
-    expect(chainContextPrompt).toContain("missing as an array containing");
+    expect(chainContextPrompt).toContain("context explaining that state.previousCastContext is unavailable");
+    expect(chainContextPrompt).toContain("Each workItem must contain only title:string and context:string");
 
     const bundledPromptText = [plannerPrompt, interactivePrompt, prompt, maintainPrompt, gitMaintainPrompt].join("\n");
+    expect(bundledPromptText).not.toContain("workItems[].context.architecture");
+    expect(bundledPromptText).not.toContain("top-level guidance, decisions, or risks");
+    expect(bundledPromptText).not.toContain("feedback, and missing");
     expect(bundledPromptText).not.toContain("Return only the runtime-provided canonical handoff JSON object");
     expect(bundledPromptText).not.toContain("return only JSON using the runtime-provided canonical handoff contract");
     expect(bundledPromptText).not.toMatch(/(?:include|place|put|emit)\s+(?:generated\s+)?work items\s+in\s+tasks/i);
@@ -141,8 +145,8 @@ describe("handoff contract drift regressions", () => {
     }
 
     const feedbackTypePromptText = [bundledPromptText, chainContextPrompt].join("\n");
-    expect(feedbackTypePromptText).not.toMatch(/feedback\s+(?:as|must be|should be|is)\s+(?:an?\s+)?(?:array|list|\[\])/i);
-    expect(feedbackTypePromptText).not.toMatch(/missing\s+(?:as|must be|should be|is)\s+(?:a\s+)?(?:string|concise diagnostic)/i);
+    expect(feedbackTypePromptText).not.toMatch(/feedback\s+(?:as|must be|should be|is)\s+(?:an?\s+)?(?:array|list|\[\]|concise string|concise diagnostic)/i);
+    expect(feedbackTypePromptText).not.toMatch(/missing\s+(?:as|must be|should be|is)\s+(?:a\s+)?(?:string|concise diagnostic|array|list)/i);
 
     for (const [loadoutName, loadout] of Object.entries(rawDefault.loadouts ?? {}) as Array<[string, { sockets?: Record<string, { edges?: Array<{ when?: unknown }> }> }]>) {
       for (const [socketName, socket] of Object.entries(loadout.sockets ?? {})) {

@@ -44,7 +44,7 @@ function socket(id: string, config: Partial<ResolvedMateriaSocket["socket"]> = {
     id,
     socket: { id, type: "utility", materia: "Noop", ...config },
     materiaId: "Noop",
-    materia: { utility: "noop" },
+    materia: { type: "utility", utility: "noop" },
   } as ResolvedMateriaSocket;
 }
 
@@ -57,63 +57,65 @@ describe("workflow transitions", () => {
     expect(selectMatchingEdge([{ when: "not_satisfied", to: "retry" }, { when: "always", to: "end" }], false)?.to).toBe("retry");
   });
 
-  test("handoff envelope adopts canonical workItems and preserves evaluator fields", () => {
+  test("handoff envelope adopts only small-contract agent fields", () => {
     const cast = state();
-    applyGenericHandoffEnvelope(cast, { workItems: [{ id: "one" }], satisfied: true, feedback: "ok", missing: [] });
-    expect(cast.data.workItems).toEqual([{ id: "one" }]);
-    expect(cast.data.envelope).toMatchObject({ workItems: [{ id: "one" }], satisfied: true, feedback: "ok", missing: [] });
+    const workItems = [{ title: "One", context: "Do one." }];
+    applyGenericHandoffEnvelope(cast, { workItems, satisfied: true, context: "done", feedback: "ok", missing: [] });
+    expect(cast.data.workItems).toEqual(workItems);
+    expect(cast.data.context).toBe("[handoff context] done");
+    expect(cast.data.envelope).toEqual({ workItems, satisfied: true, context: "done" });
   });
 
-  test("sparse planner output updates workItems and summary without dropping carried context", () => {
+  test("sparse planner output updates title/context workItems without dropping carried context", () => {
     const cast = state({
       data: {
-        envelope: { guidance: { framework: "keep" }, decisions: ["keep decision"], risks: ["keep risk"] },
-        guidance: { framework: "keep" },
-        decisions: ["keep decision"],
-        risks: ["keep risk"],
-        workItems: [{ id: "old" }],
+        envelope: { context: "keep carried context" },
+        context: "keep carried context",
+        workItems: [{ title: "Old", context: "Old context." }],
       },
     });
     const planner = socket("Planner", { parse: "json" });
     planner.materia = { tools: "readOnly", prompt: "plan", generator: true };
-    const workItems = [{ id: "new" }];
+    const workItems = [{ title: "New", context: "New context." }];
 
-    applyGenericHandoffEnvelope(cast, { summary: "Plan created.", workItems }, planner);
+    applyGenericHandoffEnvelope(cast, { context: "Plan created.", workItems }, planner);
 
-    expect(cast.data.summary).toBe("Plan created.");
+    expect(cast.data.context).toBe("keep carried context\n\n[Planner Noop] Plan created.");
     expect(cast.data.workItems).toEqual(workItems);
-    expect(cast.data.guidance).toEqual({ framework: "keep" });
-    expect(cast.data.decisions).toEqual(["keep decision"]);
-    expect(cast.data.risks).toEqual(["keep risk"]);
-    expect(cast.data.envelope).toEqual({ guidance: { framework: "keep" }, decisions: ["keep decision"], risks: ["keep risk"], summary: "Plan created.", workItems });
+    expect(cast.data.envelope).toEqual({ context: "Plan created.", workItems });
   });
 
-  test("sparse evaluator output updates evaluator fields without disturbing carried context", () => {
+  test("sparse evaluator output updates satisfied and context without adopting obsolete evaluator fields", () => {
     const cast = state({
       data: {
-        envelope: { summary: "Existing", guidance: { keep: true }, decisions: ["d"], risks: ["r"] },
-        summary: "Existing",
-        guidance: { keep: true },
-        decisions: ["d"],
-        risks: ["r"],
+        envelope: { context: "Existing" },
+        context: "Existing",
       },
     });
 
-    applyGenericHandoffEnvelope(cast, { satisfied: false, feedback: "Missing route.", missing: ["Add route X"] }, socket("Eval", { parse: "json" }));
+    applyGenericHandoffEnvelope(cast, { satisfied: false, context: "Missing route.", feedback: "obsolete", missing: ["obsolete"] }, socket("Eval", { parse: "json" }));
 
-    expect(cast.data).toMatchObject({ summary: "Existing", guidance: { keep: true }, decisions: ["d"], risks: ["r"] });
+    expect(cast.data.context).toBe("Existing\n\n[Eval Noop] Missing route.");
     expect(cast.data).not.toHaveProperty("feedback");
-    expect(cast.data.envelope).toMatchObject({ summary: "Existing", guidance: { keep: true }, decisions: ["d"], risks: ["r"], satisfied: false, feedback: "Missing route.", missing: ["Add route X"] });
+    expect(cast.data.envelope).toEqual({ context: "Missing route.", satisfied: false });
   });
 
-  test("present empty canonical arrays intentionally overwrite while absent fields preserve context", () => {
+  test("utility state patches are shallow-merged without workItems or satisfied", () => {
+    const cast = state({ data: { existing: true, nested: { old: true }, workItems: [{ title: "Old", context: "Old." }], satisfied: false } });
+
+    applyGenericHandoffEnvelope(cast, { state: { vcs: { kind: "jj" }, nested: { fresh: true }, workItems: [{ title: "New", context: "New." }], satisfied: true } }, socket("DetectVcs", { parse: "json" }));
+
+    expect(cast.data).toMatchObject({ existing: true, vcs: { kind: "jj" }, nested: { fresh: true }, workItems: [{ title: "Old", context: "Old." }], satisfied: false });
+  });
+
+  test("obsolete broad-envelope arrays are ignored by generic handoff application", () => {
     const cast = state({ data: { decisions: ["old"], risks: ["old risk"], envelope: { decisions: ["old"], risks: ["old risk"] } } });
 
     applyGenericHandoffEnvelope(cast, { decisions: [], risks: [] });
 
-    expect(cast.data.decisions).toEqual([]);
-    expect(cast.data.risks).toEqual([]);
-    expect(cast.data.envelope).toMatchObject({ decisions: [], risks: [] });
+    expect(cast.data.decisions).toEqual(["old"]);
+    expect(cast.data.risks).toEqual(["old risk"]);
+    expect(cast.data.envelope).toEqual({ decisions: ["old"], risks: ["old risk"] });
   });
 
   test("selectNextTarget enforces traversal limits while routing on satisfied", () => {

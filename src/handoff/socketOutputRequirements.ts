@@ -1,6 +1,4 @@
 import {
-  HANDOFF_FEEDBACK_FIELD,
-  HANDOFF_MISSING_FIELD,
   HANDOFF_NOT_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_FIELD,
@@ -62,8 +60,6 @@ const SATISFACTION_CONDITIONS = new Set<MateriaEdgeCondition>([
 
 const RESERVED_JSON_FIELD_TYPES: readonly Omit<SocketOutputTypeRule, "required" | "reason">[] = [
   { field: HANDOFF_SATISFIED_FIELD, path: `$.${HANDOFF_SATISFIED_FIELD}`, type: "boolean" },
-  { field: HANDOFF_FEEDBACK_FIELD, path: `$.${HANDOFF_FEEDBACK_FIELD}`, type: "string" },
-  { field: HANDOFF_MISSING_FIELD, path: `$.${HANDOFF_MISSING_FIELD}`, type: "array" },
 ];
 
 export function deriveSocketOutputRequirements(input: SocketOutputRequirementsInput): SocketOutputRequirements {

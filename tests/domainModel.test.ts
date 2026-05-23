@@ -172,16 +172,16 @@ describe("pure materia/loadout domain", () => {
   });
 
   test("validates work item and reserved handoff control field invariants", () => {
-    expect(parseHandoffWorkItem({ id: "core-1", title: "Extract", description: "Do it", acceptance: ["tested"], context: { constraints: [], dependencies: [], risks: [] } }).ok).toBe(true);
+    expect(parseHandoffWorkItem({ title: "Extract", context: "Do it with thin adapters." }).ok).toBe(true);
 
-    const invalidWorkItem = parseHandoffWorkItem({ id: "", title: "", description: "", acceptance: "nope", context: { constraints: [], dependencies: [], risks: "bad" } });
+    const invalidWorkItem = parseHandoffWorkItem({ title: "", context: { constraints: [], dependencies: [], risks: "bad" } });
     expect(invalidWorkItem.ok).toBe(false);
-    if (!invalidWorkItem.ok) expect(invalidWorkItem.issues.map((issue) => issue.path)).toContain("workItems[].id");
+    if (!invalidWorkItem.ok) expect(invalidWorkItem.issues.map((issue) => issue.path)).toEqual(["workItems[].title", "workItems[].context"]);
 
-    expect(validateReservedHandoffFields({ satisfied: true, feedback: "", missing: [] }, "$", { requiresSatisfied: true }).ok).toBe(true);
-    const invalidReserved = validateReservedHandoffFields({ satisfied: "yes", feedback: [], missing: "none" }, "$", { requiresSatisfied: true });
+    expect(validateReservedHandoffFields({ satisfied: true }, "$", { requiresSatisfied: true }).ok).toBe(true);
+    const invalidReserved = validateReservedHandoffFields({ satisfied: "yes" }, "$", { requiresSatisfied: true });
     expect(invalidReserved.ok).toBe(false);
-    if (!invalidReserved.ok) expect(invalidReserved.issues.map((issue) => issue.path)).toEqual(["$.satisfied", "$.feedback", "$.missing"]);
+    if (!invalidReserved.ok) expect(invalidReserved.issues.map((issue) => issue.path)).toEqual(["$.satisfied"]);
   });
 
   test("creates prompt intent and cast updates without mutating inputs", () => {

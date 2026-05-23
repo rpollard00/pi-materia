@@ -35,7 +35,7 @@ A Generator materia uses `generator: true`. Runtime resolves that marker to the 
 ```json
 "Auto-Plan": {
   "tools": "readOnly",
-  "prompt": "Return compact JSON with a concise summary and ordered workItems.",
+  "prompt": "Return compact JSON with ordered workItems. Each item has title and context strings.",
   "generator": true
 }
 ```

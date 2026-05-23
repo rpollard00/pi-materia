@@ -185,7 +185,7 @@ export function buildRoleGenerationPrompt(
     "You generate concise pi-materia role prompt instructions.",
     "Return only the role prompt text to place in a Materia config `prompt` field.",
     "The prompt should define the agent's responsibilities, operating style, constraints, and expected output behavior.",
-    "When the generated role prompt asks for JSON or handoff output, describe only socket-relevant payload fields and never ask for the entire canonical envelope unless the brief explicitly requires every field.",
+    "When the generated role prompt asks for agent JSON or handoff output, describe only socket-relevant fields from the small contract: workItems, satisfied, and context.",
     "Do not include markdown fences, commentary about generation, or UI instructions.",
     roleGenerationContext(generates),
     profile.extraInstructions ? `Additional operator instructions:\n${profile.extraInstructions}` : undefined,
@@ -204,7 +204,7 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
     `- items path: state.${canonical.output}`,
     `- cursor: ${canonical.cursor}`,
     `- done behavior: ${canonical.done}`,
-    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt should place generated units of work in workItems, put item-specific architecture direction in workItems[].context.architecture, avoid architectureGuidance or top-level architecture aliases, and ask for only useful generator payload fields such as a concise summary plus workItems.",
+    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt should place generated units of work in workItems, use only title:string and context:string for each generated item, avoid ids/descriptions/acceptance arrays/nested context objects, and ask only for socket-relevant handoff fields.",
   ].join("\n");
 }
 

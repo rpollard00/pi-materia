@@ -93,11 +93,11 @@ This rule protects users from silent misrouting. `/materia link` does not guess 
 
 ## Previous-cast context
 
-`--from <castId>` validates that the referenced cast exists before a new cast starts. When valid, the new cast records lineage and makes bounded prior-cast information available as structured state. That state may include canonical handoff JSON, text artifacts, prior request/summary data, decisions, risks, `workItems`, `satisfied`, `feedback`, and `missing` when available.
+`--from <castId>` validates that the referenced cast exists before a new cast starts. When valid, the new cast records lineage and makes bounded prior-cast information available as structured state. That state may include prior agent handoff JSON (`workItems`, `satisfied`, and `context`), utility/script state, text artifacts, and prior request/summary data when available.
 
 Previous-cast context is not automatically prepended to every prompt. Context transformation belongs to ordinary materia or loadouts that opt in. The stock `Chain-Context` materia is intended to summarize previous-cast state for downstream targets, but `/materia link --from` does not require it.
 
-If `Chain-Context` is used without available previous-cast context, it degrades with a clear canonical handoff diagnostic: `satisfied: false`, `feedback` explaining that `state.previousCastContext` is unavailable, and `missing` listing `state.previousCastContext`. It must not invent lineage.
+If `Chain-Context` is used without available previous-cast context, it degrades with a clear small-contract handoff diagnostic: `satisfied: false` plus `context` explaining that `state.previousCastContext` is unavailable. It must not invent lineage.
 
 ## User-visible error cases and troubleshooting
 
@@ -109,16 +109,16 @@ All parse, resolution, previous-cast loading, and graph-compilation failures abo
 - **Ambiguous target name**: `/materia link Build -- <prompt>` fails when both a materia and a loadout named `Build` exist. Retry with `materia:Build` or `loadout:Build`.
 - **Unknown target**: prefixed or unprefixed targets that cannot be found fail before cast creation. Check spelling and whether the target exists in the effective config source.
 - **Missing previous cast id**: `/materia link --from <missingCastId> Build -- <prompt>` fails before cast creation and reports that the referenced cast could not be found under the artifact root. Use `/materia casts` to find recent cast ids, and do not pass paths or ids containing `/`, `\\`, or `..`.
-- **Chain-Context without input**: `Chain-Context` can be run without `--from`, but it will report a clear `satisfied: false` handoff because `state.previousCastContext` is missing. Either add `--from <castId>` or remove `Chain-Context` when no prior context is intended.
+- **Chain-Context without input**: `Chain-Context` can be run without `--from`, but it will report a clear `satisfied: false` handoff with explanatory `context` because `state.previousCastContext` is missing. Either add `--from <castId>` or remove `Chain-Context` when no prior context is intended.
 - **Unexpectedly large previous-cast context**: previous artifacts are bounded before being placed in structured state. If downstream output seems incomplete, inspect the prior cast artifacts directly or run a targeted follow-up that asks `Chain-Context` or another consumer to focus on named artifacts/decisions rather than expecting every byte to be forwarded.
 - **Ambiguous terminal stitching**: adjacent targets with multiple terminal outputs or multiple entry inputs fail before cast creation; v1 does not guess. Split the chain into smaller commands, simplify the loadout graph, or wait for future explicit socket mapping syntax.
 - **Invalid composed graph**: unsupported cycles, invalid socket shapes, or remapping conflicts introduced by composition fail before cast creation.
 
 ## Handoff stability and stability notes
 
-Canonical linked handoff/context envelopes should use `summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing` where those fields apply. `workItems` is the canonical generated-unit field; do not author new link examples, materia prompts, or loadouts that use `tasks` for generated work.
+Agent-authored linked handoffs should use only the small contract fields `workItems`, `satisfied`, and `context` where those fields apply. `workItems` is the canonical generated-unit field and each agent-produced item contains only `title` and `context` strings; do not author new link examples, materia prompts, or loadouts that use `tasks` or broad-envelope fields for generated work.
 
-Legacy aliases from older configs or tests, such as `passed` for satisfaction or `tasks` for generated work, are obsolete compatibility behavior if encountered. They are not part of the canonical `/materia link` contract, and `Chain-Context` should preserve or emit canonical fields rather than redefining reserved evaluator/route fields.
+Legacy aliases from older configs or tests, such as `passed` for satisfaction, `tasks` for generated work, or broad-envelope fields such as `feedback`/`missing`, are obsolete compatibility behavior if encountered. They are not part of the canonical agent handoff contract, and `Chain-Context` should preserve or emit canonical fields rather than redefining reserved route fields.
 
 ## v1 non-goals
 

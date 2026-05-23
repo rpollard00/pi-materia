@@ -71,6 +71,8 @@ The command writes its result to stdout. With `parse: "json"`, stdout must be va
 { "ok": true, "message": "HELLO WORLD" }
 ```
 
+Utility JSON is deterministic script output, not an agent handoff. Scripts may return structured data for `assign` paths, and when a utility is configured to patch shared runtime state directly that structured patch belongs under a top-level `state` object. Do not model utility output as a broad agent envelope; agent-authored handoffs are limited to `workItems`, `satisfied`, and `context`.
+
 ## stdout, stderr, exit codes, and timeouts
 
 - Exit code `0` means stdout is the utility result.
@@ -211,7 +213,9 @@ The referenced `Detect-VCS` utility materia owns `parse: "json"` and `assign: { 
 
 ## Utility generators
 
-A utility materia may set `generator: true` when a deterministic script should produce generated work items like a planning agent. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. The utility may emit a compact payload such as `{ "summary": "Plan created.", "workItems": [...] }`; runtime merges that sparse payload into canonical handoff state. Do not use generated-output aliases such as `tasks`.
+A utility materia may set `generator: true` when a deterministic script should produce generated work items for loop regions. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. Generated work item entries use the same minimal item shape as agent output: `title:string` plus `context:string`.
+
+Utility scripts should not emit broad agent-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, or `missing`. When deterministic structured data is needed in shared runtime state, put it under a separate top-level `state` object (for example, `{ "state": { "planMetadata": { "source": "script" } }, "workItems": [...] }`) or map script-owned output with explicit `assign` entries. Do not use generated-output aliases such as `tasks`.
 
 ## Bundled utility scripts
 

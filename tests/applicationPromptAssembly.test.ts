@@ -117,9 +117,9 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Final output format: Return only one top-level JSON object");
     expect(prompt).toContain("Required payload fields:");
     expect(prompt).toContain('"workItems" at $.workItems: array');
-    expect(prompt).toContain('Include "summary" only when a concise summary is useful downstream');
-    expect(prompt).toContain("Put item-specific architecture direction in each workItem.context.architecture");
-    expect(prompt).toContain('Include top-level "guidance", "decisions", or "risks" only for cross-cutting information');
+    expect(prompt).toContain("Each generated work item must contain only title:string and context:string");
+    expect(prompt).toContain("put all item-specific guidance in the workItem.context text string");
+    expect(prompt).toContain("array of objects with \"title\" and \"context\" strings");
     expect(prompt).not.toContain("architectureGuidance");
     expect(prompt).not.toContain("top-level architecture");
     expect(prompt).not.toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
@@ -217,7 +217,7 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Materia isolated context.");
     expect(prompt).toContain("Command-triggered finalization");
     expect(prompt).toContain("Canonical handoff contract context:");
-    expect(prompt).toContain("The canonical runtime state fields are summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing");
+    expect(prompt).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, and context");
     expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");
@@ -260,8 +260,8 @@ describe("application prompt assembly", () => {
 
     expect(prompt).toContain("If state.previousCastContext is missing or empty");
     expect(prompt).toContain("satisfied false");
-    expect(prompt).toContain('feedback as one concise diagnostic string');
-    expect(prompt).toContain('missing as an array containing "state.previousCastContext"');
+    expect(prompt).toContain("context explaining that state.previousCastContext is unavailable");
+    expect(prompt).toContain("Do not invent lineage");
     expect(prompt).toContain("Do not invent lineage");
   });
 
