@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { applyGenericHandoffEnvelope } from "../src/application/handoff.js";
-import { applyAdvance, resolveEmptyLoopExhaustionTarget, selectNextTarget } from "../src/application/workflowTransitions.js";
+import { applyAdvance, applyAssignments, evaluateCondition, resolveEmptyLoopExhaustionTarget, selectNextTarget } from "../src/application/workflowTransitions.js";
 import { evaluateHandoffRouteCondition, selectMatchingEdge } from "../src/domain/routing.js";
 import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket } from "../src/types.js";
 
@@ -64,11 +64,99 @@ describe("workflow transitions", () => {
     expect(cast.data.envelope).toMatchObject({ workItems: [{ id: "one" }], satisfied: true, feedback: "ok", missing: [] });
   });
 
+  test("sparse planner output updates workItems and summary without dropping carried context", () => {
+    const cast = state({
+      data: {
+        envelope: { guidance: { framework: "keep" }, decisions: ["keep decision"], risks: ["keep risk"] },
+        guidance: { framework: "keep" },
+        decisions: ["keep decision"],
+        risks: ["keep risk"],
+        workItems: [{ id: "old" }],
+      },
+    });
+    const planner = socket("Planner", { parse: "json" });
+    planner.materia = { tools: "readOnly", prompt: "plan", generator: true };
+    const workItems = [{ id: "new" }];
+
+    applyGenericHandoffEnvelope(cast, { summary: "Plan created.", workItems }, planner);
+
+    expect(cast.data.summary).toBe("Plan created.");
+    expect(cast.data.workItems).toEqual(workItems);
+    expect(cast.data.guidance).toEqual({ framework: "keep" });
+    expect(cast.data.decisions).toEqual(["keep decision"]);
+    expect(cast.data.risks).toEqual(["keep risk"]);
+    expect(cast.data.envelope).toEqual({ guidance: { framework: "keep" }, decisions: ["keep decision"], risks: ["keep risk"], summary: "Plan created.", workItems });
+  });
+
+  test("sparse evaluator output updates evaluator fields without disturbing carried context", () => {
+    const cast = state({
+      data: {
+        envelope: { summary: "Existing", guidance: { keep: true }, decisions: ["d"], risks: ["r"] },
+        summary: "Existing",
+        guidance: { keep: true },
+        decisions: ["d"],
+        risks: ["r"],
+      },
+    });
+
+    applyGenericHandoffEnvelope(cast, { satisfied: false, feedback: "Missing route.", missing: ["Add route X"] }, socket("Eval", { parse: "json" }));
+
+    expect(cast.data).toMatchObject({ summary: "Existing", guidance: { keep: true }, decisions: ["d"], risks: ["r"] });
+    expect(cast.data).not.toHaveProperty("feedback");
+    expect(cast.data.envelope).toMatchObject({ summary: "Existing", guidance: { keep: true }, decisions: ["d"], risks: ["r"], satisfied: false, feedback: "Missing route.", missing: ["Add route X"] });
+  });
+
+  test("present empty canonical arrays intentionally overwrite while absent fields preserve context", () => {
+    const cast = state({ data: { decisions: ["old"], risks: ["old risk"], envelope: { decisions: ["old"], risks: ["old risk"] } } });
+
+    applyGenericHandoffEnvelope(cast, { decisions: [], risks: [] });
+
+    expect(cast.data.decisions).toEqual([]);
+    expect(cast.data.risks).toEqual([]);
+    expect(cast.data.envelope).toMatchObject({ decisions: [], risks: [] });
+  });
+
   test("selectNextTarget enforces traversal limits while routing on satisfied", () => {
     const cast = state();
     const current = socket("Socket-1", { edges: [{ when: "satisfied", to: "done", maxTraversals: 1 }, { when: "always", to: "fallback" }] });
     expect(selectNextTarget(cast, current, { satisfied: true }, config)).toBe("done");
     expect(() => selectNextTarget(cast, current, { satisfied: true }, config)).toThrow(/edge traversal limit exceeded/);
+  });
+
+  test("routing and advancement use current parsed satisfied instead of stale carried state", () => {
+    const cast = state({ data: { satisfied: true, workItems: [{ id: "one" }] }, lastJson: { satisfied: true } });
+    const current = socket("Socket-1", {
+      edges: [{ when: "satisfied", to: "done" }, { when: "not_satisfied", to: "retry" }],
+      advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" },
+    });
+
+    expect(evaluateCondition("satisfied", cast, { satisfied: false })).toBe(false);
+    expect(applyAdvance(cast, current, { satisfied: false })).toBeUndefined();
+    expect(cast.cursors.workItemIndex).toBeUndefined();
+    expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
+  });
+
+  test("assignment uses current sparse parsed payload paths, including custom nested outputs", () => {
+    const cast = state({ data: { checkpoint: { created: false }, commands: ["old"], meta: { label: "old" } } });
+    const current = {
+      id: "Maintain",
+      socket: {
+        materia: "Maintain",
+        parse: "json",
+        assign: {
+          "checkpoint.created": "$.checkpointCreated",
+          commands: "$.commands",
+          "meta.label": "$.artifacts.0.label",
+        },
+      },
+      materia: { tools: "coding", prompt: "maintain" },
+    } satisfies ResolvedMateriaSocket;
+
+    applyAssignments(cast, current, { checkpointCreated: true, commands: ["jj status"], artifacts: [{ label: "snapshot" }] });
+
+    expect(cast.data.checkpoint).toEqual({ created: true });
+    expect(cast.data.commands).toEqual(["jj status"]);
+    expect(cast.data.meta).toEqual({ label: "snapshot" });
   });
 
   test("advance increments cursor and routes final-item exhaustion through canonical loop exits", () => {

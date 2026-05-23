@@ -20,20 +20,24 @@ export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unk
   if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
 
   const workItems = parsed[HANDOFF_WORK_ITEMS_FIELD];
-  if (Array.isArray(workItems) && workItems.length > 0 && shouldAdoptEnvelopeWorkItems(state, socket)) {
+  if (hasOwn(parsed, HANDOFF_WORK_ITEMS_FIELD) && Array.isArray(workItems) && shouldAdoptEnvelopeWorkItems(state, socket)) {
     state.data.workItems = workItems;
   }
   const guidance = parsed[HANDOFF_GUIDANCE_FIELD];
-  if (isPlainObject(guidance)) {
+  if (hasOwn(parsed, HANDOFF_GUIDANCE_FIELD) && isPlainObject(guidance)) {
     const existing = isPlainObject(state.data.guidance) ? state.data.guidance : {};
     state.data.guidance = { ...existing, ...guidance };
   }
   const summary = parsed[HANDOFF_SUMMARY_FIELD];
-  if (typeof summary === "string" && summary.trim()) state.data.summary = summary;
+  if (hasOwn(parsed, HANDOFF_SUMMARY_FIELD) && typeof summary === "string") state.data.summary = summary;
   const decisions = parsed[HANDOFF_DECISIONS_FIELD];
-  if (Array.isArray(decisions) && decisions.length > 0) state.data.decisions = decisions;
+  if (hasOwn(parsed, HANDOFF_DECISIONS_FIELD) && Array.isArray(decisions)) state.data.decisions = decisions;
   const risks = parsed[HANDOFF_RISKS_FIELD];
-  if (Array.isArray(risks) && risks.length > 0) state.data.risks = risks;
+  if (hasOwn(parsed, HANDOFF_RISKS_FIELD) && Array.isArray(risks)) state.data.risks = risks;
+}
+
+function hasOwn(value: Record<string, unknown>, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, field);
 }
 
 function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, socket?: ResolvedMateriaSocket): boolean {
