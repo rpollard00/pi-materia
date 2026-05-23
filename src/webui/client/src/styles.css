@@ -2153,8 +2153,20 @@
 
 .quest-create-fields {
   display: grid;
-  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+  grid-template-columns: minmax(12rem, 20rem) minmax(0, 1fr);
   gap: 0.85rem;
+}
+
+.quest-create-controls {
+  display: grid;
+  align-content: start;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.quest-create-controls .quest-form-field,
+.quest-prompt-field {
+  min-width: 0;
 }
 
 .quest-form-field {
@@ -2169,6 +2181,7 @@
 
 .quest-form-field select,
 .quest-form-field textarea {
+  min-width: 0;
   width: 100%;
   border-radius: 0.9rem;
   border: 1px solid rgb(103 232 249 / 0.24);
