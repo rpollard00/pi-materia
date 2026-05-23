@@ -88,8 +88,8 @@ describe("native JSON prompt handoff contract guidance", () => {
           params: {
             output: {
               summary: "seeded plan",
-              workItems: [{ id: "one", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "adapter owned", constraints: [], dependencies: [], risks: [] } }],
-              guidance: { architecture: "reuse materia; sockets adapt placement" },
+              workItems: [{ title: "One", context: "Do one. Architecture: adapter owned." }],
+              state: { guidance: { architecture: "reuse materia; sockets adapt placement" } },
               decisions: [],
               risks: [],
               satisfied: true,
@@ -107,8 +107,11 @@ describe("native JSON prompt handoff contract guidance", () => {
     const prompt = promptMessages(harness).at(-1) ?? "";
     expect(prompt).toContain("Build prompt body.");
     expect(prompt).toContain("Socket adapter context");
-    expect(prompt).toContain("Current workItem JSON");
-    expect(prompt).toContain('"id": "one"');
+    expect(prompt).toContain("Current workItem:");
+    expect(prompt).toContain("Title: One");
+    expect(prompt).toContain("Context:\nDo one. Architecture: adapter owned.");
+    expect(prompt).not.toContain("Current workItem JSON");
+    expect(prompt).not.toContain('"id": "one"');
     expect(prompt).toContain("Global guidance JSON");
     expect(prompt).toContain("reuse materia; sockets adapt placement");
     expect(prompt).toContain("return a concise implementation summary");
@@ -147,14 +150,9 @@ describe("native JSON prompt handoff contract guidance", () => {
     expectPromptIncludesConciseJsonFinalInstruction(firstPrompt);
 
     harness.appendAssistantMessage(JSON.stringify({
-      summary: "planned",
-      workItems: [{ id: "api", title: "API", description: "Design API", acceptance: ["schema agreed"], context: { architecture: "upstream", constraints: [], dependencies: [], risks: [] } }],
-      guidance: {},
-      decisions: [],
-      risks: [],
+      workItems: [{ title: "API", context: "Design API. Architecture: upstream." }],
+      context: "planned",
       satisfied: true,
-      feedback: "",
-      missing: [],
     }));
     await harness.emit("agent_end", { messages: [] });
     await flushDeferredDispatch();
@@ -162,7 +160,9 @@ describe("native JSON prompt handoff contract guidance", () => {
     const secondPrompt = promptMessages(harness).at(-1) ?? "";
     expect(secondPrompt).toContain("Refine upstream work items.");
     expect(secondPrompt).toContain("Upstream generated workItems JSON for this generator stage");
-    expect(secondPrompt).toContain('"id": "api"');
+    expect(secondPrompt).toContain('"title": "API"');
+    expect(secondPrompt).toContain('"context": "Design API. Architecture: upstream."');
+    expect(secondPrompt).not.toContain('"id": "api"');
     expect(secondPrompt).toContain("transform/refine them into a new top-level workItems array");
     expect(secondPrompt).not.toContain("must still output another JSON-parsed canonical handoff envelope with workItems");
     expect(secondPrompt).not.toContain('"tasks":');
@@ -260,7 +260,7 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(finalizationPrompt).toContain("Do not expose it during multi-turn refinement");
     expectPromptIncludesConciseJsonFinalInstruction(finalizationPrompt);
     expect(finalizationPrompt).toContain("Final output format: Return only one top-level JSON object");
-    expect(finalizationPrompt).toContain("Generated units of work use workItems, not tasks");
+    expect(finalizationPrompt).toContain("Generated units use workItems, not tasks");
   });
 
   test("does not append JSON handoff contract guidance to plain-text agent sockets", async () => {

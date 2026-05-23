@@ -709,11 +709,11 @@ describe("native same-socket recovery", () => {
     expect(harness.operationLog).toContain("compact");
     expect(latestState.active).toBe(true);
     expect(latestState.currentSocketId).toBe("Socket-2");
-    expect(latestState.currentItemKey).toBe("a");
+    expect(latestState.currentItemKey).toBe("WI-1");
     expect(latestState.currentItemLabel).toBe("Alpha");
     expect(latestState.cursors).toEqual({ itemCursor: 0 });
     expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 1 });
-    expect(latestState.taskAttempts).toEqual({ '["Socket-1","__singleton__"]': 1, '["Socket-2","a"]': 1 });
+    expect(latestState.taskAttempts).toEqual({ '["Socket-1","__singleton__"]': 1, '["Socket-2","WI-1"]': 1 });
     expect(latestState.recoveryAttempts).toBeDefined();
     const socketStartsBeforeCompletion = (await readEvents(harness)).filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2");
     expect(socketStartsBeforeCompletion).toHaveLength(1);
@@ -723,7 +723,7 @@ describe("native same-socket recovery", () => {
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.currentSocketId).toBe("Socket-2");
-    expect(latestState.currentItemKey).toBe("b");
+    expect(latestState.currentItemKey).toBe("WI-2");
     expect(latestState.currentItemLabel).toBe("Beta");
     expect(latestState.cursors).toEqual({ itemCursor: 1 });
     expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 2 });

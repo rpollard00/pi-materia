@@ -61,7 +61,7 @@ describe("core plugin characterization", () => {
     const prompt = promptMessages(harness).at(-1) ?? "";
     expect(prompt).toContain("Build preserve observable startup");
     expect(prompt).toContain("Socket adapter context");
-    expect(prompt).toContain("Current workItem JSON: null");
+    expect(prompt).toContain("Current workItem: none");
     expect(prompt).toContain("Global guidance JSON: {}");
     expect(harness.operationLog).toContain("triggerTurn");
 
@@ -88,7 +88,7 @@ describe("core plugin characterization", () => {
             "Socket-1": {
               materia: "Plan",
               parse: "json",
-              assign: { routedSummary: "$.summary", copiedFeedback: "$.feedback" },
+              assign: { summary: "$.context" },
               edges: [{ when: "satisfied", to: "Socket-2" }, { when: "not_satisfied", to: "end" }],
             },
             "Socket-2": { materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
@@ -97,22 +97,16 @@ describe("core plugin characterization", () => {
       },
       materia: {
         Plan: { tools: "readOnly", prompt: "Plan JSON." },
-        Build: { tools: "readOnly", prompt: "Build {{item.id}} using {{state.summary}}." },
+        Build: { tools: "readOnly", prompt: "Build {{item.title}} using {{state.summary}}." },
       },
     });
 
     await harness.runCommand("materia", "cast route one item");
     expect(loadActiveCastState(harness.ctx)?.currentSocketId).toBe("Socket-1");
     harness.appendAssistantMessage(JSON.stringify({
-      summary: "one item planned",
-      workItems: [{ id: "wi-1", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "thin adapters", constraints: [], dependencies: [], risks: [] } }],
-      guidance: { scope: "core only" },
-      decisions: ["keep webui contract"],
-      risks: ["regression"],
+      workItems: [{ title: "One", context: "Do one. Architecture: thin adapters." }],
+      context: "one item planned",
       satisfied: true,
-      feedback: "ready to build",
-      missing: [],
-      localDiagnostic: "not an envelope field",
     }));
 
     await harness.emit("agent_end", { messages: [] });
@@ -121,30 +115,24 @@ describe("core plugin characterization", () => {
     const state = loadActiveCastState(harness.ctx);
     expect(state?.active).toBe(true);
     expect(state?.currentSocketId).toBe("Socket-2");
-    expect(state?.currentItemKey).toBe("wi-1");
-    expect(state?.data.summary).toBe("one item planned");
-    expect(state?.data.workItems).toEqual([{ id: "wi-1", title: "One", description: "Do one", acceptance: ["done"], context: { architecture: "thin adapters", constraints: [], dependencies: [], risks: [] } }]);
-    expect(state?.data.guidance).toEqual({ scope: "core only" });
-    expect(state?.data.decisions).toEqual(["keep webui contract"]);
-    expect(state?.data.risks).toEqual(["regression"]);
-    expect(state?.data.routedSummary).toBe("one item planned");
-    expect(state?.data.copiedFeedback).toBe("ready to build");
+    expect(state?.currentItemKey).toBe("WI-1");
+    expect(state?.data.workItems).toEqual([{ title: "One", context: "Do one. Architecture: thin adapters." }]);
     expect(state?.data).not.toHaveProperty("feedback");
     expect(state?.data).not.toHaveProperty("missing");
-    expect(state?.data.envelope).toMatchObject({ summary: "one item planned", satisfied: true, feedback: "ready to build", missing: [] });
-    expect(state?.data.envelope).not.toHaveProperty("localDiagnostic");
 
     const buildPrompt = promptMessages(harness).at(-1) ?? "";
-    expect(buildPrompt).toContain("Build wi-1 using one item planned.");
-    expect(buildPrompt).toContain("Current workItem JSON");
-    expect(buildPrompt).toContain('"id": "wi-1"');
+    expect(buildPrompt).toContain("Build One using one item planned.");
+    expect(buildPrompt).toContain("Current workItem:");
+    expect(buildPrompt).toContain("Title: One");
+    expect(buildPrompt).toContain("Context:\nDo one. Architecture: thin adapters.");
+    expect(buildPrompt).not.toContain("Current workItem JSON");
+    expect(buildPrompt).not.toContain('"id": "wi-1"');
     expect(buildPrompt).toContain("Global guidance JSON");
-    expect(buildPrompt).toContain("core only");
 
     const jsonArtifact = JSON.parse(await readFile(path.join(state!.runDir, "sockets", "Socket-1", "1.json"), "utf8"));
     expect(jsonArtifact.workItems).toHaveLength(1);
     expect(jsonArtifact.satisfied).toBe(true);
-    expect(jsonArtifact.feedback).toBe("ready to build");
+    expect(jsonArtifact).not.toHaveProperty("feedback");
   });
 
   test.serial("loads persisted cast states newest-first and returns the active state from session custom entries", async () => {

@@ -102,6 +102,14 @@ export interface RequeueQuestInput {
   now: string;
 }
 
+export interface UpdatePendingQuestInput {
+  questId: string;
+  title: string;
+  prompt: string;
+  now: string;
+  loadoutOverride?: string;
+}
+
 export type QuestMovePlacement = "first" | "before" | "after";
 
 export const QUEST_ID_PREFIX = "quest-";
@@ -191,6 +199,41 @@ export function addQuest(board: QuestBoard, input: AddQuestInput): DomainResult<
   };
 
   return ok({ ...board, updatedAt: input.now, quests: [...board.quests, quest] });
+}
+
+export function updatePendingQuest(board: QuestBoard, input: UpdatePendingQuestInput): DomainResult<QuestBoard> {
+  const normalized = normalizeQuestBoard(board);
+  if (!normalized.ok) return normalized;
+
+  const issues: DomainIssue[] = [];
+  if (!isNonEmptyString(input.title)) issues.push({ path: "quest.title", message: "title is required" });
+  if (!isNonEmptyString(input.prompt)) issues.push({ path: "quest.prompt", message: "prompt is required" });
+  if (!isNonEmptyString(input.now)) issues.push({ path: "quest.now", message: "timestamp is required" });
+  if (input.loadoutOverride !== undefined && !isNonEmptyString(input.loadoutOverride)) issues.push({ path: "quest.loadoutOverride", message: "loadout override must be non-empty when provided" });
+
+  const questIndex = normalized.value.quests.findIndex((quest) => quest.id === input.questId);
+  const quest = questIndex >= 0 ? normalized.value.quests[questIndex] : undefined;
+  if (quest === undefined) {
+    issues.push({ path: "questId", message: `quest '${input.questId}' does not exist` });
+  } else if (quest.status !== "pending") {
+    issues.push({ path: "quest.status", message: `quest '${quest.id}' is ${quest.status}, not pending` });
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  const { loadoutOverride, ...rest } = quest!;
+  void loadoutOverride;
+  const nextQuest: Quest = {
+    ...rest,
+    title: input.title,
+    prompt: input.prompt,
+    updatedAt: input.now,
+    ...(input.loadoutOverride !== undefined ? { loadoutOverride: input.loadoutOverride } : {}),
+  };
+  const nextBoard: QuestBoard = { ...normalized.value, updatedAt: input.now, quests: replaceAt(normalized.value.quests, questIndex, nextQuest) };
+  const validated = validateQuestBoard(nextBoard);
+  if (!validated.ok) return validated;
+  return ok(nextBoard);
 }
 
 export function enableQuestRunner(board: QuestBoard, now: string): QuestBoard {

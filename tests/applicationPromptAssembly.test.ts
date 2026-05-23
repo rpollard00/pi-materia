@@ -9,7 +9,7 @@ function agentSocket(overrides: Partial<ResolvedMateriaAgentSocket> = {}): Resol
   return {
     id: "Socket-1",
     socket: { materia: "Build", parse: "text" },
-    materia: { tools: "readOnly", prompt: "Build {{ item.id }} for {{ request }}." },
+    materia: { tools: "readOnly", prompt: "Build {{ item.title }} for {{ request }}." },
     edges: [],
     ...overrides,
   } as ResolvedMateriaAgentSocket;
@@ -57,8 +57,8 @@ function state(socket: ResolvedMateriaAgentSocket, overrides: Partial<MateriaCas
     startedAt: 1,
     updatedAt: 1,
     data: {
-      item: { id: "item-1", title: "Item 1" },
-      workItems: [{ id: "item-1", title: "Item 1" }],
+      item: { title: "Item 1", context: "Implement item 1." },
+      workItems: [{ title: "Item 1", context: "Implement item 1." }],
       guidance: { next: "keep it small" },
     },
     cursors: { item: 0 },
@@ -68,7 +68,7 @@ function state(socket: ResolvedMateriaAgentSocket, overrides: Partial<MateriaCas
     edgeTraversals: {},
     runState: { castId: "cast-1", runDir: "/repo/.pi/pi-materia/cast-1", startedAt: 1, model: "test", usage: {}, currentSocketId: socket.id, currentMateria: "Build" },
     pipeline: { entry: socket, sockets: { [socket.id]: socket } },
-    currentItemKey: "item-1",
+    currentItemKey: "WI-1",
     currentItemLabel: "Item 1",
     ...overrides,
   } as MateriaCastState;
@@ -96,10 +96,13 @@ describe("application prompt assembly", () => {
     const prompt = buildSocketPrompt(state(socket), socket);
 
     expect(prompt).toContain("<materia-instructions>");
-    expect(prompt).toContain("Build item-1 for original request.");
+    expect(prompt).toContain("Build Item 1 for original request.");
     expect(prompt).toContain("Socket adapter context");
-    expect(prompt).toContain("Current workItem JSON");
-    expect(prompt).toContain('"id": "item-1"');
+    expect(prompt).toContain("Current workItem:");
+    expect(prompt).toContain("Title: Item 1");
+    expect(prompt).toContain("Context:\nImplement item 1.");
+    expect(prompt).not.toContain("Current workItem JSON");
+    expect(prompt).not.toContain('"id": "item-1"');
     expect(prompt).toContain("Global guidance JSON");
   });
 
@@ -269,7 +272,7 @@ describe("application prompt assembly", () => {
     const socket = agentSocket();
     const castState = state(socket, { lastAssistantText: "previous answer" });
 
-    expect(activeMateriaSystemPrompt(castState, socket.materia)).toContain("Build item-1 for original request.");
+    expect(activeMateriaSystemPrompt(castState, socket.materia)).toContain("Build Item 1 for original request.");
     const synthetic = buildSyntheticCastContext(castState);
     expect(synthetic).toContain("Cast id: cast-1");
     expect(synthetic).toContain("Original request: original request");

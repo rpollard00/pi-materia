@@ -322,7 +322,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Materia WebUI' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Materia' })).toBeTruthy();
     expect(await screen.findByRole('button', { name: /Full-Auto/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Planning-Consult/ })).toBeTruthy();
     expect(screen.getByTestId('socket-Socket-1')).toBeTruthy();
@@ -1810,7 +1810,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Live cast telemetry' })).toBeTruthy();
-    expect(screen.queryByText('Visual materia grid')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Loadout Grid' })).toBeNull();
   });
 
   it('falls back to Loadout for invalid tab values', async () => {
@@ -1819,7 +1819,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Visual materia grid')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Loadout Grid' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Live cast telemetry' })).toBeNull();
   });
 
@@ -1829,7 +1829,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Visual materia grid')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Loadout Grid' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Pipeline Graph' })).toBeNull();
     expect(screen.queryByTestId('pipeline-graph')).toBeNull();
   });
@@ -1846,7 +1846,7 @@ describe('Materia loadout grid editor', () => {
     expect(window.location.search).toContain('tab=materia-editor');
 
     window.history.back();
-    await waitFor(() => expect(screen.getByText('Visual materia grid')).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Loadout Grid' })).toBeTruthy());
   });
 
   it('supports click-to-swap staging before explicit persistence', async () => {

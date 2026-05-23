@@ -170,49 +170,21 @@ describe("generic engine helper mechanics", () => {
     expect(target).toEqual({ utility: { result: { value: 7 } } });
   });
 
-  test("preserves and augments the generic handoff envelope from JSON socket output", () => {
-    const state = makeState({
-      data: {
-        envelope: {
-          summary: "existing summary",
-          workItems: [],
-          guidance: { framework: "keep" },
-          decisions: ["keep decision"],
-          risks: [],
-          satisfied: false,
-          feedback: "old feedback",
-          missing: ["old missing"],
-        },
-        guidance: { framework: "keep", style: "concise" },
-      },
-    });
+  test("preserves small handoff fields from JSON socket output", () => {
+    const state = makeState({ data: { envelope: { satisfied: false }, context: "existing context" } });
     const parsed = {
-      summary: "updated summary",
-      workItems: [
-        {
-          id: "stable-id",
-          title: "Short title",
-          description: "Actionable work",
-          acceptance: ["observable criterion"],
-          context: { architecture: "adapter-owned flow", constraints: ["no tasks"], dependencies: [], risks: ["drift"] },
-        },
-      ],
-      guidance: { style: "detailed", testCommand: "bun test" },
-      decisions: ["use generic envelope"],
-      risks: ["routing regression"],
+      workItems: [{ title: "Short title", context: "Actionable work. Acceptance: observable criterion." }],
+      context: "updated downstream context",
       satisfied: true,
-      feedback: "looks good",
-      missing: [],
     };
 
     applyGenericHandoffEnvelope(state, parsed);
 
     expect(state.data.envelope).toMatchObject(parsed);
     expect(state.data.workItems).toEqual(parsed.workItems);
-    expect(state.data.guidance).toEqual({ framework: "keep", style: "detailed", testCommand: "bun test" });
-    expect(state.data.summary).toBe("updated summary");
-    expect(state.data.decisions).toEqual(["use generic envelope"]);
-    expect(state.data.risks).toEqual(["routing regression"]);
+    expect(state.data.context).toContain("existing context");
+    expect(state.data.context).toContain("[handoff context] updated downstream context");
+    expect(state.data).not.toHaveProperty("summary");
     expect(state.data).not.toHaveProperty("tasks");
   });
 
@@ -237,8 +209,8 @@ describe("generic engine helper mechanics", () => {
 
   test("assigns generated workItems, iterates current workItem, and advances on satisfied", () => {
     const workItems = [
-      { id: "one", title: "First", description: "Do first", acceptance: ["first done"], context: { constraints: [], dependencies: [], risks: [] } },
-      { id: "two", title: "Second", description: "Do second", acceptance: ["second done"], context: { constraints: [], dependencies: [], risks: [] } },
+      { title: "First", context: "Do first; first done." },
+      { title: "Second", context: "Do second; second done." },
     ];
     const state = makeState({ data: {}, cursors: {}, currentItemKey: undefined, currentItemLabel: undefined });
     const planner = {
@@ -249,7 +221,7 @@ describe("generic engine helper mechanics", () => {
     const builder = {
       id: "Socket-4",
       socket: { materia: "Build", parse: "text", foreach: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" } },
-      materia: { tools: "coding", prompt: "build {{item.id}}" },
+      materia: { tools: "coding", prompt: "build {{item.title}}" },
     } satisfies ResolvedMateriaSocket;
     const maintainer = {
       id: "Socket-6",
@@ -264,7 +236,7 @@ describe("generic engine helper mechanics", () => {
     expect(state.data.item).toEqual(workItems[0]);
     expect(state.data.workItem).toEqual(workItems[0]);
     expect(state.data.currentWorkItem).toEqual(workItems[0]);
-    expect(state.currentItemKey).toBe("one");
+    expect(state.currentItemKey).toBe("WI-1");
     expect(state.currentItemLabel).toBe("First");
 
     expect(applyAdvance(state, maintainer, { satisfied: false })).toBeUndefined();
@@ -278,11 +250,8 @@ describe("generic engine helper mechanics", () => {
 
   test("builder text prompt includes adapter-provided current workItem and global guidance", () => {
     const workItem = {
-      id: "validate-generic-handoff-flow",
       title: "Validate handoff flow with tests or fixtures",
-      description: "Add tests for generic handoff flow.",
-      acceptance: ["builder consumes current workItem plus guidance"],
-      context: { constraints: ["small safe edits"], dependencies: [], risks: [] },
+      context: "Add tests for generic handoff flow. Acceptance: builder consumes current workItem plus guidance. Constraints: small safe edits.",
     };
     const state = makeState({
       currentSocketId: "Socket-4",
@@ -294,17 +263,19 @@ describe("generic engine helper mechanics", () => {
           "Socket-4": {
             id: "Socket-4",
             socket: { materia: "Build", parse: "text" },
-            materia: { tools: "coding", prompt: "Build {{item.id}} with {{state.guidance.testCommand}}." },
+            materia: { tools: "coding", prompt: "Build {{item.title}} with {{state.guidance.testCommand}}." },
           },
         },
       },
     });
 
-    const prompt = activeMateriaSystemPrompt(state, { tools: "coding", prompt: "Build {{item.id}} with {{state.guidance.testCommand}}." });
+    const prompt = activeMateriaSystemPrompt(state, { tools: "coding", prompt: "Build {{item.title}} with {{state.guidance.testCommand}}." });
 
-    expect(prompt).toContain("Build validate-generic-handoff-flow with bun test.");
+    expect(prompt).toContain("Build Validate handoff flow with tests or fixtures with bun test.");
     expect(prompt).toContain("Socket adapter context");
-    expect(prompt).toContain("Current workItem JSON");
+    expect(prompt).toContain("Current workItem:");
+    expect(prompt).toContain("Title: Validate handoff flow with tests or fixtures");
+    expect(prompt).toContain("Context:\nAdd tests for generic handoff flow.");
     expect(prompt).toContain("Global guidance JSON");
     expect(prompt).toContain("materia are reusable behavior");
     expect(prompt).toContain("return a concise implementation summary");

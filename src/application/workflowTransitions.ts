@@ -82,11 +82,15 @@ export function setCurrentItem(state: MateriaCastState, socket: ResolvedMateriaS
   setPath(state.data, "currentWorkItem", item);
   if (alias !== "item") setPath(state.data, alias, item);
   if (alias === "workItem" || loop.items.includes("workItems")) setPath(state.data, "workItem", item);
-  const key = readObjectField(item, "id") ?? readObjectField(item, "key") ?? index;
+  const key = deriveLoopItemKey(loop.items, alias, index);
   const label = readObjectField(item, "title") ?? readObjectField(item, "name") ?? key;
-  state.currentItemKey = String(key);
+  state.currentItemKey = key;
   state.currentItemLabel = String(label);
   return true;
+}
+
+function deriveLoopItemKey(itemsPath: string, alias: string, index: number): string {
+  return alias === "workItem" || itemsPath.includes("workItems") ? `WI-${index + 1}` : String(index);
 }
 
 export function evaluateEdgeCondition(condition: string, state: MateriaCastState, parsed: unknown): boolean {

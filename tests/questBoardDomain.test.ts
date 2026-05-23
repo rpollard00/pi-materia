@@ -15,6 +15,7 @@ import {
   resolveQuestRef,
   startQuest,
   stopQuestRunner,
+  updatePendingQuest,
   validateQuestBoard,
   type QuestBoard,
 } from "../src/domain/index.js";
@@ -121,6 +122,39 @@ describe("quest board domain", () => {
     const duplicate = addQuest(added.value, { id: "q-1", title: "Again", prompt: "Do again", now: t2 });
     expect(duplicate.ok).toBe(false);
     if (!duplicate.ok) expect(duplicate.issues[0]?.path).toBe("quest.id");
+  });
+
+  test("updates pending quest content while preserving order and audit data", () => {
+    const board = boardWithTwoQuests();
+    const updated = updatePendingQuest(board, { questId: "q-1", title: "Updated title", prompt: "Updated prompt", loadoutOverride: "Full-Auto", now: t3 });
+
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(updated.value.updatedAt).toBe(t3);
+    expect(updated.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2"]);
+    expect(updated.value.quests[0]).toMatchObject({ id: "q-1", title: "Updated title", prompt: "Updated prompt", status: "pending", createdAt: t1, updatedAt: t3, attempts: 0, loadoutOverride: "Full-Auto" });
+    expect(updated.value.quests[1]).toEqual(board.quests[1]);
+  });
+
+  test("clears pending quest loadout override and rejects invalid updates", () => {
+    const withLoadout = addQuest(createQuestBoard({ now: t0 }), { id: "q-1", title: "First", prompt: "Do one", now: t1, loadoutOverride: "Full-Auto" });
+    expect(withLoadout.ok).toBe(true);
+    if (!withLoadout.ok) return;
+    const cleared = updatePendingQuest(withLoadout.value, { questId: "q-1", title: "First", prompt: "Do one updated", now: t2 });
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.value.quests[0]?.loadoutOverride).toBeUndefined();
+
+    const blank = updatePendingQuest(withLoadout.value, { questId: "q-1", title: "First", prompt: "", now: t2 });
+    expect(blank.ok).toBe(false);
+    if (!blank.ok) expect(blank.issues[0]).toMatchObject({ path: "quest.prompt", message: "prompt is required" });
+
+    const started = startQuest(withLoadout.value, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const nonPending = updatePendingQuest(started.value, { questId: "q-1", title: "First", prompt: "Do one updated", now: t3 });
+    expect(nonPending.ok).toBe(false);
+    if (!nonPending.ok) expect(nonPending.issues[0]?.message).toContain("not pending");
   });
 
   test("starts a pending quest and prevents a second running quest", () => {

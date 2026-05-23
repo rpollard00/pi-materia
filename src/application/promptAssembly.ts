@@ -6,7 +6,7 @@ import {
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
-import { currentItem, getPath } from "./workflowTransitions.js";
+import { currentItem, getPath, readObjectField } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
 // - synthetic cast context owns the shared handoff contract summary for JSON sockets in final-output mode;
@@ -118,10 +118,19 @@ export function socketAdapterContextInstruction(state: MateriaCastState, socket:
   const guidance = getPath(state.data, "guidance") ?? {};
   return [
     "Socket adapter context: this placement supplies the current workItem and global guidance; the reusable materia should focus on its behavior, not graph placement, routing, assignment, or iteration.",
-    `Current workItem JSON: ${JSON.stringify(workItem ?? null, null, 2)}`,
+    formatCurrentWorkItemForPrompt(workItem, state.currentItemLabel),
     `Global guidance JSON: ${JSON.stringify(guidance ?? {}, null, 2)}`,
-    "For text/build sockets, consume the current workItem plus global guidance and return a concise implementation summary. The socket adapter will handle downstream state and graph flow.",
+    "For text/build sockets, consume the current workItem title/context plus global guidance and return a concise implementation summary. The socket adapter will handle downstream state and graph flow.",
   ].join("\n");
+}
+
+export function formatCurrentWorkItemForPrompt(workItem: unknown, fallbackLabel?: string): string {
+  if (!workItem) return "Current workItem: none";
+  const titleValue = readObjectField(workItem, "title") ?? fallbackLabel;
+  const contextValue = readObjectField(workItem, "context");
+  const title = typeof titleValue === "string" && titleValue.trim() ? titleValue : "(untitled)";
+  const context = typeof contextValue === "string" ? contextValue : "";
+  return ["Current workItem:", `Title: ${title}`, "Context:", context].join("\n");
 }
 
 export function generatorJsonAdapterContextInstruction(state: MateriaCastState, socket: ResolvedMateriaAgentSocket): string | undefined {

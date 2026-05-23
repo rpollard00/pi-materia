@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineConfig } from '../../../loadoutModel.js';
-import type { AddQuestResponse } from '../../types.js';
-import { QuestCreateForm } from './QuestCreateForm.js';
+import type { AddQuestResponse, UpdateQuestResponse } from '../../types.js';
+import { QuestCreateForm, QuestEditForm } from './QuestCreateForm.js';
 
 const persistedLoadouts = {
   Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
@@ -22,6 +22,16 @@ const addQuestResponse = {
     updatedAt: '2026-05-23T00:00:00.000Z',
   },
 } satisfies AddQuestResponse;
+
+const updateQuestResponse = {
+  ok: true,
+  quest: {
+    ...addQuestResponse.quest,
+    title: 'Updated quest',
+    prompt: 'Updated prompt',
+    promptPreview: 'Updated prompt',
+  },
+} satisfies UpdateQuestResponse;
 
 afterEach(() => cleanup());
 
@@ -55,5 +65,71 @@ describe('QuestCreateForm layout', () => {
     expect(fields?.classList.contains('quest-create-fields')).toBe(true);
     expect(promptField?.parentElement).toBe(fields);
     expect(Array.from(fields?.children ?? [])).toEqual([controls, promptField]);
+  });
+
+  it('keeps create submit behavior with the shared quest form', async () => {
+    const onAddQuest = vi.fn(async () => addQuestResponse);
+    render(
+      <QuestCreateForm
+        persistedLoadouts={persistedLoadouts}
+        questDefaultLoadoutId="user:alpha"
+        setQuestDefaultLoadout={vi.fn(async (loadoutId: string | null) => loadoutId)}
+        onAddQuest={onAddQuest}
+        submitting={false}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/loadout override/i), { target: { value: 'Beta' } });
+    fireEvent.change(screen.getByLabelText(/prompt/i), { target: { value: '  Rescue the villager  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /add quest/i }));
+
+    await waitFor(() => expect(onAddQuest).toHaveBeenCalledWith({ prompt: 'Rescue the villager', loadoutOverride: 'Beta' }));
+    expect((await screen.findByRole('status')).textContent).toBe('Added quest: Quest 1');
+  });
+});
+
+describe('QuestEditForm', () => {
+  it('prefills editable fields and submits trimmed changes', async () => {
+    const onUpdateQuest = vi.fn(async () => updateQuestResponse);
+    const onCancel = vi.fn();
+    render(
+      <QuestEditForm
+        persistedLoadouts={persistedLoadouts}
+        initialValues={{ prompt: 'Old prompt', loadoutOverride: 'Alpha' }}
+        onUpdateQuest={onUpdateQuest}
+        onCancel={onCancel}
+        submitting={false}
+        questTitle="Old quest"
+      />,
+    );
+
+    expect((screen.getByLabelText(/prompt/i) as HTMLTextAreaElement).value).toBe('Old prompt');
+    expect((screen.getByLabelText(/loadout override/i) as HTMLSelectElement).value).toBe('Alpha');
+
+    fireEvent.change(screen.getByLabelText(/prompt/i), { target: { value: '  Updated prompt  ' } });
+    fireEvent.change(screen.getByLabelText(/loadout override/i), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /save quest/i }));
+
+    await waitFor(() => expect(onUpdateQuest).toHaveBeenCalledWith({ prompt: 'Updated prompt' }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('returns to create mode on cancel without saving', () => {
+    const onUpdateQuest = vi.fn(async () => updateQuestResponse);
+    const onCancel = vi.fn();
+    render(
+      <QuestEditForm
+        persistedLoadouts={persistedLoadouts}
+        initialValues={{ prompt: 'Old prompt', loadoutOverride: '' }}
+        onUpdateQuest={onUpdateQuest}
+        onCancel={onCancel}
+        submitting={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    expect(onCancel).toHaveBeenCalled();
+    expect(onUpdateQuest).not.toHaveBeenCalled();
   });
 });

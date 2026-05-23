@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { addQuest as postQuest, getQuests, reorderQuest as postReorderQuest, requeueQuest as postRequeueQuest } from '../../api/index.js';
-import type { AddQuestRequest, AddQuestResponse, QuestBoardResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest, RequeueQuestRequest } from '../../types.js';
+import { addQuest as postQuest, getQuests, reorderQuest as postReorderQuest, requeueQuest as postRequeueQuest, updateQuest as patchQuest } from '../../api/index.js';
+import type { AddQuestRequest, AddQuestResponse, QuestBoardResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest, RequeueQuestRequest, UpdateQuestRequest, UpdateQuestResponse } from '../../types.js';
 
 export const QUEST_BOARD_POLL_INTERVAL_MS = 5000;
 
@@ -164,12 +164,14 @@ export function useQuestBoard() {
   const [submitting, setSubmitting] = useState(false);
   const [reorderSubmitting, setReorderSubmitting] = useState(false);
   const [requeueSubmitting, setRequeueSubmitting] = useState(false);
+  const [updateSubmitting, setUpdateSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const mountedRef = useRef(false);
   const refreshSeqRef = useRef(0);
   const mutationSeqRef = useRef(0);
   const reorderSeqRef = useRef(0);
   const requeueSeqRef = useRef(0);
+  const updateSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const seq = ++refreshSeqRef.current;
@@ -213,6 +215,30 @@ export function useQuestBoard() {
       if (mountedRef.current) setSubmitting(false);
     }
   }, [refresh]);
+
+  const update = useCallback(async (questId: string, payload: UpdateQuestRequest): Promise<UpdateQuestResponse | undefined> => {
+    const mutationSeq = ++mutationSeqRef.current;
+    const updateSeq = ++updateSeqRef.current;
+    setUpdateSubmitting(true);
+    try {
+      const result = await patchQuest(questId, payload);
+      if (!mountedRef.current || mutationSeq !== mutationSeqRef.current) return undefined;
+      if (!result.response.ok || result.body.ok !== true) throw new Error(responseError(result.body, `Quest update failed with HTTP ${result.response.status}`));
+      const normalizedBoard = normalizeQuestBoardResponse(result.body.board);
+      if (normalizedBoard) {
+        ++refreshSeqRef.current;
+        setBoard(normalizedBoard);
+        setLoading(false);
+      }
+      setError(undefined);
+      return result.body;
+    } catch (caught) {
+      if (mountedRef.current && mutationSeq === mutationSeqRef.current) setError(caught instanceof Error ? caught.message : String(caught));
+      return undefined;
+    } finally {
+      if (mountedRef.current && updateSeq === updateSeqRef.current) setUpdateSubmitting(false);
+    }
+  }, []);
 
   const reorder = useCallback(async (payload: ReorderQuestRequest): Promise<QuestBoardResponse | undefined> => {
     const mutationSeq = ++mutationSeqRef.current;
@@ -271,5 +297,5 @@ export function useQuestBoard() {
     };
   }, [refresh]);
 
-  return { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting, requeue, requeueSubmitting };
+  return { board, loading, error, refresh, add, submitting, update, updateSubmitting, reorder, reorderSubmitting, requeue, requeueSubmitting };
 }

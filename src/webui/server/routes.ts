@@ -17,7 +17,7 @@ import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaGetRoleGenerationPreferenceCallback, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
 import type { MateriaSetQuestDefaultLoadoutCallback } from './questDefaultLoadout.js';
-import type { MateriaAddQuestResult, MateriaQuestBoardSource, MateriaAddQuestInput, MateriaReorderQuestInput, MateriaReorderQuestResult, MateriaRequeueQuestInput, MateriaRequeueQuestResult } from './quests.js';
+import type { MateriaAddQuestResult, MateriaQuestBoardSource, MateriaAddQuestInput, MateriaReorderQuestInput, MateriaReorderQuestResult, MateriaRequeueQuestInput, MateriaRequeueQuestResult, MateriaUpdateQuestInput, MateriaUpdateQuestResult } from './quests.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
 
@@ -35,6 +35,7 @@ export interface MateriaWebUiRouteDeps {
     setRoleGenerationPreference?: MateriaSetRoleGenerationPreferenceCallback;
     getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
     addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
+    updateQuest?: (input: MateriaUpdateQuestInput) => Promise<MateriaUpdateQuestResult>;
     reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
     requeueQuest?: (input: MateriaRequeueQuestInput) => Promise<MateriaRequeueQuestResult>;
     generateMateriaRole?: (request: MateriaRolePromptGenerationRequest) => Promise<MateriaRolePromptGenerationResult>;
@@ -96,7 +97,7 @@ export async function handleMateriaWebUiRequest(req: IncomingMessage, res: Serve
   }
 
   if (req.url?.startsWith('/api/quests')) {
-    await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest, reorderQuest: deps.session?.reorderQuest, requeueQuest: deps.session?.requeueQuest });
+    await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest, updateQuest: deps.session?.updateQuest, reorderQuest: deps.session?.reorderQuest, requeueQuest: deps.session?.requeueQuest });
     return;
   }
 

@@ -13,6 +13,8 @@ import type {
   ReorderQuestRequest,
   RequeueQuestRequest,
   RoleGenerationPreferenceResponse,
+  UpdateQuestRequest,
+  UpdateQuestResponse,
   RoleGenerationPreferenceSavePayload,
   RoleGenerationResponse,
   SaveTarget,
@@ -88,6 +90,14 @@ export async function getQuests(): Promise<QuestBoardResponse> {
 export async function addQuest(payload: AddQuestRequest): Promise<ApiResponse<AddQuestResponse>> {
   return fetchJson<AddQuestResponse>('/api/quests', {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateQuest(questId: string, payload: UpdateQuestRequest): Promise<ApiResponse<UpdateQuestResponse>> {
+  return fetchJson<UpdateQuestResponse>(`/api/quests/${encodeURIComponent(questId)}`, {
+    method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   });

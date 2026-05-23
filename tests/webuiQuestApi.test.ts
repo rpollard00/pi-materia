@@ -2,9 +2,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, movePendingQuest, requeueQuest, type QuestBoard } from "../src/domain/questBoard.js";
+import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, movePendingQuest, requeueQuest, updatePendingQuest, type QuestBoard, type QuestRunResult } from "../src/domain/questBoard.js";
 import { issuesToMessage } from "../src/domain/result.js";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult } from "../src/webui/server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult } from "../src/webui/server/index.js";
 
 type StartedServer = ReturnType<typeof createMateriaWebUiServer>["server"];
 
@@ -35,6 +35,7 @@ function questBoardFixture(): QuestBoard {
 async function startTestServer(options: {
   board?: QuestBoard;
   addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
+  updateQuest?: (input: MateriaUpdateQuestInput) => Promise<MateriaUpdateQuestResult>;
   reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
   requeueQuest?: (input: MateriaRequeueQuestInput) => Promise<MateriaRequeueQuestResult>;
   includeRequeueQuest?: boolean;
@@ -62,6 +63,13 @@ async function startTestServer(options: {
         if (!result.ok) return { ok: false, code: "validation_failed", message: "domain validation failed" };
         board = result.value;
         return { ok: true, boardPath, board, quest: board.quests.at(-1)! };
+      }),
+      updateQuest: options.updateQuest ?? (async (input) => {
+        const result = updatePendingQuest(board, { ...input, title: input.prompt, now: "2026-05-19T20:01:30.000Z" });
+        if (!result.ok) return { ok: false, code: "validation_failed", message: issuesToMessage(result.issues) };
+        board = result.value;
+        const quest = board.quests.find((candidate) => candidate.id === input.questId)!;
+        return { ok: true, boardPath, board, quest };
       }),
       reorderQuest: options.reorderQuest ?? (async (input) => {
         const result = movePendingQuest(board, { ...input, now: "2026-05-19T20:01:00.000Z" });
@@ -110,6 +118,54 @@ describe("GET /api/quests", () => {
     expect(body.counts).toMatchObject({ total: 6, pending: 2, running: 1, succeeded: 1, failed: 1, blocked: 1, completed: 1, terminal: 3 });
   });
 
+  test("orders completed quests by newest effective completion time without changing other groups", async () => {
+    const board = questBoardFixture();
+    const completedOld = board.quests.find((quest) => quest.id === "quest-complete")!;
+    const completedNewer = {
+      id: "quest-complete-newer",
+      title: "Raise the portcullis",
+      prompt: "Raise the portcullis",
+      status: "succeeded" as const,
+      createdAt: "2026-05-19T19:09:00.000Z",
+      updatedAt: "2026-05-19T19:10:00.000Z",
+      attempts: 1,
+      lastCastId: "cast-complete-newer",
+      lastResult: { status: "succeeded" as const, castId: "cast-complete-newer", finishedAt: "2026-05-19T19:10:00.000Z", message: "Portcullis raised" },
+    };
+    const completedLegacy = {
+      id: "quest-complete-legacy",
+      title: "Archive old maps",
+      prompt: "Archive old maps",
+      status: "succeeded" as const,
+      createdAt: "2026-05-19T19:10:30.000Z",
+      updatedAt: "2026-05-19T19:11:00.000Z",
+      attempts: 1,
+      lastCastId: "cast-complete-legacy",
+      lastResult: { status: "succeeded" as const, castId: "cast-complete-legacy", message: "Maps archived" } as unknown as QuestRunResult,
+    };
+    board.quests = [
+      board.quests.find((quest) => quest.id === "quest-active")!,
+      completedOld,
+      board.quests.find((quest) => quest.id === "quest-failed")!,
+      board.quests.find((quest) => quest.id === "quest-pending-1")!,
+      completedNewer,
+      board.quests.find((quest) => quest.id === "quest-blocked")!,
+      completedLegacy,
+      board.quests.find((quest) => quest.id === "quest-pending-2")!,
+    ];
+    const baseUrl = await startTestServer({ board });
+
+    const response = await fetch(`${baseUrl}/api/quests`);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.quests.map((quest: { id: string }) => quest.id)).toEqual(["quest-active", "quest-complete", "quest-failed", "quest-pending-1", "quest-complete-newer", "quest-blocked", "quest-complete-legacy", "quest-pending-2"]);
+    expect(body.completedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-complete-legacy", "quest-complete-newer", "quest-complete"]);
+    expect(body.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2"]);
+    expect(body.failedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-failed", "quest-blocked"]);
+  });
+
   test("returns a safe error envelope when quest board reads fail", async () => {
     const baseUrl = await startTestServer({ getQuestBoardThrows: true });
 
@@ -153,6 +209,39 @@ describe("POST /api/quests", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ ok: false, code: "invalid_loadout", error: "Unknown Materia loadout \"Missing\"." });
+  });
+});
+
+describe("PATCH /api/quests/:questId", () => {
+  test("updates a pending quest and returns the updated quest plus canonical board", async () => {
+    const baseUrl = await startTestServer();
+
+    const response = await fetch(`${baseUrl}/api/quests/quest-pending-1`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "  Gather sun herbs instead  ", loadoutOverride: "Full-Auto" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.quest).toMatchObject({ id: "quest-pending-1", title: "Gather sun herbs instead", prompt: "Gather sun herbs instead", status: "pending", loadoutOverride: "Full-Auto", attempts: 0 });
+    expect(body.board.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2"]);
+    expect(body.board.pendingQuests[0].updatedAt).toBe("2026-05-19T20:01:30.000Z");
+  });
+
+  test("clears loadout override when blank and rejects non-pending or blank updates", async () => {
+    const board = questBoardFixture();
+    board.quests.find((quest) => quest.id === "quest-pending-1")!.loadoutOverride = "Full-Auto";
+    const baseUrl = await startTestServer({ board });
+
+    const cleared = await fetch(`${baseUrl}/api/quests/quest-pending-1`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "Gather moon herbs", loadoutOverride: "   " }) });
+    const clearedBody = await cleared.json();
+    const blank = await fetch(`${baseUrl}/api/quests/quest-pending-1`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "   " }) });
+    const active = await fetch(`${baseUrl}/api/quests/quest-active`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "Change active" }) });
+
+    expect(cleared.status).toBe(200);
+    expect(clearedBody.quest.loadoutOverride).toBeUndefined();
+    expect(blank.status).toBe(400);
+    expect(await blank.json()).toEqual({ ok: false, error: "Quest prompt is required." });
+    expect(active.status).toBe(400);
+    expect(await active.json()).toEqual({ ok: false, code: "validation_failed", error: "quest.status: quest 'quest-active' is running, not pending" });
   });
 });
 

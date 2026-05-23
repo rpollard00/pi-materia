@@ -269,9 +269,12 @@ function GraphToolbar({ createLoopDisabled, createTaskIteratorLoop, editPolicy, 
   return (
     <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div>
-        <h2 className="text-2xl font-bold">Visual materia grid</h2>
-        <p className="text-sm text-slate-400">Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
-        <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.</p>
+        <h2 className="text-2xl font-bold">Loadout Grid</h2>
+        <details className="mt-2 text-sm text-slate-400">
+          <summary className="cursor-pointer text-cyan-100">How to use the loadout grid</summary>
+          <p>Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.</p>
+          <p className="mt-1 text-xs text-cyan-200/80">To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.</p>
+        </details>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="materia-button-secondary" data-testid="create-task-loop" onClick={createTaskIteratorLoop} disabled={createLoopDisabled} title={createLoopDisabled ? (!editPolicy.canEdit ? editPolicy.reason : 'Select loop sockets with shift-click or a drag box first.') : `Create loop from selected sockets: ${selectedLoopSocketIds.map(socketLabel).join(', ')}`}>Create Loop</button>

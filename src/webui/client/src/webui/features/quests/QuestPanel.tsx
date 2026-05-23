@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { QuestSummary } from '../../types.js';
-import { QuestCreateForm, type QuestDefaultLoadoutProps } from './QuestCreateForm.js';
+import { QuestCreateForm, QuestEditForm, type QuestDefaultLoadoutProps } from './QuestCreateForm.js';
 import { QuestDetail } from './QuestDetail.js';
 import { QuestLogSidebar } from './QuestLogSidebar.js';
 import { useQuestBoard } from './useQuestBoard.js';
@@ -27,8 +27,9 @@ interface QuestPanelProps extends QuestDefaultLoadoutProps {
 }
 
 export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout }: QuestPanelProps) {
-  const { board, loading, error, refresh, add, submitting, reorder, reorderSubmitting, requeue, requeueSubmitting } = useQuestBoard();
+  const { board, loading, error, refresh, add, submitting, update, updateSubmitting, reorder, reorderSubmitting, requeue, requeueSubmitting } = useQuestBoard();
   const [selectedQuestId, setSelectedQuestId] = useState<string>();
+  const [editingQuestId, setEditingQuestId] = useState<string>();
 
   const grouped = useMemo(() => {
     const allQuests = board?.quests ?? [];
@@ -59,6 +60,16 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
   }, [defaultDetailQuests, selectableQuests, selectedQuestId]);
 
   const selectedQuest = selectableQuests.find((quest) => quest.id === selectedQuestId);
+  const editingQuest = grouped.pendingQuests.find((quest) => quest.id === editingQuestId);
+  const selectedPendingQuest = selectedQuest?.status === 'pending' ? selectedQuest : undefined;
+
+  useEffect(() => {
+    if (!editingQuestId) return;
+    if (editingQuest) return;
+    setEditingQuestId(undefined);
+  }, [editingQuest, editingQuestId]);
+
+  const showCreateForm = !editingQuest;
 
   return (
     <section className="quest-workspace" aria-labelledby="quests-panel-title">
@@ -72,17 +83,34 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
           <span><strong>{grouped.activeQuest ? 1 : 0}</strong> active</span>
           <span><strong>{grouped.pendingQuests.length}</strong> pending</span>
           <span><strong>{grouped.completedQuests.length}</strong> complete</span>
+          {selectedPendingQuest ? (
+            <button className="quest-refresh-button" type="button" onClick={() => setEditingQuestId(selectedPendingQuest.id)} disabled={updateSubmitting}>
+              Edit selected quest
+            </button>
+          ) : null}
         </div>
       </div>
 
-      <QuestCreateForm
-        persistedLoadouts={persistedLoadouts}
-        questDefaultLoadoutId={questDefaultLoadoutId}
-        questDefaultLoadoutWarning={questDefaultLoadoutWarning}
-        setQuestDefaultLoadout={setQuestDefaultLoadout}
-        onAddQuest={add}
-        submitting={submitting}
-      />
+      {showCreateForm ? (
+        <QuestCreateForm
+          persistedLoadouts={persistedLoadouts}
+          questDefaultLoadoutId={questDefaultLoadoutId}
+          questDefaultLoadoutWarning={questDefaultLoadoutWarning}
+          setQuestDefaultLoadout={setQuestDefaultLoadout}
+          onAddQuest={add}
+          submitting={submitting}
+        />
+      ) : (
+        <QuestEditForm
+          key={editingQuest.id}
+          persistedLoadouts={persistedLoadouts}
+          initialValues={{ prompt: editingQuest.prompt, loadoutOverride: editingQuest.loadoutOverride ?? '' }}
+          onUpdateQuest={(payload) => update(editingQuest.id, payload)}
+          onCancel={() => setEditingQuestId(undefined)}
+          submitting={updateSubmitting}
+          questTitle={editingQuest.title}
+        />
+      )}
 
       <div className="quest-workspace-grid">
         <QuestLogSidebar

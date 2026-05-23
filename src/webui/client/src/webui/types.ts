@@ -255,6 +255,19 @@ export interface AddQuestResponse {
   code?: string;
 }
 
+export interface UpdateQuestRequest {
+  prompt: string;
+  loadoutOverride?: string;
+}
+
+export interface UpdateQuestResponse {
+  ok?: boolean;
+  quest?: QuestSummary;
+  board?: QuestBoardResponse;
+  error?: string | { code?: string; message?: string };
+  code?: string;
+}
+
 export type QuestReorderPlacement = 'first' | 'before' | 'after';
 
 export interface ReorderQuestRequest {

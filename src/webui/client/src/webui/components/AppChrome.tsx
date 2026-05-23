@@ -13,7 +13,7 @@ export function AppHeader({ source, isDirty, status }: AppHeaderProps) {
       <p className="text-sm uppercase tracking-[0.45em] text-cyan-200">pi-materia loadout editor</p>
       <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-4xl font-black tracking-tight text-white md:text-6xl">Materia WebUI</h1>
+          <h1 className="text-4xl font-black tracking-tight text-white md:text-6xl">Materia</h1>
           <p className="mt-3 max-w-3xl text-slate-300">Stage loadout changes visually. Sockets and graph socket ids are preserved so inserted materia, layout, and socket-shift semantics stay intact until an explicit save.</p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-slate-300">

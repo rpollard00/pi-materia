@@ -74,6 +74,12 @@ export interface MateriaRequeueQuestInput {
   questId: string;
 }
 
+export interface MateriaUpdateQuestInput {
+  questId: string;
+  prompt: string;
+  loadoutOverride?: string;
+}
+
 export type MateriaQuestMutationFailureCode = 'invalid_loadout' | 'unavailable' | 'validation_failed';
 
 export type MateriaAddQuestResult =
@@ -88,9 +94,14 @@ export type MateriaRequeueQuestResult =
   | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
   | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
 
+export type MateriaUpdateQuestResult =
+  | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
+  | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
+
 export interface MateriaQuestRouteDeps {
   getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
   addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
+  updateQuest?: (input: MateriaUpdateQuestInput) => Promise<MateriaUpdateQuestResult>;
   reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
   requeueQuest?: (input: MateriaRequeueQuestInput) => Promise<MateriaRequeueQuestResult>;
 }
@@ -168,6 +179,12 @@ export interface MateriaAddQuestResponse {
   board: MateriaQuestBoardResponse;
 }
 
+export interface MateriaUpdateQuestResponse {
+  ok: true;
+  quest: MateriaQuestSummary;
+  board: MateriaQuestBoardResponse;
+}
+
 export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
   if (req.url?.startsWith('/api/quests/requeue')) {
     await handleRequeueQuestRoute(req, res, deps);
@@ -185,7 +202,11 @@ export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse
     await handlePostQuestRoute(req, res, deps);
     return;
   }
-  sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, or POST /api/quests/reorder to reorder quests.' });
+  if (req.method === 'PATCH') {
+    await handlePatchQuestRoute(req, res, deps);
+    return;
+  }
+  sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, PATCH /api/quests/:questId to edit a pending quest, or POST /api/quests/reorder to reorder quests.' });
 }
 
 export async function handleGetQuestsRoute(res: ServerResponse, deps: MateriaQuestRouteDeps) {
@@ -219,6 +240,31 @@ export async function handlePostQuestRoute(req: IncomingMessage, res: ServerResp
     }
     const board = mapQuestBoardResponse(result);
     sendJson(res, 200, { ok: true, quest: mapQuest(result.quest), board } satisfies MateriaAddQuestResponse);
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: errorMessage(error) });
+  }
+}
+
+export async function handlePatchQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  if (!deps.updateQuest) {
+    sendJson(res, 503, { ok: false, error: 'Quest update API is unavailable for this server.' });
+    return;
+  }
+  try {
+    const questId = questIdFromPatchUrl(req.url);
+    if (!questId) throw new Error('Quest id is required.');
+    const body = await readJsonBody(req);
+    if (!isPlainObject(body)) throw new Error('Expected JSON object body.');
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    if (!prompt) throw new Error('Quest prompt is required.');
+    const rawLoadoutOverride = typeof body.loadoutOverride === 'string' ? body.loadoutOverride.trim() : undefined;
+    const result = await deps.updateQuest({ questId, prompt, ...(rawLoadoutOverride ? { loadoutOverride: rawLoadoutOverride } : {}) });
+    if (!result.ok) {
+      sendJson(res, result.code === 'unavailable' ? 503 : 400, { ok: false, code: result.code, error: result.message });
+      return;
+    }
+    const board = mapQuestBoardResponse(result);
+    sendJson(res, 200, { ok: true, quest: mapQuest(result.quest), board } satisfies MateriaUpdateQuestResponse);
   } catch (error) {
     sendJson(res, 400, { ok: false, error: errorMessage(error) });
   }
@@ -281,12 +327,19 @@ function isQuestReorderPlacement(value: string): value is MateriaQuestReorderPla
   return value === 'first' || value === 'before' || value === 'after';
 }
 
+function questIdFromPatchUrl(url: string | undefined): string {
+  if (!url) return '';
+  const pathname = new URL(url, 'http://localhost').pathname;
+  const match = /^\/api\/quests\/([^/]+)$/.exec(pathname);
+  return match?.[1] ? decodeURIComponent(match[1]).trim() : '';
+}
+
 export function mapQuestBoardResponse(source: MateriaQuestBoardSource): MateriaQuestBoardResponse {
   const { board } = source;
   const runningQuest = board.quests.find((quest) => quest.status === 'running');
   const activeQuest = board.runner.activeQuestId ? board.quests.find((quest) => quest.id === board.runner.activeQuestId) ?? runningQuest : runningQuest;
   const pendingQuests = board.quests.filter((quest) => quest.status === 'pending').map(mapQuest);
-  const completedQuests = board.quests.filter((quest) => quest.status === 'succeeded').map(mapQuest);
+  const completedQuests = sortCompletedQuestsByCompletionTime(board.quests).map(mapQuest);
   const failedQuests = board.quests.filter((quest) => quest.status === 'failed' || quest.status === 'blocked').map(mapQuest);
   return {
     ok: true,
@@ -306,6 +359,24 @@ export function mapQuestBoardResponse(source: MateriaQuestBoardSource): MateriaQ
       generatedAt: new Date().toISOString(),
     },
   };
+}
+
+function sortCompletedQuestsByCompletionTime(quests: Quest[]): Quest[] {
+  return quests
+    .map((quest, index) => ({ quest, index, completedAt: completionTimeMs(quest) }))
+    .filter(({ quest }) => quest.status === 'succeeded')
+    .sort((left, right) => right.completedAt - left.completedAt || left.index - right.index)
+    .map(({ quest }) => quest);
+}
+
+function completionTimeMs(quest: Quest): number {
+  return validTimeMs(quest.lastResult?.finishedAt) ?? validTimeMs(quest.updatedAt) ?? Number.NEGATIVE_INFINITY;
+}
+
+function validTimeMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : undefined;
 }
 
 export function mapQuest(quest: Quest): MateriaQuestSummary {

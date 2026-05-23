@@ -139,6 +139,26 @@ afterEach(() => {
 });
 
 describe('LoadoutGraphPanel readonly defaults', () => {
+  it('renders loadout grid guidance in a collapsed details disclosure', () => {
+    const { container, getByRole, getByText } = renderPanel();
+    const dragGuidance = 'Drag orbs into sockets, drag socketed orbs onto the graph background to unsocket, drag socket cards to arrange them, or click a palette orb then click a socket.';
+    const loopGuidance = 'To create a loop, select the cycle sockets with shift-click or a drag box; the selected cycle must have exactly one inbound edge from a Generator materia.';
+
+    expect(getByRole('heading', { name: 'Loadout Grid' })).toBeTruthy();
+    const details = container.querySelector('details') as HTMLDetailsElement | null;
+    expect(details).toBeTruthy();
+    expect(details?.open).toBe(false);
+    const summary = getByText('How to use the loadout grid');
+    expect(summary.tagName).toBe('SUMMARY');
+    expect(details?.textContent).toContain(dragGuidance);
+    expect(details?.textContent).toContain(loopGuidance);
+    expect(getByText(dragGuidance).closest('details')?.open).toBe(false);
+    expect(getByText(loopGuidance).closest('details')?.open).toBe(false);
+
+    fireEvent.click(summary);
+    expect(details?.open).toBe(true);
+  });
+
   it('omits persistent readonly copy and toolbar lock controls while keeping edits disabled', () => {
     const { queryByRole, getByLabelText, getByTestId } = renderPanel();
 

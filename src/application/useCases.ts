@@ -7,7 +7,7 @@ import { parseLinkCommandArguments } from "../link/parser.js";
 import { createLinkCastStateData, createLinkPlan, createLinkRuntimeState } from "../link/planner.js";
 import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/resolver.js";
 import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData, type LinkTargetRef, type ResolvedMateriaLinkTarget, type VirtualLoadoutMetadata } from "../link/types.js";
-import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, requeueQuest, resolveQuestRef, startQuest, stopQuestRunner, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
+import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, requeueQuest, resolveQuestRef, startQuest, stopQuestRunner, updatePendingQuest, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
 
 export interface LoadoutUseCasesDeps {
@@ -476,6 +476,25 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     if (!result.ok) throw new QuestBoardValidationError(result.issues);
     await this.deps.boards.save(result.value);
     return { board: result.value, quest: result.value.quests[result.value.quests.length - 1]! };
+  }
+
+  async updatePendingQuest(input: { questRef: string; prompt: string; loadoutOverride?: string }): Promise<{ board: QuestBoard; quest: Quest }> {
+    const board = await this.deps.boards.loadOrCreate();
+    const quest = resolveQuestRef(board, input.questRef);
+    if (!quest.ok) throw new QuestBoardValidationError(quest.issues);
+    const prompt = input.prompt.trim();
+    const loadoutOverride = input.loadoutOverride?.trim();
+    const updated = updatePendingQuest(board, {
+      questId: quest.value.id,
+      title: deriveQuestTitle(prompt),
+      prompt,
+      now: this.clock.now(),
+      ...(loadoutOverride ? { loadoutOverride } : {}),
+    });
+    if (!updated.ok) throw new QuestBoardValidationError(updated.issues);
+    await this.deps.boards.save(updated.value);
+    const updatedQuest = updated.value.quests.find((candidate) => candidate.id === quest.value.id)!;
+    return { board: updated.value, quest: updatedQuest };
   }
 
   async getStatus(session?: TSession): Promise<QuestStatusSnapshot> {
