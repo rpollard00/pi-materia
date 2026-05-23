@@ -82,8 +82,10 @@ export function renderQuestStatus(snapshot: QuestStatusSnapshot): string[] {
   }
 
   lines.push("Commands: /materia quest add [--loadout <name>] <prompt> | /materia quest default-loadout [<name-or-id>|--clear] | /materia quest list [pending|all|succeeded|failed] [--limit <n>] | move <quest> --first|--before <target>|--onto <target> | requeue <quest> | unblock <quest> | unfail <quest> | run [id] | runonce [id] | start [id] | stop | status");
+  lines.push("Add: enqueue a pending quest only; it does not launch work or wake an enabled idle runner.");
   lines.push("Move: --onto means after target; quest IDs accept unambiguous prefixes. Requeue/unblock/unfail: failed/blocked quests move to the bottom of the queue.");
-  lines.push("Run: run enables continuous back-to-back processing; runonce launches one pending quest only; start is a compatibility alias for run.");
+  lines.push("Launch: run enables continuous back-to-back processing; runonce launches one pending quest only; start is a compatibility alias for run.");
+  lines.push("Idle runner: if quest run found no pending work, later adds stay pending until run/start/runonce launches queued work.");
   lines.push("Stop: stop disables future auto-advance without aborting the active cast.");
   return lines;
 }
