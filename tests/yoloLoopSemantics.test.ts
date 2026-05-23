@@ -9,7 +9,7 @@ import { normalizeMateriaConfigEdges } from "../src/webui/client/src/loadoutMode
 import { FakePiHarness } from "./fakePi.js";
 
 interface YoloTestConfig extends PiMateriaConfig {
-  __workItems: Array<{ id: string; title: string }>;
+  __workItems: ReturnType<typeof canonicalWorkItems>;
 }
 
 function testSockets(loadout: NonNullable<PiMateriaConfig["loadouts"]>[string]) {
@@ -40,6 +40,15 @@ const maintainScript = `
   });
 `;
 
+function canonicalWorkItems(workItems: Array<{ id: string; title: string }>) {
+  return workItems.map((item) => ({
+    ...item,
+    description: `Complete ${item.title}`,
+    acceptance: ["Done"],
+    context: { constraints: [], dependencies: [], risks: [] },
+  }));
+}
+
 function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { retryOnce?: string[]; exitTo?: string } = {}): YoloTestConfig {
   const exitTo = options.exitTo ?? "end";
   const sockets: Record<string, unknown> = {
@@ -65,7 +74,7 @@ function yoloConfig(workItems: Array<{ id: string; title: string }>, options: { 
   }
 
   return {
-    __workItems: workItems,
+    __workItems: canonicalWorkItems(workItems),
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Yolo",
     loadouts: {

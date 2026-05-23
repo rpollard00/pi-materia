@@ -294,7 +294,7 @@ describe("native utility socket execution", () => {
             "Socket-1": {
               utility: "echo",
               parse: "json",
-              params: { output: { workItems: [{ id: "alpha", title: "Alpha" }] } },
+              params: { output: { workItems: [{ id: "alpha", title: "Alpha", description: "Complete Alpha", acceptance: ["done"], context: { constraints: [], dependencies: [], risks: [] } }] } },
               assign: { workItems: "$.workItems" },
               edges: [{ when: "always", to: "Socket-2" }],
             },

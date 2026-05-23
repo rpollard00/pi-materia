@@ -1,6 +1,7 @@
 import {
   HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
 } from "./handoffContract.js";
+import { formatHandoffWorkItemShape, parseHandoffWorkItem } from "../domain/handoff.js";
 import { deriveSocketOutputRequirements, socketConsumesSatisfied, type SocketOutputFieldType, type SocketOutputRequirements } from "./socketOutputRequirements.js";
 import type { MateriaPipelineSocketConfig } from "../types.js";
 
@@ -97,6 +98,22 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
     }
   }
 
+  if (requiresWorkItemsShapeValidation(requirements) && Array.isArray(value.workItems)) {
+    for (const [index, workItem] of value.workItems.entries()) {
+      const result = parseHandoffWorkItem(workItem, `$.workItems.${index}`);
+      if (!result.ok) {
+        for (const issue of result.issues) {
+          issues.push({
+            path: issue.path,
+            expected: expectedWorkItemFieldType(issue.path),
+            message: `${issue.path}: ${issue.message}; expected canonical work item shape ${formatHandoffWorkItemShape()}.`,
+            reason: "Generator and workItems-assignment sockets must emit canonical workItems. Put item-specific architecture in workItems[].context.architecture and item constraints/dependencies/risks in the matching context arrays.",
+          });
+        }
+      }
+    }
+  }
+
   const requiredPaths = new Set(requirements.requiredFields.map((requirement) => requirement.path));
   for (const consumed of requirements.consumedPayloadPaths) {
     if (consumed.payloadPath === "$" || requiredPaths.has(consumed.payloadPath) || checkedRequiredPaths.has(consumed.payloadPath)) continue;
@@ -113,6 +130,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
 
   if (issues.length > 0) {
     addLegacySatisfiedHint(value, issues);
+    addArchitectureAliasHints(value, issues, requiresWorkItemsShapeValidation(requirements));
     throw new HandoffJsonValidationError(socketId, issues);
   }
 
@@ -142,6 +160,42 @@ function addLegacySatisfiedHint(value: Record<string, unknown>, issues: HandoffV
     message: `Legacy field ${legacyFields.map((field) => JSON.stringify(field)).join(", ")} is not canonical and is not used for routing.`,
     reason: "Use the canonical satisfied field for satisfied/not_satisfied control flow.",
   });
+}
+
+function addArchitectureAliasHints(value: Record<string, unknown>, issues: HandoffValidationIssue[], validateWorkItemsShape: boolean): void {
+  if (!validateWorkItemsShape) return;
+  const aliases: string[] = [];
+  for (const field of ["architectureGuidance", "architecture"] as const) {
+    if (Object.prototype.hasOwnProperty.call(value, field)) aliases.push(`$.${field}`);
+  }
+  if (Array.isArray(value.workItems)) {
+    value.workItems.forEach((item, index) => {
+      if (!isPlainJsonObject(item)) return;
+      for (const field of ["architectureGuidance", "architecture"] as const) {
+        if (Object.prototype.hasOwnProperty.call(item, field)) aliases.push(`$.workItems.${index}.${field}`);
+      }
+      const context = item.context;
+      if (isPlainJsonObject(context) && Object.prototype.hasOwnProperty.call(context, "architectureGuidance")) aliases.push(`$.workItems.${index}.context.architectureGuidance`);
+    });
+  }
+  if (aliases.length === 0) return;
+  issues.push({
+    path: aliases.join(", "),
+    expected: "string",
+    message: `Architecture alias field ${aliases.join(", ")} is not canonical for workItems payloads. Put item-specific architecture guidance at workItems[].context.architecture instead.`,
+    reason: "Generated units belong in top-level workItems, and item-specific architecture direction belongs in each workItems[].context.architecture string, not architectureGuidance or top-level architecture aliases.",
+  });
+}
+
+function requiresWorkItemsShapeValidation(requirements: SocketOutputRequirements): boolean {
+  return requirements.requiredFields.some((requirement) => requirement.path === "$.workItems");
+}
+
+function expectedWorkItemFieldType(path: string): SocketOutputFieldType | "present" {
+  if (path.endsWith(".acceptance") || path.endsWith(".context.constraints") || path.endsWith(".context.dependencies") || path.endsWith(".context.risks")) return "array";
+  if (path.endsWith(".context")) return "object";
+  if (path.endsWith(".id") || path.endsWith(".title") || path.endsWith(".description") || path.endsWith(".context.architecture")) return "string";
+  return "present";
 }
 
 function matchesType(value: unknown, type: SocketOutputFieldType): boolean {
