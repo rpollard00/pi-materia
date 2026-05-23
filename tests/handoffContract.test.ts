@@ -26,8 +26,9 @@ describe("canonical handoff contract", () => {
     expect(CANONICAL_EDGE_CONDITIONS).toBe(HANDOFF_EDGE_CONDITIONS);
   });
 
-  test("provides prompt guidance for the generic envelope and reserved evaluator fields", () => {
-    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("generic handoff envelope");
+  test("provides prompt guidance for runtime state and reserved evaluator fields", () => {
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("canonical handoff runtime state");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("JSON sockets should emit only the fields relevant to their configured placement");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"workItems"');
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("never tasks");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"satisfied" is the canonical boolean control field');
@@ -36,14 +37,15 @@ describe("canonical handoff contract", () => {
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("Do not format \"feedback\" as a list or array");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("must not redefine or alias reserved evaluator/route semantics");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("legacy placement terminology");
-    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context");
+    expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain("do not emit unrelated canonical fields just to fill an envelope");
   });
 
   test("uses reserved field type guidance in final JSON instructions and synthetic context prose", () => {
     expect(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT).toContain('"satisfied" is a boolean when present');
     expect(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT).toContain('"feedback" is a string when present');
     expect(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT).toContain('"missing" is an array when present');
-    expect(formatHandoffJsonFinalInstruction()).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
+    expect(formatHandoffJsonFinalInstruction()).toContain("Emit only fields relevant to this socket's configured placement");
+    expect(formatHandoffJsonFinalInstruction()).not.toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(HANDOFF_CONTRACT_DOC_TEXT).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
   });
 

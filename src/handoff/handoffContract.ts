@@ -19,6 +19,7 @@ import {
   type HandoffObject,
   type PartialHandoffEnvelope,
 } from "../domain/handoff.js";
+import type { SocketOutputRequirements } from "./socketOutputRequirements.js";
 
 export * from "../domain/handoff.js";
 
@@ -48,29 +49,62 @@ export const HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT = [
 ].join(" ");
 
 // Shared contract prose belongs in docs and synthetic cast context. Socket-local
-// prompt suffixes should reference it and add only adapter-specific constraints
-// such as JSON-only output or generator workItems placement.
+// prompt suffixes should render sparse, socket-specific output requirements.
 export const HANDOFF_CONTRACT_PROMPT_TEXT = [
-  "pi-materia canonical handoff JSON contract:",
-  `- JSON-parsed agent materia should return the generic handoff envelope when applicable: ${formatHandoffEnvelopeShape()}.`,
+  "pi-materia canonical handoff runtime state:",
+  `- The runtime carries a canonical state shape for handoff context: ${formatHandoffEnvelopeShape()}. JSON sockets should emit only the fields relevant to their configured placement, routing, and assignments.`,
   `- Generated units of work belong in workItems, never tasks. Each work item has: ${formatHandoffWorkItemShape()}.`,
-  "- Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context when planning, refining, or evaluating an existing envelope; augment fields instead of replacing them with placement-specific payloads.",
-  "- If older prompts, examples, adapter metadata, or cast state mention tasks, treat that as legacy placement terminology and still emit generated work units as workItems in the generic envelope.",
+  "- Preserve useful existing summary, workItems, guidance, decisions, risks, feedback, and missing context when a socket is explicitly asked to refine those fields; do not emit unrelated canonical fields just to fill an envelope.",
+  "- If older prompts, examples, adapter metadata, or cast state mention tasks, treat that as legacy placement terminology and still emit generated work units as workItems.",
   `- Reserved evaluator/route fields are owned by evaluator and graph-flow adapters: ${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")}. Do not repurpose them for general payload data.`,
   `- ${JSON.stringify(HANDOFF_SATISFIED_FIELD)} is the canonical boolean control field for satisfied/not_satisfied routing and advancement. Use it only when a socket participates in that control flow, and return a real boolean value when present.`,
   `- ${HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT}`,
-  "- Socket-specific payload fields may be requested by a local prompt for assignments, artifacts, or diagnostics. Compose them with the generic envelope; payload fields must not redefine or alias reserved evaluator/route semantics.",
+  "- Socket-specific payload fields may be requested by a local prompt for assignments, artifacts, or diagnostics. Payload fields must not redefine or alias reserved evaluator/route semantics.",
   "- Do not invent alternate routing booleans. Legacy names such as \"passed\" are not canonical handoff fields.",
-  "- When a socket adapter asks for JSON output, return only the handoff JSON object with no markdown fences, prose, or extra commentary.",
+  "- When a socket adapter asks for JSON output, return only the requested JSON object with no markdown fences, prose, or extra commentary.",
 ].join("\n");
 
-export function formatHandoffJsonFinalInstruction(): string {
-  return `Final output format: Return only JSON for this socket adapter, with no markdown fences, prose, or extra commentary. Use the runtime-provided canonical handoff envelope and preserve useful existing envelope context from Generic cast data or Previous output when applicable. ${HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT}`;
+export function formatHandoffJsonFinalInstruction(requirements?: SocketOutputRequirements): string {
+  if (!requirements) {
+    return "Final output format: Return only JSON for this socket adapter, with no markdown fences, prose, or extra commentary. Emit only fields relevant to this socket's configured placement, routing, and assignments; do not emit the full canonical handoff envelope unless the local prompt explicitly asks for it.";
+  }
+  return formatSocketOutputFinalInstruction(requirements);
+}
+
+export function formatSocketOutputFinalInstruction(requirements: SocketOutputRequirements): string {
+  if (!requirements.requiresJsonObject) return "";
+
+  const lines = [
+    "Final output format: Return only one top-level JSON object for this socket adapter. Do not include markdown fences, prose, commentary, or explanations.",
+    "Emit only the fields relevant to this socket's configured placement, routing, and assignments. Do not emit the full canonical handoff envelope unless the local prompt explicitly asks for it.",
+  ];
+
+  const requiredFields = requirements.requiredFields.map((requirement) => `- ${JSON.stringify(requirement.field)} at ${requirement.path}: ${requirement.type}. ${requirement.reason}`);
+  if (requiredFields.length > 0) lines.push("Required payload fields:", ...requiredFields);
+
+  if (requirements.requiredFields.some((requirement) => requirement.field === HANDOFF_WORK_ITEMS_FIELD)) {
+    lines.push(`For generated or planned work, emit top-level ${JSON.stringify(HANDOFF_WORK_ITEMS_FIELD)} as an array of work-item objects; do not place generated units in tasks or other fields.`);
+    lines.push(`Include ${JSON.stringify(HANDOFF_SUMMARY_FIELD)} only when a concise summary is useful downstream or explicitly requested by the local prompt.`);
+  }
+
+  const consumedPaths = requirements.consumedPayloadPaths.map((path) => `- ${path.payloadPath} for assignment to ${path.targetPath}.`);
+  if (consumedPaths.length > 0) lines.push("Payload paths consumed by this socket:", ...consumedPaths);
+
+  const reservedRequiredRules = requirements.reservedFieldTypeRules
+    .filter((rule) => rule.required)
+    .map((rule) => `- ${JSON.stringify(rule.field)} must be ${articleForType(rule.type)} ${rule.type}.`);
+  if (reservedRequiredRules.length > 0) lines.push("Required reserved field types:", ...reservedRequiredRules);
+
+  return lines.join("\n");
+}
+
+function articleForType(type: string): string {
+  return /^[aeiou]/i.test(type) ? "an" : "a";
 }
 
 export const HANDOFF_CONTRACT_DOC_TEXT = [
-  "A pi-materia handoff message is a generic JSON envelope produced by a JSON-parsed socket and consumed by socket adapters for assignment, routing, advancement, prompts, and artifacts.",
-  "The canonical envelope fields are summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing. Generated units of work use workItems, not tasks.",
+  "A pi-materia handoff is runtime-carried JSON state consumed by socket adapters for assignment, routing, advancement, prompts, and artifacts. JSON-parsed sockets emit sparse JSON payloads containing only fields relevant to their configured role and socket placement; runtime merges those payloads into canonical state.",
+  "The canonical runtime state fields are summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing. Generated units of work use workItems, not tasks.",
   "Each workItem has id, title, description, acceptance, and context fields; context carries optional architecture guidance plus constraints, dependencies, and risks arrays.",
   `Reserved evaluator/route fields (${HANDOFF_RESERVED_EVALUATOR_FIELDS.map((field) => JSON.stringify(field)).join(", ")}) are owned by evaluator and graph-flow adapters and must not be repurposed by general payload logic.`,
   `The reserved control field ${JSON.stringify(HANDOFF_SATISFIED_FIELD)} is the only canonical satisfaction field. It is required by sockets whose graph control flow depends on satisfied/not_satisfied semantics and must be a boolean when present.`,

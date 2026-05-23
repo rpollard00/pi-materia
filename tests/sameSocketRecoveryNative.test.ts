@@ -690,7 +690,7 @@ describe("native same-socket recovery", () => {
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
     const retryPrompt = promptMessages(harness).at(-1)?.content;
     expect(retryPrompt).toContain("Command-triggered finalization");
-    expect(retryPrompt).toContain("Return only JSON");
+    expect(retryPrompt).toContain("Return only one top-level JSON object");
     expect(retryPrompt).toContain("Previous output:\nDraft plan; ready to finalize.");
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.mode === "finalization" && event.data.reason === "context_window")).toBe(true);

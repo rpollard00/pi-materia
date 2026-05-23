@@ -98,8 +98,11 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("expose generated output as workItems");
     expect(prompt).toContain("Emit top-level workItems");
     expect(prompt).toContain("Generated output assignment");
-    expect(prompt).toContain("Final output format: Return only JSON");
-    expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
+    expect(prompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(prompt).toContain("Required payload fields:");
+    expect(prompt).toContain('"workItems" at $.workItems: array');
+    expect(prompt).toContain('Include "summary" only when a concise summary is useful downstream');
+    expect(prompt).not.toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });
 
@@ -110,12 +113,44 @@ describe("application prompt assembly", () => {
     });
     const prompt = buildSocketPrompt(state(socket), socket);
 
-    expect(prompt).toContain("Final output format: Return only JSON for this socket adapter");
-    expect(prompt).toContain("Use the runtime-provided canonical handoff envelope");
-    expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
+    expect(prompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(prompt).toContain("Emit only the fields relevant to this socket's configured placement, routing, and assignments");
+    expect(prompt).not.toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain("Generator socket adapter context");
     expect(prompt).not.toContain("Emit top-level workItems");
+    expect(prompt).not.toContain("Required payload fields:");
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
+  });
+
+  test("control JSON sockets require satisfied only when routing consumes it", () => {
+    const socket = agentSocket({
+      socket: { materia: "Check", parse: "json", edges: [{ when: "satisfied", to: "Socket-2" }] },
+      materia: { tools: "readOnly", prompt: "Evaluate the current result." },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(prompt).toContain('"satisfied" at $.satisfied: boolean');
+    expect(prompt).toContain("Required reserved field types:");
+    expect(prompt).toContain('"satisfied" must be a boolean');
+    expect(prompt).not.toContain('"feedback"');
+    expect(prompt).not.toContain('"missing"');
+    expect(prompt).not.toContain('"workItems" at $.workItems');
+  });
+
+  test("custom assign JSON sockets name only consumed payload paths", () => {
+    const socket = agentSocket({
+      socket: { materia: "Maintain", parse: "json", assign: { checkpointCreated: "$.checkpointCreated", vcs: "$.vcs", commands: "$.commands" } },
+      materia: { tools: "readWrite", prompt: "Create a checkpoint." },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(prompt).toContain("Payload paths consumed by this socket:");
+    expect(prompt).toContain("$.checkpointCreated for assignment to checkpointCreated");
+    expect(prompt).toContain("$.vcs for assignment to vcs");
+    expect(prompt).toContain("$.commands for assignment to commands");
+    expect(prompt).not.toContain('"summary"');
+    expect(prompt).not.toContain('"workItems"');
+    expect(prompt).not.toContain('"satisfied"');
   });
 
   test("multi-turn refinement stays conversational until continue finalization", () => {
@@ -141,11 +176,11 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Materia isolated context.");
     expect(prompt).toContain("Command-triggered finalization");
     expect(prompt).toContain("Canonical handoff contract context:");
-    expect(prompt).toContain("The canonical envelope fields are summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing");
+    expect(prompt).toContain("The canonical runtime state fields are summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing");
     expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");
-    expect(prompt).toContain("Final output format: Return only JSON for this socket");
+    expect(prompt).toContain("Final output format: Return only one top-level JSON object");
   });
 
   test("Chain-Context prompt renders useful structured previous-cast context when available", () => {

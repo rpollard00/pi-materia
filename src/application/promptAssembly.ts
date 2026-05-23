@@ -4,6 +4,7 @@ import {
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../handoff/handoffContract.js";
+import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { currentItem, getPath } from "./workflowTransitions.js";
 
@@ -44,7 +45,13 @@ export function singleTurnJsonFormatInstruction(socket: ResolvedMateriaSocket): 
 
 export function jsonHandoffContractInstruction(socket: ResolvedMateriaSocket): string | undefined {
   if (!isAgentResolvedSocket(socket)) return undefined;
-  return resolvedSocketConfig(socket).parse === "json" ? formatHandoffJsonFinalInstruction() : undefined;
+  if (resolvedSocketConfig(socket).parse !== "json") return undefined;
+  const requirements = deriveSocketOutputRequirements({
+    socket: resolvedSocketConfig(socket),
+    socketId: socket.id,
+    workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
+  });
+  return formatHandoffJsonFinalInstruction(requirements);
 }
 
 export function finalFormatInstruction(socket: ResolvedMateriaSocket): string {
@@ -69,7 +76,7 @@ export function buildJsonOutputRepairPrompt(input: JsonOutputRepairPromptInput):
     input.invalidOutputExcerpt,
     "```",
     "Return only corrected JSON. Do not include markdown fences, prose, commentary, or explanations.",
-    "Preserve the required final JSON-only and canonical handoff contract for this socket:",
+    "Preserve the required final JSON-only output requirements for this socket:",
     input.originalFinalOutputInstructions,
   ].join("\n");
 }

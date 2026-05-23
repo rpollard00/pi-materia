@@ -553,7 +553,7 @@ describe("native multi-turn runtime", () => {
     expect(commandFinalizingState.multiTurnFinalizing).toBe(true);
     const finalPrompt = harness.sentMessages.at(-1)?.message as any;
     expect(finalPrompt.content).toContain("Command-triggered finalization");
-    expect(finalPrompt.content).toContain("Return only JSON");
+    expect(finalPrompt.content).toContain("Return only one top-level JSON object");
     harness.appendAssistantMessage(finalPlan);
     await harness.emit("agent_end", { messages: [] });
 
@@ -643,7 +643,7 @@ describe("native multi-turn runtime", () => {
     expect(harness.statuses.get("materia")).toBe("Plan");
     expect((harness.widgets.get("materia")?.content ?? []).join("\n")).toContain("› Plan active");
     expect((harness.widgets.get("materia")?.content ?? []).join("\n")).not.toContain("waiting for refinement");
-    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only JSON");
+    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only one top-level JSON object");
     harness.appendAssistantMessage("still not json");
     await harness.emit("agent_end", { messages: [] });
     const retryingState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
@@ -790,7 +790,7 @@ describe("native multi-turn runtime", () => {
     expect(finalizingState.active).toBe(true);
     expect(finalizingState.socketState).toBe("awaiting_agent_response");
     expect(finalizingState.multiTurnFinalizing).toBe(true);
-    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only JSON");
+    expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only one top-level JSON object");
   });
 
   test("stale finalization flag cannot complete a paused refinement turn", async () => {
