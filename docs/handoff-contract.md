@@ -6,7 +6,18 @@ JSON-parsed materia sockets hand off reusable work context to the rest of the gr
 
 pi-materia carries a canonical handoff state internally. JSON-producing sockets do **not** have to emit the whole state object. Each JSON socket should return only the fields relevant to its configured role, assignments, routing, and advancement; runtime validation checks those socket-local requirements and then merges the sparse payload into canonical state.
 
-The runtime-carried state fields are:
+The exact canonical runtime-carried fields and their scopes are:
+
+- `summary`: optional concise cross-cutting summary of the current handoff state or generated payload.
+- `workItems`: optional top-level array of generated or refined work units. Generated units belong only here, never in `tasks`, `task`, `work`, `architectureGuidance`, top-level `architecture`, or other aliases.
+- `guidance`: optional cross-cutting guidance object/string/notes only when socket-relevant or explicitly requested; do not use it for item-specific architecture notes.
+- `decisions`: optional cross-cutting decision records only when socket-relevant or explicitly requested.
+- `risks`: optional cross-cutting risks only when socket-relevant or explicitly requested; item risks belong in `workItems[].context.risks`.
+- `satisfied`: reserved evaluator/route-owned boolean for satisfied/not_satisfied graph control.
+- `feedback`: reserved evaluator-owned string for route/evaluation feedback, not a general guidance channel.
+- `missing`: reserved evaluator-owned array of missing items, not a general guidance channel.
+
+Shape reference:
 
 ```json
 {
@@ -21,7 +32,7 @@ The runtime-carried state fields are:
 }
 ```
 
-Generated units of work use `workItems`, not `tasks`. pi-materia intentionally does not keep a `tasks` stability layer for newly generated work units; adapters should assign and iterate `workItems` directly:
+Generated units of work use `workItems`, not `tasks`. Generated units belong in top-level `workItems`. pi-materia intentionally does not keep a `tasks` stability layer for newly generated work units; adapters should assign and iterate `workItems` directly. Item-specific architecture direction belongs in `workItems[].context.architecture`; item constraints, dependencies, and risks belong in the matching `workItems[].context` arrays:
 
 ```json
 {
@@ -30,10 +41,10 @@ Generated units of work use `workItems`, not `tasks`. pi-materia intentionally d
   "description": "actionable work",
   "acceptance": ["observable criteria"],
   "context": {
-    "architecture": "optional guidance",
-    "constraints": [],
+    "architecture": "Use the existing adapter boundary; keep routing outside reusable materia.",
+    "constraints": ["Keep prompt suffixes concise"],
     "dependencies": [],
-    "risks": []
+    "risks": ["Broad wording could make agents emit unnecessary top-level fields"]
   }
 }
 ```
@@ -54,11 +65,13 @@ Generator-to-generator pipelines behave like iterator transforms: the upstream g
 
 ## Reserved evaluator/route fields
 
+`satisfied`, `feedback`, and `missing` are route/evaluator-owned, not general-purpose content fields.
+
 `satisfied` is the canonical routing field.
 
 - `satisfied` is reserved by pi-materia for `satisfied` / `not_satisfied` routing and advancement.
 - `feedback` and `missing` are reserved evaluator fields.
-- Reserved evaluator/route fields must not be repurposed by general payload logic.
+- Reserved evaluator/route fields must not be repurposed by general payload logic or used as general guidance channels.
 - When present, `satisfied` must be a JSON boolean (`true` or `false`).
 - When present, `feedback` must be a JSON string.
 - When present, `missing` must be a JSON array of missing items.
