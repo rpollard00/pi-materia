@@ -1,12 +1,27 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineConfig } from '../../../loadoutModel.js';
+import type { AddQuestResponse } from '../../types.js';
 import { QuestCreateForm } from './QuestCreateForm.js';
 
 const persistedLoadouts = {
   Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
   Beta: { id: 'user:beta', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Review' } } },
 } satisfies Record<string, PipelineConfig>;
+
+const addQuestResponse = {
+  ok: true,
+  quest: {
+    id: 'quest-1',
+    title: 'Quest 1',
+    prompt: 'Quest prompt',
+    promptPreview: 'Quest prompt',
+    status: 'pending',
+    attempts: 0,
+    createdAt: '2026-05-23T00:00:00.000Z',
+    updatedAt: '2026-05-23T00:00:00.000Z',
+  },
+} satisfies AddQuestResponse;
 
 afterEach(() => cleanup());
 
@@ -17,7 +32,7 @@ describe('QuestCreateForm layout', () => {
         persistedLoadouts={persistedLoadouts}
         questDefaultLoadoutId="user:alpha"
         setQuestDefaultLoadout={vi.fn(async (loadoutId: string | null) => loadoutId)}
-        onAddQuest={vi.fn(async () => ({ ok: true, quest: { id: 'quest-1', title: 'Quest 1' } }))}
+        onAddQuest={vi.fn(async () => addQuestResponse)}
         submitting={false}
       />,
     );
