@@ -57,7 +57,7 @@ Primary lifecycle:
    - applies model/tool settings and sends an isolated agent prompt.
 4. `sendMateriaTurn` stores the hidden prompt, may compact proactively, writes a context artifact, emits visible and hidden Pi messages, and triggers the Pi agent turn.
 5. `handleAgentEnd` finds the latest assistant response, captures usage, handles transient transport preservation and bounded same-socket recovery (`context_window` compacts before retry; safe generic `turn_failure` resends without compaction), pauses multi-turn sockets for refinement, or completes the socket.
-6. `completeSocket` records socket output artifacts, parses/validates JSON handoff if requested, updates generic envelope and assignments, applies loop advancement, enforces budget, chooses next route, and advances/finishes.
+6. `completeSocket` records socket output artifacts, parses/validates JSON payloads if requested, updates canonical runtime state and assignments, applies loop advancement, enforces budget, chooses next route, and advances/finishes.
 7. `advanceToSocket` starts the next socket or `finishCast` writes terminal artifacts/events/state and UI updates.
 8. `resumeNativeCast`/`reviveNativeCast` rehydrate latest persisted session state and continue from the failed current socket.
 
@@ -93,7 +93,7 @@ Cast/session persistence:
 ### Assignment, routing, and loop flows
 
 - Assignment is configured per socket with `assign` paths and executed by `applyAssignments` using JSON/path helpers in `native.ts`.
-- Generic handoff envelope fields are captured into `state.data.envelope`, `state.data.workItems`, `state.data.guidance`, `state.data.summary`, `state.data.decisions`, and `state.data.risks`.
+- Canonical handoff runtime fields are captured into `state.data.envelope`, `state.data.workItems`, `state.data.guidance`, `state.data.summary`, `state.data.decisions`, and `state.data.risks` after sparse JSON payloads are merged.
 - Routing uses ordered canonical outgoing edges from `graphValidation.canonicalOutgoingEdges`; `always`, `satisfied`, and `not_satisfied` are evaluated against the canonical JSON `satisfied` field.
 - Loop advancement uses `advance` and `loops` metadata; `loopIteratorForSocket`, `resolveLoopExitRoute`, and current cursor state determine current work item and exit targets.
 - Visit and edge traversal limits are enforced at runtime from loadout/global limits.

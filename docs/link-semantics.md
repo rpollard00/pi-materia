@@ -118,7 +118,7 @@ All parse, resolution, previous-cast loading, and graph-compilation failures abo
 
 Canonical linked handoff/context envelopes should use `summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing` where those fields apply. `workItems` is the canonical generated-unit field; do not author new link examples, materia prompts, or loadouts that use `tasks` for generated work.
 
-Current aliases from older configs or tests, such as `passed` for satisfaction or `tasks` for generated work, are obsolete stability if encountered. They are not part of the canonical `/materia link` contract, and `Chain-Context` should preserve or emit canonical fields rather than redefining reserved evaluator/route fields.
+Legacy aliases from older configs or tests, such as `passed` for satisfaction or `tasks` for generated work, are obsolete compatibility behavior if encountered. They are not part of the canonical `/materia link` contract, and `Chain-Context` should preserve or emit canonical fields rather than redefining reserved evaluator/route fields.
 
 ## v1 non-goals
 

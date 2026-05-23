@@ -99,4 +99,22 @@ describe("socket output requirements", () => {
       reason: "Socket assignment maps workItems from $.workItems.",
     });
   });
+
+  test("combined generator and control sockets require only consumed machine fields", () => {
+    const requirements = deriveSocketOutputRequirements({
+      socket: socket({
+        edges: [{ when: "satisfied", to: "Socket-2" }],
+        assign: { note: "$.diagnostics.note", decisions: "$.decisions" },
+      }),
+      socketId: "Socket-1",
+      workItemProducingSocketIds: ["Socket-1"],
+    });
+
+    expect(requirements.requiredFields.map((field) => field.field)).toEqual(["satisfied", "workItems"]);
+    expect(requirements.consumedPayloadPaths).toEqual([
+      { targetPath: "decisions", payloadPath: "$.decisions", topLevelField: "decisions", reason: "Socket assignment maps decisions from $.decisions." },
+      { targetPath: "note", payloadPath: "$.diagnostics.note", topLevelField: "diagnostics", reason: "Socket assignment maps note from $.diagnostics.note." },
+    ]);
+    expect(requirements.requiredFields.map((field) => field.field)).not.toEqual(expect.arrayContaining(["summary", "guidance", "risks", "feedback", "missing"]));
+  });
 });

@@ -241,10 +241,10 @@ function validateGeneratorSocketContracts(config: PiMateriaConfig, effective: Ef
     if (!generator) continue;
     if (generator.listType !== "array") throw new Error(`Generator materia "${socket.materia}" must resolve listType="array" for generator pipeline output "${generator.output}".`);
     if (!generator.itemType) throw new Error(`Generator materia "${socket.materia}" must resolve an itemType for generator pipeline output "${generator.output}".`);
-    if (socket.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
+    if (socket.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the top-level JSON payload. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
     const assignedPath = socket.assign?.[generator.output];
     if (assignedPath !== `$.${generator.output}`) {
-      throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the canonical handoff envelope. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
+      throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the top-level JSON payload. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
     }
   }
 }

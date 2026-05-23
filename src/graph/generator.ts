@@ -30,8 +30,8 @@ export function isGeneratorMateria(definition: GeneratorMateriaLike | undefined)
 
 /**
  * Resolve authored generator marker into the runtime loop-consumable workItems
- * contract. Runtime generator output is always the canonical handoff envelope's
- * workItems list; legacy `generates.output` aliases are intentionally ignored.
+ * contract. Runtime generator output is always a top-level workItems list in the
+ * socket payload; legacy `generates.output` aliases are intentionally ignored.
  */
 export function canonicalGeneratorConfigFor(definition: GeneratorMateriaLike | undefined): MateriaGeneratorConfig | undefined {
   return getMateriaCapabilities(definition).generatorConfig;

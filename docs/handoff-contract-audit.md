@@ -14,7 +14,7 @@ This historical audit covered materia-to-materia JSON handoff behavior before th
 
 ## Historical findings now superseded
 
-The original audit found drift between prompt examples, runtime routing, and validation around older handoff aliases and graph terminology. The follow-up work centralized handoff guidance, validates reserved fields for routed JSON sockets, and updated default prompts to use the generic handoff envelope.
+The original audit found drift between prompt examples, runtime routing, and validation around older handoff aliases and graph terminology. Follow-up work now keeps canonical handoff fields as runtime state while prompts and validation ask JSON sockets for only the sparse payload fields relevant to their placement.
 
 Archived examples in older planning material should not be treated as active contract documentation. When in doubt, use `docs/handoff-contract.md`, the default config prompts, and the schema/runtime tests as the source of truth.
 

@@ -324,7 +324,7 @@ Builder turn ends
 Evaluator turn ends
   -> Materia parses evaluation JSON
   -> if failed and attempts remain: send builder repair prompt
-  -> if passed: continue next task or maintainer
+  -> if satisfied: continue next work item or maintainer
 
 Maintainer turn ends
   -> Materia records checkpoint outcome
@@ -382,7 +382,7 @@ Acceptance:
 - [x] Transition state:
   - planning -> parse `PlanResult`, write `plan.json`, start first builder turn
   - building -> record build summary, start evaluator turn
-  - evaluating -> parse `EvaluationResult`, branch passed/failed
+  - evaluating -> parse sparse evaluator JSON, branch on canonical `satisfied` / `not_satisfied` conditions
   - maintaining -> record maintainer result, complete cast
 - [x] Guard against double-processing by tracking last processed entry/message id.
 - [x] Persist state before sending each next prompt.
@@ -659,14 +659,14 @@ Acceptance:
 
 Note: after Phase 3.5, Maintenance/VCS Policy should be implemented as configured Materia behavior where possible. Deterministic pieces such as VCS detection, ignore hygiene, and commits should be utility Materia sockets or named utilities, not hidden engine branches.
 
-Status: implemented in the bundled loadout as configured `Build`, `Auto-Eval`, and `Maintain` Materia rather than hardcoded engine policy. `Auto-Eval` routes passed work to `Maintain` after each task. `Maintain` autonomously checkpoints and now returns structured JSON with `satisfied`, `commitMessage`, `reason`, `vcs`, `checkpointCreated`, and `commands`, assigned to `state.lastMaintain`. If `satisfied == false`, the socket routes back to `Maintain` with a configured traversal limit; task cursor advancement is conditional on `satisfied == true`. VCS detection is explicit via the `vcs.detect` utility socket.
+Status: implemented in the bundled loadout as configured `Build`, `Auto-Eval`, and `Maintain` Materia rather than hardcoded engine policy. `Auto-Eval` routes satisfied work to `Maintain` after each work item. `Maintain` autonomously checkpoints and returns compact JSON with socket-relevant fields such as `satisfied`, `commitMessage`, `reason`, `vcs`, `checkpointCreated`, and `commands`, assigned to `state.lastMaintain`. If `satisfied == false`, the socket routes back to `Maintain` with a configured traversal limit; work-item cursor advancement is conditional on `satisfied == true`. VCS detection is explicit via the `vcs.detect` utility socket.
 
 ### 8. Maintain more frequently
 
 Problem: maintainer only runs at the end.
 
 Tasks:
-- [x] Add configured maintain/checkpoint behavior after each passed task. Supersedes a dedicated `maintainPolicy` field for the default loadout by expressing policy directly in the Materia Grid.
+- [x] Add configured maintain/checkpoint behavior after each satisfied work item. Supersedes a dedicated `maintainPolicy` field for the default loadout by expressing policy directly in the Materia Grid.
 - [x] Original option considered: add `maintainPolicy` config:
   ```json
   {
@@ -679,12 +679,12 @@ Tasks:
 - Supported modes:
   - `endOnly`
   - `afterEachTask`
-  - `afterEachPassedEvaluation`
+  - `afterEachSatisfiedEvaluation`
   - `manual`
 - [x] Default next version should be `afterEachTask`.
 
 Acceptance:
-- [x] Maintainer runs after each task passes evaluation.
+- [x] Maintainer runs after each work item satisfies evaluation.
 
 ### 9. Maintainer commits automatically when satisfied
 
@@ -730,7 +730,7 @@ Acceptance:
 ### 11. Configurable edge conditions and loop limits
 
 Tasks:
-- Move evaluator pass/fail logic into graph edge conditions.
+- Move evaluator `satisfied` / `not_satisfied` control logic into graph edge conditions.
 - Add per-edge and per-socket max loop counts.
 - Detect infinite loops and stop with a clear error.
 
@@ -940,21 +940,21 @@ Common default workflow state should live under generic keys assigned by config,
 
 ```json
 "assign": {
-  "tasks": "$.tasks"
+  "workItems": "$.workItems"
 }
 ```
 
 and referenced via templates:
 
 ```text
-{{state.currentTask.title}}
+{{state.workItem.title}}
 {{state.lastFeedback}}
 {{lastOutput}}
 ```
 
 Acceptance:
 - Engine state is workflow-agnostic.
-- Task iteration is a generic cursor over a configured collection, not a hardcoded task loop.
+- Work-item iteration is a generic cursor over a configured collection, not a hardcoded planner-specific loop.
 
 ### 16. Implement generic socket start path — Done
 
@@ -1012,7 +1012,7 @@ Generic assignment examples:
 
 ```json
 "assign": {
-  "tasks": "$.tasks",
+  "workItems": "$.workItems",
   "lastFeedback": "$.feedback",
   "lastSatisfied": "$.satisfied"
 }
@@ -1042,7 +1042,7 @@ Template support:
 
 ```text
 {{request}}
-{{state.tasks}}
+{{state.workItems}}
 {{item.title}}
 {{lastOutput}}
 {{lastJson.feedback}}
@@ -1096,9 +1096,9 @@ Support generic foreach/cursor behavior:
 
 ```json
 "foreach": {
-  "items": "state.tasks",
-  "as": "task",
-  "cursor": "taskIndex"
+  "items": "state.workItems",
+  "as": "workItem",
+  "cursor": "workItemIndex"
 }
 ```
 
@@ -1106,29 +1106,29 @@ and cursor advancement:
 
 ```json
 "advance": {
-  "cursor": "taskIndex",
-  "items": "state.tasks"
+  "cursor": "workItemIndex",
+  "items": "state.workItems"
 }
 ```
 
 Engine behavior:
-- template exposes current item as `{{task.title}}` or `{{item.title}}`
+- template exposes current item as `{{workItem.title}}` or `{{item.title}}`
 - advancing past the collection routes to `end` or configured `done` target later
 
 Acceptance:
-- Default multi-task workflow is implemented via generic cursor configuration.
-- Other workflows can iterate over arbitrary arrays, not just `tasks`.
+- Default multi-work-item workflow is implemented via generic cursor configuration.
+- Other workflows can iterate over arbitrary arrays; generated planning units use canonical `workItems`, not `tasks`.
 
 ### 21. Move current default workflow semantics into `config/default.json` — Done
 
 The bundled default config should define the familiar Materia Grid entirely as data:
 
-- planner socket creates JSON `{ tasks: [...] }`
-- `Build` socket works on current task item
-- `Auto-Eval` socket returns JSON `{ satisfied, feedback, missing }`
-- `Maintain` socket records jj/git description/commit
+- planner socket creates compact JSON such as `{ "summary": "Plan created.", "workItems": [...] }``
+- `Build` socket works on current work item
+- `Auto-Eval` socket returns compact JSON `{ "satisfied": false, "feedback": "...", "missing": [...] }`
+- `Maintain` socket records jj/git checkpoint results with socket-relevant fields such as `{ "satisfied": true, "checkpointCreated": true, "vcs": "jj", "commands": [...] }`
 - satisfied/not-satisfied routing is configured via canonical edge conditions
-- task advancement is configured on `Maintain` success with `advance.when`
+- work-item advancement is configured on `Maintain` success with `advance.when`
 
 The framework source should not contain those names or behaviors.
 

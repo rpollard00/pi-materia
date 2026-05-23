@@ -292,7 +292,7 @@ Example loadout excerpt where planning and evaluator materia use a cheaper model
       "tools": "readOnly",
       "model": "openai/gpt-4o-mini",
       "thinking": "low",
-      "prompt": "Return the generic handoff envelope with ordered workItems."
+      "prompt": "Return compact JSON with a concise summary and ordered workItems."
     },
     "Build": {
       "tools": "coding",
@@ -323,7 +323,7 @@ Provider/runtime limitations: explicit model switching requires Pi's runtime to 
 Generic socket mechanics:
 
 - `materia`: named top-level materia assigned to an agent socket
-- `parse`: `"text"` or `"json"`; JSON-parsed socket outputs follow the canonical [materia handoff JSON contract](docs/handoff-contract.md)
+- `parse`: `"text"` or `"json"`; JSON-parsed socket outputs are compact payloads that follow socket-specific requirements from the canonical [materia handoff JSON contract](docs/handoff-contract.md)
 - `assign`: copy parsed output/state values into generic cast state
 - `edges`: ordered condition-driven links using canonical conditions such as `satisfied`, `not_satisfied`, or `always`; runtime selects the first edge whose guard matches, so repeated guarded predicates are allowed, while edges after an unconditional edge are invalid because they are unreachable. The WebUI's **Flow** label is the `always` condition, not a separate edge model.
 - `foreach`: iterate a socket over an array in state
@@ -380,13 +380,13 @@ The bundled config wires the `Interactive-Plan` materia, which has `multiTurn: t
   "materia": {
     "Ignore-Artifacts": { "type": "utility", "script": { "kind": "shippedUtility", "name": "ensure-ignored.mjs", "runtime": "node" }, "parse": "json", "params": { "patterns": [".pi/pi-materia/"] }, "assign": { "artifactIgnore": "$" } },
     "Detect-VCS": { "type": "utility", "script": { "kind": "shippedUtility", "name": "detect-vcs.mjs", "runtime": "node" }, "parse": "json", "assign": { "vcs": "$" } },
-    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return JSON using the runtime-provided canonical handoff contract; generated units belong in workItems. Request: {{request}}" },
+    "Interactive-Plan": { "tools": "readOnly", "multiTurn": true, "prompt": "Collaboratively refine an implementation plan for this request. Do not emit final JSON during refinement. Only after the user runs /materia continue, return compact JSON with a concise summary and generated workItems. Request: {{request}}" },
     "Build": { "tools": "coding", "prompt": "Implement exactly the assigned workItem using adapter-provided guidance." }
   }
 }
 ```
 
-For deterministic local steps that should run without an LLM turn, use utility materia. A utility socket is canonical when it references a top-level utility materia by `materia`; the utility materia owns its label/color plus `command` or typed shipped `script`, `params`, `parse`, `assign`, and `timeoutMs`. Command utilities receive JSON on stdin, write the machine-readable result on stdout, write diagnostics on stderr, and run with the target project as cwd. Bundled defaults use `{ "kind": "shippedUtility" }` script references that are synced from package assets into the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities` or `PI_MATERIA_PROFILE_DIR/utilities`) with a hash manifest so user-modified profile scripts are not overwritten; explicit relative command paths from user/project config are still resolved from the config file that defined the utility materia. Utility JSON output participates in normal `assign`, `always`/`satisfied`/`not_satisfied` routing, and generator materia marked `generator: true` can emit the canonical handoff envelope with `workItems` for loops. See [Utility Materia](docs/utility-materia.md) for the full contract, default scripts, examples, security notes, and current configuration guidance.
+For deterministic local steps that should run without an LLM turn, use utility materia. A utility socket is canonical when it references a top-level utility materia by `materia`; the utility materia owns its label/color plus `command` or typed shipped `script`, `params`, `parse`, `assign`, and `timeoutMs`. Command utilities receive JSON on stdin, write the machine-readable result on stdout, write diagnostics on stderr, and run with the target project as cwd. Bundled defaults use `{ "kind": "shippedUtility" }` script references that are synced from package assets into the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities` or `PI_MATERIA_PROFILE_DIR/utilities`) with a hash manifest so user-modified profile scripts are not overwritten; explicit relative command paths from user/project config are still resolved from the config file that defined the utility materia. Utility JSON output participates in normal `assign`, `always`/`satisfied`/`not_satisfied` routing, and generator materia marked `generator: true` can emit compact JSON with top-level `workItems` for loops. See [Utility Materia](docs/utility-materia.md) for the full contract, default scripts, examples, security notes, and current configuration guidance.
 
 Runtime artifacts are written to `.pi/pi-materia/<timestamp>/` by default. Override with:
 
@@ -428,11 +428,11 @@ Each cast writes enough information to debug the run after the fact:
 
 The bundled defaults live at `config/default.json` and set `activeLoadout` to `Full-Auto`.
 
-- `Full-Auto`: the autonomous software-development workflow. The `Auto-Plan` materia immediately produces a generic handoff envelope with structured `workItems` from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
+- `Full-Auto`: the autonomous software-development workflow. The `Auto-Plan` materia immediately produces compact JSON with structured `workItems` from the initial request, then `Build`, `Auto-Eval`, and `Maintain` iterate through implementation, verification, and checkpointing.
 - `Planning-Consult`: the conversational planning workflow. The planning socket uses the `Interactive-Plan` materia with `multiTurn: true`, so it starts with normal discussion instead of immediate work-item JSON: it can summarize the request, ask clarifying questions, propose a breakdown, and refine scope or acceptance criteria with you before implementation begins.
 - `Hojo-Consult`: a consultative workflow that starts with the same deterministic utility setup/discovery sockets, then combines interactive planning with architecture guidance before entering the Build/Eval/Maintain loop.
 
-When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final JSON plan, parses it into the configured generic envelope (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, and `missing`), and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
+When using `Planning-Consult`, reply naturally during the planning loop with corrections, answers, tradeoffs, or requested changes such as "add a CRT shader requirement" or "split testing into a separate work item"; these refinement messages do not finalize. Once the plan looks right, run `/materia continue`. pi-materia then asks for the final compact JSON plan, parses the socket-relevant fields such as `summary`, `workItems`, and optional guidance, merges them into canonical runtime state, and advances to the automated `Build`/`Auto-Eval`/`Maintain` execution loop. JSON output and parsing are intentionally deferred until that command-triggered finalization step.
 
 These loadouts are defined entirely as config using top-level reusable materia prompts and utility materia plus socket adapters for JSON parsing, state assignment, conditional edges, foreach cursors, and named Materia assignments. Bundled default socket ids are sequential (`Socket-1` through `Socket-8`); reusable behavior and appearance stay in top-level materia definitions referenced by socket `materia` fields, while displays can add context like `Socket-4 (Build)`. The first two bundled sockets reference the command-backed utility materia `Ignore-Artifacts` and `Detect-VCS`; Loadout config and WebUI save payloads use canonical `sockets` collections for loadout membership and loop membership. Use `/materia loadout` to see which one is active and `/materia loadout Full-Auto` or `/materia loadout Planning-Consult` to switch.
 

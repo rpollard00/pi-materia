@@ -211,7 +211,7 @@ The referenced `Detect-VCS` utility materia owns `parse: "json"` and `assign: { 
 
 ## Utility generators
 
-A utility materia may set `generator: true` when a deterministic script should produce the same canonical handoff envelope as a planning agent. Generator utility output is normalized to `parse: "json"` and must expose `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. Preserve the canonical envelope field names (`summary`, `workItems`, `guidance`, `decisions`, `risks`, `satisfied`, `feedback`, `missing`) and do not use current generated-output aliases such as `tasks`.
+A utility materia may set `generator: true` when a deterministic script should produce generated work items like a planning agent. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. The utility may emit a compact payload such as `{ "summary": "Plan created.", "workItems": [...] }`; runtime merges that sparse payload into canonical handoff state. Do not use generated-output aliases such as `tasks`.
 
 ## Bundled utility scripts
 

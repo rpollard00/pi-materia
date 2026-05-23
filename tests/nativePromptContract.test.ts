@@ -58,7 +58,7 @@ describe("native JSON prompt handoff contract guidance", () => {
 
     const [prompt] = promptMessages(harness);
     expect(prompt).toContain("You are the pi-materia planning materia");
-    expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(prompt).toContain("compact JSON containing only plan fields relevant to the socket");
     expectPromptIncludesConciseJsonFinalInstruction(prompt);
     expect(prompt).toContain("Final output format: Return only one top-level JSON object");
     expect(prompt).toContain("Emit top-level workItems");

@@ -56,6 +56,14 @@ describe("handoff JSON runtime validation", () => {
     expect(validateHandoffJsonOutput(value, { socketId: "Maintain", socket: socket({ assign: { vcs: "$.vcs", commands: "$.details.commands" } }) })).toBe(value);
   });
 
+  test("accepts sparse payloads with optional context fields while enforcing only consumed paths", () => {
+    const value = { summary: "Checkpoint created.", guidance: { next: "ship" }, decisions: ["Use jj"], risks: [], checkpointCreated: true };
+
+    expect(validateHandoffJsonOutput(value, { socketId: "Maintain", socket: socket({ assign: { checkpointCreated: "$.checkpointCreated" } }) })).toBe(value);
+    const missingCheckpoint = { summary: value.summary, guidance: value.guidance, decisions: value.decisions, risks: value.risks };
+    expect(() => validateHandoffJsonOutput(missingCheckpoint, { socketId: "Maintain", socket: socket({ assign: { checkpointCreated: "$.checkpointCreated" } }) })).toThrow(/Missing payload path \$\.checkpointCreated consumed by assignment/);
+  });
+
   test("validates custom consumed assignment paths with runtime-compatible array indexes", () => {
     const value = { list: [{ label: "ready" }] };
     expect(validateHandoffJsonOutput(value, { socketId: "Maintain", socket: socket({ assign: { label: "$.list.0.label" } }) })).toBe(value);

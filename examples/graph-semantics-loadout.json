@@ -147,7 +147,7 @@
     },
     "Auto-Plan": {
       "tools": "readOnly",
-      "prompt": "Return the generic handoff envelope with summary, workItems, guidance, decisions, risks, satisfied, feedback, and missing. Use workItems, not tasks.",
+      "prompt": "Return compact JSON with a concise summary and ordered workItems. Use workItems, not tasks.",
       "generator": true
     },
     "Build": {
@@ -156,7 +156,7 @@
     },
     "Auto-Eval": {
       "tools": "readOnly",
-      "prompt": "Evaluate the current workItem and return the generic handoff envelope with satisfied, feedback, and missing populated as reserved evaluator fields."
+      "prompt": "Evaluate the current workItem and return compact JSON with satisfied, feedback, and missing."
     },
     "Maintain": {
       "tools": "coding",

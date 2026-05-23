@@ -18,8 +18,8 @@ describe("handoff contract drift regressions", () => {
     expect(HANDOFF_EDGE_CONDITIONS).toEqual(["always", "satisfied", "not_satisfied"]);
 
     const generated = buildRoleGenerationPrompt("write a JSON evaluator role");
-    expect(generated).toContain("follow the runtime-provided canonical handoff JSON contract");
-    expect(generated).toContain("instead of embedding a local schema");
+    expect(generated).toContain("describe only socket-relevant payload fields");
+    expect(generated).toContain("never ask for the entire canonical envelope");
     expect(generated).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(generated).not.toContain('"satisfied" is the canonical boolean control field');
   });
@@ -66,23 +66,23 @@ describe("handoff contract drift regressions", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const prompt = String(rawDefault.materia?.["Auto-Eval"]?.prompt ?? "");
 
-    expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(prompt).toContain("compact JSON with evaluator fields relevant to this socket");
     expect(prompt).toContain("Set satisfied as a boolean, feedback as one concise string, and missing as an array of missing items");
     expect(prompt).toContain("do not emit tasks");
     expect(prompt).not.toContain('"passed": boolean');
 
     const plannerPrompt = String(rawDefault.materia?.["Auto-Plan"]?.prompt ?? "");
     const interactivePrompt = String(rawDefault.materia?.["Interactive-Plan"]?.prompt ?? "");
-    expect(plannerPrompt).toContain("runtime-provided canonical handoff JSON");
+    expect(plannerPrompt).toContain("compact JSON containing only plan fields relevant to the socket");
     expect(plannerPrompt).toContain("workItems");
     expect(plannerPrompt).not.toContain('"tasks"');
     expect(interactivePrompt).toContain("Do not emit final workItems JSON during refinement");
-    expect(interactivePrompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(interactivePrompt).toContain("return compact JSON with summary, workItems");
 
     const maintainPrompt = String(rawDefault.materia?.Maintain?.prompt ?? "");
     const gitMaintainPrompt = String(rawDefault.materia?.GitMaintain?.prompt ?? "");
-    expect(maintainPrompt).toContain("runtime-provided canonical handoff JSON contract");
-    expect(gitMaintainPrompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(maintainPrompt).toContain("return compact JSON with satisfied, feedback, and maintenance payload fields");
+    expect(gitMaintainPrompt).toContain("return compact JSON with satisfied, feedback, and socket-specific maintenance payload fields");
     expect(maintainPrompt).not.toContain("return JSON with shape");
     expect(gitMaintainPrompt).not.toContain("return JSON with shape");
 

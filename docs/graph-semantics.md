@@ -30,12 +30,12 @@ Edges are evaluated in order and the first matching edge wins. Put guarded edges
 
 Loops are explicit regions under a loadout's `loops` object. A loop region groups socket ids, consumes at most one generator-provided list with `consumes: { from, output }`, and uses `loops.<id>.exits` for post-exhaustion routes.
 
-A Generator materia uses `generator: true`. Runtime resolves that marker to the work-items contract (`workItems`, `workItem`, `workItemIndex`, `end`). A generator socket must parse JSON and expose `workItems` from the handoff envelope.
+A Generator materia uses `generator: true`. Runtime resolves that marker to the work-items contract (`workItems`, `workItem`, `workItemIndex`, `end`). A generator socket must parse JSON and expose top-level `workItems` from its sparse JSON payload.
 
 ```json
 "Auto-Plan": {
   "tools": "readOnly",
-  "prompt": "Return the generic handoff envelope with workItems.",
+  "prompt": "Return compact JSON with a concise summary and ordered workItems.",
   "generator": true
 }
 ```
@@ -94,7 +94,7 @@ Generator materia are marked with a **Generator** badge. Sockets inside loop reg
 
 ## Example
 
-See [`../examples/graph-semantics-loadout.json`](../examples/graph-semantics-loadout.json) for a complete loadout that combines utility materia, edge conditions, a generic-envelope generator materia, sequential `Socket-N` ids, and the Build → Eval → Maintain work-item loop.
+See [`../examples/graph-semantics-loadout.json`](../examples/graph-semantics-loadout.json) for a complete loadout that combines utility materia, edge conditions, a sparse-payload generator materia, sequential `Socket-N` ids, and the Build → Eval → Maintain work-item loop.
 
 ## Contributor commands
 

@@ -911,7 +911,7 @@ describe("config loadouts", () => {
   test("bundled Auto-Eval prompt references the shared satisfied contract", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const prompt = rawDefault.materia?.["Auto-Eval"]?.prompt;
-    expect(prompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(prompt).toContain("compact JSON with evaluator fields relevant to this socket");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"satisfied" is the canonical boolean control field');
     expect(prompt).not.toContain('"satisfied": boolean');
     expect(prompt).not.toContain('"passed": boolean');
@@ -1111,7 +1111,7 @@ describe("config loadouts", () => {
 
     const fullAutoPrompt = loaded.config.materia["Auto-Plan"].prompt;
     const planningConsultPrompt = loaded.config.materia["Interactive-Plan"].prompt;
-    expect(fullAutoPrompt).toContain("runtime-provided canonical handoff JSON contract");
+    expect(fullAutoPrompt).toContain("compact JSON containing only plan fields relevant to the socket");
     expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
     expect(fullAutoPrompt).toContain("workItems");
     expect(planningConsultPrompt).toContain("Collaboratively refine an implementation plan");

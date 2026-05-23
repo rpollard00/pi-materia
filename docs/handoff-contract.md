@@ -2,9 +2,11 @@
 
 JSON-parsed materia sockets hand off reusable work context to the rest of the graph by returning a single JSON object. Sockets are the placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
 
-## Canonical generic envelope
+## Canonical runtime state and sparse socket payloads
 
-When applicable, JSON-producing agent materia return this envelope:
+pi-materia carries a canonical handoff state internally. JSON-producing sockets do **not** have to emit the whole state object. Each JSON socket should return only the fields relevant to its configured role, assignments, routing, and advancement; runtime validation checks those socket-local requirements and then merges the sparse payload into canonical state.
+
+The runtime-carried state fields are:
 
 ```json
 {
@@ -36,19 +38,19 @@ Generated units of work use `workItems`, not `tasks`. pi-materia intentionally d
 }
 ```
 
-JSON sockets should preserve useful existing `summary`, `workItems`, `guidance`, `decisions`, and `risks` context, augmenting it when possible. The output should be the object only: no markdown fences, prose, or extra commentary. Plain text sockets (`"parse": "text"`) do not use this JSON handoff contract.
+For model output, return the object only: no markdown fences, prose, or extra commentary. Plain text sockets (`"parse": "text"`) do not use JSON output requirements.
 
-If a JSON-parsed agent socket returns malformed JSON or an invalid handoff envelope, pi-materia performs a bounded same-socket repair retry before applying assignments or advancing the graph. The retry asks for corrected JSON only; utility JSON validation still fails fast.
+If a JSON-parsed agent socket returns malformed JSON or a payload missing fields required by that socket, pi-materia performs a bounded same-socket repair retry before applying assignments or advancing the graph. The retry asks for corrected JSON only; utility JSON validation still fails fast.
 
 ## Prompt layering
 
-Prompt assembly exposes the shared handoff summary through synthetic cast context for JSON sockets that are ready to produce final output. Socket-local prompt suffixes should stay thin: JSON-only formatting, generated-output placement in `workItems`, upstream `workItems` context for generator transforms, and multi-turn finalization/refinement guidance. Do not copy this full envelope schema into generated socket prompts or role-generation prompts; refer to the runtime-provided canonical handoff contract instead.
+Prompt assembly exposes canonical runtime context through synthetic cast context for JSON sockets that are ready to produce final output. Socket-local prompt suffixes stay thin and requirement-driven: JSON-only formatting, generated-output placement in `workItems`, consumed assignment paths, routing fields such as `satisfied`, and multi-turn finalization/refinement guidance. Do not copy the full runtime state schema into generated socket prompts or role-generation prompts; describe only the socket-relevant payload fields.
 
 ## Generator pipeline contract
 
-Materia marked `generator: true` produce generated work through the same handoff envelope. Their canonical output is always the top-level `workItems` array. A generator socket, including a generator upstream of another generator, must use JSON parsing and expose `workItems` (for example, `"assign": { "workItems": "$.workItems" }`).
+Materia marked `generator: true` produce generated work as a sparse JSON payload with a top-level `workItems` array. A generator socket, including a generator upstream of another generator, must use JSON parsing and expose `workItems` (for example, `"assign": { "workItems": "$.workItems" }`).
 
-Generator-to-generator pipelines behave like iterator transforms: the upstream generator emits `workItems`; the downstream generator consumes that context, transforms or filters it, and emits a new handoff JSON object with its own `workItems`. `workItems` is the canonical generator payload; do not author `tasks`, `task`, `work`, or custom output names for generated work.
+Generator-to-generator pipelines behave like iterator transforms: the upstream generator emits `workItems`; the downstream generator consumes that context, transforms or filters it, and emits a new payload with its own `workItems`. `workItems` is the canonical generator payload; do not author `tasks`, `task`, `work`, or custom output names for generated work.
 
 ## Reserved evaluator/route fields
 
@@ -61,7 +63,7 @@ Generator-to-generator pipelines behave like iterator transforms: the upstream g
 - When present, `feedback` must be a JSON string.
 - When present, `missing` must be a JSON array of missing items.
 - Sockets whose graph control flow depends on `satisfied` or `not_satisfied` must return `satisfied`.
-- Do not use current aliases such as `passed` as routing fields. They are not canonical handoff fields.
+- Do not use legacy aliases such as `passed` as routing fields. They are obsolete compatibility behavior if encountered, not canonical handoff fields.
 
 ## Routing semantics
 
@@ -82,13 +84,13 @@ At runtime, `when: "satisfied"` matches only `{ "satisfied": true }`, `when: "no
 
 ```json
 {
-  "summary": "Add canonical handoff documentation.",
+  "summary": "Add sparse handoff documentation.",
   "workItems": [
     {
       "id": "docs-contract-update",
-      "title": "Document the handoff contract",
-      "description": "Add canonical JSON handoff docs.",
-      "acceptance": ["Docs explain satisfied routing"],
+      "title": "Document sparse JSON payloads",
+      "description": "Explain canonical runtime state and socket-specific JSON outputs.",
+      "acceptance": ["Docs show compact planner and evaluator payloads"],
       "context": {
         "architecture": "Keep materia reusable; keep placement logic in adapters.",
         "constraints": ["Do not emit tasks"],
@@ -96,13 +98,7 @@ At runtime, `when: "satisfied"` matches only `{ "satisfied": true }`, `when: "no
         "risks": []
       }
     }
-  ],
-  "guidance": {},
-  "decisions": [],
-  "risks": [],
-  "satisfied": true,
-  "feedback": "",
-  "missing": []
+  ]
 }
 ```
 
@@ -120,13 +116,22 @@ A socket can assign that payload into cast state:
 
 ```json
 {
-  "summary": "README branch syntax is still stale.",
-  "workItems": [],
-  "guidance": {},
-  "decisions": [],
-  "risks": [],
   "satisfied": false,
   "feedback": "The README still links to stale branch syntax.",
   "missing": ["Update README edge examples"]
+}
+```
+
+## Maintainer-style example
+
+A socket that assigns maintenance diagnostics can return only the evaluator/control field plus consumed custom fields:
+
+```json
+{
+  "satisfied": true,
+  "feedback": "Checkpoint created.",
+  "checkpointCreated": true,
+  "vcs": "jj",
+  "commands": ["jj status", "jj describe -m ...", "jj new"]
 }
 ```

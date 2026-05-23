@@ -17,7 +17,7 @@ export interface MateriaBehaviorIdentity {
 export interface MateriaPromptIntentMetadata {
   /** Human-readable intent/category for prompt assembly and editor summaries. */
   intent?: string;
-  /** Whether this materia normally emits the canonical handoff JSON contract. */
+  /** Whether this materia normally emits JSON handoff payloads for socket-specific requirements. */
   includeHandoffContract?: boolean;
   /** Optional summary of the expected output shape; not a runtime parser implementation. */
   output?: string;

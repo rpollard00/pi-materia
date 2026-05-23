@@ -169,6 +169,24 @@ describe("application prompt assembly", () => {
     expect(prompt).not.toContain('"satisfied"');
   });
 
+  test("nested custom assign JSON sockets render nested payload paths without full-envelope fields", () => {
+    const socket = agentSocket({
+      socket: { materia: "Review", parse: "json", assign: { "review.route": "$.review.route", "review.label": "$.artifacts.0.label" } },
+      materia: { tools: "readOnly", prompt: "Review the output." },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(prompt).toContain("$.review.route for assignment to review.route");
+    expect(prompt).toContain("$.artifacts.0.label for assignment to review.label");
+    expect(prompt).not.toContain("Required payload fields:");
+    expect(prompt).not.toContain('"summary"');
+    expect(prompt).not.toContain('"guidance"');
+    expect(prompt).not.toContain('"decisions"');
+    expect(prompt).not.toContain('"risks"');
+    expect(prompt).not.toContain('"workItems" at $.workItems');
+    expect(prompt).not.toContain('"satisfied" at $.satisfied');
+  });
+
   test("multi-turn refinement stays conversational until continue finalization", () => {
     const socket = agentSocket({
       socket: { materia: "Plan", parse: "json" },
