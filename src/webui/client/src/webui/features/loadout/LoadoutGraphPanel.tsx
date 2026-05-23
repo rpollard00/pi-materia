@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, Dispatch, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from 'react';
 import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
 import type { MateriaEdgeCondition } from '../../../../../../types.js';
@@ -143,10 +143,20 @@ interface LoadoutGraphPanelProps {
 export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActions, socketModal }: LoadoutGraphPanelProps) {
   const [selectedLoopId, setSelectedLoopId] = useState<string>();
   const activeLoadoutIdentity = viewModel.activeLoadout?.id ?? viewModel.activeLoadoutName ?? '';
-  const selectedLoop = selectedLoopId ? viewModel.activeLoadout?.loops?.[selectedLoopId] : undefined;
+  const selectedLoopLoadoutIdentityRef = useRef(activeLoadoutIdentity);
+  const selectedLoop = selectedLoopId && selectedLoopLoadoutIdentityRef.current === activeLoadoutIdentity
+    ? viewModel.activeLoadout?.loops?.[selectedLoopId]
+    : undefined;
+  const openLoopControls = (loopId: string) => {
+    selectedLoopLoadoutIdentityRef.current = activeLoadoutIdentity;
+    setSelectedLoopId(loopId);
+  };
 
   useEffect(() => {
-    setSelectedLoopId(undefined);
+    if (selectedLoopLoadoutIdentityRef.current !== activeLoadoutIdentity) {
+      selectedLoopLoadoutIdentityRef.current = activeLoadoutIdentity;
+      setSelectedLoopId(undefined);
+    }
   }, [activeLoadoutIdentity]);
 
   useEffect(() => {
@@ -195,7 +205,7 @@ export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActio
         moveSocketRegionSelection={canvasActions.moveSocketRegionSelection}
         toggleEdgeCondition={canvasActions.toggleEdgeCondition}
         toggleLoopExitCondition={canvasActions.toggleLoopExitCondition}
-        openLoopControls={setSelectedLoopId}
+        openLoopControls={openLoopControls}
       />
 
       <LoopControlModal

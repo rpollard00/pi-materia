@@ -263,6 +263,87 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(getByTestId('loop-editor-keyboardLoop')).not.toBeNull();
   });
 
+  it('keeps an open loop modal synchronized with latest loop data and closes when the loop disappears', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: { syncLoop: { sockets: ['Socket-1', 'Socket-2'] } },
+    };
+    const loopRegions = [{ id: 'syncLoop', label: 'Sync', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }];
+    const viewModel = { ...baseViewModel, activeLoadout, loopRegions };
+    const { getByTestId, queryByTestId, rerender, props } = renderPanel({ viewModel });
+
+    fireEvent.click(getByTestId('loop-cycle-edge-syncLoop'));
+    expect(getByTestId('loop-control-modal').textContent).toContain('Members: Socket-1, Socket-2');
+
+    const updatedLoadout = {
+      ...activeLoadout,
+      loops: { syncLoop: { sockets: ['Socket-1'] } },
+    };
+    rerender(<LoadoutGraphPanel {...props} viewModel={{ ...viewModel, activeLoadout: updatedLoadout }} />);
+    expect(getByTestId('loop-control-modal').textContent).toContain('Members: Socket-1');
+    expect(getByTestId('loop-control-modal').textContent).not.toContain('Socket-1, Socket-2');
+
+    rerender(<LoadoutGraphPanel {...props} viewModel={{ ...viewModel, activeLoadout: { ...updatedLoadout, loops: {} } }} />);
+    expect(queryByTestId('loop-control-modal')).toBeNull();
+  });
+
+  it('resets selected loop state when switching active loadouts even if a loop id is reused', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: { reusedLoop: { sockets: ['Socket-1', 'Socket-2'] } },
+    };
+    const loopRegions = [{ id: 'reusedLoop', label: 'Reused', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }];
+    const viewModel = { ...baseViewModel, activeLoadout, loopRegions };
+    const { getByTestId, queryByTestId, rerender, props } = renderPanel({ viewModel });
+
+    fireEvent.click(getByTestId('loop-cycle-edge-reusedLoop'));
+    expect(getByTestId('loop-editor-reusedLoop')).not.toBeNull();
+
+    const nextLoadout = {
+      ...activeLoadout,
+      id: 'default:beta',
+      loops: { reusedLoop: { sockets: ['Socket-1'] } },
+    };
+    rerender(<LoadoutGraphPanel {...props} viewModel={{ ...viewModel, activeLoadout: nextLoadout, activeLoadoutName: 'Beta' }} />);
+    expect(queryByTestId('loop-control-modal')).toBeNull();
+  });
+
+  it('opens controls for each selected loop without auto-opening newly available loops', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: {
+        firstLoop: { sockets: ['Socket-1', 'Socket-2'] },
+        secondLoop: { sockets: ['Socket-2'] },
+      },
+    };
+    const { getByTestId, queryByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        loopRegions: [
+          { id: 'firstLoop', label: 'First', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' },
+          { id: 'secondLoop', label: 'Second', x: 32, y: 32, width: 240, height: 120, summary: 'Socket-2', cyclePath: 'M 60 60 C 140 40 220 40 280 60', accent: '#a78bfa', accentSoft: 'rgba(167, 139, 250, 0.12)' },
+        ],
+      },
+    });
+
+    expect(queryByTestId('loop-control-modal')).toBeNull();
+    fireEvent.click(getByTestId('loop-cycle-edge-firstLoop'));
+    expect(getByTestId('loop-editor-firstLoop')).not.toBeNull();
+    fireEvent.click(getByTestId('loop-cycle-edge-secondLoop'));
+    expect(queryByTestId('loop-editor-firstLoop')).toBeNull();
+    expect(getByTestId('loop-editor-secondLoop')).not.toBeNull();
+  });
+
   it('marks socket cards readonly and disables socket action mutations', () => {
     const baseActions = {
       closeSocketActionModal: vi.fn(),
