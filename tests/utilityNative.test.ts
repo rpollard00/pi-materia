@@ -244,7 +244,7 @@ describe("native utility socket execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string; visits?: Record<string, number> };
     expect(state.phase).toBe("failed");
-    expect(state.failedReason).toContain('must include reserved boolean field "satisfied"');
+    expect(state.failedReason).toContain('Missing required reserved field "satisfied" at $.satisfied');
     expect(state.failedReason).toContain('Legacy field "passed" is not canonical');
     expect(state.visits?.["Socket-2"]).toBeUndefined();
   });
@@ -267,7 +267,7 @@ describe("native utility socket execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; failedReason?: string; visits?: Record<string, number> };
     expect(state.phase).toBe("failed");
-    expect(state.failedReason).toContain('reserved control field "satisfied" must be a boolean');
+    expect(state.failedReason).toContain('Reserved field "satisfied" at $.satisfied must be a boolean');
     expect(state.visits?.["Socket-2"]).toBeUndefined();
   });
 

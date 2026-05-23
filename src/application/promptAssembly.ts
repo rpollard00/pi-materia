@@ -62,15 +62,17 @@ export function finalFormatInstruction(socket: ResolvedMateriaSocket): string {
 export interface JsonOutputRepairPromptInput {
   validationKind: MateriaJsonOutputValidationKind;
   errorMessage: string;
+  validationIssues?: Array<{ path: string; message: string; expected?: string; reason?: string }>;
   invalidOutputExcerpt: string;
   originalFinalOutputInstructions: string;
 }
 
 export function buildJsonOutputRepairPrompt(input: JsonOutputRepairPromptInput): string {
-  const label = input.validationKind === "json_parse" ? "JSON parse" : "canonical handoff envelope validation";
+  const label = input.validationKind === "json_parse" ? "JSON parse" : "socket JSON payload validation";
   return [
     `Your previous final JSON response was invalid (${label} failed). Regenerate the final response now.`,
     `Validation error: ${input.errorMessage}`,
+    formatValidationIssuesForRepair(input.validationIssues),
     "Bounded excerpt of your invalid output:",
     "```text",
     input.invalidOutputExcerpt,
@@ -78,6 +80,14 @@ export function buildJsonOutputRepairPrompt(input: JsonOutputRepairPromptInput):
     "Return only corrected JSON. Do not include markdown fences, prose, commentary, or explanations.",
     "Preserve the required final JSON-only output requirements for this socket:",
     input.originalFinalOutputInstructions,
+  ].filter(Boolean).join("\n");
+}
+
+function formatValidationIssuesForRepair(issues: JsonOutputRepairPromptInput["validationIssues"]): string | undefined {
+  if (!issues?.length) return undefined;
+  return [
+    "Structured validation issues for the current socket requirements:",
+    ...issues.map((issue) => `- ${issue.path}: ${issue.message}${issue.reason ? ` (${issue.reason})` : ""}`),
   ].join("\n");
 }
 
@@ -89,6 +99,7 @@ export function buildJsonOutputRepairRetryPrompt(state: MateriaCastState, socket
     buildJsonOutputRepairPrompt({
       validationKind: state.jsonOutputRepair.validationKind,
       errorMessage: state.jsonOutputRepair.errorMessage,
+      validationIssues: state.jsonOutputRepair.validationIssues,
       invalidOutputExcerpt: state.jsonOutputRepair.invalidOutputExcerpt,
       originalFinalOutputInstructions: finalFormatInstruction(socket),
     }),

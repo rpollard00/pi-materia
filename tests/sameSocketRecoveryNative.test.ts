@@ -408,7 +408,7 @@ describe("native same-socket recovery", () => {
     expect(events.filter((event) => event.type === "socket_complete")).toHaveLength(0);
     expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(0);
     expectJsonRepairRetryPrompt(promptMessages(harness).at(-1)?.content, {
-      error: "reserved control field \"satisfied\" must be a boolean when present",
+      error: "Reserved field \"satisfied\" at $.satisfied must be a boolean",
       excerpt: '{"satisfied":"yes"',
     });
 
@@ -446,7 +446,7 @@ describe("native same-socket recovery", () => {
     expect(events.filter((event) => event.type === "socket_complete")).toHaveLength(0);
     expect(events.filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2")).toHaveLength(0);
     expectJsonRepairRetryPrompt(promptMessages(harness).at(-1)?.content, {
-      error: "must include reserved boolean field \"satisfied\"",
+      error: "Missing required reserved field \"satisfied\" at $.satisfied",
       excerpt: '{"result":"missing control"}',
     });
   });
@@ -472,7 +472,7 @@ describe("native same-socket recovery", () => {
     latestState = latestCastState(handoffHarness);
     expect(latestState.active).toBe(false);
     expect(latestState.socketState).toBe("failed");
-    expect(latestState.failedReason).toContain("reserved control field \"satisfied\" must be a boolean when present");
+    expect(latestState.failedReason).toContain("Reserved field \"satisfied\" at $.satisfied must be a boolean");
     events = await readEvents(handoffHarness);
     expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
   });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateHandoffJsonOutput } from "../src/handoff/handoffValidation.js";
+import { handoffValidationIssues, validateHandoffJsonOutput } from "../src/handoff/handoffValidation.js";
 import type { MateriaPipelineSocketConfig } from "../src/types.js";
 
 function socket(overrides: Partial<MateriaPipelineSocketConfig> = {}): MateriaPipelineSocketConfig {
@@ -7,8 +7,8 @@ function socket(overrides: Partial<MateriaPipelineSocketConfig> = {}): MateriaPi
 }
 
 describe("handoff JSON runtime validation", () => {
-  test("accepts JSON objects with generic work item payload fields", () => {
-    const value = { workItems: [{ title: "Build" }], feedback: "ok", missing: [] };
+  test("accepts sparse JSON objects without unrelated canonical fields", () => {
+    const value = { summary: "planned" };
     expect(validateHandoffJsonOutput(value, { socketId: "Plan", socket: socket() })).toBe(value);
   });
 
@@ -22,18 +22,55 @@ describe("handoff JSON runtime validation", () => {
     expect(() => validateHandoffJsonOutput(null, { socketId: "Plan", socket: socket() })).toThrow(/expected a JSON object at the top level/);
   });
 
-  test("rejects malformed reserved evaluator/route fields", () => {
-    expect(() => validateHandoffJsonOutput({ satisfied: "true" }, { socketId: "Check", socket: socket() })).toThrow(/reserved control field "satisfied" must be a boolean/);
-    expect(() => validateHandoffJsonOutput({ feedback: ["retry"] }, { socketId: "Check", socket: socket() })).toThrow(/reserved evaluator field "feedback" must be a string/);
-    expect(() => validateHandoffJsonOutput({ missing: "retry" }, { socketId: "Check", socket: socket() })).toThrow(/reserved evaluator field "missing" must be an array/);
+  test("rejects malformed reserved evaluator/route fields when present", () => {
+    expect(() => validateHandoffJsonOutput({ satisfied: "true" }, { socketId: "Check", socket: socket() })).toThrow(/Reserved field "satisfied" .* must be a boolean/);
+    expect(() => validateHandoffJsonOutput({ feedback: ["retry"] }, { socketId: "Check", socket: socket() })).toThrow(/Reserved field "feedback" .* must be a string/);
+    expect(() => validateHandoffJsonOutput({ missing: "retry" }, { socketId: "Check", socket: socket() })).toThrow(/Reserved field "missing" .* must be an array/);
   });
 
-  test("requires satisfied when satisfied\/not_satisfied control flow consumes it", () => {
-    expect(() => validateHandoffJsonOutput({ feedback: "missing" }, { socketId: "Check", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }) })).toThrow(/must include reserved boolean field "satisfied"/);
-    expect(() => validateHandoffJsonOutput({ feedback: "missing" }, { socketId: "Maintain", socket: socket({ advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" } }) })).toThrow(/must include reserved boolean field "satisfied"/);
+  test("requires satisfied when satisfied/not_satisfied control flow consumes it", () => {
+    expect(() => validateHandoffJsonOutput({ feedback: "missing" }, { socketId: "Check", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }) })).toThrow(/Missing required reserved field "satisfied"/);
+    expect(() => validateHandoffJsonOutput({ feedback: "missing" }, { socketId: "Maintain", socket: socket({ advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied" } }) })).toThrow(/Missing required reserved field "satisfied"/);
   });
 
-  test("does not accept legacy passed as a canonical satisfied substitute", () => {
-    expect(() => validateHandoffJsonOutput({ passed: true, feedback: "legacy" }, { socketId: "Auto-Eval", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }) })).toThrow(/Legacy field "passed" is not canonical/);
+  test("does not require satisfied when control flow does not consume it", () => {
+    expect(validateHandoffJsonOutput({ feedback: "ok" }, { socketId: "Report", socket: socket({ edges: [{ to: "Next" }] }) })).toEqual({ feedback: "ok" });
+  });
+
+  test("requires workItems array for generator/planner outputs and assignment", () => {
+    expect(() => validateHandoffJsonOutput({ summary: "none" }, { socketId: "Plan", socket: socket(), workItemsProducer: true })).toThrow(/Missing required field "workItems"/);
+    expect(() => validateHandoffJsonOutput({ workItems: {} }, { socketId: "Plan", socket: socket(), workItemsProducer: true })).toThrow(/Field "workItems" .* must be an array/);
+    expect(() => validateHandoffJsonOutput({ summary: "none" }, { socketId: "Plan", socket: socket({ assign: { workItems: "$.workItems" } }) })).toThrow(/Missing required field "workItems"/);
+    const value = { workItems: [{ title: "Build" }] };
+    expect(validateHandoffJsonOutput(value, { socketId: "Plan", socket: socket(), workItemsProducer: true })).toBe(value);
+  });
+
+  test("validates reserved fields when assignment explicitly consumes them", () => {
+    expect(() => validateHandoffJsonOutput({}, { socketId: "Evaluate", socket: socket({ assign: { feedback: "$.feedback" } }) })).toThrow(/Missing required reserved field "feedback"/);
+    expect(() => validateHandoffJsonOutput({}, { socketId: "Evaluate", socket: socket({ assign: { missing: "$.missing" } }) })).toThrow(/Missing required reserved field "missing"/);
+  });
+
+  test("requires custom consumed assignment paths without inferring unrelated canonical fields", () => {
+    expect(() => validateHandoffJsonOutput({ checkpointCreated: true }, { socketId: "Maintain", socket: socket({ assign: { vcs: "$.vcs", commands: "$.details.commands" } }) })).toThrow(/Missing payload path \$\.vcs consumed by assignment/);
+    const value = { vcs: "jj", details: { commands: ["jj status"] } };
+    expect(validateHandoffJsonOutput(value, { socketId: "Maintain", socket: socket({ assign: { vcs: "$.vcs", commands: "$.details.commands" } }) })).toBe(value);
+  });
+
+  test("validates custom consumed assignment paths with runtime-compatible array indexes", () => {
+    const value = { list: [{ label: "ready" }] };
+    expect(validateHandoffJsonOutput(value, { socketId: "Maintain", socket: socket({ assign: { label: "$.list.0.label" } }) })).toBe(value);
+    expect(() => validateHandoffJsonOutput({ list: [] }, { socketId: "Maintain", socket: socket({ assign: { label: "$.list.0.label" } }) })).toThrow(/Missing payload path \$\.list\.0\.label consumed by assignment/);
+  });
+
+  test("exposes structured validation issues for repair prompts", () => {
+    let caught: unknown;
+    try {
+      validateHandoffJsonOutput({ passed: true }, { socketId: "Auto-Eval", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }) });
+    } catch (error) {
+      caught = error;
+    }
+    const issues = handoffValidationIssues(caught);
+    expect(issues?.map((issue) => issue.path)).toContain("$.satisfied");
+    expect(issues?.some((issue) => issue.message.includes("Legacy field \"passed\" is not canonical"))).toBe(true);
   });
 });

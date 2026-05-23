@@ -270,6 +270,7 @@ export type MateriaJsonOutputValidationKind = "json_parse" | "handoff_validation
 export interface MateriaJsonOutputRepairContext {
   validationKind: MateriaJsonOutputValidationKind;
   errorMessage: string;
+  validationIssues?: Array<{ path: string; message: string; expected?: string; reason?: string }>;
   invalidOutputExcerpt: string;
   excerptLength: number;
   truncated: boolean;

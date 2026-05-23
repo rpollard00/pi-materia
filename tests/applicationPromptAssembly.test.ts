@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -75,6 +75,22 @@ function state(socket: ResolvedMateriaAgentSocket, overrides: Partial<MateriaCas
 }
 
 describe("application prompt assembly", () => {
+  test("JSON repair prompts describe socket payload validation without requesting a full envelope", () => {
+    const prompt = buildJsonOutputRepairPrompt({
+      validationKind: "handoff_validation",
+      errorMessage: "Invalid handoff JSON output for socket \"Check\": Missing required reserved field \"satisfied\" at $.satisfied; expected a boolean.",
+      validationIssues: [{ path: "$.satisfied", message: "Missing required reserved field \"satisfied\" at $.satisfied; expected a boolean.", reason: "Current socket control flow uses satisfied/not_satisfied routing or advancement." }],
+      invalidOutputExcerpt: "{\"feedback\":\"retry\"}",
+      originalFinalOutputInstructions: "Final output format: Return only one top-level JSON object\nRequired payload fields:\n- \"satisfied\" at $.satisfied: boolean.",
+    });
+
+    expect(prompt).toContain("socket JSON payload validation");
+    expect(prompt).toContain("Structured validation issues for the current socket requirements");
+    expect(prompt).toContain("$.satisfied");
+    expect(prompt).not.toContain("canonical handoff envelope validation");
+    expect(prompt).not.toContain("full canonical handoff envelope");
+  });
+
   test("injects adapter context and rendered current item into text socket prompts", () => {
     const socket = agentSocket();
     const prompt = buildSocketPrompt(state(socket), socket);

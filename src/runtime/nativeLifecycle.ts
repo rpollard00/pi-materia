@@ -16,7 +16,8 @@ import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js
 import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
 import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
-import { validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
+import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
+import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
 import type { LoadedConfig, MateriaCastState, MateriaJsonOutputValidationKind, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
@@ -454,12 +455,12 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   if (effectiveResolvedSocketConfig(socket).parse === "json") {
     try {
       parsed = parseSocketJson<unknown>(socket.id, text);
-      parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: socket.socket });
+      parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: effectiveResolvedSocketConfig(socket), workItemsProducer: isAgentResolvedSocket(socket) && Boolean(canonicalGeneratorConfigFor(socket.materia)) });
     } catch (error) {
       const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
       if (isAgentResolvedSocket(socket)) {
         if (options.finalizedMultiTurn) state.multiTurnFinalizing = true;
-        state.jsonOutputRepair = buildJsonOutputRepairContext(text, validationError, classifyJsonOutputValidationKind(error));
+        state.jsonOutputRepair = buildJsonOutputRepairContext(text, validationError, classifyJsonOutputValidationKind(error), handoffValidationIssues(error));
         const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
         if (recovered) return;
         throw nonRecoverableTurnError(state, validationError);
@@ -717,11 +718,12 @@ function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {
 
 const JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS = 600;
 
-function buildJsonOutputRepairContext(text: string, error: Error, validationKind: MateriaJsonOutputValidationKind): NonNullable<MateriaCastState["jsonOutputRepair"]> {
+function buildJsonOutputRepairContext(text: string, error: Error, validationKind: MateriaJsonOutputValidationKind, validationIssues?: NonNullable<MateriaCastState["jsonOutputRepair"]>["validationIssues"]): NonNullable<MateriaCastState["jsonOutputRepair"]> {
   const invalidOutputExcerpt = boundedInvalidOutputExcerpt(text, JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS);
   return {
     validationKind,
     errorMessage: error.message,
+    validationIssues,
     invalidOutputExcerpt,
     excerptLength: invalidOutputExcerpt.length,
     truncated: text.length > invalidOutputExcerpt.length,
