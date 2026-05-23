@@ -230,6 +230,8 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     });
 
     expect(queryByTestId('loop-control-modal')).toBeNull();
+    expect(queryByTestId('loop-editor-reviewLoop')).toBeNull();
+    expect(queryByTestId('loop-editor-panel')).toBeNull();
     const cycleTarget = getByTestId('loop-cycle-edge-reviewLoop');
     expect(cycleTarget.getAttribute('role')).toBe('button');
     expect(cycleTarget.getAttribute('aria-label')).toBe('Open controls for Review loop');
@@ -248,19 +250,136 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     base.unmount();
     const activeLoadout = {
       ...baseViewModel.activeLoadout,
-      loops: { keyboardLoop: { sockets: ['Socket-1', 'Socket-2'] } },
+      loops: {
+        enterLoop: { sockets: ['Socket-1', 'Socket-2'] },
+        spaceLoop: { sockets: ['Socket-1', 'Socket-2'] },
+      },
     };
     const { getByTestId, queryByTestId } = renderPanel({
       viewModel: {
         ...baseViewModel,
         activeLoadout,
-        loopRegions: [{ id: 'keyboardLoop', label: 'Keyboard', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#a78bfa', accentSoft: 'rgba(167, 139, 250, 0.12)' }],
+        loopRegions: [
+          { id: 'enterLoop', label: 'Enter', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#a78bfa', accentSoft: 'rgba(167, 139, 250, 0.12)' },
+          { id: 'spaceLoop', label: 'Space', x: 32, y: 32, width: 240, height: 120, summary: 'Socket-1, Socket-2', cyclePath: 'M 60 60 C 140 40 220 40 280 60', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' },
+        ],
       },
     });
 
     expect(queryByTestId('loop-control-modal')).toBeNull();
-    fireEvent.keyDown(getByTestId('loop-cycle-edge-keyboardLoop'), { key: 'Enter' });
-    expect(getByTestId('loop-editor-keyboardLoop')).not.toBeNull();
+    fireEvent.keyDown(getByTestId('loop-cycle-edge-enterLoop'), { key: 'Enter' });
+    expect(getByTestId('loop-editor-enterLoop')).not.toBeNull();
+
+    fireEvent.keyDown(getByTestId('loop-cycle-edge-spaceLoop'), { key: ' ' });
+    expect(queryByTestId('loop-editor-enterLoop')).toBeNull();
+    expect(getByTestId('loop-editor-spaceLoop')).not.toBeNull();
+  });
+
+  it('routes modal loop mutations through the selected loop id when editable', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      source: 'user' as const,
+      loops: { editableLoop: { sockets: ['Socket-1', 'Socket-2'], exit: { from: 'Socket-2', when: 'satisfied' as const, to: 'end' } } },
+    };
+    const loopActions = {
+      breakLoop: vi.fn(),
+      clearLoopExit: vi.fn(),
+      createTaskIteratorLoop: vi.fn(),
+      updateLoopExit: vi.fn(),
+    };
+    const { getByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        editPolicy: unlockedUserPolicy,
+        loopRegions: [{ id: 'editableLoop', label: 'Editable', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }],
+      },
+      loopActions,
+    });
+
+    fireEvent.click(getByTestId('loop-cycle-edge-editableLoop'));
+    fireEvent.change(getByTestId('loop-exit-source-editableLoop'), { target: { value: 'Socket-1' } });
+    expect(loopActions.updateLoopExit).toHaveBeenCalledWith('editableLoop', { from: 'Socket-1' });
+
+    fireEvent.change(getByTestId('loop-exit-condition-editableLoop'), { target: { value: 'not_satisfied' } });
+    expect(loopActions.updateLoopExit).toHaveBeenCalledWith('editableLoop', { when: 'not_satisfied' });
+
+    fireEvent.change(getByTestId('loop-exit-target-editableLoop'), { target: { value: 'Socket-1' } });
+    expect(loopActions.updateLoopExit).toHaveBeenCalledWith('editableLoop', { to: 'Socket-1' });
+
+    fireEvent.click(getByTestId('loop-exit-clear-editableLoop'));
+    expect(loopActions.clearLoopExit).toHaveBeenCalledWith('editableLoop');
+
+    fireEvent.click(getByTestId('loop-break-editableLoop'));
+    expect(loopActions.breakLoop).toHaveBeenCalledWith('editableLoop');
+  });
+
+  it('keeps read-only loop details viewable while disabling modal mutation controls', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: { readonlyLoop: { sockets: ['Socket-1', 'Socket-2'], exit: { from: 'Socket-2', when: 'satisfied' as const, to: 'end' } } },
+    };
+    const loopActions = {
+      breakLoop: vi.fn(),
+      clearLoopExit: vi.fn(),
+      createTaskIteratorLoop: vi.fn(),
+      updateLoopExit: vi.fn(),
+    };
+    const { getByRole, getByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        editPolicy: readonlyDefaultPolicy,
+        loopRegions: [{ id: 'readonlyLoop', label: 'Read only', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }],
+      },
+      loopActions,
+    });
+
+    fireEvent.click(getByTestId('loop-cycle-edge-readonlyLoop'));
+
+    const modal = getByTestId('loop-control-modal');
+    expect(modal.textContent).toContain('Members: Socket-1, Socket-2');
+    expect(within(modal).getByRole('status').textContent).toBe(readonlyDefaultPolicy.reason);
+    expect(getByTestId('loop-exit-source-readonlyLoop')).toHaveProperty('disabled', true);
+    expect(getByTestId('loop-exit-condition-readonlyLoop')).toHaveProperty('disabled', true);
+    expect(getByTestId('loop-exit-target-readonlyLoop')).toHaveProperty('disabled', true);
+    expect(getByTestId('loop-exit-clear-readonlyLoop')).toHaveProperty('disabled', true);
+    expect(getByTestId('loop-break-readonlyLoop')).toHaveProperty('disabled', true);
+
+    fireEvent.click(getByRole('button', { name: 'Break loop' }));
+    expect(loopActions.breakLoop).not.toHaveBeenCalled();
+  });
+
+  it('keeps locked user loop details viewable while disabling modal mutation controls', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      source: 'user' as const,
+      loops: { lockedLoop: { sockets: ['Socket-1', 'Socket-2'], exit: { from: 'Socket-2', when: 'satisfied' as const, to: 'end' } } },
+    };
+    const { getByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        editPolicy: lockedUserPolicy,
+        loopRegions: [{ id: 'lockedLoop', label: 'Locked', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }],
+      },
+    });
+
+    fireEvent.click(getByTestId('loop-cycle-edge-lockedLoop'));
+
+    const modal = getByTestId('loop-control-modal');
+    expect(modal.textContent).toContain(lockedUserPolicy.reason);
+    expect(getByTestId('loop-exit-source-lockedLoop')).toHaveProperty('disabled', true);
+    expect(getByTestId('loop-break-lockedLoop')).toHaveProperty('disabled', true);
   });
 
   it('keeps an open loop modal synchronized with latest loop data and closes when the loop disappears', () => {

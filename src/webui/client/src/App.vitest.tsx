@@ -1030,9 +1030,12 @@ describe('Materia loadout grid editor', () => {
     expect(region.textContent).toContain('Build → Auto-Eval → Maintain');
     expect(region.textContent).toContain(summary);
     expect(region.getAttribute('title')).toBe(summary);
-    expect(screen.getByTestId('loop-editor-panel').textContent).toContain('Loop exits');
-    expect(screen.getByTestId('loop-editor-taskIteration').textContent).toContain('Members: Build, Auto-Eval, Maintain');
-    expect(screen.getByTestId('loop-editor-taskIteration').textContent).not.toContain('Members: Socket-2');
+    expect(screen.queryByTestId('loop-editor-panel')).toBeNull();
+    expect(screen.queryByTestId('loop-editor-taskIteration')).toBeNull();
+    fireEvent.click(screen.getByTestId('loop-cycle-edge-taskIteration'));
+    expect(screen.getByTestId('loop-control-modal').textContent).toContain('loop controls');
+    expect(screen.getByTestId('loop-control-modal').textContent).toContain('Members: Build, Auto-Eval, Maintain');
+    expect(screen.getByTestId('loop-control-modal').textContent).not.toContain('Members: Socket-2');
     const sourceOptions = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.getAttribute('value'));
     expect(sourceOptions).toEqual(['Socket-2', 'Socket-3', 'Socket-4']);
     const sourceOptionLabels = Array.from(screen.getByTestId('loop-exit-source-taskIteration').querySelectorAll('option')).map((option) => option.textContent);
@@ -1083,6 +1086,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
+    fireEvent.click(await screen.findByTestId('loop-cycle-edge-taskIteration'));
     fireEvent.change(await screen.findByTestId('loop-exit-source-taskIteration'), { target: { value: 'Socket-3' } });
     await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Socket-3 (Auto-Eval).Satisfied → end'));
     fireEvent.change(screen.getByTestId('loop-exit-condition-taskIteration'), { target: { value: 'satisfied' } });
@@ -1115,6 +1119,7 @@ describe('Materia loadout grid editor', () => {
 
     expect(await screen.findByTestId('loop-region-taskIteration')).toBeTruthy();
     expect(await screen.findByTestId('edge-Socket-3-Socket-2-1')).toBeTruthy();
+    fireEvent.click(await screen.findByTestId('loop-cycle-edge-taskIteration'));
     fireEvent.click(screen.getByTestId('loop-break-taskIteration'));
 
     await waitFor(() => expect(screen.queryByTestId('loop-region-taskIteration')).toBeNull());
