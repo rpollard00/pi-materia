@@ -78,30 +78,32 @@ export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, ques
       </div>
 
       <div className="quest-create-fields">
-        <QuestDefaultLoadoutSelector
-          persistedLoadouts={persistedLoadouts}
-          questDefaultLoadoutId={questDefaultLoadoutId}
-          questDefaultLoadoutWarning={questDefaultLoadoutWarning}
-          setQuestDefaultLoadout={setQuestDefaultLoadout}
-        />
+        <div className="quest-create-controls">
+          <QuestDefaultLoadoutSelector
+            persistedLoadouts={persistedLoadouts}
+            questDefaultLoadoutId={questDefaultLoadoutId}
+            questDefaultLoadoutWarning={questDefaultLoadoutWarning}
+            setQuestDefaultLoadout={setQuestDefaultLoadout}
+          />
 
-        <label className="quest-form-field" htmlFor="quest-loadout-override">
-          <span>Loadout override</span>
-          <select
-            id="quest-loadout-override"
-            value={loadoutOverride}
-            onChange={(event) => setLoadoutOverride(event.target.value)}
-            disabled={submitting}
-          >
-            <option value="">No override — use quest default, then active fallback</option>
-            {loadoutOptions.map(([name, loadout]) => (
-              <option key={name} value={name}>{loadout.id && loadout.id !== name ? `${name} (${loadout.id})` : name}</option>
-            ))}
-          </select>
-          <span className="mt-1 block text-[0.68rem] normal-case tracking-normal text-slate-400">
-            Leave blank to use the quest default runner loadout. If the quest default is cleared or unavailable, the runner falls back to the active loadout.
-          </span>
-        </label>
+          <label className="quest-form-field" htmlFor="quest-loadout-override">
+            <span>Loadout override</span>
+            <select
+              id="quest-loadout-override"
+              value={loadoutOverride}
+              onChange={(event) => setLoadoutOverride(event.target.value)}
+              disabled={submitting}
+            >
+              <option value="">No override — use quest default, then active fallback</option>
+              {loadoutOptions.map(([name, loadout]) => (
+                <option key={name} value={name}>{loadout.id && loadout.id !== name ? `${name} (${loadout.id})` : name}</option>
+              ))}
+            </select>
+            <span className="mt-1 block text-[0.68rem] normal-case tracking-normal text-slate-400">
+              Leave blank to use the quest default runner loadout. If the quest default is cleared or unavailable, the runner falls back to the active loadout.
+            </span>
+          </label>
+        </div>
 
         <label className="quest-form-field quest-prompt-field" htmlFor="quest-prompt">
           <span>Prompt</span>
