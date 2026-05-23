@@ -105,6 +105,18 @@ function listEntryLines(message: string): string[] {
   return message.split("\n").filter((line) => line.startsWith("- quest-"));
 }
 
+function expectQuestAddDidNotLaunch(harness: FakePiHarness, board: any): void {
+  expect(board.runner.activeQuestId).toBeUndefined();
+  expect(board.quests).toHaveLength(1);
+  expect(board.quests[0]).toMatchObject({ status: "pending", attempts: 0 });
+  expect(board.quests[0].currentCastId).toBeUndefined();
+  expect(board.quests[0].lastCastId).toBeUndefined();
+  expect(triggeredPromptMessages(harness)).toHaveLength(0);
+  expect(harness.operationLog).not.toContain("triggerTurn");
+  expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(false);
+  expect(latestMateriaMessage(harness)).not.toContain("Started continuous quest runner");
+}
+
 describe("/materia quest move parsing", () => {
   test("accepts exactly one placement option", () => {
     expect(parseQuestMoveArgs(["quest-a", "--first"])).toEqual({ ok: true, args: { questRef: "quest-a", placement: "first" } });
@@ -366,15 +378,30 @@ describe("/materia quest command interface", () => {
     expect(latestMateriaMessage(harness)).toContain("Quest default loadout: cleared");
   });
 
-  test("adds a pending quest with optional loadout override", async () => {
-    const harness = await makeHarness();
+  test("adds a pending quest to a stopped board without launching it", async () => {
+    const harness = await makeHarness(agentQuestConfig());
 
-    await harness.runCommand("materia", "quest add --loadout Other Implement the thing");
+    await harness.runCommand("materia", "quest add --loadout Test Implement the thing");
 
     const board = await readBoard(harness);
-    expect(board.quests).toHaveLength(1);
-    expect(board.quests[0]).toMatchObject({ title: "Implement the thing", prompt: "Implement the thing", status: "pending", loadoutOverride: "Other" });
+    expect(board.runner.enabled).toBe(false);
+    expect(board.quests[0]).toMatchObject({ title: "Implement the thing", prompt: "Implement the thing", loadoutOverride: "Test" });
+    expectQuestAddDidNotLaunch(harness, board);
     expect(latestMateriaMessage(harness)).toContain("Added quest");
+  });
+
+  test("quest add does not wait for idle while enqueuing", async () => {
+    const harness = await makeHarness(agentQuestConfig());
+    harness.idle = false;
+    harness.waitForIdleError = new Error("session is busy");
+
+    await harness.runCommand("materia", "quest add Queue while busy");
+
+    const board = await readBoard(harness);
+    expect(harness.waitForIdleCalls).toBe(0);
+    expect(harness.operationLog).not.toContain("waitForIdle");
+    expect(board.quests[0]).toMatchObject({ title: "Queue while busy", prompt: "Queue while busy" });
+    expectQuestAddDidNotLaunch(harness, board);
   });
 
   test("run enables the runner and launches the next quest after waiting for idle", async () => {
@@ -483,16 +510,20 @@ describe("/materia quest command interface", () => {
     expect(harness.notifications.some((notification) => notification.type === "info" && notification.message.includes("quest runner enabled and waiting"))).toBe(true);
   });
 
-  test("adding a quest wakes an enabled idle runner", async () => {
-    const harness = await makeHarness();
+  test("adding a quest to an enabled idle runner only enqueues it", async () => {
+    const harness = await makeHarness(agentQuestConfig());
     await harness.runCommand("materia", "quest run");
+    const waitsBeforeAdd = harness.waitForIdleCalls;
+    const notificationsBeforeAdd = harness.notifications.length;
 
     await harness.runCommand("materia", "quest add Wake the runner");
 
     const board = await readBoard(harness);
+    expect(harness.waitForIdleCalls).toBe(waitsBeforeAdd);
     expect(board.runner.enabled).toBe(true);
-    expect(board.quests[0]).toMatchObject({ status: "succeeded", attempts: 1 });
-    expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(true);
+    expectQuestAddDidNotLaunch(harness, board);
+    const addNotifications = harness.notifications.slice(notificationsBeforeAdd);
+    expect(addNotifications.some((notification) => notification.message.includes("auto-launched"))).toBe(false);
   });
 
   test("requeues failed and blocked quests by id or unambiguous prefix at the queue bottom", async () => {
