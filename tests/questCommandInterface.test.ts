@@ -744,7 +744,7 @@ describe("/materia quest command interface", () => {
 
     await expect(runHarness.runCommand("materia", "quest run")).rejects.toThrow("session is busy");
     let board = await readBoard(runHarness);
-    expect(runHarness.waitForIdleCalls).toBe(2);
+    expect(runHarness.waitForIdleCalls).toBe(1);
     expect(board.quests[0]).toMatchObject({ status: "pending", attempts: 0 });
     expect(runHarness.operationLog).not.toContain("triggerTurn");
 
@@ -755,7 +755,7 @@ describe("/materia quest command interface", () => {
 
     await expect(startHarness.runCommand("materia", "quest start")).rejects.toThrow("session is busy");
     board = await readBoard(startHarness);
-    expect(startHarness.waitForIdleCalls).toBe(2);
+    expect(startHarness.waitForIdleCalls).toBe(1);
     expect(board.runner.enabled).toBe(false);
     expect(board.quests[0]).toMatchObject({ status: "pending", attempts: 0 });
     expect(startHarness.operationLog).not.toContain("triggerTurn");

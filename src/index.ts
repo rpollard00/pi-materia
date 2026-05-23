@@ -413,9 +413,6 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
       const status = await input.useCases.getStatus(input.ctx);
       sendQuestMessage(input.pi, renderQuestAdded(quest, status.boardPath), "add");
       input.ctx.ui.notify(`Added pi-materia quest ${quest.id}.`, "info");
-      if (status.board.runner.enabled) {
-        await drainQuestBoard({ pi: input.pi, ctx: input.ctx, useCases: input.useCases, configuredPath: input.configuredPath, guard: input.autoAdvanceGuard });
-      }
     } catch (error) {
       notifyQuestError(input.ctx, "add", error);
     }
@@ -750,7 +747,7 @@ function tokenizeCommandArgs(args: string): string[] {
 
 function isNonBlockingQuestCommand(args: string): boolean {
   const action = tokenizeCommandArgs(args)[0] ?? "status";
-  return action === "status" || action === "list" || action === "stop" || action === "default-loadout";
+  return action === "status" || action === "list" || action === "stop" || action === "add" || action === "default-loadout";
 }
 
 function isNonBlockingMateriaCommand(subcommand: string | undefined): boolean {
