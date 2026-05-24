@@ -92,7 +92,21 @@ function stopMenuEvent(event: ReactMouseEvent | KeyboardEvent) {
 
 function loadoutScopeDescription(scope: LoadoutSourceScope): string {
   if (scope === 'default') return 'Built-In read-only loadout';
-  return `${scope} loadout`;
+  if (scope === 'explicit') return 'Explicit config loadout';
+  if (scope === 'project') return 'Project loadout';
+  return 'User loadout';
+}
+
+function loadoutSourceLabel(scope: LoadoutSourceScope): string {
+  if (scope === 'default') return 'Built-In';
+  if (scope === 'explicit') return 'Explicit';
+  if (scope === 'project') return 'Project';
+  return 'User';
+}
+
+function loadoutLockStateLabel(loadout: PipelineConfig, scope: LoadoutSourceScope): string {
+  if (scope === 'default') return 'Read-only';
+  return loadout.lockState === 'locked' ? 'Locked' : 'Editable';
 }
 
 type LoadoutLockIconKey = 'lock' | 'unlock';
@@ -172,8 +186,8 @@ function LoadoutActionsMenu({ name, isConfiguredActive, isDefaultLoadout, isQues
       </button>
       {open && (
         <div id={menuId} className="loadout-actions-popover" role="menu" aria-label={`Actions for ${name}`}>
-          <button type="button" role="menuitem" disabled={!canSetRuntimeActive} title={isConfiguredActive ? 'This loadout is already the configured active loadout.' : undefined} onClick={() => runAction(onSetRuntimeActive)}>
-            {isConfiguredActive ? 'Active loadout' : 'Set Active'}
+          <button type="button" role="menuitem" disabled={!canSetRuntimeActive} title={isConfiguredActive ? 'This loadout is already the configured active loadout.' : 'Use this loadout for newly started casts and quests without an override.'} onClick={() => runAction(onSetRuntimeActive)}>
+            {isConfiguredActive ? 'Configured active loadout' : 'Set configured active'}
           </button>
           <button type="button" role="menuitem" disabled={!canSetDefault} title={isDefaultLoadout ? 'This loadout is already the default.' : undefined} onClick={() => runAction(onSetDefault)}>
             {isDefaultLoadout ? 'Default loadout' : 'Set as Default'}
@@ -246,7 +260,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiv
           value={activeConfiguredLoadoutId ?? ''}
           disabled={activeChangePending || persistedRows.length === 0}
           onChange={(event) => void changeRuntimeActiveLoadout(event.target.value, event.currentTarget.selectedOptions[0]?.textContent ?? undefined)}
-          aria-label="Active loadout"
+          aria-label="Configured active loadout"
         >
           {persistedRows.map(({ name, loadout }) => <option key={loadout.id} value={loadout.id}>{name}</option>)}
         </select>
@@ -264,23 +278,39 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiv
           const lockAction = loadoutLockAction(loadout, sourceScope, getLoadoutLockEligibility(name, nextLockState));
           const LockIcon = loadoutLockIcons[lockAction.iconKey];
           const isEditing = name === editingLoadoutName;
+          const statusLabels = [
+            isEditing ? 'Editing' : null,
+            isConfiguredActive ? 'Configured active' : null,
+            runningLoadoutIdentity && isRunningNow ? 'Running now' : null,
+            isDefaultLoadout ? 'Default' : null,
+            isQuestDefaultLoadout ? 'Quest default' : null,
+            loadoutSourceLabel(sourceScope),
+            loadoutLockStateLabel(loadout, sourceScope),
+          ].filter(Boolean) as string[];
           return (
-            <div key={name} className={`loadout-card ${isEditing ? 'loadout-card-active' : ''}`}>
-              <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select" title={`${name} — ${loadoutScopeDescription(sourceScope)}`}>
+            <div key={name} role="listitem" className={`loadout-card ${isEditing ? 'loadout-card-active' : ''}`}>
+              <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select" title={`${name} — ${statusLabels.join(', ')}`} aria-label={`${name}. ${statusLabels.join(', ')}.`} aria-current={isEditing ? 'true' : undefined}>
                 <span className="loadout-card-title">
                   <span className="loadout-card-name">{name}</span>
-                  {isDefaultLoadout && (
-                    <span className="loadout-default-indicator" role="img" aria-label="Default loadout" title="Default loadout">
-                      <Star className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
-                    </span>
-                  )}
-                  {isQuestDefaultLoadout && (
-                    <span className="loadout-quest-default-indicator" role="img" aria-label="Quest default loadout" title="Quest default loadout">
-                      <Flag className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
-                    </span>
-                  )}
-                  {isConfiguredActive && <span className="loadout-configured-active-indicator loadout-active-indicator" aria-label="Runtime active loadout" title="Configured active loadout" />}
-                  {runningLoadoutIdentity && isRunningNow && <span className="loadout-running-indicator" aria-label="Running now" title="Running now" />}
+                  <span className="loadout-status-badges">
+                    {isEditing && <span className="loadout-status-badge loadout-editing-badge" aria-label="Editing loadout" title="Editing this loadout">Editing</span>}
+                    {isConfiguredActive && <span className="loadout-status-badge loadout-configured-active-indicator loadout-active-indicator" aria-label="Configured active status" title="Configured active loadout">Configured active</span>}
+                    {runningLoadoutIdentity && isRunningNow && <span className="loadout-status-badge loadout-running-indicator" aria-label="Running now" title="Executing cast loadout">Running now</span>}
+                    {isDefaultLoadout && (
+                      <span className="loadout-status-badge loadout-default-indicator" aria-label="Default loadout" title="Default loadout">
+                        <Star className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
+                        Default
+                      </span>
+                    )}
+                    {isQuestDefaultLoadout && (
+                      <span className="loadout-status-badge loadout-quest-default-indicator" aria-label="Quest default loadout" title="Quest default loadout">
+                        <Flag className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
+                        Quest default
+                      </span>
+                    )}
+                    <span className="loadout-status-badge loadout-source-badge" aria-label={`${loadoutSourceLabel(sourceScope)} loadout source`} title={loadoutScopeDescription(sourceScope)}>{loadoutSourceLabel(sourceScope)}</span>
+                    <span className="loadout-status-badge loadout-lock-state-badge" aria-label={`${loadoutLockStateLabel(loadout, sourceScope)} lock state`} title={lockAction.title}>{loadoutLockStateLabel(loadout, sourceScope)}</span>
+                  </span>
                 </span>
               </button>
               <button

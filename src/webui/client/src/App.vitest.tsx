@@ -410,7 +410,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    const activeSelect = await screen.findByLabelText('Configured active loadout') as HTMLSelectElement;
     expect(activeSelect.value).toBe('Full-Auto');
     expect(within(activeSelect).getByRole('option', { name: 'Full-Auto' })).toBeTruthy();
     expect(within(activeSelect).getByRole('option', { name: 'Planning-Consult' })).toBeTruthy();
@@ -435,24 +435,24 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    const activeSelect = await screen.findByLabelText('Configured active loadout') as HTMLSelectElement;
     fireEvent.change(activeSelect, { target: { value: 'Planning-Consult' } });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/loadout/active', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ name: 'Planning-Consult' }),
     })));
-    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
-    expect(screen.getByLabelText('Active loadout')).not.toHaveProperty('disabled', true);
-    expect(within(screen.getByLabelText('Active loadout')).getByRole('option', { name: 'Full-Auto' })).toBeTruthy();
-    expect(within(screen.getByLabelText('Active loadout')).getByRole('option', { name: 'Planning-Consult' })).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText('Configured active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    expect(screen.getByLabelText('Configured active loadout')).not.toHaveProperty('disabled', true);
+    expect(within(screen.getByLabelText('Configured active loadout')).getByRole('option', { name: 'Full-Auto' })).toBeTruthy();
+    expect(within(screen.getByLabelText('Configured active loadout')).getByRole('option', { name: 'Planning-Consult' })).toBeTruthy();
     expect(screen.getByText(/Active loadout is now Planning-Consult/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Full-Auto/ }).closest('.loadout-card')?.classList.contains('loadout-card-active')).toBe(true);
 
-    fireEvent.change(screen.getByLabelText('Active loadout'), { target: { value: 'Full-Auto' } });
+    fireEvent.change(screen.getByLabelText('Configured active loadout'), { target: { value: 'Full-Auto' } });
     await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(2));
-    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Full-Auto'));
-    expect(screen.getByLabelText('Active loadout')).not.toHaveProperty('disabled', true);
+    await waitFor(() => expect((screen.getByLabelText('Configured active loadout') as HTMLSelectElement).value).toBe('Full-Auto'));
+    expect(screen.getByLabelText('Configured active loadout')).not.toHaveProperty('disabled', true);
     expect(screen.getByText(/Active loadout is now Full-Auto/i)).toBeTruthy();
   });
 
@@ -473,12 +473,12 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    const activeSelect = await screen.findByLabelText('Configured active loadout') as HTMLSelectElement;
     expect(within(activeSelect).getAllByRole('option').map((option) => option.textContent)).toEqual(['Full-Auto', 'Planning-Consult']);
     fireEvent.change(activeSelect, { target: { value: 'Planning-Consult' } });
 
-    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
-    const changedSelect = screen.getByLabelText('Active loadout') as HTMLSelectElement;
+    await waitFor(() => expect((screen.getByLabelText('Configured active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    const changedSelect = screen.getByLabelText('Configured active loadout') as HTMLSelectElement;
     expect(changedSelect).not.toHaveProperty('disabled', true);
     expect(within(changedSelect).getAllByRole('option').map((option) => option.textContent)).toEqual(['Full-Auto', 'Planning-Consult']);
     expect(screen.getByRole('button', { name: /Full-Auto/ })).toBeTruthy();
@@ -496,7 +496,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    const activeSelect = await screen.findByLabelText('Configured active loadout') as HTMLSelectElement;
     fireEvent.change(activeSelect, { target: { value: 'Planning-Consult' } });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/loadout/active', expect.objectContaining({
@@ -504,7 +504,7 @@ describe('Materia loadout grid editor', () => {
       body: JSON.stringify({ name: 'Planning-Consult' }),
     })));
     await waitFor(() => expect(screen.getAllByText(/Cannot change active loadout during active cast cast-123/i).length).toBeGreaterThan(0));
-    expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Full-Auto');
+    expect((screen.getByLabelText('Configured active loadout') as HTMLSelectElement).value).toBe('Full-Auto');
   });
 
   it('keeps the reported layered config clean through selection, save, and refresh', async () => {
@@ -569,7 +569,8 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await screen.findByRole('button', { name: /Full-Auto/ });
-    expect(loadoutCard('Full-Auto').textContent).not.toContain('Built-In');
+    expect(loadoutCard('Full-Auto').textContent).toContain('Built-In');
+    expect(loadoutCard('Full-Auto').textContent).toContain('Read-only');
     expect(screen.queryByText(/shipped default/i)).toBeNull();
 
     openLoadoutActions('Full-Auto');
@@ -3435,9 +3436,9 @@ describe('Materia loadout grid editor', () => {
       activeCast: { castId: 'cast-quest', active: true, phase: 'Build', currentSocketId: 'Socket-2', currentMateria: 'Build', socketState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000, loadoutId: 'default:full-auto', loadoutName: 'Full-Auto' },
     }) }));
 
-    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('user:hojo'));
+    await waitFor(() => expect((screen.getByLabelText('Configured active loadout') as HTMLSelectElement).value).toBe('user:hojo'));
     expect(loadoutCard('Hojo').className).toContain('loadout-card-active');
-    expect(within(loadoutCard('Hojo')).getByLabelText('Runtime active loadout')).toBeTruthy();
+    expect(within(loadoutCard('Hojo')).getByLabelText('Configured active status')).toBeTruthy();
     expect(within(loadoutCard('Hojo')).queryByLabelText('Running now')).toBeNull();
     expect(within(loadoutCard('Full-Auto')).getByLabelText('Running now')).toBeTruthy();
     expect(screen.getByTestId('socket-Socket-2').className).not.toContain('materia-socket-active');
@@ -3492,14 +3493,14 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    const activeSelect = await screen.findByLabelText('Active loadout') as HTMLSelectElement;
+    const activeSelect = await screen.findByLabelText('Configured active loadout') as HTMLSelectElement;
     expect(activeSelect.value).toBe('Full-Auto');
     fireEvent.click(await screen.findByTestId('socket-Socket-2'));
     fireEvent.click(screen.getByRole('button', { name: 'New Socket' }));
     expect(await screen.findByTestId('socket-Socket-5')).toBeTruthy();
     listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({ ok: true, activeLoadoutId: 'Planning-Consult', activeLoadout: 'Planning-Consult', now: 61_000 }) }));
 
-    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
+    await waitFor(() => expect((screen.getByLabelText('Configured active loadout') as HTMLSelectElement).value).toBe('Planning-Consult'));
     expect(screen.getByTestId('socket-Socket-5')).toBeTruthy();
     expect(screen.getByText('staged edits')).toBeTruthy();
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(0);

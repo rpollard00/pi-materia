@@ -82,13 +82,15 @@ describe('LoadoutListPanel', () => {
     expect(within(betaCard).getByText('Beta')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
-    expect(betaCard.textContent).not.toContain('user loadout');
+    expect(betaCard.textContent).toContain('User');
+    expect(betaCard.textContent).toContain('Locked');
 
     const gammaCard = cardFor('Gamma');
     expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).queryByLabelText('Default loadout')).toBeNull();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
-    expect(gammaCard.textContent).not.toContain('Built-In');
+    expect(gammaCard.textContent).toContain('Built-In');
+    expect(gammaCard.textContent).toContain('Read-only');
   });
 
   it('shows the default star for a Built-In read-only default loadout', () => {
@@ -102,7 +104,8 @@ describe('LoadoutListPanel', () => {
     expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
-    expect(gammaCard.textContent).not.toContain('Built-In');
+    expect(gammaCard.textContent).toContain('Built-In');
+    expect(gammaCard.textContent).toContain('Read-only');
     expect(screen.queryByText(/Shipped default/i)).toBeNull();
   });
 
@@ -155,7 +158,7 @@ describe('LoadoutListPanel', () => {
       loadoutSources: { Hojo: 'user' },
     });
 
-    expect(within(cardFor('Hojo')).getByLabelText('Runtime active loadout')).toBeTruthy();
+    expect(within(cardFor('Hojo')).getByLabelText('Configured active status')).toBeTruthy();
   });
 
   it('does not fall back to current activeLoadout display names for the active green dot', () => {
@@ -172,7 +175,7 @@ describe('LoadoutListPanel', () => {
       activeLoadout: 'Hojo',
     } as Partial<ComponentProps<typeof LoadoutListPanel>> & { activeLoadout: string });
 
-    expect(within(cardFor('Hojo')).queryByLabelText('Runtime active loadout')).toBeNull();
+    expect(within(cardFor('Hojo')).queryByLabelText('Configured active status')).toBeNull();
   });
 
   it('derives selector default, configured active, and running state from normalized loadout records', () => {
@@ -215,9 +218,9 @@ describe('LoadoutListPanel', () => {
     } as Partial<ComponentProps<typeof LoadoutListPanel>> & { runningLoadoutIdentity: { loadoutId: string; loadoutName: string } });
 
     expect(cardFor('Hojo').className).toContain('loadout-card-active');
-    expect(within(cardFor('Hojo')).getByLabelText('Runtime active loadout')).toBeTruthy();
+    expect(within(cardFor('Hojo')).getByLabelText('Configured active status')).toBeTruthy();
     expect(within(cardFor('Hojo')).queryByLabelText('Running now')).toBeNull();
-    expect(within(cardFor('Full-Auto')).queryByLabelText('Runtime active loadout')).toBeNull();
+    expect(within(cardFor('Full-Auto')).queryByLabelText('Configured active status')).toBeNull();
     expect(within(cardFor('Full-Auto')).getByLabelText('Running now')).toBeTruthy();
   });
 
@@ -297,10 +300,10 @@ describe('LoadoutListPanel', () => {
 
     expect(onSwitchEditingLoadout).not.toHaveBeenCalled();
     const menu = screen.getByRole('menu', { name: 'Actions for Beta' });
-    expect(within(menu).getByRole('menuitem', { name: 'Set Active' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: 'Set configured active' })).toBeTruthy();
     expect(within(menu).getByRole('menuitem', { name: 'Default loadout' })).toHaveProperty('disabled', true);
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Set Active' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Set configured active' }));
 
     await waitFor(() => expect(onSetRuntimeActiveLoadout).toHaveBeenCalledWith('Beta'));
     expect(onSetDefaultLoadout).not.toHaveBeenCalled();
@@ -333,7 +336,7 @@ describe('LoadoutListPanel', () => {
     });
 
     fireEvent.click(within(cardFor('Hojo')).getByLabelText('Loadout actions'));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Set Active' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Set configured active' }));
     await waitFor(() => expect(onSetRuntimeActiveLoadout).toHaveBeenCalledWith('user:hojo'));
 
     fireEvent.click(within(cardFor('Hojo')).getByLabelText('Loadout actions'));
@@ -449,7 +452,7 @@ describe('LoadoutListPanel', () => {
     expect(onDeleteLoadout).toHaveBeenCalledWith('Gamma');
   });
 
-  it('renders compact row indicators while keeping the loadout name as the only visible text', () => {
+  it('renders compact row indicators with visible status and provenance labels', () => {
     renderPanel({
       defaultLoadoutId: 'Beta',
       loadouts: {
@@ -464,7 +467,7 @@ describe('LoadoutListPanel', () => {
     const betaCard = cardFor('Beta');
     expect(within(betaCard).getByText('Beta')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
-    expect(within(betaCard).getByLabelText('Runtime active loadout')).toBeTruthy();
+    expect(within(betaCard).getByLabelText('Configured active status')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Loadout actions')).toBeTruthy();
     expect(betaCard.querySelector('.loadout-card-select')?.className).toContain('loadout-card-select');
@@ -473,14 +476,16 @@ describe('LoadoutListPanel', () => {
     expect(betaCard.querySelector('.loadout-lock-indicator')?.className).toContain('loadout-lock-indicator');
     expect(betaCard.querySelector('.loadout-actions-menu')).toBeTruthy();
     expect(betaCard.textContent).not.toMatch(/\d+ sockets?/i);
-    expect(betaCard.textContent).not.toContain('user loadout');
+    expect(betaCard.textContent).toContain('User');
+    expect(betaCard.textContent).toContain('Locked');
 
     const gammaCard = cardFor('Gamma');
     expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
     expect(gammaCard.querySelector('.loadout-card-meta')).toBeNull();
     expect(gammaCard.textContent).not.toMatch(/\d+ sockets?/i);
-    expect(gammaCard.textContent).not.toContain('Built-In');
+    expect(gammaCard.textContent).toContain('Built-In');
+    expect(gammaCard.textContent).toContain('Read-only');
   });
 
   it('protects medium loadout names from premature truncation while preserving ellipsis contracts', () => {
@@ -517,7 +522,8 @@ describe('LoadoutListPanel', () => {
     const css = readFileSync('src/webui/client/src/styles.css', 'utf8');
     expect(css).toMatch(/\.loadout-card\s*{(?=[^}]*gap: 0\.25rem;)(?=[^}]*padding: 0;)\s*[^}]*}/s);
     expect(css).toMatch(/\.loadout-card-select\s*{(?=[^}]*flex: 1 1 auto;)(?=[^}]*overflow: hidden;)(?=[^}]*white-space: nowrap;)\s*[^}]*}/s);
-    expect(css).toMatch(/\.loadout-card-select \.loadout-card-title\s*{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto auto auto;[^}]*column-gap: 0\.25rem;/s);
+    expect(css).toMatch(/\.loadout-card-select \.loadout-card-title\s*{(?=[^}]*display: flex;)(?=[^}]*gap: 0\.35rem;)\s*[^}]*}/s);
+    expect(css).toMatch(/\.loadout-status-badge\s*{(?=[^}]*border: 1px solid)(?=[^}]*text-transform: uppercase;)\s*[^}]*}/s);
     expect(css).toMatch(/\.loadout-card-name\s*{[^}]*min-width: 0;[^}]*max-width: none;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   });
 
@@ -553,7 +559,7 @@ describe('LoadoutListPanel', () => {
     const onSetDefaultLoadout = vi.fn(async (name: string) => name);
     renderPanel({ onSetRuntimeActiveLoadout, onSetDefaultLoadout });
 
-    fireEvent.change(screen.getByLabelText('Active loadout'), { target: { value: 'Gamma' } });
+    fireEvent.change(screen.getByLabelText('Configured active loadout'), { target: { value: 'Gamma' } });
 
     await waitFor(() => expect(onSetRuntimeActiveLoadout).toHaveBeenCalledWith('Gamma'));
     expect(onSetDefaultLoadout).not.toHaveBeenCalled();
