@@ -51,7 +51,7 @@
           "parse": "json",
           "assign": {
             "lastCheck": "$",
-            "lastFeedback": "$.context"
+            "lastContext": "$.context"
           },
           "edges": [
             {
@@ -127,7 +127,7 @@
         ]
       },
       "assign": {
-        "artifactIgnore": "$"
+        "artifactIgnore": "$.state.artifactIgnore"
       }
     },
     "detectVcs": {
@@ -141,7 +141,7 @@
       ],
       "parse": "json",
       "assign": {
-        "vcs": "$"
+        "vcs": "$.state.vcs"
       }
     },
     "Auto-Plan": {
@@ -159,7 +159,7 @@
     },
     "Maintain": {
       "tools": "coding",
-      "prompt": "Checkpoint accepted work and return JSON with satisfied plus maintenance details."
+      "prompt": "Checkpoint accepted work and return compact JSON with satisfied plus explanatory context. Put deterministic maintenance details in utility state, not agent handoff JSON."
     }
   }
 }

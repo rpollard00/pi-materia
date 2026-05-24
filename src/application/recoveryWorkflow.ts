@@ -8,7 +8,8 @@ import {
   recoveryTurnMode,
   type RecoverableTurnFailure,
 } from "./recoveryPolicy.js";
-import { summarizeCompactionResult } from "./compactionWorkflow.js";
+import { evaluateContextErrorRecovery, type ContextErrorRecoveryAction, type ContextErrorRecoveryDecision } from "./contextErrorRecoveryPolicy.js";
+import { summarizeCompactionResult, type ContextPressureAssessment } from "./compactionWorkflow.js";
 
 export interface SameSocketRecoveryWorkflowDeps {
   appendEvent(runState: MateriaCastState["runState"], type: string, data: Record<string, unknown>): Promise<void>;
@@ -25,6 +26,7 @@ export interface SameSocketRecoveryWorkflowDeps {
   currentSocketVisit(state: MateriaCastState, fallback?: number): number;
   shortMetadataLabel(value: string | undefined): string | undefined;
   currentMateria(state: MateriaCastState): MateriaAgentConfig;
+  assessContextPressure?(state: MateriaCastState): Promise<ContextPressureAssessment>;
   runRecoveryAction(state: MateriaCastState, options: SameSocketRecoveryActionOptions): Promise<void>;
 }
 
@@ -35,6 +37,15 @@ export interface SameSocketRecoveryActionOptions {
   attempt: number;
   maxAttempts: number;
   entryId?: string;
+}
+
+interface RecoveryPreparation {
+  action?: SameSocketRecoveryActionOptions;
+  contextDecision?: {
+    action: ContextErrorRecoveryAction;
+    compactBecausePressure: boolean;
+    compactBecauseRepeatedStrongSignal: boolean;
+  };
 }
 
 export interface SameSocketRecoveryActionDeps {
@@ -57,7 +68,7 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   state.recoveryAttempts ??= {};
   const allowance = ensureRecoveryAllowance(state, key);
   const previousAttempts = state.recoveryAttempts[key] ?? 0;
-  const maxAttempts = allowance.effectiveMaxAttempts;
+  let maxAttempts = allowance.effectiveMaxAttempts;
   const jsonRepairMetadata = jsonOutputRepairRecoveryMetadata(state);
   if (previousAttempts >= maxAttempts) {
     const exhausted = jsonRepairMetadata
@@ -84,6 +95,8 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   }
 
   const attempt = previousAttempts + 1;
+  const preparation = await sameSocketRecoveryPreparation(state, deps, reason, error, key, previousAttempts, attempt, maxAttempts, options.entryId);
+  maxAttempts = allowance.effectiveMaxAttempts;
   state.recoveryAttempts[key] = attempt;
   state.awaitingResponse = true;
   deps.setCurrentSocketState(state, "awaiting_agent_response");
@@ -96,16 +109,13 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   deps.saveState(state);
 
   try {
-    const preparation = sameSocketRecoveryPreparation(reason, key, attempt, maxAttempts, options.entryId);
-    if (preparation) await deps.runRecoveryAction(state, preparation);
+    if (preparation.action) await deps.runRecoveryAction(state, preparation.action);
     await deps.updateToolScope(deps.currentMateria(state));
     await deps.sendMateriaTurn(state, deps.buildRecoveryPrompt(state), { skipProactiveCompaction: true });
     await deps.appendEvent(state.runState, "same_socket_recovery_retry", { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), ...jsonRepairMetadata });
     deps.saveState(state);
     deps.updateWidget(state);
-    deps.notifyWarning(jsonRepairMetadata
-      ? `pi-materia retrying ${recoveryDiagnosticLabel(state)} because the previous JSON output was invalid (${attempt}/${maxAttempts}).`
-      : `pi-materia retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`);
+    deps.notifyWarning(recoveryWarningMessage(state, reason, attempt, maxAttempts, preparation));
     return true;
   } catch (retryError) {
     await deps.appendEvent(state.runState, "same_socket_recovery_retry_failed", { reason, key, attempt, maxAttempts, error: errorMessage(retryError), originalError: errorMessage(error), entryId: options.entryId, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), ...jsonRepairMetadata });
@@ -128,15 +138,123 @@ export async function runSameSocketRecoveryActionWorkflow(state: MateriaCastStat
   }
 }
 
-function sameSocketRecoveryPreparation(
+async function sameSocketRecoveryPreparation(
+  state: MateriaCastState,
+  deps: SameSocketRecoveryWorkflowDeps,
   reason: RecoverableTurnFailure,
+  error: unknown,
   key: string,
+  previousAttempts: number,
   attempt: number,
   maxAttempts: number,
   entryId: string | undefined,
-): SameSocketRecoveryActionOptions | undefined {
-  if (reason !== "context_window") return undefined;
-  return { action: "compact", reason, key, attempt, maxAttempts, entryId };
+): Promise<RecoveryPreparation> {
+  if (reason !== "context_window") return {};
+  const pressure = await deps.assessContextPressure?.(state);
+  const priorGuardedRetries = state.contextWindowRecoveryGuards?.[key] ?? 0;
+  const decision = evaluateContextErrorRecovery(error);
+  // Evidence-gated compaction invariant: provider context_length_exceeded
+  // responses can be transient or misleading, so same-socket recovery only
+  // forces compaction when pressure corroborates the failure or the same
+  // recovery key repeats a strong context-window/input signal.
+  const compactBecausePressure = pressure?.shouldCompact === true;
+  const compactBecauseRepeatedStrongSignal = priorGuardedRetries > 0 && decision.strongContextSignal;
+  const shouldCompact = compactBecausePressure || compactBecauseRepeatedStrongSignal;
+  const action = shouldCompact ? "compact" : "retry_without_compaction";
+
+  await deps.appendEvent(state.runState, "context_window_recovery_decision", contextWindowRecoveryDecisionEventData(state, deps, {
+    action,
+    key,
+    attempt,
+    maxAttempts,
+    entryId,
+    decision,
+    pressure,
+    priorGuardedRetries,
+    compactBecausePressure,
+    compactBecauseRepeatedStrongSignal,
+  }));
+
+  if (shouldCompact) {
+    return {
+      contextDecision: { action, compactBecausePressure, compactBecauseRepeatedStrongSignal },
+      action: { action: "compact", reason, key, attempt, maxAttempts, entryId },
+    };
+  }
+
+  state.contextWindowRecoveryGuards ??= {};
+  state.contextWindowRecoveryGuards[key] = priorGuardedRetries + 1;
+  const allowance = ensureRecoveryAllowance(state, key);
+  allowance.effectiveMaxAttempts = Math.max(allowance.effectiveMaxAttempts, previousAttempts + 2);
+  return { contextDecision: { action, compactBecausePressure, compactBecauseRepeatedStrongSignal } };
+}
+
+function contextWindowRecoveryDecisionEventData(
+  state: MateriaCastState,
+  deps: SameSocketRecoveryWorkflowDeps,
+  options: {
+    action: "compact" | "retry_without_compaction";
+    key: string;
+    attempt: number;
+    maxAttempts: number;
+    entryId?: string;
+    decision: ContextErrorRecoveryDecision;
+    pressure?: ContextPressureAssessment;
+    priorGuardedRetries: number;
+    compactBecausePressure: boolean;
+    compactBecauseRepeatedStrongSignal: boolean;
+  },
+): Record<string, unknown> {
+  return {
+    action: options.action,
+    reason: "context_window",
+    key: options.key,
+    attempt: options.attempt,
+    maxAttempts: options.maxAttempts,
+    entryId: options.entryId,
+    providerType: options.decision.provider.type,
+    providerCode: options.decision.provider.code,
+    providerParam: options.decision.provider.param,
+    strongContextSignal: options.decision.strongContextSignal,
+    transientProviderSignal: options.decision.transientProviderSignal,
+    contextTokens: options.pressure?.tokens,
+    contextWindow: options.pressure?.contextWindow,
+    contextPercent: options.pressure?.percent,
+    thresholdPercent: options.pressure?.thresholdPercent,
+    thresholdMode: options.pressure?.thresholdMode,
+    thresholdTier: options.pressure?.thresholdTier,
+    contextPressureShouldCompact: options.pressure?.shouldCompact,
+    priorGuardedRetries: options.priorGuardedRetries,
+    compactBecausePressure: options.compactBecausePressure,
+    compactBecauseRepeatedStrongSignal: options.compactBecauseRepeatedStrongSignal,
+    socket: deps.currentSocketId(state),
+    itemKey: state.currentItemKey,
+    itemLabel: state.currentItemLabel,
+    itemLabelShort: deps.shortMetadataLabel(state.currentItemLabel),
+    visit: deps.currentSocketVisit(state, undefined),
+    mode: recoveryTurnMode(state),
+  };
+}
+
+function recoveryWarningMessage(
+  state: MateriaCastState,
+  reason: RecoverableTurnFailure,
+  attempt: number,
+  maxAttempts: number,
+  preparation: RecoveryPreparation,
+): string {
+  const jsonRepairMetadata = jsonOutputRepairRecoveryMetadata(state);
+  if (jsonRepairMetadata) return `pi-materia retrying ${recoveryDiagnosticLabel(state)} because the previous JSON output was invalid (${attempt}/${maxAttempts}).`;
+  if (reason === "context_window" && preparation.contextDecision?.action === "retry_without_compaction") {
+    return `pi-materia retrying ${recoveryDiagnosticLabel(state)} without compaction for suspected transient provider/context failure (${attempt}/${maxAttempts}).`;
+  }
+  if (reason === "context_window" && preparation.contextDecision?.compactBecauseRepeatedStrongSignal) {
+    return `pi-materia compacted and retrying ${recoveryDiagnosticLabel(state)} after repeated confirmed context-window failure (${attempt}/${maxAttempts}).`;
+  }
+  if (reason === "context_window" && preparation.contextDecision?.compactBecausePressure) {
+    return `pi-materia compacted and retrying ${recoveryDiagnosticLabel(state)} after context-window failure with high context pressure (${attempt}/${maxAttempts}).`;
+  }
+  return `pi-materia retrying ${recoveryDiagnosticLabel(state)} after recoverable ${reason} failure (${attempt}/${maxAttempts}).`;
 }
 
 function recoveryEventData(

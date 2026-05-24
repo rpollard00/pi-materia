@@ -14,7 +14,7 @@ export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from 
 import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
 import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
-import { maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
+import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
 import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
 import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
@@ -676,6 +676,7 @@ async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: Ext
     shortMetadataLabel,
     currentMateria,
     runRecoveryAction: (nextState, actionOptions) => runSameSocketRecoveryAction(pi, ctx, nextState, actionOptions),
+    assessContextPressure: (nextState) => assessContextPressureForCompaction(ctx, nextState, { loadConfigFromState }),
   }, options);
 }
 

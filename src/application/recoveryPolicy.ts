@@ -1,4 +1,5 @@
 import { isActiveMultiTurnSocket } from "./promptAssembly.js";
+import { evaluateContextErrorRecovery } from "./contextErrorRecoveryPolicy.js";
 import type { MateriaCastState, MateriaRecoveryAllowance, MateriaRecoveryReason, ResolvedMateriaSocket } from "../types.js";
 
 const DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS = 1;
@@ -13,7 +14,7 @@ export interface TurnFailureClassificationOptions {
 
 export function classifyTurnFailure(error: unknown, options: TurnFailureClassificationOptions = {}): TurnFailureClassification | undefined {
   const message = errorMessage(error);
-  if (isContextWindowFailureMessage(message)) return "context_window";
+  if (evaluateContextErrorRecovery(error).action === "compact") return "context_window";
   if (isPlainWebSocketTransportFailure(message)) return "transient_transport";
   if (options.allowGenericTurnFailure === true) return "turn_failure";
   return undefined;
@@ -101,10 +102,6 @@ export function nonRecoverableTurnError(state: MateriaCastState, error: unknown)
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isContextWindowFailureMessage(message: string): boolean {
-  return /context[_-]?length[_-]?exceeded|context[_-]?window[_-]?exceeded|context (window|length|limit|overflow)|token limit|max(?:imum)? tokens|input too long|request too large|too many tokens/i.test(message);
 }
 
 function isPlainWebSocketTransportFailure(message: string): boolean {

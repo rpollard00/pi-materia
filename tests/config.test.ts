@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../src/config/config.js";
+import { clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference, saveRoleGenerationPreference } from "../src/config/config.js";
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
@@ -300,7 +300,46 @@ describe("layered config loading and persistence", () => {
       const cleared = await loadProfileConfig();
       expect(cleared.roleGeneration).toEqual({
         enabled: false,
+        model: null,
         thinking: "high",
+        extraInstructions: "Keep it focused.",
+        useReadOnlyProjectContext: true,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("saves nullable role-generation thinking preference without replacing sibling fields", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        roleGeneration: {
+          enabled: false,
+          model: "provider/existing",
+          extraInstructions: "Keep it focused.",
+          useReadOnlyProjectContext: true,
+        },
+      }), "utf8");
+
+      await expect(saveRoleGenerationPreference({ thinking: "  medium" })).resolves.toEqual({ model: "provider/existing", thinking: "medium" });
+      expect((await loadProfileConfig()).roleGeneration).toEqual({
+        enabled: false,
+        model: "provider/existing",
+        thinking: "medium",
+        extraInstructions: "Keep it focused.",
+        useReadOnlyProjectContext: true,
+      });
+
+      await expect(saveRoleGenerationPreference({ thinking: null })).resolves.toEqual({ model: "provider/existing", thinking: null });
+      expect((await loadProfileConfig()).roleGeneration).toEqual({
+        enabled: false,
+        model: "provider/existing",
+        thinking: null,
         extraInstructions: "Keep it focused.",
         useReadOnlyProjectContext: true,
       });
@@ -673,7 +712,6 @@ describe("config loadouts", () => {
         command: ["node", expect.any(String)],
         parse: "json",
         params: { patterns: [".pi/pi-materia/"] },
-        assign: { artifactIgnore: "$" },
       });
       expect(loaded.config.materia["Detect-VCS"]).toMatchObject({
         type: "utility",
@@ -681,8 +719,9 @@ describe("config loadouts", () => {
         group: "Utility",
         command: ["node", expect.any(String)],
         parse: "json",
-        assign: { vcs: "$" },
       });
+      expect(loaded.config.materia["Ignore-Artifacts"].assign).toBeUndefined();
+      expect(loaded.config.materia["Detect-VCS"].assign).toBeUndefined();
       expect(pipeline.entry.id).toBe("Socket-1");
       expect(pipeline.sockets["Socket-1"].socket).toMatchObject({ materia: "Ignore-Artifacts" });
       expect(pipeline.sockets["Socket-1"].materiaId).toBe("Ignore-Artifacts");
@@ -855,7 +894,8 @@ describe("config loadouts", () => {
     );
     expect(prompts["Auto-Architect"]).toContain("Refine workItems directly; put per-item architecture guidance in each workItem.context string");
     expect(prompts["Auto-Architect"]).toContain("Include top-level context only for useful cross-cutting information when relevant");
-    expect(prompts["Build"]).toContain("Current workItem context, if any:");
+    expect(prompts["Build"]).toContain("Current workItem context:");
+    expect(prompts["Build"]).toContain("Accumulated handoff context, if any:");
     expect(prompts["Build"]).toContain("Global cross-cutting guidance, if any:");
     for (const [name, prompt] of Object.entries(prompts)) {
       if (name !== "Build" && name !== "Cover") expect(prompt, name).toContain("workItems");

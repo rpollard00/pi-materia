@@ -40,7 +40,7 @@ Shipped defaults use the typed script locator `{ "kind": "shippedUtility", "name
 Common mechanics:
 
 - `parse: "json"` parses stdout into `lastJson`; `parse: "text"` or omitted keeps stdout as `lastOutput`.
-- `assign` copies values into generic cast state, for example `{ "vcs": "$" }` or `{ "kind": "$.kind" }`.
+- `assign` copies values into generic cast state. Prefer utility-owned state patches such as `{ "vcs": "$.state.vcs" }`; explicit script-owned output paths such as `{ "kind": "$.kind" }` are also valid when documented by that utility.
 - `edges` evaluate against parsed output (`$`) and state (`state.foo`), then route to `to`.
 - `foreach` exposes current item metadata to the utility and can loop over arrays in state.
 
@@ -68,10 +68,10 @@ For command utilities, pi-materia starts the configured process with cwd set to 
 The command writes its result to stdout. With `parse: "json"`, stdout must be valid JSON:
 
 ```json
-{ "ok": true, "message": "HELLO WORLD" }
+{ "state": { "hello": { "ok": true, "message": "HELLO WORLD" } } }
 ```
 
-Utility JSON is deterministic script output, not an agent handoff. Scripts may return structured data for `assign` paths, and when a utility is configured to patch shared runtime state directly that structured patch belongs under a top-level `state` object. Do not model utility output as a broad agent envelope; agent-authored handoffs are limited to `workItems`, `satisfied`, and `context`.
+Utility JSON is deterministic script output, not an agent handoff. Scripts may return structured data for explicit `assign` paths, and when a utility is configured to patch shared runtime state directly that structured patch belongs under a top-level `state` object. Do not model utility output as a broad agent envelope; agent-authored handoffs are limited to `workItems`, `satisfied`, and `context`.
 
 ## stdout, stderr, exit codes, and timeouts
 
@@ -111,10 +111,10 @@ This loadout completes without an LLM turn by using an explicit command utility.
     "helloUtility": {
       "type": "utility",
       "label": "Hello Utility",
-      "command": ["python3", "-c", "import json,sys; ctx=json.load(sys.stdin); print(json.dumps({'ok': True, 'message': ctx['params']['message']}))"],
+      "command": ["python3", "-c", "import json,sys; ctx=json.load(sys.stdin); print(json.dumps({'state': {'hello': {'ok': True, 'message': ctx['params']['message']}}}))"],
       "params": { "message": "HELLO WORLD" },
       "parse": "json",
-      "assign": { "hello": "$" }
+      "assign": { "hello": "$.state.hello" }
     }
   }
 }
@@ -154,10 +154,14 @@ if added:
             f.write(pattern + "\n")
 
 print(json.dumps({
-    "ok": True,
-    "file": str(ignore_file),
-    "changed": bool(added),
-    "added": added
+    "state": {
+        "artifactIgnore": {
+            "ok": True,
+            "file": str(ignore_file),
+            "changed": bool(added),
+            "added": added
+        }
+    }
 }))
 ```
 
@@ -188,7 +192,7 @@ Complete loadout using the script:
         "patterns": [".pi/pi-materia/"]
       },
       "parse": "json",
-      "assign": { "artifactIgnore": "$" }
+      "assign": { "artifactIgnore": "$.state.artifactIgnore" }
     }
   }
 }
@@ -209,7 +213,7 @@ Utility JSON output can route with edges:
 }
 ```
 
-The referenced `Detect-VCS` utility materia owns `parse: "json"` and `assign: { "vcs": "$" }`, so sockets can focus on graph placement and routing.
+The referenced `Detect-VCS` utility materia writes deterministic repository details under `state.vcs` and owns `parse: "json"` plus `assign: { "vcs": "$.state.vcs" }`, so sockets can focus on graph placement and routing.
 
 ## Utility generators
 

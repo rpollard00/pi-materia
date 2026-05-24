@@ -21,6 +21,9 @@ async function readEvents(harness: FakePiHarness): Promise<any[]> {
   return (await readFile(path.join(castDir, "events.jsonl"), "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line));
 }
 
+const CODEX_SERVER_ERROR_SAMPLE = 'Error: Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID 06c12916-6464-4199-b4b7-53055ee0111a in your message.","param":null},"sequence_number":2}';
+const CODEX_CONTEXT_LENGTH_SAMPLE = 'Error: WebSocket closed 1000 Error: Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","param":"input"},"sequence_number":2}';
+
 function singleAgentConfig() {
   return {
     artifactDir: ".pi/pi-materia",
@@ -43,7 +46,7 @@ function jsonAgentConfig(target: string = "end") {
   return {
     artifactDir: ".pi/pi-materia",
     activeLoadout: "Test",
-    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", parse: "json", assign: { result: "$.result" }, edges: [{ when: "always", to: target }] } } } },
+    loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Build", parse: "json", assign: { result: "$.context" }, edges: [{ when: "always", to: target }] } } } },
     materia: { Build: { tools: "coding", prompt: "Build materia" } },
   };
 }
@@ -81,7 +84,7 @@ function jsonAgentWithDownstreamConfig() {
       Test: {
         entry: "Socket-1",
         sockets: {
-          "Socket-1": { materia: "Build", parse: "json", assign: { result: "$.result" }, edges: [{ when: "always", to: "Socket-2" }] },
+          "Socket-1": { materia: "Build", parse: "json", assign: { result: "$.context" }, edges: [{ when: "always", to: "Socket-2" }] },
           "Socket-2": { materia: "Downstream", edges: [{ when: "always", to: "end" }] },
         },
       },
@@ -104,7 +107,7 @@ function satisfiedRouteAgentConfig() {
           "Socket-1": {
             materia: "Build",
             parse: "json",
-            assign: { result: "$.result" },
+            assign: { result: "$.context" },
             edges: [{ when: "satisfied", to: "Socket-2" }, { when: "not_satisfied", to: "end" }],
           },
           "Socket-2": { materia: "Downstream", edges: [{ when: "always", to: "end" }] },
@@ -134,7 +137,7 @@ function foreachConfig() {
             materia: "Build",
             parse: "json",
             foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "end" },
-            advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "end" },
+            advance: { cursor: "itemCursor", items: "state.items", when: "satisfied", done: "end" },
             edges: [{ when: 'always', to: 'Socket-2' }],
             limits: { maxVisits: 5 },
           },
@@ -174,7 +177,7 @@ describe("native same-socket recovery", () => {
 
     const triggerTurnsAfter = harness.operationLog.filter((op) => op === "triggerTurn").length;
     expect(triggerTurnsAfter).toBe(triggerTurnsBefore + 1);
-    expect(harness.operationLog).toContain("compact");
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
@@ -193,12 +196,18 @@ describe("native same-socket recovery", () => {
     await harness.runCommand("materia", "cast codex websocket context length");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
-    const errorMessage = 'Error: WebSocket closed 1000 Error: Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","param":"input"},"sequence_number":2}';
+    const errorMessage = CODEX_CONTEXT_LENGTH_SAMPLE;
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage });
     await harness.emit("agent_end", { messages: [] });
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
-    expect(harness.operationLog).toContain("compact");
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 2);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
@@ -210,6 +219,25 @@ describe("native same-socket recovery", () => {
     expect(events.some((event) => event.type === "same_socket_recovery_retry")).toBe(true);
   });
 
+  test("Codex server_error assistant errors never trigger compaction or context-window recovery", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast codex server error");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: CODEX_SERVER_ERROR_SAMPLE });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    const latestState = latestCastState(harness);
+    expect(latestState.active).toBe(false);
+    expect(latestState.failedReason).toContain("server_error");
+
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type === "context_window_recovery_decision")).toHaveLength(0);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+  });
+
   test("agent_end failures without assistant output retry the same active socket", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast no assistant");
@@ -218,7 +246,7 @@ describe("native same-socket recovery", () => {
     await harness.emit("agent_end", { errorMessage: "maximum tokens exceeded before response" });
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
-    expect(harness.operationLog).toContain("compact");
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
@@ -370,7 +398,7 @@ describe("native same-socket recovery", () => {
       omitted: "OMITTED_TAIL",
     });
 
-    harness.appendAssistantMessage('{"result":"ok"}');
+    harness.appendAssistantMessage('{"context":"ok"}');
     await harness.emit("agent_end", { messages: [] });
 
     latestState = latestCastState(harness);
@@ -412,7 +440,7 @@ describe("native same-socket recovery", () => {
       excerpt: '{"satisfied":"yes"',
     });
 
-    harness.appendAssistantMessage('{"satisfied":true,"result":"ok"}');
+    harness.appendAssistantMessage('{"satisfied":true,"context":"ok"}');
     await harness.emit("agent_end", { messages: [] });
 
     latestState = latestCastState(harness);
@@ -482,7 +510,7 @@ describe("native same-socket recovery", () => {
     await harness.runCommand("materia", "cast unsafe post advance");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
-    harness.appendAssistantMessage('{"result":"applied"}');
+    harness.appendAssistantMessage('{"context":"applied"}');
     await harness.emit("agent_end", { messages: [] });
 
     expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
@@ -500,6 +528,7 @@ describe("native same-socket recovery", () => {
 
   test("forced compaction failure is recorded and fails clearly", async () => {
     const harness = await makeHarness(singleAgentConfig());
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     harness.compactError = new Error("compaction provider unavailable");
     await harness.runCommand("materia", "cast compact fail");
 
@@ -532,7 +561,7 @@ describe("native same-socket recovery", () => {
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Proactive compaction failed"))).toBe(true);
 
-    harness.contextUsage = undefined;
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     harness.compactError = undefined;
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
     await harness.emit("agent_end", { messages: [] });
@@ -572,6 +601,7 @@ describe("native same-socket recovery", () => {
 
   test("recovery attempts are bounded and exhaustion fails clearly", async () => {
     const harness = await makeHarness(singleAgentConfig());
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     await harness.runCommand("materia", "cast exhaust me");
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
@@ -591,6 +621,7 @@ describe("native same-socket recovery", () => {
 
   test("revive allowance extension is scoped and grows linearly", async () => {
     const harness = await makeHarness(singleAgentConfig());
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     await harness.runCommand("materia", "cast revive math");
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
@@ -610,6 +641,7 @@ describe("native same-socket recovery", () => {
 
   test("revive allowance extension rejects stale exhaustion metadata after a later non-exhaustion failure", async () => {
     const harness = await makeHarness(singleAgentConfig());
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     await harness.runCommand("materia", "cast revive stale guard");
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
@@ -646,6 +678,7 @@ describe("native same-socket recovery", () => {
     harness.appendUserMessage("Include tests and docs.");
     await harness.emit("before_agent_start", { systemPrompt: "Base system" });
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
 
     harness.appendAssistantMessage("partial stale output", { stopReason: "error", errorMessage: "maximum context length exceeded" });
     await harness.emit("agent_end", { messages: [] });
@@ -675,6 +708,7 @@ describe("native same-socket recovery", () => {
     await harness.emit("agent_end", { messages: [] });
     await harness.runCommand("materia", "continue");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded during final JSON" });
     await harness.emit("agent_end", { messages: [] });
@@ -698,6 +732,7 @@ describe("native same-socket recovery", () => {
 
   test("foreach context-window recovery preserves cursor and avoids duplicate socket start", async () => {
     const harness = await makeHarness(foreachConfig());
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     await harness.runCommand("materia", "cast foreach recovery");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
@@ -709,21 +744,21 @@ describe("native same-socket recovery", () => {
     expect(harness.operationLog).toContain("compact");
     expect(latestState.active).toBe(true);
     expect(latestState.currentSocketId).toBe("Socket-2");
-    expect(latestState.currentItemKey).toBe("a");
+    expect(latestState.currentItemKey).toBe("WI-1");
     expect(latestState.currentItemLabel).toBe("Alpha");
     expect(latestState.cursors).toEqual({ itemCursor: 0 });
     expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 1 });
-    expect(latestState.taskAttempts).toEqual({ '["Socket-1","__singleton__"]': 1, '["Socket-2","a"]': 1 });
+    expect(latestState.taskAttempts).toEqual({ '["Socket-1","__singleton__"]': 1, '["Socket-2","WI-1"]': 1 });
     expect(latestState.recoveryAttempts).toBeDefined();
     const socketStartsBeforeCompletion = (await readEvents(harness)).filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2");
     expect(socketStartsBeforeCompletion).toHaveLength(1);
 
-    harness.appendAssistantMessage('{"done":true}');
+    harness.appendAssistantMessage('{"satisfied":true}');
     await harness.emit("agent_end", { messages: [] });
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.currentSocketId).toBe("Socket-2");
-    expect(latestState.currentItemKey).toBe("b");
+    expect(latestState.currentItemKey).toBe("WI-2");
     expect(latestState.currentItemLabel).toBe("Beta");
     expect(latestState.cursors).toEqual({ itemCursor: 1 });
     expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 2 });

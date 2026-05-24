@@ -5,13 +5,13 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
-import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../config/config.js";
+import { clearStaleDefaultLoadoutPreference, getRoleGenerationPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
-import { addQuest as addQuestToBoard, generateUniqueQuestId, movePendingQuest, requeueQuest, updatePendingQuest } from "../domain/questBoard.js";
+import { addQuest as addQuestToBoard, generateUniqueQuestId, movePendingQuest, requeueQuest } from "../domain/questBoard.js";
 import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
 import { issuesToMessage } from "../domain/result.js";
 
@@ -150,14 +150,13 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
       setDefaultLoadout: createDefaultLoadoutSetter(ctx, configuredPath),
       setQuestDefaultLoadout: createQuestDefaultLoadoutSetter(ctx, configuredPath),
-      getRoleGenerationPreference: async () => ({ model: await getRoleGenerationModelPreference() }),
-      setRoleGenerationPreference: async (model) => ({ model: await saveRoleGenerationModelPreference(model) }),
+      getRoleGenerationPreference,
+      setRoleGenerationPreference: saveRoleGenerationPreference,
       getQuestBoard: () => readQuestBoardSnapshot(cwd),
       runQuest: options.questControls?.runQuest,
       runQuestOnce: options.questControls?.runQuestOnce,
       stopQuestRunner: options.questControls?.stopQuestRunner,
       addQuest: (input) => addWebUiQuest(cwd, configuredPath, input),
-      updateQuest: (input) => updateWebUiQuest(cwd, configuredPath, input),
       reorderQuest: (input) => reorderWebUiQuest(cwd, input),
       requeueQuest: (input) => requeueWebUiQuest(cwd, input),
       generateMateriaRole: pi ? (request) => generateMateriaRolePrompt(pi, ctx, request) : undefined,
@@ -343,46 +342,6 @@ async function addWebUiQuest(cwd: string, configuredPath: string | undefined, in
     return { ok: true, boardPath: boards.boardPath, board: result.value, quest: result.value.quests[result.value.quests.length - 1]! };
   } catch (error) {
     return { ok: false, code: "unavailable", message: `Could not add quest: ${error instanceof Error ? error.message : String(error)}` };
-  }
-}
-
-async function updateWebUiQuest(cwd: string, configuredPath: string | undefined, input: MateriaUpdateQuestInput): Promise<MateriaUpdateQuestResult> {
-  try {
-    const prompt = input.prompt.trim();
-    if (!prompt) return { ok: false, code: "validation_failed", message: "Quest prompt is required." };
-
-    const loadoutOverride = input.loadoutOverride?.trim();
-    if (loadoutOverride) {
-      const loaded = await loadConfig(cwd, configuredPath);
-      const resolved = resolveLoadoutReference(loadoutOverride, loaded.config.loadouts, loaded.loadoutSources);
-      if (!resolved) {
-        const names = Object.keys(loaded.config.loadouts ?? {});
-        return {
-          ok: false,
-          code: "invalid_loadout",
-          message: names.length
-            ? `Unknown Materia loadout "${loadoutOverride}". Available loadouts: ${names.join(", ")}.`
-            : "Cannot update quest with a loadout override because this config does not define any loadouts.",
-        };
-      }
-    }
-
-    const boards = new FileQuestBoardRepository(cwd);
-    const board = await boards.loadOrCreate();
-    const result = updatePendingQuest(board, {
-      questId: input.questId,
-      title: deriveWebUiQuestTitle(prompt),
-      prompt,
-      now: new Date().toISOString(),
-      ...(loadoutOverride ? { loadoutOverride } : {}),
-    });
-    if (!result.ok) return { ok: false, code: "validation_failed", message: issuesToMessage(result.issues) };
-    await boards.save(result.value);
-    const quest = result.value.quests.find((candidate) => candidate.id === input.questId);
-    if (!quest) return { ok: false, code: "validation_failed", message: `questId: quest '${input.questId}' does not exist` };
-    return { ok: true, boardPath: boards.boardPath, board: result.value, quest };
-  } catch (error) {
-    return { ok: false, code: "unavailable", message: `Could not update quest: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 

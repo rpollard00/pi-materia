@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { evaluateContextErrorRecovery } from "../src/application/contextErrorRecoveryPolicy.js";
 import { classifyRecoverableTurnFailure, classifyTurnFailure } from "../src/application/recoveryPolicy.js";
 
 describe("turn failure classification", () => {
@@ -18,6 +19,35 @@ describe("turn failure classification", () => {
     const error = new Error("WebSocket error");
     expect(classifyTurnFailure(error, { allowGenericTurnFailure: true })).toBe("transient_transport");
     expect(classifyRecoverableTurnFailure(error, { allowGenericTurnFailure: true })).toBeUndefined();
+  });
+
+  test("Codex server errors are transient policy decisions, not context-window failures", () => {
+    const error = new Error('Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID 06c12916-6464-4199-b4b7-53055ee0111a in your message.","param":null},"sequence_number":2}');
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("retry_without_compaction");
+    expect(decision.transientProviderSignal).toBe(true);
+    expect(decision.strongContextSignal).toBe(false);
+    expect(decision.provider.type).toBe("server_error");
+    expect(classifyTurnFailure(error)).toBeUndefined();
+  });
+
+  test("Codex context length errors normalize as strong context policy decisions", () => {
+    const error = new Error('Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","param":"input"},"sequence_number":2}');
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("compact");
+    expect(decision.strongContextSignal).toBe(true);
+    expect(decision.transientProviderSignal).toBe(false);
+    expect(decision.provider.code).toBe("context_length_exceeded");
+    expect(decision.provider.param).toBe("input");
+    expect(classifyTurnFailure(error)).toBe("context_window");
+  });
+
+  test("transient provider payloads win over context wording in wrappers", () => {
+    const error = new Error('Context window recovery failed: Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request.","param":null},"sequence_number":2}');
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("retry_without_compaction");
+    expect(decision.strongContextSignal).toBe(false);
+    expect(classifyTurnFailure(error)).toBeUndefined();
   });
 
   test("generic turn failure classification requires an explicit safe-retry opt-in", () => {

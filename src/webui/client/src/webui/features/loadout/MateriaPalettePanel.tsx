@@ -15,8 +15,7 @@ export interface MateriaPalettePanelProps {
 export function MateriaPalettePanel({ palette, materia, selectedMateriaId, onDragMateria, onSelectMateria }: MateriaPalettePanelProps) {
   return (
     <section className="fantasy-panel p-5">
-      <h2 className="text-xl font-bold">Materia palette</h2>
-      <p className="mt-1 text-sm text-slate-400">Click once to select for swap/insert, or drag into a socket.</p>
+      <h2 className="text-xl font-bold" title="Click once to select for swap/insert, or drag into a socket.">Materia palette</h2>
       <div className="mt-4 grid grid-cols-2 gap-3">
         {palette.map(([id, socket], index) => {
           const definition = materia[id];

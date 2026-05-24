@@ -89,7 +89,6 @@ describe("native utility socket execution", () => {
             script: { kind: "shippedUtility", name: "ensure-ignored.mjs", runtime: "node" },
             params: { patterns: [".pi/pi-materia/"] },
             parse: "json",
-            assign: { artifactIgnore: "$" },
           },
         },
       });
@@ -347,7 +346,7 @@ describe("native utility socket execution", () => {
     await jsonParseHarness.runCommand("materia", "cast hojo parse json");
     const jsonParseState = jsonParseHarness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; visits?: Record<string, number>; edgeTraversals?: Record<string, number>; cursors?: Record<string, number> };
     expect(jsonParseState.phase).toBe("complete");
-    expect(jsonParseState.data?.evalAttempts).toEqual({ alpha: 2 });
+    expect(jsonParseState.data?.evalAttempts).toEqual({ "WI-1": 2 });
     expect(jsonParseState.visits).toMatchObject({ "Socket-2": 2, "Socket-3": 2, "Socket-4": 1 });
     expect(jsonParseState.edgeTraversals).toMatchObject({ "Socket-3->Socket-2": 1, "Socket-3->Socket-4": 1 });
     expect(jsonParseState.cursors?.workItemIndex).toBe(1);
@@ -416,13 +415,13 @@ describe("native utility socket execution", () => {
 
     const state = harness.appendedEntries.at(-1)?.data as { phase?: string; runDir?: string };
     expect(state.phase).toBe("complete");
-    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "1-a.input.json"), "utf8"));
+    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "1-0.input.json"), "utf8"));
     expect(firstInput.item).toEqual({ id: "a", title: "Alpha" });
-    expect(firstInput.itemKey).toBe("a");
+    expect(firstInput.itemKey).toBe("0");
     expect(firstInput.itemLabel).toBe("Alpha");
     expect(firstInput.cursor).toEqual({ name: "itemCursor", index: 0 });
-    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "2-b.input.json"), "utf8"));
-    expect(secondInput.itemKey).toBe("b");
+    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "2-1.input.json"), "utf8"));
+    expect(secondInput.itemKey).toBe("1");
     expect(secondInput.itemLabel).toBe("Beta");
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
   });
@@ -456,12 +455,13 @@ describe("native utility socket execution", () => {
     expect(state.phase).toBe("complete");
     expect(state.visits?.["Socket-2"]).toBe(2);
     expect(state.cursors?.itemCursor).toBe(2);
-    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "1-a.input.json"), "utf8"));
+    const firstInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "1-0.input.json"), "utf8"));
     expect(firstInput.item).toEqual({ id: "a", title: "Alpha" });
     expect(firstInput.state.work).toEqual({ id: "a", title: "Alpha" });
+    expect(firstInput.itemKey).toBe("0");
     expect(firstInput.cursor).toEqual({ name: "itemCursor", index: 0 });
-    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "2-b.input.json"), "utf8"));
-    expect(secondInput.itemKey).toBe("b");
+    const secondInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-2", "2-1.input.json"), "utf8"));
+    expect(secondInput.itemKey).toBe("1");
     expect(secondInput.itemLabel).toBe("Beta");
     expect(secondInput.cursor).toEqual({ name: "itemCursor", index: 1 });
   });

@@ -1,4 +1,5 @@
 import type { ToolScopeSpec } from "./domain/toolScope.js";
+import type { MateriaThinkingLevel } from "./thinking.js";
 
 export interface PiMateriaConfig {
   artifactDir?: string;
@@ -67,14 +68,14 @@ export interface MateriaProfileConfig {
 export interface MateriaRoleGenerationProfileConfig {
   /** Whether WebUI materia role-generation helpers are available. Defaults to true. */
   enabled?: boolean;
-  /** Optional model override for isolated role-generation sessions. Defaults to Pi's active model. */
-  model?: string;
+  /** Optional model override for isolated role-generation sessions. Null/default uses Pi's active model. */
+  model?: string | null;
   /** Optional provider override for isolated role-generation sessions when model is not provider-qualified. */
   provider?: string;
   /** Optional API override/metadata for provider-specific isolated role-generation sessions. */
   api?: string;
-  /** Optional thinking override for isolated role-generation sessions. Defaults to Pi's active thinking setting. */
-  thinking?: string;
+  /** Optional thinking override for isolated role-generation sessions. Null/default uses Pi's active thinking setting. */
+  thinking?: MateriaThinkingLevel | null;
   /** Extra operator instructions appended to the role-generation system prompt. */
   extraInstructions?: string;
   /** Whether future generation may include limited read-only project context. Defaults to false. */
@@ -251,6 +252,8 @@ export interface MateriaCastState {
   recoveryExhaustion?: MateriaRecoveryExhaustion;
   /** Bounded metadata for the next same-socket retry after invalid final JSON output. */
   jsonOutputRepair?: MateriaJsonOutputRepairContext;
+  /** Same recovery keys that have already retried a strong context-window failure without compaction. */
+  contextWindowRecoveryGuards?: Record<string, number>;
   taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
   lastOutput?: string;

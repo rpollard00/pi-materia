@@ -793,15 +793,17 @@ describe("utility pipeline sockets", () => {
     const maintainPrompt = config.materia.Maintain!.prompt;
     expect(maintainPrompt).toContain("Always inspect repository state before checkpointing");
     expect(maintainPrompt).toContain("Inspect the repository state first");
-    expect(maintainPrompt).toContain("checkpointCreated=false");
+    expect(maintainPrompt).toContain("explain the skipped no-op in context");
     expect(maintainPrompt).toContain("No-op work items must not create empty commits/checkpoints");
     expect(maintainPrompt).toContain("do not run jj describe, jj new, git add, git commit");
+    expect(maintainPrompt).toContain("Do not emit checkpointCreated, commands, commitMessage");
 
     const gitMaintainPrompt = config.materia.GitMaintain!.prompt;
     expect(gitMaintainPrompt).toContain("Inspect repository state before committing");
-    expect(gitMaintainPrompt).toContain("checkpointCreated=false");
+    expect(gitMaintainPrompt).toContain("explain the skipped no-op in context");
     expect(gitMaintainPrompt).toContain("No-op work items must not create empty commits/checkpoints");
     expect(gitMaintainPrompt).toContain("do not run git add, git commit");
+    expect(gitMaintainPrompt).toContain("Do not emit checkpointCreated, commands, commitMessage");
   });
 
   test("all bundled default loadouts validate with canonical workItems generator contracts", async () => {

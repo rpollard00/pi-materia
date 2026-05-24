@@ -27,7 +27,7 @@ function regressionConfig(): PiMateriaConfig {
       const previous = ctx.state.evalAttempts ?? {};
       const attempt = Number(previous[key] ?? 0) + 1;
       const evalAttempts = { ...previous, [key]: attempt };
-      const satisfied = key === "alpha" ? attempt >= 2 : true;
+      const satisfied = key === "0" ? attempt >= 2 : true;
       process.stdout.write(JSON.stringify({ satisfied, feedback: satisfied ? "ok" : "retry", evalAttempts }));
     });
   `;
@@ -123,7 +123,7 @@ describe("graph semantics regression", () => {
     expect(state.phase).toBe("complete");
     expect(state.data?.artifactIgnore).toMatchObject({ ok: true, patterns: [".pi/pi-materia/"] });
     expect(state.data?.vcs).toMatchObject({ kind: "none" });
-    expect(state.data?.evalAttempts).toEqual({ alpha: 2, beta: 1 });
+    expect(state.data?.evalAttempts).toEqual({ "0": 2, "1": 1 });
     expect(state.visits).toMatchObject({ "Socket-1": 1, "Socket-2": 1, "Socket-3": 1, "Socket-4": 3, "Socket-5": 3, "Socket-6": 2 });
     expect(state.edgeTraversals).toMatchObject({
       "Socket-1->Socket-2": 1,
@@ -136,9 +136,9 @@ describe("graph semantics regression", () => {
     });
     expect(state.cursors?.taskIndex).toBe(2);
     await expect(readFile(path.join(harness.cwd, ".gitignore"), "utf8")).resolves.toContain(".pi/pi-materia/");
-    const alphaRetryInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-alpha.input.json"), "utf8"));
-    expect(alphaRetryInput.itemKey).toBe("alpha");
-    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "3-beta.input.json"), "utf8"));
-    expect(betaInput.itemKey).toBe("beta");
+    const alphaRetryInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-0.input.json"), "utf8"));
+    expect(alphaRetryInput.itemKey).toBe("0");
+    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "3-1.input.json"), "utf8"));
+    expect(betaInput.itemKey).toBe("1");
   });
 });

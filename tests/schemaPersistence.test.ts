@@ -74,15 +74,13 @@ describe("schema/persistence adapters", () => {
 
   test("validates persisted handoff payload reserved fields and canonical workItems", () => {
     const valid = validatePersistedHandoffPayload({
-      summary: "ok",
+      context: "ok",
       workItems: [],
       satisfied: false,
-      feedback: "needs follow-up",
-      missing: ["tests"],
     });
     expect(valid.ok).toBe(true);
 
-    const invalid = validatePersistedHandoffPayload({ tasks: [], satisfied: "yes", feedback: [], missing: "tests" });
+    const invalid = validatePersistedHandoffPayload({ tasks: [], satisfied: "yes" });
     expect(invalid.ok).toBe(false);
     if (!invalid.ok) {
       expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["handoff.tasks", "handoff.satisfied"]));

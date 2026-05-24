@@ -5,7 +5,9 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { loadProfileConfig } from "../config/config.js";
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "../graph/generator.js";
 import { getActiveModelInfo } from "../config/modelSettings.js";
+import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
 import type { MateriaGeneratorConfig, MateriaRoleGenerationProfileConfig } from "../types.js";
+import { buildMateriaModelCatalog, type MateriaModelCatalogModel, type MateriaModelCatalogResponse } from "../modelCatalog.js";
 
 export interface MateriaRolePromptGenerationRequest {
   brief: string;
@@ -19,8 +21,15 @@ export interface MateriaRoleGenerationModelResolution {
   warnings: string[];
 }
 
+export interface MateriaRoleGenerationThinkingResolution {
+  requestedThinking: string | null;
+  effectiveThinking: string | null;
+  fallback: boolean;
+  warnings: string[];
+}
+
 export type MateriaRolePromptGenerationResult =
-  | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true; warnings?: string[]; modelResolution: MateriaRoleGenerationModelResolution }
+  | { ok: true; prompt: string; model?: string; provider?: string; api?: string; thinking?: string; isolated: true; warnings?: string[]; modelResolution: MateriaRoleGenerationModelResolution; thinkingResolution: MateriaRoleGenerationThinkingResolution }
   | { ok: false; error: string; code: "invalid_brief" | "disabled" | "generation_failed" };
 
 export interface MateriaRolePromptGenerationSettings {
@@ -31,6 +40,7 @@ export interface MateriaRolePromptGenerationSettings {
   thinking?: ThinkingLevel;
   warnings?: string[];
   modelResolution: MateriaRoleGenerationModelResolution;
+  thinkingResolution: MateriaRoleGenerationThinkingResolution;
 }
 
 export interface MateriaRolePromptGeneratorInput {
@@ -82,6 +92,7 @@ export async function generateMateriaRolePrompt(
       thinking: settings.thinking,
       warnings: settings.warnings,
       modelResolution: settings.modelResolution,
+      thinkingResolution: settings.thinkingResolution,
     };
   } catch (error) {
     return { ok: false, code: "generation_failed", error: error instanceof Error ? error.message : String(error) };
@@ -102,22 +113,30 @@ export async function resolveRoleGenerationSettings(
   profile: MateriaRoleGenerationProfileConfig,
 ): Promise<MateriaRolePromptGenerationSettings> {
   const active = getActiveModelInfo(pi, ctx);
-  const choice = await resolveRoleGenerationModelChoice(ctx, profile, active.model);
+  const catalog = await buildMateriaModelCatalog({
+    modelRegistry: ctx.modelRegistry,
+    getActiveModel: () => active.model ?? null,
+    getActiveThinking: () => active.thinking ?? null,
+  });
+  const choice = await resolveRoleGenerationModelChoice(ctx, profile, active.model, catalog);
   const model = choice.model;
-  const thinking = normalizeRoleGenerationThinking(profile.thinking) ?? active.thinking;
+  const thinking = resolveRoleGenerationThinking(profile.thinking, active.thinking, choice.supportedThinkingLevels, choice.resolution.effectiveModel);
+  const warnings = [...choice.resolution.warnings, ...thinking.resolution.warnings];
   return {
     model,
     modelLabel: model ? `${model.provider}/${model.id}` : active.modelId,
     provider: model?.provider ?? active.provider,
     api: profile.api ?? model?.api ?? active.api,
-    thinking,
-    warnings: choice.resolution.warnings,
+    thinking: thinking.thinking,
+    warnings,
     modelResolution: choice.resolution,
+    thinkingResolution: thinking.resolution,
   };
 }
 
 export interface ResolvedRoleGenerationModelChoice {
   model?: Model<Api>;
+  supportedThinkingLevels?: MateriaThinkingLevel[];
   resolution: MateriaRoleGenerationModelResolution;
 }
 
@@ -125,19 +144,21 @@ export async function resolveRoleGenerationModelChoice(
   ctx: ExtensionContext,
   profile: MateriaRoleGenerationProfileConfig,
   activeModel: Model<Api> | undefined,
+  catalog?: MateriaModelCatalogResponse,
 ): Promise<ResolvedRoleGenerationModelChoice> {
   const requestedModel = profile.model?.trim() || null;
   const activeLabel = activeModel ? `${activeModel.provider}/${activeModel.id}` : null;
   const fallback = (warnings: string[]): ResolvedRoleGenerationModelChoice => ({
     model: activeModel,
+    supportedThinkingLevels: catalogModelForValue(catalog, activeLabel)?.supportedThinkingLevels,
     resolution: { requestedModel, effectiveModel: activeLabel, fallback: requestedModel !== null, warnings },
   });
 
   if (!requestedModel) return fallback([]);
 
   const unavailableWarning = 'Saved generation model is unavailable; using Active Pi Model.';
-  const qualified = parseProviderAndModel(requestedModel);
-  if (!qualified) return fallback([unavailableWarning]);
+  const catalogModel = catalogModelForValue(catalog, requestedModel);
+  if (!catalogModel) return fallback([unavailableWarning]);
 
   let available: Model<Api>[] | undefined;
   try {
@@ -150,12 +171,13 @@ export async function resolveRoleGenerationModelChoice(
     return fallback([unavailableWarning]);
   }
 
-  const matches = available.filter((model) => model.provider === qualified.provider && model.id === qualified.modelId);
+  const matches = available.filter((model) => model.provider === catalogModel.provider && model.id === catalogModel.id);
   if (matches.length !== 1) return fallback([unavailableWarning]);
   const model = matches[0];
   return {
     model,
-    resolution: { requestedModel, effectiveModel: `${model.provider}/${model.id}`, fallback: false, warnings: [] },
+    supportedThinkingLevels: catalogModel.supportedThinkingLevels,
+    resolution: { requestedModel, effectiveModel: catalogModel.value, fallback: false, warnings: [] },
   };
 }
 
@@ -208,20 +230,34 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
   ].join("\n");
 }
 
-function parseProviderAndModel(value: string): { provider: string; modelId: string } | undefined {
-  const separator = value.includes("/") ? "/" : value.includes(":") ? ":" : undefined;
-  if (!separator) return undefined;
-  const [provider, ...rest] = value.split(separator);
-  const modelId = rest.join(separator);
-  return provider && modelId ? { provider, modelId } : undefined;
+function catalogModelForValue(catalog: MateriaModelCatalogResponse | undefined, value: string | null): MateriaModelCatalogModel | undefined {
+  if (!catalog || !value) return undefined;
+  return catalog.models.find((model) => model.value === value) ?? (catalog.activeModel?.value === value ? catalog.activeModel : undefined);
 }
 
-function normalizeRoleGenerationThinking(value: string | undefined): ThinkingLevel | undefined {
-  if (!value?.trim()) return undefined;
-  const normalized = value.trim().toLowerCase();
-  const allowed = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-  if (!allowed.has(normalized)) throw new Error(`Unknown role generation thinking level "${value}".`);
-  return normalized as ThinkingLevel;
+function resolveRoleGenerationThinking(
+  value: string | null | undefined,
+  activeThinking: ThinkingLevel | undefined,
+  supportedLevels: MateriaThinkingLevel[] | undefined,
+  effectiveModel: string | null,
+): { thinking?: ThinkingLevel; resolution: MateriaRoleGenerationThinkingResolution } {
+  const requestedThinking = typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
+  const effectiveActiveThinking = activeThinking && supportedLevels?.includes(activeThinking) ? activeThinking : undefined;
+  const fallbackResolution = (warnings: string[]): { thinking?: ThinkingLevel; resolution: MateriaRoleGenerationThinkingResolution } => ({
+    thinking: effectiveActiveThinking,
+    resolution: { requestedThinking, effectiveThinking: effectiveActiveThinking ?? null, fallback: requestedThinking !== null, warnings },
+  });
+
+  if (!requestedThinking) return fallbackResolution([]);
+
+  const warning = `Saved generation thinking "${value}" is unsupported for ${effectiveModel ?? "the effective model"}; using Active Pi Thinking.`;
+  if (!isMateriaThinkingLevel(requestedThinking)) return fallbackResolution([warning]);
+  if (!supportedLevels?.includes(requestedThinking)) return fallbackResolution([warning]);
+
+  return {
+    thinking: requestedThinking as ThinkingLevel,
+    resolution: { requestedThinking, effectiveThinking: requestedThinking, fallback: false, warnings: [] },
+  };
 }
 
 function lastAssistantText(messages: unknown[] | undefined): string | undefined {

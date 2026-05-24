@@ -64,11 +64,9 @@ describe("previous-cast context loader", () => {
     }, null, 2));
     await writeFile(path.join(runDir, "sockets", "Socket-1", "1.md"), "abcdefghijklmnopqrstuvwxyz".repeat(20));
     await writeFile(path.join(runDir, "sockets", "Socket-1", "1.json"), JSON.stringify({
-      summary: "done",
-      workItems: [{ id: "WI", title: "Next", description: "Next", acceptance: [], context: { constraints: [], dependencies: [], risks: [] } }],
+      workItems: [{ title: "Next", context: "Do the next thing." }],
       satisfied: true,
-      feedback: "ok",
-      missing: [],
+      context: "done",
       extra: "preserved only in artifact preview",
     }, null, 2));
 
@@ -78,7 +76,14 @@ describe("previous-cast context loader", () => {
     if (!result.ok) return;
     expect(result.value.castId).toBe("cast-1");
     expect(result.value.request).toBe("original request");
-    expect(result.value.handoff).toMatchObject({ satisfied: true, workItems: [{ id: "WI", title: "Next" }] });
+    expect(result.value.handoff).toMatchObject({
+      satisfied: true,
+      context: "done",
+      workItems: [{ title: "Next", context: "Do the next thing." }],
+    });
+    expect(result.value.handoff).not.toHaveProperty("summary");
+    expect(result.value.handoff).not.toHaveProperty("feedback");
+    expect(result.value.handoff).not.toHaveProperty("missing");
     expect(result.value.artifacts.find((artifact) => artifact.path === "sockets/Socket-1/1.md")).toMatchObject({ truncated: true, maxBytes: 400, content: "abcdefghijklmnopqrstuvwxyz".repeat(15) + "abcdefghij" });
     expect(JSON.stringify(result.value)).not.toContain("Original request:");
   });

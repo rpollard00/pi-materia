@@ -43,7 +43,7 @@ describe("socket output requirements", () => {
       },
     ]);
     expect(requirements.reservedFieldTypeRules.find((rule) => rule.field === "satisfied")?.required).toBe(true);
-    expect(requirements.reservedFieldTypeRules.find((rule) => rule.field === "feedback")).toBeUndefined();
+    expect(requirements.reservedFieldTypeRules.map((rule) => rule.field)).not.toContain("feedback");
   });
 
   test("advance satisfied semantics require satisfied", () => {

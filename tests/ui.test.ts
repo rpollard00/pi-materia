@@ -142,6 +142,30 @@ describe("persistent Materia widget formatting", () => {
     expect(text.match(/Maintain/g)?.length ?? 0).toBeLessThanOrEqual(3);
   });
 
+  test("prefers work item titles over legacy model-authored ids in cast labels", () => {
+    const run = runState({
+      loadoutName: "Hojo-Consult",
+      currentSocketId: "Socket-5",
+      currentMateria: "Build",
+      currentTask: "WI-7 - legacy fallback label",
+    });
+    const state = {
+      active: true,
+      phase: "Socket-5",
+      currentSocketId: "Socket-5",
+      currentMateria: "Build",
+      currentItemKey: "WI-1",
+      currentItemLabel: "Implement title/context validation",
+      awaitingResponse: true,
+      runState: run,
+    } as MateriaCastState;
+
+    const text = renderMateriaCastStatusWidget(state, 2_000).join("\n");
+    expect(text).toContain("Implement title/context");
+    expect(text).not.toContain("WI-7");
+    expect(text).not.toContain("WI-1");
+  });
+
   test("renders legacy run state without loadout or endedAt metadata sensibly", () => {
     const legacyState = runState({ currentMateria: "Build", currentTask: "legacy task" });
     delete (legacyState as Partial<MateriaRunState>).loadoutName;

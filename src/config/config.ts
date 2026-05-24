@@ -13,6 +13,7 @@ import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoadout } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
+import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
 import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
@@ -150,21 +151,57 @@ export function isProviderQualifiedModelId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
 }
 
-export async function getRoleGenerationModelPreference(): Promise<string | null> {
-  return normalizeRoleGenerationModelPreference((await loadProfileConfig()).roleGeneration?.model);
+export interface RoleGenerationPreferenceUpdate {
+  model?: string | null;
+  thinking?: string | null;
 }
 
-export async function saveRoleGenerationModelPreference(model: string | null): Promise<string | null> {
-  const nextModel = normalizeRoleGenerationModelPreference(model);
+export interface RoleGenerationPreference {
+  model: string | null;
+  thinking: MateriaThinkingLevel | null;
+}
+
+export async function getRoleGenerationPreference(): Promise<RoleGenerationPreference> {
+  const roleGeneration = (await loadProfileConfig()).roleGeneration;
+  return {
+    model: normalizeRoleGenerationModelPreference(roleGeneration?.model),
+    thinking: normalizeRoleGenerationThinkingPreference(roleGeneration?.thinking),
+  };
+}
+
+export async function getRoleGenerationModelPreference(): Promise<string | null> {
+  return (await getRoleGenerationPreference()).model;
+}
+
+export function normalizeRoleGenerationThinkingPreference(thinking: string | null | undefined): MateriaThinkingLevel | null {
+  const trimmed = typeof thinking === "string" ? thinking.trim() : null;
+  return isMateriaThinkingLevel(trimmed) ? trimmed : null;
+}
+
+export async function saveRoleGenerationPreference(update: RoleGenerationPreferenceUpdate): Promise<RoleGenerationPreference> {
+  const hasModel = Object.prototype.hasOwnProperty.call(update, "model");
+  const hasThinking = Object.prototype.hasOwnProperty.call(update, "thinking");
+  const nextModel = hasModel ? normalizeRoleGenerationModelPreference(update.model) : undefined;
+  const nextThinking = hasThinking ? (typeof update.thinking === "string" ? update.thinking.trim() : null) : undefined;
   if (nextModel && !isProviderQualifiedModelId(nextModel)) {
     throw new Error('Invalid role-generation model. Expected a provider-qualified model id such as "provider/model".');
   }
+  if (nextThinking && !isMateriaThinkingLevel(nextThinking)) {
+    throw new Error('Invalid role-generation thinking. Expected one of: off, minimal, low, medium, high, xhigh.');
+  }
   const profile = await loadProfileConfig();
   const roleGeneration = { ...(profile.roleGeneration ?? defaultRoleGenerationProfileConfig()) };
-  if (nextModel) roleGeneration.model = nextModel;
-  else delete roleGeneration.model;
+  if (hasModel) roleGeneration.model = nextModel;
+  if (hasThinking) roleGeneration.thinking = nextThinking as MateriaThinkingLevel | null;
   await writeProfileConfig({ ...profile, roleGeneration });
-  return nextModel;
+  return {
+    model: normalizeRoleGenerationModelPreference(roleGeneration.model),
+    thinking: normalizeRoleGenerationThinkingPreference(roleGeneration.thinking),
+  };
+}
+
+export async function saveRoleGenerationModelPreference(model: string | null): Promise<string | null> {
+  return (await saveRoleGenerationPreference({ model })).model;
 }
 
 export async function saveMateriaConfigPatch(cwd: string, patch: MateriaConfigPatch, options: { target?: MateriaSaveTarget; configuredPath?: string } = {}): Promise<string> {
@@ -369,8 +406,9 @@ function normalizeRoleGenerationProfileConfig(value: unknown, file: string): Mat
     else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.enabled. Expected a boolean.");
   }
   if (value.model !== undefined) {
-    if (typeof value.model === "string" && value.model.trim()) config.model = value.model.trim();
-    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.model. Expected a non-empty string.");
+    if (value.model === null) config.model = null;
+    else if (typeof value.model === "string" && value.model.trim()) config.model = value.model.trim();
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.model. Expected a non-empty string or null.");
   }
   if (value.provider !== undefined) {
     if (typeof value.provider === "string" && value.provider.trim()) config.provider = value.provider.trim();
@@ -381,8 +419,13 @@ function normalizeRoleGenerationProfileConfig(value: unknown, file: string): Mat
     else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.api. Expected a non-empty string.");
   }
   if (value.thinking !== undefined) {
-    if (typeof value.thinking === "string" && value.thinking.trim()) config.thinking = value.thinking.trim();
-    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.thinking. Expected a non-empty string.");
+    if (value.thinking === null) config.thinking = null;
+    else if (typeof value.thinking === "string") {
+      const thinking = value.thinking.trim();
+      if (isMateriaThinkingLevel(thinking)) config.thinking = thinking;
+      else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.thinking. Expected one of off, minimal, low, medium, high, xhigh, or null.");
+    }
+    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.thinking. Expected one of off, minimal, low, medium, high, xhigh, or null.");
   }
   if (value.extraInstructions !== undefined) {
     if (typeof value.extraInstructions === "string") config.extraInstructions = value.extraInstructions.trim() || undefined;

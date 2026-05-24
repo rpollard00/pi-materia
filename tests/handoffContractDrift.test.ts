@@ -47,6 +47,13 @@ describe("handoff contract drift regressions", () => {
     expect(docs).toContain("When present, `satisfied` must be a JSON boolean (`true` or `false`).");
     expect(docs).toContain("Obsolete broad-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, `missing`, or `state` are not part of the agent handoff contract.");
     expect(docs).toContain("Utility and script materia are deterministic producers, not model-authored agent handoffs.");
+    expect(docs).toContain("utility `state` patch is separate from agent handoff fields");
+    expect(docs).toContain("Displays should label generated work from `workItems[].title`");
+    expect(readme).toContain("Utility JSON output is deterministic structured data, not an agent handoff envelope");
+    expect(readme).toContain("Generator role prompts are instructed to produce `workItems` entries with only `title` and `context` strings");
+    expect(readme).toContain("WebUI displays use the title for human labels while runtime-derived item keys/cursors remain internal diagnostics");
+    expect(`$${checkedDocs}`).not.toContain('"artifactIgnore": "$"');
+    expect(`$${checkedDocs}`).not.toContain('"vcs": "$"');
     expect(docs).toContain("`workItems`, not `tasks`");
     expect(docs).toContain('{ "when": "satisfied", "to": "Maintain" }');
     expect(docs).toContain('{ "when": "not_satisfied", "to": "Build"');
@@ -112,8 +119,10 @@ describe("handoff contract drift regressions", () => {
 
     const maintainPrompt = String(rawDefault.materia?.Maintain?.prompt ?? "");
     const gitMaintainPrompt = String(rawDefault.materia?.GitMaintain?.prompt ?? "");
-    expect(maintainPrompt).toContain("return compact JSON with satisfied and explanatory context");
-    expect(gitMaintainPrompt).toContain("return compact JSON with satisfied and explanatory context");
+    expect(maintainPrompt).toContain("return compact JSON with only satisfied and explanatory context");
+    expect(gitMaintainPrompt).toContain("return compact JSON with only satisfied and explanatory context");
+    expect(maintainPrompt).toContain("Do not emit checkpointCreated, commands, commitMessage");
+    expect(gitMaintainPrompt).toContain("Do not emit checkpointCreated, commands, commitMessage");
     expect(maintainPrompt).not.toContain("return JSON with shape");
     expect(gitMaintainPrompt).not.toContain("return JSON with shape");
 

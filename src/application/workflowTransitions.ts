@@ -82,16 +82,14 @@ export function setCurrentItem(state: MateriaCastState, socket: ResolvedMateriaS
   setPath(state.data, "currentWorkItem", item);
   if (alias !== "item") setPath(state.data, alias, item);
   if (alias === "workItem" || loop.items.includes("workItems")) setPath(state.data, "workItem", item);
-  const key = deriveLoopItemKey(loop.items, alias, index, item);
+  const key = deriveLoopItemKey(loop.items, alias, index);
   const label = readObjectField(item, "title") ?? readObjectField(item, "name") ?? key;
   state.currentItemKey = key;
   state.currentItemLabel = String(label);
   return true;
 }
 
-function deriveLoopItemKey(itemsPath: string, alias: string, index: number, item: unknown): string {
-  const explicitId = readObjectField(item, "id");
-  if (typeof explicitId === "string" && explicitId.trim()) return explicitId;
+function deriveLoopItemKey(itemsPath: string, alias: string, index: number): string {
   return alias === "workItem" || itemsPath.includes("workItems") ? `WI-${index + 1}` : String(index);
 }
 

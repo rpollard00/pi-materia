@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { buildRoleGenerationPrompt, generateMateriaRolePrompt, resolveRoleGenerationSettings } from "../src/handoff/roleGeneration.js";
 
-const activeModel = { provider: "active-provider", id: "active-model", name: "Active", api: "active-api" };
-const overrideModel = { provider: "override-provider", id: "role-model", name: "Role", api: "override-api" };
+const activeModel = { provider: "active-provider", id: "active-model", name: "Active", api: "active-api", reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high" } };
+const overrideModel = { provider: "override-provider", id: "role-model", name: "Role", api: "override-api", reasoning: true, thinkingLevelMap: { off: null, minimal: "minimal", low: null, medium: null, high: "high", xhigh: null } };
 
 function fakePi(thinking = "medium"): ExtensionAPI {
   return { getThinkingLevel: () => thinking } as unknown as ExtensionAPI;
@@ -61,6 +61,7 @@ describe("Materia role prompt generation service", () => {
       thinking: "high",
       warnings: [],
       modelResolution: { requestedModel: null, effectiveModel: "active-provider/active-model", fallback: false, warnings: [] },
+      thinkingResolution: { requestedThinking: null, effectiveThinking: "high", fallback: false, warnings: [] },
     });
   });
 
@@ -99,6 +100,7 @@ describe("Materia role prompt generation service", () => {
     expect(prompt).toContain("place generated units of work in workItems");
     expect(prompt).toContain("use only title:string and context:string for each generated item");
     expect(prompt).toContain("avoid ids/descriptions/acceptance arrays/nested context objects");
+    expect(prompt).not.toMatch(/produce[^\n]+id/i);
     expect(prompt).toContain("socket-relevant handoff fields");
     expect(prompt).not.toContain("legacy placement-specific outputs such as tasks");
   });
@@ -116,7 +118,40 @@ describe("Materia role prompt generation service", () => {
     expect(settings.provider).toBe("override-provider");
     expect(settings.api).toBe("profile-api");
     expect(settings.thinking).toBe("minimal");
+    expect(settings.warnings).toEqual([]);
     expect(settings.modelResolution).toEqual({ requestedModel: "override-provider/role-model", effectiveModel: "override-provider/role-model", fallback: false, warnings: [] });
+    expect(settings.thinkingResolution).toEqual({ requestedThinking: "minimal", effectiveThinking: "minimal", fallback: false, warnings: [] });
+  });
+
+  test("inherits active thinking only when supported by the effective generation model", async () => {
+    const settings = await resolveRoleGenerationSettings(fakePi("medium"), fakeCtx(), {
+      enabled: true,
+      model: "override-provider/role-model",
+      thinking: null,
+    });
+
+    expect(settings.model).toBe(overrideModel);
+    expect(settings.thinking).toBeUndefined();
+    expect(settings.warnings).toEqual([]);
+    expect(settings.thinkingResolution).toEqual({ requestedThinking: null, effectiveThinking: null, fallback: false, warnings: [] });
+  });
+
+  test("falls back to active/default thinking with warning for stale unsupported saved thinking", async () => {
+    const settings = await resolveRoleGenerationSettings(fakePi("high"), fakeCtx(), {
+      enabled: true,
+      model: "override-provider/role-model",
+      thinking: "low" as never,
+    });
+
+    expect(settings.model).toBe(overrideModel);
+    expect(settings.thinking).toBe("high");
+    expect(settings.warnings).toEqual(['Saved generation thinking "low" is unsupported for override-provider/role-model; using Active Pi Thinking.']);
+    expect(settings.thinkingResolution).toEqual({
+      requestedThinking: "low",
+      effectiveThinking: "high",
+      fallback: true,
+      warnings: ['Saved generation thinking "low" is unsupported for override-provider/role-model; using Active Pi Thinking.'],
+    });
   });
 
   test("falls back to Active Pi model when saved roleGeneration model is unavailable", async () => {

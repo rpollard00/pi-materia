@@ -18,25 +18,49 @@ export async function runSameSocketRecoveryCompaction(ctx: ExtensionContext, sta
   return compactContext(ctx, `Pi Materia forced context-window recovery for ${recoveryDiagnosticLabel(state)}. Preserve the active cast state, task requirements, and any durable artifacts/events needed to continue the same turn.`);
 }
 
-export async function maybeRunProactiveCompactionWorkflow(ctx: ExtensionContext, state: MateriaCastState, deps: CompactionWorkflowDeps): Promise<void> {
+export interface ContextPressureAssessment {
+  shouldCompact: boolean;
+  thresholdPercent?: number;
+  thresholdMode?: string;
+  thresholdTier?: unknown;
+  tokens?: number;
+  contextWindow?: number;
+  percent?: number;
+}
+
+export async function assessContextPressureForCompaction(ctx: ExtensionContext, state: MateriaCastState, deps: Pick<CompactionWorkflowDeps, "loadConfigFromState">): Promise<ContextPressureAssessment> {
   const usage = ctx.getContextUsage();
-  if (!usage) return;
+  if (!usage) return { shouldCompact: false };
   const config = await deps.loadConfigFromState(state);
   const contextWindow = effectiveContextWindow(ctx, usage);
   const threshold = resolveProactiveCompactionThreshold(config.compaction, contextWindow);
   const thresholdPercent = threshold.thresholdPercent;
   const percent = usage.tokens != null && contextWindow != null && contextWindow > 0 ? (usage.tokens / contextWindow) * 100 : usage.percent;
-  if (percent == null || percent < thresholdPercent) return;
+
+  return {
+    shouldCompact: percent != null && percent >= thresholdPercent,
+    thresholdPercent,
+    thresholdMode: threshold.mode,
+    thresholdTier: threshold.tier,
+    tokens: usage.tokens ?? undefined,
+    contextWindow,
+    percent: percent ?? undefined,
+  };
+}
+
+export async function maybeRunProactiveCompactionWorkflow(ctx: ExtensionContext, state: MateriaCastState, deps: CompactionWorkflowDeps): Promise<void> {
+  const assessment = await assessContextPressureForCompaction(ctx, state, deps);
+  if (!assessment.shouldCompact) return;
 
   const eventBase = {
     action: "compact" as const,
     reason: "context_pressure" as const,
-    thresholdPercent,
-    thresholdMode: threshold.mode,
-    thresholdTier: threshold.tier,
-    tokens: usage.tokens,
-    contextWindow,
-    percent,
+    thresholdPercent: assessment.thresholdPercent,
+    thresholdMode: assessment.thresholdMode,
+    thresholdTier: assessment.thresholdTier,
+    tokens: assessment.tokens,
+    contextWindow: assessment.contextWindow,
+    percent: assessment.percent,
     socket: deps.currentSocketId(state),
     itemKey: state.currentItemKey,
     itemLabel: state.currentItemLabel,

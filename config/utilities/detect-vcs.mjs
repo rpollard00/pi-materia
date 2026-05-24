@@ -16,7 +16,7 @@ try {
   const gitRoot = markerGitRoot ?? commandGitRoot;
   const kind = jjRoot ? "jj" : gitRoot ? "git" : "none";
   const root = jjRoot ?? gitRoot ?? null;
-  writeStdoutJson({ kind, root, available: { jj, git } });
+  writeStdoutJson({ state: { vcs: { kind, root, available: { jj, git } } } });
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

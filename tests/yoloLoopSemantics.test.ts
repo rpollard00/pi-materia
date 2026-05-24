@@ -42,8 +42,8 @@ const maintainScript = `
 
 function canonicalWorkItems(workItems: Array<{ id: string; title: string }>) {
   return workItems.map((item) => ({
-    ...item,
-    context: `Complete ${item.title}. Done.`,
+    title: item.title,
+    context: `Complete ${item.title}. Acceptance: Done.`,
   }));
 }
 
@@ -118,7 +118,7 @@ describe("Yolo loop semantics regression", () => {
     expect(state.visits).toMatchObject({ "Socket-3": 1, "Socket-4": 1 });
     expect(state.edgeTraversals?.["Socket-4->Socket-3"]).toBeUndefined();
     expect(state.cursors?.workItemIndex).toBe(1);
-    expect(state.data?.maintainAttempts).toEqual({ one: 1 });
+    expect(state.data?.maintainAttempts).toEqual({ "WI-1": 1 });
   });
 
   test("multi-item UI-created Yolo advances through consumed items then routes through canonical loop exits", async () => {
@@ -131,14 +131,14 @@ describe("Yolo loop semantics regression", () => {
     expect(state.visits).toMatchObject({ "Socket-3": 2, "Socket-4": 2, "Socket-2": 1 });
     expect(state.edgeTraversals).toMatchObject({ "Socket-4->Socket-3": 1 });
     expect(state.cursors?.workItemIndex).toBe(2);
-    expect(state.data?.maintainAttempts).toEqual({ alpha: 1, beta: 1 });
+    expect(state.data?.maintainAttempts).toEqual({ "WI-1": 1, "WI-2": 1 });
 
-    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-beta.input.json"), "utf8"));
-    expect(betaInput.itemKey).toBe("beta");
+    const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-WI-2.input.json"), "utf8"));
+    expect(betaInput.itemKey).toBe("WI-2");
   });
 
   test("not_satisfied Maintain result retries through the loop route without advancing the consumed cursor", async () => {
-    const config = yoloConfig([{ id: "alpha", title: "Alpha" }, { id: "beta", title: "Beta" }], { retryOnce: ["alpha"] });
+    const config = yoloConfig([{ id: "alpha", title: "Alpha" }, { id: "beta", title: "Beta" }], { retryOnce: ["WI-1"] });
 
     const { state } = await runYolo(config);
 
@@ -146,10 +146,10 @@ describe("Yolo loop semantics regression", () => {
     expect(state.visits).toMatchObject({ "Socket-3": 3, "Socket-4": 3 });
     expect(state.edgeTraversals).toMatchObject({ "Socket-4->Socket-3": 2 });
     expect(state.cursors?.workItemIndex).toBe(2);
-    expect(state.data?.maintainAttempts).toEqual({ alpha: 2, beta: 1 });
+    expect(state.data?.maintainAttempts).toEqual({ "WI-1": 2, "WI-2": 1 });
 
-    const retryInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-alpha.input.json"), "utf8"));
-    expect(retryInput.itemKey).toBe("alpha");
+    const retryInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "2-WI-1.input.json"), "utf8"));
+    expect(retryInput.itemKey).toBe("WI-1");
     expect(retryInput.cursor).toEqual({ name: "workItemIndex", index: 0 });
   });
 
@@ -168,7 +168,7 @@ describe("Yolo loop semantics regression", () => {
   });
 
   test("not_satisfied loop-exit route is selected when the loop exits on a false outcome", async () => {
-    const config = yoloConfig([{ id: "alpha", title: "Alpha" }], { retryOnce: ["alpha"], exitTo: "Socket-2" });
+    const config = yoloConfig([{ id: "alpha", title: "Alpha" }], { retryOnce: ["WI-1"], exitTo: "Socket-2" });
     config.loadouts!.Yolo.loops!.loopSelection.exit = { from: "Socket-4", when: "not_satisfied", to: "end" };
     config.loadouts!.Yolo.loops!.loopSelection.exits = [{ id: "after-failed", from: "Socket-4", condition: "not_satisfied", targetSocketId: "Socket-2" }];
 

@@ -33,13 +33,13 @@ Generated units of work use `workItems`, not `tasks`. Each agent-produced work i
 }
 ```
 
-Agents should not invent work item `id` values, duplicate the title into `description`, provide `acceptance` arrays, or create nested `context` objects. Runtime/UI code may derive internal loop keys such as `WI-1` from position or loop state, but those keys are not model-authored handoff fields.
+Agents should not invent work item `id` values, duplicate the title into `description`, provide `acceptance` arrays, or create nested `context` objects. Runtime/UI code may derive internal loop keys such as `WI-1` from position or loop state, but those keys are not model-authored handoff fields. Displays should label generated work from `workItems[].title`; derived keys are diagnostic/runtime labels only.
 
 For model output, return the object only: no markdown fences, prose, or extra commentary. Plain text sockets (`"parse": "text"`) do not use JSON output requirements.
 
 ## Utility/script state is separate
 
-Utility and script materia are deterministic producers, not model-authored agent handoffs. When configured, they may return structured data under a top-level `state` object for shallow merging into runtime state. That utility `state` patch is separate from agent handoff fields and should not be mixed into agent-authored JSON.
+Utility and script materia are deterministic producers, not model-authored agent handoffs. When configured, they may return structured data under a top-level `state` object for shallow merging into runtime state. That utility `state` patch is separate from agent handoff fields and should not be mixed into agent-authored JSON. Utilities may also expose explicitly documented script-owned fields for `assign`, but they should not mimic a broad agent envelope.
 
 Graph-control fields remain outside utility state: `workItems` drives loops and `satisfied` drives routing/advancement.
 

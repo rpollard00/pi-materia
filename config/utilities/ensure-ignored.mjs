@@ -31,7 +31,7 @@ try {
     await writeFile(ignoreFile, `${existing}${prefix}${added.join("\n")}\n`);
   }
 
-  writeStdoutJson({ ok: true, root, file: ignoreFile, patterns, added, unchanged: patterns.filter((pattern) => !added.includes(pattern)) });
+  writeStdoutJson({ state: { artifactIgnore: { ok: true, root, file: ignoreFile, patterns, added, unchanged: patterns.filter((pattern) => !added.includes(pattern)) } } });
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

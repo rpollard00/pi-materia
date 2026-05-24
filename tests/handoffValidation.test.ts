@@ -58,14 +58,14 @@ describe("handoff JSON runtime validation", () => {
   test("validates generator workItem shape with path-specific repair guidance", () => {
     let caught: unknown;
     try {
-      validateHandoffJsonOutput({ workItems: [{ id: "WI-1", title: "Build", description: "Build it", acceptance: ["Done"], context: { architecture: ["wrong"], constraints: "fast", dependencies: [], risks: ["low"] } }] }, { socketId: "Plan", socket: socket(), agentOutput: true, workItemsProducer: true });
+      validateHandoffJsonOutput({ workItems: [{ id: "WI-1", title: "Build", description: "Build it", acceptance: ["Done"], priority: "high", context: { architecture: ["wrong"], constraints: "fast", dependencies: [], risks: ["low"] } }] }, { socketId: "Plan", socket: socket(), agentOutput: true, workItemsProducer: true });
     } catch (error) {
       caught = error;
     }
     const issues = handoffValidationIssues(caught);
-    expect(issues?.map((issue) => issue.path)).not.toContain("$.workItems.0.id");
     expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.description");
     expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.acceptance");
+    expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.priority");
     expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.context");
     expect(issues?.find((issue) => issue.path === "$.workItems.0.context")?.reason).toContain("title:string and context:string");
   });

@@ -48,14 +48,14 @@ describe("bundled utility materia defaults", () => {
       type: "utility",
       script: { kind: "shippedUtility", name: "ensure-ignored.mjs", runtime: "node" },
       parse: "json",
-      assign: { artifactIgnore: "$" },
     });
     expect(config.materia?.["Detect-VCS"]).toMatchObject({
       type: "utility",
       script: { kind: "shippedUtility", name: "detect-vcs.mjs", runtime: "node" },
       parse: "json",
-      assign: { vcs: "$" },
     });
+    expect((config.materia?.["Ignore-Artifacts"] as { assign?: unknown }).assign).toBeUndefined();
+    expect((config.materia?.["Detect-VCS"] as { assign?: unknown }).assign).toBeUndefined();
     expect((config.materia?.["Ignore-Artifacts"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Detect-VCS"] as { command?: unknown }).command).toBeUndefined();
     expect(packageJson.files).toContain("config/default.json");

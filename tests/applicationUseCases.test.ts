@@ -457,7 +457,7 @@ describe("application use cases", () => {
     const runDir = path.join(artifactRoot, "cast-prev");
     await mkdir(path.join(runDir, "sockets", "Socket-1"), { recursive: true });
     await writeFile(path.join(runDir, "manifest.json"), JSON.stringify({ castId: "cast-prev", request: "prior request", entries: [{ artifact: "sockets/Socket-1/output.json", kind: "socket_output" }] }));
-    await writeFile(path.join(runDir, "sockets", "Socket-1", "output.json"), JSON.stringify({ summary: "prior summary", satisfied: true, feedback: "ready", missing: [] }));
+    await writeFile(path.join(runDir, "sockets", "Socket-1", "output.json"), JSON.stringify({ context: "prior context", satisfied: true }));
     let started: { options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> } } | undefined;
     const configLoaded: LoadedConfig = {
       source: "/repo/materia.json",
@@ -485,7 +485,7 @@ describe("application use cases", () => {
 
     expect(result.link.fromCastId).toBe("cast-prev");
     expect(result.link.plan.lineage.fromCastId).toBe("cast-prev");
-    expect(started?.options?.initialData?.previousCastContext).toMatchObject({ castId: "cast-prev", request: "prior request", handoff: { satisfied: true } });
+    expect(started?.options?.initialData?.previousCastContext).toMatchObject({ castId: "cast-prev", request: "prior request", handoff: { context: "prior context", satisfied: true } });
     expect(started?.options?.startEventDetails?.link).toMatchObject({ fromCastId: "cast-prev", virtualLoadout: { id: result.link.virtualLoadout.id } });
   });
 

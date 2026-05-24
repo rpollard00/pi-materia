@@ -3,9 +3,9 @@ import { isGeneratorMateria } from '../../../../../../graph/generator.js';
 import type { MateriaConfig } from '../../../loadoutModel.js';
 import { materiaSavedEventName } from '../../constants.js';
 import { generateMateriaRole, getRoleGenerationPreference, saveConfig, saveRoleGenerationPreference } from '../../api/index.js';
-import { activeModelOptionLabel } from '../../constants.js';
+import { activeModelOptionLabel, activeThinkingOptionLabel } from '../../constants.js';
 import { useModelCatalog } from '../../hooks/useModelCatalog.js';
-import type { LoadoutSourceScope, MateriaFormState, MateriaSavedEventDetail, MateriaTabId, RoleGenerationModelResolution, SelectOption } from '../../types.js';
+import type { LoadoutSourceScope, MateriaFormState, MateriaSavedEventDetail, MateriaTabId, RoleGenerationModelResolution, RoleGenerationThinkingResolution, SelectOption } from '../../types.js';
 import {
   buildMateriaPatch,
   canonicalWorkItemsGeneratorConfig,
@@ -15,6 +15,7 @@ import {
   canKeepThinkingForModel,
   modelSelectOptions,
   selectedCatalogModel,
+  thinkingLabel,
   thinkingSelectOptions,
 } from '../../utils/modelCatalog.js';
 import { buildMateriaSelectorItems, getMateriaEditPolicy, type MateriaSelectorItem } from './materiaEditPolicy.js';
@@ -75,6 +76,7 @@ export interface MateriaEditorController {
     roleGenerationError: string;
     roleGenerationWarnings: string[];
     roleGenerationModelResolution: RoleGenerationModelResolution | null;
+    roleGenerationThinkingResolution: RoleGenerationThinkingResolution | null;
     roleGenerating: boolean;
     generationModel: {
       selectedModel: string;
@@ -88,6 +90,19 @@ export interface MateriaEditorController {
       saving: boolean;
       saveError: string;
       changeModel: (model: string) => Promise<void>;
+    };
+    generationThinking: {
+      selectedThinking: string;
+      persistedThinking: string | null;
+      stalePreferenceWarning: string;
+      availableOptions: SelectOption[];
+      activeThinkingLabel: string;
+      activeThinkingDetail: string;
+      preferenceStatus: 'idle' | 'loading' | 'ready' | 'error';
+      preferenceError: string;
+      saving: boolean;
+      saveError: string;
+      changeThinking: (thinking: string) => Promise<void>;
     };
     generateRolePrompt: () => Promise<void>;
     applyGeneratedRolePrompt: () => void;
@@ -110,12 +125,16 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
   const [roleGenerationError, setRoleGenerationError] = useState('');
   const [roleGenerationWarnings, setRoleGenerationWarnings] = useState<string[]>([]);
   const [roleGenerationModelResolution, setRoleGenerationModelResolution] = useState<RoleGenerationModelResolution | null>(null);
+  const [roleGenerationThinkingResolution, setRoleGenerationThinkingResolution] = useState<RoleGenerationThinkingResolution | null>(null);
   const [roleGenerating, setRoleGenerating] = useState(false);
   const [generationPreferenceStatus, setGenerationPreferenceStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [persistedGenerationModel, setPersistedGenerationModel] = useState<string | null>(null);
+  const [persistedGenerationThinking, setPersistedGenerationThinking] = useState<string | null>(null);
   const [generationPreferenceError, setGenerationPreferenceError] = useState('');
   const [generationModelSaving, setGenerationModelSaving] = useState(false);
   const [generationModelSaveError, setGenerationModelSaveError] = useState('');
+  const [generationThinkingSaving, setGenerationThinkingSaving] = useState(false);
+  const [generationThinkingSaveError, setGenerationThinkingSaveError] = useState('');
   const roleGenerationPreferenceRequestedRef = useRef(false);
   const [pendingReloadSelection, setPendingReloadSelection] = useState<{ id: string; deletedSource: LoadoutSourceScope | undefined } | null>(null);
 
@@ -149,10 +168,12 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
       const errorMessage = typeof body.error === 'string' ? body.error : body.error?.message;
       if (!response.ok || body.ok === false) throw new Error(errorMessage ?? 'Role-generation preference request failed.');
       setPersistedGenerationModel(typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null);
+      setPersistedGenerationThinking(typeof body.thinking === 'string' && body.thinking.trim() ? body.thinking.trim() : null);
       setGenerationPreferenceStatus('ready');
     }).catch((error) => {
       if (cancelled) return;
       setPersistedGenerationModel(null);
+      setPersistedGenerationThinking(null);
       setGenerationPreferenceStatus('error');
       setGenerationPreferenceError(error instanceof Error ? error.message : String(error));
     });
@@ -210,6 +231,23 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
   const selectedGenerationModel = persistedGenerationModel
     ? (modelCatalogStatus === 'ready' ? (savedGenerationModelAvailable ? persistedGenerationModel : '') : persistedGenerationModel)
     : '';
+  const selectedGenerationCatalogModel = selectedGenerationModel
+    ? modelCatalog.models.find((model) => model.value === selectedGenerationModel)
+    : selectedCatalogModel(modelCatalog, '');
+  const generationThinkingOptions = useMemo<SelectOption[]>(() => {
+    const supported = selectedGenerationCatalogModel?.supportedThinkingLevels ?? [];
+    return [
+      { value: '', label: modelCatalog.activeThinking ? `${activeThinkingOptionLabel} (${thinkingLabel(modelCatalog.activeThinking)})` : activeThinkingOptionLabel },
+      ...supported.map((level) => ({ value: level, label: thinkingLabel(level) })),
+    ];
+  }, [modelCatalog.activeThinking, selectedGenerationCatalogModel]);
+  const generationThinkingSupported = Boolean(persistedGenerationThinking && selectedGenerationCatalogModel?.supportedThinkingLevels.includes(persistedGenerationThinking));
+  const selectedGenerationThinking = generationThinkingSupported ? (persistedGenerationThinking ?? '') : '';
+  const staleGenerationThinkingWarning = persistedGenerationThinking && modelCatalogStatus === 'ready' && !generationThinkingSupported
+    ? 'Saved generation thinking is unsupported by the selected generation model; using Active Pi Thinking.'
+    : '';
+  const activeGenerationThinkingDetail = modelCatalog.activeThinking ?? '';
+  const generationPreferenceSaving = generationModelSaving || generationThinkingSaving;
 
   useEffect(() => {
     if (!pendingReloadSelection) return;
@@ -302,17 +340,23 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
 
   async function changeGenerationModel(model: string) {
     const nextModel = model.trim() || null;
-    if (generationModelSaving) return;
+    if (generationPreferenceSaving) return;
+    const nextCatalogModel = nextModel ? modelCatalog.models.find((catalogModel) => catalogModel.value === nextModel) : selectedCatalogModel(modelCatalog, '');
+    const shouldClearThinking = Boolean(persistedGenerationThinking && !nextCatalogModel?.supportedThinkingLevels.includes(persistedGenerationThinking));
     setGenerationModelSaving(true);
     setGenerationModelSaveError('');
+    setGenerationThinkingSaveError('');
     try {
-      const { response, body } = await saveRoleGenerationPreference({ model: nextModel });
+      const { response, body } = await saveRoleGenerationPreference({ model: nextModel, ...(shouldClearThinking ? { thinking: null } : {}) });
       if (!response.ok || body.ok === false) throw new Error(responseError(body, 'Role-generation model preference save failed'));
       const savedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
+      const savedThinking = typeof body.thinking === 'string' && body.thinking.trim() ? body.thinking.trim() : null;
       setPersistedGenerationModel(savedModel);
+      setPersistedGenerationThinking(savedThinking);
       setGenerationPreferenceStatus('ready');
       setGenerationPreferenceError('');
-      setStatus(savedModel ? `Saved prompt-generation model preference: ${savedModel}.` : 'Prompt generation will use the Active Pi Model.');
+      const thinkingSuffix = shouldClearThinking ? ' Reset prompt-generation thinking to Active Pi Thinking because the saved value is unsupported by that model.' : '';
+      setStatus(`${savedModel ? `Saved prompt-generation model preference: ${savedModel}.` : 'Prompt generation will use the Active Pi Model.'}${thinkingSuffix}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setGenerationModelSaveError(message);
@@ -322,20 +366,45 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
     }
   }
 
+  async function changeGenerationThinking(thinking: string) {
+    const nextThinking = thinking.trim() || null;
+    if (generationPreferenceSaving) return;
+    setGenerationThinkingSaving(true);
+    setGenerationThinkingSaveError('');
+    try {
+      const { response, body } = await saveRoleGenerationPreference({ thinking: nextThinking });
+      if (!response.ok || body.ok === false) throw new Error(responseError(body, 'Role-generation thinking preference save failed'));
+      const savedModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
+      const savedThinking = typeof body.thinking === 'string' && body.thinking.trim() ? body.thinking.trim() : null;
+      setPersistedGenerationModel(savedModel);
+      setPersistedGenerationThinking(savedThinking);
+      setGenerationPreferenceStatus('ready');
+      setGenerationPreferenceError('');
+      setStatus(savedThinking ? `Saved prompt-generation thinking preference: ${thinkingLabel(savedThinking)}.` : 'Prompt generation will use Active Pi Thinking.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setGenerationThinkingSaveError(message);
+      setStatus(`Prompt-generation thinking preference save failed: ${message}`);
+    } finally {
+      setGenerationThinkingSaving(false);
+    }
+  }
+
   async function generateRolePrompt() {
     const brief = roleBrief.trim();
     if (!brief) {
       setRoleGenerationError('Describe the desired role before generating a prompt.');
       return;
     }
-    if (generationModelSaving) {
-      setRoleGenerationError('Wait for the prompt-generation model preference to finish saving before generating.');
+    if (generationPreferenceSaving) {
+      setRoleGenerationError('Wait for prompt-generation preferences to finish saving before generating.');
       return;
     }
     setRoleGenerating(true);
     setRoleGenerationError('');
     setRoleGenerationWarnings([]);
     setRoleGenerationModelResolution(null);
+    setRoleGenerationThinkingResolution(null);
     setStatus('Generating Materia role prompt preview…');
     try {
       const generates = materiaForm.generator ? canonicalWorkItemsGeneratorConfig() : null;
@@ -346,6 +415,7 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
       setGeneratedRolePrompt(body.prompt);
       setRoleGenerationWarnings(warnings);
       setRoleGenerationModelResolution(body.modelResolution ?? null);
+      setRoleGenerationThinkingResolution(body.thinkingResolution ?? null);
       setStatus(warnings.length ? `Generated role prompt preview with warning: ${warnings.join(' ')}` : 'Generated role prompt preview. Review it before applying.');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -361,6 +431,7 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
     setRoleGenerationError('');
     setRoleGenerationWarnings([]);
     setRoleGenerationModelResolution(null);
+    setRoleGenerationThinkingResolution(null);
     setStatus('Discarded generated role prompt preview.');
   }
 
@@ -371,6 +442,7 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
     setRoleGenerationError('');
     setRoleGenerationWarnings([]);
     setRoleGenerationModelResolution(null);
+    setRoleGenerationThinkingResolution(null);
     setStatus('Applied generated role prompt to the form. Save when ready.');
   }
 
@@ -468,6 +540,7 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
       roleGenerationError,
       roleGenerationWarnings,
       roleGenerationModelResolution,
+      roleGenerationThinkingResolution,
       roleGenerating,
       generationModel: {
         selectedModel: selectedGenerationModel,
@@ -481,6 +554,19 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
         saving: generationModelSaving,
         saveError: generationModelSaveError,
         changeModel: changeGenerationModel,
+      },
+      generationThinking: {
+        selectedThinking: selectedGenerationThinking,
+        persistedThinking: persistedGenerationThinking,
+        stalePreferenceWarning: staleGenerationThinkingWarning,
+        availableOptions: generationThinkingOptions,
+        activeThinkingLabel: activeThinkingOptionLabel,
+        activeThinkingDetail: activeGenerationThinkingDetail,
+        preferenceStatus: generationPreferenceStatus,
+        preferenceError: generationPreferenceError,
+        saving: generationThinkingSaving,
+        saveError: generationThinkingSaveError,
+        changeThinking: changeGenerationThinking,
       },
       generateRolePrompt,
       applyGeneratedRolePrompt,

@@ -36,7 +36,7 @@ function attemptConfig() {
             materia: "Build",
             parse: "json",
             foreach: { items: "state.items", as: "workItem", cursor: "itemCursor", done: "Socket-3" },
-            advance: { cursor: "itemCursor", items: "state.items", when: "$.done == true", done: "Socket-3" },
+            advance: { cursor: "itemCursor", items: "state.items", when: "satisfied", done: "Socket-3" },
             edges: [{ when: 'always', to: 'Socket-2' }],
             limits: { maxVisits: 5 },
           },
@@ -54,13 +54,13 @@ describe("native attempt identity", () => {
 
     await harness.runCommand("materia", "cast attempt semantics");
 
-    harness.appendAssistantMessage('{"done":false}', { usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0.01 } } });
+    harness.appendAssistantMessage('{"satisfied":false}', { usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0.01 } } });
     await harness.emit("agent_end", { messages: [] });
 
-    harness.appendAssistantMessage('{"done":true}', { usage: { input: 2, output: 1, totalTokens: 3, cost: { total: 0.02 } } });
+    harness.appendAssistantMessage('{"satisfied":true}', { usage: { input: 2, output: 1, totalTokens: 3, cost: { total: 0.02 } } });
     await harness.emit("agent_end", { messages: [] });
 
-    harness.appendAssistantMessage('{"done":true}', { usage: { input: 3, output: 1, totalTokens: 4, cost: { total: 0.03 } } });
+    harness.appendAssistantMessage('{"satisfied":true}', { usage: { input: 3, output: 1, totalTokens: 4, cost: { total: 0.03 } } });
     await harness.emit("agent_end", { messages: [] });
 
     harness.appendAssistantMessage("review complete", { usage: { input: 4, output: 1, totalTokens: 5, cost: { total: 0.04 } } });
@@ -68,10 +68,10 @@ describe("native attempt identity", () => {
 
     const usage = await readUsage(harness);
     expect(usage.turns.map((turn: { socket: string; taskId?: string; attempt?: number }) => ({ socket: turn.socket, taskId: turn.taskId, attempt: turn.attempt }))).toEqual([
-      { socket: "Socket-2", taskId: "a", attempt: 1 },
-      { socket: "Socket-2", taskId: "a", attempt: 2 },
-      { socket: "Socket-2", taskId: "b", attempt: 1 },
+      { socket: "Socket-2", taskId: "WI-1", attempt: 1 },
+      { socket: "Socket-2", taskId: "WI-1", attempt: 2 },
+      { socket: "Socket-2", taskId: "WI-2", attempt: 1 },
     ]);
-    expect(Object.keys(usage.byAttempt).sort()).toEqual(["a:1", "a:2", "b:1"]);
+    expect(Object.keys(usage.byAttempt).sort()).toEqual(["WI-1:1", "WI-1:2", "WI-2:1"]);
   });
 });

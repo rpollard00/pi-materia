@@ -31,6 +31,9 @@ function makeState(): MateriaCastState {
   } as MateriaCastState;
 }
 
+const CODEX_SERVER_ERROR_SAMPLE = 'Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID 06c12916-6464-4199-b4b7-53055ee0111a in your message.","param":null},"sequence_number":2}';
+const CODEX_CONTEXT_LENGTH_SAMPLE = 'Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","param":"input"},"sequence_number":2}';
+
 function makeDeps(events: Array<{ type: string; data: Record<string, unknown> }>, calls: string[] = []): SameSocketRecoveryWorkflowDeps {
   return {
     appendEvent: async (_runState, type, data) => { events.push({ type, data }); },
@@ -62,21 +65,81 @@ describe("same-socket recovery workflow", () => {
     expect(calls).toHaveLength(0);
   });
 
-  test("records an attempt, runs compaction action, and resends the same prompt", async () => {
+  test("records a guarded first context-window attempt without compaction and resends the same prompt when usage is missing", async () => {
     const state = makeState();
     const events: Array<{ type: string; data: Record<string, unknown> }> = [];
     const calls: string[] = [];
 
-    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded"), makeDeps(events, calls), { entryId: "entry-1" });
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), makeDeps(events, calls), { entryId: "entry-1" });
 
     expect(recovered).toBe(true);
     expect(state.awaitingResponse).toBe(true);
     expect(state.socketState).toBe("awaiting_agent_response");
     expect(Object.values(state.recoveryAttempts ?? {})).toEqual([1]);
-    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry"]);
-    expect(events[0].data).toMatchObject({ reason: "context_window", attempt: 1, maxAttempts: 1, entryId: "entry-1", socket: "Socket-1", mode: "normal" });
-    expect(calls).toContain("runRecoveryAction");
+    expect(Object.values(state.contextWindowRecoveryGuards ?? {})).toEqual([1]);
+    expect(events.map((event) => event.type)).toEqual(["context_window_recovery_decision", "same_socket_recovery_start", "same_socket_recovery_retry"]);
+    expect(events[0].data).toMatchObject({ action: "retry_without_compaction", reason: "context_window", attempt: 1, maxAttempts: 1, entryId: "entry-1", socket: "Socket-1", mode: "normal", strongContextSignal: true, transientProviderSignal: false, priorGuardedRetries: 0 });
+    expect(events[0].data).not.toHaveProperty("error");
+    expect(events[0].data).not.toHaveProperty("message");
+    expect(events[1].data).toMatchObject({ reason: "context_window", attempt: 1, maxAttempts: 2, entryId: "entry-1", socket: "Socket-1", mode: "normal" });
+    expect(calls).not.toContain("runRecoveryAction");
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
+  });
+
+  test("retries a first context_length_exceeded signal without compaction when context pressure is low", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = { ...makeDeps(events, calls), assessContextPressure: async () => ({ shouldCompact: false, percent: 12, thresholdPercent: 90 }) };
+
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), deps, { entryId: "entry-low" });
+
+    expect(recovered).toBe(true);
+    expect(events[0].data).toMatchObject({ action: "retry_without_compaction", providerCode: "context_length_exceeded", providerParam: "input", contextPercent: 12, thresholdPercent: 90, contextPressureShouldCompact: false, priorGuardedRetries: 0 });
+    expect(calls).not.toContain("runRecoveryAction");
+    expect(calls).toContain("sendMateriaTurn:retry prompt:true");
+  });
+
+  test("Codex server errors are not treated as context-window compaction candidates", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_SERVER_ERROR_SAMPLE), makeDeps(events, calls), { entryId: "entry-server" });
+
+    expect(recovered).toBe(false);
+    expect(events).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("compacts immediately when current context pressure is over threshold", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = { ...makeDeps(events, calls), assessContextPressure: async () => ({ shouldCompact: true, percent: 91, thresholdPercent: 90 }) };
+
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded"), deps, { entryId: "entry-1" });
+
+    expect(recovered).toBe(true);
+    expect(state.contextWindowRecoveryGuards).toBeUndefined();
+    expect(events[0].data).toMatchObject({ action: "compact", reason: "context_window", attempt: 1, maxAttempts: 1, contextPercent: 91, thresholdPercent: 90, contextPressureShouldCompact: true, compactBecausePressure: true });
+    expect(events[1].data).toMatchObject({ reason: "context_window", attempt: 1, maxAttempts: 1 });
+    expect(calls).toContain("runRecoveryAction");
+  });
+
+  test("repeated strong context signal for the same recovery key triggers one compact retry", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), deps);
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), deps, { entryId: "entry-2" });
+
+    expect(recovered).toBe(true);
+    expect(events.filter((event) => event.type === "same_socket_recovery_start").at(-1)?.data).toMatchObject({ reason: "context_window", attempt: 2, maxAttempts: 2, entryId: "entry-2" });
+    expect(calls.filter((call) => call === "runRecoveryAction")).toHaveLength(1);
+    expect(calls.filter((call) => call === "sendMateriaTurn:retry prompt:true")).toHaveLength(2);
   });
 
   test("json output repair recovery records bounded telemetry and user-facing status", async () => {
@@ -124,12 +187,13 @@ describe("same-socket recovery workflow", () => {
     const deps = makeDeps(events, calls);
 
     await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded"), deps);
-    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded again"), deps, { entryId: "entry-2" });
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded again"), deps, { entryId: "entry-2" });
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded third time"), deps, { entryId: "entry-3" });
 
     expect(recovered).toBe(true);
     expect(state.active).toBe(false);
-    expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "context_window", attempts: 1, effectiveMaxAttempts: 1, socket: "Socket-1", mode: "normal" });
-    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "context_window", attempts: 1, entryId: "entry-2" } });
+    expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "context_window", attempts: 2, effectiveMaxAttempts: 2, socket: "Socket-1", mode: "normal" });
+    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "context_window", attempts: 2, entryId: "entry-3" } });
     expect(calls).toContain("failCast:true");
   });
 
@@ -187,8 +251,8 @@ describe("same-socket recovery workflow", () => {
     const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("context window exceeded"), deps);
 
     expect(recovered).toBe(true);
-    expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry_failed"]);
-    expect(events[1].data.error).toBe("retry send failed");
+    expect(events.map((event) => event.type)).toEqual(["context_window_recovery_decision", "same_socket_recovery_start", "same_socket_recovery_retry_failed"]);
+    expect(events[2].data.error).toBe("retry send failed");
     expect(calls).toContain("failCast:false");
   });
 });

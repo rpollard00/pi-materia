@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { getUserProfileConfigPath, getRoleGenerationModelPreference, saveRoleGenerationModelPreference } from "../src/config/config.js";
+import { getUserProfileConfigPath, getRoleGenerationPreference, saveRoleGenerationPreference } from "../src/config/config.js";
 import { createMateriaWebUiServer } from "../src/webui/server/index.js";
 
 type StartedServer = ReturnType<typeof createMateriaWebUiServer>["server"];
@@ -39,8 +39,8 @@ async function startProfileServer(profileDir?: string) {
         uiStartedAt: Date.now(),
         now: Date.now(),
       }),
-      getRoleGenerationPreference: async () => ({ model: await getRoleGenerationModelPreference() }),
-      setRoleGenerationPreference: async (model) => ({ model: await saveRoleGenerationModelPreference(model) }),
+      getRoleGenerationPreference,
+      setRoleGenerationPreference: saveRoleGenerationPreference,
     },
   });
   await new Promise<void>((resolve, reject) => {
@@ -54,8 +54,16 @@ async function startProfileServer(profileDir?: string) {
 }
 
 function patchPreference(baseUrl: string, body: unknown) {
+  return writePreference(baseUrl, "PATCH", body);
+}
+
+function postPreference(baseUrl: string, body: unknown) {
+  return writePreference(baseUrl, "POST", body);
+}
+
+function writePreference(baseUrl: string, method: "PATCH" | "POST", body: unknown) {
   return fetch(`${baseUrl}/api/profile/role-generation`, {
-    method: "PATCH",
+    method,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -68,7 +76,7 @@ describe("/api/profile/role-generation", () => {
     const response = await fetch(`${baseUrl}/api/profile/role-generation`);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, model: null });
+    expect(await response.json()).toEqual({ ok: true, model: null, thinking: null });
   });
 
   test("sets trimmed provider-qualified model without checking availability", async () => {
@@ -77,8 +85,28 @@ describe("/api/profile/role-generation", () => {
     const response = await patchPreference(baseUrl, { model: "  obsolete-provider/missing-model  " });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, model: "obsolete-provider/missing-model" });
+    expect(await response.json()).toEqual({ ok: true, model: "obsolete-provider/missing-model", thinking: null });
     expect(JSON.parse(await readFile(getUserProfileConfigPath(), "utf8")).roleGeneration.model).toBe("obsolete-provider/missing-model");
+  });
+
+  test("accepts partial thinking updates and preserves omitted fields", async () => {
+    const profileDir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-api-"));
+    await mkdir(profileDir, { recursive: true });
+    const profileFile = path.join(profileDir, "config.json");
+    await writeFile(profileFile, JSON.stringify({ roleGeneration: { model: "provider/existing", extraInstructions: "Keep me." } }), "utf8");
+    const { baseUrl } = await startProfileServer(profileDir);
+
+    const response = await postPreference(baseUrl, { thinking: "high" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, model: "provider/existing", thinking: "high" });
+    expect(JSON.parse(await readFile(profileFile, "utf8")).roleGeneration).toEqual({
+      enabled: true,
+      useReadOnlyProjectContext: false,
+      model: "provider/existing",
+      extraInstructions: "Keep me.",
+      thinking: "high",
+    });
   });
 
   test("clears null and blank model values while preserving role-generation siblings", async () => {
@@ -98,11 +126,12 @@ describe("/api/profile/role-generation", () => {
 
     const blankResponse = await patchPreference(baseUrl, { model: "   " });
     expect(blankResponse.status).toBe(200);
-    expect(await blankResponse.json()).toEqual({ ok: true, model: null });
+    expect(await blankResponse.json()).toEqual({ ok: true, model: null, thinking: "medium" });
 
     const savedBlank = JSON.parse(await readFile(profileFile, "utf8"));
     expect(savedBlank.roleGeneration).toEqual({
       enabled: false,
+      model: null,
       thinking: "medium",
       extraInstructions: "Be direct.",
       useReadOnlyProjectContext: true,
@@ -111,7 +140,8 @@ describe("/api/profile/role-generation", () => {
     await patchPreference(baseUrl, { model: "provider/new" });
     const nullResponse = await patchPreference(baseUrl, { model: null });
     expect(nullResponse.status).toBe(200);
-    expect(JSON.parse(await readFile(profileFile, "utf8")).roleGeneration.model).toBeUndefined();
+    expect(await nullResponse.json()).toEqual({ ok: true, model: null, thinking: "medium" });
+    expect(JSON.parse(await readFile(profileFile, "utf8")).roleGeneration.model).toBeNull();
   });
 
   test("returns 400 for invalid payloads without modifying profile", async () => {
@@ -122,7 +152,7 @@ describe("/api/profile/role-generation", () => {
     const { baseUrl } = await startProfileServer(profileDir);
     const before = await readFile(profileFile, "utf8");
 
-    for (const body of [{}, { model: 42 }, { model: "unqualified" }, { model: "bad provider/model" }]) {
+    for (const body of [{ model: 42 }, { model: "unqualified" }, { model: "bad provider/model" }, { thinking: 42 }, { thinking: "turbo" }, { thinking: "   " }]) {
       const response = await patchPreference(baseUrl, body);
       expect(response.status).toBe(400);
       expect((await response.json()).ok).toBe(false);

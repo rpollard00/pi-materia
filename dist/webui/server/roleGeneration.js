@@ -101,8 +101,9 @@ export async function handleRoleGenerationRoute(req, res, deps) {
             api: result.api,
             thinking: result.thinking,
             isolated: result.isolated,
-            warnings: result.warnings ?? result.modelResolution?.warnings ?? [],
+            warnings: result.warnings ?? [...(result.modelResolution?.warnings ?? []), ...(result.thinkingResolution?.warnings ?? [])],
             modelResolution: result.modelResolution,
+            thinkingResolution: result.thinkingResolution,
         });
     }
     catch (error) {

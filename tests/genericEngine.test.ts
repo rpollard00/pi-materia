@@ -188,10 +188,43 @@ describe("generic engine helper mechanics", () => {
     expect(state.data).not.toHaveProperty("tasks");
   });
 
+  test("shallow-merges utility state patches without adopting utility control fields", () => {
+    const state = makeState({
+      data: {
+        existing: true,
+        nested: { preserved: true },
+        workItems: [{ title: "Keep", context: "Original generated list." }],
+      },
+    });
+    const utility = {
+      id: "Socket-Util",
+      socket: { materia: "Detect-VCS", parse: "json" },
+      materiaId: "Detect-VCS",
+      materia: { type: "utility", utility: "detect-vcs" },
+    } satisfies ResolvedMateriaSocket;
+
+    applyGenericHandoffEnvelope(state, {
+      state: {
+        vcs: { kind: "jj", root: "/repo" },
+        nested: { replacement: true },
+        workItems: [{ title: "Do not adopt", context: "Utility state cannot replace workItems." }],
+        satisfied: false,
+      },
+      satisfied: true,
+    }, utility);
+
+    expect(state.data.existing).toBe(true);
+    expect(state.data.vcs).toEqual({ kind: "jj", root: "/repo" });
+    expect(state.data.nested).toEqual({ replacement: true });
+    expect(state.data.workItems).toEqual([{ title: "Keep", context: "Original generated list." }]);
+    expect(state.data).not.toHaveProperty("satisfied");
+    expect(state.data.envelope).toEqual({ satisfied: true });
+  });
+
   test("does not let evaluator context workItems replace the generated iterator list", () => {
     const generatedWorkItems = [
-      { id: "one", title: "First", description: "Do first", acceptance: ["first done"], context: { constraints: [], dependencies: [], risks: [] } },
-      { id: "two", title: "Second", description: "Do second", acceptance: ["second done"], context: { constraints: [], dependencies: [], risks: [] } },
+      { title: "First", context: "Do first until first done." },
+      { title: "Second", context: "Do second until second done." },
     ];
     const echoedCurrentWorkItem = [generatedWorkItems[0]];
     const state = makeState({ data: { workItems: generatedWorkItems } });

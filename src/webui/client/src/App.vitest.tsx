@@ -168,12 +168,12 @@ function questSummary(overrides: Partial<QuestSummary> & Pick<QuestSummary, 'id'
   };
 }
 
-function questBoardResponse(quests: QuestSummary[], runnerEnabled = true): QuestBoardResponse {
+function questBoardResponse(quests: QuestSummary[]): QuestBoardResponse {
   const runningQuest = quests.find((quest) => quest.status === 'running');
   return {
     ok: true,
     boardPath: '/tmp/project/.pi/pi-materia/quest-board.json',
-    runner: { enabled: runnerEnabled, ...(runningQuest ? { activeQuestId: runningQuest.id } : {}) },
+    runner: { enabled: true, ...(runningQuest ? { activeQuestId: runningQuest.id } : {}) },
     activeQuest: runningQuest,
     runningQuest,
     pendingQuests: quests.filter((quest) => quest.status === 'pending'),
@@ -196,7 +196,6 @@ function questBoardResponse(quests: QuestSummary[], runnerEnabled = true): Quest
 
 function createQuestFetchMock(initialQuests: QuestSummary[], config: typeof testConfig = testConfig, initialQuestDefaultLoadoutId: string | null = null) {
   let quests = [...initialQuests];
-  let runnerEnabled = !quests.some((quest) => quest.status === 'running');
   let questDefaultLoadoutId = initialQuestDefaultLoadoutId;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (input === '/api/config') return new Response(JSON.stringify({ ok: true, source: 'test', config, questDefaultLoadoutId }));
@@ -207,35 +206,32 @@ function createQuestFetchMock(initialQuests: QuestSummary[], config: typeof test
     }
     if (input === '/api/quests/run' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body || '{}')) as { questId?: string };
-      runnerEnabled = true;
       const activeQuest = quests.find((quest) => quest.status === 'running');
       const selected = body.questId ? quests.find((quest) => quest.id === body.questId) : quests.find((quest) => quest.status === 'pending');
-      if (activeQuest || !selected || selected.status !== 'pending') return new Response(JSON.stringify({ ok: true, action: 'run', message: activeQuest ? 'A quest is already running.' : 'No pending quest is available to start.', reason: activeQuest ? 'running_quest' : 'not_found', board: questBoardResponse(quests, runnerEnabled) }));
+      if (activeQuest || !selected || selected.status !== 'pending') return new Response(JSON.stringify({ ok: true, action: 'run', message: activeQuest ? 'A quest is already running.' : 'No pending quest is available to start.', reason: activeQuest ? 'running_quest' : 'not_found', board: questBoardResponse(quests) }));
       const started = { ...selected, status: 'running' as const, currentCastId: 'cast-started' };
       quests = quests.map((quest) => quest.id === started.id ? started : quest);
-      return new Response(JSON.stringify({ ok: true, action: 'run', message: `Started quest: ${started.title}`, started: { quest: started, castId: 'cast-started' }, board: questBoardResponse(quests, runnerEnabled) }));
+      return new Response(JSON.stringify({ ok: true, action: 'run', message: `Started quest: ${started.title}`, started: { quest: started, castId: 'cast-started' }, board: questBoardResponse(quests) }));
     }
     if (input === '/api/quests/runonce' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body || '{}')) as { questId?: string };
-      runnerEnabled = false;
       const activeQuest = quests.find((quest) => quest.status === 'running');
       const selected = body.questId ? quests.find((quest) => quest.id === body.questId) : quests.find((quest) => quest.status === 'pending');
-      if (activeQuest || !selected || selected.status !== 'pending') return new Response(JSON.stringify({ ok: true, action: 'runonce', message: activeQuest ? 'A quest is already running.' : 'No pending quest is available to start.', reason: activeQuest ? 'running_quest' : 'not_found', board: questBoardResponse(quests, runnerEnabled) }));
+      if (activeQuest || !selected || selected.status !== 'pending') return new Response(JSON.stringify({ ok: true, action: 'runonce', message: activeQuest ? 'A quest is already running.' : 'No pending quest is available to start.', reason: activeQuest ? 'running_quest' : 'not_found', board: questBoardResponse(quests) }));
       const started = { ...selected, status: 'running' as const, currentCastId: 'cast-once' };
       quests = quests.map((quest) => quest.id === started.id ? started : quest);
-      return new Response(JSON.stringify({ ok: true, action: 'runonce', message: `Started quest: ${started.title}`, started: { quest: started, castId: 'cast-once' }, board: questBoardResponse(quests, runnerEnabled) }));
+      return new Response(JSON.stringify({ ok: true, action: 'runonce', message: `Started quest: ${started.title}`, started: { quest: started, castId: 'cast-once' }, board: questBoardResponse(quests) }));
     }
     if (input === '/api/quests/stop' && init?.method === 'POST') {
-      runnerEnabled = false;
-      return new Response(JSON.stringify({ ok: true, action: 'stop', message: 'Quest runner stopped.', reason: 'runner_stopped', board: questBoardResponse(quests, runnerEnabled) }));
+      return new Response(JSON.stringify({ ok: true, action: 'stop', message: 'Quest runner stopped.', reason: 'runner_stopped', board: questBoardResponse(quests) }));
     }
     if (input === '/api/quests' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body));
       const created = questSummary({ id: 'quest-added', title: body.prompt, prompt: body.prompt, promptPreview: body.prompt, status: 'pending', loadoutOverride: body.loadoutOverride });
       quests = [...quests, created];
-      return new Response(JSON.stringify({ ok: true, quest: created, board: questBoardResponse(quests, runnerEnabled) }));
+      return new Response(JSON.stringify({ ok: true, quest: created, board: questBoardResponse(quests) }));
     }
-    if (input === '/api/quests') return new Response(JSON.stringify(questBoardResponse(quests, runnerEnabled)));
+    if (input === '/api/quests') return new Response(JSON.stringify(questBoardResponse(quests)));
     return new Response(JSON.stringify({ ok: true }));
   });
 }
@@ -398,7 +394,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Materia' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Materia WebUI' })).toBeTruthy();
     expect(await screen.findByRole('button', { name: /Full-Auto/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Planning-Consult/ })).toBeTruthy();
     expect(screen.getByTestId('socket-Socket-1')).toBeTruthy();

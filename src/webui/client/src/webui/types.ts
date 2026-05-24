@@ -100,22 +100,32 @@ export interface RoleGenerationModelResolution {
   warnings: string[];
 }
 
+export interface RoleGenerationThinkingResolution {
+  requestedThinking: string | null;
+  effectiveThinking: string | null;
+  fallback: boolean;
+  warnings: string[];
+}
+
 export interface RoleGenerationResponse {
   ok?: boolean;
   prompt?: string;
   error?: string | { message?: string };
   warnings?: string[];
   modelResolution?: RoleGenerationModelResolution;
+  thinkingResolution?: RoleGenerationThinkingResolution;
 }
 
 export interface RoleGenerationPreferenceResponse {
   ok?: boolean;
   model?: string | null;
+  thinking?: string | null;
   error?: string | { code?: string; message?: string };
 }
 
 export interface RoleGenerationPreferenceSavePayload {
-  model: string | null;
+  model?: string | null;
+  thinking?: string | null;
 }
 
 export interface ModelCatalogModel {
@@ -248,19 +258,6 @@ export interface AddQuestRequest {
 }
 
 export interface AddQuestResponse {
-  ok?: boolean;
-  quest?: QuestSummary;
-  board?: QuestBoardResponse;
-  error?: string | { code?: string; message?: string };
-  code?: string;
-}
-
-export interface UpdateQuestRequest {
-  prompt: string;
-  loadoutOverride?: string;
-}
-
-export interface UpdateQuestResponse {
   ok?: boolean;
   quest?: QuestSummary;
   board?: QuestBoardResponse;
