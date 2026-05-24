@@ -5,7 +5,7 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { clearStaleDefaultLoadoutPreference, getRoleGenerationModelPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
@@ -39,8 +39,15 @@ interface MateriaWebUiArtifactOptions {
   projectRoot?: string;
 }
 
+export interface MateriaWebUiQuestControlCallbacks {
+  runQuest?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+  runQuestOnce?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+  stopQuestRunner?: () => Promise<MateriaQuestControlResult>;
+}
+
 export interface MateriaWebUiLaunchOptions {
   initializeDefaultLoadout?: boolean;
+  questControls?: MateriaWebUiQuestControlCallbacks;
 }
 
 interface MateriaWebUiBuildOptions extends MateriaWebUiArtifactOptions {
@@ -146,6 +153,9 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       getRoleGenerationPreference: async () => ({ model: await getRoleGenerationModelPreference() }),
       setRoleGenerationPreference: async (model) => ({ model: await saveRoleGenerationModelPreference(model) }),
       getQuestBoard: () => readQuestBoardSnapshot(cwd),
+      runQuest: options.questControls?.runQuest,
+      runQuestOnce: options.questControls?.runQuestOnce,
+      stopQuestRunner: options.questControls?.stopQuestRunner,
       addQuest: (input) => addWebUiQuest(cwd, configuredPath, input),
       updateQuest: (input) => updateWebUiQuest(cwd, configuredPath, input),
       reorderQuest: (input) => reorderWebUiQuest(cwd, input),

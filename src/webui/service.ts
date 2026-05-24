@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { launchMateriaWebUi } from "./launcher.js";
+import { launchMateriaWebUi, type MateriaWebUiQuestControlCallbacks } from "./launcher.js";
 
 export type MateriaWebUiEnsureMode = "explicit" | "automatic";
 export type MateriaWebUiEnsureStatus = "started" | "reused";
@@ -26,6 +26,7 @@ export interface MateriaWebUiEnsureOptions {
   configuredPath?: string;
   pi?: ExtensionAPI;
   notify?: (message: string, type?: "info" | "warning" | "error") => void;
+  questControls?: MateriaWebUiQuestControlCallbacks;
 }
 
 /**
@@ -38,6 +39,7 @@ export async function ensureMateriaWebUi(options: MateriaWebUiEnsureOptions): Pr
   try {
     const launched = await launchMateriaWebUi(options.ctx, options.configuredPath, options.pi, {
       initializeDefaultLoadout: options.mode === "explicit",
+      questControls: options.questControls,
     });
     return {
       ok: true,

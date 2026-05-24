@@ -80,7 +80,15 @@ export interface MateriaUpdateQuestInput {
   loadoutOverride?: string;
 }
 
-export type MateriaQuestMutationFailureCode = 'invalid_loadout' | 'unavailable' | 'validation_failed';
+export type MateriaQuestMutationFailureCode = 'invalid_loadout' | 'unavailable' | 'validation_failed' | 'active_cast_conflict' | 'active_quest_conflict';
+
+export type MateriaQuestControlAction = 'run' | 'runonce' | 'stop';
+
+export type MateriaQuestNoStartReason = 'runner_stopped' | 'active_cast' | 'running_quest' | 'waiting' | 'not_found' | 'safety_limit' | 'unavailable';
+
+export interface MateriaQuestControlInput {
+  questId?: string;
+}
 
 export type MateriaAddQuestResult =
   | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
@@ -98,7 +106,14 @@ export type MateriaUpdateQuestResult =
   | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
   | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
 
+export type MateriaQuestControlResult =
+  | { ok: true; boardPath: string; board: QuestBoard; action: MateriaQuestControlAction; started?: { quest: Quest; castId: string; currentSocketId?: string; artifactRoot?: string; runDir?: string }; reason?: MateriaQuestNoStartReason; message: string }
+  | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
+
 export interface MateriaQuestRouteDeps {
+  runQuest?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+  runQuestOnce?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+  stopQuestRunner?: () => Promise<MateriaQuestControlResult>;
   getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
   addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
   updateQuest?: (input: MateriaUpdateQuestInput) => Promise<MateriaUpdateQuestResult>;
@@ -185,7 +200,35 @@ export interface MateriaUpdateQuestResponse {
   board: MateriaQuestBoardResponse;
 }
 
+export interface MateriaQuestControlResponse {
+  ok: true;
+  action: MateriaQuestControlAction;
+  board: MateriaQuestBoardResponse;
+  message: string;
+  reason?: MateriaQuestNoStartReason;
+  started?: {
+    quest: MateriaQuestSummary;
+    castId: string;
+    currentSocketId?: string;
+    artifactRoot?: string;
+    runDir?: string;
+  };
+}
+
 export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  const pathname = req.url ? new URL(req.url, 'http://localhost').pathname : '';
+  if (pathname === '/api/quests/runonce') {
+    await handleRunQuestOnceRoute(req, res, deps);
+    return;
+  }
+  if (pathname === '/api/quests/run') {
+    await handleRunQuestRoute(req, res, deps);
+    return;
+  }
+  if (pathname === '/api/quests/stop') {
+    await handleStopQuestRunnerRoute(req, res, deps);
+    return;
+  }
   if (req.url?.startsWith('/api/quests/requeue')) {
     await handleRequeueQuestRoute(req, res, deps);
     return;
@@ -207,6 +250,64 @@ export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse
     return;
   }
   sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, PATCH /api/quests/:questId to edit a pending quest, or POST /api/quests/reorder to reorder quests.' });
+}
+
+export async function handleRunQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  await handleQuestControlRoute(req, res, deps.runQuest, 'run', 'Use POST to run quests.');
+}
+
+export async function handleRunQuestOnceRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  await handleQuestControlRoute(req, res, deps.runQuestOnce, 'runonce', 'Use POST to run one quest.');
+}
+
+export async function handleStopQuestRunnerRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { ok: false, error: 'Use POST to stop the quest runner.' });
+    return;
+  }
+  if (!deps.stopQuestRunner) {
+    sendJson(res, 503, { ok: false, error: 'Quest runner control API is unavailable for this server.' });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    if (!isPlainObject(body)) throw new Error('Expected JSON object body.');
+    if (Object.keys(body).length > 0) throw new Error('Stop does not accept a request body.');
+    await sendQuestControlResult(res, deps.stopQuestRunner());
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: errorMessage(error) });
+  }
+}
+
+async function handleQuestControlRoute(req: IncomingMessage, res: ServerResponse, callback: ((input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>) | undefined, action: 'run' | 'runonce', methodError: string) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { ok: false, error: methodError });
+    return;
+  }
+  if (!callback) {
+    sendJson(res, 503, { ok: false, error: 'Quest runner control API is unavailable for this server.' });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    if (!isPlainObject(body)) throw new Error('Expected JSON object body.');
+    const keys = Object.keys(body);
+    if (keys.some((key) => key !== 'questId')) throw new Error('Only questId is accepted.');
+    const questId = typeof body.questId === 'string' ? body.questId.trim() : undefined;
+    if (body.questId !== undefined && !questId) throw new Error('questId must be a non-empty string.');
+    await sendQuestControlResult(res, callback({ ...(questId ? { questId } : {}) }));
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: errorMessage(error) });
+  }
+}
+
+async function sendQuestControlResult(res: ServerResponse, pendingResult: Promise<MateriaQuestControlResult>) {
+  const result = await pendingResult;
+  if (!result.ok) {
+    sendJson(res, result.code === 'unavailable' ? 503 : 400, { ok: false, code: result.code, error: result.message });
+    return;
+  }
+  sendJson(res, 200, mapQuestControlResponse(result));
 }
 
 export async function handleGetQuestsRoute(res: ServerResponse, deps: MateriaQuestRouteDeps) {
@@ -332,6 +433,25 @@ function questIdFromPatchUrl(url: string | undefined): string {
   const pathname = new URL(url, 'http://localhost').pathname;
   const match = /^\/api\/quests\/([^/]+)$/.exec(pathname);
   return match?.[1] ? decodeURIComponent(match[1]).trim() : '';
+}
+
+export function mapQuestControlResponse(result: Extract<MateriaQuestControlResult, { ok: true }>): MateriaQuestControlResponse {
+  return {
+    ok: true,
+    action: result.action,
+    board: mapQuestBoardResponse(result),
+    message: result.message,
+    ...(result.reason ? { reason: result.reason } : {}),
+    ...(result.started ? {
+      started: {
+        quest: mapQuest(result.started.quest),
+        castId: result.started.castId,
+        ...(result.started.currentSocketId ? { currentSocketId: result.started.currentSocketId } : {}),
+        ...(result.started.artifactRoot ? { artifactRoot: result.started.artifactRoot } : {}),
+        ...(result.started.runDir ? { runDir: result.started.runDir } : {}),
+      },
+    } : {}),
+  };
 }
 
 export function mapQuestBoardResponse(source: MateriaQuestBoardSource): MateriaQuestBoardResponse {

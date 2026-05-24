@@ -17,7 +17,7 @@ import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
 import type { MateriaGetRoleGenerationPreferenceCallback, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
 import type { MateriaSetQuestDefaultLoadoutCallback } from './questDefaultLoadout.js';
-import type { MateriaAddQuestResult, MateriaQuestBoardSource, MateriaAddQuestInput, MateriaReorderQuestInput, MateriaReorderQuestResult, MateriaRequeueQuestInput, MateriaRequeueQuestResult, MateriaUpdateQuestInput, MateriaUpdateQuestResult } from './quests.js';
+import type { MateriaAddQuestResult, MateriaQuestBoardSource, MateriaAddQuestInput, MateriaQuestControlInput, MateriaQuestControlResult, MateriaReorderQuestInput, MateriaReorderQuestResult, MateriaRequeueQuestInput, MateriaRequeueQuestResult, MateriaUpdateQuestInput, MateriaUpdateQuestResult } from './quests.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
 
@@ -34,6 +34,9 @@ export interface MateriaWebUiRouteDeps {
     getRoleGenerationPreference?: MateriaGetRoleGenerationPreferenceCallback;
     setRoleGenerationPreference?: MateriaSetRoleGenerationPreferenceCallback;
     getQuestBoard?: () => Promise<MateriaQuestBoardSource>;
+    runQuest?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+    runQuestOnce?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+    stopQuestRunner?: () => Promise<MateriaQuestControlResult>;
     addQuest?: (input: MateriaAddQuestInput) => Promise<MateriaAddQuestResult>;
     updateQuest?: (input: MateriaUpdateQuestInput) => Promise<MateriaUpdateQuestResult>;
     reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
@@ -97,7 +100,7 @@ export async function handleMateriaWebUiRequest(req: IncomingMessage, res: Serve
   }
 
   if (req.url?.startsWith('/api/quests')) {
-    await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, addQuest: deps.session?.addQuest, updateQuest: deps.session?.updateQuest, reorderQuest: deps.session?.reorderQuest, requeueQuest: deps.session?.requeueQuest });
+    await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, runQuest: deps.session?.runQuest, runQuestOnce: deps.session?.runQuestOnce, stopQuestRunner: deps.session?.stopQuestRunner, addQuest: deps.session?.addQuest, updateQuest: deps.session?.updateQuest, reorderQuest: deps.session?.reorderQuest, requeueQuest: deps.session?.requeueQuest });
     return;
   }
 

@@ -5,9 +5,10 @@ import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
-import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference } from "./webui/launcher.js";
+import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference, type MateriaWebUiQuestControlCallbacks } from "./webui/launcher.js";
 import { loadConfig, saveQuestDefaultLoadoutPreference } from "./config/config.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
+import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError } from "./infrastructure/index.js";
@@ -29,6 +30,69 @@ export default function piMateria(pi: ExtensionAPI) {
   const createQuestBoardRepository = (cwd: string) => new FileQuestBoardRepository(cwd);
   const createQuestRunnerUseCases = (cwd: string, boards = createQuestBoardRepository(cwd)) => new QuestRunnerUseCases({ boards, casts: castExecutionUseCases, loadouts: loadoutUseCases, states: adapters.states, logger: adapters.logger });
   const autoAdvanceCwds = new Set<string>();
+  const createWebUiQuestControls = (ctx: ExtensionContext): MateriaWebUiQuestControlCallbacks => ({
+    runQuest: async (input) => {
+      const boards = createQuestBoardRepository(ctx.cwd);
+      const useCases = createQuestRunnerUseCases(ctx.cwd, boards);
+      try {
+        if (autoAdvanceCwds.has(ctx.cwd)) return { ok: false, code: "active_quest_conflict", message: "Quest runner is already advancing this board." };
+        autoAdvanceCwds.add(ctx.cwd);
+        try {
+          const result = await useCases.runContinuous({ pi, session: ctx, cwd: ctx.cwd, configuredPath: getConfiguredConfigPath(), ...(input.questId ? { questId: input.questId } : {}) });
+          const started = result.started[0];
+          if (started) sendQuestStartedMessages({ pi, ctx, started: result.started, firstMode: "run" });
+          return {
+            ok: true,
+            action: "run",
+            boardPath: boards.boardPath,
+            board: result.board,
+            ...(started ? { started: mapWebUiQuestStart(started) } : {}),
+            ...(result.reason ? { reason: result.reason } : {}),
+            message: started ? `Started quest ${started.quest.id} as cast ${started.state.castId}.` : questControlNoStartMessage(result.reason, input.questId, result.board.quests.length),
+          };
+        } finally {
+          autoAdvanceCwds.delete(ctx.cwd);
+        }
+      } catch (error) {
+        return mapWebUiQuestControlError("Could not run quest", error);
+      }
+    },
+    runQuestOnce: async (input) => {
+      const boards = createQuestBoardRepository(ctx.cwd);
+      const useCases = createQuestRunnerUseCases(ctx.cwd, boards);
+      try {
+        const result = await useCases.runOnce({ pi, session: ctx, cwd: ctx.cwd, configuredPath: getConfiguredConfigPath(), ...(input.questId ? { questId: input.questId } : {}) });
+        const board = result?.board ?? (await boards.loadOrCreate());
+        if (result) {
+          sendQuestMessage(pi, renderQuestStarted(result, "runonce"), "runonce");
+          ctx.ui.notify(`pi-materia quest ${result.quest.id} launched as cast ${result.state.castId}.`, "info");
+        }
+        const reason = input.questId ? "not_found" : "waiting";
+        return {
+          ok: true,
+          action: "runonce",
+          boardPath: boards.boardPath,
+          board,
+          ...(result ? { started: mapWebUiQuestStart(result) } : { reason }),
+          message: result ? `Started quest ${result.quest.id} as cast ${result.state.castId}.` : questControlNoStartMessage(reason, input.questId, board.quests.length),
+        };
+      } catch (error) {
+        return mapWebUiQuestControlError("Could not run quest once", error);
+      }
+    },
+    stopQuestRunner: async () => {
+      const boards = createQuestBoardRepository(ctx.cwd);
+      const useCases = createQuestRunnerUseCases(ctx.cwd, boards);
+      try {
+        const board = await useCases.stopRunner();
+        sendQuestMessage(pi, renderQuestStopped(board), "stop");
+        ctx.ui.notify("pi-materia quest runner stopped. Active casts were not aborted.", "info");
+        return { ok: true, action: "stop", boardPath: boards.boardPath, board, reason: "runner_stopped", message: "Quest runner stopped. Active casts were not aborted." };
+      } catch (error) {
+        return mapWebUiQuestControlError("Could not stop quest runner", error);
+      }
+    },
+  });
 
   pi.registerFlag("materia-config", {
     description: "Path to a pi-materia loadout/config JSON file",
@@ -94,13 +158,13 @@ export default function piMateria(pi: ExtensionAPI) {
       if (subcommand === "quest") {
         const questArgs = trimmedArgs.replace(/^quest(?:\s+|$)/, "");
         if (!isNonBlockingQuestCommand(questArgs)) await ctx.waitForIdle();
-        await handleQuestCommand({ args: questArgs, ctx, pi, useCases: createQuestRunnerUseCases(ctx.cwd), loadouts: loadoutUseCases, configuredPath: getConfiguredConfigPath(), autoAdvanceGuard: autoAdvanceCwds });
+        await handleQuestCommand({ args: questArgs, ctx, pi, useCases: createQuestRunnerUseCases(ctx.cwd), loadouts: loadoutUseCases, configuredPath: getConfiguredConfigPath(), autoAdvanceGuard: autoAdvanceCwds, questControls: createWebUiQuestControls(ctx) });
         return;
       }
 
       if (subcommand === "ui") {
         try {
-          const result = await ensureMateriaWebUi({ ctx, mode: "explicit", configuredPath: getConfiguredConfigPath(), pi });
+          const result = await ensureMateriaWebUi({ ctx, mode: "explicit", configuredPath: getConfiguredConfigPath(), pi, questControls: createWebUiQuestControls(ctx) });
           if (!result.ok) return;
           const reused = result.status === "reused";
           const lines = [`WebUI ${reused ? "ready" : "started"}: ${truncateLine(result.url, 110)}`];
@@ -119,7 +183,7 @@ export default function piMateria(pi: ExtensionAPI) {
         const argumentsText = trimmedArgs.replace(/^autocast(?:\s+|$)/, "");
         try {
           const { loaded, pipeline, autocast, effectiveLoadout } = await castExecutionUseCases.startAutoCast({ pi, session: ctx, cwd: ctx.cwd, argumentsText, rawCommand: `/materia ${trimmedArgs.trim()}`, configuredPath: getConfiguredConfigPath() });
-          autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath() });
+          autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath(), questControls: createWebUiQuestControls(ctx) });
           ctx.ui.notify(`pi-materia autocast config: ${loaded.source}`, "info");
           if (autocast.mode === "loadout") {
             ctx.ui.notify(`pi-materia autocast temporary loadout: ${effectiveLoadout?.effectiveLoadoutName ?? autocast.requestedTarget} (active loadout unchanged)`, "info");
@@ -145,7 +209,7 @@ export default function piMateria(pi: ExtensionAPI) {
 
       const autoStartsWebUi = shouldAutoStartWebUi(subcommand);
       if (autoStartsWebUi) {
-        autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath() });
+        autoStartMateriaWebUi({ ctx, pi, configuredPath: getConfiguredConfigPath(), questControls: createWebUiQuestControls(ctx) });
       }
 
       if (!autoStartsWebUi && !isNonBlockingMateriaCommand(subcommand)) await ctx.waitForIdle();
@@ -323,6 +387,7 @@ interface QuestCommandInput {
   loadouts: LoadoutUseCases;
   configuredPath?: string;
   autoAdvanceGuard: Set<string>;
+  questControls?: MateriaWebUiQuestControlCallbacks;
 }
 
 async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
@@ -425,7 +490,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
       return;
     }
     const questId = rest[0];
-    autoStartMateriaWebUi({ ctx: input.ctx, pi: input.pi, configuredPath: input.configuredPath });
+    autoStartMateriaWebUi({ ctx: input.ctx, pi: input.pi, configuredPath: input.configuredPath, questControls: input.questControls });
     try {
       if (input.autoAdvanceGuard.has(input.ctx.cwd)) return;
       input.autoAdvanceGuard.add(input.ctx.cwd);
@@ -452,7 +517,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
       return;
     }
     const questId = rest[0];
-    autoStartMateriaWebUi({ ctx: input.ctx, pi: input.pi, configuredPath: input.configuredPath });
+    autoStartMateriaWebUi({ ctx: input.ctx, pi: input.pi, configuredPath: input.configuredPath, questControls: input.questControls });
     try {
       const result = await input.useCases.runOnce({ pi: input.pi, session: input.ctx, cwd: input.ctx.cwd, configuredPath: input.configuredPath, ...(questId ? { questId } : {}) });
       if (!result) {
@@ -540,6 +605,31 @@ async function showQuestList(input: QuestCommandInput, args: QuestListArgs): Pro
   } catch (error) {
     notifyQuestError(input.ctx, "list", error);
   }
+}
+
+function mapWebUiQuestStart(started: QuestStartResult): Extract<MateriaQuestControlResult, { ok: true }>["started"] {
+  return {
+    quest: started.quest,
+    castId: started.state.castId,
+    ...(started.state.currentSocketId ? { currentSocketId: started.state.currentSocketId } : {}),
+    ...(started.state.artifactRoot ? { artifactRoot: started.state.artifactRoot } : {}),
+    ...(started.state.runDir ? { runDir: started.state.runDir } : {}),
+  };
+}
+
+function questControlNoStartMessage(reason: MateriaQuestNoStartReason | undefined, questId: string | undefined, totalQuests: number): string {
+  if (reason === "active_cast") return "A cast is already active; no quest was started.";
+  if (reason === "running_quest") return "A quest is already running; no quest was started.";
+  if (reason === "runner_stopped") return "Quest runner is stopped; no quest was started.";
+  if (reason === "safety_limit") return "Quest runner hit its safety limit before starting another quest.";
+  return questStartNotFoundMessage(totalQuests, questId);
+}
+
+function mapWebUiQuestControlError(prefix: string, error: unknown): MateriaQuestControlResult {
+  if (error instanceof ActiveCastConflictError) return { ok: false, code: "active_cast_conflict", message: `${prefix}: a cast is already active (${error.castId}).` };
+  if (error instanceof ActiveQuestConflictError) return { ok: false, code: "active_quest_conflict", message: `${prefix}: a quest is already running (${error.questId}).` };
+  const message = error instanceof Error ? error.message : String(error);
+  return { ok: false, code: "unavailable", message: `${prefix}: ${message}` };
 }
 
 async function settleQuestCastAndMaybeAutoAdvance(input: { pi: ExtensionAPI; ctx: ExtensionContext; state: MateriaCastState; useCases: QuestRunnerUseCases<ExtensionContext, ExtensionAPI>; configuredPath?: string; guard: Set<string>; settlementSource: "agent_end" | "command" }): Promise<void> {
@@ -821,13 +911,14 @@ function shouldAutoStartWebUi(subcommand: string | undefined): boolean {
   return subcommand === "cast" || subcommand === "link" || subcommand === "recast" || subcommand === "revive";
 }
 
-function autoStartMateriaWebUi(input: { ctx: ExtensionContext; pi: ExtensionAPI; configuredPath?: string }): void {
+function autoStartMateriaWebUi(input: { ctx: ExtensionContext; pi: ExtensionAPI; configuredPath?: string; questControls?: MateriaWebUiQuestControlCallbacks }): void {
   void ensureMateriaWebUi({
     ctx: input.ctx,
     mode: "automatic",
     configuredPath: input.configuredPath,
     pi: input.pi,
     notify: (message, type) => input.ctx.ui.notify(message, type),
+    questControls: input.questControls,
   }).then((result) => {
     if (!result.ok) return;
     updateMateriaWebUiStatusWidget(input.ctx, { url: result.url, status: result.status });
