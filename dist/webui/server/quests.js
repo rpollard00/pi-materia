@@ -33,7 +33,11 @@ export async function handleQuestRoute(req, res, deps) {
         await handlePatchQuestRoute(req, res, deps);
         return;
     }
-    sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, PATCH /api/quests/:questId to edit a pending quest, or POST /api/quests/reorder to reorder quests.' });
+    if (req.method === 'DELETE') {
+        await handleDeleteQuestRoute(req, res, deps);
+        return;
+    }
+    sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, PATCH /api/quests/:questId to edit a pending quest, DELETE /api/quests/:questId to remove a quest, or POST /api/quests/reorder to reorder quests.' });
 }
 export async function handleRunQuestRoute(req, res, deps) {
     await handleQuestControlRoute(req, res, deps.runQuest, 'run', 'Use POST to run quests.');
@@ -133,13 +137,34 @@ export async function handlePostQuestRoute(req, res, deps) {
         sendJson(res, 400, { ok: false, error: errorMessage(error) });
     }
 }
+export async function handleDeleteQuestRoute(req, res, deps) {
+    if (!deps.deleteQuest) {
+        sendJson(res, 503, { ok: false, error: 'Quest delete API is unavailable for this server.' });
+        return;
+    }
+    try {
+        const questId = questIdFromQuestUrl(req.url);
+        if (!questId)
+            throw new Error('Quest id is required.');
+        const result = await deps.deleteQuest({ questId });
+        if (!result.ok) {
+            sendJson(res, result.code === 'unavailable' ? 503 : 400, { ok: false, code: result.code, error: result.message });
+            return;
+        }
+        const board = mapQuestBoardResponse(result);
+        sendJson(res, 200, { ok: true, quest: mapQuest(result.quest), board });
+    }
+    catch (error) {
+        sendJson(res, 400, { ok: false, error: errorMessage(error) });
+    }
+}
 export async function handlePatchQuestRoute(req, res, deps) {
     if (!deps.updateQuest) {
         sendJson(res, 503, { ok: false, error: 'Quest update API is unavailable for this server.' });
         return;
     }
     try {
-        const questId = questIdFromPatchUrl(req.url);
+        const questId = questIdFromQuestUrl(req.url);
         if (!questId)
             throw new Error('Quest id is required.');
         const body = await readJsonBody(req);
@@ -222,7 +247,7 @@ export async function handleReorderQuestRoute(req, res, deps) {
 function isQuestReorderPlacement(value) {
     return value === 'first' || value === 'before' || value === 'after';
 }
-function questIdFromPatchUrl(url) {
+function questIdFromQuestUrl(url) {
     if (!url)
         return '';
     const pathname = new URL(url, 'http://localhost').pathname;

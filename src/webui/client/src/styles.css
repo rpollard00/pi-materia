@@ -2635,6 +2635,23 @@
   color: rgb(255 255 255);
 }
 
+.quest-action-delete {
+  color: rgb(252 165 165);
+}
+
+.quest-action-delete:hover,
+.quest-action-delete:focus-visible {
+  background: rgb(127 29 29 / 0.72);
+  color: rgb(254 202 202);
+}
+
+.quest-action-delete:disabled {
+  opacity: 0.42;
+  color: rgb(148 163 184);
+  cursor: not-allowed;
+  background: transparent;
+}
+
 .quest-card-title-row {
   display: flex;
   align-items: center;

@@ -102,6 +102,11 @@ export interface RequeueQuestInput {
   now: string;
 }
 
+export interface DeleteQuestInput {
+  questId: string;
+  now: string;
+}
+
 export interface UpdatePendingQuestInput {
   questId: string;
   title: string;
@@ -407,6 +412,31 @@ export function failRunningQuest(board: QuestBoard, input: FailRunningQuestInput
   const nextQuest: Quest = { ...quest, status, updatedAt: input.now, currentCastId: undefined, ...(castId !== undefined ? { lastCastId: castId } : {}), lastError, ...(lastResult !== undefined ? { lastResult } : {}) };
   const quests = replaceAt(board.quests, questIndex, nextQuest);
   return ok({ ...board, updatedAt: input.now, runner: { ...board.runner, activeQuestId: board.runner.activeQuestId === quest.id ? undefined : board.runner.activeQuestId }, quests });
+}
+
+export function deleteQuest(board: QuestBoard, input: DeleteQuestInput): DomainResult<QuestBoard> {
+  const normalized = normalizeQuestBoard(board);
+  if (!normalized.ok) return normalized;
+
+  const issues: DomainIssue[] = [];
+  if (!isNonEmptyString(input.questId)) issues.push({ path: "questId", message: "quest id is required" });
+  if (!isNonEmptyString(input.now)) issues.push({ path: "quest.now", message: "timestamp is required" });
+
+  const quest = normalized.value.quests.find((candidate) => candidate.id === input.questId);
+  if (quest === undefined) {
+    issues.push({ path: "questId", message: `quest '${input.questId}' does not exist` });
+  } else {
+    if (quest.status === "running") issues.push({ path: "quest.status", message: `quest '${quest.id}' is running and cannot be deleted` });
+    if (normalized.value.runner.activeQuestId === quest.id) issues.push({ path: "runner.activeQuestId", message: `quest '${quest.id}' is the active quest and cannot be deleted` });
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  const quests = normalized.value.quests.filter((candidate) => candidate.id !== input.questId);
+  const nextBoard: QuestBoard = { ...normalized.value, updatedAt: input.now, quests };
+  const validated = validateQuestBoard(nextBoard);
+  if (!validated.ok) return validated;
+  return ok(nextBoard);
 }
 
 export function requeueQuest(board: QuestBoard, input: RequeueQuestInput): DomainResult<QuestBoard> {

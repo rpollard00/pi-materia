@@ -22,7 +22,7 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 
 1. Run `/materia ui`.
 2. Confirm the Pi session remains usable immediately; the command should not wait for idle, start a cast, or hijack input.
-3. Confirm Pi shows a clickable `http://127.0.0.1:<port>/?session=<key>` URL and a `materia-webui` widget.
+3. Confirm Pi shows a clickable `http://127.0.0.1:<port>/` URL and a `materia-webui` widget.
 4. Run `/materia ui` again in the same Pi session and confirm it reports that the existing session-scoped server was reused.
 5. Run `/materia cast ...` or `/materia link ... -- ...` and confirm the WebUI starts or reuses automatically, shows the URL in a normal TUI notification, and leaves the current URL/status in the persistent `materia-webui` widget without adding WebUI startup text to the LLM transcript.
 6. Optional browser-open check: write `{ "webui": { "autoOpenBrowser": true } }` to `$PI_MATERIA_PROFILE_DIR/config.json`, restart Pi, run `/materia ui`, and confirm the browser opens.

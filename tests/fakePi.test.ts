@@ -233,13 +233,15 @@ describe("FakePiHarness", () => {
     const first = harness.sentMessages.at(-1)?.message as { content?: string; details?: { url?: string; sessionKey?: string } };
     const firstUrl = first.details?.url;
     expect(firstUrl).toStartWith("http://127.0.0.1:");
+    // URLs are now clean roots with no ?session query; the per-session port/server provides isolation.
+    expect(new URL(firstUrl!).search).toBe("");
     expect(first.content).toContain("WebUI started: http://127.0.0.1:");
     expect(first.content).not.toContain("scope: this Pi session only");
     expect(harness.operationLog).not.toContain("triggerTurn");
     expect(harness.operationLog).not.toContain("waitForIdle");
     expect(harness.waitForIdleCalls).toBe(0);
 
-    const response = await fetch(`${firstUrl?.replace(/\/$/, "")?.replace(/\?.*$/, "")}/api/session`);
+    const response = await fetch(new URL("/api/session", firstUrl!));
     const session = await response.json() as { scope?: string; sessionKey?: string };
     expect(session.scope).toBe("session");
     expect(session.sessionKey).toBe(first.details?.sessionKey);

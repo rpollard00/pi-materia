@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { addQuest as postQuest, getQuests, reorderQuest as postReorderQuest, requeueQuest as postRequeueQuest, runQuest as postRunQuest, runQuestOnce as postRunQuestOnce, stopQuestRunner as postStopQuestRunner, updateQuest as patchQuest } from '../../api/index.js';
-import type { AddQuestRequest, AddQuestResponse, QuestBoardResponse, QuestControlAction, QuestControlRequest, QuestControlResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest, RequeueQuestRequest, UpdateQuestRequest, UpdateQuestResponse } from '../../types.js';
+import { addQuest as postQuest, deleteQuest as postDeleteQuest, getQuests, reorderQuest as postReorderQuest, requeueQuest as postRequeueQuest, runQuest as postRunQuest, runQuestOnce as postRunQuestOnce, stopQuestRunner as postStopQuestRunner, updateQuest as patchQuest } from '../../api/index.js';
+import type { AddQuestRequest, AddQuestResponse, DeleteQuestResponse, QuestBoardResponse, QuestControlAction, QuestControlRequest, QuestControlResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest, RequeueQuestRequest, UpdateQuestRequest, UpdateQuestResponse } from '../../types.js';
 
 export const QUEST_BOARD_POLL_INTERVAL_MS = 5000;
 
@@ -167,6 +167,8 @@ export function useQuestBoard() {
   const [updateSubmitting, setUpdateSubmitting] = useState(false);
   const [controlSubmitting, setControlSubmitting] = useState(false);
   const [controlAction, setControlAction] = useState<QuestControlAction>();
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deletingQuestId, setDeletingQuestId] = useState<string>();
   const [error, setError] = useState<string>();
   const mountedRef = useRef(false);
   const refreshSeqRef = useRef(0);
@@ -175,6 +177,7 @@ export function useQuestBoard() {
   const requeueSeqRef = useRef(0);
   const updateSeqRef = useRef(0);
   const controlSeqRef = useRef(0);
+  const deleteSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const seq = ++refreshSeqRef.current;
@@ -322,6 +325,33 @@ export function useQuestBoard() {
 
   const stopQuestRunner = useCallback(() => applyControlResult('stop', () => postStopQuestRunner()), [applyControlResult]);
 
+  const deleteQuest = useCallback(async (questId: string): Promise<DeleteQuestResponse | undefined> => {
+    const mutationSeq = ++mutationSeqRef.current;
+    const deleteSeq = ++deleteSeqRef.current;
+    setDeleteSubmitting(true);
+    setDeletingQuestId(questId);
+    try {
+      const result = await postDeleteQuest(questId);
+      if (!mountedRef.current || mutationSeq !== mutationSeqRef.current) return undefined;
+      if (!result.response.ok || result.body.ok !== true) throw new Error(responseError(result.body, `Quest delete failed with HTTP ${result.response.status}`));
+      const normalizedBoard = normalizeQuestBoardResponse(result.body.board);
+      if (!normalizedBoard) throw new Error(responseError(result.body, 'Quest delete response was not usable.'));
+      ++refreshSeqRef.current;
+      setBoard(normalizedBoard);
+      setLoading(false);
+      setError(undefined);
+      return result.body;
+    } catch (caught) {
+      if (mountedRef.current && mutationSeq === mutationSeqRef.current) setError(caught instanceof Error ? caught.message : String(caught));
+      return undefined;
+    } finally {
+      if (mountedRef.current && deleteSeq === deleteSeqRef.current) {
+        setDeleteSubmitting(false);
+        setDeletingQuestId(undefined);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     void refresh();
@@ -334,5 +364,5 @@ export function useQuestBoard() {
     };
   }, [refresh]);
 
-  return { board, loading, error, refresh, add, submitting, update, updateSubmitting, reorder, reorderSubmitting, requeue, requeueSubmitting, runQuest, runQuestOnce, stopQuestRunner, controlSubmitting, controlAction };
+  return { board, loading, error, refresh, add, submitting, update, updateSubmitting, reorder, reorderSubmitting, requeue, requeueSubmitting, deleteQuest, deleteSubmitting, deletingQuestId, runQuest, runQuestOnce, stopQuestRunner, controlSubmitting, controlAction };
 }

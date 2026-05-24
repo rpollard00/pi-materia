@@ -5,6 +5,7 @@ import type {
   AddQuestResponse,
   ConfigResponse,
   DefaultLoadoutResponse,
+  DeleteQuestResponse,
   GeneratedListOutputConfig,
   ModelCatalogResponse,
   MonitorSnapshot,
@@ -118,6 +119,12 @@ export async function requeueQuest(payload: RequeueQuestRequest): Promise<ApiRes
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteQuest(questId: string): Promise<ApiResponse<DeleteQuestResponse>> {
+  return fetchJson<DeleteQuestResponse>(`/api/quests/${encodeURIComponent(questId)}`, {
+    method: 'DELETE',
   });
 }
 

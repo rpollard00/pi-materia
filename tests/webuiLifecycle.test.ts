@@ -444,9 +444,7 @@ describe("/materia ui lifecycle", () => {
 
     expect(result.reused).toBe(false);
     expect(result.autoOpenBrowser).toBe(false);
-    expect(result.url).toContain(
-      `session=${encodeURIComponent(result.sessionKey)}`,
-    );
+    expect(new URL(result.url).search).toBe("");
     expect(await readFile(path.join(profile, "config.json"), "utf8")).toContain(
       "autoOpenBrowser",
     );
@@ -619,6 +617,286 @@ describe("PATCH /api/quests/:questId through launcher path", () => {
       expect(body.quests).toHaveLength(0);
     } finally {
       await secondHarness.emit("session_shutdown");
+    }
+  });
+
+  test("returns validation_failed for missing quests through the launcher path", async () => {
+    const { harness } = await harnessWithProfile(
+      "pi-materia-webui-patch-missing-",
+    );
+
+    try {
+      const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+      const boardPath = path.join(boardDir, "quest-board.json");
+      await mkdir(boardDir, { recursive: true });
+      const now = new Date().toISOString();
+      await writeFile(
+        boardPath,
+        JSON.stringify({
+          version: QUEST_BOARD_SCHEMA_VERSION,
+          createdAt: now,
+          updatedAt: now,
+          runner: { enabled: false },
+          quests: [
+            {
+              id: "quest-pending-1",
+              title: "Pending quest",
+              prompt: "Do something",
+              status: "pending",
+              createdAt: now,
+              updatedAt: now,
+              attempts: 0,
+            },
+          ],
+        }, null, 2) + "\n",
+        "utf8",
+      );
+
+      await harness.runCommand("materia", "ui");
+      const launched = harness.appendedEntries.at(-1)?.data as { url: string };
+
+      const patchUrl = new URL("/api/quests/quest-missing", launched.url);
+      const response = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "Update missing quest" }),
+      });
+      const body = await response.json();
+
+      // Must not return the 503 unavailable envelope.
+      expect(response.status).not.toBe(503);
+      expect(response.status).toBe(400);
+      expect(body).toEqual({
+        ok: false,
+        code: "validation_failed",
+        error: "questId: quest 'quest-missing' does not exist",
+      });
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("returns validation_failed for non-pending quests through the launcher path", async () => {
+    const { harness } = await harnessWithProfile(
+      "pi-materia-webui-patch-nonpending-",
+    );
+
+    try {
+      const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+      const boardPath = path.join(boardDir, "quest-board.json");
+      await mkdir(boardDir, { recursive: true });
+      const now = new Date().toISOString();
+      await writeFile(
+        boardPath,
+        JSON.stringify({
+          version: QUEST_BOARD_SCHEMA_VERSION,
+          createdAt: now,
+          updatedAt: now,
+          runner: { enabled: false },
+          quests: [
+            {
+              id: "quest-running",
+              title: "Running quest",
+              prompt: "Running quest",
+              status: "running",
+              createdAt: now,
+              updatedAt: now,
+              attempts: 1,
+              currentCastId: "cast-active",
+            },
+          ],
+        }, null, 2) + "\n",
+        "utf8",
+      );
+
+      await harness.runCommand("materia", "ui");
+      const launched = harness.appendedEntries.at(-1)?.data as { url: string };
+
+      const patchUrl = new URL("/api/quests/quest-running", launched.url);
+      const response = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "Change running quest" }),
+      });
+      const body = await response.json();
+
+      expect(response.status).not.toBe(503);
+      expect(response.status).toBe(400);
+      expect(body).toEqual({
+        ok: false,
+        code: "validation_failed",
+        error: "quest.status: quest 'quest-running' is running, not pending",
+      });
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("returns invalid_loadout for unknown loadout overrides through the launcher path", async () => {
+    const { harness } = await harnessWithProfile(
+      "pi-materia-webui-patch-loadout-",
+    );
+
+    try {
+      const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+      const boardPath = path.join(boardDir, "quest-board.json");
+      await mkdir(boardDir, { recursive: true });
+      const now = new Date().toISOString();
+      await writeFile(
+        boardPath,
+        JSON.stringify({
+          version: QUEST_BOARD_SCHEMA_VERSION,
+          createdAt: now,
+          updatedAt: now,
+          runner: { enabled: false },
+          quests: [
+            {
+              id: "quest-pending-1",
+              title: "Pending quest",
+              prompt: "Do something",
+              status: "pending",
+              createdAt: now,
+              updatedAt: now,
+              attempts: 0,
+            },
+          ],
+        }, null, 2) + "\n",
+        "utf8",
+      );
+
+      await harness.runCommand("materia", "ui");
+      const launched = harness.appendedEntries.at(-1)?.data as { url: string };
+
+      const patchUrl = new URL("/api/quests/quest-pending-1", launched.url);
+      const response = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "Update pending", loadoutOverride: "NonExistentLoadout" }),
+      });
+      const body = await response.json();
+
+      expect(response.status).not.toBe(503);
+      expect(response.status).toBe(400);
+      expect(body.ok).toBe(false);
+      expect(body.code).toBe("invalid_loadout");
+      expect(body.error).toContain("Unknown Materia loadout");
+      expect(body.error).toContain("NonExistentLoadout");
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("returns route-level error for blank prompts without reaching the domain layer", async () => {
+    const { harness } = await harnessWithProfile(
+      "pi-materia-webui-patch-blank-",
+    );
+
+    try {
+      const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+      const boardPath = path.join(boardDir, "quest-board.json");
+      await mkdir(boardDir, { recursive: true });
+      const now = new Date().toISOString();
+      await writeFile(
+        boardPath,
+        JSON.stringify({
+          version: QUEST_BOARD_SCHEMA_VERSION,
+          createdAt: now,
+          updatedAt: now,
+          runner: { enabled: false },
+          quests: [
+            {
+              id: "quest-pending-1",
+              title: "Pending quest",
+              prompt: "Do something",
+              status: "pending",
+              createdAt: now,
+              updatedAt: now,
+              attempts: 0,
+            },
+          ],
+        }, null, 2) + "\n",
+        "utf8",
+      );
+
+      await harness.runCommand("materia", "ui");
+      const launched = harness.appendedEntries.at(-1)?.data as { url: string };
+
+      const patchUrl = new URL("/api/quests/quest-pending-1", launched.url);
+      const response = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "   " }),
+      });
+      const body = await response.json();
+
+      expect(response.status).not.toBe(503);
+      expect(response.status).toBe(400);
+      // Route-level blank prompt returns error only, no code field.
+      expect(body).toEqual({ ok: false, error: "Quest prompt is required." });
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("clears an existing loadout override when patched with blank loadoutOverride", async () => {
+    const { harness } = await harnessWithProfile(
+      "pi-materia-webui-patch-clear-loadout-",
+    );
+
+    try {
+      const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+      const boardPath = path.join(boardDir, "quest-board.json");
+      await mkdir(boardDir, { recursive: true });
+      const now = new Date().toISOString();
+      await writeFile(
+        boardPath,
+        JSON.stringify({
+          version: QUEST_BOARD_SCHEMA_VERSION,
+          createdAt: now,
+          updatedAt: now,
+          runner: { enabled: false },
+          quests: [
+            {
+              id: "quest-pending-1",
+              title: "Pending quest",
+              prompt: "Do something",
+              status: "pending",
+              createdAt: now,
+              updatedAt: now,
+              attempts: 0,
+              loadoutOverride: "Full-Auto",
+            },
+          ],
+        }, null, 2) + "\n",
+        "utf8",
+      );
+
+      await harness.runCommand("materia", "ui");
+      const launched = harness.appendedEntries.at(-1)?.data as { url: string };
+
+      // PATCH with blank loadoutOverride to clear the existing override.
+      const patchUrl = new URL("/api/quests/quest-pending-1", launched.url);
+      const response = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "Updated prompt", loadoutOverride: "   " }),
+      });
+      const body = await response.json();
+
+      expect(response.status).not.toBe(503);
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.quest.loadoutOverride).toBeUndefined();
+
+      // Verify on-disk persistence cleared the override.
+      const savedRaw = await readFile(boardPath, "utf8");
+      const saved = JSON.parse(savedRaw);
+      const savedQuest = saved.quests.find(
+        (q: { id: string }) => q.id === "quest-pending-1",
+      );
+      expect(savedQuest.loadoutOverride).toBeUndefined();
+    } finally {
+      await harness.emit("session_shutdown");
     }
   });
 });

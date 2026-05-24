@@ -105,16 +105,18 @@ describe('Quest card display coverage', () => {
 });
 
 describe('Quest card actions menu', () => {
-  test('shows Edit only for pending quests and keeps menu interactions from selecting the card', () => {
+  test('shows Edit and Delete for pending quests and keeps menu interactions from selecting the card', () => {
     const select = vi.fn();
     const edit = vi.fn();
+    const deleteQuest = vi.fn();
     render(
       <QuestLogSidebar
         pendingQuests={[quest('quest-pending', 'pending', 'Pending quest')]}
-        completedQuests={[quest('quest-done', 'succeeded', 'Done quest')]}
-        failedQuests={[quest('quest-failed', 'failed', 'Failed quest')]}
+        completedQuests={[]}
+        failedQuests={[]}
         onSelectQuest={select}
         onEditQuest={edit}
+        onDeleteQuest={deleteQuest}
       />,
     );
 
@@ -123,6 +125,7 @@ describe('Quest card actions menu', () => {
     expect(select).not.toHaveBeenCalled();
     const menu = screen.getByRole('menu', { name: 'Actions for quest-pending: Pending quest prompt' });
     expect(within(menu).getByRole('menuitem', { name: 'Edit' })).not.toBeNull();
+    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).not.toBeNull();
     expect(screen.getAllByLabelText('Quest actions')).toHaveLength(1);
 
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
@@ -130,6 +133,71 @@ describe('Quest card actions menu', () => {
     expect(edit).toHaveBeenCalledWith('quest-pending');
     expect(select).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  test('completed, failed, and blocked cards expose a Quest actions menu with Delete', () => {
+    const deleteQuest = vi.fn();
+    render(
+      <QuestLogSidebar
+        pendingQuests={[]}
+        completedQuests={[quest('quest-done', 'succeeded', 'Done quest')]}
+        failedQuests={[quest('quest-failed', 'failed', 'Failed quest'), quest('quest-blocked', 'blocked', 'Blocked quest')]}
+        onSelectQuest={vi.fn()}
+        onDeleteQuest={deleteQuest}
+      />,
+    );
+
+    // Unhide the failed section
+    fireEvent.click(screen.getByRole('button', { name: /Failed.*blocked hidden/ }));
+
+    const triggers = screen.getAllByLabelText('Quest actions');
+    expect(triggers).toHaveLength(3);
+
+    // Completed card
+    fireEvent.click(triggers[0]!);
+    let menu = screen.getByRole('menu', { name: 'Actions for quest-done: Done quest prompt' });
+    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).not.toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Edit' })).toBeNull();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
+    expect(deleteQuest).toHaveBeenCalledWith('quest-done');
+    expect(screen.queryByRole('menu')).toBeNull();
+    deleteQuest.mockClear();
+
+    // Failed card
+    fireEvent.click(triggers[1]!);
+    menu = screen.getByRole('menu', { name: 'Actions for quest-failed: Failed quest prompt' });
+    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).not.toBeNull();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
+    expect(deleteQuest).toHaveBeenCalledWith('quest-failed');
+
+    // Blocked card
+    fireEvent.click(triggers[2]!);
+    menu = screen.getByRole('menu', { name: 'Actions for quest-blocked: Blocked quest prompt' });
+    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).not.toBeNull();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
+    expect(deleteQuest).toHaveBeenCalledWith('quest-blocked');
+  });
+
+  test('running quest renders Delete disabled with explanatory title', () => {
+    render(
+      <QuestLogSidebar
+        activeQuest={quest('quest-running', 'running', 'Running quest')}
+        pendingQuests={[]}
+        completedQuests={[]}
+        failedQuests={[]}
+        onSelectQuest={vi.fn()}
+        onDeleteQuest={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByLabelText('Quest actions');
+    expect(trigger).not.toBeNull();
+    fireEvent.click(trigger);
+
+    const menu = screen.getByRole('menu', { name: 'Actions for quest-running: Running quest prompt' });
+    const deleteItem = within(menu).getByRole('menuitem', { name: 'Delete' });
+    expect(deleteItem).toHaveProperty('disabled', true);
+    expect(deleteItem.getAttribute('title')).toBe('Cannot delete a running quest.');
   });
 
   test('closes the quest actions menu on Escape and outside pointer down', () => {
@@ -140,6 +208,7 @@ describe('Quest card actions menu', () => {
         failedQuests={[]}
         onSelectQuest={vi.fn()}
         onEditQuest={vi.fn()}
+        onDeleteQuest={vi.fn()}
       />,
     );
 

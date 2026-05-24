@@ -55,7 +55,7 @@ export async function handleMateriaWebUiRequest(req, res, deps) {
         return;
     }
     if (req.url?.startsWith('/api/quests')) {
-        await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, runQuest: deps.session?.runQuest, runQuestOnce: deps.session?.runQuestOnce, stopQuestRunner: deps.session?.stopQuestRunner, addQuest: deps.session?.addQuest, updateQuest: deps.session?.updateQuest, reorderQuest: deps.session?.reorderQuest, requeueQuest: deps.session?.requeueQuest });
+        await handleQuestRoute(req, res, { getQuestBoard: deps.session?.getQuestBoard, runQuest: deps.session?.runQuest, runQuestOnce: deps.session?.runQuestOnce, stopQuestRunner: deps.session?.stopQuestRunner, addQuest: deps.session?.addQuest, updateQuest: deps.session?.updateQuest, reorderQuest: deps.session?.reorderQuest, requeueQuest: deps.session?.requeueQuest, deleteQuest: deps.session?.deleteQuest });
         return;
     }
     if (req.url?.startsWith('/api/profile/role-generation')) {

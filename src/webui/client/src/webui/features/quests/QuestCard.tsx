@@ -10,6 +10,9 @@ interface QuestCardProps {
   onSelect: (questId: string) => void;
   canEdit?: boolean;
   onEdit?: (questId: string) => void;
+  onDelete?: (questId: string) => void;
+  deleteSubmitting?: boolean;
+  deletingQuestId?: string;
 }
 
 const statusLabels: Record<QuestSummary['status'], string> = {
@@ -40,10 +43,15 @@ function stopMenuEvent(event: ReactMouseEvent | ReactPointerEvent) {
 interface QuestActionsMenuProps {
   quest: QuestSummary;
   summary: string;
-  onEdit: (questId: string) => void;
+  onEdit?: (questId: string) => void;
+  onDelete?: (questId: string) => void;
+  deleteDisabled?: boolean;
+  deleteDisabledTitle?: string;
+  deleteSubmitting?: boolean;
+  deletingQuestId?: string;
 }
 
-function QuestActionsMenu({ quest, summary, onEdit }: QuestActionsMenuProps) {
+function QuestActionsMenu({ quest, summary, onEdit, onDelete, deleteDisabled = false, deleteDisabledTitle, deleteSubmitting = false, deletingQuestId }: QuestActionsMenuProps) {
   const reactId = useId();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -70,9 +78,9 @@ function QuestActionsMenu({ quest, summary, onEdit }: QuestActionsMenuProps) {
     };
   }, [open]);
 
-  function closeAndEdit() {
+  function closeAnd(action?: (questId: string) => void) {
     setOpen(false);
-    onEdit(quest.id);
+    if (action) action(quest.id);
   }
 
   function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -82,6 +90,8 @@ function QuestActionsMenu({ quest, summary, onEdit }: QuestActionsMenuProps) {
       triggerRef.current?.focus();
     }
   }
+
+  const isDeleting = deleteSubmitting && deletingQuestId === quest.id;
 
   return (
     <div className="quest-actions-menu" ref={menuRef} onClick={stopMenuEvent} onPointerDown={stopMenuEvent} onKeyDown={handleMenuKeyDown}>
@@ -103,22 +113,39 @@ function QuestActionsMenu({ quest, summary, onEdit }: QuestActionsMenuProps) {
       </button>
       {open ? (
         <div id={menuId} className="quest-actions-popover" role="menu" aria-label={`Actions for ${summary}`}>
-          <button type="button" role="menuitem" onClick={closeAndEdit}>
-            Edit
-          </button>
+          {onEdit ? (
+            <button type="button" role="menuitem" onClick={() => closeAnd(onEdit)}>
+              Edit
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="quest-action-delete"
+              disabled={deleteDisabled || deleteSubmitting}
+              title={deleteDisabled ? deleteDisabledTitle ?? 'This quest cannot be deleted.' : undefined}
+              onClick={() => closeAnd(onDelete)}
+            >
+              {isDeleting ? 'Deleting…' : 'Delete'}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-export function QuestCard({ quest, active = false, selected = false, onSelect, canEdit = false, onEdit }: QuestCardProps) {
+export function QuestCard({ quest, active = false, selected = false, onSelect, canEdit = false, onEdit, onDelete, deleteSubmitting = false, deletingQuestId }: QuestCardProps) {
   const summary = questSummary(quest);
   const label = active ? `Active quest: ${summary}` : `${statusLabels[quest.status]} quest: ${summary}`;
   const castLabel = quest.status === 'pending' || quest.status === 'running' ? undefined : resultCastLabel(quest);
-  const editable = canEdit && quest.status === 'pending' && Boolean(onEdit);
+  const showEdit = canEdit && quest.status === 'pending' && Boolean(onEdit);
+  const isRunning = quest.status === 'running' || active;
+  const canDelete = Boolean(onDelete) && !isRunning;
+  const hasAnyAction = showEdit || Boolean(onDelete);
   return (
-    <div className={`quest-card${active ? ' quest-card-active' : ''}${selected ? ' quest-card-selected' : ''}${editable ? ' quest-card-editable' : ''}`}>
+    <div className={`quest-card${active ? ' quest-card-active' : ''}${selected ? ' quest-card-selected' : ''}${showEdit ? ' quest-card-editable' : ''}`}>
       <button
         type="button"
         className="quest-card-select"
@@ -136,7 +163,18 @@ export function QuestCard({ quest, active = false, selected = false, onSelect, c
           <span className={`quest-status-pill quest-status-${quest.status}`}>{statusLabels[quest.status]}</span>
         </span>
       </button>
-      {editable && onEdit ? <QuestActionsMenu quest={quest} summary={summary} onEdit={onEdit} /> : null}
+      {hasAnyAction ? (
+        <QuestActionsMenu
+          quest={quest}
+          summary={summary}
+          onEdit={showEdit ? onEdit : undefined}
+          onDelete={onDelete}
+          deleteDisabled={!canDelete}
+          deleteDisabledTitle={isRunning ? 'Cannot delete a running quest.' : undefined}
+          deleteSubmitting={deleteSubmitting}
+          deletingQuestId={deletingQuestId}
+        />
+      ) : null}
     </div>
   );
 }

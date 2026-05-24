@@ -11,6 +11,7 @@ vi.mock('../../api/index.js', () => ({
   updateQuest: vi.fn(),
   reorderQuest: vi.fn(),
   requeueQuest: vi.fn(),
+  deleteQuest: vi.fn(),
   runQuest: vi.fn(),
   runQuestOnce: vi.fn(),
   stopQuestRunner: vi.fn(),
@@ -59,6 +60,8 @@ function Harness() {
       <span data-testid="controlSubmitting">{String(latest.controlSubmitting)}</span>
       <span data-testid="controlAction">{latest.controlAction ?? ''}</span>
       <span data-testid="error">{latest.error ?? ''}</span>
+      <span data-testid="deleteSubmitting">{String(latest.deleteSubmitting)}</span>
+      <span data-testid="deletingQuestId">{latest.deletingQuestId ?? ''}</span>
       <span data-testid="pending">{latest.board?.pendingQuests?.map((candidate) => candidate.id).join(',') ?? ''}</span>
       <span data-testid="running">{latest.board?.runningQuest?.id ?? ''}</span>
     </div>
@@ -128,5 +131,89 @@ describe('useQuestBoard quest controls', () => {
 
     await act(async () => { await latest!.stopQuestRunner(); });
     expect(screen.getByTestId('error').textContent).toBe('Quest stop response was not usable.');
+  });
+});
+
+describe('useQuestBoard delete mutation', () => {
+  test('deletes a quest, normalizes returned board, toggles state, and updates board from response', async () => {
+    const initial = board([quest('quest-1', 'pending', 'First'), quest('quest-2', 'succeeded', 'Second')]);
+    const afterDelete = board([quest('quest-2', 'succeeded', 'Second')]);
+    mockedApi.getQuests.mockResolvedValue(initial);
+    const pendingDelete = deferred<{ response: Response; body: { ok: boolean; quest: QuestSummary; board: QuestBoardResponse } }>();
+    mockedApi.deleteQuest.mockReturnValue(pendingDelete.promise);
+
+    render(<Harness />);
+    await screen.findByText('quest-1');
+    expect(screen.getByTestId('pending').textContent).toBe('quest-1');
+
+    let deletePromise: Promise<QuestBoardResponse | undefined>;
+    act(() => { deletePromise = latest!.deleteQuest('quest-1'); });
+    await waitFor(() => expect(screen.getByTestId('deleteSubmitting').textContent).toBe('true'));
+    expect(screen.getByTestId('deletingQuestId').textContent).toBe('quest-1');
+    expect(mockedApi.deleteQuest).toHaveBeenCalledWith('quest-1');
+
+    await act(async () => {
+      pendingDelete.resolve({ response: new Response('{}'), body: { ok: true, quest: quest('quest-1', 'pending'), board: afterDelete } });
+      await deletePromise!;
+    });
+
+    await waitFor(() => expect(screen.getByTestId('deleteSubmitting').textContent).toBe('false'));
+    expect(screen.getByTestId('deletingQuestId').textContent).toBe('');
+    expect(screen.getByTestId('pending').textContent).toBe('');
+    expect(screen.getByTestId('error').textContent).toBe('');
+  });
+
+  test('encodes quest ids in the delete request', async () => {
+    mockedApi.getQuests.mockResolvedValue(board([quest('quest%2Fspecial', 'pending', 'Special')]));
+    const pendingDelete = deferred<{ response: Response; body: { ok: boolean; quest: QuestSummary; board: QuestBoardResponse } }>();
+    mockedApi.deleteQuest.mockReturnValue(pendingDelete.promise);
+
+    render(<Harness />);
+    await screen.findByText('quest%2Fspecial');
+
+    act(() => { latest!.deleteQuest('quest%2Fspecial'); });
+    expect(mockedApi.deleteQuest).toHaveBeenCalledWith('quest%2Fspecial');
+  });
+
+  test('sets error on HTTP failure', async () => {
+    mockedApi.getQuests.mockResolvedValue(board([quest('quest-fail', 'pending')]));
+    mockedApi.deleteQuest.mockResolvedValue({ response: new Response('{}', { status: 503 }), body: { ok: false, error: 'Quest runner control API is unavailable for this server.' } as unknown as QuestBoardResponse });
+
+    render(<Harness />);
+    await screen.findByText('quest-fail');
+
+    await act(async () => { await latest!.deleteQuest('quest-fail'); });
+    expect(screen.getByTestId('error').textContent).toBe('Quest runner control API is unavailable for this server.');
+  });
+
+  test('sets error on unusable response board', async () => {
+    mockedApi.getQuests.mockResolvedValue(board([quest('quest-badboard', 'pending')]));
+    mockedApi.deleteQuest.mockResolvedValue({ response: new Response('{}'), body: { ok: true, quest: quest('quest-badboard', 'pending'), board: { ok: false, error: 'bad board' } as unknown as QuestBoardResponse } });
+
+    render(<Harness />);
+    await screen.findByText('quest-badboard');
+
+    await act(async () => { await latest!.deleteQuest('quest-badboard'); });
+    expect(screen.getByTestId('error').textContent).toBe('Quest delete response was not usable.');
+  });
+
+  test('clears state after delete completes', async () => {
+    mockedApi.getQuests.mockResolvedValue(board([quest('quest-clear', 'pending')]));
+    const pendingDelete = deferred<{ response: Response; body: { ok: boolean; quest: QuestSummary; board: QuestBoardResponse } }>();
+    mockedApi.deleteQuest.mockReturnValue(pendingDelete.promise);
+
+    render(<Harness />);
+    await screen.findByText('quest-clear');
+
+    act(() => { latest!.deleteQuest('quest-clear'); });
+    await waitFor(() => expect(screen.getByTestId('deleteSubmitting').textContent).toBe('true'));
+
+    await act(async () => {
+      pendingDelete.resolve({ response: new Response('{}'), body: { ok: true, quest: quest('quest-clear', 'pending'), board: board([]) } });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('deleteSubmitting').textContent).toBe('false'));
+    expect(screen.getByTestId('deletingQuestId').textContent).toBe('');
+    expect(screen.getByTestId('error').textContent).toBe('');
   });
 });

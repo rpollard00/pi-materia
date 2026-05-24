@@ -13,6 +13,9 @@ interface QuestLogSidebarProps {
   onSelectQuest: (questId: string) => void;
   onEditQuest?: (questId: string) => void;
   onReorderQuest?: (input: { questId: string; placement: QuestReorderPlacement; targetId?: string }) => Promise<unknown> | unknown;
+  onDeleteQuest?: (questId: string) => void;
+  deleteSubmitting?: boolean;
+  deletingQuestId?: string;
 }
 
 type DropIndicator = { targetId: string; placement: 'before' | 'after' } | { targetId: 'first'; placement: 'first' };
@@ -32,7 +35,7 @@ function shouldSuppressQuestDrag(event: DragEvent<HTMLElement>): boolean {
   return Boolean(target.closest('.quest-actions-menu, input, textarea, select, a, button:not(.quest-card-select)'));
 }
 
-export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, failedQuests, selectedQuestId, reorderSubmitting = false, onSelectQuest, onEditQuest, onReorderQuest }: QuestLogSidebarProps) {
+export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, failedQuests, selectedQuestId, reorderSubmitting = false, onSelectQuest, onEditQuest, onReorderQuest, onDeleteQuest, deleteSubmitting = false, deletingQuestId }: QuestLogSidebarProps) {
   const [showFailed, setShowFailed] = useState(false);
   const [draggedQuestId, setDraggedQuestId] = useState<string>();
   const [dropIndicator, setDropIndicator] = useState<DropIndicator>();
@@ -90,7 +93,7 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
       <section className="quest-log-section" aria-labelledby="quest-active-pending-title">
         <h4 id="quest-active-pending-title">Active & Pending</h4>
         <div className="quest-card-list">
-          {activeQuest ? <QuestCard quest={activeQuest} active selected={selectedQuestId === activeQuest.id} onSelect={onSelectQuest} /> : null}
+          {activeQuest ? <QuestCard quest={activeQuest} active selected={selectedQuestId === activeQuest.id} onSelect={onSelectQuest} onDelete={onDeleteQuest} deleteSubmitting={deleteSubmitting} deletingQuestId={deletingQuestId} /> : null}
           {pendingQuests.length > 1 ? (
             <div
               className={`quest-drop-zone${dropIndicator?.placement === 'first' ? ' quest-drop-zone-active' : ''}`}
@@ -134,7 +137,7 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
                   void submitDrop(event, placement === 'before' && quest.id === pendingQuests[0]?.id ? 'first' : placement, placement === 'before' && quest.id === pendingQuests[0]?.id ? undefined : quest.id);
                 }}
               >
-                <QuestCard quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} canEdit={Boolean(onEditQuest)} onEdit={onEditQuest} />
+                <QuestCard quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} canEdit={Boolean(onEditQuest)} onEdit={onEditQuest} onDelete={onDeleteQuest} deleteSubmitting={deleteSubmitting} deletingQuestId={deletingQuestId} />
               </div>
             );
           })}
@@ -147,7 +150,7 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
         <h4 id="quest-completed-title">Completed</h4>
         <div className="quest-card-list quest-card-list-completed">
           {completedQuests.map((quest) => (
-            <QuestCard key={quest.id} quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} />
+            <QuestCard key={quest.id} quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} onDelete={onDeleteQuest} deleteSubmitting={deleteSubmitting} deletingQuestId={deletingQuestId} />
           ))}
           {completedQuests.length === 0 ? <p className="quest-empty-state">No completed quests yet.</p> : null}
         </div>
@@ -162,7 +165,7 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
           {showFailed ? (
             <div className="quest-card-list quest-card-list-failed">
               {failedQuests.map((quest) => (
-                <QuestCard key={quest.id} quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} />
+                <QuestCard key={quest.id} quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} onDelete={onDeleteQuest} deleteSubmitting={deleteSubmitting} deletingQuestId={deletingQuestId} />
               ))}
             </div>
           ) : null}

@@ -74,6 +74,10 @@ export interface MateriaRequeueQuestInput {
   questId: string;
 }
 
+export interface MateriaDeleteQuestInput {
+  questId: string;
+}
+
 export interface MateriaUpdateQuestInput {
   questId: string;
   prompt: string;
@@ -102,6 +106,10 @@ export type MateriaRequeueQuestResult =
   | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
   | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
 
+export type MateriaDeleteQuestResult =
+  | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
+  | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
+
 export type MateriaUpdateQuestResult =
   | { ok: true; boardPath: string; board: QuestBoard; quest: Quest }
   | { ok: false; code: MateriaQuestMutationFailureCode; message: string };
@@ -119,6 +127,7 @@ export interface MateriaQuestRouteDeps {
   updateQuest?: (input: MateriaUpdateQuestInput) => Promise<MateriaUpdateQuestResult>;
   reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
   requeueQuest?: (input: MateriaRequeueQuestInput) => Promise<MateriaRequeueQuestResult>;
+  deleteQuest?: (input: MateriaDeleteQuestInput) => Promise<MateriaDeleteQuestResult>;
 }
 
 export interface MateriaQuestSummary {
@@ -200,6 +209,12 @@ export interface MateriaUpdateQuestResponse {
   board: MateriaQuestBoardResponse;
 }
 
+export interface MateriaDeleteQuestResponse {
+  ok: true;
+  quest: MateriaQuestSummary;
+  board: MateriaQuestBoardResponse;
+}
+
 export interface MateriaQuestControlResponse {
   ok: true;
   action: MateriaQuestControlAction;
@@ -249,7 +264,11 @@ export async function handleQuestRoute(req: IncomingMessage, res: ServerResponse
     await handlePatchQuestRoute(req, res, deps);
     return;
   }
-  sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, PATCH /api/quests/:questId to edit a pending quest, or POST /api/quests/reorder to reorder quests.' });
+  if (req.method === 'DELETE') {
+    await handleDeleteQuestRoute(req, res, deps);
+    return;
+  }
+  sendJson(res, 405, { ok: false, error: 'Use GET to read quests, POST to add a quest, PATCH /api/quests/:questId to edit a pending quest, DELETE /api/quests/:questId to remove a quest, or POST /api/quests/reorder to reorder quests.' });
 }
 
 export async function handleRunQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
@@ -346,13 +365,33 @@ export async function handlePostQuestRoute(req: IncomingMessage, res: ServerResp
   }
 }
 
+export async function handleDeleteQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
+  if (!deps.deleteQuest) {
+    sendJson(res, 503, { ok: false, error: 'Quest delete API is unavailable for this server.' });
+    return;
+  }
+  try {
+    const questId = questIdFromQuestUrl(req.url);
+    if (!questId) throw new Error('Quest id is required.');
+    const result = await deps.deleteQuest({ questId });
+    if (!result.ok) {
+      sendJson(res, result.code === 'unavailable' ? 503 : 400, { ok: false, code: result.code, error: result.message });
+      return;
+    }
+    const board = mapQuestBoardResponse(result);
+    sendJson(res, 200, { ok: true, quest: mapQuest(result.quest), board } satisfies MateriaDeleteQuestResponse);
+  } catch (error) {
+    sendJson(res, 400, { ok: false, error: errorMessage(error) });
+  }
+}
+
 export async function handlePatchQuestRoute(req: IncomingMessage, res: ServerResponse, deps: MateriaQuestRouteDeps) {
   if (!deps.updateQuest) {
     sendJson(res, 503, { ok: false, error: 'Quest update API is unavailable for this server.' });
     return;
   }
   try {
-    const questId = questIdFromPatchUrl(req.url);
+    const questId = questIdFromQuestUrl(req.url);
     if (!questId) throw new Error('Quest id is required.');
     const body = await readJsonBody(req);
     if (!isPlainObject(body)) throw new Error('Expected JSON object body.');
@@ -428,7 +467,7 @@ function isQuestReorderPlacement(value: string): value is MateriaQuestReorderPla
   return value === 'first' || value === 'before' || value === 'after';
 }
 
-function questIdFromPatchUrl(url: string | undefined): string {
+function questIdFromQuestUrl(url: string | undefined): string {
   if (!url) return '';
   const pathname = new URL(url, 'http://localhost').pathname;
   const match = /^\/api\/quests\/([^/]+)$/.exec(pathname);

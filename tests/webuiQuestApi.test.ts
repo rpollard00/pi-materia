@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, movePendingQuest, requeueQuest, updatePendingQuest, type QuestBoard, type QuestRunResult } from "../src/domain/questBoard.js";
 import { issuesToMessage } from "../src/domain/result.js";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult } from "../src/webui/server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaDeleteQuestInput, type MateriaDeleteQuestResult, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult } from "../src/webui/server/index.js";
 
 type StartedServer = ReturnType<typeof createMateriaWebUiServer>["server"];
 
@@ -44,6 +44,7 @@ async function startTestServer(options: {
   includeRequeueQuest?: boolean;
   includeQuestControls?: boolean;
   getQuestBoardThrows?: boolean;
+  deleteQuest?: (input: MateriaDeleteQuestInput) => Promise<MateriaDeleteQuestResult>;
 } = {}) {
   const projectDir = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-quests-"));
   let board = options.board ?? questBoardFixture();
@@ -111,6 +112,7 @@ async function startTestServer(options: {
         const target = input.targetId ? board.quests.find((candidate) => candidate.id === input.targetId) : undefined;
         return { ok: true, boardPath, board, quest, ...(target ? { target } : {}) };
       }),
+      deleteQuest: options.deleteQuest,
       ...(options.includeRequeueQuest === false ? {} : {
         requeueQuest: options.requeueQuest ?? (async (input) => {
           const result = requeueQuest(board, { ...input, now: "2026-05-19T20:02:00.000Z" });
@@ -558,4 +560,168 @@ describe("POST /api/quests/requeue", () => {
     expect(await getNotAllowed.json()).toEqual({ ok: false, error: "Use POST to requeue quests." });
     expect(called).toBe(false);
   });
+});
+
+describe("DELETE /api/quests/:questId", () => {
+  test("deletes a pending quest and returns the deleted quest plus updated canonical board", async () => {
+    const board = questBoardFixture();
+    const baseUrl = await startTestServer({
+      board,
+      deleteQuest: async (input) => {
+        const candidate = board.quests.find((quest) => quest.id === input.questId);
+        if (!candidate) return { ok: false, code: "validation_failed", message: `questId: quest '${input.questId}' does not exist` };
+        if (candidate.status === "running") return { ok: false, code: "validation_failed", message: `quest.status: quest '${candidate.id}' is running, cannot delete` };
+        board.quests = board.quests.filter((quest) => quest.id !== input.questId);
+        board.updatedAt = "2026-05-19T20:06:00.000Z";
+        return { ok: true, boardPath: "quest-board.json", board, quest: candidate };
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/api/quests/quest-pending-1`, { method: "DELETE" });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.quest).toMatchObject({ id: "quest-pending-1", title: "Gather moon herbs", status: "pending" });
+    expect(body.board.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-2"]);
+    expect(body.board.quests.map((quest: { id: string }) => quest.id)).toEqual(["quest-active", "quest-pending-2", "quest-complete", "quest-failed", "quest-blocked"]);
+    expect(body.board.counts.total).toBe(5);
+  });
+
+  test("deletes blocked, failed, and succeeded quests with correct group updates", async () => {
+    let board = questBoardFixture();
+    const baseUrl = await startTestServer({
+      board,
+      deleteQuest: async (input) => {
+        const candidate = board.quests.find((quest) => quest.id === input.questId);
+        if (!candidate) return { ok: false, code: "validation_failed", message: `questId: quest '${input.questId}' does not exist` };
+        if (candidate.status === "running") return { ok: false, code: "validation_failed", message: `quest.status: quest '${candidate.id}' is running, cannot delete` };
+        board.quests = board.quests.filter((quest) => quest.id !== input.questId);
+        board.updatedAt = new Date().toISOString();
+        return { ok: true, boardPath: "quest-board.json", board, quest: candidate };
+      },
+    });
+
+    // Delete a blocked quest
+    const blocked = await fetch(`${baseUrl}/api/quests/quest-blocked`, { method: "DELETE" });
+    const blockedBody = await blocked.json();
+    expect(blocked.status).toBe(200);
+    expect(blockedBody.quest.id).toBe("quest-blocked");
+    expect(blockedBody.board.failedQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-failed"]);
+
+    // Delete a succeeded quest
+    const succeeded = await fetch(`${baseUrl}/api/quests/quest-complete`, { method: "DELETE" });
+    const succeededBody = await succeeded.json();
+    expect(succeeded.status).toBe(200);
+    expect(succeededBody.quest.id).toBe("quest-complete");
+    expect(succeededBody.board.completedQuests.map((quest: { id: string }) => quest.id)).toEqual([]);
+
+    // Delete a failed quest
+    const failed = await fetch(`${baseUrl}/api/quests/quest-failed`, { method: "DELETE" });
+    const failedBody = await failed.json();
+    expect(failed.status).toBe(200);
+    expect(failedBody.quest.id).toBe("quest-failed");
+    expect(failedBody.board.failedQuests.map((quest: { id: string }) => quest.id)).toEqual([]);
+  });
+
+  test("decodes URL-encoded quest ids", async () => {
+    const board = questBoardFixture();
+    board.quests[0].id = "quest%2Fslash";
+    board.runner.activeQuestId = "quest-different";
+    const specialQuest = {
+      id: "quest%2Fslash",
+      title: "Slash quest",
+      prompt: "Slash quest",
+      status: "blocked" as const,
+      createdAt: "2026-05-19T19:08:00.000Z",
+      updatedAt: "2026-05-19T19:09:00.000Z",
+      attempts: 1,
+    };
+    board.quests = board.quests.filter((quest) => quest.id !== "quest-active");
+    board.quests.unshift(specialQuest);
+    const baseUrl = await startTestServer({
+      board,
+      deleteQuest: async (input) => {
+        const candidate = board.quests.find((quest) => quest.id === input.questId);
+        if (!candidate) return { ok: false, code: "validation_failed", message: `questId: quest '${input.questId}' does not exist` };
+        board.quests = board.quests.filter((quest) => quest.id !== input.questId);
+        board.updatedAt = new Date().toISOString();
+        return { ok: true, boardPath: "quest-board.json", board, quest: candidate };
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/api/quests/quest%252Fslash`, { method: "DELETE" });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.quest.id).toBe("quest%2Fslash");
+  });
+
+  test("returns 400 for missing quests", async () => {
+    const baseUrl = await startTestServer({
+      deleteQuest: async (input) => {
+        return { ok: false, code: "validation_failed", message: `questId: quest '${input.questId}' does not exist` };
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/api/quests/quest-missing`, { method: "DELETE" });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ ok: false, code: "validation_failed", error: "questId: quest 'quest-missing' does not exist" });
+  });
+
+  test("returns 400 for running quests", async () => {
+    const baseUrl = await startTestServer({
+      deleteQuest: async (input) => {
+        return { ok: false, code: "validation_failed", message: `quest.status: quest '${input.questId}' is running, cannot delete` };
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/api/quests/quest-active`, { method: "DELETE" });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({ ok: false, code: "validation_failed", error: "quest.status: quest 'quest-active' is running, cannot delete" });
+  });
+
+  test("returns 503 when the delete callback is unavailable", async () => {
+    const baseUrl = await startTestServer({ deleteQuest: undefined });
+
+    const response = await fetch(`${baseUrl}/api/quests/quest-pending-1`, { method: "DELETE" });
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({ ok: false, error: "Quest delete API is unavailable for this server." });
+  });
+
+  test("returns 503 when the domain returns an unavailable error", async () => {
+    const baseUrl = await startTestServer({
+      deleteQuest: async () => {
+        return { ok: false, code: "unavailable", message: "Could not delete quest: IO error" };
+      },
+    });
+
+    const response = await fetch(`${baseUrl}/api/quests/quest-pending-1`, { method: "DELETE" });
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({ ok: false, code: "unavailable", error: "Could not delete quest: IO error" });
+  });
+
+  test("keeps special quest routes ahead of the generic :questId DELETE handler", async () => {
+    let deleteCalled = false;
+    const baseUrl = await startTestServer({
+      includeQuestControls: false,
+      deleteQuest: async () => { deleteCalled = true; return { ok: false, code: "validation_failed", message: "generic handler called" }; },
+    });
+
+    // DELETE to /run should hit the control handler, not the delete handler
+    const response = await fetch(`${baseUrl}/api/quests/run`, { method: "DELETE" });
+
+    expect(response.status).toBe(405);
+    expect(await response.json()).toEqual({ ok: false, error: "Use POST to run quests." });
+    expect(deleteCalled).toBe(false);
+  });
+
 });

@@ -46,6 +46,9 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
     stopQuestRunner,
     controlSubmitting,
     controlAction,
+    deleteQuest,
+    deleteSubmitting,
+    deletingQuestId,
   } = useQuestBoard();
   const [selectedQuestId, setSelectedQuestId] = useState<string>();
   const [editingQuestId, setEditingQuestId] = useState<string>();
@@ -136,6 +139,15 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
     toast({ id: 'quest-control-runonce-success', title: 'Quest run started', description, variant: 'success' });
   }
 
+  async function handleDeleteQuest(questId: string) {
+    if (!window.confirm('Delete this quest? This action is irreversible and the quest will be permanently removed from the board.')) return;
+    const result = await deleteQuest(questId);
+    if (!result?.ok) return;
+    toast({ id: 'quest-delete-success', title: 'Quest deleted', description: 'The quest has been removed from the board.', variant: 'success' });
+    if (editingQuestId === questId) setEditingQuestId(undefined);
+    if (selectedQuestId === questId) setSelectedQuestId(undefined);
+  }
+
   async function handleStopQuestRunner() {
     if (stopDisabled) return;
     setControlStatusMessage('');
@@ -218,6 +230,9 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
           onSelectQuest={setSelectedQuestId}
           onEditQuest={editQuest}
           onReorderQuest={reorder}
+          onDeleteQuest={handleDeleteQuest}
+          deleteSubmitting={deleteSubmitting}
+          deletingQuestId={deletingQuestId}
         />
         <QuestDetail
           quest={selectedQuest}

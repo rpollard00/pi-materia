@@ -3,6 +3,7 @@ import {
   addQuest,
   completeQuest,
   createQuestBoard,
+  deleteQuest,
   enableQuestRunner,
   failRunningQuest,
   createShortRandomQuestId,
@@ -491,6 +492,105 @@ describe("quest board domain", () => {
 
     expect(validated.ok).toBe(true);
     if (validated.ok) expect(validated.value).toEqual(completed.value);
+  });
+
+  test("deletes a pending quest and preserves remaining order", () => {
+    const board = boardWithThreeQuests();
+    const deleted = deleteQuest(board, { questId: "q-2", now: t3 });
+
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) return;
+    expect(deleted.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-3"]);
+    expect(deleted.value.updatedAt).toBe(t3);
+    expect(validateQuestBoard(deleted.value).ok).toBe(true);
+  });
+
+  test("deletes a succeeded quest", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const completed = completeQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, result: { status: "succeeded" } });
+    expect(completed.ok).toBe(true);
+    if (!completed.ok) return;
+
+    const deleted = deleteQuest(completed.value, { questId: "q-1", now: "2026-01-01T00:04:00.000Z" });
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) return;
+    expect(deleted.value.quests.map((quest) => quest.id)).toEqual(["q-2"]);
+    expect(validateQuestBoard(deleted.value).ok).toBe(true);
+  });
+
+  test("deletes a failed quest", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const failed = completeQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, result: { status: "failed", error: "boom" } });
+    expect(failed.ok).toBe(true);
+    if (!failed.ok) return;
+
+    const deleted = deleteQuest(failed.value, { questId: "q-1", now: "2026-01-01T00:04:00.000Z" });
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) return;
+    expect(deleted.value.quests.map((quest) => quest.id)).toEqual(["q-2"]);
+    expect(validateQuestBoard(deleted.value).ok).toBe(true);
+  });
+
+  test("deletes a blocked quest", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const blocked = failRunningQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, status: "blocked", message: "needs key" });
+    expect(blocked.ok).toBe(true);
+    if (!blocked.ok) return;
+
+    const deleted = deleteQuest(blocked.value, { questId: "q-1", now: "2026-01-01T00:04:00.000Z" });
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) return;
+    expect(deleted.value.quests.map((quest) => quest.id)).toEqual(["q-2"]);
+    expect(validateQuestBoard(deleted.value).ok).toBe(true);
+  });
+
+  test("rejects deletion of a running quest", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+
+    const deleted = deleteQuest(started.value, { questId: "q-1", now: t3 });
+    expect(deleted.ok).toBe(false);
+    if (!deleted.ok) expect(deleted.issues[0]?.message).toContain("running and cannot be deleted");
+    expect(started.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2"]);
+  });
+
+  test("rejects deletion of the active quest even if not running", () => {
+    const board = boardWithTwoQuests();
+    const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    // Set activeQuestId to q-2 but q-2 is not running (runner bookkeeping mismatch)
+    const withStaleActive: QuestBoard = { ...started.value, runner: { ...started.value.runner, activeQuestId: "q-2" } };
+
+    const deleted = deleteQuest(withStaleActive, { questId: "q-2", now: t3 });
+    expect(deleted.ok).toBe(false);
+    if (!deleted.ok) expect(deleted.issues[0]?.message).toContain("active quest");
+    expect(withStaleActive.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2"]);
+  });
+
+  test("rejects deletion for missing and blank quest ids", () => {
+    const board = boardWithTwoQuests();
+
+    const missing = deleteQuest(board, { questId: "q-missing", now: t3 });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.issues[0]?.message).toContain("does not exist");
+
+    const blank = deleteQuest(board, { questId: "  ", now: t3 });
+    expect(blank.ok).toBe(false);
+    if (!blank.ok) expect(blank.issues[0]?.message).toContain("quest id is required");
+
+    expect(board.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2"]);
   });
 
   test("validates malformed persisted board shapes and invalid running invariants", () => {
