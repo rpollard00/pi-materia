@@ -20,23 +20,21 @@ function nonEmptyIdentity(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function monitorMatchesViewedLoadout(
-  monitor: MonitorSnapshot,
+function activeCastMatchesViewedLoadout(
+  activeCast: NonNullable<MonitorSnapshot['activeCast']>,
   viewedLoadoutIdentity: ViewedLoadoutIdentity | undefined,
 ): boolean {
-  const runtimeLoadoutId = nonEmptyIdentity(monitor.activeLoadoutId);
-  const runtimeLoadoutName = nonEmptyIdentity(monitor.activeLoadout);
+  const runningLoadoutId = nonEmptyIdentity(activeCast.loadoutId);
+  const runningLoadoutName = nonEmptyIdentity(activeCast.loadoutName);
   const viewedLoadoutId = nonEmptyIdentity(viewedLoadoutIdentity?.viewedLoadoutId);
   const viewedLoadoutName = nonEmptyIdentity(viewedLoadoutIdentity?.viewedLoadoutName);
 
-  if (runtimeLoadoutId && viewedLoadoutId) return runtimeLoadoutId === viewedLoadoutId;
+  if (runningLoadoutId) return viewedLoadoutId === runningLoadoutId;
 
-  if (runtimeLoadoutName && viewedLoadoutName) return runtimeLoadoutName === viewedLoadoutName;
+  if (runningLoadoutName) return viewedLoadoutName === runningLoadoutName;
 
-  if (runtimeLoadoutId || runtimeLoadoutName) return false;
-
-  // Current monitor snapshots emitted before loadout identity was reported can only be
-  // scoped by the socket id. Keep that stable API path explicit and covered by tests.
+  // Monitor snapshots emitted before executing loadout identity was reported can only be
+  // scoped by the socket id. Keep that legacy API path explicit and covered by tests.
   return true;
 }
 
@@ -54,7 +52,7 @@ export function resolveMonitoringSocketIndicator(
   const sourceSocketId = activeCast.currentSocketId;
   if (!sourceSocketId) return { state: 'no-active-socket' };
 
-  if (!monitorMatchesViewedLoadout(monitorSnapshot, viewedLoadoutIdentity)) return { state: 'inactive' };
+  if (!activeCastMatchesViewedLoadout(activeCast, viewedLoadoutIdentity)) return { state: 'inactive' };
 
   const graphSocketSet = graphSocketIds instanceof Set ? graphSocketIds : new Set(graphSocketIds);
   if (!graphSocketSet.has(sourceSocketId)) return { state: 'missing-socket', sourceSocketId };

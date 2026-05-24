@@ -37,17 +37,17 @@ describe('resolveMonitoringSocketIndicator', () => {
     });
   });
 
-  it('suppresses matching socket ids when the viewed loadout id is not the runtime active loadout id', () => {
+  it('suppresses matching socket ids when the viewed loadout id is not the executing activeCast loadout id', () => {
     expect(resolveMonitoringSocketIndicator(
-      monitor({ currentSocketId: 'Socket-2' }, { activeLoadoutId: 'runtime:alpha', activeLoadout: 'Alpha' }),
+      monitor({ currentSocketId: 'Socket-2', loadoutId: 'runtime:alpha', loadoutName: 'Alpha' }, { activeLoadoutId: 'runtime:beta', activeLoadout: 'Beta' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutId: 'runtime:beta', viewedLoadoutName: 'Beta' },
     )).toEqual({ state: 'inactive' });
   });
 
-  it('returns the active graph socket when the viewed loadout id matches the runtime active loadout id', () => {
+  it('returns the active graph socket when the viewed loadout id matches the executing activeCast loadout id', () => {
     expect(resolveMonitoringSocketIndicator(
-      monitor({ currentSocketId: 'Socket-2' }, { activeLoadoutId: 'runtime:alpha', activeLoadout: 'Renamed Alpha' }),
+      monitor({ currentSocketId: 'Socket-2', loadoutId: 'runtime:alpha', loadoutName: 'Renamed Alpha' }, { activeLoadoutId: 'runtime:beta', activeLoadout: 'Beta' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutId: 'runtime:alpha', viewedLoadoutName: 'Local Alpha Name' },
     )).toEqual({
@@ -57,9 +57,9 @@ describe('resolveMonitoringSocketIndicator', () => {
     });
   });
 
-  it('uses activeLoadout display-name fallback only when stable ids are unavailable', () => {
+  it('uses activeCast display-name fallback when stable cast ids are unavailable', () => {
     expect(resolveMonitoringSocketIndicator(
-      monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Current Alpha' }),
+      monitor({ currentSocketId: 'Socket-2', loadoutName: 'Current Alpha' }, { activeLoadout: 'Current Beta' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutName: 'Current Alpha' },
     )).toEqual({
@@ -69,15 +69,15 @@ describe('resolveMonitoringSocketIndicator', () => {
     });
 
     expect(resolveMonitoringSocketIndicator(
-      monitor({ currentSocketId: 'Socket-2' }, { activeLoadout: 'Current Alpha' }),
+      monitor({ currentSocketId: 'Socket-2', loadoutName: 'Current Alpha' }, { activeLoadout: 'Current Alpha' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutName: 'Current Beta' },
     )).toEqual({ state: 'inactive' });
   });
 
-  it('prefers stable ids over matching names when both sides provide ids', () => {
+  it('prefers stable activeCast ids over matching names when both sides provide ids', () => {
     expect(resolveMonitoringSocketIndicator(
-      monitor({ currentSocketId: 'Socket-2' }, { activeLoadoutId: 'runtime:alpha', activeLoadout: 'Shared Display Name' }),
+      monitor({ currentSocketId: 'Socket-2', loadoutId: 'runtime:alpha', loadoutName: 'Shared Display Name' }, { activeLoadoutId: 'runtime:beta', activeLoadout: 'Shared Display Name' }),
       ['Socket-1', 'Socket-2'],
       { viewedLoadoutId: 'runtime:beta', viewedLoadoutName: 'Shared Display Name' },
     )).toEqual({ state: 'inactive' });

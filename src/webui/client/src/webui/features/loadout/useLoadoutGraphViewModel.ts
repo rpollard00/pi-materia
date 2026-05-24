@@ -62,8 +62,8 @@ export function useLoadoutGraphViewModel({
     [
       monitor?.activeCast?.active,
       monitor?.activeCast?.currentSocketId,
-      monitor?.activeLoadoutId,
-      monitor?.activeLoadout,
+      monitor?.activeCast?.loadoutId,
+      monitor?.activeCast?.loadoutName,
       socketPositions,
       viewedLoadoutIdentity,
     ],
