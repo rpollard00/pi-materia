@@ -11,6 +11,7 @@ interface QuestLogSidebarProps {
   selectedQuestId?: string;
   reorderSubmitting?: boolean;
   onSelectQuest: (questId: string) => void;
+  onEditQuest?: (questId: string) => void;
   onReorderQuest?: (input: { questId: string; placement: QuestReorderPlacement; targetId?: string }) => Promise<unknown> | unknown;
 }
 
@@ -25,7 +26,7 @@ function dropPlacementFromEvent(event: DragEvent<HTMLElement>): 'before' | 'afte
   return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
 }
 
-export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, failedQuests, selectedQuestId, reorderSubmitting = false, onSelectQuest, onReorderQuest }: QuestLogSidebarProps) {
+export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, failedQuests, selectedQuestId, reorderSubmitting = false, onSelectQuest, onEditQuest, onReorderQuest }: QuestLogSidebarProps) {
   const [showFailed, setShowFailed] = useState(false);
   const [draggedQuestId, setDraggedQuestId] = useState<string>();
   const [dropIndicator, setDropIndicator] = useState<DropIndicator>();
@@ -134,7 +135,7 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
                 >
                   ⋮⋮
                 </span>
-                <QuestCard quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} />
+                <QuestCard quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} canEdit={Boolean(onEditQuest)} onEdit={onEditQuest} />
               </div>
             );
           })}

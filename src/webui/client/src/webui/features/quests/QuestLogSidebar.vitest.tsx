@@ -104,6 +104,66 @@ describe('Quest card display coverage', () => {
   });
 });
 
+describe('Quest card actions menu', () => {
+  test('shows Edit only for pending quests and keeps menu interactions from selecting the card', () => {
+    const select = vi.fn();
+    const edit = vi.fn();
+    render(
+      <QuestLogSidebar
+        pendingQuests={[quest('quest-pending', 'pending', 'Pending quest')]}
+        completedQuests={[quest('quest-done', 'succeeded', 'Done quest')]}
+        failedQuests={[quest('quest-failed', 'failed', 'Failed quest')]}
+        onSelectQuest={select}
+        onEditQuest={edit}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Quest actions'));
+
+    expect(select).not.toHaveBeenCalled();
+    const menu = screen.getByRole('menu', { name: 'Actions for quest-pending: Pending quest prompt' });
+    expect(within(menu).getByRole('menuitem', { name: 'Edit' })).not.toBeNull();
+    expect(screen.getAllByLabelText('Quest actions')).toHaveLength(1);
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Edit' }));
+
+    expect(edit).toHaveBeenCalledWith('quest-pending');
+    expect(select).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  test('closes the quest actions menu on Escape and outside pointer down', () => {
+    render(
+      <QuestLogSidebar
+        pendingQuests={[quest('quest-pending', 'pending', 'Pending quest')]}
+        completedQuests={[]}
+        failedQuests={[]}
+        onSelectQuest={vi.fn()}
+        onEditQuest={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByLabelText('Quest actions');
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu')).not.toBeNull();
+
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('menu');
+    fireEvent.keyDown(within(menu).getByRole('menuitem', { name: 'Edit' }), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu')).not.toBeNull();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+});
+
 describe('Quest completed cast display coverage', () => {
   test('quest detail Last result shows the cast the quest completed in from lastResult', () => {
     render(<QuestDetail quest={completedQuestWithDivergentCasts()} onRefresh={vi.fn()} />);

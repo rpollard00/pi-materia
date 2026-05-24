@@ -2383,25 +2383,49 @@
 }
 
 .quest-card {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.65rem;
+  display: flex;
   width: 100%;
+  min-width: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.25rem;
   border-radius: 1rem;
   border: 1px solid rgb(255 255 255 / 0.08);
   background: linear-gradient(135deg, rgb(15 23 42 / 0.84), rgb(30 41 59 / 0.5));
-  padding: 0.72rem;
+  padding: 0;
   color: rgb(226 232 240);
   text-align: left;
   transition: 160ms ease;
 }
 
+.quest-card-select {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.65rem;
+  border: 0;
+  border-radius: calc(1rem - 1px);
+  background: transparent;
+  padding: 0.72rem;
+  color: inherit;
+  text-align: left;
+}
+
+.quest-card-editable .quest-card-select {
+  border-radius: calc(1rem - 1px) 0 0 calc(1rem - 1px);
+}
+
 .quest-card:hover,
-.quest-card:focus-visible,
+.quest-card:focus-within,
 .quest-card-selected {
   border-color: rgb(103 232 249 / 0.55);
   background: linear-gradient(135deg, rgb(8 47 73 / 0.86), rgb(88 28 135 / 0.44));
   box-shadow: 0 0 0 2px rgb(34 211 238 / 0.1), 0 0 24px rgb(34 211 238 / 0.12);
+}
+
+.quest-card-select:focus-visible {
   outline: none;
 }
 
@@ -2414,6 +2438,7 @@
   display: inline-grid;
   width: 1.75rem;
   height: 1.75rem;
+  align-self: center;
   place-items: center;
   border-radius: 999px;
   background: rgb(2 6 23 / 0.72);
@@ -2424,6 +2449,80 @@
 
 .quest-card-copy {
   min-width: 0;
+}
+
+.quest-actions-menu {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-self: stretch;
+}
+
+.quest-actions-trigger {
+  display: inline-flex;
+  min-width: 1.85rem;
+  height: auto;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 calc(1rem - 1px) calc(1rem - 1px) 0;
+  border: 1px solid transparent;
+  color: rgb(207 250 254);
+  line-height: 1;
+  transition: 160ms ease;
+}
+
+.quest-actions-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-width: 2.25;
+}
+
+.quest-actions-trigger:hover,
+.quest-actions-trigger[aria-expanded="true"] {
+  border-color: rgb(165 243 252 / 0.58);
+  background: rgb(8 47 73 / 0.62);
+  box-shadow: 0 0 0 2px rgb(34 211 238 / 0.08);
+}
+
+.quest-actions-trigger:focus-visible {
+  border-color: rgb(165 243 252 / 0.72);
+  outline: none;
+  background: rgb(8 47 73 / 0.68);
+  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.16);
+}
+
+.quest-actions-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 30;
+  display: grid;
+  min-width: 8rem;
+  overflow: hidden;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(103 232 249 / 0.28);
+  background: rgb(15 23 42 / 0.98);
+  padding: 0.35rem;
+  box-shadow: 0 20px 50px rgb(2 6 23 / 0.48), 0 0 24px rgb(34 211 238 / 0.12);
+}
+
+.quest-actions-popover button {
+  border-radius: 0.65rem;
+  padding: 0.48rem 0.65rem;
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: rgb(226 232 240);
+  transition: 140ms ease;
+}
+
+.quest-actions-popover button:hover,
+.quest-actions-popover button:focus-visible {
+  background: rgb(8 47 73 / 0.82);
+  color: rgb(255 255 255);
 }
 
 .quest-card-title-row {

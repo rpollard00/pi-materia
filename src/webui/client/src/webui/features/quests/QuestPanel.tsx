@@ -71,6 +71,11 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
 
   const showCreateForm = !editingQuest;
 
+  function editQuest(questId: string) {
+    setSelectedQuestId(questId);
+    setEditingQuestId(questId);
+  }
+
   return (
     <section className="quest-workspace" aria-labelledby="quests-panel-title">
       <div className="quest-workspace-banner fantasy-panel">
@@ -84,7 +89,7 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
           <span><strong>{grouped.pendingQuests.length}</strong> pending</span>
           <span><strong>{grouped.completedQuests.length}</strong> complete</span>
           {selectedPendingQuest ? (
-            <button className="quest-refresh-button" type="button" onClick={() => setEditingQuestId(selectedPendingQuest.id)} disabled={updateSubmitting}>
+            <button className="quest-refresh-button" type="button" onClick={() => editQuest(selectedPendingQuest.id)} disabled={updateSubmitting}>
               Edit selected quest
             </button>
           ) : null}
@@ -121,6 +126,7 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
           selectedQuestId={selectedQuestId}
           reorderSubmitting={reorderSubmitting}
           onSelectQuest={setSelectedQuestId}
+          onEditQuest={editQuest}
           onReorderQuest={reorder}
         />
         <QuestDetail
