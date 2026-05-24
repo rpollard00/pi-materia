@@ -26,6 +26,12 @@ function dropPlacementFromEvent(event: DragEvent<HTMLElement>): 'before' | 'afte
   return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
 }
 
+function shouldSuppressQuestDrag(event: DragEvent<HTMLElement>): boolean {
+  const target = event.target instanceof HTMLElement ? event.target : undefined;
+  if (!target) return false;
+  return Boolean(target.closest('.quest-actions-menu, input, textarea, select, a, button:not(.quest-card-select)'));
+}
+
 export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, failedQuests, selectedQuestId, reorderSubmitting = false, onSelectQuest, onEditQuest, onReorderQuest }: QuestLogSidebarProps) {
   const [showFailed, setShowFailed] = useState(false);
   const [draggedQuestId, setDraggedQuestId] = useState<string>();
@@ -39,7 +45,7 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
   }
 
   function beginDrag(event: DragEvent<HTMLElement>, quest: QuestSummary) {
-    if (!canReorder || !isPendingQuest(quest)) {
+    if (!canReorder || !isPendingQuest(quest) || shouldSuppressQuestDrag(event)) {
       event.preventDefault();
       return;
     }
@@ -108,7 +114,12 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
             return (
               <div
                 key={quest.id}
-                className={`quest-pending-row${draggedQuestId === quest.id ? ' quest-pending-row-dragging' : ''}${indicatorClass}`}
+                className={`quest-pending-row${draggable ? ' quest-pending-row-draggable' : ''}${draggedQuestId === quest.id ? ' quest-pending-row-dragging' : ''}${indicatorClass}`}
+                draggable={draggable}
+                aria-label={draggable ? `Drag ${quest.title} to reorder pending quests` : undefined}
+                title={draggable ? 'Drag to reorder pending quest' : undefined}
+                onDragStart={(event) => beginDrag(event, quest)}
+                onDragEnd={clearDragState}
                 onDragEnter={(event) => {
                   allowDrop(event);
                   setDropIndicator({ targetId: quest.id, placement: dropPlacementFromEvent(event) });
@@ -123,18 +134,6 @@ export function QuestLogSidebar({ activeQuest, pendingQuests, completedQuests, f
                   void submitDrop(event, placement === 'before' && quest.id === pendingQuests[0]?.id ? 'first' : placement, placement === 'before' && quest.id === pendingQuests[0]?.id ? undefined : quest.id);
                 }}
               >
-                <span
-                  className="quest-drag-handle"
-                  draggable={draggable}
-                  role="button"
-                  tabIndex={draggable ? 0 : -1}
-                  aria-label={`Drag ${quest.title} to reorder pending quests`}
-                  title={draggable ? 'Drag to reorder pending quest' : 'Pending quest reorder unavailable'}
-                  onDragStart={(event) => beginDrag(event, quest)}
-                  onDragEnd={clearDragState}
-                >
-                  ⋮⋮
-                </span>
                 <QuestCard quest={quest} selected={selectedQuestId === quest.id} onSelect={onSelectQuest} canEdit={Boolean(onEditQuest)} onEdit={onEditQuest} />
               </div>
             );

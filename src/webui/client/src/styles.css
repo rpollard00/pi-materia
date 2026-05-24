@@ -2296,16 +2296,35 @@
 .quest-pending-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: stretch;
-  gap: 0.45rem;
+  min-width: 0;
+}
+
+.quest-pending-row-draggable,
+.quest-pending-row-draggable .quest-card,
+.quest-pending-row-draggable .quest-card-select {
+  cursor: grab;
+}
+
+.quest-pending-row-dragging,
+.quest-pending-row-dragging .quest-card,
+.quest-pending-row-dragging .quest-card-select {
+  cursor: grabbing;
+}
+
+.quest-pending-row-draggable .quest-actions-menu {
+  cursor: default;
+}
+
+.quest-pending-row-draggable .quest-actions-trigger,
+.quest-pending-row-draggable .quest-actions-popover button {
+  cursor: pointer;
 }
 
 .quest-pending-row::before,
 .quest-pending-row::after {
   position: absolute;
   right: 0.25rem;
-  left: 2.65rem;
+  left: 0.25rem;
   z-index: 2;
   height: 2px;
   border-radius: 999px;
@@ -2323,33 +2342,6 @@
 
 .quest-pending-row-dragging {
   opacity: 0.58;
-}
-
-.quest-drag-handle {
-  display: inline-grid;
-  width: 2rem;
-  min-height: 100%;
-  place-items: center;
-  border-radius: 0.85rem;
-  border: 1px solid rgb(103 232 249 / 0.22);
-  background: rgb(2 6 23 / 0.42);
-  color: rgb(165 243 252 / 0.72);
-  cursor: grab;
-  font-weight: 950;
-  letter-spacing: -0.26em;
-  user-select: none;
-}
-
-.quest-drag-handle:active {
-  cursor: grabbing;
-}
-
-.quest-drag-handle:focus-visible,
-.quest-drag-handle:hover {
-  border-color: rgb(103 232 249 / 0.55);
-  color: rgb(224 242 254);
-  outline: none;
-  box-shadow: 0 0 0 2px rgb(34 211 238 / 0.12);
 }
 
 .quest-drop-zone {
@@ -2402,7 +2394,7 @@
   display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 1.75rem minmax(0, 1fr);
   align-items: center;
   gap: 0.65rem;
   border: 0;
@@ -2439,6 +2431,7 @@
   width: 1.75rem;
   height: 1.75rem;
   align-self: center;
+  justify-self: center;
   place-items: center;
   border-radius: 999px;
   background: rgb(2 6 23 / 0.72);
@@ -2448,7 +2441,9 @@
 }
 
 .quest-card-copy {
+  display: grid;
   min-width: 0;
+  align-content: center;
 }
 
 .quest-actions-menu {

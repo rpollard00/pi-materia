@@ -229,7 +229,7 @@ describe('Quest completed cast display coverage', () => {
 });
 
 describe('QuestLogSidebar quest reordering', () => {
-  test('renders active quest pinned above pending quests and only pending quests get drag handles', () => {
+  test('renders active quest pinned above pending quests and makes pending rows draggable directly', () => {
     render(
       <QuestLogSidebar
         activeQuest={quest('quest-active', 'running', 'Active quest')}
@@ -245,11 +245,11 @@ describe('QuestLogSidebar quest reordering', () => {
     const buttons = within(activePending).getAllByRole('button');
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Active quest: quest-active: Active quest prompt',
-      'Drag First pending to reorder pending quests',
       'Pending quest: quest-pending-1: First pending prompt',
-      'Drag Second pending to reorder pending quests',
       'Pending quest: quest-pending-2: Second pending prompt',
     ]);
+    expect(screen.getByLabelText('Drag First pending to reorder pending quests').getAttribute('draggable')).toBe('true');
+    expect(screen.getByLabelText('Drag Second pending to reorder pending quests').getAttribute('draggable')).toBe('true');
     expect(screen.queryByLabelText('Drag Active quest to reorder pending quests')).toBeNull();
   });
 
@@ -266,7 +266,7 @@ describe('QuestLogSidebar quest reordering', () => {
     );
 
     const transfer = dataTransfer('quest-b');
-    fireEvent.dragStart(screen.getByLabelText('Drag Beta to reorder pending quests'), { dataTransfer: transfer });
+    fireEvent.dragStart(screen.getByLabelText('Pending quest: quest-b: Beta prompt'), { dataTransfer: transfer });
     fireEvent.drop(screen.getByText('Drop here for first pending'), {
       dataTransfer: transfer,
       clientY: 25,
@@ -291,11 +291,30 @@ describe('QuestLogSidebar quest reordering', () => {
     const targetRow = screen.getByLabelText('Pending quest: quest-b: Beta prompt').closest('.quest-pending-row')!;
     vi.spyOn(targetRow, 'getBoundingClientRect').mockReturnValue({ top: 0, height: 100, bottom: 100, left: 0, right: 100, width: 100, x: 0, y: 0, toJSON: () => ({}) });
     const transfer = dataTransfer('quest-a');
-    fireEvent.dragStart(screen.getByLabelText('Drag Alpha to reorder pending quests'), { dataTransfer: transfer });
+    fireEvent.dragStart(screen.getByLabelText('Pending quest: quest-a: Alpha prompt'), { dataTransfer: transfer });
     fireEvent.drop(targetRow, { dataTransfer: transfer, clientY: 75 });
 
     expect(reorder).toHaveBeenCalledWith({ questId: 'quest-a', placement: 'after', targetId: 'quest-b' });
     expect(select).not.toHaveBeenCalled();
+  });
+
+  test('suppresses direct row dragging from the actions menu', () => {
+    render(
+      <QuestLogSidebar
+        pendingQuests={[quest('quest-a', 'pending', 'Alpha'), quest('quest-b', 'pending', 'Beta')]}
+        completedQuests={[]}
+        failedQuests={[]}
+        onSelectQuest={vi.fn()}
+        onEditQuest={vi.fn()}
+        onReorderQuest={vi.fn()}
+      />,
+    );
+
+    const transfer = dataTransfer('quest-a');
+    const allowed = fireEvent.dragStart(screen.getAllByLabelText('Quest actions')[0]!, { dataTransfer: transfer });
+
+    expect(allowed).toBe(false);
+    expect(transfer.setData).not.toHaveBeenCalled();
   });
 
   test('disables drag reordering while a reorder is submitting', () => {
@@ -310,7 +329,9 @@ describe('QuestLogSidebar quest reordering', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Drag Alpha to reorder pending quests').getAttribute('draggable')).toBe('false');
+    const pendingRow = screen.getByLabelText('Pending quest: quest-a: Alpha prompt').closest('.quest-pending-row');
+    expect(pendingRow?.getAttribute('draggable')).toBe('false');
+    expect(pendingRow?.classList.contains('quest-pending-row-draggable')).toBe(false);
     expect(screen.getByRole('status').textContent).toBe('Reordering pending quests…');
   });
 });
