@@ -132,7 +132,8 @@ describe("quest board domain", () => {
     if (!updated.ok) return;
     expect(updated.value.updatedAt).toBe(t3);
     expect(updated.value.quests.map((quest) => quest.id)).toEqual(["q-1", "q-2"]);
-    expect(updated.value.quests[0]).toMatchObject({ id: "q-1", title: "Updated title", prompt: "Updated prompt", status: "pending", createdAt: t1, updatedAt: t3, attempts: 0, loadoutOverride: "Full-Auto" });
+    expect(updated.value.quests[0]).toEqual({ ...board.quests[0], title: "Updated title", prompt: "Updated prompt", updatedAt: t3, loadoutOverride: "Full-Auto" });
+    expect(updated.value.quests[0]).toMatchObject({ id: "q-1", status: "pending", createdAt: t1, attempts: 0 });
     expect(updated.value.quests[1]).toEqual(board.quests[1]);
   });
 
@@ -148,6 +149,14 @@ describe("quest board domain", () => {
     const blank = updatePendingQuest(withLoadout.value, { questId: "q-1", title: "First", prompt: "", now: t2 });
     expect(blank.ok).toBe(false);
     if (!blank.ok) expect(blank.issues[0]).toMatchObject({ path: "quest.prompt", message: "prompt is required" });
+
+    const blankLoadout = updatePendingQuest(withLoadout.value, { questId: "q-1", title: "First", prompt: "Do one updated", loadoutOverride: "", now: t2 });
+    expect(blankLoadout.ok).toBe(false);
+    if (!blankLoadout.ok) expect(blankLoadout.issues[0]).toMatchObject({ path: "quest.loadoutOverride", message: "loadout override must be non-empty when provided" });
+
+    const missing = updatePendingQuest(withLoadout.value, { questId: "q-missing", title: "Missing", prompt: "No quest", now: t2 });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.issues[0]).toMatchObject({ path: "questId", message: "quest 'q-missing' does not exist" });
 
     const started = startQuest(withLoadout.value, { questId: "q-1", castId: "cast-1", now: t2 });
     expect(started.ok).toBe(true);

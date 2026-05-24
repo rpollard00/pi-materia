@@ -223,6 +223,8 @@ describe("PATCH /api/quests/:questId", () => {
     expect(body.ok).toBe(true);
     expect(body.quest).toMatchObject({ id: "quest-pending-1", title: "Gather sun herbs instead", prompt: "Gather sun herbs instead", status: "pending", loadoutOverride: "Full-Auto", attempts: 0 });
     expect(body.board.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-pending-1", "quest-pending-2"]);
+    expect(body.board.quests.map((quest: { id: string }) => quest.id)).toEqual(["quest-active", "quest-pending-1", "quest-pending-2", "quest-complete", "quest-failed", "quest-blocked"]);
+    expect(body.board.pendingQuests[0].createdAt).toBe("2026-05-19T19:02:00.000Z");
     expect(body.board.pendingQuests[0].updatedAt).toBe("2026-05-19T20:01:30.000Z");
   });
 
@@ -242,6 +244,27 @@ describe("PATCH /api/quests/:questId", () => {
     expect(await blank.json()).toEqual({ ok: false, error: "Quest prompt is required." });
     expect(active.status).toBe(400);
     expect(await active.json()).toEqual({ ok: false, code: "validation_failed", error: "quest.status: quest 'quest-active' is running, not pending" });
+  });
+
+  test("returns 400 for missing quests and invalid loadout overrides", async () => {
+    const baseUrl = await startTestServer({
+      updateQuest: async (input) => {
+        if (input.loadoutOverride && input.loadoutOverride !== "Full-Auto") return { ok: false, code: "invalid_loadout", message: `Unknown Materia loadout \"${input.loadoutOverride}\".` };
+        const board = questBoardFixture();
+        const result = updatePendingQuest(board, { ...input, title: input.prompt, now: "2026-05-19T20:01:30.000Z" });
+        if (!result.ok) return { ok: false, code: "validation_failed", message: issuesToMessage(result.issues) };
+        const quest = result.value.quests.find((candidate) => candidate.id === input.questId)!;
+        return { ok: true, boardPath: "quest-board.json", board: result.value, quest };
+      },
+    });
+
+    const missing = await fetch(`${baseUrl}/api/quests/quest-missing`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "Update missing" }) });
+    const invalidLoadout = await fetch(`${baseUrl}/api/quests/quest-pending-1`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "Update pending", loadoutOverride: "Missing" }) });
+
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toEqual({ ok: false, code: "validation_failed", error: "questId: quest 'quest-missing' does not exist" });
+    expect(invalidLoadout.status).toBe(400);
+    expect(await invalidLoadout.json()).toEqual({ ok: false, code: "invalid_loadout", error: "Unknown Materia loadout \"Missing\"." });
   });
 });
 
