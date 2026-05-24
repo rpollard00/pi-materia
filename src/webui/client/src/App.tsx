@@ -44,7 +44,7 @@ export function App() {
     materiaSources,
     loadouts,
     persistedLoadouts,
-    runtimeActiveLoadoutId,
+    configuredActiveLoadoutId,
     reloadConfig,
     revertDraft,
     saveDraft,
@@ -69,9 +69,13 @@ export function App() {
   useCastCompletionToasts(monitor);
 
   useEffect(() => {
-    if (!monitor?.activeLoadoutId) return;
+    if (monitor?.activeCast?.active || !monitor?.activeLoadoutId) return;
     applyExternalRuntimeActiveLoadout(monitor.activeLoadoutId, monitor.activeLoadout);
-  }, [applyExternalRuntimeActiveLoadout, monitor?.activeLoadout, monitor?.activeLoadoutId]);
+  }, [applyExternalRuntimeActiveLoadout, monitor?.activeCast?.active, monitor?.activeLoadout, monitor?.activeLoadoutId]);
+
+  const runningLoadoutIdentity = monitor?.activeCast?.active
+    ? { loadoutId: monitor.activeCast.loadoutId, loadoutName: monitor.activeCast.loadoutName }
+    : undefined;
 
   const setLoadoutStatus = (message: string, options?: LoadoutStatusOptions | LoadoutStatusToastIntent) => {
     emitLoadoutStatusToast(message, options);
@@ -204,7 +208,8 @@ export function App() {
           <LoadoutListPanel
             loadouts={loadouts}
             editingLoadoutName={editingLoadoutName}
-            runtimeActiveLoadoutId={runtimeActiveLoadoutId}
+            configuredActiveLoadoutId={configuredActiveLoadoutId}
+            runningLoadoutIdentity={runningLoadoutIdentity}
             defaultLoadoutId={defaultLoadoutId}
             questDefaultLoadoutId={questDefaultLoadoutId}
             persistedLoadouts={persistedLoadouts}

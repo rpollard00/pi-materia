@@ -104,7 +104,8 @@
 .loadout-default-indicator,
 .loadout-quest-default-indicator,
 .loadout-lock-indicator,
-.loadout-active-indicator {
+.loadout-active-indicator,
+.loadout-running-indicator {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -157,12 +158,21 @@
   opacity: 0.72;
 }
 
-.loadout-active-indicator {
+.loadout-active-indicator,
+.loadout-running-indicator {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 999px;
+}
+
+.loadout-active-indicator {
   background: rgb(34 197 94);
   box-shadow: 0 0 10px rgb(34 197 94 / 0.72);
+}
+
+.loadout-running-indicator {
+  background: rgb(14 165 233);
+  box-shadow: 0 0 10px rgb(14 165 233 / 0.72);
 }
 
 .loadout-actions-menu {

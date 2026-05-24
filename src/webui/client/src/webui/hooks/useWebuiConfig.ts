@@ -266,8 +266,9 @@ export function useWebuiConfig() {
   const loadouts = useMemo(() => buildLoadouts(draftConfig ?? {}), [draftConfig]);
   const persistedLoadouts = useMemo(() => buildLoadouts(baselineConfig ?? draftConfig ?? {}), [baselineConfig, draftConfig]);
   const editingLoadoutName = resolveViewedLoadoutName(loadouts, viewedLoadoutName, draftConfig?.activeLoadout);
-  const runtimeActiveLoadoutId = hasLoadoutId(persistedLoadouts, baselineConfig?.activeLoadoutId) ? baselineConfig?.activeLoadoutId : undefined;
-  const runtimeActiveLoadoutName = Object.entries(persistedLoadouts).find(([, loadout]) => Boolean(runtimeActiveLoadoutId) && loadout.id === runtimeActiveLoadoutId)?.[0];
+  const configuredActiveLoadoutId = hasLoadoutId(persistedLoadouts, baselineConfig?.activeLoadoutId) ? baselineConfig?.activeLoadoutId : undefined;
+  const runtimeActiveLoadoutId = configuredActiveLoadoutId;
+  const runtimeActiveLoadoutName = Object.entries(persistedLoadouts).find(([, loadout]) => Boolean(configuredActiveLoadoutId) && loadout.id === configuredActiveLoadoutId)?.[0];
   const editingLoadout = editingLoadoutName ? loadouts[editingLoadoutName] : undefined;
   const activeLoadoutName = editingLoadoutName;
   const persistedActiveLoadoutName = runtimeActiveLoadoutName;
@@ -819,6 +820,7 @@ export function useWebuiConfig() {
     loadouts,
     persistedActiveLoadoutName,
     persistedLoadouts,
+    configuredActiveLoadoutId,
     runtimeActiveLoadoutId,
     reloadConfig,
     revertDraft,

@@ -6,10 +6,18 @@ import type { LoadoutLockEligibility } from './loadoutLockEligibility.js';
 
 type LoadoutLockState = 'locked' | 'unlocked';
 
+export interface RunningLoadoutIdentity {
+  loadoutId?: string;
+  loadoutName?: string;
+}
+
 export interface LoadoutListPanelProps {
   loadouts: Record<string, PipelineConfig>;
   editingLoadoutName: string | undefined;
-  runtimeActiveLoadoutId: string | undefined;
+  configuredActiveLoadoutId?: string | undefined;
+  /** @deprecated use configuredActiveLoadoutId */
+  runtimeActiveLoadoutId?: string | undefined;
+  runningLoadoutIdentity?: RunningLoadoutIdentity;
   defaultLoadoutId: string | null;
   questDefaultLoadoutId?: string | null;
   persistedLoadouts: Record<string, PipelineConfig>;
@@ -30,26 +38,38 @@ export interface LoadoutSelectorViewModel {
   name: string;
   loadout: PipelineConfig;
   isDefault: boolean;
+  isConfiguredActive: boolean;
+  isRunningNow: boolean;
+  /** @deprecated use isConfiguredActive */
   isRuntimeActive: boolean;
 }
 
-export function buildLoadoutSelectorViewModels(loadouts: Record<string, PipelineConfig>, defaultLoadoutId: string | null, activeLoadoutId?: string): LoadoutSelectorViewModel[] {
+function matchesLoadoutIdentity(name: string, loadout: PipelineConfig, identity?: RunningLoadoutIdentity): boolean {
+  if (!identity) return false;
+  if (identity.loadoutId) return loadout.id === identity.loadoutId;
+  return Boolean(identity.loadoutName) && name === identity.loadoutName;
+}
+
+export function buildLoadoutSelectorViewModels(loadouts: Record<string, PipelineConfig>, defaultLoadoutId: string | null, configuredActiveLoadoutId?: string, runningLoadoutIdentity?: RunningLoadoutIdentity): LoadoutSelectorViewModel[] {
   // Config load stamps stable loadout.id values; selector state must
   // not fall back to display names or object keys when IDs are stale/unknown.
   return Object.keys(loadouts).map((name) => {
     const loadout = loadouts[name];
+    const isConfiguredActive = Boolean(configuredActiveLoadoutId) && loadout.id === configuredActiveLoadoutId;
     return {
       name,
       loadout,
       isDefault: Boolean(defaultLoadoutId) && loadout.id === defaultLoadoutId,
-      isRuntimeActive: Boolean(activeLoadoutId) && loadout.id === activeLoadoutId,
+      isConfiguredActive,
+      isRuntimeActive: isConfiguredActive,
+      isRunningNow: runningLoadoutIdentity ? matchesLoadoutIdentity(name, loadout, runningLoadoutIdentity) : isConfiguredActive,
     };
   });
 }
 
 interface LoadoutActionsMenuProps {
   name: string;
-  isRuntimeActive: boolean;
+  isConfiguredActive: boolean;
   isDefaultLoadout: boolean;
   isQuestDefaultLoadout: boolean;
   canSetRuntimeActive: boolean;
@@ -101,7 +121,7 @@ function loadoutLockAction(loadout: PipelineConfig, scope: LoadoutSourceScope, e
   return { iconKey: 'unlock', label: 'Lock edits', title: eligibility.reason ?? 'Lock edits', menuLabel: 'Lock edits', nextState: 'locked', disabled: !eligibility.eligible };
 }
 
-function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, isQuestDefaultLoadout, canSetRuntimeActive, canSetDefault, canSetQuestDefault, deleteDisabled, deleteTitle, lockAction, onSetRuntimeActive, onSetDefault, onSetQuestDefault, onToggleLock, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
+function LoadoutActionsMenu({ name, isConfiguredActive, isDefaultLoadout, isQuestDefaultLoadout, canSetRuntimeActive, canSetDefault, canSetQuestDefault, deleteDisabled, deleteTitle, lockAction, onSetRuntimeActive, onSetDefault, onSetQuestDefault, onToggleLock, onDuplicate, onDelete }: LoadoutActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -152,8 +172,8 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, isQuestDe
       </button>
       {open && (
         <div id={menuId} className="loadout-actions-popover" role="menu" aria-label={`Actions for ${name}`}>
-          <button type="button" role="menuitem" disabled={!canSetRuntimeActive} title={isRuntimeActive ? 'This loadout is already active.' : undefined} onClick={() => runAction(onSetRuntimeActive)}>
-            {isRuntimeActive ? 'Active loadout' : 'Set Active'}
+          <button type="button" role="menuitem" disabled={!canSetRuntimeActive} title={isConfiguredActive ? 'This loadout is already the configured active loadout.' : undefined} onClick={() => runAction(onSetRuntimeActive)}>
+            {isConfiguredActive ? 'Active loadout' : 'Set Active'}
           </button>
           <button type="button" role="menuitem" disabled={!canSetDefault} title={isDefaultLoadout ? 'This loadout is already the default.' : undefined} onClick={() => runAction(onSetDefault)}>
             {isDefaultLoadout ? 'Default loadout' : 'Set as Default'}
@@ -176,17 +196,18 @@ function LoadoutActionsMenu({ name, isRuntimeActive, isDefaultLoadout, isQuestDe
   );
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLoadoutId, defaultLoadoutId, questDefaultLoadoutId = null, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetQuestDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiveLoadoutId, runtimeActiveLoadoutId, runningLoadoutIdentity, defaultLoadoutId, questDefaultLoadoutId = null, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetQuestDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
+  const activeConfiguredLoadoutId = configuredActiveLoadoutId ?? runtimeActiveLoadoutId;
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
   const [questDefaultChangePending, setQuestDefaultChangePending] = useState(false);
-  const persistedRows = buildLoadoutSelectorViewModels(persistedLoadouts, defaultLoadoutId, runtimeActiveLoadoutId).filter(({ loadout }) => Boolean(loadout.id));
-  const loadoutRows = buildLoadoutSelectorViewModels(loadouts, defaultLoadoutId, runtimeActiveLoadoutId);
+  const persistedRows = buildLoadoutSelectorViewModels(persistedLoadouts, defaultLoadoutId, activeConfiguredLoadoutId).filter(({ loadout }) => Boolean(loadout.id));
+  const loadoutRows = buildLoadoutSelectorViewModels(loadouts, defaultLoadoutId, activeConfiguredLoadoutId, runningLoadoutIdentity);
 
   async function changeRuntimeActiveLoadout(loadoutId: string, displayName?: string) {
     // This quick selector changes only the runtime/session active loadout. It
     // intentionally does not update the durable defaultLoadoutId preference.
-    if (!loadoutId || loadoutId === runtimeActiveLoadoutId || activeChangePending) return;
+    if (!loadoutId || loadoutId === activeConfiguredLoadoutId || activeChangePending) return;
     setActiveChangePending(true);
     setActiveChangeMessage(`Changing active loadout to ${displayName ?? loadoutId}…`);
     try {
@@ -219,10 +240,10 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
         <button className="materia-button" onClick={onCreateLoadout}>New</button>
       </div>
       <label className="mb-3 block text-xs uppercase tracking-[0.18em] text-cyan-200">
-        Active loadout
+        Configured active loadout
         <select
           className="mt-1 w-full rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-sm normal-case tracking-normal text-cyan-100 disabled:opacity-60"
-          value={runtimeActiveLoadoutId ?? ''}
+          value={activeConfiguredLoadoutId ?? ''}
           disabled={activeChangePending || persistedRows.length === 0}
           onChange={(event) => void changeRuntimeActiveLoadout(event.target.value, event.currentTarget.selectedOptions[0]?.textContent ?? undefined)}
           aria-label="Active loadout"
@@ -232,7 +253,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
       </label>
       {activeChangeMessage && <p className="mb-3 text-xs text-slate-300" role="status">{activeChangeMessage}</p>}
       <div className="space-y-2" role="list" aria-label="Available loadouts">
-        {loadoutRows.map(({ name, loadout, isDefault, isRuntimeActive }) => {
+        {loadoutRows.map(({ name, loadout, isDefault, isConfiguredActive, isRunningNow }) => {
           const sourceScope = loadoutSources[name] ?? 'user';
           const defaultLoadout = sourceScope === 'default';
           const deleteDisabled = !canDeleteLoadout(name);
@@ -242,8 +263,9 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
           const nextLockState = loadout.lockState === 'locked' ? 'unlocked' : 'locked';
           const lockAction = loadoutLockAction(loadout, sourceScope, getLoadoutLockEligibility(name, nextLockState));
           const LockIcon = loadoutLockIcons[lockAction.iconKey];
+          const isEditing = name === editingLoadoutName;
           return (
-            <div key={name} className={`loadout-card ${name === editingLoadoutName ? 'loadout-card-active' : ''}`}>
+            <div key={name} className={`loadout-card ${isEditing ? 'loadout-card-active' : ''}`}>
               <button type="button" onClick={() => onSwitchEditingLoadout(name)} className="loadout-card-select" title={`${name} — ${loadoutScopeDescription(sourceScope)}`}>
                 <span className="loadout-card-title">
                   <span className="loadout-card-name">{name}</span>
@@ -257,7 +279,8 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
                       <Flag className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
                     </span>
                   )}
-                  {isRuntimeActive && <span className="loadout-active-indicator" aria-label="Runtime active loadout" title="Active loadout" />}
+                  {isConfiguredActive && <span className="loadout-configured-active-indicator loadout-active-indicator" aria-label="Runtime active loadout" title="Configured active loadout" />}
+                  {runningLoadoutIdentity && isRunningNow && <span className="loadout-running-indicator" aria-label="Running now" title="Running now" />}
                 </span>
               </button>
               <button
@@ -275,10 +298,10 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, runtimeActiveLo
               </button>
               <LoadoutActionsMenu
                 name={name}
-                isRuntimeActive={isRuntimeActive}
+                isConfiguredActive={isConfiguredActive}
                 isDefaultLoadout={isDefaultLoadout}
                 isQuestDefaultLoadout={isQuestDefaultLoadout}
-                canSetRuntimeActive={persisted && !isRuntimeActive && !activeChangePending}
+                canSetRuntimeActive={persisted && !isConfiguredActive && !activeChangePending}
                 canSetDefault={persisted && !isDefaultLoadout}
                 canSetQuestDefault={persisted && !isQuestDefaultLoadout && !questDefaultChangePending}
                 deleteDisabled={deleteDisabled}
