@@ -485,7 +485,7 @@ describe("application use cases", () => {
 
     expect(result.link.fromCastId).toBe("cast-prev");
     expect(result.link.plan.lineage.fromCastId).toBe("cast-prev");
-    expect(started?.options?.initialData?.previousCastContext).toMatchObject({ castId: "cast-prev", request: "prior request", handoff: { summary: "prior summary", satisfied: true } });
+    expect(started?.options?.initialData?.previousCastContext).toMatchObject({ castId: "cast-prev", request: "prior request", handoff: { satisfied: true } });
     expect(started?.options?.startEventDetails?.link).toMatchObject({ fromCastId: "cast-prev", virtualLoadout: { id: result.link.virtualLoadout.id } });
   });
 

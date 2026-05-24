@@ -129,7 +129,7 @@ export function parseHandoffWorkItem(
 ): DomainResult<HandoffWorkItem> {
   if (!isPlainObject(value)) return err(path, "work item must be an object");
   const issues: DomainIssue[] = [];
-  const allowedFields = new Set<string>(HANDOFF_WORK_ITEM_FIELDS);
+  const allowedFields = new Set<string>([...HANDOFF_WORK_ITEM_FIELDS, "id"]);
   for (const field of Object.keys(value)) {
     if (!allowedFields.has(field))
       issues.push({ path: `${path}.${field}`, message: `unexpected work item field ${JSON.stringify(field)}` });

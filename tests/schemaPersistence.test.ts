@@ -85,7 +85,7 @@ describe("schema/persistence adapters", () => {
     const invalid = validatePersistedHandoffPayload({ tasks: [], satisfied: "yes", feedback: [], missing: "tests" });
     expect(invalid.ok).toBe(false);
     if (!invalid.ok) {
-      expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["handoff.tasks", "handoff.satisfied", "handoff.feedback", "handoff.missing"]));
+      expect(invalid.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["handoff.tasks", "handoff.satisfied"]));
     }
   });
 

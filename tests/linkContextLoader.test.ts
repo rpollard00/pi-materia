@@ -78,7 +78,7 @@ describe("previous-cast context loader", () => {
     if (!result.ok) return;
     expect(result.value.castId).toBe("cast-1");
     expect(result.value.request).toBe("original request");
-    expect(result.value.handoff).toMatchObject({ summary: "done", satisfied: true, feedback: "ok", missing: [] });
+    expect(result.value.handoff).toMatchObject({ satisfied: true, workItems: [{ id: "WI", title: "Next" }] });
     expect(result.value.artifacts.find((artifact) => artifact.path === "sockets/Socket-1/1.md")).toMatchObject({ truncated: true, maxBytes: 400, content: "abcdefghijklmnopqrstuvwxyz".repeat(15) + "abcdefghij" });
     expect(JSON.stringify(result.value)).not.toContain("Original request:");
   });

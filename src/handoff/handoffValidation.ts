@@ -55,7 +55,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
     }]);
   }
 
-  if (options.agentOutput) validateAgentTopLevelFields(value, issues);
+  if (options.agentOutput) validateAgentTopLevelFields(value, issues, requirements, options.socket);
 
   if (!requirements) {
     if (issues.length > 0) throw new HandoffJsonValidationError(socketId, issues);
@@ -161,10 +161,14 @@ function formatHandoffValidationErrorMessage(socketId: string, issues: HandoffVa
   return `Invalid handoff JSON output for socket "${socketId}": ${detail}`;
 }
 
-function validateAgentTopLevelFields(value: Record<string, unknown>, issues: HandoffValidationIssue[]): void {
+function validateAgentTopLevelFields(value: Record<string, unknown>, issues: HandoffValidationIssue[], requirements: SocketOutputRequirements | undefined, socket: MateriaPipelineSocketConfig | undefined): void {
   const allowed = new Set<string>(HANDOFF_ENVELOPE_FIELDS);
+  for (const consumed of requirements?.consumedPayloadPaths ?? []) {
+    if (consumed.topLevelField) allowed.add(consumed.topLevelField);
+  }
+  const allowsCustomPayload = (requirements?.consumedPayloadPaths.length ?? 0) > 0 || socketUsesCustomJsonPayloadCondition(socket);
   for (const field of Object.keys(value)) {
-    if (!allowed.has(field)) {
+    if (!allowed.has(field) && !allowsCustomPayload) {
       issues.push({
         path: `$.${field}`,
         expected: "present",
@@ -197,6 +201,12 @@ function validateAgentTopLevelFields(value: Record<string, unknown>, issues: Han
       reason: "Generated work belongs in workItems as title/context objects.",
     });
   }
+}
+
+function socketUsesCustomJsonPayloadCondition(socket: MateriaPipelineSocketConfig | undefined): boolean {
+  if (!socket) return false;
+  const conditions = [socket.advance?.when, ...(socket.edges ?? []).map((edge) => edge.when)];
+  return conditions.some((condition) => typeof condition === "string" && condition.includes("$."));
 }
 
 function addLegacySatisfiedHint(value: Record<string, unknown>, issues: HandoffValidationIssue[]): void {

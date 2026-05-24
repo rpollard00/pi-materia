@@ -43,9 +43,7 @@ const maintainScript = `
 function canonicalWorkItems(workItems: Array<{ id: string; title: string }>) {
   return workItems.map((item) => ({
     ...item,
-    description: `Complete ${item.title}`,
-    acceptance: ["Done"],
-    context: { constraints: [], dependencies: [], risks: [] },
+    context: `Complete ${item.title}. Done.`,
   }));
 }
 

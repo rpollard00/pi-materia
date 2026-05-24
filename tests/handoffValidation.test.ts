@@ -63,7 +63,7 @@ describe("handoff JSON runtime validation", () => {
       caught = error;
     }
     const issues = handoffValidationIssues(caught);
-    expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.id");
+    expect(issues?.map((issue) => issue.path)).not.toContain("$.workItems.0.id");
     expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.description");
     expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.acceptance");
     expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.context");

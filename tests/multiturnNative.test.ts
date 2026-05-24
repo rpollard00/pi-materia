@@ -187,21 +187,13 @@ describe("native multi-turn runtime", () => {
   test("bundled Full-Auto advances from Auto-Plan to Auto-Architect without interactive input", async () => {
     const harness = await makeBundledDefaultHarness();
     const workItem = {
-      id: "WI-1",
       title: "Ship it",
-      description: "Implement the requested feature",
-      acceptance: ["Feature is implemented", "Regression test passes"],
-      context: { architecture: "Keep it simple", constraints: [], dependencies: [], risks: [] },
+      context: "Implement the requested feature. Keep it simple. Acceptance: feature is implemented and regression test passes.",
     };
     const autoPlanEnvelope = {
-      summary: "Plan",
       workItems: [workItem],
-      guidance: { note: "Use top-level workItems" },
-      decisions: [],
-      risks: [],
       satisfied: true,
-      feedback: "",
-      missing: [],
+      context: "Plan",
     };
     expect(autoPlanEnvelope).toHaveProperty("workItems");
     expect(autoPlanEnvelope).not.toHaveProperty("tasks");
@@ -286,21 +278,13 @@ describe("native multi-turn runtime", () => {
   test("strict Full-Auto dispatches Build after Auto-Architect without an external wakeup", async () => {
     const harness = await makeBundledDefaultHarness({ strictTriggerTurnDuringAgentEnd: true });
     const workItem = {
-      id: "WI-1",
       title: "Ship it",
-      description: "Implement the requested feature",
-      acceptance: ["Feature is implemented", "Regression test passes"],
-      context: { architecture: "Keep it simple", constraints: [], dependencies: [], risks: [] },
+      context: "Implement the requested feature. Keep it simple. Acceptance: feature is implemented and regression test passes.",
     };
     const autoPlanEnvelope = {
-      summary: "Plan",
       workItems: [workItem],
-      guidance: { note: "Use top-level workItems" },
-      decisions: [],
-      risks: [],
       satisfied: true,
-      feedback: "",
-      missing: [],
+      context: "Plan",
     };
     const architectEnvelope = { ...autoPlanEnvelope, summary: "Architected plan", decisions: ["Keep boundaries small"] };
 
@@ -375,14 +359,9 @@ describe("native multi-turn runtime", () => {
   test("finalized Interactive-Plan /materia continue auto-dispatches the Build prompt", async () => {
     const harness = await makeHarness(interactivePlanToBuildConfig());
     const finalPlan = JSON.stringify({
-      summary: "Plan",
-      workItems: [{ id: "WI-1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }],
-      guidance: {},
-      decisions: [],
-      risks: [],
+      workItems: [{ title: "Ship it", context: "Do the work. Done." }],
       satisfied: true,
-      feedback: "",
-      missing: [],
+      context: "Plan",
     });
 
     await harness.runCommand("materia", "cast build the feature");
@@ -407,7 +386,7 @@ describe("native multi-turn runtime", () => {
     expect(buildState.socketState).toBe("awaiting_agent_response");
     expect(buildState.awaitingResponse).toBe(true);
     expect(buildState.multiTurnFinalizing).not.toBe(true);
-    expect(buildState.data.workItems).toEqual([{ id: "WI-1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
+    expect(buildState.data.workItems).toEqual([{ title: "Ship it", context: "Do the work. Done." }]);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(promptsBeforeFinalAgentEnd);
 
     await flushDeferredDispatch();
@@ -423,7 +402,7 @@ describe("native multi-turn runtime", () => {
     const socketComplete = events.find((event) => event.type === "socket_complete" && event.data.socket === "Socket-3");
     expect(socketComplete?.data).toMatchObject({ parsed: true, finalizedRefinement: true, artifact: "sockets/Socket-3/1.md" });
     expect(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.md"), "utf8")).toBe(finalPlan);
-    expect(JSON.parse(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.json"), "utf8"))).toMatchObject({ summary: "Plan", satisfied: true });
+    expect(JSON.parse(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.json"), "utf8"))).toMatchObject({ context: "Plan", satisfied: true });
     const stages = advancementStages(events);
     expect(stages).toEqual(expect.arrayContaining([
       "finalized_multi_turn_handle_entry",
@@ -443,14 +422,9 @@ describe("native multi-turn runtime", () => {
   test("duplicate finalized agent_end callbacks schedule only one deferred Build prompt", async () => {
     const harness = await makeHarness(interactivePlanToBuildConfig());
     const finalPlan = JSON.stringify({
-      summary: "Plan",
-      workItems: [{ id: "WI-1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }],
-      guidance: {},
-      decisions: [],
-      risks: [],
+      workItems: [{ title: "Ship it", context: "Do the work. Done." }],
       satisfied: true,
-      feedback: "",
-      missing: [],
+      context: "Plan",
     });
 
     await harness.runCommand("materia", "cast build the feature");
@@ -483,7 +457,7 @@ describe("native multi-turn runtime", () => {
 
   test("bundled Planning-Consult pauses after planner output until /materia continue advances to Build", async () => {
     const harness = await makeBundledDefaultHarness();
-    const finalPlan = '{"summary":"Plan","workItems":[{"id":"1","title":"Ship it","description":"Do the work","acceptance":["Done"],"context":{"architecture":"","constraints":[],"dependencies":[],"risks":[]}}],"guidance":{},"decisions":[],"risks":[],"satisfied":true,"feedback":"","missing":[]}';
+    const finalPlan = '{"workItems":[{"title":"Ship it","context":"Do the work. Done."}],"satisfied":true,"context":"Plan"}';
 
     await harness.runCommand("materia", "loadout Planning-Consult");
     const savedLoadoutChoice = JSON.parse(await readFile(path.join(harness.cwd, ".pi", "pi-materia.json"), "utf8"));
@@ -564,7 +538,7 @@ describe("native multi-turn runtime", () => {
     expect(buildState.socketState).toBe("awaiting_agent_response");
     expect(buildState.awaitingResponse).toBe(true);
     expect(buildState.multiTurnFinalizing).not.toBe(true);
-    expect(buildState.data.workItems).toEqual([{ id: "1", title: "Ship it", description: "Do the work", acceptance: ["Done"], context: { architecture: "", constraints: [], dependencies: [], risks: [] } }]);
+    expect(buildState.data.workItems).toEqual([{ title: "Ship it", context: "Do the work. Done." }]);
     expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(2);
 
     await flushDeferredDispatch();
@@ -580,7 +554,7 @@ describe("native multi-turn runtime", () => {
     expect(events.find((event) => event.type === "socket_complete" && event.data.socket === "Socket-3")?.data).toMatchObject({ parsed: true, finalizedRefinement: true });
     expect(advancementStages(events)).toEqual(expect.arrayContaining(["dispatch_scheduling", "deferred_dispatch_execution", "dispatch_execution_exit"]));
     expect(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.md"), "utf8")).toBe(finalPlan);
-    expect(JSON.parse(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.json"), "utf8"))).toMatchObject({ summary: "Plan", satisfied: true });
+    expect(JSON.parse(await readFile(path.join(buildState.runDir, "sockets", "Socket-3", "1.json"), "utf8"))).toMatchObject({ context: "Plan", satisfied: true });
   });
 
   test("loadout switching changes multi-turn behavior only by selecting multi-turn materia", async () => {
