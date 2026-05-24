@@ -101,6 +101,12 @@ A socket can assign that payload into cast state:
 }
 ```
 
+## Follow-up/rework context
+
+`satisfied:false` is a graph-control result, not an evaluator-only rejection field. If runtime selects a `not_satisfied` edge from that result, it captures bounded route provenance and reason text from this canonical handoff output and renders it into the next matching socket prompt as runtime-owned follow-up context.
+
+Agents should keep using only `workItems`, `satisfied`, and `context`. Put actionable follow-up reasons in top-level `context`; do not invent additional handoff fields such as `feedback`, `reason`, `failure`, or `rework`, and do not put rework messages into utility state patches. See [Socket rework context semantics](socket-rework-context.md).
+
 ## Evaluator example
 
 ```json

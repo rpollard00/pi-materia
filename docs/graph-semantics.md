@@ -20,6 +20,8 @@ Supported `when` values:
 
 Edges are evaluated in order and the first matching edge wins. Put guarded edges before any `always` edge.
 
+`not_satisfied` is generic graph control meaning the current item needs follow-up at the selected target. It is not evaluator-only terminology. When a `satisfied:false` result selects a `not_satisfied` edge, runtime captures bounded source/reason provenance and renders it into the next matching prompt as follow-up/rework context; agents still emit only canonical handoff fields. See [Socket rework context semantics](socket-rework-context.md).
+
 ## Output parsing and control fields
 
 `parse` is the persisted output parsing field for loadout sockets. Use `parse: "json"` for sockets whose output feeds `assign`, `advance`, or guarded routing. Use `parse: "text"` or omit `parse` only for plain-text outputs.

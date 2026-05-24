@@ -76,3 +76,7 @@ This audit traces the current `satisfied:false` / `not_satisfied` path from sock
 The original concern is valid. The current system can show why a default Auto-Eval rejected work, but it is not a generic runtime guarantee of rework awareness. The default `Socket-5` Auto-Eval assignment path (`lastFeedback <- $.context`) is an important existing source and should be preserved, but it does not replace a runtime-owned `not_satisfied` provenance mechanism.
 
 A robust fix should preserve the canonical agent handoff contract and add bounded runtime-rendered follow-up context at the routing/prompt layer: when a `satisfied:false` result selects a follow-up edge, capture source socket/materia, edge condition/target, and concise reason text from the prior socket's `context`/output, then render that as generic follow-up context in the next prompt. This should not add agent-authored fields beyond `workItems`, `satisfied`, and `context`, should not mutate the work item schema, and should not use `state.data.context` as an implicit mailbox.
+
+## Post-audit note
+
+The runtime-owned follow-up context mechanism described in the conclusion has since been implemented. Current authoring semantics are documented in [Socket rework context semantics](socket-rework-context.md).
