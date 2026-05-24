@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { addQuest as postQuest, getQuests, reorderQuest as postReorderQuest, requeueQuest as postRequeueQuest, updateQuest as patchQuest } from '../../api/index.js';
-import type { AddQuestRequest, AddQuestResponse, QuestBoardResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest, RequeueQuestRequest, UpdateQuestRequest, UpdateQuestResponse } from '../../types.js';
+import { addQuest as postQuest, getQuests, reorderQuest as postReorderQuest, requeueQuest as postRequeueQuest, runQuest as postRunQuest, runQuestOnce as postRunQuestOnce, stopQuestRunner as postStopQuestRunner, updateQuest as patchQuest } from '../../api/index.js';
+import type { AddQuestRequest, AddQuestResponse, QuestBoardResponse, QuestControlAction, QuestControlRequest, QuestControlResponse, QuestCounts, QuestRunnerState, QuestStatus, QuestSummary, ReorderQuestRequest, RequeueQuestRequest, UpdateQuestRequest, UpdateQuestResponse } from '../../types.js';
 
 export const QUEST_BOARD_POLL_INTERVAL_MS = 5000;
 
@@ -165,6 +165,8 @@ export function useQuestBoard() {
   const [reorderSubmitting, setReorderSubmitting] = useState(false);
   const [requeueSubmitting, setRequeueSubmitting] = useState(false);
   const [updateSubmitting, setUpdateSubmitting] = useState(false);
+  const [controlSubmitting, setControlSubmitting] = useState(false);
+  const [controlAction, setControlAction] = useState<QuestControlAction>();
   const [error, setError] = useState<string>();
   const mountedRef = useRef(false);
   const refreshSeqRef = useRef(0);
@@ -172,6 +174,7 @@ export function useQuestBoard() {
   const reorderSeqRef = useRef(0);
   const requeueSeqRef = useRef(0);
   const updateSeqRef = useRef(0);
+  const controlSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const seq = ++refreshSeqRef.current;
@@ -286,6 +289,39 @@ export function useQuestBoard() {
     }
   }, []);
 
+  const applyControlResult = useCallback(async (action: QuestControlAction, request: () => Promise<{ response: Response; body: QuestControlResponse }>): Promise<QuestControlResponse | undefined> => {
+    const controlSeq = ++controlSeqRef.current;
+    setControlAction(action);
+    setControlSubmitting(true);
+    try {
+      const result = await request();
+      if (!mountedRef.current || controlSeq !== controlSeqRef.current) return undefined;
+      if (!result.response.ok || result.body.ok !== true) throw new Error(responseError(result.body, `Quest ${action} failed with HTTP ${result.response.status}`));
+      const normalizedBoard = normalizeQuestBoardResponse(result.body.board);
+      if (!normalizedBoard) throw new Error(responseError(result.body, `Quest ${action} response was not usable.`));
+      ++refreshSeqRef.current;
+      setBoard(normalizedBoard);
+      setLoading(false);
+      setError(undefined);
+      await refresh();
+      return result.body;
+    } catch (caught) {
+      if (mountedRef.current && controlSeq === controlSeqRef.current) setError(caught instanceof Error ? caught.message : String(caught));
+      return undefined;
+    } finally {
+      if (mountedRef.current && controlSeq === controlSeqRef.current) {
+        setControlSubmitting(false);
+        setControlAction(undefined);
+      }
+    }
+  }, [refresh]);
+
+  const runQuest = useCallback((payload: QuestControlRequest = {}) => applyControlResult('run', () => postRunQuest(payload)), [applyControlResult]);
+
+  const runQuestOnce = useCallback((payload: QuestControlRequest = {}) => applyControlResult('runonce', () => postRunQuestOnce(payload)), [applyControlResult]);
+
+  const stopQuestRunner = useCallback(() => applyControlResult('stop', () => postStopQuestRunner()), [applyControlResult]);
+
   useEffect(() => {
     mountedRef.current = true;
     void refresh();
@@ -293,9 +329,10 @@ export function useQuestBoard() {
     return () => {
       mountedRef.current = false;
       refreshSeqRef.current += 1;
+      controlSeqRef.current += 1;
       window.clearInterval(interval);
     };
   }, [refresh]);
 
-  return { board, loading, error, refresh, add, submitting, update, updateSubmitting, reorder, reorderSubmitting, requeue, requeueSubmitting };
+  return { board, loading, error, refresh, add, submitting, update, updateSubmitting, reorder, reorderSubmitting, requeue, requeueSubmitting, runQuest, runQuestOnce, stopQuestRunner, controlSubmitting, controlAction };
 }

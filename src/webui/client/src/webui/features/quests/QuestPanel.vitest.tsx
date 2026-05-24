@@ -65,6 +65,11 @@ function renderPanel(overrides: Partial<ReturnType<typeof useQuestBoard>> = {}) 
     reorderSubmitting: false,
     requeue: vi.fn(),
     requeueSubmitting: false,
+    runQuest: vi.fn(),
+    runQuestOnce: vi.fn(),
+    stopQuestRunner: vi.fn(),
+    controlSubmitting: false,
+    controlAction: undefined,
     ...overrides,
   });
 

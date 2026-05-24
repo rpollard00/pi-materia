@@ -280,6 +280,32 @@ export interface RequeueQuestRequest {
   questId: string;
 }
 
+export type QuestControlAction = 'run' | 'runonce' | 'stop';
+export type QuestNoStartReason = 'runner_stopped' | 'active_cast' | 'running_quest' | 'waiting' | 'not_found' | 'safety_limit' | 'unavailable';
+
+export interface QuestControlRequest {
+  questId?: string;
+}
+
+export interface QuestControlStartedSummary {
+  quest: QuestSummary;
+  castId: string;
+  currentSocketId?: string;
+  artifactRoot?: string;
+  runDir?: string;
+}
+
+export interface QuestControlResponse {
+  ok?: boolean;
+  action?: QuestControlAction;
+  board?: QuestBoardResponse;
+  message?: string;
+  reason?: QuestNoStartReason;
+  started?: QuestControlStartedSummary;
+  error?: string | { code?: string; message?: string };
+  code?: string;
+}
+
 export interface MonitorSnapshot {
   ok?: boolean;
   sessionKey?: string;

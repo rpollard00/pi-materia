@@ -9,6 +9,8 @@ import type {
   ModelCatalogResponse,
   MonitorSnapshot,
   QuestBoardResponse,
+  QuestControlRequest,
+  QuestControlResponse,
   QuestDefaultLoadoutResponse,
   ReorderQuestRequest,
   RequeueQuestRequest,
@@ -116,6 +118,30 @@ export async function requeueQuest(payload: RequeueQuestRequest): Promise<ApiRes
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function runQuest(payload: QuestControlRequest = {}): Promise<ApiResponse<QuestControlResponse>> {
+  return fetchJson<QuestControlResponse>('/api/quests/run', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function runQuestOnce(payload: QuestControlRequest = {}): Promise<ApiResponse<QuestControlResponse>> {
+  return fetchJson<QuestControlResponse>('/api/quests/runonce', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function stopQuestRunner(): Promise<ApiResponse<QuestControlResponse>> {
+  return fetchJson<QuestControlResponse>('/api/quests/stop', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
   });
 }
 
