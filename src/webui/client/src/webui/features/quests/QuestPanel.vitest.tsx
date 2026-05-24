@@ -92,6 +92,52 @@ afterEach(() => {
   mockedUseQuestBoard.mockReset();
 });
 
+describe('QuestPanel runner controls', () => {
+  test('shows banner controls above counts and disables actions from board state', () => {
+    renderPanel({
+      board: {
+        ...board,
+        runner: { enabled: false },
+        counts: { total: 1, pending: 0, running: 0, succeeded: 1, failed: 0, blocked: 0, completed: 1, terminal: 1 },
+        pendingQuests: [],
+        quests: [completedQuest],
+      },
+    });
+
+    expect(screen.getByRole('button', { name: 'Run quests continuously' })).not.toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Run one pending quest' })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Stop quest auto-advance' })).toHaveProperty('disabled', true);
+    const counts = screen.getByLabelText('Quest counts');
+    expect(counts.textContent).toContain('0 active');
+    expect(counts.textContent).toContain('0 pending');
+    expect(counts.textContent).toContain('1 complete');
+  });
+
+  test('wires run, run once, and stop controls with in-flight labels and feedback', async () => {
+    const runQuest = vi.fn(async () => ({ ok: true as const, action: 'run' as const, message: 'Runner started.', board }));
+    const runQuestOnce = vi.fn(async () => ({ ok: true as const, action: 'runonce' as const, message: 'Started one quest.', board }));
+    const stopQuestRunner = vi.fn(async () => ({ ok: true as const, action: 'stop' as const, message: 'Runner stopped.', board }));
+    renderPanel({ runQuest, runQuestOnce, stopQuestRunner, board: { ...board, runner: { enabled: true } } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run quests continuously' }));
+    await waitFor(() => expect(runQuest).toHaveBeenCalledWith({ questId: 'quest-pending' }));
+    expect(screen.getByText('Runner started.')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run one pending quest' }));
+    await waitFor(() => expect(runQuestOnce).toHaveBeenCalledWith({ questId: 'quest-pending' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop quest auto-advance' }));
+    await waitFor(() => expect(stopQuestRunner).toHaveBeenCalled());
+  });
+
+  test('renders active control action text and hook errors', () => {
+    renderPanel({ controlSubmitting: true, controlAction: 'runonce', error: 'Quest runner control API is unavailable for this server.' });
+
+    expect(screen.getByRole('button', { name: 'Run one pending quest' }).textContent).toContain('Starting…');
+    expect(screen.getAllByText('Quest runner control API is unavailable for this server.')).toHaveLength(2);
+  });
+});
+
 describe('QuestPanel editing flow', () => {
   test('switches from create to edit mode from the pending card menu, prefills values, saves, and returns to create mode', async () => {
     const { update } = renderPanel();

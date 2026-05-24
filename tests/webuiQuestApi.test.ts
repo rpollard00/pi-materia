@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { QUEST_BOARD_SCHEMA_VERSION, addQuest, createQuestBoard, movePendingQuest, requeueQuest, updatePendingQuest, type QuestBoard, type QuestRunResult } from "../src/domain/questBoard.js";
 import { issuesToMessage } from "../src/domain/result.js";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult } from "../src/webui/server/index.js";
+import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult } from "../src/webui/server/index.js";
 
 type StartedServer = ReturnType<typeof createMateriaWebUiServer>["server"];
 
@@ -38,7 +38,11 @@ async function startTestServer(options: {
   updateQuest?: (input: MateriaUpdateQuestInput) => Promise<MateriaUpdateQuestResult>;
   reorderQuest?: (input: MateriaReorderQuestInput) => Promise<MateriaReorderQuestResult>;
   requeueQuest?: (input: MateriaRequeueQuestInput) => Promise<MateriaRequeueQuestResult>;
+  runQuest?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+  runQuestOnce?: (input: MateriaQuestControlInput) => Promise<MateriaQuestControlResult>;
+  stopQuestRunner?: () => Promise<MateriaQuestControlResult>;
   includeRequeueQuest?: boolean;
+  includeQuestControls?: boolean;
   getQuestBoardThrows?: boolean;
 } = {}) {
   const projectDir = await mkdtemp(path.join(tmpdir(), "pi-materia-webui-quests-"));
@@ -57,6 +61,34 @@ async function startTestServer(options: {
         if (options.getQuestBoardThrows) throw new Error("quest board read failed");
         return { boardPath, board };
       },
+      ...(options.includeQuestControls === false ? {} : {
+        runQuest: options.runQuest ?? (async (input) => {
+          const active = board.quests.find((quest) => quest.status === "running");
+          if (active) return { ok: false, code: "active_quest_conflict", message: `Quest '${active.id}' is already running.` };
+          const quest = input.questId ? board.quests.find((candidate) => candidate.id === input.questId) : board.quests.find((candidate) => candidate.status === "pending");
+          if (!quest) return { ok: true, boardPath, board: { ...board, runner: { ...board.runner, enabled: true } }, action: "run", reason: "not_found", message: "No pending quest is available to start." };
+          if (quest.status !== "pending") return { ok: false, code: "validation_failed", message: `quest.status: quest '${quest.id}' is ${quest.status}, not pending` };
+          quest.status = "running";
+          quest.currentCastId = "cast-started";
+          board.runner = { enabled: true, activeQuestId: quest.id, lastStartedAt: "2026-05-19T20:03:00.000Z" };
+          return { ok: true, boardPath, board, action: "run", started: { quest, castId: "cast-started", currentSocketId: "Socket-1" }, message: `Started quest ${quest.id}.` };
+        }),
+        runQuestOnce: options.runQuestOnce ?? (async (input) => {
+          const active = board.quests.find((quest) => quest.status === "running");
+          if (active) return { ok: false, code: "active_cast_conflict", message: "A cast is already active." };
+          const quest = input.questId ? board.quests.find((candidate) => candidate.id === input.questId) : board.quests.find((candidate) => candidate.status === "pending");
+          if (!quest) return { ok: true, boardPath, board, action: "runonce", reason: "not_found", message: "No pending quest is available to start." };
+          if (quest.status !== "pending") return { ok: false, code: "validation_failed", message: `quest.status: quest '${quest.id}' is ${quest.status}, not pending` };
+          quest.status = "running";
+          quest.currentCastId = "cast-once";
+          board.runner = { enabled: false, activeQuestId: quest.id, lastStartedAt: "2026-05-19T20:04:00.000Z" };
+          return { ok: true, boardPath, board, action: "runonce", started: { quest, castId: "cast-once" }, message: `Started one quest ${quest.id}.` };
+        }),
+        stopQuestRunner: options.stopQuestRunner ?? (async () => {
+          board.runner = { ...board.runner, enabled: false, lastStoppedAt: "2026-05-19T20:05:00.000Z" };
+          return { ok: true, boardPath, board, action: "stop", reason: "runner_stopped", message: "Quest runner stopped." };
+        }),
+      }),
       addQuest: options.addQuest ?? (async (input) => {
         if (input.loadoutOverride && input.loadoutOverride !== "Full-Auto") return { ok: false, code: "invalid_loadout", message: `Unknown Materia loadout \"${input.loadoutOverride}\".` };
         const result = addQuest(board, { id: "quest-created", title: input.prompt, prompt: input.prompt, now: "2026-05-19T20:00:00.000Z", ...(input.loadoutOverride ? { loadoutOverride: input.loadoutOverride } : {}) });
@@ -174,6 +206,124 @@ describe("GET /api/quests", () => {
 
     expect(response.status).toBe(500);
     expect(body).toEqual({ ok: false, error: "quest board read failed" });
+  });
+});
+
+describe("POST /api/quests/run, /runonce, and /stop", () => {
+  test("runs the next pending quest continuously and returns started metadata plus canonical board", async () => {
+    const board = createQuestBoard({ now: NOW });
+    const added = addQuest(board, { id: "quest-pending", title: "Scout ruins", prompt: "Scout ruins", now: NOW });
+    if (!added.ok) throw new Error("fixture failed");
+    const baseUrl = await startTestServer({ board: added.value });
+
+    const response = await fetch(`${baseUrl}/api/quests/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.action).toBe("run");
+    expect(body.started).toMatchObject({ castId: "cast-started", currentSocketId: "Socket-1", quest: { id: "quest-pending", status: "running" } });
+    expect(body.board.runner).toMatchObject({ enabled: true, activeQuestId: "quest-pending" });
+    expect(body.board.runningQuest.id).toBe("quest-pending");
+  });
+
+  test("runs a requested quest once without enabling continuous mode", async () => {
+    const board = createQuestBoard({ now: NOW });
+    const first = addQuest(board, { id: "quest-first", title: "First", prompt: "First", now: NOW });
+    if (!first.ok) throw new Error("fixture failed");
+    const second = addQuest(first.value, { id: "quest-second", title: "Second", prompt: "Second", now: NOW });
+    if (!second.ok) throw new Error("fixture failed");
+    const baseUrl = await startTestServer({ board: second.value });
+
+    const response = await fetch(`${baseUrl}/api/quests/runonce`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: " quest-second " }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.action).toBe("runonce");
+    expect(body.started).toMatchObject({ castId: "cast-once", quest: { id: "quest-second", status: "running" } });
+    expect(body.board.runner).toMatchObject({ enabled: false, activeQuestId: "quest-second" });
+    expect(body.board.pendingQuests.map((quest: { id: string }) => quest.id)).toEqual(["quest-first"]);
+  });
+
+  test("stops future auto-advance without aborting the active quest", async () => {
+    const baseUrl = await startTestServer();
+
+    const response = await fetch(`${baseUrl}/api/quests/stop`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, action: "stop", reason: "runner_stopped", message: "Quest runner stopped." });
+    expect(body.board.runner).toMatchObject({ enabled: false, activeQuestId: "quest-active" });
+    expect(body.board.runningQuest.id).toBe("quest-active");
+  });
+
+  test("returns a no-start message when no pending quest is available", async () => {
+    const baseUrl = await startTestServer({ board: createQuestBoard({ now: NOW }) });
+
+    const response = await fetch(`${baseUrl}/api/quests/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-missing" }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.started).toBeUndefined();
+    expect(body).toMatchObject({ ok: true, action: "run", reason: "not_found", message: "No pending quest is available to start." });
+    expect(body.board.runner.enabled).toBe(true);
+  });
+
+  test("surfaces missing quest, active conflict, and unavailable callbacks as stable error envelopes", async () => {
+    const missingBase = await startTestServer({ board: createQuestBoard({ now: NOW }), runQuest: async () => ({ ok: false, code: "validation_failed", message: "questId: quest 'quest-missing' does not exist" }) });
+    const conflictBase = await startTestServer();
+    const unavailableBase = await startTestServer({ includeQuestControls: false });
+
+    const missing = await fetch(`${missingBase}/api/quests/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-missing" }) });
+    const conflict = await fetch(`${conflictBase}/api/quests/runonce`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+    const unavailable = await fetch(`${unavailableBase}/api/quests/stop`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toEqual({ ok: false, code: "validation_failed", error: "questId: quest 'quest-missing' does not exist" });
+    expect(conflict.status).toBe(400);
+    expect(await conflict.json()).toEqual({ ok: false, code: "active_cast_conflict", error: "A cast is already active." });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({ ok: false, error: "Quest runner control API is unavailable for this server." });
+  });
+
+  test("validates control request method and body before invoking callbacks", async () => {
+    let called = false;
+    const baseUrl = await startTestServer({ runQuest: async () => { called = true; return { ok: false, code: "unavailable", message: "should not be called" }; } });
+
+    const invalidJson = await fetch(`${baseUrl}/api/quests/run`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+    const arrayBody = await fetch(`${baseUrl}/api/quests/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify([]) });
+    const extraKey = await fetch(`${baseUrl}/api/quests/runonce`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-1", force: true }) });
+    const blankQuestId = await fetch(`${baseUrl}/api/quests/run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "   " }) });
+    const stopWithBody = await fetch(`${baseUrl}/api/quests/stop`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ questId: "quest-pending-1" }) });
+    const getRun = await fetch(`${baseUrl}/api/quests/run`);
+
+    expect(invalidJson.status).toBe(400);
+    expect((await invalidJson.json()).ok).toBe(false);
+    expect(arrayBody.status).toBe(400);
+    expect(await arrayBody.json()).toEqual({ ok: false, error: "Expected JSON object body." });
+    expect(extraKey.status).toBe(400);
+    expect(await extraKey.json()).toEqual({ ok: false, error: "Only questId is accepted." });
+    expect(blankQuestId.status).toBe(400);
+    expect(await blankQuestId.json()).toEqual({ ok: false, error: "questId must be a non-empty string." });
+    expect(stopWithBody.status).toBe(400);
+    expect(await stopWithBody.json()).toEqual({ ok: false, error: "Stop does not accept a request body." });
+    expect(getRun.status).toBe(405);
+    expect(await getRun.json()).toEqual({ ok: false, error: "Use POST to run quests." });
+    expect(called).toBe(false);
+  });
+
+  test("keeps control route names ahead of generic quest id handlers", async () => {
+    let updateCalled = false;
+    const baseUrl = await startTestServer({
+      includeQuestControls: false,
+      updateQuest: async () => { updateCalled = true; return { ok: false, code: "validation_failed", message: "generic handler called" }; },
+    });
+
+    const response = await fetch(`${baseUrl}/api/quests/run`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "Should not edit" }) });
+
+    expect(response.status).toBe(405);
+    expect(await response.json()).toEqual({ ok: false, error: "Use POST to run quests." });
+    expect(updateCalled).toBe(false);
   });
 });
 

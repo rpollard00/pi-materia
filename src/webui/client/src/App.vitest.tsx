@@ -168,12 +168,12 @@ function questSummary(overrides: Partial<QuestSummary> & Pick<QuestSummary, 'id'
   };
 }
 
-function questBoardResponse(quests: QuestSummary[]): QuestBoardResponse {
+function questBoardResponse(quests: QuestSummary[], runnerEnabled = true): QuestBoardResponse {
   const runningQuest = quests.find((quest) => quest.status === 'running');
   return {
     ok: true,
     boardPath: '/tmp/project/.pi/pi-materia/quest-board.json',
-    runner: { enabled: true, ...(runningQuest ? { activeQuestId: runningQuest.id } : {}) },
+    runner: { enabled: runnerEnabled, ...(runningQuest ? { activeQuestId: runningQuest.id } : {}) },
     activeQuest: runningQuest,
     runningQuest,
     pendingQuests: quests.filter((quest) => quest.status === 'pending'),
@@ -196,6 +196,7 @@ function questBoardResponse(quests: QuestSummary[]): QuestBoardResponse {
 
 function createQuestFetchMock(initialQuests: QuestSummary[], config: typeof testConfig = testConfig, initialQuestDefaultLoadoutId: string | null = null) {
   let quests = [...initialQuests];
+  let runnerEnabled = !quests.some((quest) => quest.status === 'running');
   let questDefaultLoadoutId = initialQuestDefaultLoadoutId;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (input === '/api/config') return new Response(JSON.stringify({ ok: true, source: 'test', config, questDefaultLoadoutId }));
@@ -204,13 +205,37 @@ function createQuestFetchMock(initialQuests: QuestSummary[], config: typeof test
       questDefaultLoadoutId = body.name;
       return new Response(JSON.stringify({ ok: true, questDefaultLoadoutId, message: questDefaultLoadoutId ? `Quest default loadout set to ${questDefaultLoadoutId}.` : 'Quest default loadout cleared.' }));
     }
+    if (input === '/api/quests/run' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body || '{}')) as { questId?: string };
+      runnerEnabled = true;
+      const activeQuest = quests.find((quest) => quest.status === 'running');
+      const selected = body.questId ? quests.find((quest) => quest.id === body.questId) : quests.find((quest) => quest.status === 'pending');
+      if (activeQuest || !selected || selected.status !== 'pending') return new Response(JSON.stringify({ ok: true, action: 'run', message: activeQuest ? 'A quest is already running.' : 'No pending quest is available to start.', reason: activeQuest ? 'running_quest' : 'not_found', board: questBoardResponse(quests, runnerEnabled) }));
+      const started = { ...selected, status: 'running' as const, currentCastId: 'cast-started' };
+      quests = quests.map((quest) => quest.id === started.id ? started : quest);
+      return new Response(JSON.stringify({ ok: true, action: 'run', message: `Started quest: ${started.title}`, started: { quest: started, castId: 'cast-started' }, board: questBoardResponse(quests, runnerEnabled) }));
+    }
+    if (input === '/api/quests/runonce' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body || '{}')) as { questId?: string };
+      runnerEnabled = false;
+      const activeQuest = quests.find((quest) => quest.status === 'running');
+      const selected = body.questId ? quests.find((quest) => quest.id === body.questId) : quests.find((quest) => quest.status === 'pending');
+      if (activeQuest || !selected || selected.status !== 'pending') return new Response(JSON.stringify({ ok: true, action: 'runonce', message: activeQuest ? 'A quest is already running.' : 'No pending quest is available to start.', reason: activeQuest ? 'running_quest' : 'not_found', board: questBoardResponse(quests, runnerEnabled) }));
+      const started = { ...selected, status: 'running' as const, currentCastId: 'cast-once' };
+      quests = quests.map((quest) => quest.id === started.id ? started : quest);
+      return new Response(JSON.stringify({ ok: true, action: 'runonce', message: `Started quest: ${started.title}`, started: { quest: started, castId: 'cast-once' }, board: questBoardResponse(quests, runnerEnabled) }));
+    }
+    if (input === '/api/quests/stop' && init?.method === 'POST') {
+      runnerEnabled = false;
+      return new Response(JSON.stringify({ ok: true, action: 'stop', message: 'Quest runner stopped.', reason: 'runner_stopped', board: questBoardResponse(quests, runnerEnabled) }));
+    }
     if (input === '/api/quests' && init?.method === 'POST') {
       const body = JSON.parse(String(init.body));
       const created = questSummary({ id: 'quest-added', title: body.prompt, prompt: body.prompt, promptPreview: body.prompt, status: 'pending', loadoutOverride: body.loadoutOverride });
       quests = [...quests, created];
-      return new Response(JSON.stringify({ ok: true, quest: created, board: questBoardResponse(quests) }));
+      return new Response(JSON.stringify({ ok: true, quest: created, board: questBoardResponse(quests, runnerEnabled) }));
     }
-    if (input === '/api/quests') return new Response(JSON.stringify(questBoardResponse(quests)));
+    if (input === '/api/quests') return new Response(JSON.stringify(questBoardResponse(quests, runnerEnabled)));
     return new Response(JSON.stringify({ ok: true }));
   });
 }
@@ -291,6 +316,57 @@ describe('Materia quests pane', () => {
       body: JSON.stringify({ name: null }),
     })));
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active' || call[0] === '/api/loadout/default')).toHaveLength(0);
+  });
+
+  it('runs and stops quests through banner controls', async () => {
+    const fetchMock = createQuestFetchMock([
+      questSummary({ id: 'quest-pending-1', title: 'Gather moon herbs', status: 'pending' }),
+      questSummary({ id: 'quest-pending-2', title: 'Forge silver key', status: 'pending' }),
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Run quests continuously' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/quests/run', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({}),
+    })));
+    await waitFor(() => expect(screen.getAllByText('Started quest: Gather moon herbs').length).toBeGreaterThan(0));
+    await waitFor(() => expect(document.querySelector('[data-toast-variant="success"]')?.textContent).toContain('Started quest'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop quest auto-advance' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/quests/stop', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({}),
+    })));
+  });
+
+  it('sends run-once payloads for a selected pending quest and shows control failures', async () => {
+    const fetchMock = createQuestFetchMock([
+      questSummary({ id: 'quest-pending-1', title: 'Gather moon herbs', status: 'pending' }),
+    ]);
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig })));
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify(questBoardResponse([
+      questSummary({ id: 'quest-pending-1', title: 'Gather moon herbs', status: 'pending' }),
+    ]))));
+    fetchMock.mockImplementationOnce(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/quests/runonce') return new Response(JSON.stringify({ ok: false, error: 'A cast is already active.' }), { status: 400 });
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+    fireEvent.click(await screen.findByRole('button', { name: 'Pending quest: quest-pending-1: Gather moon herbs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Run one pending quest' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/quests/runonce', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ questId: 'quest-pending-1' }),
+    })));
+    expect(await screen.findByText('A cast is already active.')).toBeTruthy();
   });
 
   it('submits the add quest form and refreshes the quest log without changing quest default loadout', async () => {
