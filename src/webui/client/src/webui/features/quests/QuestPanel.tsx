@@ -4,6 +4,7 @@ import type { QuestSummary } from '../../types.js';
 import { QuestCreateForm, QuestEditForm, type QuestDefaultLoadoutProps } from './QuestCreateForm.js';
 import { QuestDetail } from './QuestDetail.js';
 import { QuestLogSidebar } from './QuestLogSidebar.js';
+import { toast } from '../../../toast/index.js';
 import { useQuestBoard } from './useQuestBoard.js';
 
 const activeStatuses = new Set(['running']);
@@ -27,9 +28,29 @@ interface QuestPanelProps extends QuestDefaultLoadoutProps {
 }
 
 export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout }: QuestPanelProps) {
-  const { board, loading, error, refresh, add, submitting, update, updateSubmitting, reorder, reorderSubmitting, requeue, requeueSubmitting } = useQuestBoard();
+  const {
+    board,
+    loading,
+    error,
+    refresh,
+    add,
+    submitting,
+    update,
+    updateSubmitting,
+    reorder,
+    reorderSubmitting,
+    requeue,
+    requeueSubmitting,
+    runQuest,
+    runQuestOnce,
+    stopQuestRunner,
+    controlSubmitting,
+    controlAction,
+  } = useQuestBoard();
   const [selectedQuestId, setSelectedQuestId] = useState<string>();
   const [editingQuestId, setEditingQuestId] = useState<string>();
+  const [controlStatusMessage, setControlStatusMessage] = useState('');
+  const [controlErrorMessage, setControlErrorMessage] = useState('');
 
   const grouped = useMemo(() => {
     const allQuests = board?.quests ?? [];
@@ -62,6 +83,13 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
   const selectedQuest = selectableQuests.find((quest) => quest.id === selectedQuestId);
   const editingQuest = grouped.pendingQuests.find((quest) => quest.id === editingQuestId);
   const selectedPendingQuest = selectedQuest?.status === 'pending' ? selectedQuest : undefined;
+  const activeQuestId = grouped.activeQuest?.id ?? board?.runner?.activeQuestId ?? board?.status?.activeQuestId;
+  const hasActiveQuestOrCast = Boolean(activeQuestId);
+  const hasPendingLaunchableQuest = grouped.pendingQuests.length > 0;
+  const runnerKnownStopped = board?.runner ? !board.runner.enabled : false;
+  const runDisabled = controlSubmitting;
+  const runOnceDisabled = controlSubmitting || hasActiveQuestOrCast || !hasPendingLaunchableQuest;
+  const stopDisabled = controlSubmitting || runnerKnownStopped;
 
   useEffect(() => {
     if (!editingQuestId) return;
@@ -76,6 +104,52 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
     setEditingQuestId(questId);
   }
 
+  function controlSuccessDescription(responseMessage: string | undefined, fallback: string) {
+    return responseMessage?.trim() || fallback;
+  }
+
+  async function handleRunQuest() {
+    if (runDisabled) return;
+    setControlStatusMessage('');
+    setControlErrorMessage('');
+    const response = await runQuest(selectedPendingQuest ? { questId: selectedPendingQuest.id } : {});
+    if (!response?.ok) {
+      setControlErrorMessage('Could not start the quest runner.');
+      return;
+    }
+    const description = controlSuccessDescription(response.message, response.started ? `Started ${response.started.quest.title}.` : 'Continuous quest runner enabled.');
+    setControlStatusMessage(description);
+    toast({ id: 'quest-control-run-success', title: 'Quest runner started', description, variant: 'success' });
+  }
+
+  async function handleRunQuestOnce() {
+    if (runOnceDisabled) return;
+    setControlStatusMessage('');
+    setControlErrorMessage('');
+    const response = await runQuestOnce(selectedPendingQuest ? { questId: selectedPendingQuest.id } : {});
+    if (!response?.ok) {
+      setControlErrorMessage('Could not run a quest once.');
+      return;
+    }
+    const description = controlSuccessDescription(response.message, response.started ? `Started ${response.started.quest.title}.` : 'No pending quest was started.');
+    setControlStatusMessage(description);
+    toast({ id: 'quest-control-runonce-success', title: 'Quest run started', description, variant: 'success' });
+  }
+
+  async function handleStopQuestRunner() {
+    if (stopDisabled) return;
+    setControlStatusMessage('');
+    setControlErrorMessage('');
+    const response = await stopQuestRunner();
+    if (!response?.ok) {
+      setControlErrorMessage('Could not stop quest auto-advance.');
+      return;
+    }
+    const description = controlSuccessDescription(response.message, 'Quest auto-advance stopped. Active casts will continue.');
+    setControlStatusMessage(description);
+    toast({ id: 'quest-control-stop-success', title: 'Quest runner stopped', description, variant: 'success' });
+  }
+
   return (
     <section className="quest-workspace" aria-labelledby="quests-panel-title">
       <div className="quest-workspace-banner fantasy-panel">
@@ -84,15 +158,31 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
           <h2 id="quests-panel-title">Quests</h2>
           <p>Track the active adventure, pending work, and completed victories from the project quest board.</p>
         </div>
-        <div className="quest-counts" aria-label="Quest counts">
-          <span><strong>{grouped.activeQuest ? 1 : 0}</strong> active</span>
-          <span><strong>{grouped.pendingQuests.length}</strong> pending</span>
-          <span><strong>{grouped.completedQuests.length}</strong> complete</span>
-          {selectedPendingQuest ? (
-            <button className="quest-refresh-button" type="button" onClick={() => editQuest(selectedPendingQuest.id)} disabled={updateSubmitting}>
-              Edit selected quest
+        <div className="quest-banner-actions">
+          <div className="quest-runner-controls" aria-label="Quest runner controls">
+            <button className="quest-runner-button quest-runner-button-primary" type="button" onClick={() => { void handleRunQuest(); }} disabled={runDisabled} aria-label="Run quests continuously">
+              {controlSubmitting && controlAction === 'run' ? 'Running…' : 'Run'}
             </button>
-          ) : null}
+            <button className="quest-runner-button" type="button" onClick={() => { void handleRunQuestOnce(); }} disabled={runOnceDisabled} aria-label="Run one pending quest">
+              {controlSubmitting && controlAction === 'runonce' ? 'Starting…' : 'Run once'}
+            </button>
+            <button className="quest-runner-button quest-runner-button-stop" type="button" onClick={() => { void handleStopQuestRunner(); }} disabled={stopDisabled} aria-label="Stop quest auto-advance">
+              {controlSubmitting && controlAction === 'stop' ? 'Stopping…' : 'Stop'}
+            </button>
+          </div>
+          <div className="quest-control-feedback" aria-live="polite">
+            {controlErrorMessage || error ? <span className="quest-control-feedback-error">{controlErrorMessage || error}</span> : controlStatusMessage ? <span>{controlStatusMessage}</span> : null}
+          </div>
+          <div className="quest-counts" aria-label="Quest counts">
+            <span><strong>{grouped.activeQuest ? 1 : 0}</strong> active</span>
+            <span><strong>{grouped.pendingQuests.length}</strong> pending</span>
+            <span><strong>{grouped.completedQuests.length}</strong> complete</span>
+            {selectedPendingQuest ? (
+              <button className="quest-refresh-button" type="button" onClick={() => editQuest(selectedPendingQuest.id)} disabled={updateSubmitting}>
+                Edit selected quest
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
