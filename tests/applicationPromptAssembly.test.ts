@@ -131,6 +131,55 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Tests failed: expected inspect output to include socket provenance.");
   });
 
+  test("rebuild prompts in build/eval rework loops include actionable feedback for vague items without widening the handoff contract", () => {
+    const buildSocket = agentSocket({
+      id: "Socket-Build",
+      socket: { materia: "Build", parse: "text" },
+      materia: { tools: "readWrite", prompt: "Build-style implementation step for {{ item.title }}.\n{{ item.context }}" },
+    });
+    const workItem = { title: "Validate behavior/inspect", context: "Inspect the behavior and update what is needed." };
+    const buildPrompt = buildSocketPrompt(state(buildSocket, {
+      currentSocketId: "Socket-Build",
+      phase: "Socket-Build",
+      currentItemKey: "WI-vague",
+      currentItemLabel: workItem.title,
+      data: {
+        item: workItem,
+        workItems: [workItem],
+        guidance: {},
+      },
+      reworkFeedback: [{
+        sourceSocketId: "Socket-AutoEval",
+        sourceMateria: "Auto-Eval",
+        sourceMateriaLabel: "Auto-Eval",
+        targetSocketId: "Socket-Build",
+        condition: "not_satisfied",
+        itemKey: "WI-vague",
+        itemLabel: workItem.title,
+        reason: "Tests failed: expected inspect output to include socket provenance after the previous build.",
+        createdAt: 1,
+      }],
+    }), buildSocket);
+
+    expect(buildPrompt).toContain("Runtime follow-up context");
+    expect(buildPrompt).toContain("follow-up/rework for the current item");
+    expect(buildPrompt).toContain("not_satisfied routing");
+    expect(buildPrompt).toContain("Socket-AutoEval Auto-Eval");
+    expect(buildPrompt).toContain("Tests failed: expected inspect output to include socket provenance after the previous build.");
+    expect(buildPrompt).toContain("Title: Validate behavior/inspect");
+
+    const evalSocket = agentSocket({
+      id: "Socket-AutoEval",
+      socket: { materia: "Auto-Eval", parse: "json", edges: [{ when: "satisfied", to: "Socket-Maintain" }, { when: "not_satisfied", to: "Socket-Build" }] },
+      materia: { tools: "readOnly", prompt: "Evaluate the build result." },
+    });
+    const evalPrompt = buildSocketPrompt(state(evalSocket), evalSocket);
+
+    expect(evalPrompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(evalPrompt).not.toContain("reworkFeedback");
+    expect(evalPrompt).not.toContain("lastFeedback");
+  });
+
   test("does not render rework context for unrelated target sockets or items", () => {
     const socket = agentSocket({ id: "Socket-4" });
     const prompt = buildSocketPrompt(state(socket, {
