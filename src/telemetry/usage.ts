@@ -2,12 +2,19 @@ import path from "node:path";
 import { usageBySocket } from "../runtime/castStateAccessors.js";
 import type { MateriaRunState, MateriaModelSelection, UsageCostKind, UsageReport, UsageTotals } from "../types.js";
 
-export function createRunState(runId: string, runDir: string, model: unknown, loadoutName?: string): MateriaRunState {
+export interface RunStateLoadoutIdentity {
+  loadoutId?: string;
+  loadoutName?: string;
+}
+
+export function createRunState(runId: string, runDir: string, model: unknown, loadoutIdentity?: RunStateLoadoutIdentity | string): MateriaRunState {
   const modelInfo = getModelInfo(model);
+  const identity = typeof loadoutIdentity === "string" ? { loadoutName: loadoutIdentity } : loadoutIdentity;
   return {
     runId,
     startedAt: Date.now(),
-    ...(loadoutName ? { loadoutName } : {}),
+    ...(identity?.loadoutId ? { loadoutId: identity.loadoutId } : {}),
+    ...(identity?.loadoutName ? { loadoutName: identity.loadoutName } : {}),
     runDir,
     eventsFile: path.join(runDir, "events.jsonl"),
     usageFile: path.join(runDir, "usage.json"),

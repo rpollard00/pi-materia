@@ -29,7 +29,7 @@ import { appendEvent, appendManifest, initializeRun, recordSocketParsedJson, rec
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
 import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.js";
-import { hashConfig, loadConfigFromState, resolvePersistedCastLoadoutName } from "./configPersistence.js";
+import { castLoadoutIdentity, hashConfig, loadConfigFromState, resolvePersistedCastLoadoutIdentity } from "./configPersistence.js";
 import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, updateToolScope, type ToolScopeRuntimeWarning } from "./agentTurnState.js";
@@ -169,13 +169,14 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   const runDir = path.join(artifactRoot, castId);
 
   const effectivePipeline = getEffectivePipelineConfig(config);
-  const runState = createRunState(castId, runDir, ctx.model, effectivePipeline.loadoutName);
+  const loadoutIdentity = castLoadoutIdentity(config, effectivePipeline.pipeline, effectivePipeline.loadoutName);
+  const runState = createRunState(castId, runDir, ctx.model, loadoutIdentity);
   runState.currentSocketId = pipeline.entry.id;
   runState.currentMateria = socketMateriaName(pipeline.entry);
   runState.lastMessage = pipeline.entry.id;
   await initializeRun(runDir, config, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
   await writeUsage(runState);
-  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, nativeSession: true, isolatedMateriaContext: true, ...(options?.startEventDetails ?? {}) });
+  await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, ...(loadoutIdentity.loadoutId ? { loadoutId: loadoutIdentity.loadoutId } : {}), nativeSession: true, isolatedMateriaContext: true, ...(options?.startEventDetails ?? {}) });
 
   const state: MateriaCastState = {
     version: 2,
@@ -285,7 +286,9 @@ async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   setCurrentSocketState(state, isAgentResolvedSocket(socket) ? "awaiting_agent_response" : "running_utility");
   state.failedReason = undefined;
   state.runState.endedAt = undefined;
-  state.runState.loadoutName ||= await resolvePersistedCastLoadoutName(state);
+  const persistedLoadoutIdentity = await resolvePersistedCastLoadoutIdentity(state);
+  state.runState.loadoutId ||= persistedLoadoutIdentity?.loadoutId;
+  state.runState.loadoutName ||= persistedLoadoutIdentity?.loadoutName;
   state.runState.currentSocketId = socket.id;
   state.runState.currentMateria = socketMateriaName(socket);
   state.runState.lastMessage = `Recasting from socket ${socket.id}.`;

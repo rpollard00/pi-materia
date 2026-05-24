@@ -346,6 +346,8 @@ export interface MateriaRunState {
   startedAt: number;
   /** Canonical terminal timestamp. */
   endedAt?: number;
+  /** Stable loadout id used to execute this cast. */
+  loadoutId?: string;
   /** Active loadout name used to execute this cast. */
   loadoutName?: string;
   runDir: string;

@@ -409,6 +409,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
   const state = loadActiveCastState(ctx);
   const artifactSummary = state?.runDir ? await readArtifactSummary(state.runDir) : undefined;
   const activeLoadoutSnapshot = await readActiveLoadoutSnapshot(ctx.cwd, configuredPath);
+  const activeCastLoadoutIdentity = state ? resolveActiveCastLoadoutIdentity(state) : undefined;
   return {
     ok: true,
     scope: "session",
@@ -427,6 +428,8 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
       castId: state.castId,
       active: state.active,
       phase: state.phase,
+      ...(activeCastLoadoutIdentity?.loadoutId ? { loadoutId: activeCastLoadoutIdentity.loadoutId } : {}),
+      ...(activeCastLoadoutIdentity?.loadoutName ? { loadoutName: activeCastLoadoutIdentity.loadoutName } : {}),
       currentSocketId: state.currentSocketId,
       currentMateria: state.currentMateria,
       socketState: state.socketState,
@@ -437,6 +440,22 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
       updatedAt: state.updatedAt,
     } : undefined,
   };
+}
+
+function resolveActiveCastLoadoutIdentity(state: NonNullable<ReturnType<typeof loadActiveCastState>>): { loadoutId?: string; loadoutName?: string } | undefined {
+  const runState = state.runState;
+  const quest = isRecord(state.data?.quest) ? state.data.quest : undefined;
+  const loadoutId = nonEmptyString(runState.loadoutId) ?? nonEmptyString(quest?.effectiveLoadoutId);
+  const loadoutName = nonEmptyString(runState.loadoutName) ?? nonEmptyString(quest?.effectiveLoadoutName);
+  return loadoutId || loadoutName ? { ...(loadoutId ? { loadoutId } : {}), ...(loadoutName ? { loadoutName } : {}) } : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function readPiToolRegistry(pi?: ExtensionAPI): MateriaToolRegistrySnapshot {

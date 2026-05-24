@@ -48,6 +48,8 @@ export interface MateriaWebUiSessionSnapshot {
     castId: string;
     active: boolean;
     phase: string;
+    loadoutId?: string;
+    loadoutName?: string;
     currentSocketId?: string;
     currentMateria?: string;
     socketState?: string;
