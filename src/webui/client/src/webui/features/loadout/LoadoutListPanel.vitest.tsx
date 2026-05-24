@@ -175,15 +175,15 @@ describe('LoadoutListPanel', () => {
     expect(within(cardFor('Hojo')).queryByLabelText('Runtime active loadout')).toBeNull();
   });
 
-  it('derives selector default and active state from normalized loadout records', () => {
-    const rows = buildLoadoutSelectorViewModels({
-      'Hojo Display': { id: 'user:hojo', entry: 'Socket-1', sockets: {} },
-      Stale: { id: 'user:stale', entry: 'Socket-1', sockets: {} },
-    }, 'user:hojo', 'user:hojo');
+  it('derives selector default, configured active, and running state from normalized loadout records', () => {
+    const rows = (buildLoadoutSelectorViewModels as any)({
+      Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} },
+      'Full-Auto': { id: 'default:full-auto', entry: 'Socket-2', sockets: {} },
+    }, 'user:hojo', 'user:hojo', { loadoutId: 'default:full-auto', loadoutName: 'Full-Auto' });
 
-    expect(rows.map(({ name, isDefault, isRuntimeActive }) => [name, isDefault, isRuntimeActive])).toEqual([
-      ['Hojo Display', true, true],
-      ['Stale', false, false],
+    expect(rows.map(({ name, isDefault, isRuntimeActive, isRunningNow }: any) => [name, isDefault, isRuntimeActive, isRunningNow])).toEqual([
+      ['Hojo', true, true, false],
+      ['Full-Auto', false, false, true],
     ]);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'Hojo')[0]?.isDefault).toBe(false);
     expect(buildLoadoutSelectorViewModels({ Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: {} } }, 'missing')[0]?.isDefault).toBe(false);
@@ -195,6 +195,30 @@ describe('LoadoutListPanel', () => {
     }, 'user:missing-default', 'user:missing-active');
     expect(staleRows[0]?.isDefault).toBe(false);
     expect(staleRows[0]?.isRuntimeActive).toBe(false);
+  });
+
+  it('shows running now on the executing loadout while leaving Hojo selected and configured active', () => {
+    renderPanel({
+      editingLoadoutName: 'Hojo',
+      runtimeActiveLoadoutId: 'user:hojo',
+      defaultLoadoutId: null,
+      loadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-2': { materia: 'Auto-Architect' } } },
+        'Full-Auto': { id: 'default:full-auto', entry: 'Socket-1', sockets: { 'Socket-2': { materia: 'Build' } } },
+      },
+      persistedLoadouts: {
+        Hojo: { id: 'user:hojo', entry: 'Socket-1', sockets: { 'Socket-2': { materia: 'Auto-Architect' } } },
+        'Full-Auto': { id: 'default:full-auto', entry: 'Socket-1', sockets: { 'Socket-2': { materia: 'Build' } } },
+      },
+      loadoutSources: { Hojo: 'user', 'Full-Auto': 'default' },
+      runningLoadoutIdentity: { loadoutId: 'default:full-auto', loadoutName: 'Full-Auto' },
+    } as Partial<ComponentProps<typeof LoadoutListPanel>> & { runningLoadoutIdentity: { loadoutId: string; loadoutName: string } });
+
+    expect(cardFor('Hojo').className).toContain('loadout-card-active');
+    expect(within(cardFor('Hojo')).getByLabelText('Runtime active loadout')).toBeTruthy();
+    expect(within(cardFor('Hojo')).queryByLabelText('Running now')).toBeNull();
+    expect(within(cardFor('Full-Auto')).queryByLabelText('Runtime active loadout')).toBeNull();
+    expect(within(cardFor('Full-Auto')).getByLabelText('Running now')).toBeTruthy();
   });
 
   it('switches the viewed loadout when the selectable row button is clicked', () => {

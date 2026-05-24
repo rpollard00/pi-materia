@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MonitorSnapshot } from '../../types.js';
 import { resolveMonitoringSocketIndicator } from './monitoringSocketAdapter.js';
 
-function monitor(activeCast: Partial<NonNullable<MonitorSnapshot['activeCast']>>, loadoutIdentity: Pick<MonitorSnapshot, 'activeLoadoutId' | 'activeLoadout'> = {}): MonitorSnapshot {
+function monitor(activeCast: Partial<NonNullable<MonitorSnapshot['activeCast']>> & { loadoutId?: string; loadoutName?: string }, loadoutIdentity: Pick<MonitorSnapshot, 'activeLoadoutId' | 'activeLoadout'> = {}): MonitorSnapshot {
   return {
     ...loadoutIdentity,
     activeCast: {
@@ -16,7 +16,7 @@ function monitor(activeCast: Partial<NonNullable<MonitorSnapshot['activeCast']>>
       updatedAt: 2,
       ...activeCast,
     },
-  };
+  } as MonitorSnapshot;
 }
 
 describe('resolveMonitoringSocketIndicator', () => {
@@ -92,6 +92,43 @@ describe('resolveMonitoringSocketIndicator', () => {
       state: 'active',
       sourceSocketId: 'Socket-2',
       graphSocketId: 'Socket-2',
+    });
+  });
+
+  it('scopes quest cast sockets by the executing activeCast stable loadout id before socket matching', () => {
+    const questMonitor = monitor({ currentSocketId: 'Socket-2', loadoutId: 'default:full-auto', loadoutName: 'Full-Auto' }, { activeLoadoutId: 'user:hojo', activeLoadout: 'Hojo' });
+
+    expect(resolveMonitoringSocketIndicator(
+      questMonitor,
+      ['Socket-1', 'Socket-2'],
+      { viewedLoadoutId: 'user:hojo', viewedLoadoutName: 'Hojo' },
+    )).toEqual({ state: 'inactive' });
+    expect(resolveMonitoringSocketIndicator(
+      questMonitor,
+      ['Socket-1', 'Socket-2'],
+      { viewedLoadoutId: 'default:full-auto', viewedLoadoutName: 'Renamed Full Auto' },
+    )).toEqual({
+      state: 'active',
+      sourceSocketId: 'Socket-2',
+      graphSocketId: 'Socket-2',
+    });
+  });
+
+  it('reports a missing socket for the executing loadout instead of mapping the socket onto another loadout', () => {
+    const questMonitor = monitor({ currentSocketId: 'Socket-9', loadoutId: 'default:full-auto', loadoutName: 'Full-Auto' }, { activeLoadoutId: 'user:hojo', activeLoadout: 'Hojo' });
+
+    expect(resolveMonitoringSocketIndicator(
+      questMonitor,
+      ['Socket-1', 'Socket-2'],
+      { viewedLoadoutId: 'user:hojo', viewedLoadoutName: 'Hojo' },
+    )).toEqual({ state: 'inactive' });
+    expect(resolveMonitoringSocketIndicator(
+      questMonitor,
+      ['Socket-1', 'Socket-2'],
+      { viewedLoadoutId: 'default:full-auto', viewedLoadoutName: 'Full-Auto' },
+    )).toEqual({
+      state: 'missing-socket',
+      sourceSocketId: 'Socket-9',
     });
   });
 

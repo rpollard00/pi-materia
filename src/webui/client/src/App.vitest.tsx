@@ -3385,6 +3385,68 @@ describe('Materia loadout grid editor', () => {
   });
 
 
+  it('keeps configured/editing Hojo separate from a quest cast running Full-Auto', async () => {
+    const listeners = new Map<string, (event: MessageEvent) => void>();
+    class MockEventSource {
+      url: string;
+      constructor(url: string) { this.url = url; }
+      addEventListener(type: string, listener: (event: MessageEvent) => void) { listeners.set(type, listener); }
+      close() {}
+    }
+    const questCastConfig = {
+      activeLoadout: 'Hojo',
+      activeLoadoutId: 'user:hojo',
+      materia: {
+        Build: { tools: 'coding', prompt: 'Build the work' },
+        'Auto-Architect': { tools: 'readOnly', prompt: 'Architect the work' },
+      },
+      loadouts: {
+        Hojo: {
+          id: 'user:hojo',
+          entry: 'Socket-1',
+          sockets: {
+            'Socket-1': { materia: 'Auto-Architect', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'Auto-Architect' },
+          },
+        },
+        'Full-Auto': {
+          id: 'default:full-auto',
+          entry: 'Socket-1',
+          sockets: {
+            'Socket-1': { materia: 'Auto-Architect', edges: [{ when: 'always', to: 'Socket-2' }] },
+            'Socket-2': { materia: 'Build' },
+          },
+        },
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/monitor') return new Response(JSON.stringify({ ok: true }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: questCastConfig, questDefaultLoadoutId: 'default:full-auto', loadoutSources: { Hojo: 'user', 'Full-Auto': 'default' } }));
+    });
+    vi.stubGlobal('EventSource', MockEventSource);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await screen.findByTestId('socket-Socket-2');
+    listeners.get('monitor')?.(new MessageEvent('monitor', { data: JSON.stringify({
+      ok: true,
+      now: 61_000,
+      uiStartedAt: 1_000,
+      activeCast: { castId: 'cast-quest', active: true, phase: 'Build', currentSocketId: 'Socket-2', currentMateria: 'Build', socketState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000, loadoutId: 'default:full-auto', loadoutName: 'Full-Auto' },
+    }) }));
+
+    await waitFor(() => expect((screen.getByLabelText('Active loadout') as HTMLSelectElement).value).toBe('user:hojo'));
+    expect(loadoutCard('Hojo').className).toContain('loadout-card-active');
+    expect(within(loadoutCard('Hojo')).getByLabelText('Runtime active loadout')).toBeTruthy();
+    expect(within(loadoutCard('Hojo')).queryByLabelText('Running now')).toBeNull();
+    expect(within(loadoutCard('Full-Auto')).getByLabelText('Running now')).toBeTruthy();
+    expect(screen.getByTestId('socket-Socket-2').className).not.toContain('materia-socket-active');
+
+    fireEvent.click(within(loadoutCard('Full-Auto')).getByRole('button', { name: /Full-Auto/ }));
+    await waitFor(() => expect(screen.getByTestId('socket-Socket-2').className).toContain('materia-socket-active'));
+    expect(screen.getByTestId('socket-Socket-2').getAttribute('aria-label')).toContain('Build socket details');
+  });
+
   it('renders live monitor updates and highlights the active loadout socket', async () => {
     const listeners = new Map<string, (event: MessageEvent) => void>();
     class MockEventSource {
