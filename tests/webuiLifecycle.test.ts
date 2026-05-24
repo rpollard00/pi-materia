@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -451,5 +452,173 @@ describe("/materia ui lifecycle", () => {
     );
 
     await harness.emit("session_shutdown");
+  });
+});
+
+describe("PATCH /api/quests/:questId through launcher path", () => {
+  const QUEST_BOARD_SCHEMA_VERSION = 1;
+
+  test("updates a pending quest through the full launcher path and persists the edit", async () => {
+    const { harness } = await harnessWithProfile(
+      "pi-materia-webui-quest-patch-",
+    );
+
+    try {
+      // Seed a quest board with a single pending quest in the harness cwd.
+      const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+      const boardPath = path.join(boardDir, "quest-board.json");
+      await mkdir(boardDir, { recursive: true });
+      const now = new Date().toISOString();
+      const pendingQuest = {
+        id: "quest-pending-1",
+        title: "Gather moon herbs",
+        prompt: "Gather moon herbs",
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+        attempts: 0,
+      };
+      const board = {
+        version: QUEST_BOARD_SCHEMA_VERSION,
+        createdAt: now,
+        updatedAt: now,
+        runner: { enabled: false },
+        quests: [pendingQuest],
+      };
+      await writeFile(boardPath, JSON.stringify(board, null, 2) + "\n", "utf8");
+
+      // Launch the WebUI through the full launcher path.
+      await harness.runCommand("materia", "ui");
+      const launched = harness.appendedEntries.at(-1)?.data as {
+        url: string;
+        sessionKey: string;
+      };
+      expect(launched.url).toBeTruthy();
+
+      // PATCH the pending quest.  Use new URL() so the path replaces the
+      // pathname of the launched URL rather than appending after the
+      // session query string.
+      const patchUrl = new URL(
+        `/api/quests/quest-pending-1`,
+        launched.url,
+      );
+      const patchResponse = await fetch(patchUrl, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "  Gather sun herbs instead  " }),
+      });
+      const patchBody = await patchResponse.json();
+
+      // Regression assertion: the response must no longer be the 503
+      // unavailable envelope that the launcher currently returns.
+      expect(patchResponse.status).not.toBe(503);
+      expect(patchBody).not.toEqual({
+        ok: false,
+        error: "Quest update API is unavailable for this server.",
+      });
+
+      // After the launcher wiring fix the response should be a 200 success.
+      expect(patchResponse.status).toBe(200);
+      expect(patchBody.ok).toBe(true);
+      expect(patchBody.quest).toMatchObject({
+        id: "quest-pending-1",
+        title: "Gather sun herbs instead",
+        prompt: "Gather sun herbs instead",
+        status: "pending",
+      });
+      expect(patchBody.board).toBeDefined();
+      expect(patchBody.board.pendingQuests).toHaveLength(1);
+
+      // Verify the on-disk board reflects the edited prompt, title, and
+      // a newer updatedAt timestamp.
+      const savedRaw = await readFile(boardPath, "utf8");
+      const saved = JSON.parse(savedRaw);
+      const savedQuest = saved.quests.find(
+        (q: { id: string }) => q.id === "quest-pending-1",
+      );
+      expect(savedQuest.prompt).toBe("Gather sun herbs instead");
+      expect(savedQuest.title).toBe("Gather sun herbs instead");
+      expect(savedQuest.status).toBe("pending");
+      expect(savedQuest.createdAt).toBe(now);
+      expect(savedQuest.updatedAt).not.toBe(now);
+      expect(new Date(savedQuest.updatedAt).getTime()).toBeGreaterThan(
+        new Date(now).getTime(),
+      );
+    } finally {
+      await harness.emit("session_shutdown");
+    }
+  });
+
+  test("isolates cwd state so seeded boards do not leak between tests", async () => {
+    const { harness: firstHarness } = await harnessWithProfile(
+      "pi-materia-webui-patch-isolate-1-",
+    );
+
+    try {
+      // Seed the first harness cwd with a pending quest.
+      const firstBoardDir = path.join(firstHarness.cwd, ".pi", "pi-materia");
+      await mkdir(firstBoardDir, { recursive: true });
+      const now = new Date().toISOString();
+      await writeFile(
+        path.join(firstBoardDir, "quest-board.json"),
+        JSON.stringify(
+          {
+            version: QUEST_BOARD_SCHEMA_VERSION,
+            createdAt: now,
+            updatedAt: now,
+            runner: { enabled: false },
+            quests: [
+              {
+                id: "quest-first",
+                title: "First",
+                prompt: "First quest",
+                status: "pending",
+                createdAt: now,
+                updatedAt: now,
+                attempts: 0,
+              },
+            ],
+          },
+          null,
+          2,
+        ) + "\n",
+        "utf8",
+      );
+
+      // Launch and immediately shut down.
+      await firstHarness.runCommand("materia", "ui");
+      await firstHarness.emit("session_shutdown");
+    } catch {
+      // Ignore errors during setup/shutdown.
+    }
+
+    // A second harness with a different cwd should start with an empty board,
+    // confirming that the first harness state did not leak.
+    const { harness: secondHarness } = await harnessWithProfile(
+      "pi-materia-webui-patch-isolate-2-",
+    );
+
+    try {
+      expect(
+        existsSync(
+          path.join(secondHarness.cwd, ".pi", "pi-materia", "quest-board.json"),
+        ),
+      ).toBe(false);
+
+      await secondHarness.runCommand("materia", "ui");
+      const launched = secondHarness.appendedEntries.at(-1)?.data as {
+        url: string;
+      };
+
+      // The fresh board should be empty (no quests).
+      const response = await fetch(
+        new URL("/api/quests", launched.url),
+      );
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.quests).toHaveLength(0);
+    } finally {
+      await secondHarness.emit("session_shutdown");
+    }
   });
 });
