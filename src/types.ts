@@ -252,6 +252,8 @@ export interface MateriaCastState {
   recoveryExhaustion?: MateriaRecoveryExhaustion;
   /** Bounded metadata for the next same-socket retry after invalid final JSON output. */
   jsonOutputRepair?: MateriaJsonOutputRepairContext;
+  /** Bounded runtime-owned provenance rendered into follow-up prompts after not_satisfied routing. */
+  reworkFeedback?: MateriaReworkFeedbackEntry[];
   /** Same recovery keys that have already retried a strong context-window failure without compaction. */
   contextWindowRecoveryGuards?: Record<string, number>;
   taskAttempts: Record<string, number>;
@@ -277,6 +279,18 @@ export interface MateriaJsonOutputRepairContext {
   invalidOutputExcerpt: string;
   excerptLength: number;
   truncated: boolean;
+}
+
+export interface MateriaReworkFeedbackEntry {
+  sourceSocketId: string;
+  sourceMateria?: string;
+  sourceMateriaLabel?: string;
+  targetSocketId: string;
+  condition: "not_satisfied";
+  itemKey?: string;
+  itemLabel?: string;
+  reason: string;
+  createdAt: number;
 }
 
 export type MateriaRecoveryReason = "context_window" | "turn_failure";

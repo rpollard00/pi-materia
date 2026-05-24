@@ -41,8 +41,12 @@ export function canonicalSatisfiedOutcome(state: MateriaCastState, parsed: unkno
   return typeof satisfied === "boolean" ? satisfied : undefined;
 }
 
+export function selectNextEdge(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): MateriaEdgeConfig | undefined {
+  return selectMatchingEdge(canonicalOutgoingEdges(effectiveResolvedSocketConfig(socket)), canonicalSatisfiedOutcome(state, parsed));
+}
+
 export function selectNextTarget(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown, config: PiMateriaConfig): string {
-  const edge = selectMatchingEdge(canonicalOutgoingEdges(effectiveResolvedSocketConfig(socket)), canonicalSatisfiedOutcome(state, parsed));
+  const edge = selectNextEdge(state, socket, parsed);
   if (edge) {
     enforceEdgeLimit(state, socket.id, edge, config);
     return edge.to;

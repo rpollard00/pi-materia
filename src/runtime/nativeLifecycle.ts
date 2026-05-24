@@ -11,7 +11,8 @@ import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
-import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
+import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
+import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
 import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
@@ -479,7 +480,17 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   await appendEvent(state.runState, "socket_complete", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), artifact, parsed: effectiveResolvedSocketConfig(socket).parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
   await assertBudget(config, state.runState, ctx);
 
-  const nextTarget = advanceTarget ?? selectNextTarget(state, socket, parsed, config);
+  let nextTarget = advanceTarget;
+  if (!nextTarget) {
+    const nextEdge = selectNextEdge(state, socket, parsed);
+    if (nextEdge) {
+      enforceEdgeLimit(state, socket.id, nextEdge, config);
+      nextTarget = nextEdge.to;
+      captureReworkFeedbackForRoute(state, { sourceSocket: socket, targetSocketId: nextEdge.to, edge: nextEdge, parsed, rawOutput: text });
+    } else {
+      nextTarget = "end";
+    }
+  }
   if (diagnostics) diagnostics.nextSocketTarget = nextTarget ?? "end";
   const nextDiagnostics = diagnostics ? { ...diagnostics } : undefined;
   await appendAdvancementDiagnostic(ctx, state, "socket_completion_exit", nextDiagnostics, { boundary: "sync_state_advancement", entryId });

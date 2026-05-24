@@ -6,6 +6,7 @@ import {
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
+import { renderReworkFeedbackPromptContext } from "./reworkFeedback.js";
 import { currentItem, getPath, readObjectField } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
@@ -15,13 +16,14 @@ import { currentItem, getPath, readObjectField } from "./workflowTransitions.js"
 // - plain-text agent sockets receive no JSON-only handoff contract unless their local prompt asks for one.
 export function buildSocketPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
   if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
-  return materiaPrompt(socket.materia, state, [socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)]);
+  return materiaPrompt(socket.materia, state, [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)]);
 }
 
 export function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
   if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
   return materiaPrompt(socket.materia, state, [
     buildSyntheticCastContext(state),
+    renderReworkFeedbackPromptContext(state, socket.id),
     socketAdapterContextInstruction(state, socket),
     "Command-triggered finalization: the user ran /materia continue for this multi-turn socket. This is the only finalization mechanism and this is the finalization turn.",
     finalFormatInstruction(socket),
@@ -150,7 +152,7 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
 
 export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaAgentConfig): string {
   const socket = activeResolvedSocket(state);
-  const suffixes = socket && isAgentResolvedSocket(socket) ? [socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)] : [];
+  const suffixes = socket && isAgentResolvedSocket(socket) ? [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)] : [];
   return [renderTemplate(materia.prompt, state), ...suffixes].filter(Boolean).join("\n\n");
 }
 

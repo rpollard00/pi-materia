@@ -106,6 +106,53 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Global guidance JSON");
   });
 
+  test("renders runtime-owned follow-up context for matching not_satisfied rework", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const prompt = buildSocketPrompt(state(socket, {
+      currentSocketId: "Socket-4",
+      phase: "Socket-4",
+      currentItemKey: "WI-1",
+      reworkFeedback: [{
+        sourceSocketId: "Socket-5",
+        sourceMateria: "Auto-Eval",
+        sourceMateriaLabel: "Auto-Eval",
+        targetSocketId: "Socket-4",
+        condition: "not_satisfied",
+        itemKey: "WI-1",
+        itemLabel: "Validate behavior",
+        reason: "Tests failed: expected inspect output to include socket provenance.",
+        createdAt: 1,
+      }],
+    }), socket);
+
+    expect(prompt).toContain("Runtime follow-up context");
+    expect(prompt).toContain("reached by prior not_satisfied routing");
+    expect(prompt).toContain("Socket-5 Auto-Eval");
+    expect(prompt).toContain("Tests failed: expected inspect output to include socket provenance.");
+  });
+
+  test("does not render rework context for unrelated target sockets or items", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const prompt = buildSocketPrompt(state(socket, {
+      currentSocketId: "Socket-4",
+      phase: "Socket-4",
+      currentItemKey: "WI-2",
+      reworkFeedback: [{
+        sourceSocketId: "Socket-5",
+        sourceMateria: "Auto-Eval",
+        targetSocketId: "Socket-4",
+        condition: "not_satisfied",
+        itemKey: "WI-1",
+        itemLabel: "Old item",
+        reason: "Old failure.",
+        createdAt: 1,
+      }],
+    }), socket);
+
+    expect(prompt).not.toContain("Runtime follow-up context");
+    expect(prompt).not.toContain("Old failure.");
+  });
+
   test("generator JSON sockets receive concise canonical workItems placement instructions", () => {
     const socket = agentSocket({
       socket: { materia: "Plan", parse: "json" },
