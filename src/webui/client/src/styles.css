@@ -102,8 +102,7 @@
 
 .loadout-default-indicator,
 .loadout-quest-default-indicator,
-.loadout-lock-indicator,
-.loadout-status-badge {
+.loadout-lock-indicator {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -120,21 +119,14 @@
   overflow: hidden;
 }
 
-.loadout-status-badge {
-  min-height: 1.2rem;
-  max-width: 9rem;
-  overflow: hidden;
-  border: 1px solid rgb(148 163 184 / 0.22);
-  border-radius: 999px;
-  background: rgb(15 23 42 / 0.72);
-  padding: 0.18rem 0.42rem;
-  color: rgb(203 213 225);
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
+.loadout-configured-active-dot {
+  display: inline-flex;
+  width: 0.6rem;
+  height: 0.6rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  background: rgb(34 197 94);
+  box-shadow: 0 0 6px rgb(34 197 94 / 0.6);
 }
 
 .sr-only {
@@ -194,30 +186,7 @@
   opacity: 0.72;
 }
 
-.loadout-active-indicator {
-  border-color: rgb(34 197 94 / 0.38);
-  background: rgb(20 83 45 / 0.52);
-  color: rgb(187 247 208);
-  box-shadow: 0 0 10px rgb(34 197 94 / 0.18);
-}
 
-.loadout-running-indicator {
-  border-color: rgb(14 165 233 / 0.38);
-  background: rgb(12 74 110 / 0.56);
-  color: rgb(186 230 253);
-  box-shadow: 0 0 10px rgb(14 165 233 / 0.2);
-}
-
-.loadout-editing-badge {
-  border-color: rgb(103 232 249 / 0.38);
-  background: rgb(8 47 73 / 0.56);
-  color: rgb(165 243 252);
-}
-
-.loadout-source-badge,
-.loadout-lock-state-badge {
-  color: rgb(226 232 240 / 0.86);
-}
 
 .loadout-actions-menu {
   position: relative;

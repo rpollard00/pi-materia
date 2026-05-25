@@ -82,15 +82,11 @@ describe('LoadoutListPanel', () => {
     expect(within(betaCard).getByText('Beta')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(betaCard).getByLabelText('Unlock edits')).toBeTruthy();
-    expect(betaCard.textContent).toContain('User');
-    expect(betaCard.textContent).toContain('Locked');
 
     const gammaCard = cardFor('Gamma');
     expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).queryByLabelText('Default loadout')).toBeNull();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
-    expect(gammaCard.textContent).toContain('Built-In');
-    expect(gammaCard.textContent).toContain('Read-only');
   });
 
   it('shows the default star for a Built-In read-only default loadout', () => {
@@ -104,8 +100,6 @@ describe('LoadoutListPanel', () => {
     expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Default loadout')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
-    expect(gammaCard.textContent).toContain('Built-In');
-    expect(gammaCard.textContent).toContain('Read-only');
     expect(screen.queryByText(/Shipped default/i)).toBeNull();
   });
 
@@ -221,7 +215,9 @@ describe('LoadoutListPanel', () => {
     expect(within(cardFor('Hojo')).getByLabelText('Configured active status')).toBeTruthy();
     expect(within(cardFor('Hojo')).queryByLabelText('Running now')).toBeNull();
     expect(within(cardFor('Full-Auto')).queryByLabelText('Configured active status')).toBeNull();
-    expect(within(cardFor('Full-Auto')).getByLabelText('Running now')).toBeTruthy();
+    // Running now is captured in the card button title for accessibility
+    const fullAutoSelect = within(cardFor('Full-Auto')).getByRole('button', { name: /Full-Auto/ });
+    expect(fullAutoSelect.getAttribute('title')).toContain('Running now');
   });
 
   it('switches the viewed loadout when the selectable row button is clicked', () => {
@@ -476,16 +472,25 @@ describe('LoadoutListPanel', () => {
     expect(betaCard.querySelector('.loadout-lock-indicator')?.className).toContain('loadout-lock-indicator');
     expect(betaCard.querySelector('.loadout-actions-menu')).toBeTruthy();
     expect(betaCard.textContent).not.toMatch(/\d+ sockets?/i);
-    expect(betaCard.textContent).toContain('User');
-    expect(betaCard.textContent).toContain('Locked');
+    // Visible text badges for status, source, and lock-state are no longer rendered
+    expect(betaCard.textContent).not.toContain('User');
+    expect(betaCard.textContent).not.toContain('Locked');
+    expect(betaCard.textContent).not.toContain('Editable');
+    expect(betaCard.textContent).not.toContain('Configured active');
+    expect(betaCard.textContent).not.toContain('Running now');
+    expect(betaCard.textContent).not.toContain('Default');
+    expect(betaCard.textContent).not.toContain('Quest default');
 
     const gammaCard = cardFor('Gamma');
     expect(within(gammaCard).getByText('Gamma')).toBeTruthy();
     expect(within(gammaCard).getByLabelText('Built-In read-only')).toBeTruthy();
     expect(gammaCard.querySelector('.loadout-card-meta')).toBeNull();
     expect(gammaCard.textContent).not.toMatch(/\d+ sockets?/i);
-    expect(gammaCard.textContent).toContain('Built-In');
-    expect(gammaCard.textContent).toContain('Read-only');
+    expect(gammaCard.textContent).not.toContain('Built-In');
+    expect(gammaCard.textContent).not.toContain('Read-only');
+    expect(gammaCard.textContent).not.toContain('Configured active');
+    expect(gammaCard.textContent).not.toContain('Default');
+    expect(gammaCard.textContent).not.toContain('Quest default');
   });
 
   it('protects medium loadout names from premature truncation while preserving ellipsis contracts', () => {
@@ -523,8 +528,41 @@ describe('LoadoutListPanel', () => {
     expect(css).toMatch(/\.loadout-card\s*{(?=[^}]*gap: 0\.25rem;)(?=[^}]*padding: 0;)\s*[^}]*}/s);
     expect(css).toMatch(/\.loadout-card-select\s*{(?=[^}]*flex: 1 1 auto;)(?=[^}]*overflow: hidden;)(?=[^}]*white-space: nowrap;)\s*[^}]*}/s);
     expect(css).toMatch(/\.loadout-card-select \.loadout-card-title\s*{(?=[^}]*display: flex;)(?=[^}]*gap: 0\.35rem;)\s*[^}]*}/s);
-    expect(css).toMatch(/\.loadout-status-badge\s*{(?=[^}]*border: 1px solid)(?=[^}]*text-transform: uppercase;)\s*[^}]*}/s);
+    expect(css).toMatch(/\.loadout-configured-active-dot\s*{(?=[^}]*width: 0\.6rem;)(?=[^}]*height: 0\.6rem;)(?=[^}]*border-radius: 9999px;)(?=[^}]*background: rgb\(34 197 94\);)\s*[^}]*}/s);
     expect(css).toMatch(/\.loadout-card-name\s*{[^}]*min-width: 0;[^}]*max-width: none;[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
+  });
+
+  it('does not render visible text badge words on any loadout card body', () => {
+    renderPanel({
+      defaultLoadoutId: 'Beta',
+      questDefaultLoadoutId: 'Gamma',
+      loadouts: {
+        ...loadouts,
+        Alpha: { ...loadouts.Alpha, lockState: 'unlocked' },
+        Beta: { ...loadouts.Beta, lockState: 'locked' },
+        Gamma: { ...loadouts.Gamma, source: 'default', lockState: 'locked' },
+      },
+      loadoutSources: { Alpha: 'user', Beta: 'user', Gamma: 'default' },
+      runtimeActiveLoadoutId: 'Beta',
+      runningLoadoutIdentity: { loadoutId: 'Gamma', loadoutName: 'Gamma' },
+    } as Partial<ComponentProps<typeof LoadoutListPanel>> & { runningLoadoutIdentity: { loadoutId: string; loadoutName: string } });
+
+    const forbiddenBadgeWords = ['Configured active', 'Running now', 'Default', 'Quest default', 'Built-In', 'Editable', 'User', 'Locked', 'Read-only', 'Explicit', 'Project'];
+    for (const cardName of ['Alpha', 'Beta', 'Gamma']) {
+      const card = cardFor(cardName);
+      for (const word of forbiddenBadgeWords) {
+        expect(card.textContent).not.toContain(word);
+      }
+      // Accessible labels must remain queryable even though text badges are absent
+      if (cardName === 'Beta') {
+        expect(within(card).getByLabelText('Default loadout')).toBeTruthy();
+        expect(within(card).getByLabelText('Configured active status')).toBeTruthy();
+      }
+      if (cardName === 'Gamma') {
+        expect(within(card).getByLabelText('Quest default loadout')).toBeTruthy();
+        expect(within(card).getByLabelText('Built-In read-only')).toBeTruthy();
+      }
+    }
   });
 
   it('uses Lucide SVG icons instead of emoji or text glyphs for touched selector indicators', () => {

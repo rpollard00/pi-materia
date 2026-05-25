@@ -293,23 +293,17 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiv
                 <span className="loadout-card-title">
                   <span className="loadout-card-name">{name}</span>
                   <span className="loadout-status-badges">
-                    {isEditing && <span className="loadout-status-badge loadout-editing-badge" aria-label="Editing loadout" title="Editing this loadout">Editing</span>}
-                    {isConfiguredActive && <span className="loadout-status-badge loadout-configured-active-indicator loadout-active-indicator" aria-label="Configured active status" title="Configured active loadout">Configured active</span>}
-                    {runningLoadoutIdentity && isRunningNow && <span className="loadout-status-badge loadout-running-indicator" aria-label="Running now" title="Executing cast loadout">Running now</span>}
-                    {isDefaultLoadout && (
-                      <span className="loadout-status-badge loadout-default-indicator" aria-label="Default loadout" title="Default loadout">
-                        <Star className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
-                        Default
-                      </span>
-                    )}
                     {isQuestDefaultLoadout && (
-                      <span className="loadout-status-badge loadout-quest-default-indicator" aria-label="Quest default loadout" title="Quest default loadout">
+                      <span className="loadout-quest-default-indicator" aria-label="Quest default loadout" title="Quest default loadout">
                         <Flag className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
-                        Quest default
                       </span>
                     )}
-                    <span className="loadout-status-badge loadout-source-badge" aria-label={`${loadoutSourceLabel(sourceScope)} loadout source`} title={loadoutScopeDescription(sourceScope)}>{loadoutSourceLabel(sourceScope)}</span>
-                    <span className="loadout-status-badge loadout-lock-state-badge" aria-label={`${loadoutLockStateLabel(loadout, sourceScope)} lock state`} title={lockAction.title}>{loadoutLockStateLabel(loadout, sourceScope)}</span>
+                    {isDefaultLoadout && (
+                      <span className="loadout-default-indicator" aria-label="Default loadout" title="Default loadout">
+                        <Star className="loadout-icon loadout-icon-filled" aria-hidden="true" focusable="false" />
+                      </span>
+                    )}
+                    {isConfiguredActive && <span className="loadout-configured-active-dot" aria-label="Configured active status" title="Configured active loadout" />}
                   </span>
                 </span>
               </button>

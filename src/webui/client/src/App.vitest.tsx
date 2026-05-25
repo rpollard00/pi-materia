@@ -569,8 +569,8 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     await screen.findByRole('button', { name: /Full-Auto/ });
-    expect(loadoutCard('Full-Auto').textContent).toContain('Built-In');
-    expect(loadoutCard('Full-Auto').textContent).toContain('Read-only');
+    expect(within(loadoutCard('Full-Auto')).getByLabelText('Built-In read-only')).toBeTruthy();
+    expect(within(loadoutCard('Full-Auto')).getByRole('button', { name: /Full-Auto/ }).getAttribute('aria-label')).toContain('Built-In');
     expect(screen.queryByText(/shipped default/i)).toBeNull();
 
     openLoadoutActions('Full-Auto');
@@ -3440,7 +3440,7 @@ describe('Materia loadout grid editor', () => {
     expect(loadoutCard('Hojo').className).toContain('loadout-card-active');
     expect(within(loadoutCard('Hojo')).getByLabelText('Configured active status')).toBeTruthy();
     expect(within(loadoutCard('Hojo')).queryByLabelText('Running now')).toBeNull();
-    expect(within(loadoutCard('Full-Auto')).getByLabelText('Running now')).toBeTruthy();
+    expect(within(loadoutCard('Full-Auto')).getByRole('button', { name: /Running now/ })).toBeTruthy();
     expect(screen.getByTestId('socket-Socket-2').className).not.toContain('materia-socket-active');
 
     fireEvent.click(within(loadoutCard('Full-Auto')).getByRole('button', { name: /Full-Auto/ }));
