@@ -554,6 +554,19 @@
         "runtime": "node"
       }
     },
+    "Blackbelt-Maintain": {
+      "type": "utility",
+      "label": "Blackbelt-Maintain",
+      "description": "Autonomously checkpoint accepted work items using jj (preferred) or git with deterministic script behavior.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "blackbelt-maintain.mjs",
+        "runtime": "node"
+      }
+    },
     "Chain-Context": {
       "type": "agent",
       "tools": "readOnly",

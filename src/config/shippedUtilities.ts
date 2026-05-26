@@ -102,7 +102,7 @@ export async function syncShippedUtilityScripts(profileDir: string): Promise<Shi
 
 function bundledUtilityScriptPaths(): string[] {
   const configDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "config", "utilities");
-  return [path.join(configDir, "detect-vcs.mjs"), path.join(configDir, "ensure-ignored.mjs")];
+  return [path.join(configDir, "detect-vcs.mjs"), path.join(configDir, "ensure-ignored.mjs"), path.join(configDir, "blackbelt-maintain.mjs")];
 }
 
 function normalizeShippedUtilityName(name: string): string {
