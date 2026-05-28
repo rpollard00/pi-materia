@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/rpollard00/pi-materia/compare/v0.1.4...v0.1.5) (2026-05-28)
+
+
+### Bug Fixes
+
+* repository url in package ([e8ab67a](https://github.com/rpollard00/pi-materia/commit/e8ab67a0cd56b5532bcaeb8287888be3ad8fed57))
+
 ## [0.1.4](https://github.com/rpollard00/pi-materia/compare/v0.1.3...v0.1.4) (2026-05-28)
 
 
