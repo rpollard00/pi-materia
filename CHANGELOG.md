@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/rpollard00/pi-materia/compare/v0.1.3...v0.1.4) (2026-05-28)
+
+
+### Bug Fixes
+
+* trigger npm trusted publishing retry ([8ed5b4d](https://github.com/rpollard00/pi-materia/commit/8ed5b4d0d9bbd6b624cfb11a97ab02bcd929f069))
+
 ## [0.1.3](https://github.com/rpollard00/pi-materia/compare/v0.1.2...v0.1.3) (2026-05-28)
 
 
