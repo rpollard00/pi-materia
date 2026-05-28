@@ -14,7 +14,21 @@ PR merge → CI checks → main push → Release Please
 
 ## Conventional Commit conventions
 
-All commits to `main` should follow the [Conventional Commits](https://www.conventionalcommits.org/) format. Release Please reads commit messages to determine the next version bump:
+All commits to `main` should follow the [Conventional Commits](https://www.conventionalcommits.org/) format. Release Please reads commit messages to determine the next version bump.
+
+### Work item titles
+
+pi-materia work items (the structured tasks that flow through the materia pipeline) also use Conventional Commit subject format for their titles. This makes commit messages cleaner since `Maintain` and `Blackbelt-Maintain` use the work item title directly as the VCS message when it validates.
+
+Example work item titles:
+
+- `feat: add GitHub Actions CI workflow`
+- `fix(config): correct loadout socket wiring`
+- `ci!: switch to trusted npm publishing`
+
+The `Release` loadout (see below) routes work items through `Commit-Sigil`, a utility that validates titles before execution. Invalid titles loop back for correction.
+
+### Commit message version bumps
 
 | Commit type | Version bump |
 |---|---|
@@ -83,6 +97,26 @@ npm view @rpollard00/pi-materia --json | jq '.provenance'
 
 Or visit the package page on npmjs.com — published versions with provenance display a "Provenance" badge with a link to the signed attestation.
 
+## Release loadout
+
+pi-materia ships several pre-configured loadouts in `config/default.json`. For release-related development work, use the `Release` loadout:
+
+```bash
+# Activate the Release loadout (or set activeLoadout in config/default.json)
+pi-materia --loadout Release
+```
+
+The `Release` loadout routes planning through `Commit-Sigil` before `Auto-Architect` and `Build`. This ensures all work item titles follow Conventional Commit format before implementation begins. If titles don't validate, the pipeline loops back to planning for correction.
+
+Key loadout differences:
+
+| Loadout | Planner | Title validation | Eval loop |
+|---|---|---|---|
+| `Full-Auto` | Auto-Plan → Auto-Architect | No | Build → Auto-Eval (retry 3x) |
+| `Release` | Auto-Plan → Commit-Sigil → Auto-Architect | Yes (Commit-Sigil) | Build → Auto-Eval (retry 3x) |
+
+Use the `Release` loadout when making changes that will become part of a release — especially CI/CD, packaging, or publish-related changes. For other development, `Full-Auto` or `Planning-Consult` are appropriate.
+
 ## Maintainer flow
 
 1. Work on feature branches; use Conventional Commit titles for all commits.
@@ -110,6 +144,26 @@ Likely causes:
 ### Publish job fails with 404
 
 The package may not exist yet on npm. Run `npm publish --access public` manually the first time (or configure the trusted publisher on the package's settings page after creating it through the npm website).
+
+### Release Please PR has unexpected version bump
+
+Review the commit messages on `main` since the last release. Release Please determines the version bump from Conventional Commit types:
+
+```bash
+git log --oneline v0.1.2..main
+```
+
+Ensure commit subjects use `feat:` for features (minor bump) and `fix:` for bug fixes (patch bump). Commits like `chore:`, `docs:`, `ci:`, or `refactor:` alone won't bump the version.
+
+### Release loadout title validation fails
+
+When using the `Release` loadout, `Commit-Sigil` validates work item titles before implementation. If titles fail validation:
+
+- Check that all work item titles start with a Conventional Commit type (`feat:`, `fix:`, `ci:`, `docs:`, `chore:`, etc.)
+- Ensure the type is followed by `: ` (colon and space)
+- Scoped types like `fix(scope):` are valid; empty scopes like `feat():` are rejected
+- Breaking changes use `!` before the colon: `feat!:`, `fix(scope)!:`
+- The validation context will list invalid item indices and suggested corrections
 
 ### npm pack dry-run fails in CI
 
