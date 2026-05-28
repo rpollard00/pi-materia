@@ -935,7 +935,8 @@ describe("config loadouts", () => {
           expect(edge.when, `${loadoutName}.${socketName}.edges[${index}].when`).toBeDefined();
           expect(canonical.has(edge.when as string), `${loadoutName}.${socketName}.edges[${index}].when`).toBe(true);
           if (edge.when === "satisfied" || edge.when === "not_satisfied") {
-            expect(socket.parse, `${loadoutName}.${socketName}.parse for ${edge.when}`).toBe("json");
+            const parseValue = materia?.type === "utility" ? materia?.parse : socket.parse;
+            expect(parseValue, `${loadoutName}.${socketName}.parse for ${edge.when}`).toBe("json");
           }
           expect(edge.to === "end" || Boolean(loadout.sockets?.[edge.to ?? ""]), `${loadoutName}.${socketName}.edges[${index}].to`).toBe(true);
         }
