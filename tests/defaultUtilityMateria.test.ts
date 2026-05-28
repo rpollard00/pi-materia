@@ -83,6 +83,7 @@ describe("bundled utility materia defaults", () => {
     await expect(access(path.resolve("config", "utilities", "detect-vcs.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "ensure-ignored.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "blackbelt-maintain.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "commit-sigil.mjs"))).resolves.toBeNull();
   });
 
   test("Blackbelt-Maintain has correct shipped-utility config shape, parse, color, and metadata", async () => {
