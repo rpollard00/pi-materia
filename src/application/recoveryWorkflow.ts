@@ -66,7 +66,7 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
 
   const key = recoveryIdentityKey(state);
   state.recoveryAttempts ??= {};
-  const allowance = ensureRecoveryAllowance(state, key);
+  const allowance = ensureRecoveryAllowance(state, key, { reason });
   const previousAttempts = state.recoveryAttempts[key] ?? 0;
   let maxAttempts = allowance.effectiveMaxAttempts;
   const jsonRepairMetadata = jsonOutputRepairRecoveryMetadata(state);

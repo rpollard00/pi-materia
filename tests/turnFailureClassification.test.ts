@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { evaluateContextErrorRecovery } from "../src/application/contextErrorRecoveryPolicy.js";
-import { classifyRecoverableTurnFailure, classifyTurnFailure } from "../src/application/recoveryPolicy.js";
+import { classifyRecoverableTurnFailure, classifyTurnFailure, ensureRecoveryAllowance } from "../src/application/recoveryPolicy.js";
 
 describe("turn failure classification", () => {
   test("classifies plain WebSocket transport failures as transient", () => {
@@ -92,5 +92,44 @@ describe("turn failure classification", () => {
     // "timeout" alone without the tool/command pattern should not match
     expect(classifyTurnFailure(new Error("connection timeout exceeded"))).toBeUndefined();
     expect(classifyTurnFailure(new Error("request took too long"))).toBeUndefined();
+  });
+
+  test("ensureRecoveryAllowance creates budget of 3 for tool_timeout reason", () => {
+    const state = { recoveryAllowances: {} } as any;
+    const allowance = ensureRecoveryAllowance(state, "key-1", { reason: "tool_timeout" });
+    expect(allowance).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
+  });
+
+  test("ensureRecoveryAllowance uses default budget of 1 without tool_timeout reason", () => {
+    const state = { recoveryAllowances: {} } as any;
+    const allowance = ensureRecoveryAllowance(state, "key-1");
+    expect(allowance).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    const ctxAllowance = ensureRecoveryAllowance(state, "key-2", { reason: "context_window" });
+    expect(ctxAllowance).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    const turnAllowance = ensureRecoveryAllowance(state, "key-3", { reason: "turn_failure" });
+    expect(turnAllowance).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+  });
+
+  test("ensureRecoveryAllowance upgrades existing allowance to timeout budget when reason is tool_timeout", () => {
+    const state = { recoveryAllowances: {} } as any;
+    // Create with default budget
+    const original = ensureRecoveryAllowance(state, "key-1");
+    expect(original).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    // Upgrade to timeout budget
+    const upgraded = ensureRecoveryAllowance(state, "key-1", { reason: "tool_timeout" });
+    expect(upgraded).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
+    expect(upgraded).toBe(original); // same object reference
+  });
+
+  test("ensureRecoveryAllowance does not downgrade an already-higher budget for tool_timeout", () => {
+    const state = { recoveryAllowances: { "key-1": { originalMaxAttempts: 5, effectiveMaxAttempts: 7, reviveCount: 2 } } } as any;
+    const allowance = ensureRecoveryAllowance(state, "key-1", { reason: "tool_timeout" });
+    expect(allowance).toEqual({ originalMaxAttempts: 5, effectiveMaxAttempts: 7, reviveCount: 2 });
+  });
+
+  test("ensureRecoveryAllowance does not upgrade non-timeout reasons", () => {
+    const state = { recoveryAllowances: { "key-1": { originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 } } } as any;
+    const allowance = ensureRecoveryAllowance(state, "key-1", { reason: "context_window" });
+    expect(allowance).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
   });
 });

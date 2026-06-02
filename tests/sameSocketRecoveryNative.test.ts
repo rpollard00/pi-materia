@@ -658,6 +658,33 @@ describe("native same-socket recovery", () => {
     expect(() => extendSameSocketRecoveryAllowanceForRevive(state)).toThrow(/does not match the current terminal failure/);
   });
 
+  test("tool timeout revive grants budget-sized increment using originalMaxAttempts", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast timeout revive budget");
+
+    // Exhaust the 3-attempt timeout budget
+    for (let i = 0; i < 4; i++) {
+      harness.appendAssistantMessage("", { stopReason: "error", errorMessage: `bash command timed out ${i}` });
+      await harness.emit("agent_end", { messages: [] });
+    }
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(state.active).toBe(false);
+    expect(state.recoveryExhaustion.reason).toBe("tool_timeout");
+    expect(state.recoveryExhaustion.originalMaxAttempts).toBe(3);
+    const exhaustedKey = state.recoveryExhaustion.key;
+
+    // Revive should add originalMaxAttempts (3) more attempts
+    expect(extendSameSocketRecoveryAllowanceForRevive(state)).toMatchObject({
+      key: exhaustedKey,
+      priorEffectiveMaxAttempts: 3,
+      increment: 3,
+      newEffectiveMaxAttempts: 6,
+      reviveCount: 1,
+    });
+    expect(state.recoveryAllowances[exhaustedKey]).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 6, reviveCount: 1 });
+  });
+
   test("revive allowance extension rejects legacy or non-exhaustion failures", async () => {
     const harness = await makeHarness(utilityJsonConfig());
     await harness.runCommand("materia", "cast non exhaustion revive reject");
@@ -815,21 +842,27 @@ describe("native same-socket recovery", () => {
     expect(latestState.lastAssistantText).toBe("done after timeout");
   });
 
-  test("tool timeout recovery exhausts with structured metadata", async () => {
+  test("tool timeout recovery exhausts with structured metadata after timeout-specific budget", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast tool timeout exhaust");
 
+    // Budget is 3 for tool_timeout; need 3 retries before exhaustion
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out" });
     await harness.emit("agent_end", { messages: [] });
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "tool call timed out again" });
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "command timed out third" });
+    await harness.emit("agent_end", { messages: [] });
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "command timed out fourth" });
     await harness.emit("agent_end", { messages: [] });
 
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
     expect(latestState.failedReason).toContain("Same-socket recovery exhausted");
-    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "tool_timeout", socket: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "tool_timeout", socket: "Socket-1", attempts: 3, originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
 
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.reason === "tool_timeout")).toBe(true);
+    expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.reason === "tool_timeout" && event.data.originalMaxAttempts === 3 && event.data.effectiveMaxAttempts === 3)).toBe(true);
+    expect(events.filter((event) => event.type === "same_socket_recovery_start" && event.data.reason === "tool_timeout")).toHaveLength(3);
   });
 });

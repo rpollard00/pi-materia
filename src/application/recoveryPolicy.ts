@@ -3,6 +3,7 @@ import { evaluateContextErrorRecovery } from "./contextErrorRecoveryPolicy.js";
 import type { MateriaCastState, MateriaRecoveryAllowance, MateriaRecoveryReason, ResolvedMateriaSocket } from "../types.js";
 
 const DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS = 1;
+const TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS = 3;
 
 export type TurnFailureClassification = MateriaRecoveryReason | "transient_transport";
 export type RecoverableTurnFailure = MateriaRecoveryReason;
@@ -38,11 +39,19 @@ export function recoveryIdentityKey(state: MateriaCastState): string {
   return JSON.stringify([recoveryTurnMode(state), socketId, state.currentItemKey ?? "__singleton__", visit, refinementTurn]);
 }
 
-export function ensureRecoveryAllowance(state: MateriaCastState, key: string): MateriaRecoveryAllowance {
+export function ensureRecoveryAllowance(state: MateriaCastState, key: string, options?: { reason?: MateriaRecoveryReason }): MateriaRecoveryAllowance {
   state.recoveryAllowances ??= {};
   const existing = state.recoveryAllowances[key];
-  if (isValidRecoveryAllowance(existing)) return existing;
-  const originalMaxAttempts = DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS;
+  if (isValidRecoveryAllowance(existing)) {
+    if (options?.reason === "tool_timeout") {
+      existing.originalMaxAttempts = Math.max(existing.originalMaxAttempts, TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS);
+      existing.effectiveMaxAttempts = Math.max(existing.effectiveMaxAttempts, TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS);
+    }
+    return existing;
+  }
+  const originalMaxAttempts = options?.reason === "tool_timeout"
+    ? Math.max(DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS, TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS)
+    : DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS;
   const allowance: MateriaRecoveryAllowance = { originalMaxAttempts, effectiveMaxAttempts: originalMaxAttempts, reviveCount: 0 };
   state.recoveryAllowances[key] = allowance;
   return allowance;
