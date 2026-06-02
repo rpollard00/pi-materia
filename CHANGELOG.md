@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.6](https://github.com/rpollard00/pi-materia/compare/v0.1.5...v0.1.6) (2026-06-02)
+
+
+### Features
+
+* **materia-revive:** add timeout revive integration tests with metadata and hint preservation ([f213485](https://github.com/rpollard00/pi-materia/commit/f21348514dc9c41562cba2d4cf433b0f58779d7b))
+* **materia-runtime:** add timeout-specific same-socket retry budget ([f92271f](https://github.com/rpollard00/pi-materia/commit/f92271f5ca404346e11b28335485539c8769e24a))
+* **materia-runtime:** persist timeout recovery hints across retries ([0715cf4](https://github.com/rpollard00/pi-materia/commit/0715cf4ac617e258ddd899355f72d1363f2c5502))
+* refine the default prompts ([1a3f634](https://github.com/rpollard00/pi-materia/commit/1a3f6341ff6eb76aea2531c700c4076d3bcdf73f))
+
+
+### Bug Fixes
+
+* **materia-runtime:** classify bash tool timeouts as recoverable failures ([e38f2e9](https://github.com/rpollard00/pi-materia/commit/e38f2e97251fa0e0d5b1982b3d3cb68a1711b7b6))
+* test failures ([9ada6f1](https://github.com/rpollard00/pi-materia/commit/9ada6f1ceb959d5e1d16c9d3842bc4de94a73af5))
+* untrack pi artifact ([72cbd7a](https://github.com/rpollard00/pi-materia/commit/72cbd7a94506ddf800afdfbb8e0822c80e29db62))
+
 ## [0.1.5](https://github.com/rpollard00/pi-materia/compare/v0.1.4...v0.1.5) (2026-05-28)
 
 
