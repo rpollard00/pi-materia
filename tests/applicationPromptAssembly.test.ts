@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -373,5 +373,67 @@ describe("application prompt assembly", () => {
     expect(synthetic).toContain("Cast id: cast-1");
     expect(synthetic).toContain("Original request: original request");
     expect(synthetic).toContain("Previous output:\nprevious answer");
+  });
+});
+
+describe("buildTimeoutRecoveryHint", () => {
+  function makeHintState(overrides: Partial<Pick<import("../src/types.js").MateriaCastState, "recoveryReasons" | "recoveryErrorMessages" | "recoveryAttempts" | "recoveryHintSuppressed">> = {}): Partial<import("../src/types.js").MateriaCastState> {
+    return overrides;
+  }
+
+  test("returns undefined for non-timeout recovery reason", () => {
+    const state = makeHintState({ recoveryReasons: { "key-1": "context_window" } });
+    expect(buildTimeoutRecoveryHint(state as any, "key-1")).toBeUndefined();
+  });
+
+  test("returns undefined when no recovery reason is recorded", () => {
+    const state = makeHintState();
+    expect(buildTimeoutRecoveryHint(state as any, "key-1")).toBeUndefined();
+  });
+
+  test("returns undefined when hint is suppressed", () => {
+    const state = makeHintState({ recoveryReasons: { "key-1": "tool_timeout" }, recoveryHintSuppressed: true });
+    expect(buildTimeoutRecoveryHint(state as any, "key-1")).toBeUndefined();
+  });
+
+  test("returns hint with duration extracted from error message", () => {
+    const state = makeHintState({
+      recoveryReasons: { "key-1": "tool_timeout" },
+      recoveryErrorMessages: { "key-1": "bash command timed out after 180 seconds" },
+      recoveryAttempts: { "key-1": 2 },
+    });
+    const hint = buildTimeoutRecoveryHint(state as any, "key-1");
+    expect(hint).toBeDefined();
+    expect(hint).toContain("TIMEOUT RECOVERY HINT");
+    expect(hint).toContain("after 180s");
+    expect(hint).toContain("retry #2");
+    expect(hint).toContain("Do NOT repeat");
+    expect(hint).toContain("one-shot commands");
+    expect(hint).toContain("--run flags instead of --watch");
+  });
+
+  test("returns hint without duration when error message has no duration", () => {
+    const state = makeHintState({
+      recoveryReasons: { "key-1": "tool_timeout" },
+      recoveryErrorMessages: { "key-1": "bash command timed out" },
+      recoveryAttempts: { "key-1": 0 },
+    });
+    const hint = buildTimeoutRecoveryHint(state as any, "key-1");
+    expect(hint).toBeDefined();
+    expect(hint).toContain("The previous bash command timed out");
+    expect(hint).not.toContain("after");
+    expect(hint).not.toContain("retry #");
+  });
+
+  test("hint is stable across multiple calls (persists)", () => {
+    const state = makeHintState({
+      recoveryReasons: { "key-1": "tool_timeout" },
+      recoveryErrorMessages: { "key-1": "Command timed out after 300 seconds" },
+      recoveryAttempts: { "key-1": 1 },
+    });
+    const hint1 = buildTimeoutRecoveryHint(state as any, "key-1");
+    const hint2 = buildTimeoutRecoveryHint(state as any, "key-1");
+    expect(hint1).toBe(hint2);
+    expect(hint1).toContain("after 300s");
   });
 });

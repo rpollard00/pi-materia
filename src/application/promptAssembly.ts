@@ -150,6 +150,25 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
   ].filter(Boolean).join("\n");
 }
 
+export function buildTimeoutRecoveryHint(state: MateriaCastState, recoveryKey: string): string | undefined {
+  const reason = state.recoveryReasons?.[recoveryKey];
+  if (reason !== "tool_timeout") return undefined;
+  if (state.recoveryHintSuppressed) return undefined;
+  const originalMessage = state.recoveryErrorMessages?.[recoveryKey] ?? "";
+  const durationMatch = originalMessage.match(/timed?\s*out[^]*?(\d+)\s*(?:seconds?|secs?|s)/i);
+  const durationHint = durationMatch ? ` after ${durationMatch[1]}s` : "";
+  const attempt = state.recoveryAttempts?.[recoveryKey] ?? 0;
+  const attemptHint = attempt > 0 ? ` (retry #${attempt})` : "";
+  return [
+    "⚠️ TIMEOUT RECOVERY HINT — READ THIS BEFORE PROCEEDING:",
+    `The previous bash command timed out${durationHint}${attemptHint}. Do NOT repeat the same long-running or interactive command.`,
+    "- Do not run interactive smoke tests, watch modes, or any command that waits for stdin or a prompt.",
+    "- Use targeted, one-shot commands with explicit shorter timeouts (e.g. add timeout flags).",
+    "- If you need to verify behavior, run individual test files or use --run flags instead of --watch.",
+    "- If a previous command is still running, do not re-run it. Move on to the next step.",
+  ].join("\n");
+}
+
 export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaAgentConfig): string {
   const socket = activeResolvedSocket(state);
   const suffixes = socket && isAgentResolvedSocket(socket) ? [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)] : [];

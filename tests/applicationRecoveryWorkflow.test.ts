@@ -290,3 +290,61 @@ describe("same-socket recovery action workflow", () => {
     expect(events[1].data.error).toBe("compact failed");
   });
 });
+
+describe("recovery reason and error message persistence", () => {
+  test("persists recoveryReasons and recoveryErrorMessages for tool_timeout", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("bash command timed out after 180 seconds"), deps);
+
+    const key = events[0]?.data.key as string;
+    expect(key).toBeDefined();
+    expect(state.recoveryReasons).toBeDefined();
+    expect(state.recoveryReasons![key]).toBe("tool_timeout");
+    expect(state.recoveryErrorMessages).toBeDefined();
+    expect(state.recoveryErrorMessages![key]).toBe("bash command timed out after 180 seconds");
+  });
+
+  test("preserves original error message across multiple retries", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("bash command timed out after 180 seconds"), deps);
+    const key = events[0]?.data.key as string;
+    const originalMessage = state.recoveryErrorMessages![key];
+
+    // Second retry with different message should not overwrite
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("tool call timed out again"), deps);
+    expect(state.recoveryErrorMessages![key]).toBe(originalMessage);
+    expect(state.recoveryReasons![key]).toBe("tool_timeout");
+  });
+
+  test("persists recoveryReasons for context_window failures", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), deps);
+    const key = events[0]?.data.key as string;
+    expect(state.recoveryReasons![key]).toBe("context_window");
+    expect(state.recoveryErrorMessages![key]).toContain("context_length_exceeded");
+  });
+
+  test("persists recoveryReasons for generic turn_failure", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error("provider auth failed"), deps, { allowGenericTurnFailure: true });
+    const key = events[0]?.data.key as string;
+    expect(state.recoveryReasons![key]).toBe("turn_failure");
+    expect(state.recoveryErrorMessages![key]).toBe("provider auth failed");
+  });
+});

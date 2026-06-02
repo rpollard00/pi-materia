@@ -67,6 +67,14 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   const key = recoveryIdentityKey(state);
   state.recoveryAttempts ??= {};
   const allowance = ensureRecoveryAllowance(state, key, { reason });
+  // Persist the recovery reason and original error message so prompt assembly can
+  // inject reason-specific hints (e.g. timeout avoidance) across all retry attempts.
+  state.recoveryReasons ??= {};
+  state.recoveryReasons[key] = reason;
+  state.recoveryErrorMessages ??= {};
+  if (!state.recoveryErrorMessages[key]) {
+    state.recoveryErrorMessages[key] = errorMessage(error);
+  }
   const previousAttempts = state.recoveryAttempts[key] ?? 0;
   let maxAttempts = allowance.effectiveMaxAttempts;
   const jsonRepairMetadata = jsonOutputRepairRecoveryMetadata(state);

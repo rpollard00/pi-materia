@@ -248,8 +248,14 @@ export interface MateriaCastState {
   recoveryAttempts?: Record<string, number>;
   /** Scoped per-context same-socket recovery allowance metadata, keyed like recoveryAttempts. */
   recoveryAllowances?: Record<string, MateriaRecoveryAllowance>;
+  /** Per-context recovery reason, keyed like recoveryAttempts. Persists the classified reason across retries so prompt assembly can inject reason-specific hints. */
+  recoveryReasons?: Record<string, MateriaRecoveryReason>;
+  /** Per-context original error message from the first failure that triggered recovery, keyed like recoveryAttempts. */
+  recoveryErrorMessages?: Record<string, string>;
   /** Structured terminal metadata for casts failed by same-socket recovery exhaustion. */
   recoveryExhaustion?: MateriaRecoveryExhaustion;
+  /** Clearable flag so the runtime can drop stale timeout hints after a successful retry. */
+  recoveryHintSuppressed?: boolean;
   /** Bounded metadata for the next same-socket retry after invalid final JSON output. */
   jsonOutputRepair?: MateriaJsonOutputRepairContext;
   /** Bounded runtime-owned provenance rendered into follow-up prompts after not_satisfied routing. */

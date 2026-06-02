@@ -865,4 +865,43 @@ describe("native same-socket recovery", () => {
     expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.reason === "tool_timeout" && event.data.originalMaxAttempts === 3 && event.data.effectiveMaxAttempts === 3)).toBe(true);
     expect(events.filter((event) => event.type === "same_socket_recovery_start" && event.data.reason === "tool_timeout")).toHaveLength(3);
   });
+
+  test("tool timeout recovery prompt includes persistent timeout hint with duration", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast timeout hint persistence");
+
+    // First timeout triggers recovery with hint
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out after 180 seconds" });
+    await harness.emit("agent_end", { messages: [] });
+
+    let prompt = promptMessages(harness).at(-1)?.content;
+    expect(prompt).toContain("TIMEOUT RECOVERY HINT");
+    expect(prompt).toContain("after 180s");
+    expect(prompt).toContain("Do NOT repeat");
+    expect(prompt).toContain("one-shot commands");
+
+    // Second timeout retry preserves the hint with original duration
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "command timed out again" });
+    await harness.emit("agent_end", { messages: [] });
+
+    prompt = promptMessages(harness).at(-1)?.content;
+    expect(prompt).toContain("TIMEOUT RECOVERY HINT");
+    expect(prompt).toContain("after 180s"); // original duration preserved
+    expect(prompt).toContain("retry #2");
+
+    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.recoveryReasons).toBeDefined();
+    expect(latestState.recoveryErrorMessages).toBeDefined();
+  });
+
+  test("non-timeout recovery prompts do not include timeout hint", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast context no timeout hint");
+
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const prompt = promptMessages(harness).at(-1)?.content;
+    expect(prompt).not.toContain("TIMEOUT RECOVERY HINT");
+  });
 });
