@@ -6,7 +6,7 @@ import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
-import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
@@ -14,7 +14,7 @@ export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from 
 import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
 import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
-import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
+import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
 import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
 import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
@@ -726,9 +726,16 @@ function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {
   const socket = currentSocketOrThrow(state);
   const jsonRepairPrompt = buildJsonOutputRepairRetryPrompt(state, socket);
   if (jsonRepairPrompt) return jsonRepairPrompt;
-  if (state.activeTurnPrompt) return state.activeTurnPrompt;
-  if (recoveryTurnMode(state) === "finalization") return buildMultiTurnFinalizationPrompt(state, socket);
-  return buildSocketPrompt(state, socket);
+  const recoveryKey = recoveryIdentityKey(state);
+  const timeoutHint = buildTimeoutRecoveryHint(state, recoveryKey);
+  if (state.activeTurnPrompt) return appendRecoveryHint(state.activeTurnPrompt, timeoutHint);
+  if (recoveryTurnMode(state) === "finalization") return appendRecoveryHint(buildMultiTurnFinalizationPrompt(state, socket), timeoutHint);
+  return appendRecoveryHint(buildSocketPrompt(state, socket), timeoutHint);
+}
+
+function appendRecoveryHint(prompt: string, hint: string | undefined): string {
+  if (!hint) return prompt;
+  return `${prompt}\n\n${hint}`;
 }
 
 const JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS = 600;

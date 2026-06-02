@@ -3,6 +3,7 @@ import { evaluateContextErrorRecovery } from "./contextErrorRecoveryPolicy.js";
 import type { MateriaCastState, MateriaRecoveryAllowance, MateriaRecoveryReason, ResolvedMateriaSocket } from "../types.js";
 
 const DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS = 1;
+const TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS = 3;
 
 export type TurnFailureClassification = MateriaRecoveryReason | "transient_transport";
 export type RecoverableTurnFailure = MateriaRecoveryReason;
@@ -15,6 +16,7 @@ export interface TurnFailureClassificationOptions {
 export function classifyTurnFailure(error: unknown, options: TurnFailureClassificationOptions = {}): TurnFailureClassification | undefined {
   const message = errorMessage(error);
   if (evaluateContextErrorRecovery(error).action === "compact") return "context_window";
+  if (isToolTimeoutFailure(message)) return "tool_timeout";
   if (isPlainWebSocketTransportFailure(message)) return "transient_transport";
   if (options.allowGenericTurnFailure === true) return "turn_failure";
   return undefined;
@@ -22,7 +24,7 @@ export function classifyTurnFailure(error: unknown, options: TurnFailureClassifi
 
 export function classifyRecoverableTurnFailure(error: unknown, options: TurnFailureClassificationOptions = {}): RecoverableTurnFailure | undefined {
   const classification = classifyTurnFailure(error, options);
-  return classification === "context_window" || classification === "turn_failure" ? classification : undefined;
+  return classification === "context_window" || classification === "tool_timeout" || classification === "turn_failure" ? classification : undefined;
 }
 
 export function recoveryTurnMode(state: MateriaCastState): "normal" | "refinement" | "finalization" {
@@ -37,11 +39,19 @@ export function recoveryIdentityKey(state: MateriaCastState): string {
   return JSON.stringify([recoveryTurnMode(state), socketId, state.currentItemKey ?? "__singleton__", visit, refinementTurn]);
 }
 
-export function ensureRecoveryAllowance(state: MateriaCastState, key: string): MateriaRecoveryAllowance {
+export function ensureRecoveryAllowance(state: MateriaCastState, key: string, options?: { reason?: MateriaRecoveryReason }): MateriaRecoveryAllowance {
   state.recoveryAllowances ??= {};
   const existing = state.recoveryAllowances[key];
-  if (isValidRecoveryAllowance(existing)) return existing;
-  const originalMaxAttempts = DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS;
+  if (isValidRecoveryAllowance(existing)) {
+    if (options?.reason === "tool_timeout") {
+      existing.originalMaxAttempts = Math.max(existing.originalMaxAttempts, TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS);
+      existing.effectiveMaxAttempts = Math.max(existing.effectiveMaxAttempts, TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS);
+    }
+    return existing;
+  }
+  const originalMaxAttempts = options?.reason === "tool_timeout"
+    ? Math.max(DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS, TOOL_TIMEOUT_MIN_RECOVERY_ATTEMPTS)
+    : DEFAULT_MAX_SAME_SOCKET_RECOVERY_ATTEMPTS;
   const allowance: MateriaRecoveryAllowance = { originalMaxAttempts, effectiveMaxAttempts: originalMaxAttempts, reviveCount: 0 };
   state.recoveryAllowances[key] = allowance;
   return allowance;
@@ -107,6 +117,15 @@ export function errorMessage(error: unknown): string {
 function isPlainWebSocketTransportFailure(message: string): boolean {
   const normalized = message.trim().replace(/\s+/g, " ");
   return /(?:^|:\s*)(?:error:\s*)?websocket (?:error|closed|close|connection (?:closed|error|lost)|disconnected)(?:\s+\d{3,4})?\.?$/i.test(normalized);
+}
+
+function isToolTimeoutFailure(message: string): boolean {
+  const normalized = message.trim().replace(/\s+/g, " ");
+  // Pi bash tool returns: "Command timed out after N seconds"
+  // Agent-level: "bash command timed out", "tool call timed out"
+  // Turn-level: "turn timed out", "agent turn exceeded"
+  // Utility: "Utility command timed out for socket"
+  return /\b(?:tool(?:[_ -]call)?|bash|command)\s+timed?\s*out\b|\btimed?\s*out\s+(?:after\s+\d+|waiting for|during)\b/i.test(normalized);
 }
 
 function currentSocketVisit(state: MateriaCastState, fallback = 0): number {
