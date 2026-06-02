@@ -342,12 +342,10 @@ describe("application prompt assembly", () => {
     }), socket);
 
     expect(prompt).toContain("Transform structured previous-cast state");
-    expect(prompt).toContain('"castId": "cast-prev"');
-    expect(prompt).toContain("original feature request");
-    expect(prompt).toContain("implemented parser");
-    expect(prompt).toContain("bounded preview");
+    expect(prompt).toContain("Consume generic previous-cast state");
+    expect(prompt).toContain("prior request and cast id");
     expect(prompt).toContain("workItems");
-    expect(prompt).toContain("never use tasks");
+    expect(prompt).toContain("state.previousCastContext is unavailable");
   });
 
   test("Chain-Context prompt gives clear behavior when previous-cast context is missing", () => {

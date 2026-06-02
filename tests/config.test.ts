@@ -900,9 +900,9 @@ describe("config loadouts", () => {
     );
     expect(prompts["Auto-Architect"]).toContain("Refine workItems directly; put per-item architecture guidance in each workItem.context string");
     expect(prompts["Auto-Architect"]).toContain("Include top-level context only for useful cross-cutting information when relevant");
-    expect(prompts["Build"]).toContain("Current workItem context:");
-    expect(prompts["Build"]).toContain("Accumulated handoff context, if any:");
-    expect(prompts["Build"]).toContain("Global cross-cutting guidance, if any:");
+    expect(prompts["Build"]).toContain("Consume the current workItem and its context as the implementation scope");
+    expect(prompts["Build"]).toContain("AVOID creating god modules");
+    expect(prompts["Build"]).toContain("Build the work item now using normal Pi tools");
     for (const [name, prompt] of Object.entries(prompts)) {
       if (name !== "Build" && name !== "Cover") expect(prompt, name).toContain("workItems");
       expect(prompt, name).not.toContain("architectureGuidance");
@@ -919,7 +919,7 @@ describe("config loadouts", () => {
     });
     expect(rawDefault.materia?.["Chain-Context"]?.prompt).toContain("state.previousCastContext");
     expect(rawDefault.materia?.["Chain-Context"]?.prompt).toContain("workItems");
-    expect(rawDefault.materia?.["Chain-Context"]?.prompt).toContain("never use tasks");
+    expect(rawDefault.materia?.["Chain-Context"]?.prompt).toContain("Transform structured previous-cast state");
   });
 
   test("bundled default loadout edges use explicit canonical conditions", async () => {
@@ -977,7 +977,7 @@ describe("config loadouts", () => {
   test("bundled Auto-Eval prompt references the shared satisfied contract", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
     const prompt = rawDefault.materia?.["Auto-Eval"]?.prompt;
-    expect(prompt).toContain("compact JSON with evaluator fields relevant to this socket");
+    expect(prompt).toContain("Verify whether the work satisfies");
     expect(HANDOFF_CONTRACT_PROMPT_TEXT).toContain('"satisfied" is the canonical boolean control field');
     expect(prompt).not.toContain('"satisfied": boolean');
     expect(prompt).not.toContain('"passed": boolean');
@@ -1177,7 +1177,7 @@ describe("config loadouts", () => {
 
     const fullAutoPrompt = loaded.config.materia["Auto-Plan"].prompt;
     const planningConsultPrompt = loaded.config.materia["Interactive-Plan"].prompt;
-    expect(fullAutoPrompt).toContain("compact JSON containing only plan fields relevant to the socket");
+    expect(fullAutoPrompt).toContain("Break high-level software requests");
     expect(fullAutoPrompt).toContain("Create an implementation plan for this request");
     expect(fullAutoPrompt).toContain("workItems");
     expect(planningConsultPrompt).toContain("Collaboratively refine an implementation plan");

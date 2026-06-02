@@ -6,6 +6,7 @@ node_modules/
 .pi/pi-materia.json
 config/.pi/pi-materia/
 .pi/ralph-loop/
+.pi/pi-materia/**
 
 # Build outputs
 _build/

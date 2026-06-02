@@ -153,12 +153,12 @@ describe("handoff contract drift regressions", () => {
     const prompt = String(rawDefault.materia?.["Auto-Eval"]?.prompt ?? "");
 
     expect(prompt).toContain(
-      "compact JSON with evaluator fields relevant to this socket",
+      "Verify whether the work satisfies",
     );
     expect(prompt).toContain(
-      "Set satisfied as a boolean for the evaluation result and include concise explanatory context",
+      "Bash is available for evaluation commands",
     );
-    expect(prompt).toContain("Do not emit feedback, missing, or tasks");
+    expect(prompt).toContain("Run relevant tests and ensure they pass");
     expect(prompt).not.toContain('"passed": boolean');
 
     const plannerPrompt = String(
@@ -168,7 +168,7 @@ describe("handoff contract drift regressions", () => {
       rawDefault.materia?.["Interactive-Plan"]?.prompt ?? "",
     );
     expect(plannerPrompt).toContain(
-      "compact JSON containing only plan fields relevant to the socket",
+      "Create an implementation plan for this request",
     );
     expect(plannerPrompt).toContain("workItems");
     expect(plannerPrompt).not.toContain('"tasks"');
@@ -193,7 +193,7 @@ describe("handoff contract drift regressions", () => {
       "return compact JSON with only satisfied and explanatory context",
     );
     expect(maintainPrompt).toContain(
-      "Do not emit checkpointCreated, commands, commitMessage",
+      "Always inspect repository state before checkpointing",
     );
     expect(gitMaintainPrompt).toContain(
       "Do not emit checkpointCreated, commands, commitMessage",
@@ -208,7 +208,7 @@ describe("handoff contract drift regressions", () => {
       "context explaining that state.previousCastContext is unavailable",
     );
     expect(chainContextPrompt).toContain(
-      "Each workItem must contain only title:string and context:string",
+      "prior request and cast id",
     );
 
     const bundledPromptText = [

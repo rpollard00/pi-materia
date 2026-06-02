@@ -796,7 +796,7 @@ describe("utility pipeline sockets", () => {
     expect(maintainPrompt).toContain("explain the skipped no-op in context");
     expect(maintainPrompt).toContain("No-op work items must not create empty commits/checkpoints");
     expect(maintainPrompt).toContain("do not run jj describe, jj new, git add, git commit");
-    expect(maintainPrompt).toContain("Do not emit checkpointCreated, commands, commitMessage");
+    expect(maintainPrompt).toContain("return compact JSON with only satisfied and explanatory context");
 
     const gitMaintainPrompt = config.materia.GitMaintain!.prompt;
     expect(gitMaintainPrompt).toContain("Inspect repository state before committing");
