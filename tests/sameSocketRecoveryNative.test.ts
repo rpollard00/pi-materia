@@ -904,4 +904,107 @@ describe("native same-socket recovery", () => {
     const prompt = promptMessages(harness).at(-1)?.content;
     expect(prompt).not.toContain("TIMEOUT RECOVERY HINT");
   });
+
+  test("timeout revive preserves metadata and injects hint on subsequent retries", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast timeout revive hint");
+
+    // Exhaust the 3-attempt timeout budget
+    for (let i = 0; i < 4; i++) {
+      harness.appendAssistantMessage("", { stopReason: "error", errorMessage: `bash command timed out after 180 seconds (${i + 1})` });
+      await harness.emit("agent_end", { messages: [] });
+    }
+
+    const exhausted = latestCastState(harness);
+    expect(exhausted.active).toBe(false);
+    expect(exhausted.recoveryExhaustion.reason).toBe("tool_timeout");
+    const key = exhausted.recoveryExhaustion.key;
+
+    // Verify metadata before revive
+    expect(exhausted.recoveryReasons[key]).toBe("tool_timeout");
+    expect(exhausted.recoveryErrorMessages[key]).toContain("timed out after 180 seconds");
+
+    // Revive
+    const reviveResult = extendSameSocketRecoveryAllowanceForRevive(exhausted);
+    expect(reviveResult).toMatchObject({
+      key,
+      priorEffectiveMaxAttempts: 3,
+      increment: 3,
+      newEffectiveMaxAttempts: 6,
+      reviveCount: 1,
+    });
+
+    // Metadata must survive revive
+    expect(exhausted.recoveryReasons[key]).toBe("tool_timeout");
+    expect(exhausted.recoveryErrorMessages[key]).toContain("timed out after 180 seconds");
+    expect(exhausted.recoveryAllowances[key]).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 6, reviveCount: 1 });
+  });
+
+  test("timeout revive followed by additional timeout failure carries hint with original duration", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast timeout revive retry flow");
+
+    // Exhaust the 3-attempt timeout budget
+    for (let i = 0; i < 4; i++) {
+      harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out after 120 seconds" });
+      await harness.emit("agent_end", { messages: [] });
+    }
+
+    const exhausted = latestCastState(harness);
+    expect(exhausted.active).toBe(false);
+    const key = exhausted.recoveryExhaustion.key;
+
+    // Revive to get 3 more attempts
+    extendSameSocketRecoveryAllowanceForRevive(exhausted);
+
+    // Simulate resume: reactivate the cast like resumeValidatedNativeCast does
+    exhausted.recoveryExhaustion = undefined;
+    exhausted.active = true;
+    exhausted.failedReason = undefined;
+    exhausted.awaitingResponse = true;
+    exhausted.socketState = "awaiting_agent_response";
+    harness.pi.appendEntry("pi-materia-cast-state", exhausted);
+
+    // Trigger another timeout failure — should retry with preserved hint
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out again" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const retried = latestCastState(harness);
+    expect(retried.active).toBe(true);
+    expect(retried.recoveryAttempts[key]).toBe(4); // 3 original + 1 new
+    expect(retried.recoveryReasons[key]).toBe("tool_timeout");
+    expect(retried.recoveryErrorMessages[key]).toContain("timed out after 120 seconds"); // original preserved
+
+    const retryPrompt = promptMessages(harness).at(-1)?.content;
+    expect(retryPrompt).toContain("TIMEOUT RECOVERY HINT");
+    expect(retryPrompt).toContain("after 120s"); // original duration preserved
+  });
+
+  test("context-window revive uses originalMaxAttempts of 1 (regression guard)", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
+    await harness.runCommand("materia", "cast context-window revive regression");
+
+    // Exhaust the 1-attempt context-window budget
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "maximum context length exceeded" });
+    await harness.emit("agent_end", { messages: [] });
+    // Compaction triggers but retry still fails
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded again" });
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = latestCastState(harness);
+    expect(state.active).toBe(false);
+    const key = state.recoveryExhaustion.key;
+    expect(state.recoveryAllowances[key].originalMaxAttempts).toBe(1);
+
+    // Revive adds 1 more for context-window (not 3 like timeout)
+    const result = extendSameSocketRecoveryAllowanceForRevive(state);
+    expect(result).toMatchObject({
+      key,
+      priorEffectiveMaxAttempts: 1,
+      increment: 1,
+      newEffectiveMaxAttempts: 2,
+      reviveCount: 1,
+    });
+  });
 });
