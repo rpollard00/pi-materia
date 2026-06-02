@@ -838,6 +838,7 @@ describe("config loadouts", () => {
     const expectedParse = new Map([
       ["Ignore-Artifacts", "json"],
       ["Detect-VCS", "json"],
+      ["Blackbelt-Bootstrap", "json"],
       ["Blackbelt-Maintain", "json"],
       ["Commit-Sigil", "json"],
       ["Auto-Architect", "json"],

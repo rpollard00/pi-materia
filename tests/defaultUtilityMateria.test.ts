@@ -56,6 +56,11 @@ describe("bundled utility materia defaults", () => {
       script: { kind: "shippedUtility", name: "detect-vcs.mjs", runtime: "node" },
       parse: "json",
     });
+    expect(config.materia?.["Blackbelt-Bootstrap"]).toMatchObject({
+      type: "utility",
+      script: { kind: "shippedUtility", name: "blackbelt-bootstrap.mjs", runtime: "node" },
+      parse: "json",
+    });
     expect(config.materia?.["Blackbelt-Maintain"]).toMatchObject({
       type: "utility",
       script: { kind: "shippedUtility", name: "blackbelt-maintain.mjs", runtime: "node" },
@@ -63,9 +68,11 @@ describe("bundled utility materia defaults", () => {
     });
     expect((config.materia?.["Ignore-Artifacts"] as { assign?: unknown }).assign).toBeUndefined();
     expect((config.materia?.["Detect-VCS"] as { assign?: unknown }).assign).toBeUndefined();
+    expect((config.materia?.["Blackbelt-Bootstrap"] as { assign?: unknown }).assign).toBeUndefined();
     expect((config.materia?.["Blackbelt-Maintain"] as { assign?: unknown }).assign).toBeUndefined();
     expect((config.materia?.["Ignore-Artifacts"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Detect-VCS"] as { command?: unknown }).command).toBeUndefined();
+    expect((config.materia?.["Blackbelt-Bootstrap"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Blackbelt-Maintain"] as { command?: unknown }).command).toBeUndefined();
     expect(packageJson.files).toContain("config/default.json");
     expect(config.materia?.ensureArtifactsIgnored).toBeUndefined();
@@ -82,6 +89,7 @@ describe("bundled utility materia defaults", () => {
     expect(packageJson.scripts?.["pack:dry-run"]).toBe("npm pack --dry-run");
     await expect(access(path.resolve("config", "utilities", "detect-vcs.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "ensure-ignored.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "blackbelt-bootstrap.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "blackbelt-maintain.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "commit-sigil.mjs"))).resolves.toBeNull();
   });
@@ -106,11 +114,12 @@ describe("bundled utility materia defaults", () => {
     expect((materia as { command?: unknown }).command).toBeUndefined();
   });
 
-  test("no bundled loadout socket references Blackbelt-Maintain", async () => {
+  test("no bundled loadout socket references Blackbelt utilities", async () => {
     const config = await loadDefaultConfig();
 
     for (const [loadoutName, loadout] of Object.entries(config.loadouts ?? {})) {
       for (const [socketId, socket] of Object.entries((loadout as { sockets?: Record<string, { materia?: string }> }).sockets ?? {})) {
+        expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-Bootstrap`).not.toBe("Blackbelt-Bootstrap");
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-Maintain`).not.toBe("Blackbelt-Maintain");
       }
     }

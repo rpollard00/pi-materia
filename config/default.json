@@ -750,6 +750,19 @@
         "runtime": "node"
       }
     },
+    "Blackbelt-Bootstrap": {
+      "type": "utility",
+      "label": "Blackbelt-Bootstrap",
+      "description": "Deterministically bootstrap jj version control for the current project and ensure an empty working commit for maintenance flows.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "blackbelt-bootstrap.mjs",
+        "runtime": "node"
+      }
+    },
     "Blackbelt-Maintain": {
       "type": "utility",
       "label": "Blackbelt-Maintain",
