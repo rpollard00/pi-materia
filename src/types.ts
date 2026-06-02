@@ -293,7 +293,7 @@ export interface MateriaReworkFeedbackEntry {
   createdAt: number;
 }
 
-export type MateriaRecoveryReason = "context_window" | "turn_failure";
+export type MateriaRecoveryReason = "context_window" | "tool_timeout" | "turn_failure";
 
 export interface MateriaRecoveryExhaustion {
   kind: "same_socket_recovery_exhausted";

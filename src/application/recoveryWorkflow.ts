@@ -245,6 +245,9 @@ function recoveryWarningMessage(
 ): string {
   const jsonRepairMetadata = jsonOutputRepairRecoveryMetadata(state);
   if (jsonRepairMetadata) return `pi-materia retrying ${recoveryDiagnosticLabel(state)} because the previous JSON output was invalid (${attempt}/${maxAttempts}).`;
+  if (reason === "tool_timeout") {
+    return `pi-materia retrying ${recoveryDiagnosticLabel(state)} after tool timeout (${attempt}/${maxAttempts}).`;
+  }
   if (reason === "context_window" && preparation.contextDecision?.action === "retry_without_compaction") {
     return `pi-materia retrying ${recoveryDiagnosticLabel(state)} without compaction for suspected transient provider/context failure (${attempt}/${maxAttempts}).`;
   }

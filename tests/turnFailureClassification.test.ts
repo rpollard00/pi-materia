@@ -63,4 +63,34 @@ describe("turn failure classification", () => {
     expect(classifyTurnFailure(new Error('WebSocket closed 1000 Error: Codex error: {"type":"error","error":{"type":"invalid_request_error","message":"bad request"}}'))).toBeUndefined();
     expect(classifyTurnFailure(new Error("provider configuration unavailable"))).toBeUndefined();
   });
+
+  test("bash tool timeouts are classified as tool_timeout", () => {
+    expect(classifyTurnFailure(new Error('Pi agent turn failed for socket "Build": Command timed out after 120 seconds'))).toBe("tool_timeout");
+    expect(classifyRecoverableTurnFailure(new Error('Command timed out after 180 seconds'))).toBe("tool_timeout");
+  });
+
+  test("tool-call timeout messages are classified as tool_timeout", () => {
+    expect(classifyTurnFailure(new Error("bash command timed out"))).toBe("tool_timeout");
+    expect(classifyTurnFailure(new Error("tool call timed out during execution"))).toBe("tool_timeout");
+    expect(classifyRecoverableTurnFailure(new Error("bash command timed out"))).toBe("tool_timeout");
+  });
+
+  test("utility socket timeout messages are classified as tool_timeout", () => {
+    expect(classifyTurnFailure(new Error('Utility command timed out for socket "Build" after 30000ms'))).toBe("tool_timeout");
+    expect(classifyRecoverableTurnFailure(new Error('Utility command timed out for socket "Build" after 30000ms'))).toBe("tool_timeout");
+  });
+
+  test("tool_timeout is recoverable without allowGenericTurnFailure opt-in", () => {
+    const error = new Error("bash command timed out");
+    expect(classifyTurnFailure(error)).toBe("tool_timeout");
+    expect(classifyRecoverableTurnFailure(error)).toBe("tool_timeout");
+    expect(classifyRecoverableTurnFailure(error, { allowGenericTurnFailure: false })).toBe("tool_timeout");
+    expect(classifyRecoverableTurnFailure(error, { allowGenericTurnFailure: true })).toBe("tool_timeout");
+  });
+
+  test("tool_timeout classification is not confused by unrelated timeout mentions", () => {
+    // "timeout" alone without the tool/command pattern should not match
+    expect(classifyTurnFailure(new Error("connection timeout exceeded"))).toBeUndefined();
+    expect(classifyTurnFailure(new Error("request took too long"))).toBeUndefined();
+  });
 });
