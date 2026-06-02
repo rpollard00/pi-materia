@@ -22,7 +22,7 @@ Canonical utility sockets reference reusable top-level utility materia; executab
   "command"?: string[],         // explicit local command and args
   "script"?: {                  // shipped utility script resolved through the user profile
     "kind": "shippedUtility",
-    "name": "detect-vcs.mjs",
+    "name": "blackbelt-bootstrap.mjs",
     "runtime"?: "node"
   },
   "params"?: object,            // JSON-serializable utility parameters
@@ -33,7 +33,7 @@ Canonical utility sockets reference reusable top-level utility materia; executab
 }
 ```
 
-A utility materia must configure either `command` or `script`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Runtime sockets reference top-level utility materia such as `Ignore-Artifacts` or `Detect-VCS`.
+A utility materia must configure either `command` or `script`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Runtime sockets reference top-level utility materia such as `Ignore-Artifacts`, `Detect-VCS`, or `Blackbelt-Bootstrap`.
 
 Shipped defaults use the typed script locator `{ "kind": "shippedUtility", "name": "...mjs" }`. On config load, pi-materia syncs packaged scripts to the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities`, or `PI_MATERIA_PROFILE_DIR/utilities` when overridden), records hashes in `.pi-materia-shipped-utilities.json`, and resolves execution to that profile copy. If a user-modified profile script would be overwritten during an update, the modified file is preserved and the new packaged script is written under a hash-suffixed filename that the manifest points to. Relative command script paths from non-shipped config files are still resolved from the directory containing the owning config file, while every spawned process cwd remains the target project directory.
 
@@ -213,7 +213,7 @@ Utility JSON output can route with edges:
 }
 ```
 
-The referenced `Detect-VCS` utility materia writes deterministic repository details under `state.vcs` and owns `parse: "json"` plus `assign: { "vcs": "$.state.vcs" }`, so sockets can focus on graph placement and routing.
+The referenced `Detect-VCS` utility materia writes deterministic repository details under `state.vcs` and owns `parse: "json"` plus `assign: { "vcs": "$.state.vcs" }`, so sockets can focus on graph placement and routing. Bootstrap flows should prefer `Blackbelt-Bootstrap` when repository setup is desired instead of asking planners/builders to create manual VCS setup work items.
 
 ## Utility generators
 
@@ -223,14 +223,20 @@ Utility scripts should not emit broad agent-envelope fields such as `summary`, `
 
 ## Bundled utility scripts
 
-The default config defines `Ignore-Artifacts` and `Detect-VCS` as shipped-script utility materia that run `ensure-ignored.mjs` and `detect-vcs.mjs` through profile-resolved copies. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Current ids `ensureArtifactsIgnored` and `detectVcs`, current aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `currentUtilityVcsDetect...` are obsolete input, not canonical shipped ids.
+The default config defines `Ignore-Artifacts`, `Detect-VCS`, `Blackbelt-Bootstrap`, `Blackbelt-Maintain`, and `Commit-Sigil` as shipped-script utility materia that run profile-resolved copies of their scripts. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Current ids `ensureArtifactsIgnored` and `detectVcs`, current aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `currentUtilityVcsDetect...` are obsolete input, not canonical shipped ids.
+
+### Blackbelt-Bootstrap
+
+`Blackbelt-Bootstrap` is the deterministic replacement for planner-created VCS setup tasks in bootstrap flows. It requires `jj` on `PATH`; if `jj` is missing, the utility hard-fails and writes a `state.blackbeltBootstrap` failure payload. When run in a directory that is not already a jj repository, it runs `jj git init` from the current project directory, including when a plain Git repository already exists, and does not use colocated mode. After detecting or initializing the jj repository, it checks whether the current jj commit is empty with `jj diff --summary`. If the current commit has content, it runs `jj new` so downstream Blackbelt-Maintain work starts from a fresh empty working commit. If the directory is already a jj repository with an empty current commit, it exits successfully without changing repository state.
+
+The utility writes deterministic state under `state.blackbeltBootstrap` (including `ok`, `root`, `available`, `initialized`, `newWorkingCommit`, and `emptyHead` on success). That utility state patch is separate from agent-authored handoff JSON; do not ask planners, builders, or maintainers to emit those fields as agent JSON.
 
 ## Profile verification
 
 To verify this machine's profile and bundled defaults use the current utility form:
 
 1. Inspect `config/default.json` and the active profile config (`${PI_MATERIA_PROFILE_DIR:-~/.config}/pi/pi-materia/config.json`, depending on your profile override).
-2. Confirm shipped utility materia ids are `Detect-VCS` and `Ignore-Artifacts`.
+2. Confirm shipped utility materia ids include `Blackbelt-Bootstrap`, `Detect-VCS`, and `Ignore-Artifacts`.
 3. Confirm loadout utility sockets reference those ids with `materia`.
 4. Run `bun test tests/defaultUtilityMateria.test.ts tests/config.test.ts tests/utilityNative.test.ts` and `npm run pack:dry-run` before publishing or depending on packaged shipped utilities.
 

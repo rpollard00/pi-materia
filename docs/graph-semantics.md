@@ -90,7 +90,7 @@ The WebUI derives visual edges for these routes with stable ids like `loop-exit:
 
 ## Utility materia and generator/consumer styling
 
-Bundled setup/discovery steps such as `Ignore-Artifacts` and `Detect-VCS` are utility materia. They appear in the WebUI palette under the Utility group and execute through the same graph runtime as agent materia.
+Bundled setup/discovery steps such as `Ignore-Artifacts`, `Detect-VCS`, and `Blackbelt-Bootstrap` are utility materia. They appear in the WebUI palette under the Utility group and execute through the same graph runtime as agent materia.
 
 Generator materia are marked with a **Generator** badge. Sockets inside loop regions are marked as **Loop consumer**. The badge is the accessible cue; the overlay preserves the materia's configured base color.
 
