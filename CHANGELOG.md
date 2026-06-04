@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.7](https://github.com/rpollard00/pi-materia/compare/v0.1.6...v0.1.7) (2026-06-02)
+
+
+### Features
+
+* Add Blackbelt-Bootstrap deterministic utility script ([11e62c6](https://github.com/rpollard00/pi-materia/commit/11e62c6799d6fff0835ed39607a1861d97bb5935))
+* Register Blackbelt-Bootstrap as a shipped palette utility ([fc4bd5a](https://github.com/rpollard00/pi-materia/commit/fc4bd5a31f2a052e396adea4d4749f2ccb5a149e))
+
 ## [0.1.6](https://github.com/rpollard00/pi-materia/compare/v0.1.5...v0.1.6) (2026-06-02)
 
 
