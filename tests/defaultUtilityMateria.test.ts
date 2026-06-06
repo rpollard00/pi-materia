@@ -92,6 +92,7 @@ describe("bundled utility materia defaults", () => {
     await expect(access(path.resolve("config", "utilities", "blackbelt-bootstrap.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "blackbelt-maintain.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "commit-sigil.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "blackbelt-pr.mjs"))).resolves.toBeNull();
   });
 
   test("Blackbelt-Bootstrap has correct shipped-utility config shape, parse, color, and metadata", async () => {
@@ -163,9 +164,10 @@ describe("bundled utility materia defaults", () => {
       const entries = await readdir(utilitiesDir);
       expect(entries).toContain("blackbelt-bootstrap.mjs");
       expect(entries).toContain("blackbelt-maintain.mjs");
+      expect(entries).toContain("blackbelt-pr.mjs");
 
       // Verify each script is copied with content
-      for (const name of ["blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs"]) {
+      for (const name of ["blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs", "blackbelt-pr.mjs"]) {
         const scriptContent = await readFile(path.join(utilitiesDir, name), "utf8");
         expect(scriptContent).toBeTruthy();
       }

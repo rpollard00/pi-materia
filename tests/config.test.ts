@@ -868,6 +868,7 @@ describe("config loadouts", () => {
       ["Detect-VCS", "json"],
       ["Blackbelt-Bootstrap", "json"],
       ["Blackbelt-Maintain", "json"],
+      ["Blackbelt-PR", "json"],
       ["Commit-Sigil", "json"],
       ["Auto-Architect", "json"],
       ["Chain-Context", "json"],
