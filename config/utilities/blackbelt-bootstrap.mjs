@@ -1,7 +1,50 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { access, constants } from "node:fs/promises";
 import path from "node:path";
+
+class UtilityError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.details = details;
+  }
+}
+
+const BOOKMARK_NOUNS = [
+  "crystal",
+  "chocobo",
+  "moogle",
+  "airship",
+  "cactuar",
+  "tonberry",
+  "gil",
+  "behemoth",
+  "spell",
+  "dragoon",
+  "mage",
+  "knight",
+  "thief",
+  "monk",
+  "paladin",
+  "summoner",
+  "alchemy",
+  "aether",
+  "limit",
+  "tome",
+  "ribbon",
+  "potion",
+  "ether",
+  "elixir",
+  "relic",
+  "armlet",
+  "lance",
+  "blade",
+  "grimoire",
+  "caravan",
+];
+
+const BOOKMARK_VERBS = ["guards", "casts", "charges", "weaves", "strikes", "heals", "jumps", "tracks", "forges", "levels", "quests", "marches"];
 
 try {
   const input = await readStdinJson();
@@ -82,13 +125,6 @@ try {
   process.exitCode = 1;
 }
 
-class UtilityError extends Error {
-  constructor(message, details = {}) {
-    super(message);
-    this.details = details;
-  }
-}
-
 async function readStdinJson() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
@@ -158,33 +194,33 @@ function formatError(error) {
 
 /**
  * Generate a deterministic, git-ref-safe bookmark name under the blackbelt/ prefix.
- * Priority: params.bookmarkName > castId > basename(runDir) > timestamp + repo basename.
+ * Priority: explicit params.bookmarkName override, otherwise hash castId (with
+ * runDir/cwd only as last-resort seeds) into blackbelt/<noun>-<verb>-<hash>.
  */
 function generateBookmarkName(input, cwd) {
   const params = input.params != null && typeof input.params === "object" ? input.params : {};
-  let raw;
 
-  // 1. Explicit params.bookmarkName
   if (typeof params.bookmarkName === "string" && params.bookmarkName.trim().length > 0) {
-    raw = params.bookmarkName.trim();
-  } else if (typeof input.castId === "string" && input.castId.trim().length > 0) {
-    // 2. Prefer castId
-    raw = input.castId.trim();
-  } else if (typeof input.runDir === "string" && input.runDir.trim().length > 0) {
-    // 3. basename(runDir)
-    const base = path.basename(input.runDir.trim());
-    raw = base.length > 0 ? base : undefined;
+    return sanitizeRefName(`blackbelt/${params.bookmarkName.trim()}`);
   }
 
-  if (!raw) {
-    // 4. Fallback: timestamp + sanitized repo basename
-    const repoBase = path.basename(cwd);
-    const ts = new Date().toISOString().replace(/[:.]/g, "-").toLowerCase();
-    raw = `${ts}-${repoBase}`;
-  }
+  const seed = bookmarkSeed(input, cwd);
+  const hash = createHash("sha256").update(seed).digest("hex");
+  const nounIndex = Number.parseInt(hash.slice(0, 8), 16) % BOOKMARK_NOUNS.length;
+  const verbIndex = Number.parseInt(hash.slice(8, 16), 16) % BOOKMARK_VERBS.length;
+  const suffix = hash.slice(0, 10);
 
-  // Always nest under the stable blackbelt/ prefix
-  return sanitizeRefName(`blackbelt/${raw}`);
+  return sanitizeRefName(`blackbelt/${BOOKMARK_NOUNS[nounIndex]}-${BOOKMARK_VERBS[verbIndex]}-${suffix}`);
+}
+
+function bookmarkSeed(input, cwd) {
+  if (typeof input.castId === "string" && input.castId.trim().length > 0) {
+    return input.castId.trim();
+  }
+  if (typeof input.runDir === "string" && input.runDir.trim().length > 0) {
+    return input.runDir.trim();
+  }
+  return cwd;
 }
 
 /**

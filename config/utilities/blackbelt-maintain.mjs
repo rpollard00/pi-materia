@@ -5,7 +5,7 @@
  * Input scope (tightly constrained):
  *   - item.title          → jj describe message
  *   - cwd                 → working directory for jj commands
- *   - state.blackbeltBootstrap.bookmarkName → bookmark target (fallback: generateBookmarkName)
+ *   - state.blackbeltBootstrap.bookmarkName → bootstrap-owned bookmark target
  *
  * Explicitly NOT coupled to:
  *   - Runtime cast status (phase, active, failedReason, socketState, etc.)
@@ -18,7 +18,6 @@
  * `satisfied: false` with a descriptive context string.
  */
 import { execFile } from "node:child_process";
-import path from "node:path";
 
 try {
   const input = await readStdinJson();
@@ -26,8 +25,15 @@ try {
   const cwd = typeof input.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd();
 
   // Determine bookmark name early so every result context can include it.
-  // Prefer bootstrap state, fall back to generator.
-  const bookmarkName = resolveBookmarkName(input, cwd);
+  // Bootstrap owns bookmark naming; maintain must not invent replacements.
+  const bookmarkName = resolveBookmarkName(input);
+  if (bookmarkName === null) {
+    writeStdoutJson({
+      satisfied: false,
+      context: "Blackbelt-Maintain: missing state.blackbeltBootstrap.bookmarkName. Run Blackbelt-Bootstrap first so maintain can advance the bootstrap-owned bookmark.",
+    });
+    process.exit(0);
+  }
 
   // Fail early if no title available
   if (typeof title !== "string" || title.trim().length === 0) {
@@ -112,15 +118,13 @@ async function moveBookmark(bookmarkName, cwd) {
   }
 }
 
-function resolveBookmarkName(input, cwd) {
-  // Prefer bootstrap state
+function resolveBookmarkName(input) {
   const state = input.state != null && typeof input.state === "object" ? input.state : {};
   const bbState = state.blackbeltBootstrap != null && typeof state.blackbeltBootstrap === "object" ? state.blackbeltBootstrap : {};
   if (typeof bbState.bookmarkName === "string" && bbState.bookmarkName.trim().length > 0) {
     return bbState.bookmarkName.trim();
   }
-  // Fall back to the same generator used by bootstrap
-  return generateBookmarkName(input, cwd);
+  return null;
 }
 
 function execFileText(command, args, cwd) {
@@ -161,55 +165,4 @@ async function readStdinJson() {
 
 function writeStdoutJson(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
-}
-
-/**
- * Generate a deterministic, git-ref-safe bookmark name under the blackbelt/ prefix.
- * Priority: params.bookmarkName > castId > basename(runDir) > timestamp + repo basename.
- * Kept here as a fallback when bootstrap state does not carry a bookmarkName.
- */
-function generateBookmarkName(input, cwd) {
-  const params = input.params != null && typeof input.params === "object" ? input.params : {};
-  let raw;
-
-  if (typeof params.bookmarkName === "string" && params.bookmarkName.trim().length > 0) {
-    raw = params.bookmarkName.trim();
-  } else if (typeof input.castId === "string" && input.castId.trim().length > 0) {
-    raw = input.castId.trim();
-  } else if (typeof input.runDir === "string" && input.runDir.trim().length > 0) {
-    const base = path.basename(input.runDir.trim());
-    raw = base.length > 0 ? base : undefined;
-  }
-
-  if (!raw) {
-    const repoBase = path.basename(cwd);
-    const ts = new Date().toISOString().replace(/[:.]/g, "-").toLowerCase();
-    raw = `${ts}-${repoBase}`;
-  }
-
-  return sanitizeRefName(`blackbelt/${raw}`);
-}
-
-function sanitizeRefName(raw) {
-  let s = raw.toLowerCase();
-  s = s.replace(/[\x00-\x20\x7f~^:?*[\\]/g, "-");
-  s = s.replace(/@\{/g, "-{");
-  s = s.replace(/\.\./g, ".-");
-  s = s.replace(/-{2,}/g, "-");
-  s = s.replace(/\/{2,}/g, "/");
-  s = s.replace(/^[\/.]+/, "");
-  s = s.replace(/\.lock(?=\/|$)/gi, "-lock");
-
-  const segments = s.split("/").map((seg) => {
-    let cleaned = seg.replace(/^[-.]+/, "").replace(/[-.]+$/, "");
-    if (cleaned.length === 0) cleaned = "x";
-    if (cleaned.endsWith(".lock")) {
-      cleaned = cleaned.slice(0, -5) + "-x";
-    }
-    return cleaned;
-  });
-
-  s = segments.join("/");
-  if (s === "@" || s.length === 0) s = "x";
-  return s;
 }
