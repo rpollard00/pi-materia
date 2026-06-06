@@ -38,7 +38,6 @@ export interface MateriaWebUiEnsureOptions {
 export async function ensureMateriaWebUi(options: MateriaWebUiEnsureOptions): Promise<MateriaWebUiEnsureResult> {
   try {
     const launched = await launchMateriaWebUi(options.ctx, options.configuredPath, options.pi, {
-      initializeDefaultLoadout: options.mode === "explicit",
       questControls: options.questControls,
     });
     return {
