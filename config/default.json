@@ -779,7 +779,7 @@
     "Commit-Sigil": {
       "type": "utility",
       "label": "Commit-Sigil",
-      "description": "Pass-through generator validator for Conventional Commit work item titles. Consumes state.workItems, validates each title, echoes workItems unchanged, and emits satisfied/context for routing.",
+      "description": "Pass-through generator validator for Conventional Commit work item titles. Generator: true because it produces canonical top-level workItems for downstream generator/loop semantics. Consumes state.workItems, validates each title against the Conventional Commit format, echoes the input workItems array unchanged, and emits satisfied/context for routing. Utility state stays separate under state; the workItems / satisfied / context contract matches agent generator output.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",

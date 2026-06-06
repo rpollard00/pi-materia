@@ -217,9 +217,15 @@ The referenced `Detect-VCS` utility materia writes deterministic repository deta
 
 ## Utility generators
 
-A utility materia may set `generator: true` when a deterministic script should produce generated work items for loop regions. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON so loop regions can consume it with `consumes: { "from": "Socket-N", "output": "workItems" }`. Generated work item entries use the same minimal item shape as agent output: `title:string` plus `context:string`.
+Utility materia marked `generator: true` follow the same top-level `workItems` / `satisfied` / `context` contract as agent generators. A deterministic script emits canonical generator output; utility state patches remain under a separate `state` object. This lets utility generators participate in loop regions and generator-to-generator pipelines with `consumes: { "from": "Socket-N", "output": "workItems" }`.
+
+A utility materia may set `generator: true` when a deterministic script should produce generated work items for loop regions. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON. Generated work item entries use the same minimal item shape as agent output: `title:string` plus `context:string`.
 
 Utility scripts should not emit broad agent-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, or `missing`. When deterministic structured data is needed in shared runtime state, put it under a separate top-level `state` object (for example, `{ "state": { "planMetadata": { "source": "script" } }, "workItems": [...] }`) or map script-owned output with explicit `assign` entries. Do not use generated-output aliases such as `tasks`.
+
+### Pass-through generator validators
+
+Some utility generators are validators that do not transform `workItems`. `Commit-Sigil` is the canonical example: it consumes `state.workItems`, validates Conventional Commit title formatting on each item, and echoes the input `workItems` array unchanged. It toggles `satisfied` based on validation results and includes actionable `context` so routing can loop back to planning when titles need correction. It is `generator: true` because it produces canonical top-level `workItems` for downstream generator/loop semantics — not because it rewrites or filters titles. The echoed `workItems` payload carries the same shape as agent generator output into the next socket.
 
 ## Bundled utility scripts
 
@@ -230,6 +236,32 @@ The default config defines `Ignore-Artifacts`, `Detect-VCS`, `Blackbelt-Bootstra
 `Blackbelt-Bootstrap` is the deterministic replacement for planner-created VCS setup tasks in bootstrap flows. It requires `jj` on `PATH`; if `jj` is missing, the utility hard-fails and writes a `state.blackbeltBootstrap` failure payload. When run in a directory that is not already a jj repository, it runs `jj git init` from the current project directory, including when a plain Git repository already exists, and does not use colocated mode. After detecting or initializing the jj repository, it checks whether the current jj commit is empty with `jj diff --summary`. If the current commit has content, it runs `jj new` so downstream Blackbelt-Maintain work starts from a fresh empty working commit. If the directory is already a jj repository with an empty current commit, it exits successfully without changing repository state.
 
 The utility writes deterministic state under `state.blackbeltBootstrap` (including `ok`, `root`, `available`, `initialized`, `newWorkingCommit`, and `emptyHead` on success). That utility state patch is separate from agent-authored handoff JSON; do not ask planners, builders, or maintainers to emit those fields as agent JSON.
+
+### Commit-Sigil
+
+`Commit-Sigil` is a pass-through generator validator. It is `generator: true` because it produces canonical top-level `workItems` for downstream generator and loop-region semantics — the `Release` loadout loop consumes `workItems` from the Commit-Sigil socket. It does **not** rewrite, filter, or transform titles; it echoes the input `workItems` array unchanged while validating each title against Conventional Commit format (`type: description` or `type(scope): description`, with optional `!` for breaking changes).
+
+The script reads work items from `state.workItems` (with a top-level `workItems` fallback for direct tests), validates each `title` string, and writes canonical generator output:
+
+```json
+{
+  "workItems": [{"title": "feat: add release workflow", "context": "…"}],
+  "satisfied": true,
+  "context": "All work items validated."
+}
+```
+
+When validation fails, `satisfied` is `false` and `context` includes item indices and actionable correction hints so routing can loop back to planning:
+
+```json
+{
+  "workItems": [{"title": "bad title", "context": "…"}],
+  "satisfied": false,
+  "context": "Work item 0: title must start with type: (feat:, fix:, chore:, docs:, …)."
+}
+```
+
+For empty input the script emits `workItems: []` with `satisfied: true`. `Commit-Sigil` never emits `tasks`, `work`, broad-envelope fields, or state patches. Routing consumption is configured on the socket (e.g. `consumes: { "from": "Socket-9", "output": "workItems" }`) while edges key on `satisfied` / `not_satisfied` to advance or loop back.
 
 ## Profile verification
 

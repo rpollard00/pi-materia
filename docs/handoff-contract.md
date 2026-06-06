@@ -53,6 +53,8 @@ Materia marked `generator: true` produce generated work as a sparse JSON payload
 
 Generator-to-generator pipelines behave like iterator transforms: the upstream generator emits `workItems`; the downstream generator consumes that context, transforms or filters it, and emits a new payload with its own `workItems`. `workItems` is the canonical generator payload; do not author `tasks`, `task`, `work`, or custom output names for generated work.
 
+Utility materia marked `generator: true` follow the same top-level `workItems` / `satisfied` / `context` contract as agent generators. A deterministic script emits canonical generator output; utility-only state patches remain under a separate `state` object. Pass-through validator generators (such as `Commit-Sigil`) echo input `workItems` unchanged while validating titles and reporting `satisfied` / `context` for routing. They are `generator: true` because they produce canonical `workItems` for downstream generator and loop-region semantics — not because they transform or rewrite titles.
+
 ## Reserved route field
 
 `satisfied` is the canonical routing field.
