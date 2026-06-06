@@ -108,11 +108,7 @@
             }
           ],
           "materia": "Auto-Plan",
-          "parse": "json",
-          "empty": false,
-          "assign": {
-            "workItems": "$.workItems"
-          }
+          "empty": false
         },
         "Socket-4": {
           "socketKind": "normal",
@@ -181,11 +177,7 @@
             }
           ],
           "materia": "Auto-Architect",
-          "parse": "json",
-          "empty": false,
-          "assign": {
-            "workItems": "$.workItems"
-          }
+          "empty": false
         }
       }
     },
@@ -233,10 +225,6 @@
           "materia": "Detect-VCS"
         },
         "Socket-3": {
-          "parse": "json",
-          "assign": {
-            "workItems": "$.workItems"
-          },
           "materia": "Interactive-Plan",
           "edges": [
             {
@@ -395,11 +383,7 @@
             }
           ],
           "materia": "Interactive-Plan",
-          "parse": "json",
-          "empty": false,
-          "assign": {
-            "workItems": "$.workItems"
-          }
+          "empty": false
         },
         "Socket-4": {
           "socketKind": "normal",
@@ -410,11 +394,7 @@
             }
           ],
           "materia": "Auto-Architect",
-          "parse": "json",
-          "empty": false,
-          "assign": {
-            "workItems": "$.workItems"
-          }
+          "empty": false
         },
         "Socket-5": {
           "socketKind": "normal",
@@ -570,11 +550,7 @@
             }
           ],
           "materia": "Auto-Plan",
-          "parse": "json",
-          "empty": false,
-          "assign": {
-            "workItems": "$.workItems"
-          }
+          "empty": false
         },
         "Socket-4": {
           "socketKind": "normal",
@@ -643,11 +619,7 @@
             }
           ],
           "materia": "Auto-Architect",
-          "parse": "json",
-          "empty": false,
-          "assign": {
-            "workItems": "$.workItems"
-          }
+          "empty": false
         },
         "Socket-9": {
           "socketKind": "normal",

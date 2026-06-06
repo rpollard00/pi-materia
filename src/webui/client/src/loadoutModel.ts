@@ -104,13 +104,29 @@ function normalizeCanonicalParseSemantics(container: { parse?: unknown; outputFo
   for (const definition of Object.values(definitions)) normalizeCanonicalParseSemantics(definition);
 }
 
+/**
+ * Generator parse/assign fields are derived at runtime by effectiveResolvedSocketConfig.
+ * This function prunes legacy canonical generator fields (parse: "json" and
+ * assign.workItems: "$.workItems") from agent generator sockets during WebUI
+ * normalization. Non-canonical parse/assign values are preserved for runtime
+ * validation to reject.
+ */
 function normalizeGeneratorPipelineSockets(loadout: PipelineConfig, definitions: Record<string, MateriaBehaviorConfig>): void {
-  for (const id of generatorPipelineSocketIds(loadout, definitions)) {
-    const socket = loadout.sockets?.[id];
-    if (typeof socket?.materia !== 'string') continue;
-    if (!canonicalMateriaGeneratorOutput(definitions[socket.materia])) continue;
-    socket.parse = 'json';
-    socket.assign = { ...(socket.assign as Record<string, string> | undefined ?? {}), workItems: '$.workItems' };
+  for (const [, socket] of Object.entries(loadout.sockets ?? {})) {
+    const socketMateria = typeof socket.materia === 'string' ? definitions[socket.materia] : undefined;
+    // Only prune agent generator sockets; utility sockets are handled separately
+    if (!socketMateria || socketMateria.type === 'utility' || socketMateria.utility !== undefined || socketMateria.command !== undefined || socketMateria.script !== undefined) continue;
+    if (socketMateria.generator !== true) continue;
+    // Prune canonical parse that is derived at runtime
+    if (socket.parse === 'json') delete socket.parse;
+    // Prune canonical assign.workItems that is derived at runtime
+    if (socket.assign && typeof socket.assign === 'object' && !Array.isArray(socket.assign)) {
+      const assign = socket.assign as Record<string, unknown>;
+      if (assign.workItems === '$.workItems') {
+        delete assign.workItems;
+        if (Object.keys(assign).length === 0) delete socket.assign;
+      }
+    }
   }
 }
 
@@ -385,10 +401,13 @@ export function createMateriaReference(materiaId: string, _type: SocketType = 'a
 
 export function materiaPaletteSocket(id: string, definition?: MateriaBehaviorConfig): PipelineSocket {
   if (definition?.type === 'utility' || definition?.utility !== undefined || definition?.command !== undefined || definition?.script !== undefined) return { ...createMateriaReference(id, 'utility') };
+  // Generator materia owns parse/assign; these are derived at runtime and should not be materialized on sockets.
+  // Non-generator agents preserve their parse/assign from the definition.
+  const isGenerator = definition?.generator === true;
   return {
     ...createMateriaReference(id, 'agent'),
-    parse: definition?.parse,
-    assign: cloneValue(definition?.assign),
+    parse: isGenerator ? undefined : definition?.parse,
+    assign: isGenerator ? undefined : cloneValue(definition?.assign),
     foreach: cloneValue(definition?.foreach),
   };
 }

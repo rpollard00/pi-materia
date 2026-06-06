@@ -212,8 +212,7 @@ describe("loadout-aware pipeline resolution", () => {
     const pipeline = resolvePipeline(config);
     const effectiveGeneratorConfig = effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]);
 
-    expect(pipeline.sockets["Socket-1"].socket.parse).toBe("json");
-    expect(pipeline.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    // parse and assign are derived at runtime, not persisted on utility generator sockets
     expect(effectiveGeneratorConfig.parse).toBe("json");
     expect(effectiveGeneratorConfig.assign).toEqual({ other: "$.other", workItems: "$.workItems" });
     expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-1", output: "workItems" });
@@ -341,20 +340,20 @@ describe("loadout-aware pipeline resolution", () => {
     const missingUpstreamParse = structuredClone(config) as PiMateriaConfig;
     delete testSockets(missingUpstreamParse.loadouts!.Loop)["Socket-1"].parse;
     const normalizedMissingUpstreamParse = resolvePipeline(missingUpstreamParse);
-    expect(normalizedMissingUpstreamParse.sockets["Socket-1"].socket.parse).toBe("json");
-    expect(normalizedMissingUpstreamParse.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    expect(effectiveResolvedSocketConfig(normalizedMissingUpstreamParse.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(normalizedMissingUpstreamParse.sockets["Socket-1"]).assign?.workItems).toBe("$.workItems");
 
     const missingDownstreamParse = structuredClone(config) as PiMateriaConfig;
     delete testSockets(missingDownstreamParse.loadouts!.Loop)["Socket-4"].parse;
     const normalizedMissingDownstreamParse = resolvePipeline(missingDownstreamParse);
-    expect(normalizedMissingDownstreamParse.sockets["Socket-4"].socket.parse).toBe("json");
-    expect(normalizedMissingDownstreamParse.sockets["Socket-4"].socket.assign?.workItems).toBe("$.workItems");
+    expect(effectiveResolvedSocketConfig(normalizedMissingDownstreamParse.sockets["Socket-4"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(normalizedMissingDownstreamParse.sockets["Socket-4"]).assign?.workItems).toBe("$.workItems");
 
     const incompleteDownstreamAssignment = structuredClone(config) as PiMateriaConfig;
     testSockets(incompleteDownstreamAssignment.loadouts!.Loop)["Socket-4"].assign = { tasks: "$.tasks" };
     const normalizedIncompleteDownstreamAssignment = resolvePipeline(incompleteDownstreamAssignment);
-    expect(normalizedIncompleteDownstreamAssignment.sockets["Socket-4"].socket.parse).toBe("json");
-    expect(normalizedIncompleteDownstreamAssignment.sockets["Socket-4"].socket.assign?.workItems).toBe("$.workItems");
+    expect(effectiveResolvedSocketConfig(normalizedIncompleteDownstreamAssignment.sockets["Socket-4"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(normalizedIncompleteDownstreamAssignment.sockets["Socket-4"]).assign?.workItems).toBe("$.workItems");
   });
 
   test("resolvePipeline reconciles stale loop consumer source from current graph edges", () => {
@@ -390,8 +389,8 @@ describe("loadout-aware pipeline resolution", () => {
     const pipeline = resolvePipeline(config);
 
     expect(pipeline.loops?.taskIteration.consumes).toEqual({ from: "Socket-2", output: "workItems" });
-    expect(pipeline.sockets["Socket-2"].socket.parse).toBe("json");
-    expect(pipeline.sockets["Socket-2"].socket.assign?.workItems).toBe("$.workItems");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-2"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-2"]).assign?.workItems).toBe("$.workItems");
     expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
   });
 
@@ -416,10 +415,10 @@ describe("loadout-aware pipeline resolution", () => {
 
     const pipeline = resolvePipeline(config);
 
-    expect(pipeline.sockets["Socket-1"].socket.parse).toBe("json");
-    expect(pipeline.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
-    expect(pipeline.sockets["Socket-2"].socket.parse).toBe("json");
-    expect(pipeline.sockets["Socket-2"].socket.assign?.workItems).toBe("$.workItems");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).assign?.workItems).toBe("$.workItems");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-2"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-2"]).assign?.workItems).toBe("$.workItems");
   });
 
   test("resolvePipeline rejects authored legacy generates metadata with obsolete metadata guidance", () => {
@@ -690,7 +689,7 @@ describe("utility pipeline sockets", () => {
         Test: {
           entry: "Socket-1",
           sockets: {
-            "Socket-1": { materia: "planner", parse: "text", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-1": { materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
             "Socket-2": { materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
           },
           loops: { taskIteration: { sockets: ["Socket-2"], consumes: { from: "Socket-1", output: "workItems" } } },
@@ -702,19 +701,37 @@ describe("utility pipeline sockets", () => {
       },
     };
 
-    const normalizedTextParse = resolvePipeline(config);
-    expect(normalizedTextParse.sockets["Socket-1"].socket.parse).toBe("json");
-    expect(normalizedTextParse.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    // Clean generator socket: effective config derives parse/assign at runtime
+    const clean = resolvePipeline(config);
+    expect(effectiveResolvedSocketConfig(clean.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(clean.sockets["Socket-1"]).assign?.workItems).toBe("$.workItems");
 
+    // Conflicting parse: "text" on a generator socket is rejected
+    testSockets(config.loadouts!.Test)["Socket-1"].parse = "text";
+    expect(() => resolvePipeline(config)).toThrow(/conflicting parse/);
+
+    // Legacy canonical parse: "json" is tolerated
     testSockets(config.loadouts!.Test)["Socket-1"].parse = "json";
-    const normalizedMissingAssignment = resolvePipeline(config);
-    expect(normalizedMissingAssignment.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    const withCanonicalParse = resolvePipeline(config);
+    expect(effectiveResolvedSocketConfig(withCanonicalParse.sockets["Socket-1"]).parse).toBe("json");
 
+    // Clean socket with no assign: effective config adds workItems
+    delete testSockets(config.loadouts!.Test)["Socket-1"].parse;
+    delete testSockets(config.loadouts!.Test)["Socket-1"].assign;
+    const noAssign = resolvePipeline(config);
+    expect(effectiveResolvedSocketConfig(noAssign.sockets["Socket-1"]).assign?.workItems).toBe("$.workItems");
+
+    // Conflicting assign.workItems is rejected
+    testSockets(config.loadouts!.Test)["Socket-1"].assign = { workItems: "$.tasks" };
+    expect(() => resolvePipeline(config)).toThrow(/conflicting assign/);
+
+    // Additional assign keys are fine (runtime adds workItems)
     testSockets(config.loadouts!.Test)["Socket-1"].assign = { tasks: "$.tasks" };
-    const normalizedLegacyAssignment = resolvePipeline(config);
-    expect(normalizedLegacyAssignment.sockets["Socket-1"].socket.parse).toBe("json");
-    expect(normalizedLegacyAssignment.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    const withExtraAssign = resolvePipeline(config);
+    expect(effectiveResolvedSocketConfig(withExtraAssign.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(withExtraAssign.sockets["Socket-1"]).assign).toEqual({ tasks: "$.tasks", workItems: "$.workItems" });
 
+    // Legacy canonical assign: workItems is tolerated
     testSockets(config.loadouts!.Test)["Socket-1"].assign = { workItems: "$.workItems" };
     expect(resolvePipeline(config).entry.materia.generator).toBe(true);
 
@@ -818,7 +835,11 @@ describe("utility pipeline sockets", () => {
       const [loopId, loop] = Object.entries(loadout.loops ?? {})[0] ?? [];
       expect(loop?.consumes?.output).toBe("workItems");
       expect(typeof loop?.consumes?.from).toBe("string");
-      expect(loadout.sockets?.[loop!.consumes!.from]).toMatchObject({ parse: "json", assign: { workItems: "$.workItems" } });
+      // Generator parse/assign are derived at runtime via effectiveResolvedSocketConfig
+      const consumerSocket = loop?.consumes?.from ? pipeline.sockets[loop.consumes.from] : undefined;
+      expect(consumerSocket).toBeDefined();
+      expect(effectiveResolvedSocketConfig(consumerSocket!).parse).toBe("json");
+      expect(effectiveResolvedSocketConfig(consumerSocket!).assign?.workItems).toBe("$.workItems");
       expect(pipeline.loops?.[loopId]?.iterator).toEqual({ items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" });
       expect(renderGrid(config, pipeline, "default", "/tmp/project").join("\n")).toContain("generator=workItems:array<workItem>");
     }

@@ -31,7 +31,7 @@ export function normalizeLoadedLoadout<TLoadout extends MateriaPipelineConfig>(l
 
 export function prepareLoadoutForSave<TLoadout extends MateriaPipelineConfig>(loadout: TLoadout, materia: Record<string, GeneratorMateriaLike> = {}, options: { loadoutName?: string } = {}): NormalizedLoadoutResult<TLoadout> {
   const result = prepareLoadout(loadout, materia, options);
-  pruneCanonicalUtilitySocketFields(result.loadout);
+  pruneCanonicalUtilitySocketFields(result.loadout, materia);
   return { loadout: result.loadout, analysis: analyzeLoadoutGraph(result.loadout, materia) };
 }
 
@@ -97,10 +97,28 @@ function pruneLoadoutLayout(loadout: MateriaPipelineConfig): void {
   normalizeLoadoutLayout(loadout);
 }
 
-function pruneCanonicalUtilitySocketFields(loadout: MateriaPipelineConfig): void {
+function pruneCanonicalUtilitySocketFields(loadout: MateriaPipelineConfig, materia: Record<string, GeneratorMateriaLike> = {}): void {
   for (const [, socket] of loadoutSocketEntries(loadout)) {
     const canonicalSocket = socket as unknown as Record<string, unknown>;
     for (const key of ["utility", "command", "params", "timeoutMs"]) delete canonicalSocket[key];
+    const socketMateria = typeof socket.materia === "string" ? materia[socket.materia] : undefined;
+    // Utility sockets: prune all parse/assign (materia owns these)
+    if (socketMateria?.type === "utility" || socketMateria?.utility !== undefined || socketMateria?.command !== undefined) {
+      delete canonicalSocket["parse"];
+      delete canonicalSocket["assign"];
+    }
+    // Agent generator sockets: prune canonical parse/assign that are derived at runtime
+    const generator = socketMateria ? canonicalGeneratorConfigFor(socketMateria) : undefined;
+    if (generator && socketMateria && !(socketMateria.type === "utility" || socketMateria.utility !== undefined || socketMateria.command !== undefined)) {
+      if (canonicalSocket["parse"] === "json") delete canonicalSocket["parse"];
+      if (canonicalSocket["assign"] !== undefined && typeof canonicalSocket["assign"] === "object" && !Array.isArray(canonicalSocket["assign"])) {
+        const assign = canonicalSocket["assign"] as Record<string, unknown>;
+        if (assign[generator.output] === `$.${generator.output}`) {
+          delete assign[generator.output];
+          if (Object.keys(assign).length === 0) delete canonicalSocket["assign"];
+        }
+      }
+    }
   }
 }
 
@@ -113,15 +131,13 @@ function reconcileLoopConsumers(loadout: MateriaPipelineConfig, materia: Record<
   }
 }
 
-function normalizeGeneratorPipelineSockets(loadout: MateriaPipelineConfig, materia: Record<string, GeneratorMateriaLike>): void {
-  for (const id of analyzeLoadoutGraph(loadout, materia).workItemProducingSocketIds) {
-    const socket = getLoadoutSocket(loadout, id);
-    if (!socket || !isMateriaSocket(socket)) continue;
-    const generator = canonicalGeneratorConfigFor(materia[socket.materia]);
-    if (!generator) continue;
-    socket.parse = "json";
-    socket.assign = { ...(socket.assign ?? {}), [generator.output]: `$.${generator.output}` };
-  }
+/**
+ * Generator parse/assign fields are derived at runtime by effectiveResolvedSocketConfig.
+ * This function exists for backward-compatible normalization of legacy persisted fields.
+ * It no longer materializes generator output fields onto sockets.
+ */
+function normalizeGeneratorPipelineSockets(_loadout: MateriaPipelineConfig, _materia: Record<string, GeneratorMateriaLike>): void {
+  // No-op: parse and assign are derived at runtime via effectiveResolvedSocketConfig.
 }
 
 function isMateriaSocket(socket: MateriaPipelineSocketConfig): socket is MateriaPipelineSocketConfig & { materia: string } {

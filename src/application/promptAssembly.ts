@@ -5,6 +5,7 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
+import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { renderReworkFeedbackPromptContext } from "./reworkFeedback.js";
 import { currentItem, getPath, readObjectField } from "./workflowTransitions.js";
@@ -47,9 +48,9 @@ export function singleTurnJsonFormatInstruction(socket: ResolvedMateriaSocket): 
 
 export function jsonHandoffContractInstruction(socket: ResolvedMateriaSocket): string | undefined {
   if (!isAgentResolvedSocket(socket)) return undefined;
-  if (resolvedSocketConfig(socket).parse !== "json") return undefined;
+  if (effectiveResolvedSocketConfig(socket).parse !== "json") return undefined;
   const requirements = deriveSocketOutputRequirements({
-    socket: resolvedSocketConfig(socket),
+    socket: effectiveResolvedSocketConfig(socket),
     socketId: socket.id,
     workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
   });
@@ -109,13 +110,13 @@ export function buildJsonOutputRepairRetryPrompt(state: MateriaCastState, socket
 }
 
 export function isFinalJsonOutputSocket(state: MateriaCastState, socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {
-  if (!isAgentResolvedSocket(socket) || resolvedSocketConfig(socket).parse !== "json") return false;
+  if (!isAgentResolvedSocket(socket) || effectiveResolvedSocketConfig(socket).parse !== "json") return false;
   return !isMultiTurnResolvedAgentSocket(socket) || state.multiTurnFinalizing === true;
 }
 
 export function socketAdapterContextInstruction(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {
   if (!isAgentResolvedSocket(socket)) return undefined;
-  if (resolvedSocketConfig(socket).parse === "json") return generatorJsonAdapterContextInstruction(state, socket);
+  if (effectiveResolvedSocketConfig(socket).parse === "json") return generatorJsonAdapterContextInstruction(state, socket);
   const workItem = currentItem(state) ?? getPath(state.data, "currentWorkItem") ?? getPath(state.data, "workItem");
   const guidance = getPath(state.data, "guidance") ?? {};
   return [
@@ -246,7 +247,7 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
 
 export function syntheticHandoffContractContext(state: MateriaCastState): string | undefined {
   const socket = activeResolvedSocket(state);
-  if (!socket || !isAgentResolvedSocket(socket) || resolvedSocketConfig(socket).parse !== "json") return undefined;
+  if (!socket || !isAgentResolvedSocket(socket) || effectiveResolvedSocketConfig(socket).parse !== "json") return undefined;
 
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;

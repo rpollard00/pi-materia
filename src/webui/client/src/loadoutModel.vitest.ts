@@ -183,7 +183,7 @@ describe('loadout normalization model', () => {
     expect(() => assertValidLoadoutSaveSemantics(unknown)).toThrow(/socket references unknown materia/);
   });
 
-  it('normalizes generator-to-generator sockets to canonical JSON workItems assignment before save', () => {
+  it('generator-to-generator sockets do not materialize parse/assign during normalization (derived at runtime)', () => {
     const config = normalizeMateriaConfigEdges({
       activeLoadout: 'Yolo',
       loadouts: {
@@ -201,13 +201,15 @@ describe('loadout normalization model', () => {
       },
     });
 
-    expect(config.loadouts?.Yolo.sockets?.['Socket-1'].parse).toBe('json');
-    expect(config.loadouts?.Yolo.sockets?.['Socket-1'].assign?.workItems).toBe('$.workItems');
-    expect(config.loadouts?.Yolo.sockets?.['Socket-2'].parse).toBe('json');
-    expect(config.loadouts?.Yolo.sockets?.['Socket-2'].assign?.workItems).toBe('$.workItems');
+    // Generator parse/assign are derived at runtime; normalization does not materialize them onto sockets
+    expect(config.loadouts?.Yolo.sockets?.['Socket-1'].parse).toBeUndefined();
+    expect(config.loadouts?.Yolo.sockets?.['Socket-1'].assign).toBeUndefined();
+    expect(config.loadouts?.Yolo.sockets?.['Socket-2'].parse).toBeUndefined();
+    // Non-canonical assign keys are preserved
+    expect(config.loadouts?.Yolo.sockets?.['Socket-2'].assign?.tasks).toBe('$.tasks');
   });
 
-  it('normalizes generator-to-loop source sockets to canonical JSON workItems assignment before save', () => {
+  it('generator-to-loop source sockets retain authored parse (runtime validation rejects conflicts)', () => {
     const config = normalizeMateriaConfigEdges({
       loadouts: {
         Loop: {
@@ -225,8 +227,10 @@ describe('loadout normalization model', () => {
       },
     });
 
-    expect(config.loadouts?.Loop.sockets?.['Socket-1'].parse).toBe('json');
-    expect(config.loadouts?.Loop.sockets?.['Socket-1'].assign?.workItems).toBe('$.workItems');
+    // Normalization does not override authored parse on generator sockets;
+    // runtime pipeline validation rejects conflicting parse values (e.g. parse:"text" on a generator).
+    expect(config.loadouts?.Loop.sockets?.['Socket-1'].parse).toBe('text');
+    expect(config.loadouts?.Loop.sockets?.['Socket-1'].assign).toBeUndefined();
     expect(config.loadouts?.Loop.sockets?.['Socket-2'].parse).toBeUndefined();
   });
 
@@ -260,8 +264,9 @@ describe('loadout normalization model', () => {
 
     const loadout = config.loadouts?.Loop;
     expect(loadout?.loops?.taskIteration.consumes?.from).toBe('Socket-2');
-    expect(loadout?.sockets?.['Socket-2'].parse).toBe('json');
-    expect(loadout?.sockets?.['Socket-2'].assign?.workItems).toBe('$.workItems');
+    // Generator parse/assign are derived at runtime; normalization does not materialize them
+    expect(loadout?.sockets?.['Socket-2'].parse).toBeUndefined();
+    expect(loadout?.sockets?.['Socket-2'].assign).toBeUndefined();
     expect(loadout?.sockets?.['Socket-4'].advance).toEqual({ cursor: 'workItemIndex', items: 'state.workItems', when: 'satisfied' });
     expect(loadout?.loops?.taskIteration.exits).toBeUndefined();
   });
@@ -746,8 +751,32 @@ describe('loadout materia palette model', () => {
 
     loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], buildMateria);
 
+    // Non-generator agent sockets retain materia-owned parse/assign from the definition
     expect(loadout.sockets!['Socket-1']).toMatchObject({ materia: 'Build', parse: 'json', assign: { satisfied: '$.satisfied' }, empty: false });
     expect(paletteSignature(materia)).toBe(before);
+  });
+
+  it('generator materia palette sockets omit parse and assign (derived at runtime)', () => {
+    const materia = {
+      planner: { prompt: 'plan', generator: true, parse: 'json', assign: { workItems: '$.workItems' } },
+      Build: { prompt: 'build', parse: 'json', assign: { satisfied: '$.satisfied' } },
+    } satisfies Record<string, MateriaBehaviorConfig>;
+
+    const palette = buildMateriaPalette(materia);
+    const plannerPalette = palette.find(([id]) => id === 'planner')?.[1];
+    const buildPalette = palette.find(([id]) => id === 'Build')?.[1];
+
+    // Generator: parse and assign are omitted (derived at runtime)
+    expect(plannerPalette?.parse).toBeUndefined();
+    expect(plannerPalette?.assign).toBeUndefined();
+    // Non-generator agent: parse and assign are preserved from the definition
+    expect(buildPalette?.parse).toBe('json');
+    expect(buildPalette?.assign).toEqual({ satisfied: '$.satisfied' });
+
+    // Placing a generator palette socket produces a clean socket
+    const loadout = makeEmptyEntryLoadout();
+    loadout.sockets!['Socket-1'] = placeMateriaInSocket(loadout.sockets!['Socket-1'], plannerPalette);
+    expect(loadout.sockets!['Socket-1']).toEqual({ materia: 'planner', empty: false, socketKind: 'entry' });
   });
 
   it('keeps palette contents stable when connected empty sockets are added', () => {

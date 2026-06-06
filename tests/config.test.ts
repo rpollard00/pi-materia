@@ -6,6 +6,7 @@ import { clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUs
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
+import { effectiveResolvedSocketConfig } from "../src/runtime/resolvedMateria.js";
 import { getEffectivePipelineConfig, resolvePipeline } from "../src/runtime/pipeline.js";
 import { paletteColors } from "../src/webui/client/src/loadoutModel.js";
 
@@ -738,6 +739,10 @@ describe("config loadouts", () => {
   });
 
   test("loadConfig materializes declarative loop exits for existing saved loadouts", async () => {
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
     const saved = await writeConfig({
       activeLoadout: "Yolo",
       materia: {
@@ -766,16 +771,25 @@ describe("config loadouts", () => {
 
     const loaded = await loadConfig(saved.dir, saved.file);
 
-    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].parse).toBe("json");
-    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
-    expect(loaded.config.loadouts?.Yolo.sockets["Socket-4"].edges).toEqual([{ when: "always", to: "Socket-3" }]);
     const pipeline = resolvePipeline(loaded.config);
-    expect(pipeline.sockets["Socket-1"].socket.parse).toBe("json");
-    expect(pipeline.sockets["Socket-1"].socket.assign?.workItems).toBe("$.workItems");
+    // loop semantics (parse, advance) are materialized at runtime via resolvePipeline
+    expect(pipeline.sockets["Socket-4"].socket.parse).toBe("json");
     expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
+    expect(pipeline.sockets["Socket-4"].socket.edges).toEqual([{ when: "always", to: "Socket-3" }]);
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).assign?.workItems).toBe("$.workItems");
+    expect(pipeline.sockets["Socket-4"].socket.advance).toEqual({ cursor: "workItemIndex", items: "state.workItems", when: "satisfied" });
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
   });
 
   test("loadConfig reports loop materialization conflicts instead of overwriting authored semantics", async () => {
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
     const saved = await writeConfig({
       activeLoadout: "ConflictingLoop",
       materia: {
@@ -806,9 +820,17 @@ describe("config loadouts", () => {
     });
 
     await expect(loadConfig(saved.dir, saved.file)).rejects.toThrow(/existing advance block.*cursor: current "otherIndex", expected "workItemIndex"/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
   });
 
   test("rejects loadout-level prompt fields so materia.prompt stays the only behavior prompt source", async () => {
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
     const withPrompt = await writeConfig({
       loadouts: {
         Custom: {
@@ -830,6 +852,10 @@ describe("config loadouts", () => {
       },
     });
     await expect(loadConfig(withSystemPrompt.dir, withSystemPrompt.file)).rejects.toThrow(/loadout "Custom" configures obsolete systemPrompt/);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
   });
 
   test("bundled default materia use palette colors, explicit parse modes, and canonical generator markers", async () => {
@@ -931,12 +957,15 @@ describe("config loadouts", () => {
       for (const [socketName, socket] of Object.entries(loadout.sockets ?? {})) {
         expect(socket.next, `${loadoutName}.${socketName}.next`).toBeUndefined();
         const materia = typeof socket.materia === "string" ? rawDefault.materia?.[socket.materia] : undefined;
-        if (materia?.type !== "utility") expect(["text", "json"].includes(String(socket.parse)), `${loadoutName}.${socketName}.parse`).toBe(true);
+        const isGeneratorSocket = materia?.generator === true;
+        // Generator parse/assign are derived at runtime; sockets are placement only
+        if (!isGeneratorSocket && materia?.type !== "utility") expect(["text", "json"].includes(String(socket.parse)), `${loadoutName}.${socketName}.parse`).toBe(true);
         for (const [index, edge] of (socket.edges ?? []).entries()) {
           expect(edge.when, `${loadoutName}.${socketName}.edges[${index}].when`).toBeDefined();
           expect(canonical.has(edge.when as string), `${loadoutName}.${socketName}.edges[${index}].when`).toBe(true);
           if (edge.when === "satisfied" || edge.when === "not_satisfied") {
-            const parseValue = materia?.type === "utility" ? materia?.parse : socket.parse;
+            // Generator sockets derive parse="json" at runtime
+            const parseValue = isGeneratorSocket ? "json" : (materia?.type === "utility" ? materia?.parse : socket.parse);
             expect(parseValue, `${loadoutName}.${socketName}.parse for ${edge.when}`).toBe("json");
           }
           expect(edge.to === "end" || Boolean(loadout.sockets?.[edge.to ?? ""]), `${loadoutName}.${socketName}.edges[${index}].to`).toBe(true);
@@ -1169,9 +1198,9 @@ describe("config loadouts", () => {
     const fullAutoPlanner = loaded.config.loadouts?.["Full-Auto"]?.sockets["Socket-3"];
     const planningConsultPlanner = loaded.config.loadouts?.["Planning-Consult"]?.sockets["Socket-3"];
     expect(fullAutoPlanner).toMatchObject({ materia: "Auto-Plan" });
+    // Loaded config sockets are pruned of canonical parse/assign; resolve to check effective config
     expect(planningConsultPlanner).toMatchObject({
       materia: "Interactive-Plan",
-      parse: "json",
     });
     expect("multiTurn" in (planningConsultPlanner ?? {})).toBe(false);
     expect(loaded.config.materia["Interactive-Plan"].multiTurn).toBe(true);
@@ -1192,18 +1221,20 @@ describe("config loadouts", () => {
     expect(planningConsultPrompt).not.toContain("Return only JSON");
 
     const fullAuto = resolvePipeline(loaded.config);
-    expect(fullAuto.sockets["Socket-3"].socket).toEqual(expect.objectContaining({ materia: "Auto-Plan", parse: "json" }));
+    expect(fullAuto.sockets["Socket-3"].socket).toEqual(expect.objectContaining({ materia: "Auto-Plan" }));
+    expect(effectiveResolvedSocketConfig(fullAuto.sockets["Socket-3"]).parse).toBe("json");
     expect(fullAuto.sockets["Socket-3"].materia.multiTurn).toBeUndefined();
     expect(fullAuto.sockets["Socket-3"].materia.prompt).toContain("planning materia");
     expect(fullAuto.sockets["Socket-4"].socket).toMatchObject({ materia: "Build" });
-    expect(fullAuto.sockets["Socket-8"].socket).toMatchObject({ materia: "Auto-Architect", parse: "json" });
+    expect(fullAuto.sockets["Socket-8"].socket).toMatchObject({ materia: "Auto-Architect" });
+    expect(effectiveResolvedSocketConfig(fullAuto.sockets["Socket-8"]).parse).toBe("json");
 
     loaded.config.activeLoadout = "Planning-Consult";
     const planningConsult = resolvePipeline(loaded.config);
     expect(planningConsult.sockets["Socket-3"].socket).toMatchObject({
       materia: "Interactive-Plan",
-      parse: "json",
     });
+    expect(effectiveResolvedSocketConfig(planningConsult.sockets["Socket-3"]).parse).toBe("json");
     expect("type" in planningConsult.sockets["Socket-3"].socket).toBe(false);
     expect("multiTurn" in planningConsult.sockets["Socket-3"].socket).toBe(false);
     expect(planningConsult.sockets["Socket-3"].materia.multiTurn).toBe(true);

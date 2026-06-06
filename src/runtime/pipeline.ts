@@ -83,7 +83,12 @@ function validateAuthoredUtilityRuntimeSockets(config: PiMateriaConfig, loadoutN
       if (rawSocket[field] !== undefined) throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "${field}". Configure executable utility behavior on materia "${socket.materia}" instead.`);
     }
     const generator = canonicalGeneratorConfigFor(rawMateria as unknown as MateriaUtilityConfig);
-    const allowsRuntimeMaterializedParse = socket.parse === "json" && isLoopJsonExitSource(loadout, id);
+    // parse: "json" is allowed on utility sockets when it is a loop JSON exit source
+    // (runtime-materialized by loop semantics) or when the materia is a generator
+    // (legacy canonical derived value; will be pruned on save).
+    const allowsRuntimeMaterializedParse = socket.parse === "json" && (isLoopJsonExitSource(loadout, id) || Boolean(generator));
+    // Assign is allowed on utility sockets when it exactly matches the canonical
+    // generator workItems assignment (legacy derived value; pruned on save).
     const allowsDerivedGeneratorAssign = generator && socket.assign?.[generator.output] === `$.${generator.output}` && Object.keys(socket.assign).length === 1;
     if (socket.parse !== undefined && !allowsRuntimeMaterializedParse) throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "parse". Configure parse on utility materia "${socket.materia}" instead.`);
     if (socket.assign !== undefined && !allowsDerivedGeneratorAssign) throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "assign". Configure assign on utility materia "${socket.materia}" instead.`);
@@ -132,7 +137,13 @@ function validateCanonicalUtilityRuntimeSocket(id: string, socket: MateriaPipeli
   }
 
   const generator = canonicalGeneratorConfigFor(materia);
+  // parse: "json" is always allowed on utility sockets in the per-socket validation
+  // because runtime-materialized loop exit sources may carry parse: "json" without
+  // being generators themselves. The pre-validation (validateAuthoredUtilityRuntimeSockets)
+  // handles the stricter obsolete-field rejection.
   const allowsRuntimeMaterializedParse = socket.parse === "json";
+  // Assign is allowed on utility sockets when it exactly matches the canonical
+  // generator workItems assignment (legacy derived value; pruned on save).
   const allowsDerivedGeneratorAssign = generator && socket.assign?.[generator.output] === `$.${generator.output}` && Object.keys(socket.assign).length === 1;
   if (socket.parse !== undefined && !allowsRuntimeMaterializedParse) {
     throw new Error(`Utility pipeline slot "${id}" configures obsolete socket field "parse". Configure parse on utility materia "${socket.materia}" instead.`);
@@ -221,45 +232,27 @@ function isGeneratorPipelineSocket(config: PiMateriaConfig, pipeline: MateriaPip
   return Boolean(socket && isMateriaSocket(socket) && isGeneratorMateria(config.materia[socket.materia]));
 }
 
-function normalizeGeneratorPipelineSlots(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): void {
-  for (const id of generatorPipelineSocketIds(config, pipeline)) {
-    const socket = getLoadoutSocket(pipeline, id);
-    if (!socket || !isMateriaSocket(socket)) continue;
-    const generator = canonicalGeneratorConfigFor(config.materia[socket.materia]);
-    if (!generator) continue;
-    socket.parse = "json";
-    socket.assign = { ...(socket.assign ?? {}), [generator.output]: `$.${generator.output}` };
-  }
-}
-
 function validateGeneratorSocketContracts(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): void {
-  const generatorPipelineIds = generatorPipelineSocketIds(config, effective.pipeline);
-  for (const id of generatorPipelineIds) {
-    const socket = getLoadoutSocket(effective.pipeline, id);
-    if (!socket || !isMateriaSocket(socket)) continue;
+  // Validate all agent generator sockets, not just pipeline-connected ones.
+  // Generator materia owns the output contract (parse/assign); sockets are placement only.
+  for (const [id, socket] of loadoutSocketEntries(effective.pipeline)) {
+    if (!isGeneratorPipelineSocket(config, effective.pipeline, id)) continue;
+    if (!isMateriaSocket(socket)) continue;
     const generator = canonicalGeneratorConfigFor(config.materia[socket.materia]);
     if (!generator) continue;
     if (generator.listType !== "array") throw new Error(`Generator materia "${socket.materia}" must resolve listType="array" for generator pipeline output "${generator.output}".`);
     if (!generator.itemType) throw new Error(`Generator materia "${socket.materia}" must resolve an itemType for generator pipeline output "${generator.output}".`);
-    if (socket.parse !== "json") throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the top-level JSON payload. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
-    const assignedPath = socket.assign?.[generator.output];
-    if (assignedPath !== `$.${generator.output}`) {
-      throw new Error(`Generator pipeline slot "${id}" must parse JSON and expose generated output "${generator.output}" from the top-level JSON payload. Set parse: "json" and assign ${generator.output} from $.${generator.output}.`);
+    // generator materia owns the output contract; reject truly conflicting socket-local parse/assign values
+    if (socket.parse !== undefined && socket.parse !== "json") {
+      throw new Error(`Generator pipeline slot "${id}" configures conflicting parse mode "${String(socket.parse)}". Generator materia "${socket.materia}" requires JSON output. Omit parse from the socket or use the canonical parse: "json".`);
+    }
+    if (typeof socket.assign === "object" && socket.assign !== null && !Array.isArray(socket.assign)) {
+      const assign = socket.assign as Record<string, unknown>;
+      if (assign[generator.output] !== undefined && assign[generator.output] !== `$.${generator.output}`) {
+        throw new Error(`Generator pipeline slot "${id}" configures conflicting assign.${generator.output} "${String(assign[generator.output])}". Generator materia "${socket.materia}" requires canonical assign.${generator.output}: "$.${generator.output}".`);
+      }
     }
   }
-}
-
-function generatorPipelineSocketIds(config: PiMateriaConfig, pipeline: MateriaPipelineConfig): Set<string> {
-  const ids = new Set(Object.values(pipeline.loops ?? {}).map((loop) => loop.consumes?.from).filter((id): id is string => typeof id === "string"));
-  for (const [from, socket] of loadoutSocketEntries(pipeline)) {
-    if (!isGeneratorPipelineSocket(config, pipeline, from)) continue;
-    for (const edge of socket.edges ?? []) {
-      if (!isGeneratorPipelineSocket(config, pipeline, edge.to)) continue;
-      ids.add(from);
-      ids.add(edge.to);
-    }
-  }
-  return ids;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

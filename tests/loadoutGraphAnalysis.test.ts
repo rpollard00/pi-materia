@@ -71,7 +71,8 @@ describe("loadout graph analysis under overlapping loop memberships", () => {
     expect(analysis.loopConsumerSources.has("ambiguous")).toBe(false);
     expect(analysis.workItemProducingSocketIds).toEqual(new Set(["Socket-1"]));
     expect(analysis.workItemProducingSocketIds).toEqual(new Set(["Socket-1"]));
-    expect(prepared.sockets["Socket-1"]?.assign?.workItems).toBe("$.workItems");
+    // parse and assign are derived at runtime; save prep prunes them from utility sockets
+    expect(prepared.sockets["Socket-1"]?.assign).toBeUndefined();
     expect(prepared.sockets["Socket-2"]?.assign?.workItems).toBeUndefined();
 
     const diagnosticKeys = analysis.diagnostics.map(({ code, loopId, from }) => `${code}:${loopId}:${from ?? ""}`).sort();
@@ -101,7 +102,8 @@ describe("loadout graph analysis under overlapping loop memberships", () => {
     expect(analysis.workItemProducingSocketIds).toEqual(new Set(["Socket-1"]));
     expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["loop-consumer-stale"]);
     expect(prepared.loops?.work.consumes).toEqual({ from: "Socket-1", output: "workItems" });
-    expect(prepared.sockets["Socket-1"]?.parse).toBe("json");
-    expect(prepared.sockets["Socket-1"]?.assign).toEqual({ workItems: "$.workItems" });
+    // parse and assign are derived at runtime; save prep prunes them from utility sockets
+    expect(prepared.sockets["Socket-1"]?.parse).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.assign).toBeUndefined();
   });
 });

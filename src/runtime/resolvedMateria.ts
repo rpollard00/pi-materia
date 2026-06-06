@@ -32,9 +32,18 @@ export function effectiveUtilityConfig(socket: ResolvedMateriaUtilitySocket): Ma
 }
 
 export function effectiveResolvedSocketConfig(socket: ResolvedMateriaSocket): MateriaPipelineSocketConfig {
-  if (isAgentResolvedSocket(socket)) return socket.socket;
-  const utility = effectiveUtilityConfig(socket) ?? {} as MateriaUtilityConfig;
   const generator = canonicalGeneratorConfigFor(socket.materia);
+
+  if (isAgentResolvedSocket(socket)) {
+    if (!generator) return socket.socket;
+    return {
+      ...socket.socket,
+      parse: "json",
+      assign: { ...(socket.socket.assign ?? {}), [generator.output]: `$.${generator.output}` },
+    };
+  }
+
+  const utility = effectiveUtilityConfig(socket) ?? {} as MateriaUtilityConfig;
   const effective: MateriaPipelineSocketConfig = {
     materia: socket.materiaId,
     ...(socket.socket.socketKind ? { socketKind: socket.socket.socketKind } : {}),

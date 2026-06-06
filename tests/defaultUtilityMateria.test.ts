@@ -175,6 +175,7 @@ describe("Commit-Sigil generator utility", () => {
     const config = await loadDefaultConfig();
     config.activeLoadout = "Release";
     const { resolvePipeline } = await import("../src/runtime/pipeline.js");
+    const { effectiveResolvedSocketConfig } = await import("../src/runtime/resolvedMateria.js");
     const pipeline = resolvePipeline(config);
 
     const s9 = pipeline.sockets["Socket-9"];
@@ -182,9 +183,10 @@ describe("Commit-Sigil generator utility", () => {
     expect(s9.materiaId).toBe("Commit-Sigil");
     expect(s9.materia.type).toBe("utility");
     expect(s9.materia.generator).toBe(true);
-    // Generator normalization materializes parse:json and assign:workItems on the socket
-    expect(s9.socket.parse).toBe("json");
-    expect(s9.socket.assign).toEqual({ workItems: "$.workItems" });
+    // parse:json and assign:workItems are derived at runtime by effectiveResolvedSocketConfig
+    const effective = effectiveResolvedSocketConfig(s9);
+    expect(effective.parse).toBe("json");
+    expect(effective.assign).toEqual({ lastFeedback: "$.context", workItems: "$.workItems" });
     // Satisfied/not_satisfied routing edges are preserved
     expect(s9.socket.edges).toEqual([
       { when: "satisfied", to: "Socket-8" },
