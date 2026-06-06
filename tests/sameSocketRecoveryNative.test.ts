@@ -334,6 +334,49 @@ describe("native same-socket recovery", () => {
     expect(events.filter((event) => event.type === "cast_end")).toHaveLength(0);
   });
 
+  test("stream-ended agent_end failure preserves state and later success completes normally", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast stream ended agent end success");
+    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
+
+    // First agent_end fails with stream-ended error (no assistant message produced)
+    await harness.emit("agent_end", { errorMessage: "Stream ended without finish_reason" });
+
+    // No retry or compaction — the failure is transient transport
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.runState.endedAt).toBeUndefined();
+    expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Transient transport failure"))).toBe(true);
+
+    // Later Pi retries and the assistant responds successfully
+    const successEntry = harness.appendAssistantMessage("done after stream ended agent-end blip");
+    await harness.emit("agent_end", { messages: [] });
+
+    // Cast completes normally — no failed state leaked
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.awaitingResponse).toBe(false);
+    expect(latestState.socketState).toBe("complete");
+    expect(latestState.phase).toBe("complete");
+    expect(latestState.lastProcessedEntryId).toBe(successEntry.id);
+    expect(latestState.lastAssistantText).toBe("done after stream ended agent-end blip");
+    expect(latestState.failedReason).toBeUndefined();
+
+    const events = await readEvents(harness);
+    expect(events.some((event) => event.type === "transient_transport_turn_failure" && event.data.warning === true && event.data.error.includes("Stream ended without finish_reason"))).toBe(true);
+    expect(events.some((event) => event.type === "socket_complete" && event.data.entryId === successEntry.id && event.data.socket === "Socket-1")).toBe(true);
+    expect(events.some((event) => event.type === "cast_end" && event.data.ok === true && event.data.entryId === successEntry.id)).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    // No failed cast_end leaked through
+    expect(events.filter((event) => event.type === "cast_end" && event.data.ok === false)).toHaveLength(0);
+  });
+
   test("stream-ended assistant error entries are ignored and later success completes normally", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast stream ended assistant blip");
