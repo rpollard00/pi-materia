@@ -4,6 +4,8 @@ export interface GeneratorMateriaLike {
   type?: "agent" | "utility" | string;
   generator?: boolean;
   generates?: MateriaGeneratorConfig;
+  utility?: string;
+  command?: string[];
 }
 
 export interface MateriaCapabilities {
