@@ -105,6 +105,7 @@ function bundledUtilityScriptPaths(): string[] {
   return [
     path.join(configDir, "blackbelt-bootstrap.mjs"),
     path.join(configDir, "blackbelt-maintain.mjs"),
+    path.join(configDir, "blackbelt-pr.mjs"),
     path.join(configDir, "commit-sigil.mjs"),
     path.join(configDir, "detect-vcs.mjs"),
     path.join(configDir, "ensure-ignored.mjs"),
