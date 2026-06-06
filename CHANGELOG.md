@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.8](https://github.com/rpollard00/pi-materia/compare/v0.1.7...v0.1.8) (2026-06-06)
+
+
+### Features
+
+* add deterministic jj bookmark naming for blackbelt ([7c5802c](https://github.com/rpollard00/pi-materia/commit/7c5802c231eb80371b6cae2a05e7ecefb2a06fa0))
+* update blackbelt-bootstrap to create jj bookmark ([4293e5a](https://github.com/rpollard00/pi-materia/commit/4293e5af3c862e11e3f81ffb3defe1d1503dc4f6))
+
+
+### Bug Fixes
+
+* classify stream-ended agent transport errors before terminal failure ([dd4c0ef](https://github.com/rpollard00/pi-materia/commit/dd4c0ef0800e8cbbeb3d5842b40fec60019e0ff3))
+* generate noun-verb blackbelt bookmark names ([5c5061a](https://github.com/rpollard00/pi-materia/commit/5c5061ab35d1a58b9fbb5fbc83c4a6ef32b73a00))
+* generator socket configuration boundary ([4ec1b90](https://github.com/rpollard00/pi-materia/commit/4ec1b90293f3e1f94a667cb6c85dfe7e72544855))
+* make Commit-Sigil emit canonical generator output ([47949fe](https://github.com/rpollard00/pi-materia/commit/47949feca1a9efefaa25633311a856598a0c9663))
+* **materia:** preserve active loadout when opening UI ([41b3d4d](https://github.com/rpollard00/pi-materia/commit/41b3d4d83d5f9ad7d834ade06297df5bec05f608))
+* preserve active cast state for recoverable stream failures ([21f5927](https://github.com/rpollard00/pi-materia/commit/21f592715cd3e0d06193aa90435e20da04e1ec60))
+* restore npm typecheck success ([2dc5711](https://github.com/rpollard00/pi-materia/commit/2dc5711d2c36b57678ae5240e837a6f93f349a4a))
+* treat generator utilities as workItems producers ([c403676](https://github.com/rpollard00/pi-materia/commit/c403676664f1a2cd694faeaed3c3850677e27bcc))
+
 ## [0.1.7](https://github.com/rpollard00/pi-materia/compare/v0.1.6...v0.1.7) (2026-06-02)
 
 
