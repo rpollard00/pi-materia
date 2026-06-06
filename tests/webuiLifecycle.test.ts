@@ -9,7 +9,7 @@ import {
   webUiLauncherTestInternals,
 } from "../src/webui/launcher.js";
 import { ensureMateriaWebUi } from "../src/webui/service.js";
-import { getUserProfileConfigPath } from "../src/config/config.js";
+import { getUserProfileConfigPath, loadConfig } from "../src/config/config.js";
 import { FakePiHarness } from "./fakePi.js";
 
 const previousProfileDir = process.env.PI_MATERIA_PROFILE_DIR;
@@ -45,6 +45,14 @@ async function waitForNotification(
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for notification including ${includes}`);
+}
+
+function minimalLoadout(id: string) {
+  return {
+    id,
+    entry: "Socket-1",
+    sockets: { "Socket-1": { materia: "Build" } },
+  };
 }
 
 describe("/materia ui lifecycle", () => {
@@ -222,6 +230,57 @@ describe("/materia ui lifecycle", () => {
 
     await harness.emit("session_shutdown");
     await expect(fetch(new URL("/api/health", first.url))).rejects.toThrow();
+  });
+
+  test("command preserves the active loadout when opening the WebUI before session start", async () => {
+    const { harness, profile } = await harnessWithProfile(
+      "pi-materia-webui-loadout-preserve-",
+    );
+    await writeFile(
+      path.join(profile, "config.json"),
+      JSON.stringify({ defaultLoadoutId: "user:hojo" }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      path.join(profile, "materia.json"),
+      JSON.stringify(
+        {
+          materia: { Build: { tools: "coding", prompt: "build" } },
+          loadouts: {
+            Hojo: minimalLoadout("user:hojo"),
+            reno: minimalLoadout("user:reno"),
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    try {
+      await harness.runCommand("materia", "loadout reno");
+      let loaded = await loadConfig(harness.cwd);
+      expect(loaded.config.activeLoadout).toBe("reno");
+      expect(loaded.config.activeLoadoutId).toBe("user:reno");
+
+      await harness.runCommand("materia", "ui");
+
+      loaded = await loadConfig(harness.cwd);
+      expect(loaded.config.activeLoadout).toBe("reno");
+      expect(loaded.config.activeLoadoutId).toBe("user:reno");
+      expect(
+        harness.notifications.map((notification) => notification.message),
+      ).not.toContain(
+        expect.stringContaining("initialized active loadout from default preference"),
+      );
+      expect(
+        harness.appendedEntries.filter(
+          (entry) => entry.customType === "pi-materia-active-loadout-changed",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await harness.emit("session_shutdown");
+    }
   });
 
   test("automatic service startup returns structured status without transcript or idle side effects", async () => {
