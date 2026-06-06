@@ -798,6 +798,7 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.multiTurnFinalizing = false;
   setCurrentSocketState(state, "complete");
   state.recoveryExhaustion = undefined;
+  state.failedReason = undefined;
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
   markRunEnded(state);
