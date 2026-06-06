@@ -235,7 +235,7 @@ The default config defines `Ignore-Artifacts`, `Detect-VCS`, `Blackbelt-Bootstra
 
 `Blackbelt-Bootstrap` is the deterministic replacement for planner-created VCS setup tasks in bootstrap flows. It requires `jj` on `PATH`; if `jj` is missing, the utility hard-fails and writes a `state.blackbeltBootstrap` failure payload. When run in a directory that is not already a jj repository, it runs `jj git init` from the current project directory, including when a plain Git repository already exists, and does not use colocated mode. After detecting or initializing the jj repository, it checks whether the current jj commit is empty with `jj diff --summary`. If the current commit has content, it runs `jj new` so downstream Blackbelt-Maintain work starts from a fresh empty working commit. If the directory is already a jj repository with an empty current commit, it exits successfully without changing repository state.
 
-The utility writes deterministic state under `state.blackbeltBootstrap` (including `ok`, `root`, `available`, `initialized`, `newWorkingCommit`, `emptyHead`, and `bookmarkName` on success). The `bookmarkName` is a deterministic git-ref-safe name under the `blackbelt/` prefix (e.g. `blackbelt/2026-06-06t17-40-51-157z`) that `Blackbelt-Maintain` reads to advance the bookmark with each checkpoint. Naming priority: explicit `params.bookmarkName`, then `input.castId`, then basename of `input.runDir`, then a timestamp plus sanitized repo basename fallback. This utility state patch is separate from agent-authored handoff JSON; do not ask planners, builders, or maintainers to emit those fields as agent JSON.
+The utility writes deterministic state under `state.blackbeltBootstrap` (including `ok`, `root`, `available`, `initialized`, `newWorkingCommit`, `emptyHead`, and `bookmarkName` on success). The `bookmarkName` is a deterministic git-ref-safe name under the `blackbelt/` prefix shaped like `blackbelt/<noun>-<verb>-<short-hash>` (for example, `blackbelt/crystal-casts-1a2b3c4d5e`) that `Blackbelt-Maintain` reads to advance the bookmark with each checkpoint. Naming priority: explicit sanitized `params.bookmarkName` override, otherwise a SHA-256-derived noun/verb/hash name seeded by `input.castId`; `runDir` and `cwd` are used only as last-resort seeds when `castId` is absent. Generated names do not expose timestamps or raw cast ids. This utility state patch is separate from agent-authored handoff JSON; do not ask planners, builders, or maintainers to emit those fields as agent JSON.
 
 ### Blackbelt-Maintain
 
@@ -243,7 +243,7 @@ The utility writes deterministic state under `state.blackbeltBootstrap` (includi
 
 For each invocation, the utility:
 1. Reads the current work item title from `input.item.title`.
-2. Resolves the bookmark name from `state.blackbeltBootstrap.bookmarkName`, falling back to the same deterministic generator when bootstrap state is absent.
+2. Resolves the bookmark name from `state.blackbeltBootstrap.bookmarkName`; if that bootstrap state is absent, returns `satisfied: false` with actionable context to run `Blackbelt-Bootstrap` instead of generating a replacement bookmark.
 3. Checks for dirty changes with `jj diff --summary`. If the working commit is clean, it returns `satisfied: true` as a no-op (no empty checkpoints).
 4. If dirty, runs `jj describe -m <title>`, moves the session bookmark to the described commit (before `jj new` so a post-new failure cannot leave a stale bookmark), then runs `jj new` to open a fresh empty working commit for the next task.
 
