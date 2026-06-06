@@ -36,6 +36,20 @@ try {
     newWorkingCommit = true;
   }
 
+  const bookmarkName = generateBookmarkName(input, cwd);
+  // Idempotently set the bookmark: try bookmark set (jj >= 0.20), fall back to bookmark create
+  try {
+    await execFileText("jj", ["bookmark", "set", bookmarkName, "--revision", "@"], cwd);
+  } catch {
+    // Older jj: bookmark create then move if needed
+    try {
+      await execFileText("jj", ["bookmark", "create", bookmarkName, "--revision", "@"], cwd);
+    } catch {
+      // Already exists on older jj, try bookmark move
+      await execFileText("jj", ["bookmark", "move", bookmarkName, "--to", "@"], cwd);
+    }
+  }
+
   writeStdoutJson({
     state: {
       blackbeltBootstrap: {
@@ -45,6 +59,7 @@ try {
         initialized,
         newWorkingCommit,
         emptyHead: true,
+        bookmarkName,
       },
     },
   });
@@ -124,4 +139,91 @@ function execFileText(command, args, cwd) {
       resolve(stdout);
     });
   });
+}
+
+/**
+ * Generate a deterministic, git-ref-safe bookmark name under the blackbelt/ prefix.
+ * Priority: params.bookmarkName > castId > basename(runDir) > timestamp + repo basename.
+ */
+function generateBookmarkName(input, cwd) {
+  const params = input.params != null && typeof input.params === "object" ? input.params : {};
+  let raw;
+
+  // 1. Explicit params.bookmarkName
+  if (typeof params.bookmarkName === "string" && params.bookmarkName.trim().length > 0) {
+    raw = params.bookmarkName.trim();
+  } else if (typeof input.castId === "string" && input.castId.trim().length > 0) {
+    // 2. Prefer castId
+    raw = input.castId.trim();
+  } else if (typeof input.runDir === "string" && input.runDir.trim().length > 0) {
+    // 3. basename(runDir)
+    const base = path.basename(input.runDir.trim());
+    raw = base.length > 0 ? base : undefined;
+  }
+
+  if (!raw) {
+    // 4. Fallback: timestamp + sanitized repo basename
+    const repoBase = path.basename(cwd);
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").toLowerCase();
+    raw = `${ts}-${repoBase}`;
+  }
+
+  // Always nest under the stable blackbelt/ prefix
+  return sanitizeRefName(`blackbelt/${raw}`);
+}
+
+/**
+ * Sanitize a string for use as a Git/JJ ref (bookmark) name.
+ * Rules: lowercase; replace invalid chars with -; collapse repeats;
+ * avoid empty segments, .., @{, .lock; no leading/trailing slash or dot.
+ * Empty or fully-sanitized segments are replaced with "x" so that the
+ * blackbelt/ prefix always produces at least a two-segment ref name.
+ */
+function sanitizeRefName(raw) {
+  let s = raw.toLowerCase();
+
+  // Replace Git-ref-invalid characters with '-'
+  // Invalid per git-check-ref-format: control chars, space, ~ ^ : ? * [ \
+  s = s.replace(/[\x00-\x20\x7f~^:?*[\\]/g, "-");
+
+  // Break @{ sequence (replace @ with - in that context)
+  s = s.replace(/@\{/g, "-{");
+
+  // Break .. (double dot)
+  s = s.replace(/\.\./g, ".-");
+
+  // Collapse consecutive hyphens
+  s = s.replace(/-{2,}/g, "-");
+
+  // Collapse multiple slashes
+  s = s.replace(/\/{2,}/g, "/");
+
+  // Remove leading / and . (before splitting so the first segment is never empty)
+  s = s.replace(/^[\/.]+/, "");
+
+  // Replace .lock in any path segment (Git rejects ref components ending in .lock).
+  // Run before splitting so it catches .lock at segment boundaries.
+  s = s.replace(/\.lock(?=\/|$)/gi, "-lock");
+
+  // Split into segments and clean each one individually.
+  // Do NOT strip trailing delimiters before splitting — let the per-segment
+  // cleaner replace empty trailing segments with "x" so we always preserve
+  // a non-empty suffix (e.g. "blackbelt/" becomes "blackbelt/x").
+  const segments = s.split("/").map((seg) => {
+    let cleaned = seg.replace(/^[-.]+/, "").replace(/[-.]+$/, "");
+    if (cleaned.length === 0) cleaned = "x";
+    // Guard against .lock surviving per-segment trimming (e.g. foo.lock. → foo.lock).
+    // Git rejects any ref component ending in .lock, so replace the trailing suffix.
+    if (cleaned.endsWith(".lock")) {
+      cleaned = cleaned.slice(0, -5) + "-x";
+    }
+    return cleaned;
+  });
+
+  s = segments.join("/");
+
+  // A lone '@' is invalid as a ref name; empty string too
+  if (s === "@" || s.length === 0) s = "x";
+
+  return s;
 }
