@@ -109,7 +109,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
     }
   }
 
-  if (options.agentOutput && Array.isArray(value.workItems)) {
+  if ((options.agentOutput || options.workItemsProducer) && Array.isArray(value.workItems)) {
     for (const [index, workItem] of value.workItems.entries()) {
       const result = parseHandoffWorkItem(workItem, `$.workItems.${index}`);
       if (!result.ok) {

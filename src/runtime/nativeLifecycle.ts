@@ -459,7 +459,7 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   if (effectiveResolvedSocketConfig(socket).parse === "json") {
     try {
       parsed = parseSocketJson<unknown>(socket.id, text);
-      parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: effectiveResolvedSocketConfig(socket), agentOutput: isAgentResolvedSocket(socket), workItemsProducer: isAgentResolvedSocket(socket) && Boolean(canonicalGeneratorConfigFor(socket.materia)) });
+      parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: effectiveResolvedSocketConfig(socket), agentOutput: isAgentResolvedSocket(socket), workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)) });
     } catch (error) {
       const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
       if (isAgentResolvedSocket(socket)) {
