@@ -157,3 +157,188 @@ describe("bundled utility materia defaults", () => {
     }
   });
 });
+
+describe("Commit-Sigil generator utility", () => {
+  test("default config marks Commit-Sigil as generator:true utility materia", async () => {
+    const config = await loadDefaultConfig();
+    const materia = config.materia?.["Commit-Sigil"];
+    expect(materia).toBeDefined();
+    expect(materia?.type).toBe("utility");
+    expect(materia?.generator).toBe(true);
+    expect(materia?.parse).toBe("json");
+    expect(materia?.script).toEqual({ kind: "shippedUtility", name: "commit-sigil.mjs", runtime: "node" });
+    // Generator utility materia must keep executable behavior on the materia, not on socket
+    expect((materia as Record<string, unknown>).command).toBeUndefined();
+  });
+
+  test("resolving Release loadout materializes Socket-9 Commit-Sigil with workItems assignment", async () => {
+    const config = await loadDefaultConfig();
+    config.activeLoadout = "Release";
+    const { resolvePipeline } = await import("../src/runtime/pipeline.js");
+    const pipeline = resolvePipeline(config);
+
+    const s9 = pipeline.sockets["Socket-9"];
+    expect(s9).toBeDefined();
+    expect(s9.materiaId).toBe("Commit-Sigil");
+    expect(s9.materia.type).toBe("utility");
+    expect(s9.materia.generator).toBe(true);
+    // Generator normalization materializes parse:json and assign:workItems on the socket
+    expect(s9.socket.parse).toBe("json");
+    expect(s9.socket.assign).toEqual({ workItems: "$.workItems" });
+    // Satisfied/not_satisfied routing edges are preserved
+    expect(s9.socket.edges).toEqual([
+      { when: "satisfied", to: "Socket-8" },
+      { when: "not_satisfied", to: "Socket-3", maxTraversals: 3 },
+    ]);
+  });
+
+  test("Release loop still consumes from Socket-8 Auto-Architect, not Socket-9 Commit-Sigil", async () => {
+    const config = await loadDefaultConfig();
+    config.activeLoadout = "Release";
+    const { resolvePipeline } = await import("../src/runtime/pipeline.js");
+    const pipeline = resolvePipeline(config);
+
+    // LoopSelection consumes workItems from Auto-Architect (Socket-8), not Commit-Sigil
+    const loop = pipeline.loops?.loopSelection;
+    expect(loop).toBeDefined();
+    expect(loop?.consumes?.from).toBe("Socket-8");
+    expect(loop?.consumes?.output).toBe("workItems");
+    expect(loop?.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });
+    // Loop sockets are Build/Eval/Maintain (Socket-4/5/6)
+    expect(loop?.sockets).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
+    // Commit-Sigil (Socket-9) is NOT in the loop
+    expect(loop?.sockets).not.toContain("Socket-9");
+  });
+
+  test("Socket-5 Auto-Eval lastFeedback/context assignment is preserved in Release", async () => {
+    const config = await loadDefaultConfig();
+    config.activeLoadout = "Release";
+    const { resolvePipeline } = await import("../src/runtime/pipeline.js");
+    const pipeline = resolvePipeline(config);
+
+    const s5 = pipeline.sockets["Socket-5"];
+    expect(s5).toBeDefined();
+    expect(s5.socket.materia).toBe("Auto-Eval");
+    expect(s5.socket.assign).toMatchObject({ lastFeedback: "$.context" });
+  });
+
+  test("commit-sigil.mjs echoes workItems unmodified for valid Conventional Commit titles", async () => {
+    const scriptPath = path.resolve("config", "utilities", "commit-sigil.mjs");
+    const { stdout } = await runScriptWithInput(scriptPath, {
+      workItems: [
+        { title: "feat: add login", context: "Implement login flow" },
+        { title: "fix(auth): handle timeout", context: "Fix auth timeout" },
+      ],
+    });
+    const output = JSON.parse(stdout);
+    expect(output.workItems).toEqual([
+      { title: "feat: add login", context: "Implement login flow" },
+      { title: "fix(auth): handle timeout", context: "Fix auth timeout" },
+    ]);
+    expect(output.satisfied).toBe(true);
+    expect(typeof output.context).toBe("string");
+    expect(output.context).toContain("conform to Conventional Commit format");
+    // No extraneous envelope fields
+    expect(output.tasks).toBeUndefined();
+    expect(output.envelope).toBeUndefined();
+    expect(output.state).toBeUndefined();
+  });
+
+  test("commit-sigil.mjs rejects invalid titles with satisfied:false and actionable context", async () => {
+    const scriptPath = path.resolve("config", "utilities", "commit-sigil.mjs");
+    const { stdout } = await runScriptWithInput(scriptPath, {
+      workItems: [
+        { title: "not a conventional commit", context: "Missing colon" },
+      ],
+    });
+    const output = JSON.parse(stdout);
+    // Work items echoed unchanged
+    expect(output.workItems).toEqual([
+      { title: "not a conventional commit", context: "Missing colon" },
+    ]);
+    expect(output.satisfied).toBe(false);
+    expect(typeof output.context).toBe("string");
+    expect(output.context).toContain("validation failed");
+    expect(output.context).toContain("Conventional Commit format");
+    // No extraneous envelope fields
+    expect(output.tasks).toBeUndefined();
+    expect(output.envelope).toBeUndefined();
+  });
+
+  test("commit-sigil.mjs handles empty input with satisfied:true", async () => {
+    const scriptPath = path.resolve("config", "utilities", "commit-sigil.mjs");
+    const { stdout } = await runScriptWithInput(scriptPath, {});
+    const output = JSON.parse(stdout);
+    expect(output.workItems).toEqual([]);
+    expect(output.satisfied).toBe(true);
+    expect(output.context).toContain("no work items to validate");
+  });
+
+  test("commit-sigil.mjs reads state.workItems when top-level workItems is absent", async () => {
+    const scriptPath = path.resolve("config", "utilities", "commit-sigil.mjs");
+    const { stdout } = await runScriptWithInput(scriptPath, {
+      state: {
+        workItems: [
+          { title: "docs: update readme", context: "Update docs" },
+        ],
+      },
+    });
+    const output = JSON.parse(stdout);
+    expect(output.workItems).toEqual([
+      { title: "docs: update readme", context: "Update docs" },
+    ]);
+    expect(output.satisfied).toBe(true);
+  });
+
+  test("commit-sigil.mjs ignores tasks/work aliases and never emits them", async () => {
+    const scriptPath = path.resolve("config", "utilities", "commit-sigil.mjs");
+    const { stdout } = await runScriptWithInput(scriptPath, {
+      tasks: [{ title: "feat: ignored" }],
+      work: [{ title: "fix: also ignored" }],
+    });
+    const output = JSON.parse(stdout);
+    expect(output.workItems).toEqual([]);
+    expect(output.satisfied).toBe(true);
+    expect(output.tasks).toBeUndefined();
+    expect(output.work).toBeUndefined();
+  });
+
+  test("commit-sigil.mjs does not rewrite titles or add fields to work items", async () => {
+    const scriptPath = path.resolve("config", "utilities", "commit-sigil.mjs");
+    const original = { title: "chore: update deps", context: "Routine" };
+    const { stdout } = await runScriptWithInput(scriptPath, {
+      workItems: [original],
+    });
+    const output = JSON.parse(stdout);
+    expect(output.workItems).toEqual([original]);
+    // No extra fields added
+    const keys = Object.keys(output.workItems[0]).sort();
+    expect(keys).toEqual(["context", "title"]);
+  });
+
+  test("commit-sigil.mjs flag non-standard types as advisory while keeping satisfied:true", async () => {
+    const scriptPath = path.resolve("config", "utilities", "commit-sigil.mjs");
+    const { stdout } = await runScriptWithInput(scriptPath, {
+      workItems: [
+        { title: "customtype: do something", context: "Non-standard type" },
+      ],
+    });
+    const output = JSON.parse(stdout);
+    expect(output.satisfied).toBe(true);
+    expect(output.context).toContain("non-standard type");
+  });
+});
+
+async function runScriptWithInput(scriptPath: string, input: unknown): Promise<{ stdout: string; stderr: string }> {
+  const proc = Bun.spawn(["node", scriptPath], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  proc.stdin.write(JSON.stringify(input));
+  proc.stdin.end();
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  await proc.exited;
+  return { stdout: stdout.trim(), stderr: stderr.trim() };
+}

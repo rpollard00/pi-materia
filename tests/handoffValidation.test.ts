@@ -75,6 +75,37 @@ describe("handoff JSON runtime validation", () => {
     expect(validateHandoffJsonOutput(value, { socketId: "Plan", socket: socket({ assign: { workItems: "$.workItems", custom: "$.custom" } }) })).toBe(value);
   });
 
+  test("utility generator output with workItemsProducer:true and agentOutput:false requires $.workItems", () => {
+    // Simulates a utility generator socket like Commit-Sigil: generator:true makes
+    // workItemsProducer:true but agentOutput:false because it's a script, not a model.
+    expect(() => validateHandoffJsonOutput({ satisfied: true, context: "ok" }, { socketId: "Commit-Sigil", socket: socket({ parse: "json", edges: [{ when: "satisfied", to: "Architect" }] }), agentOutput: false, workItemsProducer: true })).toThrow(/Missing required field "workItems"/);
+  });
+
+  test("utility generator output with workItemsProducer:true and agentOutput:false rejects malformed work item shapes", () => {
+    let caught: unknown;
+    try {
+      validateHandoffJsonOutput({ workItems: [{ title: "feat: ok", context: { nested: true } }], satisfied: true }, { socketId: "Commit-Sigil", socket: socket({ parse: "json", edges: [{ when: "satisfied", to: "Architect" }] }), agentOutput: false, workItemsProducer: true });
+    } catch (error) {
+      caught = error;
+    }
+    const issues = handoffValidationIssues(caught);
+    // workItem.context must be a string, not an object
+    expect(issues?.map((issue) => issue.path)).toContain("$.workItems.0.context");
+    expect(issues?.find((issue) => issue.path === "$.workItems.0.context")?.reason).toContain("title:string and context:string");
+  });
+
+  test("utility generator output accepts canonical workItems with valid title/context strings", () => {
+    const value = { workItems: [{ title: "feat: add login", context: "Implement login flow" }], satisfied: true, context: "all good" };
+    expect(validateHandoffJsonOutput(value, { socketId: "Commit-Sigil", socket: socket({ parse: "json", edges: [{ when: "satisfied", to: "Architect" }] }), agentOutput: false, workItemsProducer: true })).toBe(value);
+  });
+
+  test("non-generator utility workItems assignment stays permissive with extra fields and nested context", () => {
+    // Non-generator utilities that assign workItems from $.workItems should not
+    // enforce the strict title/context-only work item shape.
+    const value = { workItems: [{ id: "legacy", title: "Build", description: "Build it", acceptance: ["Done"], priority: "high", context: { architecture: ["wrong"], constraints: "fast", dependencies: [], risks: ["low"] } }], satisfied: true };
+    expect(validateHandoffJsonOutput(value, { socketId: "Plan", socket: socket({ assign: { workItems: "$.workItems" } }), agentOutput: false })).toBe(value);
+  });
+
   test("adds architecture alias repair hints for invalid generator workItems payloads", () => {
     let caught: unknown;
     try {
