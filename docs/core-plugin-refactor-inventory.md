@@ -61,6 +61,34 @@ Primary lifecycle:
 7. `advanceToSocket` starts the next socket or `finishCast` writes terminal artifacts/events/state and UI updates.
 8. `resumeNativeCast`/`reviveNativeCast` rehydrate latest persisted session state and continue from the failed current socket.
 
+### Turn failure classification and transient transport recovery
+
+`handleAgentEnd` classifies agent-turn errors via `classifyTurnFailure` (in `src/application/recoveryPolicy.ts`) into one of three paths:
+
+- **`transient_transport`** — the error is a transport-level blip (WebSocket connection drop, `Stream ended without finish_reason`, or similar provider-stream interruption) that does not reflect a real agent or provider failure. The cast stays active and the next turn proceeds normally.
+- **Recoverable** (`context_window`, `tool_timeout`, or `turn_failure` when allowed) — the runtime retries within the same socket, with compaction applied before `context_window` retries.
+- **Terminal** (all other errors, exhausted same-socket recovery budgets, utility execution failures, post-advance lifecycle failures) — `failCast` marks the cast failed and emits `cast_end ok:false`.
+
+#### Recovered transport warning vs terminal failure
+
+| Aspect | Recovered transient transport | Terminal cast failure |
+| --- | --- | --- |
+| Trigger | WebSocket blip, stream-ended-without-finish-reason, provider connection drop | Non-recoverable errors, exhausted recovery, utility failures, post-advance lifecycle failures |
+| Cast `active` | stays `true` | set to `false` |
+| `awaitingResponse` | stays `true` | set to `false` |
+| `socketState` | stays `awaiting_agent_response` | set to `failed` |
+| `phase` | unchanged | set to `"failed"` |
+| `failedReason` | not set | set to error message |
+| `runState.endedAt` | not set | set to now |
+| Manifest entry | none added | failed entry appended |
+| Event emitted | `transient_transport_turn_failure` (warning) | `cast_end ok:false` |
+| UI notification | warning toast | error notification |
+| Next action | Pi agent turn continues normally; later assistant success completes the cast with `cast_end ok:true` | Cast must be manually restarted via `/materia recast` or `/materia revive` |
+
+`classifyTurnFailure` applies precedence-sensitive checks: `context_window` and `tool_timeout` are checked first; then explicit stream-ended-without-finish-reason and plain WebSocket transport failures return `transient_transport`. Messages containing embedded structured provider error payloads (e.g. `Codex error: {"type":"error",...}`) are rejected by the stream-ended detector so provider errors are never masked by trailing transport text.
+
+On successful cast completion, `finishCast` clears `failedReason`, `recoveryExhaustion`, and any other stale failure fields so the UI/catalog do not show a failed cast after `phase="complete"`.
+
 ### Persistence and artifact paths
 
 Config persistence/loading:

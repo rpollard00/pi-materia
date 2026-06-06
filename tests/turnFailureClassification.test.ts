@@ -8,6 +8,41 @@ describe("turn failure classification", () => {
     expect(classifyTurnFailure(new Error('Pi agent turn failed for socket "Build": WebSocket error'))).toBe("transient_transport");
   });
 
+  test("classifies stream-ended-without-finish-reason as transient_transport", () => {
+    expect(classifyTurnFailure(new Error("Stream ended without finish_reason"))).toBe("transient_transport");
+    expect(classifyTurnFailure(new Error('Pi agent turn failed for socket "Build": Stream ended without finish_reason'))).toBe("transient_transport");
+    // Also match dashed variant
+    expect(classifyTurnFailure(new Error("Stream ended without finish-reason"))).toBe("transient_transport");
+  });
+
+  test("stream-ended transport failures are not recoverable same-socket failures", () => {
+    const error = new Error("Stream ended without finish_reason");
+    expect(classifyTurnFailure(error, { allowGenericTurnFailure: true })).toBe("transient_transport");
+    expect(classifyRecoverableTurnFailure(error, { allowGenericTurnFailure: true })).toBeUndefined();
+  });
+
+  test("stream-ended classification does not mask structured provider errors", () => {
+    // Stream-ended text appears before a structured provider error —
+    // the end-of-message anchor prevents transient_transport.
+    const serverAfter = new Error('Stream ended without finish_reason Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"Internal error"}}');
+    expect(classifyTurnFailure(serverAfter)).toBeUndefined();
+
+    // Structured provider error appears before stream-ended text —
+    // the provider error payload is detected anywhere in the message and
+    // stream-ended classification is refused, so the structured error
+    // falls through for recovery or terminal handling.
+    const serverBefore = new Error('Codex error: {"type":"error","error":{"type":"server_error","code":"server_error"}} Stream ended without finish_reason');
+    expect(classifyTurnFailure(serverBefore)).toBeUndefined();
+
+    // Context-length wrapped in stream text still wins (checked first)
+    const ctxAfter = new Error('Stream ended without finish_reason Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window."}}');
+    expect(classifyTurnFailure(ctxAfter)).toBe("context_window");
+
+    // Context-length before stream-ended text also wins (checked first)
+    const ctxBefore = new Error('Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded"}} Stream ended without finish_reason');
+    expect(classifyTurnFailure(ctxBefore)).toBe("context_window");
+  });
+
   test("context-window signals wrapped in WebSocket text remain context-window failures", () => {
     const errorMessage = 'Error: WebSocket closed 1000 Error: Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model."}}';
     expect(classifyTurnFailure(new Error(errorMessage))).toBe("context_window");

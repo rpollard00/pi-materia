@@ -46,6 +46,11 @@ export interface MateriaWebUiQuestControlCallbacks {
 }
 
 export interface MateriaWebUiLaunchOptions {
+  /**
+   * Internal opt-in for session lifecycle initialization only. The pending
+   * launch map is keyed by session, so avoid mixing in-flight launches with
+   * different initialization semantics.
+   */
   initializeDefaultLoadout?: boolean;
   questControls?: MateriaWebUiQuestControlCallbacks;
 }
@@ -133,7 +138,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   const sessionId = ctx.sessionManager.getSessionId() ?? "";
   const cwd = ctx.cwd;
   const startedAt = Date.now();
-  if (options.initializeDefaultLoadout !== false) await initializeDefaultLoadoutPreference(ctx, configuredPath, pi);
+  if (options.initializeDefaultLoadout === true) await initializeDefaultLoadoutPreference(ctx, configuredPath, pi);
 
   const { server } = createMateriaWebUiServer({
     host,

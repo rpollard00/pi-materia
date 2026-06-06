@@ -13,10 +13,33 @@ export interface TurnFailureClassificationOptions {
   allowGenericTurnFailure?: boolean;
 }
 
+/**
+ * Classify a turn-level agent error for routing to transient/recoverable/terminal paths.
+ *
+ * ## Recovered transport warning vs terminal failure semantics
+ *
+ * Transport-level blips (WebSocket errors, stream-ended-without-finish-reason) are
+ * transient and must NOT force a terminal cast failure. When classified as
+ * {@link transient_transport}, the caller preserves the active/awaiting state and
+ * continues normally—no `cast_end ok:false`, no `failed` phase/socketState, no
+ * failed manifest entries. A later successful assistant response completes the cast
+ * normally.
+ *
+ * Terminal failures are reserved for non-recoverable errors, exhausted same-socket
+ * recovery budgets, utility failures, and post-advance lifecycle failures—all of
+ * which land in `failCast`. Keep this classification narrow: only transport-layer
+ * messages with clear transient semantics should return `"transient_transport"`.
+ * Structured provider errors (even when wrapped in transport text) and generic
+ * failure messages must fall through to recovery or terminal handling.
+ */
 export function classifyTurnFailure(error: unknown, options: TurnFailureClassificationOptions = {}): TurnFailureClassification | undefined {
   const message = errorMessage(error);
   if (evaluateContextErrorRecovery(error).action === "compact") return "context_window";
   if (isToolTimeoutFailure(message)) return "tool_timeout";
+  // Order matters: check stream-ended first (more specific signal), then
+  // generic websocket failures. Both return transient_transport so the cast
+  // stays active and awaiting—no failed state or cast_end ok:false.
+  if (isStreamEndedTransportFailure(message)) return "transient_transport";
   if (isPlainWebSocketTransportFailure(message)) return "transient_transport";
   if (options.allowGenericTurnFailure === true) return "turn_failure";
   return undefined;
@@ -114,9 +137,38 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Detect explicit WebSocket-layer transport failures that should not force a
+ * terminal cast failure. These are transient by nature (connection blips) and
+ * the Pi agent will recover on the next turn.
+ */
 function isPlainWebSocketTransportFailure(message: string): boolean {
   const normalized = message.trim().replace(/\s+/g, " ");
   return /(?:^|:\s*)(?:error:\s*)?websocket (?:error|closed|close|connection (?:closed|error|lost)|disconnected)(?:\s+\d{3,4})?\.?$/i.test(normalized);
+}
+
+/**
+ * Detect stream-ended-without-finish-reason transport failures from the Pi
+ * agent provider layer. These are transient stream-level errors where the
+ * provider connection dropped or the stream was cut before a finish_reason
+ * arrived. Like WebSocket blips, these should not force terminal cast failure.
+ *
+ * Rejects messages that contain a structured provider error payload anywhere
+ * in the message (e.g. `Codex error: {"type":"error",...}`) so that provider
+ * errors are never masked by a trailing stream-ended transport message.
+ * {@link evaluateContextErrorRecovery} already handles {@code context_window}
+ * classification before this check; other structured provider errors that
+ * appear alongside stream-ended text fall through for recovery or terminal
+ * handling.
+ */
+function isStreamEndedTransportFailure(message: string): boolean {
+  const normalized = message.trim();
+  // Refuse to classify as transient transport when the message contains an
+  // embedded structured provider error payload (Codex/Anthropic/etc. JSON).
+  // In that case the provider signal should govern, even if the stream-ended
+  // text happens to appear at the end of the wrapper.
+  if (/\b(?:codex|anthropic|openai|provider)\s+error\s*:\s*\{|\{"type"\s*:\s*"error"/i.test(normalized)) return false;
+  return /stream\s+ended\s+without\s+finish[_-]?reason\s*\.?$/i.test(normalized);
 }
 
 function isToolTimeoutFailure(message: string): boolean {

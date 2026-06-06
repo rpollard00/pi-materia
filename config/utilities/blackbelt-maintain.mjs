@@ -1,4 +1,22 @@
 #!/usr/bin/env node
+/**
+ * Blackbelt-Maintain — deterministic jj checkpoint utility.
+ *
+ * Input scope (tightly constrained):
+ *   - item.title          → jj describe message
+ *   - cwd                 → working directory for jj commands
+ *   - state.blackbeltBootstrap.bookmarkName → bookmark target (fallback: generateBookmarkName)
+ *
+ * Explicitly NOT coupled to:
+ *   - Runtime cast status (phase, active, failedReason, socketState, etc.)
+ *   - Artifact scanning or manifest entries
+ *   - Cast lifecycle handoff beyond the bootstrap bookmark
+ *
+ * Output contract: stdout JSON with ONLY top-level `satisfied` and `context`.
+ * Stderr is reserved for diagnostics; no state patches are emitted.
+ * All known failure modes (no title, no jj repo, jj command error) return
+ * `satisfied: false` with a descriptive context string.
+ */
 import { execFile } from "node:child_process";
 import path from "node:path";
 
