@@ -844,4 +844,167 @@ describe("utility pipeline sockets", () => {
       expect(renderGrid(config, pipeline, "default", "/tmp/project").join("\n")).toContain("generator=workItems:array<workItem>");
     }
   });
+
+  test("resolvePipeline fails when a standalone agent generator socket has conflicting parse", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "planGen", parse: "text", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Build" },
+          },
+        },
+      },
+      materia: {
+        planGen: { tools: "readOnly", prompt: "Plan.", generator: true, parse: "json" },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+    expect(() => resolvePipeline(config)).toThrow(/conflicting parse/);
+  });
+
+  test("resolvePipeline fails when a standalone agent generator socket has conflicting assign.workItems", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "planGen", assign: { workItems: "$.tasks" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Build" },
+          },
+        },
+      },
+      materia: {
+        planGen: { tools: "readOnly", prompt: "Plan.", generator: true, parse: "json" },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+    expect(() => resolvePipeline(config)).toThrow(/conflicting assign/);
+  });
+
+  test("resolvePipeline accepts agent generator socket with canonical parse and assign as tolerated legacy", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "planGen", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Build" },
+          },
+        },
+      },
+      materia: {
+        planGen: { tools: "readOnly", prompt: "Plan.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+    const pipeline = resolvePipeline(config);
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).assign?.workItems).toBe("$.workItems");
+  });
+
+  test("resolvePipeline accepts clean agent generator socket and derives JSON/workItems at runtime", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "planGen", edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Build" },
+          },
+        },
+      },
+      materia: {
+        planGen: { tools: "readOnly", prompt: "Plan.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+    const pipeline = resolvePipeline(config);
+    // Socket stays clean; effective config derives behavior
+    expect(pipeline.sockets["Socket-1"].socket.parse).toBeUndefined();
+    expect(pipeline.sockets["Socket-1"].socket.assign).toBeUndefined();
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).assign?.workItems).toBe("$.workItems");
+  });
+
+  test("resolvePipeline accepts clean utility generator socket and derives JSON/workItems at runtime", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "commitGen", edges: [{ when: "satisfied", to: "Socket-2" }, { when: "not_satisfied", to: "end" }] },
+            "Socket-2": { materia: "Build" },
+          },
+        },
+      },
+      materia: {
+        commitGen: { type: "utility", command: ["node", "commit-sigil.mjs"], generator: true, parse: "json", assign: { lastFeedback: "$.context" } },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+    const pipeline = resolvePipeline(config);
+    // Socket stays clean; effective config derives behavior
+    expect(pipeline.sockets["Socket-1"].socket.parse).toBeUndefined();
+    expect(pipeline.sockets["Socket-1"].socket.assign).toBeUndefined();
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).assign).toEqual({ lastFeedback: "$.context", workItems: "$.workItems" });
+    // Satisfied/not_satisfied routing requires JSON parse; effective config provides it
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).parse).toBe("json");
+  });
+
+  test("resolvePipeline rejects non-canonical assign values on generator sockets", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "planGen", parse: "json", assign: { workItems: "$.otherField" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Build" },
+          },
+        },
+      },
+      materia: {
+        planGen: { tools: "readOnly", prompt: "Plan.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+    expect(() => resolvePipeline(config)).toThrow(/conflicting assign/);
+  });
+
+  test("resolvePipeline accepts agent generator socket with extra non-workItems assign keys", () => {
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "planGen", assign: { tasks: "$.tasks", lastPlan: "$" }, edges: [{ when: "always", to: "Socket-2" }] },
+            "Socket-2": { materia: "Build" },
+          },
+        },
+      },
+      materia: {
+        planGen: { tools: "readOnly", prompt: "Plan.", generator: true },
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    };
+    const pipeline = resolvePipeline(config);
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).parse).toBe("json");
+    expect(effectiveResolvedSocketConfig(pipeline.sockets["Socket-1"]).assign).toEqual({ tasks: "$.tasks", lastPlan: "$", workItems: "$.workItems" });
+  });
 });

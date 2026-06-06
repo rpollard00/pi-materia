@@ -106,4 +106,99 @@ describe("loadout graph analysis under overlapping loop memberships", () => {
     expect(prepared.sockets["Socket-1"]?.parse).toBeUndefined();
     expect(prepared.sockets["Socket-1"]?.assign).toBeUndefined();
   });
+
+  test("prepareLoadoutForSave prunes canonical agent generator socket parse and assign.workItems", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "planner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
+      },
+    };
+
+    const prepared = prepareLoadoutForSave(loadout, materia).loadout;
+    // Canonical generator parse/assign fields are pruned on save
+    expect(prepared.sockets["Socket-1"]?.parse).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.assign).toBeUndefined();
+    // Non-generator socket fields preserved
+    expect(prepared.sockets["Socket-1"]?.materia).toBe("planner");
+    expect(prepared.sockets["Socket-1"]?.edges).toEqual([{ when: "always", to: "Socket-2" }]);
+  });
+
+  test("prepareLoadoutForSave preserves non-workItems assign keys on agent generator sockets", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "planner", assign: { lastPlan: "$", workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
+      },
+    };
+
+    const prepared = prepareLoadoutForSave(loadout, materia).loadout;
+    // workItems is pruned (canonical derived), but lastPlan is preserved
+    expect(prepared.sockets["Socket-1"]?.assign?.workItems).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.assign?.lastPlan).toBe("$");
+  });
+
+  test("prepareLoadoutForSave prunes canonical agent generator parse but preserves non-json parse", () => {
+    // Non-json parse on a generator socket is a conflict that should be rejected at runtime;
+    // save prep preserves it so the runtime validation can reject it.
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "planner", parse: "text", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
+      },
+    };
+
+    const prepared = prepareLoadoutForSave(loadout, materia).loadout;
+    // Non-json parse is not pruned; it will be rejected by runtime validation
+    expect(prepared.sockets["Socket-1"]?.parse).toBe("text");
+  });
+
+  test("prepareLoadoutForSave prunes parse and assign from utility generator sockets", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "scriptPlanner", parse: "json", assign: { workItems: "$.workItems" }, edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
+      },
+    };
+
+    const prepared = prepareLoadoutForSave(loadout, materia).loadout;
+    // Utility socket parse/assign fields are pruned on save
+    expect(prepared.sockets["Socket-1"]?.parse).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.assign).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.materia).toBe("scriptPlanner");
+  });
+
+  test("prepareLoadoutForSave does not reintroduce parse or assign on clean generator sockets", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "planner", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
+      },
+    };
+
+    const prepared = prepareLoadoutForSave(loadout, materia).loadout;
+    // Clean socket stays clean after save prep
+    expect(prepared.sockets["Socket-1"]?.parse).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.assign).toBeUndefined();
+    expect(prepared.sockets["Socket-1"]?.materia).toBe("planner");
+  });
+
+  test("prepareLoadoutForSave prunes non-standard assign.workItems on agent generator sockets and preserves other assign keys", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "planner", assign: { workItems: "$.tasks", other: "$.other" }, edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build" },
+      },
+    };
+
+    const prepared = prepareLoadoutForSave(loadout, materia).loadout;
+    // Non-canonical assign.workItems (not "$.workItems") is preserved for runtime rejection
+    expect(prepared.sockets["Socket-1"]?.assign).toEqual({ workItems: "$.tasks", other: "$.other" });
+  });
 });
