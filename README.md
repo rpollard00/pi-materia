@@ -142,7 +142,7 @@ The WebUI starts automatically with `/materia cast`, `/materia link`, `/materia 
 /materia abort           # stop the active cast
 ```
 
-pi-materia automatically retries safe failures (transient provider errors, context-window limits) within the same socket before requiring manual intervention.
+pi-materia automatically retries safe failures (context-window limits, tool timeouts, and safe generic turn failures) within the same socket before requiring manual intervention. Transient transport errors (WebSocket connection drops, `Stream ended without finish_reason`, and similar provider-stream interruptions) are recorded as warnings but do NOT force cast failure — the cast stays active and the next turn proceeds normally without a `cast_end ok:false` or failed manifest entries.
 
 ### Customize your pipelines
 
