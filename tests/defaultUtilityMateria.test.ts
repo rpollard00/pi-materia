@@ -94,6 +94,26 @@ describe("bundled utility materia defaults", () => {
     await expect(access(path.resolve("config", "utilities", "commit-sigil.mjs"))).resolves.toBeNull();
   });
 
+  test("Blackbelt-Bootstrap has correct shipped-utility config shape, parse, color, and metadata", async () => {
+    const config = await loadDefaultConfig();
+    const materia = config.materia?.["Blackbelt-Bootstrap"];
+
+    expect(materia).toBeDefined();
+    expect(materia?.type).toBe("utility");
+    expect(materia?.label).toBe("Blackbelt-Bootstrap");
+    expect(materia?.group).toBe("Utility");
+    expect(materia?.parse).toBe("json");
+    expect(materia?.script).toEqual({ kind: "shippedUtility", name: "blackbelt-bootstrap.mjs", runtime: "node" });
+    expect(typeof materia?.description).toBe("string");
+    expect((materia?.description as string).includes("bookmark")).toBe(true);
+    expect((materia?.description as string).includes("jj")).toBe(true);
+    expect(typeof materia?.color).toBe("string");
+    const allowedColors = new Set(paletteColors);
+    expect(allowedColors.has(materia?.color as string)).toBe(true);
+    expect((materia as { assign?: unknown }).assign).toBeUndefined();
+    expect((materia as { command?: unknown }).command).toBeUndefined();
+  });
+
   test("Blackbelt-Maintain has correct shipped-utility config shape, parse, color, and metadata", async () => {
     const config = await loadDefaultConfig();
     const materia = config.materia?.["Blackbelt-Maintain"];
@@ -129,7 +149,7 @@ describe("bundled utility materia defaults", () => {
     expect(config.materia?.GitMaintain).toBeDefined();
   });
 
-  test("profile sync copies and resolves blackbelt-maintain.mjs through shipped utility resolution", async () => {
+  test("profile sync copies and resolves Blackbelt utility scripts through shipped utility resolution", async () => {
     const temp = await mkdtemp(path.join(tmpdir(), "pi-materia-bb-shipped-"));
     const profileDir = path.join(temp, "profile");
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
@@ -141,12 +161,18 @@ describe("bundled utility materia defaults", () => {
 
       const utilitiesDir = path.join(profileDir, "utilities");
       const entries = await readdir(utilitiesDir);
+      expect(entries).toContain("blackbelt-bootstrap.mjs");
       expect(entries).toContain("blackbelt-maintain.mjs");
 
-      const scriptContent = await readFile(path.join(utilitiesDir, "blackbelt-maintain.mjs"), "utf8");
-      expect(scriptContent).toBeTruthy();
+      // Verify each script is copied with content
+      for (const name of ["blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs"]) {
+        const scriptContent = await readFile(path.join(utilitiesDir, name), "utf8");
+        expect(scriptContent).toBeTruthy();
+      }
 
       const manifest = JSON.parse(await readFile(path.join(utilitiesDir, ".pi-materia-shipped-utilities.json"), "utf8"));
+      expect(manifest.utilities["blackbelt-bootstrap.mjs"]).toBeDefined();
+      expect(manifest.utilities["blackbelt-bootstrap.mjs"].profileFile).toBe("blackbelt-bootstrap.mjs");
       expect(manifest.utilities["blackbelt-maintain.mjs"]).toBeDefined();
       expect(manifest.utilities["blackbelt-maintain.mjs"].profileFile).toBe("blackbelt-maintain.mjs");
     } finally {

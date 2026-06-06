@@ -140,13 +140,15 @@ describe("layered config loading and persistence", () => {
       const utilitiesDir = path.join(profileDir, "utilities");
       const manifest = JSON.parse(await readFile(path.join(utilitiesDir, ".pi-materia-shipped-utilities.json"), "utf8"));
 
-      expect(await readdir(utilitiesDir)).toEqual(expect.arrayContaining(["detect-vcs.mjs", "ensure-ignored.mjs", "blackbelt-maintain.mjs", "commit-sigil.mjs", ".pi-materia-shipped-utilities.json"]));
+      expect(await readdir(utilitiesDir)).toEqual(expect.arrayContaining(["detect-vcs.mjs", "ensure-ignored.mjs", "blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs", "commit-sigil.mjs", ".pi-materia-shipped-utilities.json"]));
       expect(manifest.utilities["detect-vcs.mjs"].profileFile).toBe("detect-vcs.mjs");
       expect(manifest.utilities["ensure-ignored.mjs"].profileFile).toBe("ensure-ignored.mjs");
+      expect(manifest.utilities["blackbelt-bootstrap.mjs"].profileFile).toBe("blackbelt-bootstrap.mjs");
       expect(manifest.utilities["blackbelt-maintain.mjs"].profileFile).toBe("blackbelt-maintain.mjs");
       expect(manifest.utilities["commit-sigil.mjs"].profileFile).toBe("commit-sigil.mjs");
       expect(loaded.config.materia["Detect-VCS"]).toMatchObject({ command: ["node", path.join(utilitiesDir, "detect-vcs.mjs")] });
       expect(loaded.config.materia["Ignore-Artifacts"]).toMatchObject({ command: ["node", path.join(utilitiesDir, "ensure-ignored.mjs")] });
+      expect(loaded.config.materia["Blackbelt-Bootstrap"]).toMatchObject({ command: ["node", path.join(utilitiesDir, "blackbelt-bootstrap.mjs")] });
       expect(loaded.config.materia["Blackbelt-Maintain"]).toMatchObject({ command: ["node", path.join(utilitiesDir, "blackbelt-maintain.mjs")] });
       expect(loaded.config.materia["Commit-Sigil"]).toMatchObject({ command: ["node", path.join(utilitiesDir, "commit-sigil.mjs")] });
       expect(JSON.stringify(loaded.config.materia["Detect-VCS"])).not.toContain(process.cwd());

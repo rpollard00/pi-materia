@@ -725,7 +725,7 @@
     "Blackbelt-Bootstrap": {
       "type": "utility",
       "label": "Blackbelt-Bootstrap",
-      "description": "Deterministically bootstrap jj version control for the current project and ensure an empty working commit for maintenance flows.",
+      "description": "Deterministically bootstrap jj version control for the current project, ensure an empty working commit for maintenance flows, and create a stable blackbelt/ bookmark for pull-request-driven workflows.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
@@ -738,7 +738,7 @@
     "Blackbelt-Maintain": {
       "type": "utility",
       "label": "Blackbelt-Maintain",
-      "description": "Autonomously checkpoint accepted work items using jj (preferred) or git with deterministic script behavior.",
+      "description": "Autonomously checkpoint accepted work items using jj only (no git fallback). Reads state.blackbeltBootstrap.bookmarkName and advances the blackbelt/ bookmark with each checkpoint.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
