@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Commit-Sigil — deterministic utility materia.
- * Consumes state.workItems, validates each title against Conventional Commit
- * subject grammar, and emits only { satisfied, context }.
+ * Commit-Sigil — deterministic generator utility materia.
+ * Validates Conventional Commit title semantics on every work item,
+ * echoes the input workItems array unchanged, and reports
+ * satisfied/context for graph routing.
+ *
+ * Output contract (every stdout JSON path):
+ *   { workItems, satisfied, context }
  */
 
 // Conventional Commit types per spec, plus common ecosystem additions.
@@ -18,15 +22,22 @@ const CC_REGEX = /^(?<type>[a-z]+)(?<scope>\([^)]+\))?(?<breaking>!)?: (?<summar
 try {
   const input = await readStdinJson();
 
-  // Extract workItems from state or top-level array
-  const workItems = Array.isArray(input?.state?.workItems)
+  // Consume runtime input from state.workItems, optionally top-level
+  // workItems for direct script tests. Never alias tasks/work.
+  const raw = Array.isArray(input?.state?.workItems)
     ? input.state.workItems
     : Array.isArray(input?.workItems)
       ? input.workItems
-      : [];
+      : null;
 
+  // Preserve the canonical array identity — deep-copy so we echo the
+  // input unchanged while validating titles in isolation.
+  const workItems = raw !== null ? structuredClone(raw) : [];
+
+  // Empty input: no work items to validate.
   if (!Array.isArray(workItems) || workItems.length === 0) {
     writeStdoutJson({
+      workItems: [],
       satisfied: true,
       context: "Commit-Sigil: no work items to validate.",
     });
@@ -40,10 +51,11 @@ try {
     const item = workItems[i];
     if (!item || typeof item !== "object") continue;
 
+    // Trim only for validation checks; never rewrite titles or add fields.
     const title = typeof item.title === "string" ? item.title.trim() : "";
     if (!title) {
       allSatisfied = false;
-      issues.push(formatIssue(i, null, "missing title", "chore: update"));
+      issues.push(`- Item ${i} (missing title): every work item must have a non-empty title string.`);
       continue;
     }
 
@@ -52,16 +64,16 @@ try {
     if (!match) {
       allSatisfied = false;
       const suggestion = suggestCorrection(title);
-      issues.push(formatIssue(i, title, "does not match Conventional Commit format", suggestion));
+      issues.push(`- Item ${i} (${JSON.stringify(title)}): does not match Conventional Commit format.\n  Suggested: ${JSON.stringify(suggestion)}`);
       continue;
     }
 
     const { type } = match.groups;
 
     if (!STANDARD_TYPES.has(type)) {
-      // Non-standard type — still structurally valid but flag as advisory
-      issues.push(formatIssue(i, title, `non-standard type "${type}" (structural format is valid)`));
-      // Don't fail on non-standard types — the structure is correct
+      // Non-standard type — structurally valid but flag as advisory.
+      // Don't fail on non-standard types; the structure is correct.
+      issues.push(`- Item ${i} (${JSON.stringify(title)}): non-standard type "${type}" (structural format is valid).`);
     }
   }
 
@@ -70,29 +82,24 @@ try {
       ? `\n\nAdvisories:\n${issues.join("\n")}`
       : "";
     writeStdoutJson({
+      workItems,
       satisfied: true,
       context: `Commit-Sigil: all ${workItems.length} work item title(s) conform to Conventional Commit format.${advisory}`,
     });
   } else {
     writeStdoutJson({
+      workItems,
       satisfied: false,
-      context: `Commit-Sigil: work item title validation failed.\n\n${issues.join("\n\n")}`,
+      context: `Commit-Sigil: work item title validation failed.\n\n${issues.join("\n\n")}\n\nEach work item title must match Conventional Commit format: type[(scope)][!]: summary (e.g. "feat: add login", "fix(auth): handle timeout"). Accepted types: ${[...STANDARD_TYPES].join(", ")}.`,
     });
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   writeStdoutJson({
+    workItems: [],
     satisfied: false,
     context: `Commit-Sigil: unexpected error: ${message}`,
   });
-}
-
-function formatIssue(index, original, reason, suggestion) {
-  const parts = [`- Item ${index} (${original ? JSON.stringify(original) : "missing title"}): ${reason}`];
-  if (suggestion) {
-    parts.push(`  Suggested: ${JSON.stringify(suggestion)}`);
-  }
-  return parts.join("\n");
 }
 
 function suggestCorrection(title) {

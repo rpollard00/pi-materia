@@ -779,10 +779,11 @@
     "Commit-Sigil": {
       "type": "utility",
       "label": "Commit-Sigil",
-      "description": "Deterministic validator for Conventional Commit work item titles. Consumes state.workItems, validates each title, and emits satisfied/context for routing.",
+      "description": "Pass-through generator validator for Conventional Commit work item titles. Consumes state.workItems, validates each title, echoes workItems unchanged, and emits satisfied/context for routing.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
+      "generator": true,
       "assign": {
         "lastFeedback": "$.context"
       },
