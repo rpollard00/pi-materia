@@ -40,11 +40,13 @@ try {
   // Idempotently set the bookmark: try bookmark set (jj >= 0.20), fall back to bookmark create
   try {
     await execFileText("jj", ["bookmark", "set", bookmarkName, "--revision", "@"], cwd);
-  } catch {
+  } catch (setErr) {
+    console.error(`[blackbelt-bootstrap] bookmark set failed, trying bookmark create: ${formatError(setErr)}`);
     // Older jj: bookmark create then move if needed
     try {
       await execFileText("jj", ["bookmark", "create", bookmarkName, "--revision", "@"], cwd);
-    } catch {
+    } catch (createErr) {
+      console.error(`[blackbelt-bootstrap] bookmark create failed, trying bookmark move: ${formatError(createErr)}`);
       // Already exists on older jj, try bookmark move
       await execFileText("jj", ["bookmark", "move", bookmarkName, "--to", "@"], cwd);
     }
@@ -132,6 +134,11 @@ async function isCurrentCommitEmpty(cwd) {
 function execFileText(command, args, cwd) {
   return new Promise((resolve, reject) => {
     execFile(command, args, { cwd, timeout: 30000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      // Log stderr diagnostics to console.error so they are visible but do not
+      // pollute stdout JSON output consumed by pi-materia.
+      if (stderr && stderr.trim().length > 0) {
+        console.error(`[${command}] ${stderr.trim()}`);
+      }
       if (error) {
         error.stderr = stderr;
         return reject(error);
@@ -139,6 +146,14 @@ function execFileText(command, args, cwd) {
       resolve(stdout);
     });
   });
+}
+
+function formatError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof Error && "stderr" in error && typeof error.stderr === "string" && error.stderr.trim().length > 0) {
+    return `${message} (stderr: ${error.stderr.trim()})`;
+  }
+  return message;
 }
 
 /**
