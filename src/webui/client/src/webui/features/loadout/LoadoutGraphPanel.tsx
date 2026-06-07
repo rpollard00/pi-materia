@@ -348,17 +348,32 @@ function GraphCanvas(props: GraphCanvasProps) {
   } = props;
 
   const [zoom, setZoom] = useState<number>(ZOOM_DEFAULT);
+  const [showZoomPercent, setShowZoomPercent] = useState<boolean>(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasWidth = loadoutGraph.width;
   const canvasHeight = loadoutGraph.height;
+
+  const scheduleHideZoomPercent = () => {
+    if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
+    setShowZoomPercent(true);
+    hideTimerRef.current = setTimeout(() => setShowZoomPercent(false), 1500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
+    };
+  }, []);
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     const direction = event.deltaY > 0 ? -1 : 1;
     setZoom((prev) => clampZoom(prev + direction * ZOOM_STEP));
+    scheduleHideZoomPercent();
     event.preventDefault();
   };
 
-  const zoomIn = () => setZoom((prev) => clampZoom(prev + ZOOM_STEP));
-  const zoomOut = () => setZoom((prev) => clampZoom(prev - ZOOM_STEP));
+  const zoomIn = () => { setZoom((prev) => clampZoom(prev + ZOOM_STEP)); scheduleHideZoomPercent(); };
+  const zoomOut = () => { setZoom((prev) => clampZoom(prev - ZOOM_STEP)); scheduleHideZoomPercent(); };
 
   return (
     <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" aria-readonly={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined}>
@@ -423,6 +438,7 @@ function GraphCanvas(props: GraphCanvasProps) {
       <div className="loadout-graph-zoom-controls">
         <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom in" onClick={zoomIn} data-testid="zoom-in">+</button>
         <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom out" onClick={zoomOut} data-testid="zoom-out">−</button>
+        <span className={`loadout-graph-zoom-percent${showZoomPercent ? '' : ' loadout-graph-zoom-percent--hidden'}`} data-testid="zoom-percent">{Math.round(zoom * 100)}%</span>
       </div>
     </div>
   );

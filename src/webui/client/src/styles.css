@@ -349,6 +349,29 @@
   transform: scale(0.94);
 }
 
+.loadout-graph-zoom-percent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(103 232 249 / 0.28);
+  background: rgb(15 23 42 / 0.88);
+  color: rgb(165 243 252 / 0.9);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  backdrop-filter: blur(6px);
+  opacity: 1;
+  transition: opacity 400ms ease;
+}
+
+.loadout-graph-zoom-percent--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .loadout-graph-canvas-zoom-wrapper {
   position: relative;
   min-width: 100%;
