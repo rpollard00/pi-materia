@@ -343,7 +343,7 @@ export default function piMateria(pi: ExtensionAPI) {
           const requestedCastId = rest.join(" ").trim();
           const castId = await castExecutionUseCases.reviveLatestOrRequested(pi, ctx, requestedCastId);
           if (!castId) {
-            ctx.ui.notify("No failed pi-materia casts exhausted by same-socket recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
+            ctx.ui.notify("No failed pi-materia casts exhausted by same-socket recovery or edge traversal are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
             return;
           }
         } catch (error) {
@@ -353,7 +353,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (only after same-socket recovery attempts are exhausted; adds the original attempt allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (after same-socket recovery exhaustion or edge traversal exhaustion; extends the exhausted allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -880,7 +880,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
     .filter((state) => state.castId.startsWith(castIdPrefix))
     .map((state) => ({
       value: `${command} ${state.castId}`,
-      label: `${state.castId}  ${command === "revive" ? "revivable" : recastStatusLabel(state)}  socket:${currentCastSocketId(state) ?? "-"}`,
+      label: `${state.castId}  ${command === "revive" ? revivableStatusLabel(state) : recastStatusLabel(state)}  socket:${command === "revive" ? (revivableStatusSocketId(state) ?? currentCastSocketId(state) ?? "-") : (currentCastSocketId(state) ?? "-")}`,
       description: truncateLine(state.request ?? state.failedReason ?? state.runState?.lastMessage ?? "", 72),
     }));
   return completions.length ? completions : null;
@@ -930,6 +930,19 @@ function autoStartMateriaWebUi(input: { ctx: ExtensionContext; pi: ExtensionAPI;
 
 function recastStatusLabel(state: MateriaCastState): string {
   return state.failedReason?.toLowerCase().includes("abort") ? "aborted" : "failed";
+}
+
+function revivableStatusLabel(state: MateriaCastState): string {
+  if (state.recoveryExhaustion?.kind === "edge_traversal_exhausted") return "edge-exhausted";
+  if (state.recoveryExhaustion?.kind === "same_socket_recovery_exhausted") return "recovery-exhausted";
+  return "revivable";
+}
+
+function revivableStatusSocketId(state: MateriaCastState): string | undefined {
+  const exhaustion = state.recoveryExhaustion;
+  if (exhaustion?.kind === "edge_traversal_exhausted") return exhaustion.to;
+  if (exhaustion?.kind === "same_socket_recovery_exhausted") return exhaustion.socket;
+  return undefined;
 }
 
 function truncateLine(value: string, max: number): string {

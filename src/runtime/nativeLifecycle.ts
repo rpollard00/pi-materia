@@ -10,11 +10,11 @@ import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMulti
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
-export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
+export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
 import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
-import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
+import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, MateriaEdgeTraversalExhaustionError, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
-import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
+import { classifyTurnFailure, errorMessage, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
 import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
 import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
@@ -232,14 +232,60 @@ export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   const state = loadCastStateById(ctx, castId);
   if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
   assertNoActiveNativeCast(ctx, state, "reviving");
+
+  const exhaustion = state.recoveryExhaustion;
+  if (!exhaustion) {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured exhaustion metadata. Use /materia recast instead.`);
+  }
+
+  if (exhaustion.kind === "edge_traversal_exhausted") {
+    const result = extendEdgeTraversalAllowanceForRevive(state);
+    await appendEvent(state.runState, "cast_revive", {
+      castId: state.castId,
+      exhaustedRecoveryKey: result.key,
+      traversalContext: {
+        from: exhaustion.from,
+        to: exhaustion.to,
+        key: result.key,
+        count: exhaustion.count,
+        itemKey: state.currentItemKey,
+      },
+      priorEffectiveLimit: result.priorEffectiveLimit,
+      increment: result.increment,
+      newEffectiveLimit: result.newEffectiveLimit,
+      reviveCount: result.reviveCount,
+    });
+
+    // Clear failure markers and advance directly to the blocked target socket
+    // instead of resending the completed source socket prompt.
+    state.recoveryExhaustion = undefined;
+    state.active = true;
+    state.failedReason = undefined;
+    state.runState.endedAt = undefined;
+    const persistedLoadoutIdentity = await resolvePersistedCastLoadoutIdentity(state);
+    state.runState.loadoutId ||= persistedLoadoutIdentity?.loadoutId;
+    state.runState.loadoutName ||= persistedLoadoutIdentity?.loadoutName;
+    state.runState.lastMessage = `Reviving cast ${state.castId} to blocked target ${exhaustion.to}.`;
+    await writeUsage(state.runState);
+    saveCastState(pi, state);
+
+    const targetSocket = getResolvedPipelineSocket(state.pipeline, exhaustion.to);
+    if (!targetSocket) throw new Error(`Revive target socket "${exhaustion.to}" is not in the pipeline.`);
+    await startSocket(pi, ctx, state, targetSocket);
+    ctx.ui.notify(`pi-materia cast ${state.castId} revived to blocked target socket "${exhaustion.to}".`, "info");
+    return state;
+  }
+
+  // same_socket_recovery_exhausted
   const result = extendSameSocketRecoveryAllowanceForRevive(state);
+  const sameSocketExhaustion = exhaustion as { kind: "same_socket_recovery_exhausted"; socket?: string; mode?: string };
   await appendEvent(state.runState, "cast_revive", {
     castId: state.castId,
     exhaustedRecoveryKey: result.key,
     recoveryContext: {
       key: result.key,
-      socket: state.recoveryExhaustion?.socket ?? currentSocketId(state),
-      mode: state.recoveryExhaustion?.mode,
+      socket: sameSocketExhaustion.socket ?? currentSocketId(state),
+      mode: sameSocketExhaustion.mode,
       itemKey: state.currentItemKey,
     },
     priorEffectiveMaxAttempts: result.priorEffectiveMaxAttempts,
@@ -487,7 +533,40 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   if (!nextTarget) {
     const nextEdge = selectNextEdge(state, socket, parsed);
     if (nextEdge) {
-      enforceEdgeLimit(state, socket.id, nextEdge, config);
+      try {
+        enforceEdgeLimit(state, socket.id, nextEdge, config);
+      } catch (error) {
+        if (error instanceof MateriaEdgeTraversalExhaustionError) {
+          const allowance = state.edgeAllowances?.[error.key];
+          state.recoveryExhaustion = {
+            kind: "edge_traversal_exhausted",
+            from: error.from,
+            to: error.to,
+            key: error.key,
+            count: error.count,
+            originalLimit: error.originalLimit,
+            effectiveLimit: error.effectiveLimit,
+            reviveCount: allowance?.reviveCount ?? 0,
+            failedReason: error.message,
+            exhaustedAt: Date.now(),
+          };
+          await appendEvent(state.runState, "edge_traversal_exhausted", {
+            from: error.from,
+            to: error.to,
+            key: error.key,
+            count: error.count,
+            originalLimit: error.originalLimit,
+            effectiveLimit: error.effectiveLimit,
+            reviveCount: allowance?.reviveCount ?? 0,
+            socket: socket.id,
+            materia: socketMateriaName(socket),
+            itemKey: state.currentItemKey,
+          });
+          await failCast(pi, ctx, state, error, entryId, { preserveRecoveryExhaustion: true });
+          return;
+        }
+        throw error;
+      }
       nextTarget = nextEdge.to;
       captureReworkFeedbackForRoute(state, { sourceSocket: socket, targetSocketId: nextEdge.to, edge: nextEdge, parsed, rawOutput: text });
     } else {

@@ -1476,7 +1476,7 @@ describe('Materia loadout grid editor', () => {
     expect(css).toMatch(/\.materia-socket-orb-stage\s*{[^}]*height: var\(--materia-socket-stage-size\);[^}]*width: var\(--materia-socket-stage-size\);/s);
     expect(css).toMatch(/\.materia-socket-label\s*{[^}]*max-width: var\(--materia-socket-width\);/s);
     expect(css).toContain('--materia-orb-small-size: 2rem;');
-    expect(css).toMatch(/\.loadout-graph-viewport\s*{[^}]*max-width: 100%;[^}]*overflow: auto;/s);
+    expect(css).toMatch(/\.loadout-graph-scroll-area\s*{[^}]*overflow: auto;/s);
     expect(css).toMatch(/\.loadout-graph-canvas\s*{[^}]*min-width: 100%;[^}]*min-height: 100%;/s);
     expect(css).toMatch(/\.materia-orb-iterator\s*{[^}]*outline: 1px solid/s);
     expect(css).toMatch(/\.materia-orb-iterator::after\s*{[^}]*radial-gradient/s);
@@ -1993,7 +1993,7 @@ describe('Materia loadout grid editor', () => {
     await screen.findByTestId('socket-Socket-4');
     const dataTransfer = createDataTransfer();
     fireEvent.dragStart(screen.getByTestId('socket-Socket-4').querySelector('[draggable="true"]') as HTMLElement, { dataTransfer });
-    fireEvent.drop(screen.getByTestId('socket-grid-viewport'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('socket-grid-scroll-area'), { dataTransfer });
     expect(await screen.findByText(/Cleared materia from Socket-4/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -2049,7 +2049,7 @@ describe('Materia loadout grid editor', () => {
     await screen.findByTestId('socket-Socket-2');
     const dataTransfer = createDataTransfer();
     dataTransfer.setData('application/json', JSON.stringify({ kind: 'socket', materiaId: 'Socket-2', fromLoadout: 'Full-Auto', fromSocket: 'Socket-2' }));
-    fireEvent.drop(screen.getByTestId('socket-grid-viewport'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('socket-grid-scroll-area'), { dataTransfer });
 
     expect(await screen.findByText('Cleared materia from Socket-2; socket graph links and layout were preserved.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -2258,7 +2258,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByText('staged edits')).toBeNull();
 
     dataTransfer.setData('application/json', JSON.stringify({ kind: 'palette', materiaId: 'Build' }));
-    fireEvent.drop(screen.getByTestId('socket-grid-viewport'), { dataTransfer });
+    fireEvent.drop(screen.getByTestId('socket-grid-scroll-area'), { dataTransfer });
     expect(await screen.findByText('Ignored drop: drag palette materia onto a socket to place it.')).toBeTruthy();
     expect(screen.queryByText('staged edits')).toBeNull();
 

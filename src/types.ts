@@ -252,8 +252,10 @@ export interface MateriaCastState {
   recoveryReasons?: Record<string, MateriaRecoveryReason>;
   /** Per-context original error message from the first failure that triggered recovery, keyed like recoveryAttempts. */
   recoveryErrorMessages?: Record<string, string>;
-  /** Structured terminal metadata for casts failed by same-socket recovery exhaustion. */
+  /** Structured terminal metadata for casts failed by same-socket recovery exhaustion or edge traversal exhaustion. */
   recoveryExhaustion?: MateriaRecoveryExhaustion;
+  /** Per-edge cast-local effective traversal limits, keyed like edgeTraversals. Populated on first traversal and updated by revive. */
+  edgeAllowances?: Record<string, MateriaEdgeAllowance>;
   /** Clearable flag so the runtime can drop stale timeout hints after a successful retry. */
   recoveryHintSuppressed?: boolean;
   /** Bounded metadata for the next same-socket retry after invalid final JSON output. */
@@ -301,7 +303,13 @@ export interface MateriaReworkFeedbackEntry {
 
 export type MateriaRecoveryReason = "context_window" | "tool_timeout" | "turn_failure";
 
-export interface MateriaRecoveryExhaustion {
+export interface MateriaEdgeAllowance {
+  originalLimit: number;
+  effectiveLimit: number;
+  reviveCount: number;
+}
+
+export interface MateriaSameSocketRecoveryExhaustion {
   kind: "same_socket_recovery_exhausted";
   reason: MateriaRecoveryReason;
   key: string;
@@ -320,6 +328,21 @@ export interface MateriaRecoveryExhaustion {
   mode: "normal" | "refinement" | "finalization";
   exhaustedAt: number;
 }
+
+export interface MateriaEdgeTraversalExhaustion {
+  kind: "edge_traversal_exhausted";
+  from: string;
+  to: string;
+  key: string;
+  count: number;
+  originalLimit: number;
+  effectiveLimit: number;
+  reviveCount: number;
+  failedReason: string;
+  exhaustedAt: number;
+}
+
+export type MateriaRecoveryExhaustion = MateriaSameSocketRecoveryExhaustion | MateriaEdgeTraversalExhaustion;
 
 export interface MateriaManifestEntry {
   phase: MateriaCastPhase;
