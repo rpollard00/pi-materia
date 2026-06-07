@@ -774,6 +774,19 @@
         "runtime": "node"
       }
     },
+    "Mime-Maintain": {
+      "type": "utility",
+      "label": "Mime-Maintain",
+      "description": "Autonomously stage and commit changes using only git (no jj dependency). Reads state.mimeBootstrap.branchName and commits with the work item title as the commit message.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "mime-maintain.mjs",
+        "runtime": "node"
+      }
+    },
     "Commit-Sigil": {
       "type": "utility",
       "label": "Commit-Sigil",
