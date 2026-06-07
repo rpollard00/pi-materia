@@ -154,14 +154,15 @@ async function runUtility(script: string, input: Record<string, unknown>, env: R
   return { stdout, stderr, exitCode, json: JSON.parse(stdout) };
 }
 
-async function runBootstrap(input: Record<string, unknown>) {
+async function runBootstrap(input: Record<string, unknown>, extraEnv: Record<string, string> = {}) {
   const fake = await makeFakeJj();
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-bootstrap-cwd-"));
-  return runUtility(
+  const result = await runUtility(
     bootstrapScript,
     { cwd, runDir: path.join(cwd, ".pi", "pi-materia", "run"), state: {}, ...input },
-    { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, JJ_LOG: fake.log },
+    { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, JJ_LOG: fake.log, ...extraEnv },
   );
+  return { ...result, fake };
 }
 
 describe("Blackbelt utility scripts", () => {
@@ -200,6 +201,63 @@ describe("Blackbelt utility scripts", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.json.state.blackbeltBootstrap.bookmarkName).toBe("blackbelt/feature-name-lock");
+  });
+
+  test("bootstrap describes dirty pre-existing work before jj new and sets bookmark on the described revision", async () => {
+    const castId = "2026-06-06T19-39-18-566Z";
+    const result = await runBootstrap({ castId }, { JJ_DIRTY: "1" });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.state.blackbeltBootstrap.ok).toBe(true);
+    expect(result.json.state.blackbeltBootstrap.newWorkingCommit).toBe(true);
+    expect(result.json.state.blackbeltBootstrap.emptyHead).toBe(true);
+
+    // Verify command order in jj.log: describe before bookmark set before new.
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+
+    const describeIdx = lines.findIndex((l) => l.startsWith("describe"));
+    const bookmarkIdx = lines.findIndex((l) => l.startsWith("bookmark set"));
+    const newIdx = lines.findIndex((l) => l === "new");
+
+    expect(describeIdx).toBeGreaterThan(-1);
+    expect(bookmarkIdx).toBeGreaterThan(-1);
+    expect(newIdx).toBeGreaterThan(-1);
+    // describe must come before bookmark set, which must come before new.
+    expect(describeIdx).toBeLessThan(bookmarkIdx);
+    expect(bookmarkIdx).toBeLessThan(newIdx);
+  });
+
+  test("bootstrap describe message includes the deterministic bookmark name for dirty head", async () => {
+    const castId = "2026-06-06T19-39-18-566Z";
+    const result = await runBootstrap({ castId }, { JJ_DIRTY: "1" });
+
+    expect(result.exitCode).toBe(0);
+    const bookmarkName = result.json.state.blackbeltBootstrap.bookmarkName;
+    expect(bookmarkName).toBeTruthy();
+
+    // The describe message should reference the bookmark name.
+    const jjLog = await readFile(result.fake.log, "utf8");
+    expect(jjLog).toContain(`describe -m bootstrap: ${bookmarkName}`);
+  });
+
+  test("bootstrap clean head no-op: no describe, no new — only bookmark set", async () => {
+    const castId = "2026-06-06T19-39-18-566Z";
+    // No JJ_DIRTY → diff --summary returns empty → clean head.
+    const result = await runBootstrap({ castId });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.state.blackbeltBootstrap.ok).toBe(true);
+    expect(result.json.state.blackbeltBootstrap.newWorkingCommit).toBe(false);
+    expect(result.json.state.blackbeltBootstrap.emptyHead).toBe(true);
+
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+
+    // Should have bookmark set but NOT describe or new.
+    expect(lines.some((l) => l.startsWith("bookmark set"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("describe"))).toBe(false);
+    expect(lines.some((l) => l === "new")).toBe(false);
   });
 
   test("maintain refuses to invent a bookmark when bootstrap state is missing", async () => {
