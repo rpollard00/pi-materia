@@ -136,7 +136,7 @@ The WebUI starts automatically with `/materia cast`, `/materia link`, `/materia 
 ```bash
 /materia recast          # resume the most recent failed/aborted cast
 /materia recast <id>     # resume a specific cast
-/materia revive <id>     # add recovery attempts to a same-socket-exhausted cast
+/materia revive <id>     # extend the exhausted allowance for same-socket recovery or edge traversal, then recast
 /materia casts           # list past casts
 /materia status          # show the current cast state
 /materia abort           # stop the active cast
@@ -198,7 +198,7 @@ Save this as `.pi/pi-materia.json` in your project, or pass it with `--materia-c
 | `/materia quest requeue <id>` | Return a failed/blocked quest to the queue |
 | `/materia quest default-loadout [name\|--clear]` | Set or clear the quest default loadout |
 | `/materia recast [id]` | Resume a failed/aborted cast |
-| `/materia revive [id]` | Add recovery allowance to an exhausted cast |
+| `/materia revive [id]` | Extend allowance for a same-socket or edge-traversal exhausted cast |
 | `/materia casts` | List past casts |
 | `/materia status` | Show active cast state |
 | `/materia continue` | Finalize a paused multi-turn planning socket |

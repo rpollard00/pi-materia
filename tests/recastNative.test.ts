@@ -29,6 +29,28 @@ async function makeHarness(options: { socketId?: string; materia?: string } = {}
   return harness;
 }
 
+async function makeMultiSocketHarness(): Promise<FakePiHarness> {
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-recast-"));
+  await mkdir(path.join(cwd, ".pi"), { recursive: true });
+  await writeFile(path.join(cwd, ".pi", "pi-materia.json"), JSON.stringify({
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "Socket-1",
+        sockets: {
+          "Socket-1": { materia: "Build", edges: [{ when: "always", to: "Socket-2" }] },
+          "Socket-2": { materia: "Build" },
+        },
+      },
+    },
+    materia: { Build: { tools: "coding", prompt: "Build materia" } },
+  }, null, 2));
+  const harness = new FakePiHarness(cwd);
+  piMateria(harness.pi);
+  return harness;
+}
+
 function latestState(harness: FakePiHarness): MateriaCastState {
   const entry = harness.appendedEntries.filter((item) => item.customType === "pi-materia-cast-state").at(-1);
   if (!entry?.data) throw new Error("No materia cast state was appended");
@@ -59,6 +81,34 @@ function makeRevivableState(state: MateriaCastState, options: { key?: string; or
       mode: "normal",
       exhaustedAt: Date.now(),
     },
+  });
+}
+
+function makeEdgeTraversalExhaustedState(state: MateriaCastState, options: { from?: string; to?: string; originalLimit?: number; effectiveLimit?: number; reviveCount?: number; count?: number; extraEdgeAllowances?: MateriaCastState["edgeAllowances"] } = {}): MateriaCastState {
+  const from = options.from ?? "Socket-1";
+  const to = options.to ?? "Socket-2";
+  const key = `${from}->${to}`;
+  const originalLimit = options.originalLimit ?? 1;
+  const effectiveLimit = options.effectiveLimit ?? originalLimit;
+  const reviveCount = options.reviveCount ?? 0;
+  const count = options.count ?? effectiveLimit + 1;
+  const failedReason = `Materia edge traversal limit exceeded for ${from}->${to} (${count}/${effectiveLimit})`;
+  return cloneState(state, {
+    edgeAllowances: { ...options.extraEdgeAllowances, [key]: { originalLimit, effectiveLimit, reviveCount } },
+    edgeTraversals: { ...state.edgeTraversals, [key]: count },
+    recoveryExhaustion: {
+      kind: "edge_traversal_exhausted",
+      from,
+      to,
+      key,
+      count,
+      originalLimit,
+      effectiveLimit,
+      reviveCount,
+      failedReason,
+      exhaustedAt: Date.now(),
+    },
+    failedReason,
   });
 }
 
@@ -404,5 +454,236 @@ describe("/materia recast", () => {
 
     const prefixCompletions = harness.getCommandCompletions("materia", `recast ${older.castId.slice(0, -1)}`) ?? [];
     expect(prefixCompletions.map((item) => item.value)).toEqual([`recast ${older.castId}`]);
+  });
+
+  // ── Edge-traversal exhaustion revive regression tests ──
+
+  test("revive extends an exhausted edge-traversal allowance and advances to the blocked target", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    await harness.runCommand("materia", "cast edge traversal task");
+    const failed = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2");
+    const exhausted = makeEdgeTraversalExhaustedState(failed, { from: "Socket-1", to: "Socket-2", originalLimit: 1, effectiveLimit: 1 });
+    const edgeKey = exhausted.recoveryExhaustion!.key;
+    harness.pi.appendEntry("pi-materia-cast-state", exhausted);
+
+    await harness.runCommand("materia", `revive ${exhausted.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(exhausted.castId);
+    expect(resumed.active).toBe(true);
+    expect(resumed.recoveryExhaustion).toBeUndefined();
+    expect(resumed.failedReason).toBeUndefined();
+
+    const allowance = resumed.edgeAllowances?.[edgeKey];
+    expect(allowance).toMatchObject({ originalLimit: 1, effectiveLimit: 2, reviveCount: 1 });
+
+    // Notification verifies revive reached the target socket (startSocket overwrites runState.lastMessage)
+    const reviveNotify = harness.notifications.find((n) => n.message.includes("revived to blocked target socket"));
+    expect(reviveNotify?.message).toContain(`revived to blocked target socket "Socket-2"`);
+
+    const events = await readEvents(resumed);
+    const eventTypes = events.map((event) => event.type ?? "");
+    const reviveIndex = eventTypes.indexOf("cast_revive");
+    expect(reviveIndex).toBeGreaterThan(-1);
+    // Edge-traversal revive does NOT emit a cast_recast event (different path)
+    expect(eventTypes).not.toContain("cast_recast");
+    expect(events[reviveIndex]?.data).toMatchObject({
+      castId: exhausted.castId,
+      exhaustedRecoveryKey: edgeKey,
+      traversalContext: {
+        from: "Socket-1",
+        to: "Socket-2",
+        key: edgeKey,
+      },
+      priorEffectiveLimit: 1,
+      increment: 1,
+      newEffectiveLimit: 2,
+      reviveCount: 1,
+    });
+    expect(events[reviveIndex]?.data).not.toHaveProperty("recoveryContext");
+  });
+
+  test("repeated edge-traversal revives grow allowance linearly and leave unrelated edges untouched", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    await harness.runCommand("materia", "cast repeated edge traversal task");
+    const failed = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2");
+    const edgeKey = "Socket-1->Socket-2";
+    const otherKey = "Socket-1->Socket-3";
+    const exhausted = makeEdgeTraversalExhaustedState(failed, {
+      from: "Socket-1",
+      to: "Socket-2",
+      originalLimit: 3,
+      effectiveLimit: 3,
+      extraEdgeAllowances: { [otherKey]: { originalLimit: 2, effectiveLimit: 2, reviveCount: 0 } },
+    });
+    harness.pi.appendEntry("pi-materia-cast-state", exhausted);
+
+    // First revive
+    await harness.runCommand("materia", `revive ${exhausted.castId}`);
+    const firstResume = latestState(harness);
+    expect(firstResume.edgeAllowances?.[edgeKey]).toMatchObject({ originalLimit: 3, effectiveLimit: 6, reviveCount: 1 });
+    expect(firstResume.edgeAllowances?.[otherKey]).toMatchObject({ originalLimit: 2, effectiveLimit: 2, reviveCount: 0 });
+
+    // Set up second exhaustion (with increased effectiveLimit and reviveCount from first revive)
+    const secondFailureReason = "Materia edge traversal limit exceeded for Socket-1->Socket-2 (7/6)";
+    const exhaustedAgain = makeEdgeTraversalExhaustedState(cloneState(firstResume, {
+      active: false,
+      awaitingResponse: false,
+      phase: "failed",
+      socketState: "failed",
+      failedReason: secondFailureReason,
+      runState: { ...firstResume.runState, lastMessage: secondFailureReason, endedAt: Date.now() },
+    }), {
+      from: "Socket-1",
+      to: "Socket-2",
+      originalLimit: 3,
+      effectiveLimit: 6,
+      reviveCount: 1,
+      count: 7,
+      extraEdgeAllowances: { [otherKey]: { originalLimit: 2, effectiveLimit: 2, reviveCount: 0 } },
+    });
+    harness.pi.appendEntry("pi-materia-cast-state", exhaustedAgain);
+
+    // Second revive
+    await harness.runCommand("materia", `revive ${exhaustedAgain.castId}`);
+    const secondResume = latestState(harness);
+    expect(secondResume.edgeAllowances?.[edgeKey]).toMatchObject({ originalLimit: 3, effectiveLimit: 9, reviveCount: 2 });
+    expect(secondResume.edgeAllowances?.[edgeKey]?.effectiveLimit).not.toBe(12); // incremental, not multiplicative
+    expect(secondResume.edgeAllowances?.[otherKey]).toMatchObject({ originalLimit: 2, effectiveLimit: 2, reviveCount: 0 });
+  });
+
+  test("no-id revive selects latest eligible edge-traversal exhausted cast", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    // Create an ordinary failed cast first
+    await harness.runCommand("materia", "cast ordinary failure first");
+    const ordinary = await failCurrentCast(harness, "ordinary failure");
+
+    // Create an edge-traversal exhausted cast (newer)
+    await harness.runCommand("materia", "cast edge traversal exhausted cast");
+    const failed = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2");
+    const exhausted = makeEdgeTraversalExhaustedState(failed, { from: "Socket-1", to: "Socket-2", originalLimit: 1, effectiveLimit: 1 });
+    harness.pi.appendEntry("pi-materia-cast-state", exhausted);
+
+    // No-id revive should pick the edge-exhausted cast, not the ordinary one
+    await harness.runCommand("materia", "revive");
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(exhausted.castId);
+    expect(resumed.active).toBe(true);
+
+    // Ordinary cast should remain untouched
+    const ordinaryLatest = harness.appendedEntries
+      .filter((entry) => entry.customType === "pi-materia-cast-state" && (entry.data as MateriaCastState | undefined)?.castId === ordinary.castId)
+      .at(-1)?.data as MateriaCastState | undefined;
+    expect(ordinaryLatest).toMatchObject({ castId: ordinary.castId, active: false, phase: "failed" });
+  });
+
+  test("revive completions filter edge-traversal exhausted casts and show edge-exhausted label", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    // Edge-traversal exhausted cast
+    await harness.runCommand("materia", "cast edge traversal exhausted filter");
+    const failed = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2");
+    const edgeExhausted = makeEdgeTraversalExhaustedState(failed, { from: "Socket-1", to: "Socket-2" });
+    harness.pi.appendEntry("pi-materia-cast-state", edgeExhausted);
+
+    // Same-socket recovery exhausted cast
+    await harness.runCommand("materia", "cast same socket exhausted filter");
+    const sameSocketFailed = await failCurrentCast(harness, "Same-socket recovery exhausted for normal turn");
+    const sameSocketExhausted = makeRevivableState(sameSocketFailed);
+    harness.pi.appendEntry("pi-materia-cast-state", sameSocketExhausted);
+
+    // Ordinary failed cast (not revivable)
+    await harness.runCommand("materia", "cast ordinary failure for filter");
+    const ordinary = await failCurrentCast(harness, "ordinary failure");
+
+    const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    const completionValues = completions.map((item) => item.value);
+
+    // Both exhausted casts appear, newest first (same-socket is newer)
+    expect(completionValues).toEqual([`revive ${sameSocketExhausted.castId}`, `revive ${edgeExhausted.castId}`]);
+    expect(completionValues).not.toContain(`revive ${ordinary.castId}`);
+
+    // Edge-traversal cast shows edge-exhausted label with target socket
+    const edgeCompletion = completions.find((item) => item.value === `revive ${edgeExhausted.castId}`);
+    expect(edgeCompletion?.label).toContain("edge-exhausted");
+    expect(edgeCompletion?.label).toContain("Socket-2");
+
+    // Same-socket cast shows recovery-exhausted label with source socket
+    const sameSocketCompletion = completions.find((item) => item.value === `revive ${sameSocketExhausted.castId}`);
+    expect(sameSocketCompletion?.label).toContain("recovery-exhausted");
+  });
+
+  test("revive completions include both same-socket and edge-traversal exhausted casts when both types exist", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    // Same-socket exhausted (older)
+    await harness.runCommand("materia", "cast older same-socket exhausted");
+    const older = await failCurrentCast(harness, "Same-socket recovery exhausted for normal turn");
+    const olderRevivable = makeRevivableState(older);
+    harness.pi.appendEntry("pi-materia-cast-state", olderRevivable);
+
+    // Edge-traversal exhausted (newer)
+    await harness.runCommand("materia", "cast newer edge exhausted");
+    const newer = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2");
+    const newerEdgeExhausted = makeEdgeTraversalExhaustedState(newer, { from: "Socket-1", to: "Socket-2" });
+    harness.pi.appendEntry("pi-materia-cast-state", newerEdgeExhausted);
+
+    // No-id revive picks newest revivable (edge-traversal in this case)
+    await harness.runCommand("materia", "revive");
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(newerEdgeExhausted.castId);
+
+    const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    // The now-active cast should not appear in completions
+    expect(completions.map((item) => item.value)).toEqual([`revive ${olderRevivable.castId}`]);
+  });
+
+  test("non-revivable failures still guide users to /materia recast", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    // Ordinary failure
+    await harness.runCommand("materia", "cast ordinary failure for guidance");
+    await failCurrentCast(harness, "ordinary failure");
+
+    const mixedCompletions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    expect(mixedCompletions).toEqual([]);
+
+    // revive without id should show the empty-state message
+    await harness.runCommand("materia", "revive");
+    const emptyStateNotify = harness.notifications.find((n) => n.message.includes("No failed pi-materia casts exhausted"));
+    expect(emptyStateNotify?.message).toContain("No failed pi-materia casts exhausted by same-socket recovery or edge traversal are available to revive");
+    expect(emptyStateNotify?.message).toContain("Use /materia recast");
+  });
+
+  test("preserves existing same-socket revive behavior after edge-traversal revive changes", async () => {
+    // Verify that the same-socket revive tests still pass unchanged
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast same socket sanity check");
+    const failed = await failCurrentCast(harness, "Same-socket recovery exhausted for normal turn");
+    const revivable = makeRevivableState(failed);
+    const recoveryKey = revivable.recoveryExhaustion!.key;
+    harness.pi.appendEntry("pi-materia-cast-state", revivable);
+
+    await harness.runCommand("materia", `revive ${revivable.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(revivable.castId);
+    expect(resumed.active).toBe(true);
+    expect(resumed.socketState).toBe("awaiting_agent_response");
+    const allowance = resumed.recoveryAllowances?.[recoveryKey];
+    expect(allowance).toMatchObject({ originalMaxAttempts: 1, effectiveMaxAttempts: 2, reviveCount: 1 });
+    expect(resumed.recoveryExhaustion).toBeUndefined();
+    expect(harness.notifications.at(-1)?.message).toContain(`pi-materia cast ${revivable.castId} recast from socket "Socket-1".`);
+
+    const events = await readEvents(resumed);
+    const eventTypes = events.map((event) => event.type ?? "");
+    expect(eventTypes).toContain("cast_revive");
+    expect(eventTypes).toContain("cast_recast");
   });
 });
