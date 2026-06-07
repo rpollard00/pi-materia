@@ -138,12 +138,25 @@ try {
     ? params.apiBaseUrl.trim().replace(/\/$/, "")
     : (process.env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/$/, "");
 
-  // Pre-push revision check: if the bookmark tip is an empty descriptionless
-  // working commit, safely move the bookmark to the nearest pushable ancestor
-  // when that drops no file changes.  Otherwise fail early without attempting
-  // git push (which would reject unnamed, empty commits).
+  // Pre-push revision check: detect unpushable revisions before attempting
+  // git push.  jj git push rejects both unnamed (non-empty + descriptionless)
+  // and purely empty descriptionless commits.  For unnamed revisions, fail
+  // early with diagnostics rather than silently renaming or dropping code.
   const preflight = await preflightPushRevision(bookmarkName, revision, cwd);
   if (!preflight.pushable) {
+    if (preflight.reason === "unnamedRevision") {
+      throw new UtilityError(
+        `Blackbelt-PR: unpushable unnamed revision "${preflight.revision}" for bookmark "${bookmarkName}". ` +
+          `The revision has changes but no description — jj git push requires a commit description. ` +
+          `Describe the revision before pushing, e.g.: jj describe -r ${preflight.revision} -m "your message"`,
+        {
+          bookmarkName,
+          unnamedRevision: true,
+          revision: preflight.revision,
+          reason: preflight.reason,
+        },
+      );
+    }
     throw new UtilityError(
       `Blackbelt-PR: no pushable revision for bookmark "${bookmarkName}". ` +
         `The bookmark points to an empty, descriptionless commit with no non-empty ancestor. ` +
@@ -424,19 +437,24 @@ async function inferPrTitle(bookmarkName, revision, params, cwd) {
 /**
  * Pre-push revision safety check.
  *
- * If the resolved bookmark tip is a purely empty, descriptionless working commit,
- * walk up parent chain to find the nearest non-empty ancestor.  Move the bookmark
- * to that ancestor only when it drops no file changes (the tip diff is empty so
- * no diffs are lost).  Return noPushableRevision when there is no non-empty ancestor.
+ * Detects two classes of unpushable revision:
+ * 1. Unnamed (non-empty diff + blank description): jj git push requires a
+ *    description to create the git commit.  Fail early with diagnostics
+ *    rather than silently renaming or dropping code.
+ * 2. Empty + descriptionless: walk up parent chain to find the nearest
+ *    non-empty ancestor.  Move the bookmark to that ancestor only when it
+ *    drops no file changes (the tip diff is empty so no diffs are lost).
+ *    Return noPushableRevision when there is no non-empty ancestor.
  *
  * Returns { pushable: true, revision, adjusted: false } for normal revisions,
  *         { pushable: true, revision, adjusted: true, originalRevision } for adjusted,
+ *         { pushable: false, reason: "unnamedRevision", bookmarkName, revision } for unnamed,
  *         { pushable: false, reason: "noPushableRevision" } for failure.
  */
 async function preflightPushRevision(bookmarkName, revision, cwd) {
   const checkRev = revision ?? bookmarkName;
 
-  // 1. Check if the revision is empty (no diff).
+  // 1. Check if the revision has changes.
   let diffSummary;
   try {
     diffSummary = (await execFileText("jj", ["diff", "--summary", "-r", checkRev], cwd)).trim();
@@ -445,11 +463,8 @@ async function preflightPushRevision(bookmarkName, revision, cwd) {
     return { pushable: true, revision: checkRev, adjusted: false };
   }
   const isEmpty = diffSummary.length === 0;
-  if (!isEmpty) {
-    return { pushable: true, revision: checkRev, adjusted: false };
-  }
 
-  // 2. Check if the revision is descriptionless.
+  // 2. Check if the revision has a description.
   let description;
   try {
     description = (await execFileText("jj", ["log", "--no-graph", "-r", checkRev, "-T", "description"], cwd)).trim();
@@ -457,12 +472,30 @@ async function preflightPushRevision(bookmarkName, revision, cwd) {
     return { pushable: true, revision: checkRev, adjusted: false };
   }
   const isDescriptionless = description.length === 0;
-  if (!isDescriptionless) {
-    // Has a description — let the push attempt proceed normally.
+
+  // 3. Non-empty but unnamed → jj git push will reject this commit because
+  //    it has no description.  Fail early with diagnostics; do not silently
+  //    rename or drop code.
+  if (!isEmpty && isDescriptionless) {
+    return {
+      pushable: false,
+      reason: "unnamedRevision",
+      bookmarkName,
+      revision: checkRev,
+    };
+  }
+
+  // 4. Non-empty with a description — pushable.
+  if (!isEmpty) {
     return { pushable: true, revision: checkRev, adjusted: false };
   }
 
-  // 3. Empty AND descriptionless — find nearest non-empty ancestor.
+  // 5. Empty with a description — pushable (the description signals intent).
+  if (!isDescriptionless) {
+    return { pushable: true, revision: checkRev, adjusted: false };
+  }
+
+  // 6. Empty AND descriptionless — find nearest non-empty ancestor.
   let ancestorRev = checkRev;
   const maxWalk = 50; // Safety valve to prevent infinite loops.
   for (let i = 0; i < maxWalk; i++) {
@@ -492,8 +525,34 @@ async function preflightPushRevision(bookmarkName, revision, cwd) {
     }
 
     if (parentDiff.length > 0) {
-      // Found a non-empty ancestor.  The tip is empty (no diff), so moving
-      // the bookmark to this ancestor does not drop any file changes.
+      // Found a non-empty ancestor.  Verify it has a description before
+      // considering it pushable — a non-empty unnamed ancestor would
+      // just reproduce the same jj git push rejection.
+      let parentDesc;
+      try {
+        parentDesc = (await execFileText("jj", [
+          "log", "--no-graph", "-r", parentId, "-T", "description",
+        ], cwd)).trim();
+      } catch {
+        // Can't check description — be conservative and report unnamed.
+        return {
+          pushable: false,
+          reason: "unnamedRevision",
+          bookmarkName,
+          revision: parentId,
+        };
+      }
+      if (parentDesc.length === 0) {
+        // Non-empty ancestor with no description — unpushable.
+        return {
+          pushable: false,
+          reason: "unnamedRevision",
+          bookmarkName,
+          revision: parentId,
+        };
+      }
+      // Non-empty, named ancestor found.  The tip is empty (no diff), so
+      // moving the bookmark to this ancestor drops no file changes.
       try {
         await execFileText("jj", ["bookmark", "set", bookmarkName, "--revision", parentId], cwd);
         return {

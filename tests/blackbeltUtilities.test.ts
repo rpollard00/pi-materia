@@ -165,9 +165,25 @@ case "$1" in
       exit 0
     fi
     # Otherwise -T description (title inference / preflight description check).
+    # Extract the -r revision to differentiate tip vs parent/ancestor queries
+    # so that PR_EMPTY_DESCRIPTION only affects the tip while the parent can
+    # be controlled independently via PR_PARENT_DESCRIPTION.
+    queried_rev=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "-r" ]; then queried_rev="$a"; fi
+      prev="$a"
+    done
+    is_parent=0
+    case "$queried_rev" in
+      *parent-commit-id*) is_parent=1 ;;
+    esac
     if [ "$PR_EMPTY_DESCRIPTION" = "1" ]; then
-      # Output nothing — simulates a revision with no description.
-      :
+      if [ "$is_parent" = "1" ] && [ -n "$PR_PARENT_DESCRIPTION" ]; then
+        printf '%s\n' "$PR_PARENT_DESCRIPTION"
+      else
+        : # empty — simulates a revision with no description.
+      fi
     elif [ -n "$PR_DESCRIPTION" ]; then
       printf '%s\n' "$PR_DESCRIPTION"
     else
@@ -641,10 +657,12 @@ describe("Blackbelt-PR utility script", () => {
     }
   });
 
-  test("falls back to bookmark name when jj description is empty", async () => {
+  test("fails with unnamedRevision when bookmark tip has changes but no description", async () => {
     const api = startFakeGitHubApi();
     try {
       // PR_EMPTY_DESCRIPTION=1 makes the fake jj output nothing for `jj log`.
+      // The diff is non-empty (no PR_TIP_EMPTY), so the preflight catches an
+      // unnamedRevision before reaching title inference — fail early.
       const result = await runPrUtility(
         {
           params: {
@@ -657,9 +675,13 @@ describe("Blackbelt-PR utility script", () => {
         api.baseUrl,
       );
 
-      expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.title).toBe("blackbelt/test-bookmark");
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltPr.ok).toBe(false);
+      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
+      // Must NOT have attempted git push.
+      const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
+      expect(jjLog).not.toContain("git push");
     } finally {
       api.server.stop();
     }
@@ -851,10 +873,10 @@ describe("Blackbelt-PR utility script", () => {
     }
   });
 
-  test("does not silently fall back when explicit revision has no description — uses bookmark name instead", async () => {
-    // When a valid revision is provided but its description is empty, the title
-    // should fall back to the bookmark name (which is correct — not a silent
-    // fallback from invalid revision, just an empty description).
+  test("fails loudly when explicit revision has no description — unnamedRevision caught by preflight", async () => {
+    // When a valid revision is provided but its description is empty and the
+    // revision has changes, the preflight now catches it as an unnamedRevision
+    // before reaching title inference — the commit is unpushable.
     const api = startFakeGitHubApi();
     try {
       const result = await runPrUtility(
@@ -870,10 +892,15 @@ describe("Blackbelt-PR utility script", () => {
         api.baseUrl,
       );
 
-      expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      // Falls back to bookmark name when description is empty.
-      expect(result.json.state.blackbeltPr.title).toBe("blackbelt/test-bookmark");
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltPr.ok).toBe(false);
+      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltPr.revision).toBe("abc123def456");
+
+      // Must NOT have attempted git push.
+      const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
+      expect(jjLog).not.toContain("git push");
     } finally {
       api.server.stop();
     }
@@ -918,9 +945,11 @@ describe("Blackbelt-PR utility script", () => {
   // Pre-push revision check — empty tip handling
   // -----------------------------------------------------------------------
 
-  test("empty tip with pushable parent: adjusts bookmark to non-empty ancestor and pushes", async () => {
+  test("empty tip with pushable parent: adjusts bookmark to non-empty named ancestor and pushes", async () => {
     const api = startFakeGitHubApi();
     try {
+      // Tip is empty+descriptionless; parent is non-empty WITH a description
+      // so the ancestor is pushable and the bookmark moves to it.
       const result = await runPrUtility(
         {
           params: {
@@ -934,6 +963,7 @@ describe("Blackbelt-PR utility script", () => {
           GITHUB_TOKEN: "test-token",
           PR_TIP_EMPTY: "1",
           PR_EMPTY_DESCRIPTION: "1",
+          PR_PARENT_DESCRIPTION: "feat: parent has a description",
         },
         api.baseUrl,
       );
@@ -954,6 +984,49 @@ describe("Blackbelt-PR utility script", () => {
       const setIdx = jjLog.indexOf("bookmark set blackbelt/test-bookmark --revision parent-commit-id");
       const pushIdx = jjLog.indexOf("git push --bookmark blackbelt/test-bookmark");
       expect(setIdx).toBeLessThan(pushIdx);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("empty tip with non-empty unnamed parent: fails with unnamedRevision (not moved to unnamed ancestor)", async () => {
+    const api = startFakeGitHubApi();
+    try {
+      // Tip is empty+descriptionless; parent is non-empty but ALSO unnamed.
+      // The preflight must NOT move the bookmark to the unnamed ancestor
+      // and must not attempt jj git push — it must report unnamedRevision.
+      const result = await runPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            repo: "test-owner/test-repo",
+          },
+          state: {},
+        },
+        {
+          GITHUB_TOKEN: "test-token",
+          PR_TIP_EMPTY: "1",
+          PR_EMPTY_DESCRIPTION: "1",
+          // No PR_PARENT_DESCRIPTION → parent is also unnamed.
+        },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltPr.ok).toBe(false);
+      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
+      // The error must identify the unnamed ancestor, not the tip.
+      expect(result.json.state.blackbeltPr.revision).toBe("parent-commit-id");
+      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      // Should include remediation guidance.
+      expect(result.json.state.blackbeltPr.error).toMatch(/jj describe|describe.*-m/);
+
+      // Must NOT have attempted git push.
+      const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
+      expect(jjLog).not.toContain("git push");
+      // Must NOT have set the bookmark to the parent.
+      expect(jjLog).not.toContain("bookmark set blackbelt/test-bookmark --revision parent-commit-id");
     } finally {
       api.server.stop();
     }
@@ -1029,8 +1102,8 @@ describe("Blackbelt-PR utility script", () => {
   test("explicit params.revision that is empty: adjusts bookmark to parent and pushes", async () => {
     const api = startFakeGitHubApi();
     try {
-      // params.revision is provided and is empty+nodesc — preflight should
-      // walk to the parent and adjust the bookmark.
+      // params.revision is provided and is empty+nodesc; parent is non-empty
+      // WITH a description so the bookmark moves to it.
       const result = await runPrUtility(
         {
           params: {
@@ -1045,6 +1118,7 @@ describe("Blackbelt-PR utility script", () => {
           GITHUB_TOKEN: "test-token",
           PR_TIP_EMPTY: "1",
           PR_EMPTY_DESCRIPTION: "1",
+          PR_PARENT_DESCRIPTION: "feat: parent has a description",
         },
         api.baseUrl,
       );
@@ -1069,7 +1143,7 @@ describe("Blackbelt-PR utility script", () => {
   test("non-empty tip is unaffected by preflight — pushes normally", async () => {
     const api = startFakeGitHubApi();
     try {
-      // Tip has changes (non-empty diff) — preflight should pass through.
+      // Tip has changes (non-empty diff) and description — preflight should pass through.
       const result = await runPrUtility(
         {
           params: {
@@ -1092,6 +1166,87 @@ describe("Blackbelt-PR utility script", () => {
       const jjLog = await readFile(result.fake!.log, "utf8");
       expect(jjLog).not.toContain("bookmark set");
       expect(jjLog).toContain("git push --bookmark blackbelt/test-bookmark");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Pre-push revision check — unnamed (non-empty + descriptionless) detection
+  // -----------------------------------------------------------------------
+
+  test("non-empty unnamed commit fails before push with remediation guidance", async () => {
+    const api = startFakeGitHubApi();
+    try {
+      // Tip has changes (non-empty diff) but no description — jj git push
+      // would reject this. Preflight should fail before push is attempted.
+      const result = await runPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            repo: "test-owner/test-repo",
+          },
+          state: {},
+        },
+        {
+          GITHUB_TOKEN: "test-token",
+          PR_EMPTY_DESCRIPTION: "1",
+        },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltPr.ok).toBe(false);
+      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltPr.revision).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      // Should include remediation guidance (jj describe command).
+      expect(result.json.state.blackbeltPr.error).toMatch(/jj describe|describe.*-m/);
+
+      // Must NOT have attempted git push.
+      const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
+      expect(jjLog).not.toContain("git push");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("non-empty unnamed explicit revision fails before push with diagnostics", async () => {
+    const api = startFakeGitHubApi();
+    try {
+      // params.revision points to a commit with changes but no description.
+      // Preflight should detect and fail before push.
+      const result = await runPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            revision: "abc123def456",
+            repo: "test-owner/test-repo",
+          },
+          state: {},
+        },
+        {
+          GITHUB_TOKEN: "test-token",
+          PR_EMPTY_DESCRIPTION: "1",
+        },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltPr.ok).toBe(false);
+      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltPr.revision).toBe("abc123def456");
+      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      // Should include remediation guidance.
+      expect(result.json.state.blackbeltPr.error).toMatch(/jj describe|describe.*-m/);
+      // The error should identify the specific revision.
+      expect(result.json.state.blackbeltPr.error).toContain("abc123def456");
+
+      // Must NOT have attempted git push.
+      const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
+      expect(jjLog).not.toContain("git push");
     } finally {
       api.server.stop();
     }
