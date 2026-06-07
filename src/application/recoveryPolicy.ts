@@ -124,6 +124,39 @@ export function extendSameSocketRecoveryAllowanceForRevive(state: MateriaCastSta
   return { key: exhaustion.key, priorEffectiveMaxAttempts, increment, newEffectiveMaxAttempts: allowance.effectiveMaxAttempts, reviveCount: allowance.reviveCount };
 }
 
+export interface MateriaEdgeReviveAllowanceResult {
+  key: string;
+  priorEffectiveLimit: number;
+  increment: number;
+  newEffectiveLimit: number;
+  reviveCount: number;
+}
+
+export function extendEdgeTraversalAllowanceForRevive(state: MateriaCastState): MateriaEdgeReviveAllowanceResult {
+  if (state.active) throw new Error(`pi-materia cast ${state.castId} is still active and cannot be revived.`);
+  if (state.phase !== "failed" && currentSocketState(state) !== "failed") throw new Error(`pi-materia cast ${state.castId} is not failed and cannot be revived.`);
+  const exhaustion = state.recoveryExhaustion;
+  if (!exhaustion || exhaustion.kind !== "edge_traversal_exhausted") {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured edge traversal exhaustion metadata. Use /materia recast for general failed casts.`);
+  }
+  if (!exhaustion.key) throw new Error(`pi-materia cast ${state.castId} is not revivable: exhausted edge context is missing.`);
+  if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: edge traversal exhaustion metadata does not match the current terminal failure. Use /materia recast for general failed casts.`);
+  }
+  const allowance = state.edgeAllowances?.[exhaustion.key];
+  if (!allowance || !Number.isSafeInteger(allowance.originalLimit) || allowance.originalLimit <= 0 || !Number.isSafeInteger(allowance.effectiveLimit) || allowance.effectiveLimit < allowance.originalLimit || !Number.isSafeInteger(allowance.reviveCount) || allowance.reviveCount < 0) {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: edge allowance metadata is missing or invalid. Use /materia recast instead.`);
+  }
+  const priorEffectiveLimit = allowance.effectiveLimit;
+  const increment = allowance.originalLimit;
+  allowance.effectiveLimit = priorEffectiveLimit + increment;
+  allowance.reviveCount += 1;
+  exhaustion.effectiveLimit = allowance.effectiveLimit;
+  exhaustion.reviveCount = allowance.reviveCount;
+  state.updatedAt = Date.now();
+  return { key: exhaustion.key, priorEffectiveLimit, increment, newEffectiveLimit: allowance.effectiveLimit, reviveCount: allowance.reviveCount };
+}
+
 export function recoveryDiagnosticLabel(state: MateriaCastState): string {
   const item = state.currentItemKey ? ` item ${JSON.stringify(state.currentItemKey)}` : "";
   return `${recoveryTurnMode(state)} turn for socket "${currentSocketId(state) ?? state.phase}"${item}`;

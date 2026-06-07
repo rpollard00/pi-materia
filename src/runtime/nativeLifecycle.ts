@@ -10,11 +10,11 @@ import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMulti
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
-export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
+export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
 import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
 import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, MateriaEdgeTraversalExhaustionError, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
-import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
+import { classifyTurnFailure, errorMessage, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
 import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
 import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
@@ -232,16 +232,43 @@ export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   const state = loadCastStateById(ctx, castId);
   if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
   assertNoActiveNativeCast(ctx, state, "reviving");
+
+  const exhaustion = state.recoveryExhaustion;
+  if (!exhaustion) {
+    throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured exhaustion metadata. Use /materia recast instead.`);
+  }
+
+  if (exhaustion.kind === "edge_traversal_exhausted") {
+    const result = extendEdgeTraversalAllowanceForRevive(state);
+    await appendEvent(state.runState, "cast_revive", {
+      castId: state.castId,
+      exhaustedRecoveryKey: result.key,
+      traversalContext: {
+        from: exhaustion.from,
+        to: exhaustion.to,
+        key: result.key,
+        count: exhaustion.count,
+        itemKey: state.currentItemKey,
+      },
+      priorEffectiveLimit: result.priorEffectiveLimit,
+      increment: result.increment,
+      newEffectiveLimit: result.newEffectiveLimit,
+      reviveCount: result.reviveCount,
+    });
+    saveCastState(pi, state);
+    return resumeValidatedNativeCast(pi, ctx, state);
+  }
+
+  // same_socket_recovery_exhausted
   const result = extendSameSocketRecoveryAllowanceForRevive(state);
-  // extendSameSocketRecoveryAllowanceForRevive validates kind === "same_socket_recovery_exhausted"
-  const exhaustion = state.recoveryExhaustion as { kind: "same_socket_recovery_exhausted"; socket?: string; mode?: string } | undefined;
+  const sameSocketExhaustion = exhaustion as { kind: "same_socket_recovery_exhausted"; socket?: string; mode?: string };
   await appendEvent(state.runState, "cast_revive", {
     castId: state.castId,
     exhaustedRecoveryKey: result.key,
     recoveryContext: {
       key: result.key,
-      socket: exhaustion?.socket ?? currentSocketId(state),
-      mode: exhaustion?.mode,
+      socket: sameSocketExhaustion.socket ?? currentSocketId(state),
+      mode: sameSocketExhaustion.mode,
       itemKey: state.currentItemKey,
     },
     priorEffectiveMaxAttempts: result.priorEffectiveMaxAttempts,

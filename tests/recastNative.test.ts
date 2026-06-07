@@ -353,7 +353,7 @@ describe("/materia recast", () => {
 
     await harness.runCommand("materia", "revive");
     expect(harness.notifications).toContainEqual({
-      message: "No failed pi-materia casts exhausted by same-socket recovery are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.",
+      message: "No failed pi-materia casts exhausted by same-socket recovery or edge traversal are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.",
       type: "info",
     });
 
