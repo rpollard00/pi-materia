@@ -12,7 +12,7 @@ export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../appli
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 export { classifyTurnFailure, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
 import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
-import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
+import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, MateriaEdgeTraversalExhaustionError, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
 import { classifyTurnFailure, errorMessage, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
 import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
@@ -233,13 +233,15 @@ export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
   if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
   assertNoActiveNativeCast(ctx, state, "reviving");
   const result = extendSameSocketRecoveryAllowanceForRevive(state);
+  // extendSameSocketRecoveryAllowanceForRevive validates kind === "same_socket_recovery_exhausted"
+  const exhaustion = state.recoveryExhaustion as { kind: "same_socket_recovery_exhausted"; socket?: string; mode?: string } | undefined;
   await appendEvent(state.runState, "cast_revive", {
     castId: state.castId,
     exhaustedRecoveryKey: result.key,
     recoveryContext: {
       key: result.key,
-      socket: state.recoveryExhaustion?.socket ?? currentSocketId(state),
-      mode: state.recoveryExhaustion?.mode,
+      socket: exhaustion?.socket ?? currentSocketId(state),
+      mode: exhaustion?.mode,
       itemKey: state.currentItemKey,
     },
     priorEffectiveMaxAttempts: result.priorEffectiveMaxAttempts,
@@ -487,7 +489,40 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   if (!nextTarget) {
     const nextEdge = selectNextEdge(state, socket, parsed);
     if (nextEdge) {
-      enforceEdgeLimit(state, socket.id, nextEdge, config);
+      try {
+        enforceEdgeLimit(state, socket.id, nextEdge, config);
+      } catch (error) {
+        if (error instanceof MateriaEdgeTraversalExhaustionError) {
+          const allowance = state.edgeAllowances?.[error.key];
+          state.recoveryExhaustion = {
+            kind: "edge_traversal_exhausted",
+            from: error.from,
+            to: error.to,
+            key: error.key,
+            count: error.count,
+            originalLimit: error.originalLimit,
+            effectiveLimit: error.effectiveLimit,
+            reviveCount: allowance?.reviveCount ?? 0,
+            failedReason: error.message,
+            exhaustedAt: Date.now(),
+          };
+          await appendEvent(state.runState, "edge_traversal_exhausted", {
+            from: error.from,
+            to: error.to,
+            key: error.key,
+            count: error.count,
+            originalLimit: error.originalLimit,
+            effectiveLimit: error.effectiveLimit,
+            reviveCount: allowance?.reviveCount ?? 0,
+            socket: socket.id,
+            materia: socketMateriaName(socket),
+            itemKey: state.currentItemKey,
+          });
+          await failCast(pi, ctx, state, error, entryId, { preserveRecoveryExhaustion: true });
+          return;
+        }
+        throw error;
+      }
       nextTarget = nextEdge.to;
       captureReworkFeedbackForRoute(state, { sourceSocket: socket, targetSocketId: nextEdge.to, edge: nextEdge, parsed, rawOutput: text });
     } else {

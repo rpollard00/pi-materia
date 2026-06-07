@@ -94,13 +94,33 @@ function isResumableCastState(state: MateriaCastState): boolean {
 function isRevivableCastState(state: MateriaCastState): boolean {
   if (!isResumableCastState(state)) return false;
   const exhaustion = state.recoveryExhaustion;
-  if (!exhaustion || exhaustion.kind !== "same_socket_recovery_exhausted" || !exhaustion.key) return false;
+  if (!exhaustion) return false;
+  if (exhaustion.kind === "same_socket_recovery_exhausted") return isValidSameSocketRevivableState(state, exhaustion);
+  if (exhaustion.kind === "edge_traversal_exhausted") return isValidEdgeTraversalRevivableState(state, exhaustion);
+  return false;
+}
+
+function isValidSameSocketRevivableState(state: MateriaCastState, exhaustion: MateriaCastState["recoveryExhaustion"] & { kind: "same_socket_recovery_exhausted" }): boolean {
+  if (!exhaustion.key) return false;
   if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
   const allowance = state.recoveryAllowances?.[exhaustion.key];
   return Boolean(
     allowance &&
     Number.isSafeInteger(allowance.originalMaxAttempts) && allowance.originalMaxAttempts > 0 &&
     Number.isSafeInteger(allowance.effectiveMaxAttempts) && allowance.effectiveMaxAttempts >= allowance.originalMaxAttempts &&
+    Number.isSafeInteger(allowance.reviveCount) && allowance.reviveCount >= 0
+  );
+}
+
+function isValidEdgeTraversalRevivableState(state: MateriaCastState, exhaustion: MateriaCastState["recoveryExhaustion"] & { kind: "edge_traversal_exhausted" }): boolean {
+  if (!exhaustion.key) return false;
+  if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
+  if (!exhaustion.from || !exhaustion.to) return false;
+  const allowance = state.edgeAllowances?.[exhaustion.key];
+  return Boolean(
+    allowance &&
+    Number.isSafeInteger(allowance.originalLimit) && allowance.originalLimit > 0 &&
+    Number.isSafeInteger(allowance.effectiveLimit) && allowance.effectiveLimit >= allowance.originalLimit &&
     Number.isSafeInteger(allowance.reviveCount) && allowance.reviveCount >= 0
   );
 }

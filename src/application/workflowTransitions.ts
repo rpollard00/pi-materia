@@ -9,6 +9,26 @@ import type { MateriaCastState, MateriaEdgeCondition, MateriaEdgeConfig, PiMater
 
 export const DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS = 25;
 
+export class MateriaEdgeTraversalExhaustionError extends Error {
+  public readonly from: string;
+  public readonly to: string;
+  public readonly key: string;
+  public readonly count: number;
+  public readonly originalLimit: number;
+  public readonly effectiveLimit: number;
+
+  constructor(from: string, to: string, key: string, count: number, originalLimit: number, effectiveLimit: number) {
+    super(`Materia edge traversal limit exceeded for ${key} (${count}/${effectiveLimit}).`);
+    this.name = "MateriaEdgeTraversalExhaustionError";
+    this.from = from;
+    this.to = to;
+    this.key = key;
+    this.count = count;
+    this.originalLimit = originalLimit;
+    this.effectiveLimit = effectiveLimit;
+  }
+}
+
 export function applyAssignments(state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): void {
   for (const [target, source] of Object.entries(effectiveResolvedSocketConfig(socket).assign ?? {})) {
     setPath(state.data, target, resolveValue(source, state, parsed));
@@ -55,11 +75,21 @@ export function selectNextTarget(state: MateriaCastState, socket: ResolvedMateri
 }
 
 export function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEdgeConfig, config: PiMateriaConfig): void {
-  const key = `${from}->${edge.to}`;
+  const to = edge.to;
+  const key = `${from}->${to}`;
   const count = (state.edgeTraversals[key] ?? 0) + 1;
   state.edgeTraversals[key] = count;
-  const limit = edge.maxTraversals ?? config.limits?.maxEdgeTraversals ?? DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS;
-  if (count > limit) throw new Error(`Materia edge traversal limit exceeded for ${key} (${count}/${limit}).`);
+  const originalLimit = edge.maxTraversals ?? config.limits?.maxEdgeTraversals ?? DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS;
+  const effectiveLimit = resolveEdgeEffectiveLimit(state, key, originalLimit);
+  if (count > effectiveLimit) throw new MateriaEdgeTraversalExhaustionError(from, to, key, count, originalLimit, effectiveLimit);
+}
+
+function resolveEdgeEffectiveLimit(state: MateriaCastState, key: string, originalLimit: number): number {
+  state.edgeAllowances ??= {};
+  const existing = state.edgeAllowances[key];
+  if (existing && existing.originalLimit === originalLimit) return existing.effectiveLimit;
+  state.edgeAllowances[key] = { originalLimit, effectiveLimit: originalLimit, reviveCount: 0 };
+  return originalLimit;
 }
 
 export function setCurrentItem(state: MateriaCastState, socket: ResolvedMateriaSocket): boolean {
