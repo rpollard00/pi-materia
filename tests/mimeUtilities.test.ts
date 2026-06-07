@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -394,20 +394,21 @@ describe("Mime-Bootstrap utility script", () => {
   });
 
   test("fails with clear error when git is not on PATH", async () => {
-    const sanitizedPath = ["/usr/bin", "/bin", "/usr/local/bin"].join(path.delimiter);
-    const fake = await makeFakeGitForBootstrap();
+    const emptyDir = await mkdtemp(path.join(tmpdir(), "pi-materia-no-git-bootstrap-"));
+    try {
+      const result = await runUtility(
+        bootstrapScript,
+        { cwd: "/tmp" },
+        { PATH: emptyDir },
+      );
 
-    // Use a PATH without git
-    const result = await runUtility(
-      bootstrapScript,
-      { cwd: "/tmp" },
-      { PATH: sanitizedPath },
-    );
-
-    expect(result.exitCode).toBe(1);
-    expect(result.json.state.mimeBootstrap.ok).toBe(false);
-    expect(result.json.state.mimeBootstrap.error).toContain("git is required");
-    expect(result.json.state.mimeBootstrap.available?.git).toBe(false);
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeBootstrap.ok).toBe(false);
+      expect(result.json.state.mimeBootstrap.error).toContain("git is required");
+      expect(result.json.state.mimeBootstrap.available?.git).toBe(false);
+    } finally {
+      await rm(emptyDir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   test("fails with clear error outside a git repo", async () => {
@@ -513,17 +514,21 @@ describe("Mime-Maintain utility script", () => {
   });
 
   test("fails with clear error when git is not available", async () => {
-    const sanitizedPath = ["/usr/bin", "/bin", "/usr/local/bin"].join(path.delimiter);
-    const result = await runUtility(
-      maintainScript,
-      { cwd: "/tmp", item: { title: "fix: test" } },
-      { PATH: sanitizedPath },
-    );
+    const emptyDir = await mkdtemp(path.join(tmpdir(), "pi-materia-no-git-maintain-"));
+    try {
+      const result = await runUtility(
+        maintainScript,
+        { cwd: "/tmp", item: { title: "fix: test" } },
+        { PATH: emptyDir },
+      );
 
-    expect(result.exitCode).toBe(1);
-    expect(result.json.state.mimeMaintain.ok).toBe(false);
-    expect(result.json.state.mimeMaintain.error).toContain("git is required");
-    expect(result.json.state.mimeMaintain.available?.git).toBe(false);
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeMaintain.ok).toBe(false);
+      expect(result.json.state.mimeMaintain.error).toContain("git is required");
+      expect(result.json.state.mimeMaintain.available?.git).toBe(false);
+    } finally {
+      await rm(emptyDir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   test("fails with clear error outside a git repo", async () => {
