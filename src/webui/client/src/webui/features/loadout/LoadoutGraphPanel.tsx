@@ -357,8 +357,12 @@ function GraphCanvas(props: GraphCanvasProps) {
     event.preventDefault();
   };
 
+  const zoomIn = () => setZoom((prev) => clampZoom(prev + ZOOM_STEP));
+  const zoomOut = () => setZoom((prev) => clampZoom(prev - ZOOM_STEP));
+
   return (
-    <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onWheel={handleWheel} onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? handleGraphDrop : undefined} aria-readonly={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined}>
+    <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" aria-readonly={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined}>
+      <div className="loadout-graph-scroll-area" data-testid="socket-grid-scroll-area" onWheel={handleWheel} onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? handleGraphDrop : undefined}>
       <div
         className="loadout-graph-canvas-zoom-wrapper"
         style={{ width: `${canvasWidth * zoom}px`, height: `${canvasHeight * zoom}px` }}
@@ -414,6 +418,11 @@ function GraphCanvas(props: GraphCanvasProps) {
             />
           ))}
         </div>
+      </div>
+      </div>
+      <div className="loadout-graph-zoom-controls">
+        <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom in" onClick={zoomIn} data-testid="zoom-in">+</button>
+        <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom out" onClick={zoomOut} data-testid="zoom-out">−</button>
       </div>
     </div>
   );
