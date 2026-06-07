@@ -350,6 +350,8 @@
 }
 
 .loadout-graph-zoom-percent {
+  position: absolute;
+  right: calc(100% + 0.25rem);
   display: flex;
   align-items: center;
   justify-content: center;

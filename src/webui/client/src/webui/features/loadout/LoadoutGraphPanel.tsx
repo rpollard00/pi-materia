@@ -436,9 +436,9 @@ function GraphCanvas(props: GraphCanvasProps) {
       </div>
       </div>
       <div className="loadout-graph-zoom-controls">
-        <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom in" onClick={zoomIn} data-testid="zoom-in">+</button>
-        <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom out" onClick={zoomOut} data-testid="zoom-out">−</button>
         <span className={`loadout-graph-zoom-percent${showZoomPercent ? '' : ' loadout-graph-zoom-percent--hidden'}`} data-testid="zoom-percent">{Math.round(zoom * 100)}%</span>
+        <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom out" onClick={zoomOut} data-testid="zoom-out">−</button>
+        <button type="button" className="loadout-graph-zoom-button" aria-label="Zoom in" onClick={zoomIn} data-testid="zoom-in">+</button>
       </div>
     </div>
   );
