@@ -761,6 +761,19 @@
         "runtime": "node"
       }
     },
+    "Mime-Bootstrap": {
+      "type": "utility",
+      "label": "Mime-Bootstrap",
+      "description": "Deterministically bootstrap git version control branch setup for the current project and create a stable mime/ branch for git-based workflows.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "mime-bootstrap.mjs",
+        "runtime": "node"
+      }
+    },
     "Commit-Sigil": {
       "type": "utility",
       "label": "Commit-Sigil",
