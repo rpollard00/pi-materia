@@ -761,6 +761,45 @@
         "runtime": "node"
       }
     },
+    "Mime-Bootstrap": {
+      "type": "utility",
+      "label": "Mime-Bootstrap",
+      "description": "Deterministically bootstrap git version control branch setup for the current project and create a stable mime/ branch for git-based workflows.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "mime-bootstrap.mjs",
+        "runtime": "node"
+      }
+    },
+    "Mime-Maintain": {
+      "type": "utility",
+      "label": "Mime-Maintain",
+      "description": "Autonomously stage and commit changes using only git (no jj dependency). Reads state.mimeBootstrap.branchName and commits with the work item title as the commit message.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "mime-maintain.mjs",
+        "runtime": "node"
+      }
+    },
+    "Mime-PR": {
+      "type": "utility",
+      "label": "Mime-PR",
+      "description": "Deterministic git-only GitHub pull request utility. Pushes the active git branch and creates a PR via the GitHub API. Auth via configurable env var (default GITHUB_TOKEN).",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "mime-pr.mjs",
+        "runtime": "node"
+      }
+    },
     "Commit-Sigil": {
       "type": "utility",
       "label": "Commit-Sigil",

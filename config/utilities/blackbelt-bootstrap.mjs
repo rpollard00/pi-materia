@@ -72,27 +72,29 @@ try {
     }
   }
 
+  // Generate bookmark name early so we can use it in the description for
+  // dirty revisions (preventing unnamed commits from being stranded when
+  // jj new advances @ away from undescribed work).
+  const bookmarkName = generateBookmarkName(input, cwd);
+
   const hadEmptyHead = await isCurrentCommitEmpty(cwd);
   let newWorkingCommit = false;
   if (!hadEmptyHead) {
+    // Describe the dirty working revision BEFORE creating a new empty commit.
+    // This prevents an unnamed, undescribed commit from being left behind
+    // when jj new advances @.  The description is deterministic (derived from
+    // the bookmark name) so repeated bootstrap calls on the same cast produce
+    // the same description.
+    await execFileText("jj", ["describe", "-m", `bootstrap: ${bookmarkName}`], cwd);
+    // Place the bookmark on the now-described revision so the bookmark always
+    // tracks a pushable, described commit — never an empty or unnamed one.
+    await setBookmark(bookmarkName, cwd);
+    // Now create a new empty working commit on top.
     await execFileText("jj", ["new"], cwd);
     newWorkingCommit = true;
-  }
-
-  const bookmarkName = generateBookmarkName(input, cwd);
-  // Idempotently set the bookmark: try bookmark set (jj >= 0.20), fall back to bookmark create
-  try {
-    await execFileText("jj", ["bookmark", "set", bookmarkName, "--revision", "@"], cwd);
-  } catch (setErr) {
-    console.error(`[blackbelt-bootstrap] bookmark set failed, trying bookmark create: ${formatError(setErr)}`);
-    // Older jj: bookmark create then move if needed
-    try {
-      await execFileText("jj", ["bookmark", "create", bookmarkName, "--revision", "@"], cwd);
-    } catch (createErr) {
-      console.error(`[blackbelt-bootstrap] bookmark create failed, trying bookmark move: ${formatError(createErr)}`);
-      // Already exists on older jj, try bookmark move
-      await execFileText("jj", ["bookmark", "move", bookmarkName, "--to", "@"], cwd);
-    }
+  } else {
+    // Clean working copy — no describe/new needed. Just place the bookmark on @.
+    await setBookmark(bookmarkName, cwd);
   }
 
   writeStdoutJson({
@@ -165,6 +167,25 @@ async function jjRoot(cwd) {
 async function isCurrentCommitEmpty(cwd) {
   const diffSummary = await execFileText("jj", ["diff", "--summary"], cwd);
   return diffSummary.trim().length === 0;
+}
+
+/**
+ * Idempotently set/create/move a bookmark to point at @.
+ * Tries `jj bookmark set` (jj >= 0.20), falls back to `jj bookmark create`
+ * for older jj where the bookmark may not exist yet, then `jj bookmark move`.
+ */
+async function setBookmark(bookmarkName, cwd) {
+  try {
+    await execFileText("jj", ["bookmark", "set", bookmarkName, "--revision", "@"], cwd);
+  } catch (setErr) {
+    console.error(`[blackbelt-bootstrap] bookmark set failed, trying bookmark create: ${formatError(setErr)}`);
+    try {
+      await execFileText("jj", ["bookmark", "create", bookmarkName, "--revision", "@"], cwd);
+    } catch (createErr) {
+      console.error(`[blackbelt-bootstrap] bookmark create failed, trying bookmark move: ${formatError(createErr)}`);
+      await execFileText("jj", ["bookmark", "move", bookmarkName, "--to", "@"], cwd);
+    }
+  }
 }
 
 function execFileText(command, args, cwd) {

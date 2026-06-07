@@ -7,6 +7,7 @@ import { clearMateriaFromSocket, setSocketLayouts, setSocketMateria, swapSocketM
 import { socketCardWidth, socketLayoutOffsetX, socketLayoutOffsetY, socketLayoutUnitX, socketLayoutUnitY, socketStageHeight } from '../../constants.js';
 import type { DragPayload, MonitorSnapshot, PositionedSocket, SocketLayoutDragState, SocketRegionSelectionDragState } from '../../types.js';
 import type { LoadoutStatusToastIntent, SetLoadoutStatus } from '../../utils/loadoutNotifications.js';
+import { scaleCanvasPoint } from '../../utils/canvasPoint.js';
 import { layoutValueForPosition, rectanglesIntersect } from '../../utils/graphLayout.js';
 import { parseDragPayload } from '../../utils/forms.js';
 import { useLoadoutGraphViewModel } from './useLoadoutGraphViewModel.js';
@@ -236,8 +237,18 @@ export function useLoadoutSocketInteractionController({
   }
 
   function canvasPoint(event: ReactPointerEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const el = event.currentTarget;
+    const rect = el.getBoundingClientRect();
+    return scaleCanvasPoint({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      offsetWidth: el.offsetWidth,
+      offsetHeight: el.offsetHeight,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+    });
   }
 
   function beginSocketRegionSelection(event: ReactPointerEvent<HTMLDivElement>) {

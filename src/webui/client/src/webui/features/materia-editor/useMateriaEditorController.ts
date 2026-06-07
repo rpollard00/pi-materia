@@ -180,25 +180,7 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
     return () => { cancelled = true; };
   }, [selectedTab]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const handleMateriaSaved = (event: Event) => {
-      const detail = (event as CustomEvent<MateriaSavedEventDetail>).detail;
-      const name = detail?.name ?? detail?.id ?? 'materia';
-      const behavior = detail?.behavior ?? 'prompt';
-      const scope = detail?.scope ?? 'configured';
-      void reloadConfig({
-        preserveLoadoutEdits: true,
-        readyStatus: `Saved reusable ${behavior} materia ${name} to ${scope} scope. Loadout draft edits were left unchanged.`,
-        cancelled: () => cancelled,
-      });
-    };
-    window.addEventListener(materiaSavedEventName, handleMateriaSaved);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(materiaSavedEventName, handleMateriaSaved);
-    };
-  }, [reloadConfig]);
+
 
   const editableDefinitionIds = useMemo(() => Object.keys(materia ?? {}).sort((a, b) => a.localeCompare(b)), [materia]);
   const selectorItems = useMemo(() => buildMateriaSelectorItems(materia, materiaSources, defaultMateriaIds), [materia, materiaSources, defaultMateriaIds]);
@@ -259,6 +241,26 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
     else resetMateriaEditorForm();
     setPendingReloadSelection(null);
   }, [materia, materiaSources, defaultMateriaIds, pendingReloadSelection]);
+
+  // Keep originalMateriaModelSettings in sync with the latest materia definitions
+  // after any reload (save, lock, delete, external config refresh). Only update when
+  // the form values haven't diverged from the definition (no unsaved edits).
+  useEffect(() => {
+    const editingId = materiaForm.editingSocketId;
+    if (!editingId) return;
+    const definition = materia?.[editingId];
+    if (!definition) return;
+    const isUtility = definition.type === 'utility';
+    const latestModel = isUtility ? '' : String(definition.model ?? '').trim();
+    const latestThinking = isUtility ? '' : String(definition.thinking ?? '').trim();
+    // Only refresh if the form still matches the definition (no unsaved edits to model/thinking)
+    if (materiaForm.model !== latestModel || materiaForm.thinking !== latestThinking) return;
+    setOriginalMateriaModelSettings((prev) => {
+      if (!prev || prev.editingSocketId !== editingId) return { editingSocketId: editingId, model: latestModel, thinking: latestThinking };
+      if (prev.model === latestModel && prev.thinking === latestThinking) return prev;
+      return { editingSocketId: editingId, model: latestModel, thinking: latestThinking };
+    });
+  }, [materia, materiaForm.editingSocketId, materiaForm.model, materiaForm.thinking]);
 
   function resetMateriaEditorForm() {
     setMateriaForm(emptyMateriaForm());
@@ -511,6 +513,10 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
       const { response, body } = await saveConfig(target, patch);
       if (!response.ok || body.ok === false) throw new Error(responseError(body, 'Materia save failed'));
       const scope = body.target ?? target;
+      await reloadConfig({
+        preserveLoadoutEdits: true,
+        readyStatus: `Saved reusable ${savedBehavior} materia ${savedName} to ${scope} scope. Loadout draft edits were left unchanged.`,
+      });
       dispatchMateriaSavedEvent({ id: savedName, name: savedName, behavior: savedBehavior, requestedScope: target, scope });
       resetMateriaEditorForm();
     } catch (error) {
