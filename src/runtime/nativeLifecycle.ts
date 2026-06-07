@@ -255,8 +255,25 @@ export async function reviveNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, 
       newEffectiveLimit: result.newEffectiveLimit,
       reviveCount: result.reviveCount,
     });
+
+    // Clear failure markers and advance directly to the blocked target socket
+    // instead of resending the completed source socket prompt.
+    state.recoveryExhaustion = undefined;
+    state.active = true;
+    state.failedReason = undefined;
+    state.runState.endedAt = undefined;
+    const persistedLoadoutIdentity = await resolvePersistedCastLoadoutIdentity(state);
+    state.runState.loadoutId ||= persistedLoadoutIdentity?.loadoutId;
+    state.runState.loadoutName ||= persistedLoadoutIdentity?.loadoutName;
+    state.runState.lastMessage = `Reviving cast ${state.castId} to blocked target ${exhaustion.to}.`;
+    await writeUsage(state.runState);
     saveCastState(pi, state);
-    return resumeValidatedNativeCast(pi, ctx, state);
+
+    const targetSocket = getResolvedPipelineSocket(state.pipeline, exhaustion.to);
+    if (!targetSocket) throw new Error(`Revive target socket "${exhaustion.to}" is not in the pipeline.`);
+    await startSocket(pi, ctx, state, targetSocket);
+    ctx.ui.notify(`pi-materia cast ${state.castId} revived to blocked target socket "${exhaustion.to}".`, "info");
+    return state;
   }
 
   // same_socket_recovery_exhausted
