@@ -351,8 +351,14 @@ function GraphCanvas(props: GraphCanvasProps) {
   const canvasWidth = loadoutGraph.width;
   const canvasHeight = loadoutGraph.height;
 
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const direction = event.deltaY > 0 ? -1 : 1;
+    setZoom((prev) => clampZoom(prev + direction * ZOOM_STEP));
+    event.preventDefault();
+  };
+
   return (
-    <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? handleGraphDrop : undefined} aria-readonly={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined}>
+    <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onWheel={handleWheel} onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? handleGraphDrop : undefined} aria-readonly={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined}>
       <div
         className="loadout-graph-canvas-zoom-wrapper"
         style={{ width: `${canvasWidth * zoom}px`, height: `${canvasHeight * zoom}px` }}
