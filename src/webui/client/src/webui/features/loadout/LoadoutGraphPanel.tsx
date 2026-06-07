@@ -328,6 +328,15 @@ interface GraphCanvasProps {
   openLoopControls: (loopId: string) => void;
 }
 
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 3.0;
+const ZOOM_STEP = 0.1;
+const ZOOM_DEFAULT = 1.0;
+
+function clampZoom(value: number): number {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value / ZOOM_STEP) * ZOOM_STEP));
+}
+
 function GraphCanvas(props: GraphCanvasProps) {
   const {
     activeLoadout, activeLoadoutName, currentMonitorSocket, loadoutGraph, loopExitBadges, loopMemberships,
@@ -338,53 +347,67 @@ function GraphCanvas(props: GraphCanvasProps) {
     toggleLoopExitCondition, openLoopControls,
   } = props;
 
+  const [zoom, setZoom] = useState<number>(ZOOM_DEFAULT);
+  const canvasWidth = loadoutGraph.width;
+  const canvasHeight = loadoutGraph.height;
+
   return (
     <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? handleGraphDrop : undefined} aria-readonly={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined}>
       <div
-        className="loadout-graph-canvas"
-        data-testid="socket-grid"
-        style={{ width: `${loadoutGraph.width}px`, height: `${loadoutGraph.height}px` }}
-        onPointerDown={beginSocketRegionSelection}
-        onPointerMove={moveSocketRegionSelection}
-        onPointerUp={finishSocketRegionSelection}
-        onPointerCancel={cancelSocketRegionSelection}
+        className="loadout-graph-canvas-zoom-wrapper"
+        style={{ width: `${canvasWidth * zoom}px`, height: `${canvasHeight * zoom}px` }}
       >
-        <EdgeLayer
-          activeLoadout={activeLoadout}
-          height={loadoutGraph.height}
-          loopRegions={loopRegions}
-          materia={materia}
-          routedEdges={routedEdges}
-          toggleEdgeCondition={toggleEdgeCondition}
-          toggleLoopExitCondition={toggleLoopExitCondition}
-          openLoopControls={openLoopControls}
-          editPolicy={editPolicy}
-          width={loadoutGraph.width}
-        />
-        <LoopRegionsLayer loopRegions={loopRegions} loopSelectionRectangle={loopSelectionRectangle} />
-        {loadoutGraph.sockets.map((socket) => (
-          <SocketCard
-            key={socket.id}
+        <div
+          className="loadout-graph-canvas"
+          data-testid="socket-grid"
+          style={{
+            width: `${canvasWidth}px`,
+            height: `${canvasHeight}px`,
+            transform: `scale(${zoom})`,
+            transformOrigin: '0 0',
+          }}
+          onPointerDown={beginSocketRegionSelection}
+          onPointerMove={moveSocketRegionSelection}
+          onPointerUp={finishSocketRegionSelection}
+          onPointerCancel={cancelSocketRegionSelection}
+        >
+          <EdgeLayer
             activeLoadout={activeLoadout}
-            activeLoadoutName={activeLoadoutName}
-            currentMonitorSocket={currentMonitorSocket}
-            dragMateria={dragMateria}
-            handleDrop={handleDrop}
-            handleSocketClick={handleSocketClick}
-            loopExitBadge={loopExitBadges.get(socket.id)}
-            loopMembership={loopMemberships.get(socket.id)}
+            height={canvasHeight}
+            loopRegions={loopRegions}
             materia={materia}
-            selectedLoopSocketSet={selectedLoopSocketSet}
-            selectedMateriaId={selectedMateriaId}
-            socket={socket}
-            socketLayoutDrag={socketLayoutDrag}
+            routedEdges={routedEdges}
+            toggleEdgeCondition={toggleEdgeCondition}
+            toggleLoopExitCondition={toggleLoopExitCondition}
+            openLoopControls={openLoopControls}
             editPolicy={editPolicy}
-            beginSocketLayoutDrag={beginSocketLayoutDrag}
-            cancelSocketLayoutDrag={cancelSocketLayoutDrag}
-            finishSocketLayoutDrag={finishSocketLayoutDrag}
-            moveSocketLayoutDrag={moveSocketLayoutDrag}
+            width={canvasWidth}
           />
-        ))}
+          <LoopRegionsLayer loopRegions={loopRegions} loopSelectionRectangle={loopSelectionRectangle} />
+          {loadoutGraph.sockets.map((socket) => (
+            <SocketCard
+              key={socket.id}
+              activeLoadout={activeLoadout}
+              activeLoadoutName={activeLoadoutName}
+              currentMonitorSocket={currentMonitorSocket}
+              dragMateria={dragMateria}
+              handleDrop={handleDrop}
+              handleSocketClick={handleSocketClick}
+              loopExitBadge={loopExitBadges.get(socket.id)}
+              loopMembership={loopMemberships.get(socket.id)}
+              materia={materia}
+              selectedLoopSocketSet={selectedLoopSocketSet}
+              selectedMateriaId={selectedMateriaId}
+              socket={socket}
+              socketLayoutDrag={socketLayoutDrag}
+              editPolicy={editPolicy}
+              beginSocketLayoutDrag={beginSocketLayoutDrag}
+              cancelSocketLayoutDrag={cancelSocketLayoutDrag}
+              finishSocketLayoutDrag={finishSocketLayoutDrag}
+              moveSocketLayoutDrag={moveSocketLayoutDrag}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
