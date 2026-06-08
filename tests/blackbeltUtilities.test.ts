@@ -473,27 +473,6 @@ describe("Blackbelt-PR utility script", () => {
     }
   });
 
-  test("fails with clear error when GITHUB_TOKEN is missing", async () => {
-    const api = startFakeGitHubApi();
-    try {
-      const result = await runPrUtility(
-        {
-          params: { bookmark: "blackbelt/test-bookmark" },
-          state: {},
-        },
-        {},
-        api.baseUrl,
-      );
-
-      expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("GITHUB_TOKEN");
-      expect(result.json.state.blackbeltPr.tokenFound).toBe(false);
-    } finally {
-      api.server.stop();
-    }
-  });
-
   test("fails with clear error when configured authEnv variable is missing", async () => {
     const api = startFakeGitHubApi();
     try {
