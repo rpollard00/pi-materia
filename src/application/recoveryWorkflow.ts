@@ -45,6 +45,7 @@ interface RecoveryPreparation {
     action: ContextErrorRecoveryAction;
     compactBecausePressure: boolean;
     compactBecauseRepeatedStrongSignal: boolean;
+    compactBecauseConfirmedOverflow: boolean;
   };
 }
 
@@ -163,11 +164,14 @@ async function sameSocketRecoveryPreparation(
   const decision = evaluateContextErrorRecovery(error);
   // Evidence-gated compaction invariant: provider context_length_exceeded
   // responses can be transient or misleading, so same-socket recovery only
-  // forces compaction when pressure corroborates the failure or the same
-  // recovery key repeats a strong context-window/input signal.
+  // forces compaction when pressure corroborates the failure, the error
+  // message carries explicit per-side overflow token counts (confirmed
+  // overflow), or the same recovery key repeats a strong context-window
+  // signal.
+  const compactBecauseConfirmedOverflow = decision.overflowTelemetry !== undefined;
   const compactBecausePressure = pressure?.shouldCompact === true;
   const compactBecauseRepeatedStrongSignal = priorGuardedRetries > 0 && decision.strongContextSignal;
-  const shouldCompact = compactBecausePressure || compactBecauseRepeatedStrongSignal;
+  const shouldCompact = compactBecauseConfirmedOverflow || compactBecausePressure || compactBecauseRepeatedStrongSignal;
   const action = shouldCompact ? "compact" : "retry_without_compaction";
 
   await deps.appendEvent(state.runState, "context_window_recovery_decision", contextWindowRecoveryDecisionEventData(state, deps, {
@@ -181,11 +185,12 @@ async function sameSocketRecoveryPreparation(
     priorGuardedRetries,
     compactBecausePressure,
     compactBecauseRepeatedStrongSignal,
+    compactBecauseConfirmedOverflow,
   }));
 
   if (shouldCompact) {
     return {
-      contextDecision: { action, compactBecausePressure, compactBecauseRepeatedStrongSignal },
+      contextDecision: { action, compactBecausePressure, compactBecauseRepeatedStrongSignal, compactBecauseConfirmedOverflow },
       action: { action: "compact", reason, key, attempt, maxAttempts, entryId },
     };
   }
@@ -194,7 +199,7 @@ async function sameSocketRecoveryPreparation(
   state.contextWindowRecoveryGuards[key] = priorGuardedRetries + 1;
   const allowance = ensureRecoveryAllowance(state, key);
   allowance.effectiveMaxAttempts = Math.max(allowance.effectiveMaxAttempts, previousAttempts + 2);
-  return { contextDecision: { action, compactBecausePressure, compactBecauseRepeatedStrongSignal } };
+  return { contextDecision: { action, compactBecausePressure, compactBecauseRepeatedStrongSignal, compactBecauseConfirmedOverflow } };
 }
 
 function contextWindowRecoveryDecisionEventData(
@@ -211,6 +216,7 @@ function contextWindowRecoveryDecisionEventData(
     priorGuardedRetries: number;
     compactBecausePressure: boolean;
     compactBecauseRepeatedStrongSignal: boolean;
+    compactBecauseConfirmedOverflow: boolean;
   },
 ): Record<string, unknown> {
   return {
@@ -235,6 +241,8 @@ function contextWindowRecoveryDecisionEventData(
     priorGuardedRetries: options.priorGuardedRetries,
     compactBecausePressure: options.compactBecausePressure,
     compactBecauseRepeatedStrongSignal: options.compactBecauseRepeatedStrongSignal,
+    compactBecauseConfirmedOverflow: options.compactBecauseConfirmedOverflow,
+    overflowTelemetry: options.decision.overflowTelemetry,
     socket: deps.currentSocketId(state),
     itemKey: state.currentItemKey,
     itemLabel: state.currentItemLabel,
@@ -258,6 +266,9 @@ function recoveryWarningMessage(
   }
   if (reason === "context_window" && preparation.contextDecision?.action === "retry_without_compaction") {
     return `pi-materia retrying ${recoveryDiagnosticLabel(state)} without compaction for suspected transient provider/context failure (${attempt}/${maxAttempts}).`;
+  }
+  if (reason === "context_window" && preparation.contextDecision?.compactBecauseConfirmedOverflow) {
+    return `pi-materia compacted and retrying ${recoveryDiagnosticLabel(state)} after confirmed provider context-window overflow (${attempt}/${maxAttempts}).`;
   }
   if (reason === "context_window" && preparation.contextDecision?.compactBecauseRepeatedStrongSignal) {
     return `pi-materia compacted and retrying ${recoveryDiagnosticLabel(state)} after repeated confirmed context-window failure (${attempt}/${maxAttempts}).`;

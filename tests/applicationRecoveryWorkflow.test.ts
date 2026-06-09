@@ -33,6 +33,7 @@ function makeState(): MateriaCastState {
 
 const CODEX_SERVER_ERROR_SAMPLE = 'Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com if the error persists. Please include the request ID 06c12916-6464-4199-b4b7-53055ee0111a in your message.","param":null},"sequence_number":2}';
 const CODEX_CONTEXT_LENGTH_SAMPLE = 'Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Your input exceeds the context window of this model. Please adjust your input and try again.","param":"input"},"sequence_number":2}';
+const QWEN_EXPLICIT_OVERFLOW_SAMPLE = 'Error: 400 request (132725 tokens) exceeds the available context size (131072 tokens), try increasing it [compaction] Compacted from 121,716 tokens (ctrl+o to expand)';
 
 function makeDeps(events: Array<{ type: string; data: Record<string, unknown> }>, calls: string[] = []): SameSocketRecoveryWorkflowDeps {
   return {
@@ -63,6 +64,56 @@ describe("same-socket recovery workflow", () => {
     expect(recovered).toBe(false);
     expect(events).toHaveLength(0);
     expect(calls).toHaveLength(0);
+  });
+
+  test("confirmed overflow with explicit token counts forces compaction on first attempt even without pressure", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = { ...makeDeps(events, calls), assessContextPressure: async () => ({ shouldCompact: false, percent: 10, thresholdPercent: 90 }) };
+
+    const recovered = await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(QWEN_EXPLICIT_OVERFLOW_SAMPLE), deps, { entryId: "entry-qwen" });
+
+    expect(recovered).toBe(true);
+    // Cast must stay active (not failed)
+    expect(state.active).toBe(true);
+    expect(state.failedReason).toBeUndefined();
+    // Guard must not be incremented — we compact, not guard
+    expect(state.contextWindowRecoveryGuards).toBeUndefined();
+    expect(state.recoveryExhaustion).toBeUndefined();
+    // Decision event must show compaction
+    expect(events[0].type).toBe("context_window_recovery_decision");
+    expect(events[0].data).toMatchObject({
+      action: "compact",
+      reason: "context_window",
+      attempt: 1,
+      maxAttempts: 1,
+      entryId: "entry-qwen",
+      compactBecauseConfirmedOverflow: true,
+      compactBecausePressure: false,
+      compactBecauseRepeatedStrongSignal: false,
+      strongContextSignal: true,
+      transientProviderSignal: false,
+      priorGuardedRetries: 0,
+      socket: "Socket-1",
+      mode: "normal",
+    });
+    // Overflow telemetry should be included
+    expect(events[0].data.overflowTelemetry).toEqual({ requestedTokens: 132725, availableContextTokens: 131072, overflowTokens: 1653 });
+    // Recovery start event
+    expect(events[1].type).toBe("same_socket_recovery_start");
+    expect(events[1].data).toMatchObject({ reason: "context_window", attempt: 1 });
+    // Action start/complete before retry
+    expect(calls.filter((c) => c === "runRecoveryAction")).toHaveLength(1);
+    const runActionIdx = calls.indexOf("runRecoveryAction");
+    const sendTurnIdx = calls.findIndex((c) => c.startsWith("sendMateriaTurn"));
+    expect(runActionIdx).toBeGreaterThan(-1);
+    expect(sendTurnIdx).toBeGreaterThan(runActionIdx);
+    expect(calls).toContain("sendMateriaTurn:retry prompt:true");
+    // No terminal failCast
+    expect(calls.filter((c) => c.startsWith("failCast"))).toHaveLength(0);
+    // Warning message references confirmed overflow
+    expect(calls.some((c) => c.startsWith("notify:") && c.includes("confirmed provider context-window overflow"))).toBe(true);
   });
 
   test("records a guarded first context-window attempt without compaction and resends the same prompt when usage is missing", async () => {
