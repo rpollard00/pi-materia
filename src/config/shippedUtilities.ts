@@ -109,6 +109,8 @@ function bundledUtilityScriptPaths(): string[] {
     path.join(configDir, "mime-maintain.mjs"),
     path.join(configDir, "mime-gh-pr.mjs"),
     path.join(configDir, "blackbelt-gh-pr.mjs"),
+    path.join(configDir, "blackbelt-ado-pr.mjs"),
+    path.join(configDir, "mime-ado-pr.mjs"),
     path.join(configDir, "commit-sigil.mjs"),
     path.join(configDir, "detect-vcs.mjs"),
     path.join(configDir, "ensure-ignored.mjs"),

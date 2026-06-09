@@ -94,6 +94,20 @@ describe("bundled utility materia defaults", () => {
     expect((config.materia?.["Blackbelt-Maintain"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Mime-Bootstrap"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Mime-Maintain"] as { command?: unknown }).command).toBeUndefined();
+    expect(config.materia?.["Blackbelt-ADO-PR"]).toMatchObject({
+      type: "utility",
+      script: { kind: "shippedUtility", name: "blackbelt-ado-pr.mjs", runtime: "node" },
+      parse: "json",
+    });
+    expect(config.materia?.["Mime-ADO-PR"]).toMatchObject({
+      type: "utility",
+      script: { kind: "shippedUtility", name: "mime-ado-pr.mjs", runtime: "node" },
+      parse: "json",
+    });
+    expect((config.materia?.["Blackbelt-ADO-PR"] as { assign?: unknown }).assign).toBeUndefined();
+    expect((config.materia?.["Mime-ADO-PR"] as { assign?: unknown }).assign).toBeUndefined();
+    expect((config.materia?.["Blackbelt-ADO-PR"] as { command?: unknown }).command).toBeUndefined();
+    expect((config.materia?.["Mime-ADO-PR"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Mime-GH-PR"] as { command?: unknown }).command).toBeUndefined();
     expect(packageJson.files).toContain("config/default.json");
     expect(config.materia?.ensureArtifactsIgnored).toBeUndefined();
@@ -117,6 +131,8 @@ describe("bundled utility materia defaults", () => {
     await expect(access(path.resolve("config", "utilities", "mime-bootstrap.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "mime-maintain.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "mime-gh-pr.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "blackbelt-ado-pr.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "mime-ado-pr.mjs"))).resolves.toBeNull();
   });
 
   test("Blackbelt-Bootstrap has correct shipped-utility config shape, parse, color, and metadata", async () => {
@@ -219,6 +235,48 @@ describe("bundled utility materia defaults", () => {
     expect((materia as { command?: unknown }).command).toBeUndefined();
   });
 
+  test("Blackbelt-ADO-PR has correct shipped-utility config shape, parse, color, and metadata", async () => {
+    const config = await loadDefaultConfig();
+    const materia = config.materia?.["Blackbelt-ADO-PR"];
+
+    expect(materia).toBeDefined();
+    expect(materia?.type).toBe("utility");
+    expect(materia?.label).toBe("Blackbelt-ADO-PR");
+    expect(materia?.group).toBe("Utility");
+    expect(materia?.parse).toBe("json");
+    expect(materia?.script).toEqual({ kind: "shippedUtility", name: "blackbelt-ado-pr.mjs", runtime: "node" });
+    expect(typeof materia?.description).toBe("string");
+    expect((materia?.description as string).includes("pull request")).toBe(true);
+    expect((materia?.description as string).includes("jj")).toBe(true);
+    expect((materia?.description as string).includes("Azure DevOps")).toBe(true);
+    expect(typeof materia?.color).toBe("string");
+    const allowedColors = new Set(paletteColors);
+    expect(allowedColors.has(materia?.color as string)).toBe(true);
+    expect((materia as { assign?: unknown }).assign).toBeUndefined();
+    expect((materia as { command?: unknown }).command).toBeUndefined();
+  });
+
+  test("Mime-ADO-PR has correct shipped-utility config shape, parse, color, and metadata", async () => {
+    const config = await loadDefaultConfig();
+    const materia = config.materia?.["Mime-ADO-PR"];
+
+    expect(materia).toBeDefined();
+    expect(materia?.type).toBe("utility");
+    expect(materia?.label).toBe("Mime-ADO-PR");
+    expect(materia?.group).toBe("Utility");
+    expect(materia?.parse).toBe("json");
+    expect(materia?.script).toEqual({ kind: "shippedUtility", name: "mime-ado-pr.mjs", runtime: "node" });
+    expect(typeof materia?.description).toBe("string");
+    expect((materia?.description as string).includes("pull request")).toBe(true);
+    expect((materia?.description as string).includes("git")).toBe(true);
+    expect((materia?.description as string).includes("Azure DevOps")).toBe(true);
+    expect(typeof materia?.color).toBe("string");
+    const allowedColors = new Set(paletteColors);
+    expect(allowedColors.has(materia?.color as string)).toBe(true);
+    expect((materia as { assign?: unknown }).assign).toBeUndefined();
+    expect((materia as { command?: unknown }).command).toBeUndefined();
+  });
+
   test("no bundled loadout socket references Mime or Blackbelt utilities", async () => {
     const config = await loadDefaultConfig();
 
@@ -229,6 +287,9 @@ describe("bundled utility materia defaults", () => {
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-GH-PR`).not.toBe("Mime-GH-PR");
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-Bootstrap`).not.toBe("Blackbelt-Bootstrap");
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-Maintain`).not.toBe("Blackbelt-Maintain");
+        expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-GH-PR`).not.toBe("Blackbelt-GH-PR");
+        expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-ADO-PR`).not.toBe("Blackbelt-ADO-PR");
+        expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-ADO-PR`).not.toBe("Mime-ADO-PR");
       }
     }
 
@@ -255,9 +316,11 @@ describe("bundled utility materia defaults", () => {
       expect(entries).toContain("mime-bootstrap.mjs");
       expect(entries).toContain("mime-maintain.mjs");
       expect(entries).toContain("mime-gh-pr.mjs");
+      expect(entries).toContain("blackbelt-ado-pr.mjs");
+      expect(entries).toContain("mime-ado-pr.mjs");
 
       // Verify each script is copied with content
-      for (const name of ["blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs", "blackbelt-gh-pr.mjs", "mime-bootstrap.mjs", "mime-maintain.mjs", "mime-gh-pr.mjs"]) {
+      for (const name of ["blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs", "blackbelt-gh-pr.mjs", "blackbelt-ado-pr.mjs", "mime-bootstrap.mjs", "mime-maintain.mjs", "mime-gh-pr.mjs", "mime-ado-pr.mjs"]) {
         const scriptContent = await readFile(path.join(utilitiesDir, name), "utf8");
         expect(scriptContent).toBeTruthy();
       }
@@ -273,6 +336,10 @@ describe("bundled utility materia defaults", () => {
       expect(manifest.utilities["mime-maintain.mjs"].profileFile).toBe("mime-maintain.mjs");
       expect(manifest.utilities["mime-gh-pr.mjs"]).toBeDefined();
       expect(manifest.utilities["mime-gh-pr.mjs"].profileFile).toBe("mime-gh-pr.mjs");
+      expect(manifest.utilities["blackbelt-ado-pr.mjs"]).toBeDefined();
+      expect(manifest.utilities["blackbelt-ado-pr.mjs"].profileFile).toBe("blackbelt-ado-pr.mjs");
+      expect(manifest.utilities["mime-ado-pr.mjs"]).toBeDefined();
+      expect(manifest.utilities["mime-ado-pr.mjs"].profileFile).toBe("mime-ado-pr.mjs");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

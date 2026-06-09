@@ -1231,3 +1231,648 @@ describe("Blackbelt-GH-PR utility script", () => {
     }
   });
 });
+
+// ===========================================================================
+// Blackbelt-ADO-PR tests
+// ===========================================================================
+
+const adoPrScript = path.resolve("config", "utilities", "blackbelt-ado-pr.mjs");
+
+function startFakeAdoApi() {
+  let simulatedApiError: string | null = null;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      const body = request.method === "POST" ? await request.text().catch(() => "") : "";
+
+      // GET /org/project/_apis/git/repositories/repo → return defaultBranch
+      const repoMatch = url.pathname.match(/^\/([^/]+)\/([^/]+)\/_apis\/git\/repositories\/([^/]+)$/);
+      if (repoMatch && request.method === "GET") {
+        return Response.json({ defaultBranch: "refs/heads/main", name: repoMatch[3] });
+      }
+
+      // POST /org/project/_apis/git/repositories/repo/pullrequests → create PR
+      const pullsMatch = url.pathname.match(/^\/([^/]+)\/([^/]+)\/_apis\/git\/repositories\/([^/]+)\/pullrequests$/);
+      if (pullsMatch && request.method === "POST") {
+        let parsed: Record<string, unknown> = {};
+        try { parsed = JSON.parse(body); } catch { /* ignore */ }
+        if (simulatedApiError === "422") {
+          return Response.json({ message: "Validation Failed: source ref not found" }, { status: 422 });
+        }
+        if (simulatedApiError === "401") {
+          return Response.json({ message: "Unauthorized" }, { status: 401 });
+        }
+        return Response.json({
+          pullRequestId: 99,
+          title: parsed.title ?? "Untitled",
+          isDraft: parsed.isDraft ?? false,
+        }, { status: 201 });
+      }
+
+      return new Response("Not Found", { status: 404 });
+    },
+  });
+  return {
+    server,
+    baseUrl: server.url.origin,
+    setSimulatedApiError(code: string | null) { simulatedApiError = code; },
+  };
+}
+
+/**
+ * Create a fake jj that supports the specific commands used by blackbelt-ado-pr.
+ */
+async function makeFakeJjForAdoPr() {
+  const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-fake-jj-ado-pr-"));
+  const log = path.join(dir, "jj.log");
+  const diffCountFile = path.join(dir, "diff.count");
+  const jj = path.join(dir, "jj");
+  await writeFile(
+    jj,
+    `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$JJ_LOG"
+case "$1" in
+  root)
+    pwd
+    ;;
+  diff)
+    rflag=0
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "-r" ]; then rflag=1; diff_rev="$a"; fi
+      prev="$a"
+    done
+    if [ "$rflag" = "1" ]; then
+      cnt=$(cat "$JJ_DIFF_COUNT" 2>/dev/null || echo 0)
+      cnt=$((cnt + 1))
+      echo "$cnt" > "$JJ_DIFF_COUNT"
+      if [ "$PR_TIP_EMPTY" = "1" ] && [ "$cnt" -eq 1 ]; then
+        :
+      elif [ "$cnt" -gt 1 ] && [ "$PR_PARENT_DIFF_EMPTY" = "1" ]; then
+        :
+      elif [ "$cnt" -gt 1 ] && [ "$PR_ALL_PARENTS_EMPTY" = "1" ]; then
+        :
+      else
+        echo "M file.txt"
+      fi
+    else
+      if [ "$JJ_DIRTY" = "1" ]; then echo 'M file.txt'; fi
+    fi
+    ;;
+  bookmark)
+    case "$2" in
+      list)
+        if [ "$PR_NO_BOOKMARK" = "1" ]; then
+          echo "No bookmarks found."
+          exit 1
+        fi
+        if [ -n "$PR_BOOKMARK_LIST" ]; then
+          printf '%s\\n' "$PR_BOOKMARK_LIST"
+        else
+          echo "blackbelt/test-bookmark: xxxxxxxx (some description)"
+          echo "main: yyyyyyyy"
+        fi
+        ;;
+      set)
+        if [ "$PR_BOOKMARK_SET_FAIL" = "1" ]; then
+          echo "Bookmark set failed" >&2
+          exit 1
+        fi
+        ;;
+    esac
+    ;;
+  git)
+    case "$2" in
+      remote)
+        if [ -n "$ADO_REMOTE_URL" ]; then
+          echo "origin $ADO_REMOTE_URL"
+        else
+          echo "origin https://dev.azure.com/test-org/test-project/_git/test-repo"
+        fi
+        ;;
+      push)
+        if [ "$PR_PUSH_FAIL" = "1" ]; then
+          echo "Push failed: rejected" >&2
+          exit 1
+        fi
+        ;;
+    esac
+    ;;
+  log)
+    wants_commit_id=0
+    for arg in "$@"; do
+      case "$arg" in
+        *commit_id*) wants_commit_id=1 ;;
+      esac
+    done
+    if [ "$wants_commit_id" = "1" ]; then
+      for a in "$@"; do
+        case "$a" in
+          parents\\(*\\))
+            if [ "$PR_NO_PARENT" = "1" ]; then
+              :
+            else
+              echo "\${PR_PARENT_ID:-parent-commit-id}"
+            fi
+            exit 0
+            ;;
+        esac
+      done
+      if [ "$PR_REVISION_INVALID" = "1" ]; then
+        echo "Error: No such revision" >&2
+        exit 1
+      fi
+      echo "abcdef1234567890abcdef1234567890abcdef12"
+      exit 0
+    fi
+    queried_rev=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "-r" ]; then queried_rev="$a"; fi
+      prev="$a"
+    done
+    is_parent=0
+    case "$queried_rev" in
+      *parent-commit-id*) is_parent=1 ;;
+    esac
+    if [ "$PR_EMPTY_DESCRIPTION" = "1" ]; then
+      if [ "$is_parent" = "1" ] && [ -n "$PR_PARENT_DESCRIPTION" ]; then
+        printf '%s\\n' "$PR_PARENT_DESCRIPTION"
+      else
+        :
+      fi
+    elif [ -n "$PR_DESCRIPTION" ]; then
+      printf '%s\\n' "$PR_DESCRIPTION"
+    else
+      echo "feat: test pr description"
+      echo ""
+      echo "Additional context line."
+    fi
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`,
+    "utf8",
+  );
+  await chmod(jj, 0o755);
+  await writeFile(log, "", "utf8");
+  await writeFile(diffCountFile, "0", "utf8");
+  return { dir, log, diffCountFile };
+}
+
+async function runAdoPrUtility(
+  input: Record<string, unknown>,
+  env: Record<string, string> = {},
+  apiBaseUrl: string,
+  opts: { noJj?: boolean } = {},
+) {
+  const fake = opts.noJj ? null : await makeFakeJjForAdoPr();
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-ado-pr-cwd-"));
+
+  const params = typeof input.params === "object" && input.params !== null
+    ? { ...input.params as Record<string, unknown>, apiBaseUrl }
+    : { apiBaseUrl };
+
+  const proc = Bun.spawn([process.execPath, adoPrScript], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      PATH: fake ? `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}` : (process.env.PATH ?? ""),
+      ...(fake ? { JJ_LOG: fake.log, JJ_DIFF_COUNT: fake.diffCountFile } : {}),
+      ...env,
+    },
+  });
+  proc.stdin.write(`${JSON.stringify({ cwd, ...input, params })}\n`);
+  proc.stdin.end();
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode, json: JSON.parse(stdout), fake };
+}
+
+describe("Blackbelt-ADO-PR utility script", () => {
+  test("fails with clear error when jj is not available (no git fallback)", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const sanitizedPath = ["/usr/bin", "/bin", "/usr/local/bin"].join(path.delimiter);
+
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PATH: sanitizedPath },
+        api.baseUrl,
+        { noJj: true },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toMatch(/jj is required|no jj repository/);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails with clear error when configured authEnv variable is missing", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark", authEnv: "ADO_PAT" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "wrong-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toContain("ADO_PAT");
+      expect(result.json.state.blackbeltAdoPr.tokenFound).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails when bookmark does not exist", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "nonexistent-bookmark" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_NO_BOOKMARK: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toContain("nonexistent-bookmark");
+      expect(result.json.state.blackbeltAdoPr.bookmarkExists).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails when push to remote fails", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_PUSH_FAIL: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toContain("push failed");
+      expect(result.json.state.blackbeltAdoPr.pushOk).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails on ADO API error (422)", async () => {
+    const api = startFakeAdoApi();
+    api.setSimulatedApiError("422");
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toContain("Azure DevOps API error");
+      expect(result.json.state.blackbeltAdoPr.apiStatus).toBe(422);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails on ADO API auth error (401)", async () => {
+    const api = startFakeAdoApi();
+    api.setSimulatedApiError("401");
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toContain("Unauthorized");
+      expect(result.json.state.blackbeltAdoPr.apiStatus).toBe(401);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("successfully pushes bookmark and creates ADO PR with explicit params", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "feat: custom ado pr title",
+            body: "This is a test ADO PR body.",
+            base: "develop",
+            draft: true,
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.prNumber).toBe(99);
+      expect(result.json.state.blackbeltAdoPr.prUrl).toBe("https://dev.azure.com/test-org/test-project/_git/test-repo/pullrequest/99");
+      expect(result.json.state.blackbeltAdoPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltAdoPr.title).toBe("feat: custom ado pr title");
+      expect(result.json.state.blackbeltAdoPr.base).toBe("develop");
+      expect(result.json.state.blackbeltAdoPr.draft).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.organization).toBe("test-org");
+      expect(result.json.state.blackbeltAdoPr.project).toBe("test-project");
+      expect(result.json.state.blackbeltAdoPr.repository).toBe("test-repo");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("infers PR title from jj description when params.title is absent", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_DESCRIPTION: "fix: inferred from jj description\n\nBody text here." },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.title).toBe("fix: inferred from jj description");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("resolves bookmark from bootstrap state when params.bookmark is absent", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+            title: "chore: from bootstrap state",
+          },
+          state: {
+            blackbeltBootstrap: {
+              bookmarkName: "blackbelt/test-bookmark",
+            },
+          },
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltAdoPr.title).toBe("chore: from bootstrap state");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("parses ADO org/project/repo from remote URL automatically", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "test: auto ado config",
+          },
+          state: {},
+        },
+        {
+          AZURE_DEVOPS_EXT_PAT: "test-token",
+          ADO_REMOTE_URL: "https://dev.azure.com/auto-org/auto-project/_git/auto-repo",
+        },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.organization).toBe("auto-org");
+      expect(result.json.state.blackbeltAdoPr.project).toBe("auto-project");
+      expect(result.json.state.blackbeltAdoPr.repository).toBe("auto-repo");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("uses custom authEnv to locate the token", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+            title: "test: custom auth env",
+            authEnv: "CUSTOM_ADO_TOKEN",
+          },
+          state: {},
+        },
+        { CUSTOM_ADO_TOKEN: "custom-token-value" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("resolves ADO config from params.repo as org/project/repo", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            repo: "repo-org/repo-project/repo-name",
+            title: "test: repo param",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.organization).toBe("repo-org");
+      expect(result.json.state.blackbeltAdoPr.project).toBe("repo-project");
+      expect(result.json.state.blackbeltAdoPr.repository).toBe("repo-name");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("no git fallback — does not attempt to use git when jj is missing", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const sanitizedPath = ["/usr/bin", "/bin", "/usr/local/bin"].join(path.delimiter);
+
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PATH: sanitizedPath },
+        api.baseUrl,
+        { noJj: true },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toMatch(/jj/);
+      expect(result.json.state.blackbeltAdoPr.error).not.toMatch(/\brun\s+git\b|\bgit\s+push\b|\bgit\s+fallback\b/i);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("no git fallback — utility has no git import or git command execution", async () => {
+    const scriptContent = await readFile(adoPrScript, "utf8");
+    expect(scriptContent).not.toMatch(/execFile\(["']git["']/);
+  });
+
+  test("fails clearly when params.revision cannot be resolved", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            revision: "nonexistent-revision",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_REVISION_INVALID: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toContain("nonexistent-revision");
+      expect(result.json.state.blackbeltAdoPr.revisionResolved).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("pushes a specific revision by setting the bookmark to that revision first", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            revision: "abc123def456",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+            title: "feat: from specific revision",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.revision).toBe("abc123def456");
+
+      const jjLog = await readFile(result.fake!.log, "utf8");
+      expect(jjLog).toContain("bookmark set blackbelt/test-bookmark --revision abc123def456");
+      expect(jjLog).toContain("git push --bookmark blackbelt/test-bookmark");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails with unnamedRevision when bookmark tip has changes but no description", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_EMPTY_DESCRIPTION: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltAdoPr.unnamedRevision).toBe(true);
+
+      const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
+      expect(jjLog).not.toContain("git push");
+    } finally {
+      api.server.stop();
+    }
+  });
+});

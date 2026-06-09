@@ -1073,3 +1073,605 @@ describe("Mime-GH-PR utility script", () => {
     }
   });
 });
+
+// ===========================================================================
+// Mime-ADO-PR tests
+// ===========================================================================
+
+const adoPrScript = path.resolve("config", "utilities", "mime-ado-pr.mjs");
+
+function startFakeAdoApi() {
+  let simulatedApiError: string | null = null;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      const body = request.method === "POST" ? await request.text().catch(() => "") : "";
+
+      // GET /org/project/_apis/git/repositories/repo → return defaultBranch
+      const repoMatch = url.pathname.match(/^\/([^/]+)\/([^/]+)\/_apis\/git\/repositories\/([^/]+)$/);
+      if (repoMatch && request.method === "GET") {
+        return Response.json({ defaultBranch: "refs/heads/main", name: repoMatch[3] });
+      }
+
+      // POST /org/project/_apis/git/repositories/repo/pullrequests → create PR
+      const pullsMatch = url.pathname.match(/^\/([^/]+)\/([^/]+)\/_apis\/git\/repositories\/([^/]+)\/pullrequests$/);
+      if (pullsMatch && request.method === "POST") {
+        let parsed: Record<string, unknown> = {};
+        try { parsed = JSON.parse(body); } catch { /* ignore */ }
+        if (simulatedApiError === "422") {
+          return Response.json({ message: "Validation Failed: source ref not found" }, { status: 422 });
+        }
+        if (simulatedApiError === "401") {
+          return Response.json({ message: "Unauthorized" }, { status: 401 });
+        }
+        return Response.json({
+          pullRequestId: 99,
+          title: parsed.title ?? "Untitled",
+          isDraft: parsed.isDraft ?? false,
+        }, { status: 201 });
+      }
+
+      return new Response("Not Found", { status: 404 });
+    },
+  });
+  return {
+    server,
+    baseUrl: server.url.origin,
+    setSimulatedApiError(code: string | null) { simulatedApiError = code; },
+  };
+}
+
+async function makeFakeGitForAdoPr() {
+  const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-fake-git-ado-pr-"));
+  const log = path.join(dir, "git.log");
+  const git = path.join(dir, "git");
+  await writeFile(
+    git,
+    `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GIT_LOG"
+case "$1" in
+  rev-parse)
+    if [ "$GIT_NO_REPO" = "1" ]; then
+      echo "fatal: not a git repository" >&2
+      exit 128
+    fi
+    pwd
+    ;;
+  branch)
+    case "$2" in
+      --show-current)
+        if [ "$PR_CURRENT_BRANCH" = "__empty__" ]; then
+          :
+        elif [ -n "$PR_CURRENT_BRANCH" ]; then
+          echo "$PR_CURRENT_BRANCH"
+        else
+          echo "mime/test-branch"
+        fi
+        ;;
+      --list)
+        if [ "$PR_NO_BRANCH" = "1" ]; then
+          :
+        elif [ -n "$PR_BRANCH_LIST" ]; then
+          printf '%s\\n' "$PR_BRANCH_LIST"
+        else
+          echo "  mime/test-branch"
+        fi
+        ;;
+    esac
+    ;;
+  remote)
+    if [ -n "$ADO_REMOTE_URL" ]; then
+      echo "$ADO_REMOTE_URL"
+    else
+      echo "https://dev.azure.com/test-org/test-project/_git/test-repo"
+    fi
+    ;;
+  push)
+    if [ "$PR_PUSH_FAIL" = "1" ]; then
+      echo "fatal: push failed" >&2
+      exit 1
+    fi
+    ;;
+  log)
+    if [ "$PR_EMPTY_LOG" = "1" ]; then
+      :
+    elif [ -n "$PR_LOG_MESSAGE" ]; then
+      printf '%s\\n' "$PR_LOG_MESSAGE"
+    else
+      echo "feat: default commit message"
+    fi
+    ;;
+esac
+`,
+    "utf8",
+  );
+  await chmod(git, 0o755);
+  await writeFile(log, "", "utf8");
+  return { dir, log };
+}
+
+async function runAdoPrUtility(
+  input: Record<string, unknown>,
+  env: Record<string, string> = {},
+  apiBaseUrl: string,
+  opts: { noGit?: boolean } = {},
+) {
+  const fake = opts.noGit ? null : await makeFakeGitForAdoPr();
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-mime-ado-pr-cwd-"));
+
+  const params =
+    typeof input.params === "object" && input.params !== null
+      ? { ...(input.params as Record<string, unknown>), apiBaseUrl }
+      : { apiBaseUrl };
+
+  const proc = Bun.spawn([process.execPath, adoPrScript], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      PATH: fake
+        ? `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`
+        : (process.env.PATH ?? ""),
+      ...(fake ? { GIT_LOG: fake.log } : {}),
+      ...env,
+    },
+  });
+  proc.stdin.write(`${JSON.stringify({ cwd, ...input, params })}\n`);
+  proc.stdin.end();
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode, json: JSON.parse(stdout), fake };
+}
+
+describe("Mime-ADO-PR utility script", () => {
+  test("fails with clear error when git is not available (no jj fallback)", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const sanitizedPath = ["/usr/bin", "/bin", "/usr/local/bin"].join(path.delimiter);
+
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PATH: sanitizedPath },
+        api.baseUrl,
+        { noGit: true },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toMatch(/git is required|git/);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails with clear error when AZURE_DEVOPS_EXT_PAT is missing", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("AZURE_DEVOPS_EXT_PAT");
+      expect(result.json.state.mimeAdoPr.tokenFound).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails with clear error when configured authEnv variable is missing", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch", authEnv: "ADO_PAT" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "wrong-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("ADO_PAT");
+      expect(result.json.state.mimeAdoPr.tokenFound).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails when branch does not exist", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "nonexistent-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_NO_BRANCH: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("nonexistent-branch");
+      expect(result.json.state.mimeAdoPr.branchExists).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails when push to remote fails", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_PUSH_FAIL: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("push failed");
+      expect(result.json.state.mimeAdoPr.pushOk).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails on ADO API error (422)", async () => {
+    const api = startFakeAdoApi();
+    api.setSimulatedApiError("422");
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("Azure DevOps API error");
+      expect(result.json.state.mimeAdoPr.apiStatus).toBe(422);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails on ADO API auth error (401)", async () => {
+    const api = startFakeAdoApi();
+    api.setSimulatedApiError("401");
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("Unauthorized");
+      expect(result.json.state.mimeAdoPr.apiStatus).toBe(401);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails outside a git repo", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", GIT_NO_REPO: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("no git repository");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("fails when no branch can be resolved", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {},
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_CURRENT_BRANCH: "__empty__" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toContain("no branch resolved");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("successfully pushes branch and creates ADO PR with explicit params", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            branch: "mime/test-branch",
+            title: "feat: custom ado pr title",
+            body: "This is a test ADO PR body.",
+            base: "develop",
+            draft: true,
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.mimeAdoPr.ok).toBe(true);
+      expect(result.json.state.mimeAdoPr.prNumber).toBe(99);
+      expect(result.json.state.mimeAdoPr.prUrl).toBe("https://dev.azure.com/test-org/test-project/_git/test-repo/pullrequest/99");
+      expect(result.json.state.mimeAdoPr.branchName).toBe("mime/test-branch");
+      expect(result.json.state.mimeAdoPr.title).toBe("feat: custom ado pr title");
+      expect(result.json.state.mimeAdoPr.base).toBe("develop");
+      expect(result.json.state.mimeAdoPr.draft).toBe(true);
+      expect(result.json.state.mimeAdoPr.organization).toBe("test-org");
+      expect(result.json.state.mimeAdoPr.project).toBe("test-project");
+      expect(result.json.state.mimeAdoPr.repository).toBe("test-repo");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("infers PR title from latest commit message when params.title is absent", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            branch: "mime/test-branch",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_LOG_MESSAGE: "fix: inferred from git log\n\nBody text here." },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.mimeAdoPr.ok).toBe(true);
+      expect(result.json.state.mimeAdoPr.title).toBe("fix: inferred from git log");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("falls back to branch name when git log is empty", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            branch: "mime/test-branch",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_EMPTY_LOG: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.mimeAdoPr.ok).toBe(true);
+      expect(result.json.state.mimeAdoPr.title).toBe("mime/test-branch");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("resolves branch from bootstrap state when params.branch is absent", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+            title: "chore: from bootstrap state",
+          },
+          state: {
+            mimeBootstrap: {
+              branchName: "mime/test-branch",
+            },
+          },
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.mimeAdoPr.ok).toBe(true);
+      expect(result.json.state.mimeAdoPr.branchName).toBe("mime/test-branch");
+      expect(result.json.state.mimeAdoPr.title).toBe("chore: from bootstrap state");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("parses ADO org/project/repo from remote URL automatically", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            branch: "mime/test-branch",
+            title: "test: auto ado config",
+          },
+          state: {},
+        },
+        {
+          AZURE_DEVOPS_EXT_PAT: "test-token",
+          ADO_REMOTE_URL: "https://dev.azure.com/auto-org/auto-project/_git/auto-repo",
+        },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.mimeAdoPr.ok).toBe(true);
+      expect(result.json.state.mimeAdoPr.organization).toBe("auto-org");
+      expect(result.json.state.mimeAdoPr.project).toBe("auto-project");
+      expect(result.json.state.mimeAdoPr.repository).toBe("auto-repo");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("resolves ADO config from params.repo as org/project/repo", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            branch: "mime/test-branch",
+            repo: "repo-org/repo-project/repo-name",
+            title: "test: repo param",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.mimeAdoPr.ok).toBe(true);
+      expect(result.json.state.mimeAdoPr.organization).toBe("repo-org");
+      expect(result.json.state.mimeAdoPr.project).toBe("repo-project");
+      expect(result.json.state.mimeAdoPr.repository).toBe("repo-name");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("uses custom authEnv to locate the token", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            branch: "mime/test-branch",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+            title: "test: custom auth env",
+            authEnv: "CUSTOM_ADO_TOKEN",
+          },
+          state: {},
+        },
+        { CUSTOM_ADO_TOKEN: "custom-token-value" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.mimeAdoPr.ok).toBe(true);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("pushes with -u flag to set upstream tracking", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            branch: "mime/test-branch",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+            title: "test: push upstream",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      const logContent = await readFile(result.fake!.log, "utf8");
+      expect(logContent).toContain("push -u");
+      expect(logContent).toContain("mime/test-branch");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("does not depend on jj or blackbelt code", async () => {
+    const scriptContent = await readFile(adoPrScript, "utf8");
+    expect(scriptContent).not.toContain("bookmark");
+    expect(scriptContent).not.toMatch(/execFile(?:Text)?\(["']jj["']/);
+    expect(scriptContent).toMatch(/execFile(?:Text)?\(["']git["']/);
+  });
+
+  test("no jj fallback — error message mentions git, not jj", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const sanitizedPath = ["/usr/bin", "/bin", "/usr/local/bin"].join(path.delimiter);
+
+      const result = await runAdoPrUtility(
+        {
+          params: { branch: "mime/test-branch" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PATH: sanitizedPath },
+        api.baseUrl,
+        { noGit: true },
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.mimeAdoPr.ok).toBe(false);
+      expect(result.json.state.mimeAdoPr.error).toMatch(/git/);
+      expect(result.json.state.mimeAdoPr.error).not.toMatch(/\bjj\b/);
+    } finally {
+      api.server.stop();
+    }
+  });
+});

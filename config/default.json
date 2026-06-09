@@ -800,6 +800,32 @@
         "runtime": "node"
       }
     },
+    "Blackbelt-ADO-PR": {
+      "type": "utility",
+      "label": "Blackbelt-ADO-PR",
+      "description": "Deterministic jj-only Azure DevOps pull request utility. Pushes a blackbelt/ bookmark and creates a PR via the Azure DevOps REST API. Auth via configurable env var (default AZURE_DEVOPS_EXT_PAT).",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "blackbelt-ado-pr.mjs",
+        "runtime": "node"
+      }
+    },
+    "Mime-ADO-PR": {
+      "type": "utility",
+      "label": "Mime-ADO-PR",
+      "description": "Deterministic git-only Azure DevOps pull request utility. Pushes the active git branch and creates a PR via the Azure DevOps REST API. Auth via configurable env var (default AZURE_DEVOPS_EXT_PAT).",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "script": {
+        "kind": "shippedUtility",
+        "name": "mime-ado-pr.mjs",
+        "runtime": "node"
+      }
+    },
     "Commit-Sigil": {
       "type": "utility",
       "label": "Commit-Sigil",
