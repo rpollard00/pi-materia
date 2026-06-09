@@ -92,7 +92,7 @@ export class FakePiHarness {
   readonly pi: ExtensionAPI;
   readonly ctx: FakeCommandContext;
   readonly events = new Map<string, ExtensionHandler<any, any>[]>();
-  readonly commands = new Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string; description?: string }> | null; handler: (args: string, ctx: FakeCommandContext) => Promise<void> }>();
+  readonly commands = new Map<string, { description?: string; getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string; description?: string }> | null | Promise<Array<{ value: string; label: string; description?: string }> | null>; handler: (args: string, ctx: FakeCommandContext) => Promise<void> }>();
   readonly flags = new Map<string, boolean | string | undefined>();
   readonly sentMessages: Array<{ message: unknown; options?: unknown }> = [];
   readonly suppressedTriggerTurnSends: SuppressedTriggerTurnSend[] = [];
@@ -269,10 +269,13 @@ export class FakePiHarness {
     await command.handler(args, this.ctx);
   }
 
-  getCommandCompletions(name: string, prefix: string): Array<{ value: string; label: string; description?: string }> | null {
+  getCommandCompletions(name: string, prefix: string): Array<{ value: string; label: string; description?: string }> | null | Promise<Array<{ value: string; label: string; description?: string }> | null> {
     const command = this.commands.get(name);
     if (!command) throw new Error(`Fake Pi command not registered: ${name}`);
-    return command.getArgumentCompletions?.(prefix) ?? null;
+    const result = command.getArgumentCompletions?.(prefix);
+    // getArgumentCompletions may return a Promise for async branches (e.g. loadout completions)
+    if (result instanceof Promise) return result;
+    return result ?? null;
   }
 
   appendAssistantMessage(text: string, extra: Record<string, unknown> = {}): SessionEntry {
