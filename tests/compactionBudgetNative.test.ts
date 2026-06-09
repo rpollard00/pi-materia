@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
@@ -24,7 +24,7 @@ function singleAgentConfig() {
 }
 
 describe("native compaction request budgeting audit", () => {
-  test("pre-turn usage can be below threshold while isolated prompt/context add large request material", async () => {
+  test("pre-turn usage near threshold triggers proactive compaction when projected overhead pushes tokens over threshold", async () => {
     const harness = await makeHarness(singleAgentConfig());
     const largeGrepLikeOutput = [
       "grep /getArgumentCompletions/ in ~/.nvm/versions/node/v22.15.0/lib/node_modules/@earendil-works/pi-coding-agent (**/*.{ts,md}) limit 50",
@@ -33,10 +33,17 @@ describe("native compaction request budgeting audit", () => {
       "x".repeat(50_000),
     ].join("\n");
 
-    harness.contextUsage = { tokens: 20_789, contextWindow: 272_000, percent: (20_789 / 272_000) * 100 };
+    // Pre-turn usage near the 55% threshold for a 272k window (149,600 tokens).
+    // Projected overhead (~30k tokens) pushes the total over the threshold.
+    harness.contextUsage = { tokens: 130_000, contextWindow: 272_000, percent: (130_000 / 272_000) * 100 };
+
+    // Set active model so effectiveContextWindow picks it up.
+    (harness.ctx as any).model = { provider: "test", id: "large-context", contextWindow: 272_000 };
+
     await harness.runCommand("materia", `cast ${largeGrepLikeOutput}`);
 
-    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    // Proactive compaction should fire because projected tokens cross the threshold.
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
 
     const hiddenPrompt = harness.sentMessages.map(({ message }) => message as any).find((message) => message.customType === "pi-materia-prompt")?.content as string;
     expect(hiddenPrompt.length).toBeGreaterThan(50_000);
@@ -62,6 +69,28 @@ describe("native compaction request budgeting audit", () => {
 
     const castRoot = path.join(harness.cwd, ".pi", "pi-materia");
     expect(await readdir(castRoot)).toHaveLength(1);
+
+    // Verify the proactive compaction event includes projection fields.
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    const eventsContent = await readFile(state.runState.eventsFile, "utf8");
+    const events = eventsContent.trim().split("\n").map((line: string) => JSON.parse(line));
+    const compactionStart = events.find((event: any) => event.type === "proactive_compaction_start");
+    expect(compactionStart).toBeDefined();
+    expect(compactionStart.data).toHaveProperty("projectedTokens");
+    expect(compactionStart.data).toHaveProperty("projectedPercent");
+    expect(compactionStart.data).toHaveProperty("projectedOverhead");
+    expect(compactionStart.data.projectedOverhead).toHaveProperty("promptTokens");
+    expect(compactionStart.data.projectedOverhead).toHaveProperty("castContextTokens");
+    expect(compactionStart.data.projectedOverhead).toHaveProperty("systemPromptTokens");
+    expect(compactionStart.data.projectedOverhead).toHaveProperty("safetyMarginTokens");
+    expect(compactionStart.data.projectedOverhead).toHaveProperty("total");
+    expect(typeof compactionStart.data.projectedTokens).toBe("number");
+    expect(compactionStart.data.projectedTokens).toBeGreaterThan(compactionStart.data.tokens);
+    expect(typeof compactionStart.data.projectedPercent).toBe("number");
+    expect(compactionStart.data.projectedPercent).toBeGreaterThan(compactionStart.data.percent);
+
+    // Projected percent should be >= threshold (55% for 272k).
+    expect(compactionStart.data.projectedPercent).toBeGreaterThanOrEqual(55);
   });
 
   test("context isolation retains large active-turn tool results after a below-threshold usage snapshot", async () => {
