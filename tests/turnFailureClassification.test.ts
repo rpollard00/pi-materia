@@ -77,6 +77,74 @@ describe("turn failure classification", () => {
     expect(classifyTurnFailure(error)).toBe("context_window");
   });
 
+  test("explicit request-over-context errors parse as strong context-window signal with overflow telemetry", () => {
+    // qwen / local-model sample: explicit token counts in the error message.
+    const error = new Error("Error: 400 request (132725 tokens) exceeds the available context size (131072 tokens), try increasing it");
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("compact");
+    expect(decision.strongContextSignal).toBe(true);
+    expect(decision.transientProviderSignal).toBe(false);
+    expect(decision.overflowTelemetry).toEqual({
+      requestedTokens: 132725,
+      availableContextTokens: 131072,
+      overflowTokens: 132725 - 131072,
+    });
+    expect(classifyTurnFailure(error)).toBe("context_window");
+    expect(classifyRecoverableTurnFailure(error)).toBe("context_window");
+  });
+
+  test("explicit overflow telemetry handles comma-formatted token counts", () => {
+    const error = new Error("Error: 400 request (132,725 tokens) exceeds the available context length (131,072 tokens), try increasing it");
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("compact");
+    expect(decision.strongContextSignal).toBe(true);
+    expect(decision.overflowTelemetry).toEqual({
+      requestedTokens: 132725,
+      availableContextTokens: 131072,
+      overflowTokens: 132725 - 131072,
+    });
+  });
+
+  test("server_error stays on non-compaction path even with context-like wording", () => {
+    // Server errors with transient provider signals must NOT be classified as context_window.
+    const error = new Error('Error: 500 request exceeds context window Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"The server had an error while processing your request. Sorry about that!"}}');
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("retry_without_compaction");
+    expect(decision.strongContextSignal).toBe(false);
+    expect(decision.transientProviderSignal).toBe(true);
+    expect(decision.overflowTelemetry).toBeUndefined();
+    expect(classifyTurnFailure(error)).toBeUndefined();
+  });
+
+  test("timeout errors stay on non-compaction path", () => {
+    const error = new Error("Error: request timed out while processing context window");
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("retry_without_compaction");
+    expect(decision.strongContextSignal).toBe(false);
+    expect(decision.transientProviderSignal).toBe(true);
+    // Not a context_window — transient wins, falls through for other handling.
+    expect(classifyTurnFailure(error)).not.toBe("context_window");
+  });
+
+  test("unavailable errors stay on non-compaction path", () => {
+    const error = new Error("Service unavailable: the model is currently overloaded, try again later");
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("retry_without_compaction");
+    expect(decision.strongContextSignal).toBe(false);
+    expect(decision.transientProviderSignal).toBe(true);
+    // Not a context_window — falls through for other handling.
+    expect(classifyTurnFailure(error)).toBeUndefined();
+  });
+
+  test("reachability errors stay on non-compaction path", () => {
+    const error = new Error("Network error: connection refused while sending request to context service");
+    const decision = evaluateContextErrorRecovery(error);
+    expect(decision.action).toBe("retry_without_compaction");
+    expect(decision.strongContextSignal).toBe(false);
+    expect(decision.transientProviderSignal).toBe(true);
+    expect(classifyTurnFailure(error)).toBeUndefined();
+  });
+
   test("transient provider payloads win over context wording in wrappers", () => {
     const error = new Error('Context window recovery failed: Codex error: {"type":"error","error":{"type":"server_error","code":"server_error","message":"An error occurred while processing your request. You can retry your request.","param":null},"sequence_number":2}');
     const decision = evaluateContextErrorRecovery(error);

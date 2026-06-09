@@ -15,7 +15,7 @@ import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js"
 import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, MateriaEdgeTraversalExhaustionError, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
 import { classifyTurnFailure, errorMessage, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
-import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction } from "../application/compactionWorkflow.js";
+import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction, type ContextProjectionInput } from "../application/compactionWorkflow.js";
 import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
 import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
@@ -783,12 +783,18 @@ async function runSameSocketRecoveryAction(pi: ExtensionAPI, ctx: ExtensionConte
 }
 
 async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
-  // This is a pre-turn transcript snapshot from Pi core. It does not include
-  // request material added later in this turn: the hidden Materia prompt,
-  // synthetic isolated cast context, before_agent_start system-prompt suffix,
-  // active-turn tool results retained by context isolation, or provider-specific
-  // tokenization overhead. Keep docs/materia-compaction-budgeting.md in sync
-  // when changing this decision point.
+  let projection: ContextProjectionInput | undefined;
+  try {
+    const materia = currentMateria(state);
+    projection = {
+      hiddenPromptContent: state.activeTurnPrompt ?? "",
+      syntheticCastContext: buildSyntheticCastContext(state),
+      systemPromptSuffix: activeMateriaSystemPrompt(state, materia),
+    };
+  } catch {
+    // Utility socket or missing materia; proceed without projection.
+  }
+
   await maybeRunProactiveCompactionWorkflow(ctx, state, {
     loadConfigFromState,
     appendEvent,
@@ -798,7 +804,7 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
     currentSocketId,
     currentSocketVisit,
     shortMetadataLabel,
-  });
+  }, projection);
 }
 
 function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {

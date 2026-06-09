@@ -7,12 +7,19 @@ export interface NormalizedProviderError {
   message?: string;
 }
 
+export interface ContextOverflowTelemetry {
+  requestedTokens: number;
+  availableContextTokens: number;
+  overflowTokens: number;
+}
+
 export interface ContextErrorRecoveryDecision {
   action: ContextErrorRecoveryAction;
   provider: NormalizedProviderError;
   strongContextSignal: boolean;
   transientProviderSignal: boolean;
   message: string;
+  overflowTelemetry?: ContextOverflowTelemetry;
 }
 
 /**
@@ -29,8 +36,10 @@ export function evaluateContextErrorRecovery(error: unknown): ContextErrorRecove
   const provider = normalizeProviderError(message);
   const providerText = [provider.type, provider.code, provider.param, provider.message].filter(Boolean).join(" ");
   const searchText = providerText || message;
+  const overflowTelemetry = parseExplicitOverflowTelemetry(message);
   const transientProviderSignal = hasTransientProviderSignal(provider, message);
-  const strongContextSignal = !transientProviderSignal && hasStrongContextSignal(provider, searchText, Boolean(providerText));
+  const explicitOverflowSignal = overflowTelemetry !== undefined;
+  const strongContextSignal = !transientProviderSignal && (explicitOverflowSignal || hasStrongContextSignal(provider, searchText, Boolean(providerText)));
 
   return {
     action: strongContextSignal ? "compact" : transientProviderSignal ? "retry_without_compaction" : "skip",
@@ -38,6 +47,7 @@ export function evaluateContextErrorRecovery(error: unknown): ContextErrorRecove
     strongContextSignal,
     transientProviderSignal,
     message,
+    overflowTelemetry,
   };
 }
 
@@ -88,6 +98,28 @@ function* embeddedJsonValues(text: string): Generator<unknown> {
       }
     }
   }
+}
+
+/**
+ * Parse explicit token-overflow messages from local-model providers and wrappers.
+ *
+ * Detects patterns like:
+ * `Error: 400 request (132725 tokens) exceeds the available context size (131072 tokens), try increasing it`
+ *
+ * Returns parsed token counts when the message includes explicit per-side counts
+ * with a clear overflow relationship, which is a strong non-transient signal.
+ */
+function parseExplicitOverflowTelemetry(text: string): ContextOverflowTelemetry | undefined {
+  // Match: request (132725 tokens) exceeds the available context size (131072 tokens)
+  // Also handle: request (132,725 tokens) exceeds ... (131,072 tokens)
+  const pattern = /request\s*\(\s*(\d{1,3}(?:,\d{3})*|\d+)\s*tokens?\s*\)\s*exceeds?\s*the\s*(?:available\s*)?context\s*(?:size|length|window|limit)\s*\(\s*(\d{1,3}(?:,\d{3})*|\d+)\s*tokens?\s*\)/i;
+  const match = text.match(pattern);
+  if (!match) return undefined;
+  const requestedTokens = parseInt(match[1].replace(/,/g, ""), 10);
+  const availableContextTokens = parseInt(match[2].replace(/,/g, ""), 10);
+  if (!Number.isSafeInteger(requestedTokens) || !Number.isSafeInteger(availableContextTokens)) return undefined;
+  const overflowTokens = requestedTokens - availableContextTokens;
+  return { requestedTokens, availableContextTokens, overflowTokens };
 }
 
 function hasStrongContextSignal(provider: NormalizedProviderError, text: string, hasProviderPayload: boolean): boolean {
