@@ -38,6 +38,7 @@
     "build:webui": "vite build --config src/webui/client/vite.config.ts && tsc -p src/webui/server/tsconfig.json --noEmit false",
     "test": "bun test",
     "test:watch": "bun test --watch",
+    "test:utilities": "bun test ./utility/tests/blackbeltUtilities.utility.ts ./utility/tests/mimeUtilities.utility.ts",
     "test:webui": "vitest run --config src/webui/client/vitest.config.ts",
     "typecheck": "tsc --noEmit && tsc -p src/webui/client/tsconfig.json --noEmit && tsc -p src/webui/server/tsconfig.json --noEmit",
     "pack:dry-run": "npm pack --dry-run",

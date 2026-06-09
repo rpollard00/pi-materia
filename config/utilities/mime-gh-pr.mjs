@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mime-PR — deterministic git-only GitHub pull request utility.
+ * Mime-GH-PR — deterministic git-only GitHub pull request utility.
  *
  * Pushes the active git branch to a GitHub remote and creates a pull request
  * through the GitHub API.  Uses standard git commands only — no jj dependency.
@@ -22,10 +22,10 @@
  *   2. Latest commit message on the branch (via `git log -1 --format=%s`)
  *   3. The branch name itself
  *
- * Output contract: stdout JSON with top-level `state.mimePr`.
+ * Output contract: stdout JSON with top-level `state.mimeGhPr`.
  * Stderr is reserved for diagnostics.
  * All known failure modes (missing git, missing auth, push failure, API error)
- * return a mimePr failure payload.
+ * return a mimeGhPr failure payload.
  */
 import { execFile } from "node:child_process";
 
@@ -43,7 +43,7 @@ try {
 
   // Require git — no jj fallback.
   if (!(await isCommandAvailable("git"))) {
-    throw new UtilityError("Mime-PR: git is required but was not found on PATH.", {
+    throw new UtilityError("Mime-GH-PR: git is required but was not found on PATH.", {
       available: { git: false },
     });
   }
@@ -51,7 +51,7 @@ try {
   // Verify we are inside a git repo.
   const gitRoot = await resolveGitRoot(cwd);
   if (gitRoot === null) {
-    throw new UtilityError("Mime-PR: no git repository detected. Run Mime-Bootstrap first.", {
+    throw new UtilityError("Mime-GH-PR: no git repository detected. Run Mime-Bootstrap first.", {
       hasGitRepo: false,
     });
   }
@@ -59,7 +59,7 @@ try {
   // Resolve branch name.
   const branchName = await resolveBranchName(input, cwd);
   if (typeof branchName !== "string" || branchName.trim().length === 0) {
-    throw new UtilityError("Mime-PR: no branch resolved. Provide params.branch, check out a branch, or run Mime-Bootstrap first.", {
+    throw new UtilityError("Mime-GH-PR: no branch resolved. Provide params.branch, check out a branch, or run Mime-Bootstrap first.", {
       branchResolved: false,
     });
   }
@@ -67,7 +67,7 @@ try {
   // Verify the branch exists.
   const branchExists = await checkBranchExists(branchName, cwd);
   if (!branchExists) {
-    throw new UtilityError(`Mime-PR: branch "${branchName}" does not exist.`, {
+    throw new UtilityError(`Mime-GH-PR: branch "${branchName}" does not exist.`, {
       branchName,
       branchExists: false,
     });
@@ -77,7 +77,7 @@ try {
   const remote = resolveRemote(params);
   const remoteUrl = await resolveRemoteUrl(remote, cwd);
   if (remoteUrl === null) {
-    throw new UtilityError(`Mime-PR: could not resolve URL for remote "${remote}". Check \`git remote -v\`.`, {
+    throw new UtilityError(`Mime-GH-PR: could not resolve URL for remote "${remote}". Check \`git remote -v\`.`, {
       remote,
       remoteResolved: false,
     });
@@ -86,7 +86,7 @@ try {
   // Resolve repository owner/name.
   const repo = resolveRepo(params, remoteUrl);
   if (repo === null) {
-    throw new UtilityError(`Mime-PR: could not determine GitHub owner/repo from remote URL "${remoteUrl}". Provide params.repo as "owner/name".`, {
+    throw new UtilityError(`Mime-GH-PR: could not determine GitHub owner/repo from remote URL "${remoteUrl}". Provide params.repo as "owner/name".`, {
       remoteUrl,
       repoResolved: false,
     });
@@ -98,7 +98,7 @@ try {
     : "GITHUB_TOKEN";
   const token = process.env[authEnv];
   if (typeof token !== "string" || token.trim().length === 0) {
-    throw new UtilityError(`Mime-PR: GitHub token not found in environment variable "${authEnv}". Set ${authEnv} or configure params.authEnv.`, {
+    throw new UtilityError(`Mime-GH-PR: GitHub token not found in environment variable "${authEnv}". Set ${authEnv} or configure params.authEnv.`, {
       authEnv,
       tokenFound: false,
     });
@@ -112,7 +112,7 @@ try {
   // Push the branch to GitHub.
   const pushResult = await pushBranch(branchName, remote, cwd);
   if (!pushResult.ok) {
-    throw new UtilityError(`Mime-PR: push failed for branch "${branchName}" to remote "${remote}": ${pushResult.error}`, {
+    throw new UtilityError(`Mime-GH-PR: push failed for branch "${branchName}" to remote "${remote}": ${pushResult.error}`, {
       branchName,
       remote,
       pushOk: false,
@@ -137,7 +137,7 @@ try {
   const prResult = await createPullRequest(repo, title, branchName, base, token, apiBaseUrl, { body, draft });
 
   if (!prResult.ok) {
-    throw new UtilityError(`Mime-PR: GitHub API error creating pull request: ${prResult.error}`, {
+    throw new UtilityError(`Mime-GH-PR: GitHub API error creating pull request: ${prResult.error}`, {
       repo,
       prOk: false,
       apiError: prResult.error,
@@ -147,7 +147,7 @@ try {
 
   writeStdoutJson({
     state: {
-      mimePr: {
+      mimeGhPr: {
         ok: true,
         prUrl: prResult.prUrl,
         prNumber: prResult.prNumber,
@@ -162,12 +162,12 @@ try {
   });
 } catch (error) {
   const rawMessage = error instanceof Error ? error.message : String(error);
-  const message = rawMessage.startsWith("Mime-PR:") ? rawMessage : `Mime-PR: ${rawMessage}`;
+  const message = rawMessage.startsWith("Mime-GH-PR:") ? rawMessage : `Mime-GH-PR: ${rawMessage}`;
   const details = error instanceof UtilityError ? error.details : {};
   console.error(message);
   writeStdoutJson({
     state: {
-      mimePr: {
+      mimeGhPr: {
         ok: false,
         error: message,
         ...details,
@@ -342,7 +342,7 @@ async function resolveDefaultBranch(repo, token, apiBaseUrl) {
       headers: {
         "Authorization": `Bearer ${token}`,
         "Accept": "application/vnd.github+json",
-        "User-Agent": "pi-materia-mime-pr",
+        "User-Agent": "pi-materia-mime-gh-pr",
       },
     });
     if (!response.ok) return "main";
@@ -366,7 +366,7 @@ async function createPullRequest(repo, title, head, base, token, apiBaseUrl, { b
         "Authorization": `Bearer ${token}`,
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
-        "User-Agent": "pi-materia-mime-pr",
+        "User-Agent": "pi-materia-mime-gh-pr",
       },
       body: JSON.stringify(payload),
     });
