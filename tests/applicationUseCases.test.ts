@@ -51,6 +51,7 @@ describe("application use cases", () => {
       resolve(config) { calls.push(`resolve:${config.activeLoadout}`); return pipeline(); },
       renderGrid(_config, resolved, source, cwd) { return [`${source}:${cwd}:${resolved.entry.id}`]; },
       renderLoadoutList(config, source) { return [`${source}:${config.activeLoadout}`]; },
+      renderLoadoutCatalog(config, source, _loadoutSources) { return [`${source}:${config.activeLoadout}`]; },
     };
     const useCases = new LoadoutUseCases({ configs, pipeline: presenter });
 

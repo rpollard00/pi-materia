@@ -129,11 +129,18 @@ describe("FakePiHarness", () => {
 
     await harness.runCommand("materia", "loadout");
     const listed = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(listed.content).toContain("⌘ Full-Auto");
-    expect(listed.content).toContain("Full-Auto*");
+    // Catalog output: header line, blank line, then one line per loadout with active marker and id/source
+    expect(listed.content).toContain("loadout(s) from");
+    expect(listed.content).toContain("Full-Auto");
+    expect(listed.content).toContain("*");
     expect(listed.content).toContain("Planning-Consult");
-    expect(listed.content).not.toContain("Loadout:");
-    expect(listed.content).not.toContain("Available:");
+    expect(listed.content).toContain("id:default:full-auto");
+    expect(listed.content).toContain("id:default:planning-consult");
+    // No truncation suffix anywhere
+    expect(listed.content).not.toContain("+0");
+    expect(listed.content).not.toContain("+1");
+    expect(listed.content).not.toContain("+2");
+    expect(listed.content).not.toMatch(/\+\d/);
     expect(harness.widgets.get("materia-loadouts")?.content).toBeUndefined();
 
     await harness.runCommand("materia", "loadout Planning-Consult");
@@ -192,6 +199,41 @@ describe("FakePiHarness", () => {
     expect(switched.content).not.toContain("Loadout:");
     expect(switched.content).not.toContain("Available:");
     expect(harness.operationLog).not.toContain("triggerTurn");
+  });
+
+  test("shows complete loadout catalog with more than four loadouts and no truncation", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-command-catalog-"));
+    const configFile = path.join(dir, ".pi", "pi-materia.json");
+    await mkdir(path.dirname(configFile), { recursive: true });
+    const customLoadouts: Record<string, unknown> = {};
+    for (let i = 1; i <= 7; i += 1) {
+      customLoadouts[`Loadout-${i}`] = {
+        id: `custom:loadout-${i}`,
+        entry: "Socket-1",
+        sockets: { "Socket-1": { materia: "planner" } },
+      };
+    }
+    await writeFile(configFile, JSON.stringify({
+      activeLoadout: "Loadout-3",
+      loadouts: customLoadouts,
+      materia: {
+        planner: { type: "utility", utility: "echo", params: { text: "ok" } },
+      },
+    }), "utf8");
+    const harness = new FakePiHarness(dir);
+    piMateria(harness.pi);
+
+    await harness.runCommand("materia", "loadout");
+    const listed = harness.sentMessages.at(-1)?.message as { content?: string };
+    // All 7 custom loadouts plus the 4 default loadouts = 11 total (custom overrides default names when non-overlapping)
+    expect(listed.content).toContain("loadout(s) from");
+    // Last configured custom loadout present
+    expect(listed.content).toContain("Loadout-7");
+    // Active marker present
+    expect(listed.content).toContain("*");
+    expect(listed.content).toContain("Loadout-3");
+    // No truncation suffix
+    expect(listed.content).not.toMatch(/\+\d/);
   });
 
   test("reports valid options for an unknown /materia loadout", async () => {

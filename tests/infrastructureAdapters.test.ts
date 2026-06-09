@@ -7,7 +7,7 @@ describe("infrastructure adapters", () => {
   test("compose the workflow ports consumed by application services", () => {
     const adapters = createMateriaPluginAdapters({ MATERIA_CONFIG: "custom.json" });
     expect(adapters.configs).toEqual(createConfigRepository());
-    expect(Object.keys(adapters.pipeline).sort()).toEqual(["renderGrid", "renderLoadoutList", "resolve"]);
+    expect(Object.keys(adapters.pipeline).sort()).toEqual(["renderGrid", "renderLoadoutCatalog", "renderLoadoutList", "resolve"]);
     expect(Object.keys(adapters.states).sort()).toEqual(["listLatest", "listResumable", "listRevivable", "loadActive"]);
     expect(Object.keys(adapters.artifacts)).toEqual(["renderCastList"]);
     expect(Object.keys(adapters.context)).toEqual(["buildIsolatedContext"]);
