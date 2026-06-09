@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Blackbelt-PR — deterministic jj-only GitHub pull request utility.
+ * Blackbelt-GH-PR — deterministic jj-only GitHub pull request utility.
  *
  * Pushes a specified or inferred jj bookmark to a GitHub remote and creates
  * a pull request through the GitHub API.  Requires jj (no git fallback).
@@ -24,10 +24,10 @@
  *   2. First line of the bookmarked revision's jj description
  *   3. The bookmark name itself
  *
- * Output contract: stdout JSON with top-level `state.blackbeltPr`.
+ * Output contract: stdout JSON with top-level `state.blackbeltGhPr`.
  * Stderr is reserved for diagnostics.
  * All known failure modes (missing jj, missing auth, unresolved bookmark,
- * push failure, API error) return a blackbeltPr failure payload.
+ * push failure, API error) return a blackbeltGhPr failure payload.
  */
 import { execFile } from "node:child_process";
 
@@ -45,7 +45,7 @@ try {
 
   // Require jj — no git fallback.
   if (!(await isCommandAvailable("jj"))) {
-    throw new UtilityError("Blackbelt-PR: jj is required but was not found on PATH.", {
+    throw new UtilityError("Blackbelt-GH-PR: jj is required but was not found on PATH.", {
       available: { jj: false },
     });
   }
@@ -53,7 +53,7 @@ try {
   // Verify we are inside a jj repo.
   const jjRoot = await resolveJjRoot(cwd);
   if (jjRoot === null) {
-    throw new UtilityError("Blackbelt-PR: no jj repository detected. Run Blackbelt-Bootstrap first.", {
+    throw new UtilityError("Blackbelt-GH-PR: no jj repository detected. Run Blackbelt-Bootstrap first.", {
       hasJjRepo: false,
     });
   }
@@ -61,7 +61,7 @@ try {
   // Resolve bookmark name.
   const bookmarkName = resolveBookmarkName(input) ?? resolveBootstrapBookmark(input);
   if (typeof bookmarkName !== "string" || bookmarkName.trim().length === 0) {
-    throw new UtilityError("Blackbelt-PR: no bookmark resolved. Provide params.bookmark or run Blackbelt-Bootstrap first.", {
+    throw new UtilityError("Blackbelt-GH-PR: no bookmark resolved. Provide params.bookmark or run Blackbelt-Bootstrap first.", {
       bookmarkResolved: false,
     });
   }
@@ -75,7 +75,7 @@ try {
     // Validate that the revision can be resolved.
     const revisionExists = await checkRevisionExists(revision, cwd);
     if (!revisionExists) {
-      throw new UtilityError(`Blackbelt-PR: revision "${revision}" could not be resolved.`, {
+      throw new UtilityError(`Blackbelt-GH-PR: revision "${revision}" could not be resolved.`, {
         revision,
         revisionResolved: false,
       });
@@ -84,7 +84,7 @@ try {
     // Set (or create) the bookmark to point at the requested revision.
     const setResult = await setBookmarkRevision(bookmarkName, revision, cwd);
     if (!setResult.ok) {
-      throw new UtilityError(`Blackbelt-PR: failed to set bookmark "${bookmarkName}" to revision "${revision}": ${setResult.error}`, {
+      throw new UtilityError(`Blackbelt-GH-PR: failed to set bookmark "${bookmarkName}" to revision "${revision}": ${setResult.error}`, {
         bookmarkName,
         revision,
         bookmarkSetOk: false,
@@ -95,7 +95,7 @@ try {
     // No revision specified — verify the bookmark exists.
     const bookmarkExists = await checkBookmarkExists(bookmarkName, cwd);
     if (!bookmarkExists) {
-      throw new UtilityError(`Blackbelt-PR: bookmark "${bookmarkName}" does not exist.`, {
+      throw new UtilityError(`Blackbelt-GH-PR: bookmark "${bookmarkName}" does not exist.`, {
         bookmarkName,
         bookmarkExists: false,
       });
@@ -106,7 +106,7 @@ try {
   const remote = resolveRemote(params);
   const remoteUrl = await resolveRemoteUrl(remote, cwd);
   if (remoteUrl === null) {
-    throw new UtilityError(`Blackbelt-PR: could not resolve URL for remote "${remote}". Check jj git remote list.`, {
+    throw new UtilityError(`Blackbelt-GH-PR: could not resolve URL for remote "${remote}". Check jj git remote list.`, {
       remote,
       remoteResolved: false,
     });
@@ -115,7 +115,7 @@ try {
   // Resolve repository owner/name.
   const repo = resolveRepo(params, remoteUrl);
   if (repo === null) {
-    throw new UtilityError(`Blackbelt-PR: could not determine GitHub owner/repo from remote URL "${remoteUrl}". Provide params.repo as "owner/name".`, {
+    throw new UtilityError(`Blackbelt-GH-PR: could not determine GitHub owner/repo from remote URL "${remoteUrl}". Provide params.repo as "owner/name".`, {
       remoteUrl,
       repoResolved: false,
     });
@@ -127,7 +127,7 @@ try {
     : "GITHUB_TOKEN";
   const token = process.env[authEnv];
   if (typeof token !== "string" || token.trim().length === 0) {
-    throw new UtilityError(`Blackbelt-PR: GitHub token not found in environment variable "${authEnv}". Set ${authEnv} or configure params.authEnv.`, {
+    throw new UtilityError(`Blackbelt-GH-PR: GitHub token not found in environment variable "${authEnv}". Set ${authEnv} or configure params.authEnv.`, {
       authEnv,
       tokenFound: false,
     });
@@ -146,7 +146,7 @@ try {
   if (!preflight.pushable) {
     if (preflight.reason === "unnamedRevision") {
       throw new UtilityError(
-        `Blackbelt-PR: unpushable unnamed revision "${preflight.revision}" for bookmark "${bookmarkName}". ` +
+        `Blackbelt-GH-PR: unpushable unnamed revision "${preflight.revision}" for bookmark "${bookmarkName}". ` +
           `The revision has changes but no description — jj git push requires a commit description. ` +
           `Describe the revision before pushing, e.g.: jj describe -r ${preflight.revision} -m "your message"`,
         {
@@ -158,7 +158,7 @@ try {
       );
     }
     throw new UtilityError(
-      `Blackbelt-PR: no pushable revision for bookmark "${bookmarkName}". ` +
+      `Blackbelt-GH-PR: no pushable revision for bookmark "${bookmarkName}". ` +
         `The bookmark points to an empty, descriptionless commit with no non-empty ancestor. ` +
         `Describe the working commit or ensure there are changes before pushing.`,
       {
@@ -174,7 +174,7 @@ try {
   // Push the bookmark to GitHub.
   const pushResult = await pushBookmark(bookmarkName, remote, cwd);
   if (!pushResult.ok) {
-    throw new UtilityError(`Blackbelt-PR: push failed for bookmark "${bookmarkName}" to remote "${remote}": ${pushResult.error}`, {
+    throw new UtilityError(`Blackbelt-GH-PR: push failed for bookmark "${bookmarkName}" to remote "${remote}": ${pushResult.error}`, {
       bookmarkName,
       remote,
       pushOk: false,
@@ -199,7 +199,7 @@ try {
   const prResult = await createPullRequest(repo, title, bookmarkName, base, token, apiBaseUrl, { body, draft });
 
   if (!prResult.ok) {
-    throw new UtilityError(`Blackbelt-PR: GitHub API error creating pull request: ${prResult.error}`, {
+    throw new UtilityError(`Blackbelt-GH-PR: GitHub API error creating pull request: ${prResult.error}`, {
       repo,
       prOk: false,
       apiError: prResult.error,
@@ -209,7 +209,7 @@ try {
 
   writeStdoutJson({
     state: {
-      blackbeltPr: {
+      blackbeltGhPr: {
         ok: true,
         prUrl: prResult.prUrl,
         prNumber: prResult.prNumber,
@@ -226,12 +226,12 @@ try {
   });
 } catch (error) {
   const rawMessage = error instanceof Error ? error.message : String(error);
-  const message = rawMessage.startsWith("Blackbelt-PR:") ? rawMessage : `Blackbelt-PR: ${rawMessage}`;
+  const message = rawMessage.startsWith("Blackbelt-GH-PR:") ? rawMessage : `Blackbelt-GH-PR: ${rawMessage}`;
   const details = error instanceof UtilityError ? error.details : {};
   console.error(message);
   writeStdoutJson({
     state: {
-      blackbeltPr: {
+      blackbeltGhPr: {
         ok: false,
         error: message,
         ...details,
@@ -422,7 +422,7 @@ async function inferPrTitle(bookmarkName, revision, params, cwd) {
     // If the user explicitly provided a revision (and it was validated earlier),
     // this should not fail — escalate instead of silently falling back.
     if (revision !== null) {
-      throw new UtilityError(`Blackbelt-PR: could not read description for revision "${revForDescription}": ${formatExecError(error)}`, {
+      throw new UtilityError(`Blackbelt-GH-PR: could not read description for revision "${revForDescription}": ${formatExecError(error)}`, {
         revision,
         descriptionResolved: false,
       });
@@ -588,7 +588,7 @@ async function resolveDefaultBranch(repo, token, apiBaseUrl) {
       headers: {
         "Authorization": `Bearer ${token}`,
         "Accept": "application/vnd.github+json",
-        "User-Agent": "pi-materia-blackbelt-pr",
+        "User-Agent": "pi-materia-blackbelt-gh-pr",
       },
     });
     if (!response.ok) return "main";
@@ -612,7 +612,7 @@ async function createPullRequest(repo, title, head, base, token, apiBaseUrl, { b
         "Authorization": `Bearer ${token}`,
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
-        "User-Agent": "pi-materia-blackbelt-pr",
+        "User-Agent": "pi-materia-blackbelt-gh-pr",
       },
       body: JSON.stringify(payload),
     });

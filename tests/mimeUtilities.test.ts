@@ -6,7 +6,7 @@ import path from "node:path";
 
 const bootstrapScript = path.resolve("config", "utilities", "mime-bootstrap.mjs");
 const maintainScript = path.resolve("config", "utilities", "mime-maintain.mjs");
-const prScript = path.resolve("config", "utilities", "mime-pr.mjs");
+const prScript = path.resolve("config", "utilities", "mime-gh-pr.mjs");
 
 // ---------------------------------------------------------------------------
 // Fake git for bootstrap tests
@@ -231,7 +231,7 @@ async function runMaintain(
 }
 
 // ---------------------------------------------------------------------------
-// Fake GitHub API server for PR tests (shared with blackbelt-pr pattern)
+// Fake GitHub API server for PR tests (shared with blackbelt-gh-pr pattern)
 // ---------------------------------------------------------------------------
 function startFakeGitHubApi() {
   let simulatedApiError: string | null = null;
@@ -291,7 +291,7 @@ async function runPrUtility(
   opts: { noGit?: boolean } = {},
 ) {
   const fake = opts.noGit ? null : await makeFakeGitForPr();
-  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-mime-pr-cwd-"));
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-mime-gh-pr-cwd-"));
 
   const params =
     typeof input.params === "object" && input.params !== null
@@ -613,10 +613,10 @@ describe("Mime-Maintain utility script", () => {
 });
 
 // =========================================================================
-// Mime-PR tests
+// Mime-GH-PR tests
 // =========================================================================
 
-describe("Mime-PR utility script", () => {
+describe("Mime-GH-PR utility script", () => {
   test("fails with clear error when git is not available (no jj fallback)", async () => {
     const api = startFakeGitHubApi();
     try {
@@ -633,8 +633,8 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toMatch(/git is required|git|git/);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toMatch(/git is required|git|git/);
     } finally {
       api.server.stop();
     }
@@ -653,9 +653,9 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("GITHUB_TOKEN");
-      expect(result.json.state.mimePr.tokenFound).toBe(false);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("GITHUB_TOKEN");
+      expect(result.json.state.mimeGhPr.tokenFound).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -674,9 +674,9 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("GH_PAT");
-      expect(result.json.state.mimePr.tokenFound).toBe(false);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("GH_PAT");
+      expect(result.json.state.mimeGhPr.tokenFound).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -695,9 +695,9 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("nonexistent-branch");
-      expect(result.json.state.mimePr.branchExists).toBe(false);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("nonexistent-branch");
+      expect(result.json.state.mimeGhPr.branchExists).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -716,9 +716,9 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("push failed");
-      expect(result.json.state.mimePr.pushOk).toBe(false);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("push failed");
+      expect(result.json.state.mimeGhPr.pushOk).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -738,9 +738,9 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("GitHub API error");
-      expect(result.json.state.mimePr.apiStatus).toBe(422);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("GitHub API error");
+      expect(result.json.state.mimeGhPr.apiStatus).toBe(422);
     } finally {
       api.server.stop();
     }
@@ -760,9 +760,9 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("Bad credentials");
-      expect(result.json.state.mimePr.apiStatus).toBe(401);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("Bad credentials");
+      expect(result.json.state.mimeGhPr.apiStatus).toBe(401);
     } finally {
       api.server.stop();
     }
@@ -781,8 +781,8 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("no git repository");
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("no git repository");
     } finally {
       api.server.stop();
     }
@@ -801,8 +801,8 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
-      expect(result.json.state.mimePr.error).toContain("no branch resolved");
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.error).toContain("no branch resolved");
     } finally {
       api.server.stop();
     }
@@ -828,14 +828,14 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
-      expect(result.json.state.mimePr.prNumber).toBe(42);
-      expect(result.json.state.mimePr.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
-      expect(result.json.state.mimePr.branchName).toBe("mime/test-branch");
-      expect(result.json.state.mimePr.title).toBe("feat: custom pr title");
-      expect(result.json.state.mimePr.base).toBe("develop");
-      expect(result.json.state.mimePr.draft).toBe(true);
-      expect(result.json.state.mimePr.repo).toBe("test-owner/test-repo");
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.prNumber).toBe(42);
+      expect(result.json.state.mimeGhPr.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
+      expect(result.json.state.mimeGhPr.branchName).toBe("mime/test-branch");
+      expect(result.json.state.mimeGhPr.title).toBe("feat: custom pr title");
+      expect(result.json.state.mimeGhPr.base).toBe("develop");
+      expect(result.json.state.mimeGhPr.draft).toBe(true);
+      expect(result.json.state.mimeGhPr.repo).toBe("test-owner/test-repo");
     } finally {
       api.server.stop();
     }
@@ -857,8 +857,8 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
-      expect(result.json.state.mimePr.title).toBe("fix: inferred from git log");
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.title).toBe("fix: inferred from git log");
     } finally {
       api.server.stop();
     }
@@ -880,8 +880,8 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
-      expect(result.json.state.mimePr.title).toBe("mime/test-branch");
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.title).toBe("mime/test-branch");
     } finally {
       api.server.stop();
     }
@@ -907,9 +907,9 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
-      expect(result.json.state.mimePr.branchName).toBe("mime/test-branch");
-      expect(result.json.state.mimePr.title).toBe("chore: from bootstrap state");
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.branchName).toBe("mime/test-branch");
+      expect(result.json.state.mimeGhPr.title).toBe("chore: from bootstrap state");
     } finally {
       api.server.stop();
     }
@@ -932,8 +932,8 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
-      expect(result.json.state.mimePr.branchName).toBe("mime/test-branch");
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.branchName).toBe("mime/test-branch");
     } finally {
       api.server.stop();
     }
@@ -957,7 +957,7 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
     } finally {
       api.server.stop();
     }
@@ -1006,7 +1006,7 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
       const logContent = await readFile(result.fake!.log, "utf8");
       expect(logContent).toContain("remote get-url upstream");
     } finally {
@@ -1033,8 +1033,8 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.mimePr.ok).toBe(true);
-      expect(result.json.state.mimePr.repo).toBe("auto-owner/auto-repo");
+      expect(result.json.state.mimeGhPr.ok).toBe(true);
+      expect(result.json.state.mimeGhPr.repo).toBe("auto-owner/auto-repo");
     } finally {
       api.server.stop();
     }
@@ -1064,10 +1064,10 @@ describe("Mime-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.mimePr.ok).toBe(false);
+      expect(result.json.state.mimeGhPr.ok).toBe(false);
       // Error should mention git, not jj
-      expect(result.json.state.mimePr.error).toMatch(/git/);
-      expect(result.json.state.mimePr.error).not.toMatch(/\bjj\b/);
+      expect(result.json.state.mimeGhPr.error).toMatch(/git/);
+      expect(result.json.state.mimeGhPr.error).not.toMatch(/\bjj\b/);
     } finally {
       api.server.stop();
     }

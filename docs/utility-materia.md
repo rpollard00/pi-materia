@@ -229,7 +229,7 @@ Some utility generators are validators that do not transform `workItems`. `Commi
 
 ## Bundled utility scripts
 
-The default config defines `Ignore-Artifacts`, `Detect-VCS`, `Blackbelt-Bootstrap`, `Blackbelt-Maintain`, `Blackbelt-PR`, and `Commit-Sigil` as shipped-script utility materia that run profile-resolved copies of their scripts. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Current ids `ensureArtifactsIgnored` and `detectVcs`, current aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `currentUtilityVcsDetect...` are obsolete input, not canonical shipped ids.
+The default config defines `Ignore-Artifacts`, `Detect-VCS`, `Blackbelt-Bootstrap`, `Blackbelt-Maintain`, `Blackbelt-GH-PR`, and `Commit-Sigil` as shipped-script utility materia that run profile-resolved copies of their scripts. These scripts use only Node standard APIs, stdin JSON, stdout JSON, and stderr diagnostics. Current ids `ensureArtifactsIgnored` and `detectVcs`, current aliases `project.ensureIgnored` and `vcs.detect`, and generated ids such as `currentUtilityVcsDetect...` are obsolete input, not canonical shipped ids.
 
 ### Blackbelt-Bootstrap
 
@@ -277,9 +277,9 @@ When validation fails, `satisfied` is `false` and `context` includes item indice
 
 For empty input the script emits `workItems: []` with `satisfied: true`. `Commit-Sigil` never emits `tasks`, `work`, broad-envelope fields, or state patches. Routing consumption is configured on the socket (e.g. `consumes: { "from": "Socket-9", "output": "workItems" }`) while edges key on `satisfied` / `not_satisfied` to advance or loop back.
 
-### Blackbelt-PR
+### Blackbelt-GH-PR
 
-`Blackbelt-PR` is a deterministic **jj-only** utility in the blackbelt family (no git fallback). It pushes a specified or inferred jj bookmark to a GitHub remote and creates a pull request through the GitHub API. If `jj` is unavailable, no jj repository is detected, or git is suggested as a fallback, the utility hard-fails with a clear diagnostic.
+`Blackbelt-GH-PR` is a deterministic **jj-only** utility in the blackbelt family (no git fallback). It pushes a specified or inferred jj bookmark to a GitHub remote and creates a pull request through the GitHub API. If `jj` is unavailable, no jj repository is detected, or git is suggested as a fallback, the utility hard-fails with a clear diagnostic.
 
 #### Parameters
 
@@ -316,12 +316,12 @@ The utility resolves the PR title from the first available source:
 
 #### Output contract
 
-On success, writes deterministic state under `state.blackbeltPr`:
+On success, writes deterministic state under `state.blackbeltGhPr`:
 
 ```json
 {
   "state": {
-    "blackbeltPr": {
+    "blackbeltGhPr": {
       "ok": true,
       "prUrl": "https://github.com/owner/repo/pull/42",
       "prNumber": 42,
@@ -337,7 +337,7 @@ On success, writes deterministic state under `state.blackbeltPr`:
 }
 ```
 
-On failure, writes a failure payload with `ok: false` and diagnostic details under the same `state.blackbeltPr` key. Failure payloads include specific boolean flags (`available.jj`, `hasJjRepo`, `bookmarkExists`, `revisionResolved`, `bookmarkSetOk`, `remoteResolved`, `repoResolved`, `tokenFound`, `pushOk`, `prOk`, `apiStatus`) so downstream routing can distinguish failure modes without parsing error strings. Non-zero exit codes signal failure to pi-materia.
+On failure, writes a failure payload with `ok: false` and diagnostic details under the same `state.blackbeltGhPr` key. Failure payloads include specific boolean flags (`available.jj`, `hasJjRepo`, `bookmarkExists`, `revisionResolved`, `bookmarkSetOk`, `remoteResolved`, `repoResolved`, `tokenFound`, `pushOk`, `prOk`, `apiStatus`) so downstream routing can distinguish failure modes without parsing error strings. Non-zero exit codes signal failure to pi-materia.
 
 #### Auth setup
 
@@ -441,7 +441,7 @@ Utilities that make outbound HTTP calls to external APIs must:
 
 #### Own your state key
 
-Each external integration utility must write its results under a single top-level key inside the `state` object that is unique to that utility (e.g. `state.blackbeltPr`, `state.releasePlease`, `state.containerRegistry`). Never write directly into a shared namespace or into fields owned by another utility.
+Each external integration utility must write its results under a single top-level key inside the `state` object that is unique to that utility (e.g. `state.blackbeltGhPr`, `state.releasePlease`, `state.containerRegistry`). Never write directly into a shared namespace or into fields owned by another utility.
 
 #### Include diagnostic booleans
 
@@ -473,7 +473,7 @@ Do not mix utility state patches into agent-authored JSON. Agents must not emit 
 
 ### Testing external integration utilities
 
-Test external integration utilities by mocking the external service at the HTTP level (not by mocking credential resolution). The blackbelt-pr test suite demonstrates this pattern:
+Test external integration utilities by mocking the external service at the HTTP level (not by mocking credential resolution). The blackbelt-gh-pr test suite demonstrates this pattern:
 
 - Start a local HTTP server that responds to expected API endpoints.
 - Inject the server URL via a utility parameter (`apiBaseUrl`).

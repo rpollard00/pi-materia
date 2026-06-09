@@ -76,9 +76,9 @@ describe("bundled utility materia defaults", () => {
       script: { kind: "shippedUtility", name: "mime-maintain.mjs", runtime: "node" },
       parse: "json",
     });
-    expect(config.materia?.["Mime-PR"]).toMatchObject({
+    expect(config.materia?.["Mime-GH-PR"]).toMatchObject({
       type: "utility",
-      script: { kind: "shippedUtility", name: "mime-pr.mjs", runtime: "node" },
+      script: { kind: "shippedUtility", name: "mime-gh-pr.mjs", runtime: "node" },
       parse: "json",
     });
     expect((config.materia?.["Ignore-Artifacts"] as { assign?: unknown }).assign).toBeUndefined();
@@ -87,14 +87,14 @@ describe("bundled utility materia defaults", () => {
     expect((config.materia?.["Blackbelt-Maintain"] as { assign?: unknown }).assign).toBeUndefined();
     expect((config.materia?.["Mime-Bootstrap"] as { assign?: unknown }).assign).toBeUndefined();
     expect((config.materia?.["Mime-Maintain"] as { assign?: unknown }).assign).toBeUndefined();
-    expect((config.materia?.["Mime-PR"] as { assign?: unknown }).assign).toBeUndefined();
+    expect((config.materia?.["Mime-GH-PR"] as { assign?: unknown }).assign).toBeUndefined();
     expect((config.materia?.["Ignore-Artifacts"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Detect-VCS"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Blackbelt-Bootstrap"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Blackbelt-Maintain"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Mime-Bootstrap"] as { command?: unknown }).command).toBeUndefined();
     expect((config.materia?.["Mime-Maintain"] as { command?: unknown }).command).toBeUndefined();
-    expect((config.materia?.["Mime-PR"] as { command?: unknown }).command).toBeUndefined();
+    expect((config.materia?.["Mime-GH-PR"] as { command?: unknown }).command).toBeUndefined();
     expect(packageJson.files).toContain("config/default.json");
     expect(config.materia?.ensureArtifactsIgnored).toBeUndefined();
     expect(config.materia?.detectVcs).toBeUndefined();
@@ -113,10 +113,10 @@ describe("bundled utility materia defaults", () => {
     await expect(access(path.resolve("config", "utilities", "blackbelt-bootstrap.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "blackbelt-maintain.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "commit-sigil.mjs"))).resolves.toBeNull();
-    await expect(access(path.resolve("config", "utilities", "blackbelt-pr.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "blackbelt-gh-pr.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "mime-bootstrap.mjs"))).resolves.toBeNull();
     await expect(access(path.resolve("config", "utilities", "mime-maintain.mjs"))).resolves.toBeNull();
-    await expect(access(path.resolve("config", "utilities", "mime-pr.mjs"))).resolves.toBeNull();
+    await expect(access(path.resolve("config", "utilities", "mime-gh-pr.mjs"))).resolves.toBeNull();
   });
 
   test("Blackbelt-Bootstrap has correct shipped-utility config shape, parse, color, and metadata", async () => {
@@ -199,16 +199,16 @@ describe("bundled utility materia defaults", () => {
     expect((materia as { command?: unknown }).command).toBeUndefined();
   });
 
-  test("Mime-PR has correct shipped-utility config shape, parse, color, and metadata", async () => {
+  test("Mime-GH-PR has correct shipped-utility config shape, parse, color, and metadata", async () => {
     const config = await loadDefaultConfig();
-    const materia = config.materia?.["Mime-PR"];
+    const materia = config.materia?.["Mime-GH-PR"];
 
     expect(materia).toBeDefined();
     expect(materia?.type).toBe("utility");
-    expect(materia?.label).toBe("Mime-PR");
+    expect(materia?.label).toBe("Mime-GH-PR");
     expect(materia?.group).toBe("Utility");
     expect(materia?.parse).toBe("json");
-    expect(materia?.script).toEqual({ kind: "shippedUtility", name: "mime-pr.mjs", runtime: "node" });
+    expect(materia?.script).toEqual({ kind: "shippedUtility", name: "mime-gh-pr.mjs", runtime: "node" });
     expect(typeof materia?.description).toBe("string");
     expect((materia?.description as string).includes("pull request")).toBe(true);
     expect((materia?.description as string).includes("git")).toBe(true);
@@ -226,7 +226,7 @@ describe("bundled utility materia defaults", () => {
       for (const [socketId, socket] of Object.entries((loadout as { sockets?: Record<string, { materia?: string }> }).sockets ?? {})) {
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-Bootstrap`).not.toBe("Mime-Bootstrap");
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-Maintain`).not.toBe("Mime-Maintain");
-        expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-PR`).not.toBe("Mime-PR");
+        expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-GH-PR`).not.toBe("Mime-GH-PR");
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-Bootstrap`).not.toBe("Blackbelt-Bootstrap");
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Blackbelt-Maintain`).not.toBe("Blackbelt-Maintain");
       }
@@ -251,13 +251,13 @@ describe("bundled utility materia defaults", () => {
       const entries = await readdir(utilitiesDir);
       expect(entries).toContain("blackbelt-bootstrap.mjs");
       expect(entries).toContain("blackbelt-maintain.mjs");
-      expect(entries).toContain("blackbelt-pr.mjs");
+      expect(entries).toContain("blackbelt-gh-pr.mjs");
       expect(entries).toContain("mime-bootstrap.mjs");
       expect(entries).toContain("mime-maintain.mjs");
-      expect(entries).toContain("mime-pr.mjs");
+      expect(entries).toContain("mime-gh-pr.mjs");
 
       // Verify each script is copied with content
-      for (const name of ["blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs", "blackbelt-pr.mjs", "mime-bootstrap.mjs", "mime-maintain.mjs", "mime-pr.mjs"]) {
+      for (const name of ["blackbelt-bootstrap.mjs", "blackbelt-maintain.mjs", "blackbelt-gh-pr.mjs", "mime-bootstrap.mjs", "mime-maintain.mjs", "mime-gh-pr.mjs"]) {
         const scriptContent = await readFile(path.join(utilitiesDir, name), "utf8");
         expect(scriptContent).toBeTruthy();
       }
@@ -271,8 +271,8 @@ describe("bundled utility materia defaults", () => {
       expect(manifest.utilities["mime-bootstrap.mjs"].profileFile).toBe("mime-bootstrap.mjs");
       expect(manifest.utilities["mime-maintain.mjs"]).toBeDefined();
       expect(manifest.utilities["mime-maintain.mjs"].profileFile).toBe("mime-maintain.mjs");
-      expect(manifest.utilities["mime-pr.mjs"]).toBeDefined();
-      expect(manifest.utilities["mime-pr.mjs"].profileFile).toBe("mime-pr.mjs");
+      expect(manifest.utilities["mime-gh-pr.mjs"]).toBeDefined();
+      expect(manifest.utilities["mime-gh-pr.mjs"].profileFile).toBe("mime-gh-pr.mjs");
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

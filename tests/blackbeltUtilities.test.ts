@@ -6,7 +6,7 @@ import path from "node:path";
 
 const bootstrapScript = path.resolve("config", "utilities", "blackbelt-bootstrap.mjs");
 const maintainScript = path.resolve("config", "utilities", "blackbelt-maintain.mjs");
-const prScript = path.resolve("config", "utilities", "blackbelt-pr.mjs");
+const prScript = path.resolve("config", "utilities", "blackbelt-gh-pr.mjs");
 
 async function makeFakeJj() {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-fake-jj-"));
@@ -39,7 +39,7 @@ esac
 }
 
 /**
- * Create a fake jj that supports the specific commands used by blackbelt-pr.
+ * Create a fake jj that supports the specific commands used by blackbelt-gh-pr.
  *
  * Supports:
  *   jj root             → prints cwd
@@ -348,7 +348,7 @@ describe("Blackbelt utility scripts", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Blackbelt-PR tests
+// Blackbelt-GH-PR tests
 // ---------------------------------------------------------------------------
 
 /**
@@ -399,7 +399,7 @@ function startFakeGitHubApi() {
 }
 
 /**
- * Run the blackbelt-pr utility script against a fake jj and a fake GitHub API.
+ * Run the blackbelt-gh-pr utility script against a fake jj and a fake GitHub API.
  *
  * Injects `params.apiBaseUrl` automatically from the fake API server.
  * If `noJj` is true, the fake jj dir is NOT prepended to PATH (and the
@@ -440,7 +440,7 @@ async function runPrUtility(
   return { stdout, stderr, exitCode, json: JSON.parse(stdout), fake };
 }
 
-describe("Blackbelt-PR utility script", () => {
+describe("Blackbelt-GH-PR utility script", () => {
   test("fails with clear error when jj is not available (no git fallback)", async () => {
     const api = startFakeGitHubApi();
     try {
@@ -464,10 +464,10 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
       // We may get "jj is required" (jj not on PATH) or "no jj repository"
       // (jj found but no repo). Both are valid no-git-fallback failures.
-      expect(result.json.state.blackbeltPr.error).toMatch(/jj is required|no jj repository/);
+      expect(result.json.state.blackbeltGhPr.error).toMatch(/jj is required|no jj repository/);
     } finally {
       api.server.stop();
     }
@@ -486,9 +486,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("GH_PAT");
-      expect(result.json.state.blackbeltPr.tokenFound).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("GH_PAT");
+      expect(result.json.state.blackbeltGhPr.tokenFound).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -507,9 +507,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("nonexistent-bookmark");
-      expect(result.json.state.blackbeltPr.bookmarkExists).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("nonexistent-bookmark");
+      expect(result.json.state.blackbeltGhPr.bookmarkExists).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -528,9 +528,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("push failed");
-      expect(result.json.state.blackbeltPr.pushOk).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("push failed");
+      expect(result.json.state.blackbeltGhPr.pushOk).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -550,9 +550,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("GitHub API error");
-      expect(result.json.state.blackbeltPr.apiStatus).toBe(422);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("GitHub API error");
+      expect(result.json.state.blackbeltGhPr.apiStatus).toBe(422);
     } finally {
       api.server.stop();
     }
@@ -572,9 +572,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("Bad credentials");
-      expect(result.json.state.blackbeltPr.apiStatus).toBe(401);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("Bad credentials");
+      expect(result.json.state.blackbeltGhPr.apiStatus).toBe(401);
     } finally {
       api.server.stop();
     }
@@ -600,14 +600,14 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.prNumber).toBe(42);
-      expect(result.json.state.blackbeltPr.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
-      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
-      expect(result.json.state.blackbeltPr.title).toBe("feat: custom pr title");
-      expect(result.json.state.blackbeltPr.base).toBe("develop");
-      expect(result.json.state.blackbeltPr.draft).toBe(true);
-      expect(result.json.state.blackbeltPr.repo).toBe("test-owner/test-repo");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.prNumber).toBe(42);
+      expect(result.json.state.blackbeltGhPr.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
+      expect(result.json.state.blackbeltGhPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.title).toBe("feat: custom pr title");
+      expect(result.json.state.blackbeltGhPr.base).toBe("develop");
+      expect(result.json.state.blackbeltGhPr.draft).toBe(true);
+      expect(result.json.state.blackbeltGhPr.repo).toBe("test-owner/test-repo");
     } finally {
       api.server.stop();
     }
@@ -629,8 +629,8 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.title).toBe("fix: inferred from jj description");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.title).toBe("fix: inferred from jj description");
     } finally {
       api.server.stop();
     }
@@ -655,9 +655,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
-      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltGhPr.unnamedRevision).toBe(true);
       // Must NOT have attempted git push.
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
       expect(jjLog).not.toContain("git push");
@@ -686,9 +686,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
-      expect(result.json.state.blackbeltPr.title).toBe("chore: from bootstrap state");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.title).toBe("chore: from bootstrap state");
     } finally {
       api.server.stop();
     }
@@ -712,7 +712,7 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
     } finally {
       api.server.stop();
     }
@@ -736,9 +736,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("blackbelt/test");
-      expect(result.json.state.blackbeltPr.bookmarkExists).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("blackbelt/test");
+      expect(result.json.state.blackbeltGhPr.bookmarkExists).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -762,10 +762,10 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
-      expect(result.json.state.blackbeltPr.revision).toBe("abc123def456");
-      expect(result.json.state.blackbeltPr.title).toBe("feat: from specific revision");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.revision).toBe("abc123def456");
+      expect(result.json.state.blackbeltGhPr.title).toBe("feat: from specific revision");
 
       // Verify jj bookmark set was called.
       const jjLog = await readFile(result.fake!.log, "utf8");
@@ -794,9 +794,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("nonexistent-revision");
-      expect(result.json.state.blackbeltPr.revisionResolved).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("nonexistent-revision");
+      expect(result.json.state.blackbeltGhPr.revisionResolved).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -819,9 +819,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("failed to set bookmark");
-      expect(result.json.state.blackbeltPr.bookmarkSetOk).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("failed to set bookmark");
+      expect(result.json.state.blackbeltGhPr.bookmarkSetOk).toBe(false);
     } finally {
       api.server.stop();
     }
@@ -844,9 +844,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.title).toBe("fix: title from revision description");
-      expect(result.json.state.blackbeltPr.revision).toBe("abc123def456");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.title).toBe("fix: title from revision description");
+      expect(result.json.state.blackbeltGhPr.revision).toBe("abc123def456");
     } finally {
       api.server.stop();
     }
@@ -872,10 +872,10 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
-      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
-      expect(result.json.state.blackbeltPr.revision).toBe("abc123def456");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltGhPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltGhPr.revision).toBe("abc123def456");
 
       // Must NOT have attempted git push.
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
@@ -902,11 +902,11 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
       // The error must mention jj, not git.
-      expect(result.json.state.blackbeltPr.error).toMatch(/jj/);
+      expect(result.json.state.blackbeltGhPr.error).toMatch(/jj/);
       // The error must not suggest using git as an alternative.
-      expect(result.json.state.blackbeltPr.error).not.toMatch(/\brun\s+git\b|\bgit\s+push\b|\bgit\s+fallback\b/i);
+      expect(result.json.state.blackbeltGhPr.error).not.toMatch(/\brun\s+git\b|\bgit\s+push\b|\bgit\s+fallback\b/i);
     } finally {
       api.server.stop();
     }
@@ -948,12 +948,12 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.prNumber).toBe(42);
-      expect(result.json.state.blackbeltPr.revisionAdjusted).toBe(true);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.prNumber).toBe(42);
+      expect(result.json.state.blackbeltGhPr.revisionAdjusted).toBe(true);
       // The revision should now be the parent commit ID.
-      expect(result.json.state.blackbeltPr.revision).toBe("parent-commit-id");
-      expect(result.json.state.blackbeltPr.originalRevision).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.revision).toBe("parent-commit-id");
+      expect(result.json.state.blackbeltGhPr.originalRevision).toBe("blackbelt/test-bookmark");
 
       // Verify jj log shows bookmark was set to parent before push.
       const jjLog = await readFile(result.fake!.log, "utf8");
@@ -992,14 +992,14 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
-      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltGhPr.unnamedRevision).toBe(true);
       // The error must identify the unnamed ancestor, not the tip.
-      expect(result.json.state.blackbeltPr.revision).toBe("parent-commit-id");
-      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.revision).toBe("parent-commit-id");
+      expect(result.json.state.blackbeltGhPr.bookmarkName).toBe("blackbelt/test-bookmark");
       // Should include remediation guidance.
-      expect(result.json.state.blackbeltPr.error).toMatch(/jj describe|describe.*-m/);
+      expect(result.json.state.blackbeltGhPr.error).toMatch(/jj describe|describe.*-m/);
 
       // Must NOT have attempted git push.
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
@@ -1032,9 +1032,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("no pushable revision");
-      expect(result.json.state.blackbeltPr.noPushableRevision).toBe(true);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("no pushable revision");
+      expect(result.json.state.blackbeltGhPr.noPushableRevision).toBe(true);
 
       // Must NOT have attempted git push.
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
@@ -1066,9 +1066,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("no pushable revision");
-      expect(result.json.state.blackbeltPr.noPushableRevision).toBe(true);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("no pushable revision");
+      expect(result.json.state.blackbeltGhPr.noPushableRevision).toBe(true);
 
       // Must NOT have attempted git push.
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
@@ -1103,10 +1103,10 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.revisionAdjusted).toBe(true);
-      expect(result.json.state.blackbeltPr.revision).toBe("parent-commit-id");
-      expect(result.json.state.blackbeltPr.originalRevision).toBe("abc123def456");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.revisionAdjusted).toBe(true);
+      expect(result.json.state.blackbeltGhPr.revision).toBe("parent-commit-id");
+      expect(result.json.state.blackbeltGhPr.originalRevision).toBe("abc123def456");
 
       // Verify jj log: first bookmark set to the explicit revision,
       // then bookmark set to parent after preflight, then push.
@@ -1137,9 +1137,9 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.json.state.blackbeltPr.ok).toBe(true);
-      expect(result.json.state.blackbeltPr.revisionAdjusted).toBeUndefined();
-      expect(result.json.state.blackbeltPr.revision).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.revisionAdjusted).toBeUndefined();
+      expect(result.json.state.blackbeltGhPr.revision).toBe("blackbelt/test-bookmark");
 
       // Should NOT have an extra bookmark set call (only from the push flow).
       const jjLog = await readFile(result.fake!.log, "utf8");
@@ -1175,13 +1175,13 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
-      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
-      expect(result.json.state.blackbeltPr.revision).toBe("blackbelt/test-bookmark");
-      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltGhPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltGhPr.revision).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.bookmarkName).toBe("blackbelt/test-bookmark");
       // Should include remediation guidance (jj describe command).
-      expect(result.json.state.blackbeltPr.error).toMatch(/jj describe|describe.*-m/);
+      expect(result.json.state.blackbeltGhPr.error).toMatch(/jj describe|describe.*-m/);
 
       // Must NOT have attempted git push.
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
@@ -1213,15 +1213,15 @@ describe("Blackbelt-PR utility script", () => {
       );
 
       expect(result.exitCode).toBe(1);
-      expect(result.json.state.blackbeltPr.ok).toBe(false);
-      expect(result.json.state.blackbeltPr.error).toContain("unnamed");
-      expect(result.json.state.blackbeltPr.unnamedRevision).toBe(true);
-      expect(result.json.state.blackbeltPr.revision).toBe("abc123def456");
-      expect(result.json.state.blackbeltPr.bookmarkName).toBe("blackbelt/test-bookmark");
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      expect(result.json.state.blackbeltGhPr.error).toContain("unnamed");
+      expect(result.json.state.blackbeltGhPr.unnamedRevision).toBe(true);
+      expect(result.json.state.blackbeltGhPr.revision).toBe("abc123def456");
+      expect(result.json.state.blackbeltGhPr.bookmarkName).toBe("blackbelt/test-bookmark");
       // Should include remediation guidance.
-      expect(result.json.state.blackbeltPr.error).toMatch(/jj describe|describe.*-m/);
+      expect(result.json.state.blackbeltGhPr.error).toMatch(/jj describe|describe.*-m/);
       // The error should identify the specific revision.
-      expect(result.json.state.blackbeltPr.error).toContain("abc123def456");
+      expect(result.json.state.blackbeltGhPr.error).toContain("abc123def456");
 
       // Must NOT have attempted git push.
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
