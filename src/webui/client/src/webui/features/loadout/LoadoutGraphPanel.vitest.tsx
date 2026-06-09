@@ -525,3 +525,96 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(within(modal).getByRole('button', { name: 'Connect Edge' })).toHaveProperty('disabled', true);
   });
 });
+
+describe('LoadoutGraphPanel zoom behavior', () => {
+  it('does not change zoom on wheel events over the scroll area', () => {
+    const { getByTestId } = renderPanel();
+    const scrollArea = getByTestId('socket-grid-scroll-area');
+    const zoomPercent = getByTestId('zoom-percent');
+
+    expect(zoomPercent.textContent).toBe('100%');
+
+    fireEvent.wheel(scrollArea, { deltaY: 120 });
+    expect(zoomPercent.textContent).toBe('100%');
+
+    fireEvent.wheel(scrollArea, { deltaY: -120 });
+    expect(zoomPercent.textContent).toBe('100%');
+  });
+
+  it('zoom-in button increases zoom percentage', () => {
+    const { getByTestId } = renderPanel();
+    const zoomPercent = getByTestId('zoom-percent');
+    const zoomIn = getByTestId('zoom-in');
+
+    expect(zoomPercent.textContent).toBe('100%');
+
+    fireEvent.click(zoomIn);
+    expect(zoomPercent.textContent).toBe('110%');
+
+    fireEvent.click(zoomIn);
+    expect(zoomPercent.textContent).toBe('120%');
+  });
+
+  it('zoom-out button decreases zoom percentage', () => {
+    const { getByTestId } = renderPanel();
+    const zoomPercent = getByTestId('zoom-percent');
+    const zoomOut = getByTestId('zoom-out');
+
+    expect(zoomPercent.textContent).toBe('100%');
+
+    fireEvent.click(zoomOut);
+    expect(zoomPercent.textContent).toBe('90%');
+
+    fireEvent.click(zoomOut);
+    expect(zoomPercent.textContent).toBe('80%');
+  });
+
+  it('clamps zoom percentage within configured bounds', () => {
+    const { getByTestId } = renderPanel();
+    const zoomPercent = getByTestId('zoom-percent');
+    const zoomIn = getByTestId('zoom-in');
+    const zoomOut = getByTestId('zoom-out');
+
+    // Clamp max at 300%
+    for (let i = 0; i < 30; i++) fireEvent.click(zoomIn);
+    expect(zoomPercent.textContent).toBe('300%');
+
+    // Clamp min at 25%
+    for (let i = 0; i < 30; i++) fireEvent.click(zoomOut);
+    expect(zoomPercent.textContent).toBe('25%');
+  });
+
+  it('preserves socket drag-and-drop after wheel zoom is disabled', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+
+    const canvasActions = {
+      beginSocketLayoutDrag: vi.fn(),
+      beginSocketRegionSelection: vi.fn(),
+      cancelSocketLayoutDrag: vi.fn(),
+      cancelSocketRegionSelection: vi.fn(),
+      dragMateria: vi.fn(),
+      finishSocketLayoutDrag: vi.fn(),
+      finishSocketRegionSelection: vi.fn(),
+      handleDrop: vi.fn(),
+      handleGraphDrop: vi.fn(),
+      handleSocketClick: vi.fn(),
+      moveSocketLayoutDrag: vi.fn(),
+      moveSocketRegionSelection: vi.fn(),
+      toggleEdgeCondition: vi.fn(),
+      toggleLoopExitCondition: vi.fn(),
+    };
+    const { getByTestId } = renderPanel({
+      viewModel: { ...baseViewModel, editPolicy: unlockedUserPolicy },
+      canvasActions,
+    });
+
+    const socket = getByTestId('socket-Socket-1');
+    fireEvent.pointerDown(socket);
+    expect(canvasActions.beginSocketLayoutDrag).toHaveBeenCalled();
+
+    fireEvent.click(socket);
+    expect(canvasActions.handleSocketClick).toHaveBeenCalledWith('Socket-1', expect.anything());
+  });
+});
