@@ -64,7 +64,7 @@ export class LoadoutUseCases {
 
   async listLoadouts(cwd: string, configuredPath?: string): Promise<{ loaded: LoadedConfig; lines: string[] }> {
     const loaded = await this.deps.configs.load(cwd, configuredPath);
-    return { loaded, lines: this.deps.pipeline.renderLoadoutList(loaded.config, loaded.source) };
+    return { loaded, lines: this.deps.pipeline.renderLoadoutCatalog(loaded.config, loaded.source, loaded.loadoutSources) };
   }
 
   async selectActiveLoadout(input: { cwd: string; requestedLoadout: string; configuredPath?: string; activeCast?: MateriaCastState }): Promise<{ loaded: LoadedConfig; writtenPath: string }> {

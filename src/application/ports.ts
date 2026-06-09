@@ -11,6 +11,7 @@ export interface PipelinePresenter {
   resolve(config: LoadedConfig["config"]): ResolvedMateriaPipeline;
   renderGrid(config: LoadedConfig["config"], pipeline: ResolvedMateriaPipeline, source: string, cwd: string): string[];
   renderLoadoutList(config: LoadedConfig["config"], source: string): string[];
+  renderLoadoutCatalog(config: LoadedConfig["config"], source: string, loadoutSources?: Record<string, string>): string[];
 }
 
 export interface CastStateRepository<TSession = unknown> {

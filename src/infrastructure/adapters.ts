@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "../config/config.js";
-import { renderLoadoutList } from "../loadout/loadouts.js";
+import { renderLoadoutCatalog, renderLoadoutList } from "../loadout/loadouts.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState } from "./castStateRepository.js";
 import { renderGrid, resolvePipeline } from "../runtime/pipeline.js";
 import type { ArtifactCatalog, CastStateRepository, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
@@ -11,7 +11,7 @@ export function createConfigRepository(): ConfigRepository {
 }
 
 export function createPipelinePresenter(): PipelinePresenter {
-  return { resolve: resolvePipeline, renderGrid, renderLoadoutList };
+  return { resolve: resolvePipeline, renderGrid, renderLoadoutList, renderLoadoutCatalog };
 }
 
 export function createCastStateRepository(): CastStateRepository<ExtensionContext> {

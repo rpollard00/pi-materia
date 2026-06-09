@@ -7,6 +7,7 @@ import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.j
 import { registerMateriaRenderer } from "./presentation/renderer.js";
 import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference, type MateriaWebUiQuestControlCallbacks } from "./webui/launcher.js";
 import { loadConfig, saveQuestDefaultLoadoutPreference } from "./config/config.js";
+import { loadoutPickerCandidates } from "./loadout/loadoutPickerCandidates.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
@@ -149,7 +150,7 @@ export default function piMateria(pi: ExtensionAPI) {
 
   pi.registerCommand("materia", {
     description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
-    getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states),
+    getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states, getConfiguredConfigPath),
     handler: async (args, ctx) => {
       activeContext = ctx;
       const trimmedArgs = args.trimStart();
@@ -844,10 +845,31 @@ function isNonBlockingMateriaCommand(subcommand: string | undefined): boolean {
   return subcommand === "continue";
 }
 
-function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | undefined, statesRepository: Pick<CastStateRepository<ExtensionContext>, "listResumable" | "listRevivable">): Array<{ value: string; label: string; description?: string }> | null {
+function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | undefined, statesRepository: Pick<CastStateRepository<ExtensionContext>, "listResumable" | "listRevivable">, getConfigPath?: () => string | undefined): Array<{ value: string; label: string; description?: string }> | null | Promise<Array<{ value: string; label: string; description?: string }> | null> {
   const trimmedStart = prefix.trimStart();
   const tokens = trimmedStart.split(/\s+/).filter(Boolean);
   const endsWithWhitespace = /\s$/.test(prefix);
+
+  // Loadout subcommand completions — loads config asynchronously to build the full candidate list.
+  // Handled before the generic subcommand filter so typing the exact "loadout" token shows
+  // loadout candidates instead of repeating the subcommand name.
+  if (tokens.length >= 1 && tokens[0] === "loadout") {
+    if (!ctx || !getConfigPath) return null;
+    const query = prefix.replace(/^loadout\s*/, "").trim();
+    const configuredPath = getConfigPath();
+    return loadConfig(ctx.cwd, configuredPath).then((loaded) => {
+      const candidates = loadoutPickerCandidates({
+        config: loaded.config,
+        loadoutSources: loaded.loadoutSources,
+      }, query);
+      if (candidates.length === 0) return null;
+      return candidates.map((c) => ({
+        value: `loadout ${c.value}`,
+        label: c.label,
+        description: c.description,
+      }));
+    });
+  }
 
   if (tokens.length === 0 && !endsWithWhitespace) {
     const subcommands = materiaSubcommands();
