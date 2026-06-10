@@ -365,19 +365,12 @@ function GraphCanvas(props: GraphCanvasProps) {
     };
   }, []);
 
-  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    const direction = event.deltaY > 0 ? -1 : 1;
-    setZoom((prev) => clampZoom(prev + direction * ZOOM_STEP));
-    scheduleHideZoomPercent();
-    event.preventDefault();
-  };
-
   const zoomIn = () => { setZoom((prev) => clampZoom(prev + ZOOM_STEP)); scheduleHideZoomPercent(); };
   const zoomOut = () => { setZoom((prev) => clampZoom(prev - ZOOM_STEP)); scheduleHideZoomPercent(); };
 
   return (
     <div className="loadout-graph-viewport" data-testid="socket-grid-viewport" aria-readonly={!editPolicy.canEdit} title={!editPolicy.canEdit ? editPolicy.reason : undefined}>
-      <div className="loadout-graph-scroll-area" data-testid="socket-grid-scroll-area" onWheel={handleWheel} onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? handleGraphDrop : undefined}>
+      <div className="loadout-graph-scroll-area" data-testid="socket-grid-scroll-area" onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? handleGraphDrop : undefined}>
       <div
         className="loadout-graph-canvas-zoom-wrapper"
         style={{ width: `${canvasWidth * zoom}px`, height: `${canvasHeight * zoom}px` }}
