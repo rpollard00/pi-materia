@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -636,5 +636,425 @@ describe("Blackbelt-ADO-PR mocked behavior", () => {
     } finally {
       api.server.stop();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blackbelt-Maintain — refused-snapshot / oversized-output resilience
+// ---------------------------------------------------------------------------
+
+const maintainScript = path.resolve("config", "utilities", "blackbelt-maintain.mjs");
+
+async function makeFakeJjForMaintain() {
+  const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-fake-jj-maintain-"));
+  const log = path.join(dir, "jj.log");
+  const jj = path.join(dir, "jj");
+
+  // The script reads MA MAINTAIN_DIFF_OUT, MAINTAIN_DIFF_EMPTY, DIFF_FAIL,
+  // and CHECKPOINT_FAIL from the environment at runtime — those are
+  // injected by each test case via Bun.spawn env.
+  await writeFile(
+    jj,
+    `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$JJ_LOG"
+case "$1" in
+  root)
+    pwd
+    ;;
+  diff)
+    if [ "\${DIFF_FAIL:-false}" = "true" ]; then
+      # Simulate oversized stdout — write >1MB then exit 1
+      for i in \$(seq 1 15000); do
+        echo "A target/debug/file-\$i.bin: 5.0MiB (5242880 bytes); the maximum size allowed is 1.0MiB (1048576 bytes)"
+      done
+      echo "Warning: Refused to snapshot some files:" >&2
+      echo "  target/debug/breakout: 681.3MiB; max size 1.0MiB" >&2
+      exit 1
+    fi
+    if [ -n "$MAINTAIN_DIFF_EMPTY" ]; then
+      : # no output = clean working copy
+    else
+      printf '%s\\n' "\${MAINTAIN_DIFF_OUT:-M src/app.rs\\nM Cargo.toml\\n}"
+    fi
+    ;;
+  describe)
+    if [ "\${CHECKPOINT_FAIL:-false}" = "true" ]; then
+      echo "jj: error: cannot describe" >&2
+      exit 1
+    fi
+    ;;
+  bookmark)
+    if [ "\${CHECKPOINT_FAIL:-false}" = "true" ]; then
+      echo "jj: error: cannot set bookmark" >&2
+      exit 1
+    fi
+    ;;
+  new)
+    if [ "\${CHECKPOINT_FAIL:-false}" = "true" ]; then
+      echo "jj: error: cannot create new commit" >&2
+      exit 1
+    fi
+    ;;
+esac
+`,
+    "utf8",
+  );
+  await chmod(jj, 0o755);
+  await writeFile(log, "", "utf8");
+  return { dir, log };
+}
+
+async function runMaintain(input: Record<string, unknown>, env: Record<string, string> = {}) {
+  const fake = await makeFakeJjForMaintain();
+  const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-maintain-cwd-"));
+
+  const proc = Bun.spawn([process.execPath, maintainScript], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`,
+      JJ_LOG: fake.log,
+      MAINTAIN_DIFF_OUT: "M src/app.rs\nM Cargo.toml\n",
+      ...env,
+    },
+  });
+  proc.stdin.write(`${JSON.stringify({ cwd, ...input })}\n`);
+  proc.stdin.end();
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode, json: JSON.parse(stdout), fake };
+}
+
+describe("Blackbelt-Maintain oversized-output / refused-snapshot resilience", () => {
+  test("reports satisfied:true on normal dirty checkpoint", async () => {
+    const result = await runMaintain({
+      item: { title: "feat: test checkpoint" },
+      state: { blackbeltBootstrap: { bookmarkName: "blackbelt/test-bookmark" } },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
+    expect(result.json.context).toContain("checkpoint created");
+    expect(result.json.context).toContain("blackbelt/test-bookmark");
+  });
+
+  test("reports satisfied:true when working copy is clean", async () => {
+    const fake = await makeFakeJjForMaintain({ diffOutput: "" });
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-maintain-cwd-"));
+
+    const proc = Bun.spawn([process.execPath, maintainScript], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`,
+        JJ_LOG: fake.log,
+        MAINTAIN_DIFF_EMPTY: "1",
+      },
+    });
+    proc.stdin.write(`${JSON.stringify({
+      cwd,
+      item: { title: "feat: no changes" },
+      state: { blackbeltBootstrap: { bookmarkName: "blackbelt/test-bookmark" } },
+    })}\n`);
+    proc.stdin.end();
+    const [stdout, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).toBe(0);
+    const json = JSON.parse(stdout);
+    expect(json.satisfied).toBe(true);
+    expect(json.context).toContain("clean");
+  });
+
+  test("reports satisfied:true when jj diff --summary fails with oversized output (assumes dirty)", async () => {
+    const fake = await makeFakeJjForMaintain();
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-maintain-cwd-"));
+
+    const proc = Bun.spawn([process.execPath, maintainScript], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`,
+        JJ_LOG: fake.log,
+        DIFF_FAIL: "true",
+      },
+    });
+    proc.stdin.write(`${JSON.stringify({
+      cwd,
+      item: { title: "feat: oversized diff" },
+      state: { blackbeltBootstrap: { bookmarkName: "blackbelt/test-bookmark" } },
+    })}\n`);
+    proc.stdin.end();
+    const [stdout, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).toBe(0);
+    const json = JSON.parse(stdout);
+    expect(json.satisfied).toBe(true);
+    expect(json.context).toContain("checkpoint created");
+  });
+
+  test("reports satisfied:false when actual checkpoint commands fail", async () => {
+    const fake = await makeFakeJjForMaintain();
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-maintain-cwd-"));
+
+    const proc = Bun.spawn([process.execPath, maintainScript], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`,
+        JJ_LOG: fake.log,
+        MAINTAIN_DIFF_OUT: "M src/app.rs\n",
+        CHECKPOINT_FAIL: "true",
+      },
+    });
+    proc.stdin.write(`${JSON.stringify({
+      cwd,
+      item: { title: "feat: will fail" },
+      state: { blackbeltBootstrap: { bookmarkName: "blackbelt/test-bookmark" } },
+    })}\n`);
+    proc.stdin.end();
+    const [stdout, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).toBe(0);
+    const json = JSON.parse(stdout);
+    expect(json.satisfied).toBe(false);
+    expect(json.context).toContain("jj command failed");
+  });
+
+  test("reports satisfied:false when bookmarkName is missing", async () => {
+    const result = await runMaintain({
+      item: { title: "feat: no bookmark" },
+      state: {},
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(result.json.context).toContain("missing state.blackbeltBootstrap.bookmarkName");
+  });
+
+  test("reports satisfied:false when item title is missing", async () => {
+    const result = await runMaintain({
+      item: {},
+      state: { blackbeltBootstrap: { bookmarkName: "blackbelt/test-bookmark" } },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(result.json.context).toContain("no item title");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blackbelt-Bootstrap — build-artifact .gitignore and oversized-diff resilience
+// ---------------------------------------------------------------------------
+
+const bootstrapScript = path.resolve("config", "utilities", "blackbelt-bootstrap.mjs");
+
+async function makeFakeJjForBootstrap(opts: { diffEmpty?: boolean; diffFail?: boolean; initFail?: boolean; checkpointFail?: boolean } = {}) {
+  const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-fake-jj-bootstrap-"));
+  const log = path.join(dir, "jj.log");
+  const jj = path.join(dir, "jj");
+
+  const diffEmpty = opts.diffEmpty ?? true;
+  const diffFail = opts.diffFail ?? false;
+  const initFail = opts.initFail ?? false;
+  const checkpointFail = opts.checkpointFail ?? false;
+
+  await writeFile(
+    jj,
+    `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$JJ_LOG"
+case "$1" in
+  root)
+    if [ "$BOOTSTRAP_NO_ROOT" = "1" ] && [ ! -f "\${BOOTSTRAP_SENTINEL:-/tmp/pi-materia-bootstrap-did-init-}" ]; then
+      echo "Error: no jj repo in this directory" >&2
+      exit 1
+    fi
+    pwd
+    ;;
+  git)
+    if [ "$2" = "init" ]; then
+      if [ "\${INIT_FAIL:-false}" = "true" ]; then
+        echo "jj: error: git init failed" >&2
+        exit 1
+      fi
+      # Touch a marker file so the second jj root call succeeds.
+      # Use a unique sentinel so tests don't contaminate each other.
+      touch "\${BOOTSTRAP_SENTINEL:-/tmp/pi-materia-bootstrap-did-init-}"
+      echo "Initialized git backing repo"
+    fi
+    ;;
+  diff)
+    if [ "\${DIFF_FAIL:-false}" = "true" ]; then
+      # Simulate oversized stdout
+      for i in \$(seq 1 15000); do
+        echo "A target/debug/file-\$i.bin"
+      done
+      exit 1
+    fi
+    if [ "\${DIFF_EMPTY:-true}" = "true" ]; then
+      : # no output = clean working copy
+    else
+      echo "M src/app.rs"
+    fi
+    ;;
+  describe)
+    if [ "\${CHECKPOINT_FAIL:-false}" = "true" ]; then
+      echo "jj: error: cannot describe" >&2
+      exit 1
+    fi
+    ;;
+  bookmark)
+    if [ "\${CHECKPOINT_FAIL:-false}" = "true" ]; then
+      echo "jj: error: cannot set bookmark" >&2
+      exit 1
+    fi
+    ;;
+  new)
+    if [ "\${CHECKPOINT_FAIL:-false}" = "true" ]; then
+      echo "jj: error: cannot create new commit" >&2
+      exit 1
+    fi
+    ;;
+esac
+`,
+    "utf8",
+  );
+  await chmod(jj, 0o755);
+  await writeFile(log, "", "utf8");
+  return { dir, log };
+}
+
+async function runBootstrap(
+  input: Record<string, unknown>,
+  env: Record<string, string> = {},
+  cwdOverride?: string,
+) {
+  const fake = await makeFakeJjForBootstrap();
+  const cwd = cwdOverride ?? await mkdtemp(path.join(tmpdir(), "pi-materia-ut-bootstrap-cwd-"));
+
+  const proc = Bun.spawn([process.execPath, bootstrapScript], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`,
+      JJ_LOG: fake.log,
+      ...env,
+    },
+  });
+  proc.stdin.write(`${JSON.stringify({ cwd, ...input })}\n`);
+  proc.stdin.end();
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode, json: JSON.parse(stdout), fake };
+}
+
+/** Unique sentinel per bootstrap test to prevent cross-test contamination. */
+let bootstrapSentinelCount = 0;
+function bootstrapSentinel(): string {
+  return `/tmp/pi-materia-bootstrap-did-init-\$\$-${++bootstrapSentinelCount}`;
+}
+
+describe("Blackbelt-Bootstrap oversized-diff and .gitignore resilience", () => {
+  test("succeeds with clean working copy", async () => {
+    const sentinel = bootstrapSentinel();
+    // Clean up any leftover sentinel before the test.
+    try { await import("node:fs/promises").then(m => m.unlink(sentinel)); } catch {}
+    const result = await runBootstrap(
+      { castId: "test-cast-001" },
+      { BOOTSTRAP_NO_ROOT: "1", BOOTSTRAP_SENTINEL: sentinel },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.state.blackbeltBootstrap.ok).toBe(true);
+    expect(result.json.state.blackbeltBootstrap.bookmarkName).toMatch(/^blackbelt\//);
+  });
+
+  test("handles jj diff --summary failure (oversized output) gracefully", async () => {
+    const sentinel = bootstrapSentinel();
+    try { await import("node:fs/promises").then(m => m.unlink(sentinel)); } catch {}
+    const result = await runBootstrap(
+      { castId: "test-cast-oversized" },
+      { BOOTSTRAP_NO_ROOT: "1", DIFF_FAIL: "true", BOOTSTRAP_SENTINEL: sentinel },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.state.blackbeltBootstrap.ok).toBe(true);
+    expect(result.json.state.blackbeltBootstrap.bookmarkName).toMatch(/^blackbelt\//);
+  });
+
+  test("adds target/ and node_modules/ to .gitignore when directories exist", async () => {
+    const sentinel = bootstrapSentinel();
+    try { await import("node:fs/promises").then(m => m.unlink(sentinel)); } catch {}
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-bootstrap-ignore-"));
+    // Create target/ and node_modules/ directories
+    await mkdir(path.join(cwd, "target"));
+    await mkdir(path.join(cwd, "node_modules"));
+    await writeFile(path.join(cwd, "target", ".keep"), "", "utf8");
+    await writeFile(path.join(cwd, "node_modules", ".keep"), "", "utf8");
+    // Create an existing .gitignore with one entry
+    await writeFile(path.join(cwd, ".gitignore"), ".pi/pi-materia/\n", "utf8");
+
+    const result = await runBootstrap(
+      { castId: "test-cast-ignore" },
+      { BOOTSTRAP_NO_ROOT: "1", BOOTSTRAP_SENTINEL: sentinel },
+      cwd,
+    );
+
+    expect(result.exitCode).toBe(0);
+
+    // Verify .gitignore was updated with build artifact patterns
+    const gitignoreContent = await readFile(path.join(cwd, ".gitignore"), "utf8");
+    expect(gitignoreContent).toContain("target/");
+    expect(gitignoreContent).toContain("node_modules/");
+    expect(gitignoreContent).toContain(".pi/pi-materia/"); // original entry preserved
+  });
+
+  test("does not duplicate patterns already in .gitignore", async () => {
+    const sentinel = bootstrapSentinel();
+    try { await import("node:fs/promises").then(m => m.unlink(sentinel)); } catch {}
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-bootstrap-ignore2-"));
+    // Create target/ directory
+    await mkdir(path.join(cwd, "target"));
+    await writeFile(path.join(cwd, "target", ".keep"), "", "utf8");
+    // .gitignore already has target/
+    await writeFile(path.join(cwd, ".gitignore"), "target/\nnode_modules/\n", "utf8");
+
+    const result = await runBootstrap(
+      { castId: "test-cast-ignore-dup" },
+      { BOOTSTRAP_NO_ROOT: "1", BOOTSTRAP_SENTINEL: sentinel },
+      cwd,
+    );
+
+    expect(result.exitCode).toBe(0);
+
+    // Verify target/ appears only once
+    const gitignoreContent = await readFile(path.join(cwd, ".gitignore"), "utf8");
+    const targetMatches = (gitignoreContent.match(/^target\/$/gm) || []).length;
+    expect(targetMatches).toBe(1);
   });
 });
