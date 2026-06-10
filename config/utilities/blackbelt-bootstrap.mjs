@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, constants } from "node:fs/promises";
+import { access, constants, appendFile, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 class UtilityError extends Error {
@@ -10,6 +11,8 @@ class UtilityError extends Error {
     this.details = details;
   }
 }
+
+const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB — handles large repos with many tracked files
 
 const BOOKMARK_NOUNS = [
   "crystal",
@@ -64,6 +67,11 @@ try {
   let root = await jjRoot(cwd);
   let initialized = false;
   if (root === null) {
+    // Before initializing jj, ensure common build artifact directories
+    // are in .gitignore so jj doesn't try to track them.  Untracked
+    // build artifacts cause jj diff --summary to balloon output and
+    // exceed maxBuffer, which breaks downstream blackbelt-maintain.
+    await ensureBuildArtifactsGitignored(cwd);
     await execFileText("jj", ["git", "init"], cwd);
     initialized = true;
     root = await jjRoot(cwd);
@@ -165,8 +173,18 @@ async function jjRoot(cwd) {
 }
 
 async function isCurrentCommitEmpty(cwd) {
-  const diffSummary = await execFileText("jj", ["diff", "--summary"], cwd);
-  return diffSummary.trim().length === 0;
+  try {
+    const diffSummary = await execFileText("jj", ["diff", "--summary"], cwd);
+    return diffSummary.trim().length === 0;
+  } catch (error) {
+    // If jj diff --summary fails (e.g. maxBuffer exceeded due to build
+    // artifacts not being gitignored), assume the working copy is NOT
+    // empty.  Treating it as dirty triggers a describe+bookmark+new
+    // sequence which is harmless even if the working copy were truly
+    // clean — much better than crashing bootstrap.
+    console.error(`[blackbelt-bootstrap] jj diff --summary failed (assuming dirty): ${formatError(error)}`);
+    return false;
+  }
 }
 
 /**
@@ -188,9 +206,9 @@ async function setBookmark(bookmarkName, cwd) {
   }
 }
 
-function execFileText(command, args, cwd) {
+function execFileText(command, args, cwd, maxBuffer = MAX_BUFFER) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd, timeout: 30000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, { cwd, timeout: 30000, maxBuffer }, (error, stdout, stderr) => {
       // Log stderr diagnostics to console.error so they are visible but do not
       // pollute stdout JSON output consumed by pi-materia.
       if (stderr && stderr.trim().length > 0) {
@@ -242,6 +260,69 @@ function bookmarkSeed(input, cwd) {
     return input.runDir.trim();
   }
   return cwd;
+}
+
+/**
+ * Ensure common build artifact directories are in .gitignore before jj
+ * initialization.  Large untracked build outputs cause jj diff --summary
+ * to produce enormous stdout, blowing past the execFile maxBuffer and
+ * breaking blackbelt-maintain.
+ *
+ * Adds patterns for directories that are detected on disk (e.g. target/
+ * for Rust projects) and common patterns that are safe to always ignore.
+ */
+async function ensureBuildArtifactsGitignored(cwd) {
+  const gitignorePath = path.join(cwd, ".gitignore");
+
+  // Existing .gitignore entries (empty set if file doesn't exist yet).
+  let existing = new Set();
+  try {
+    const content = await readFile(gitignorePath, "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed.length > 0 && !trimmed.startsWith("#")) existing.add(trimmed);
+    }
+  } catch {
+    // File doesn't exist — that's fine, we'll create it.
+  }
+
+  // Patterns to add when the corresponding directory exists on disk.
+  const diskPatterns = {
+    "target/": "target",       // Rust / cargo
+    "node_modules/": "node_modules", // Node.js
+    "dist/": "dist",           // JS / Python / general build output
+    "build/": "build",         // C++, Python, general build output
+    ".venv/": ".venv",         // Python virtualenv
+    "venv/": "venv",           // Python virtualenv
+    "__pycache__/": "__pycache__", // Python bytecode
+    "*.egg-info/": null,       // Python egg-info — always safe to ignore
+    ".tox/": ".tox",           // Python tox
+    ".pytest_cache/": ".pytest_cache", // Python pytest cache
+  };
+
+  const addPatterns = [];
+  for (const [pattern, checkDir] of Object.entries(diskPatterns)) {
+    if (existing.has(pattern)) continue;
+    if (checkDir === null) {
+      // Always-safe patterns (no disk check needed).
+      addPatterns.push(pattern);
+    } else if (existsSync(path.join(cwd, checkDir))) {
+      addPatterns.push(pattern);
+    }
+  }
+
+  if (addPatterns.length === 0) return;
+
+  // Append to .gitignore (create if it doesn't exist).
+  const newBlock = [
+    "",
+    "# Added by Blackbelt-Bootstrap: build artifacts",
+    ...addPatterns,
+    "",
+  ].join("\n");
+
+  await appendFile(gitignorePath, newBlock, "utf8");
+  console.error(`[blackbelt-bootstrap] Added ${addPatterns.length} build-artifact pattern(s) to .gitignore: ${addPatterns.join(", ")}`);
 }
 
 /**
