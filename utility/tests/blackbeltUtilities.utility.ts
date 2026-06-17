@@ -219,6 +219,13 @@ describe("Blackbelt-GH-PR mocked behavior", () => {
       expect(result.json.state.blackbeltGhPr.title).toBe("feat: test gh pr");
       expect(result.json.state.blackbeltGhPr.base).toBe("main");
       expect(result.json.state.blackbeltGhPr.draft).toBe(false);
+
+      // Verify event emission.
+      expect(result.json.event).toBeDefined();
+      expect(Array.isArray(result.json.event)).toBe(true);
+      expect(result.json.event[0].type).toBe("result.pr_created");
+      expect(result.json.event[0].payload.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
+      expect(result.json.event[0].payload.prNumber).toBe(42);
     } finally {
       api.server.stop();
     }
@@ -280,6 +287,11 @@ describe("Blackbelt-GH-PR mocked behavior", () => {
       expect(result.exitCode).toBe(0);
       expect(result.json.state.blackbeltGhPr.ok).toBe(true);
       expect(result.json.state.blackbeltGhPr.bookmarkName).toBe("blackbelt/test-bookmark");
+
+      // Verify event emission from bootstrap-resolved path.
+      expect(result.json.event).toBeDefined();
+      expect(result.json.event[0].type).toBe("result.pr_created");
+      expect(result.json.event[0].payload.branchName).toBe("blackbelt/test-bookmark");
     } finally {
       api.server.stop();
     }
@@ -476,6 +488,13 @@ describe("Blackbelt-ADO-PR mocked behavior", () => {
       expect(result.json.state.blackbeltAdoPr.organization).toBe("test-org");
       expect(result.json.state.blackbeltAdoPr.project).toBe("test-project");
       expect(result.json.state.blackbeltAdoPr.repository).toBe("test-repo");
+
+      // Verify event emission.
+      expect(result.json.event).toBeDefined();
+      expect(Array.isArray(result.json.event)).toBe(true);
+      expect(result.json.event[0].type).toBe("result.pr_created");
+      expect(result.json.event[0].payload.prUrl).toContain("pullrequest/99");
+      expect(result.json.event[0].payload.prNumber).toBe(99);
     } finally {
       api.server.stop();
     }

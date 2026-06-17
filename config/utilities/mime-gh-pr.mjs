@@ -13,6 +13,7 @@
  *   - params.body       → PR body text
  *   - params.draft      → boolean, create as draft PR
  *   - params.base       → PR base branch (default: inferred from remote HEAD)
+ *   - params.pushOnly   → boolean, push branch but skip PR creation (emits result.branch_pushed)
  *   - params.authEnv    → env var name for GitHub token (default: GITHUB_TOKEN)
  *   - params.apiBaseUrl → GitHub API base URL override (for GHE / testing)
  *   - state.mimeBootstrap.branchName  → fallback branch
@@ -22,10 +23,12 @@
  *   2. Latest commit message on the branch (via `git log -1 --format=%s`)
  *   3. The branch name itself
  *
- * Output contract: stdout JSON with top-level `state.mimeGhPr`.
- * Stderr is reserved for diagnostics.
- * All known failure modes (missing git, missing auth, push failure, API error)
- * return a mimeGhPr failure payload.
+ * Output contract: stdout JSON with top-level `state.mimeGhPr` and an
+ * optional `event` array.  Successful PR creation emits result.pr_created;
+ * pushOnly mode emits result.branch_pushed.  Stderr is reserved for
+ * diagnostics.  All known failure modes (missing git, missing auth,
+ * push failure, API error) return a mimeGhPr failure payload with no event
+ * array.
  */
 import { execFile } from "node:child_process";
 
@@ -121,12 +124,40 @@ try {
   }
 
   // Infer PR title.
-  const title = await inferPrTitle(branchName, params, cwd);
+  const title = typeof params.title === "string" && params.title.trim().length > 0
+    ? params.title.trim()
+    : await inferPrTitle(branchName, params, cwd);
 
   // Resolve base branch.
   const base = typeof params.base === "string" && params.base.trim().length > 0
     ? params.base.trim()
     : await resolveDefaultBranch(repo, token, apiBaseUrl);
+
+  const pushOnly = typeof params.pushOnly === "boolean" ? params.pushOnly : false;
+
+  if (pushOnly) {
+    writeStdoutJson({
+      state: {
+        mimeGhPr: {
+          ok: true,
+          branchName,
+          remote,
+          repo,
+          pushOnly: true,
+        },
+      },
+      event: [{
+        type: "result.branch_pushed",
+        message: `Branch ${branchName} pushed to ${remote}`,
+        payload: {
+          branchName,
+          remote,
+          repo,
+        },
+      }],
+    });
+    process.exit(0);
+  }
 
   // Create the pull request.
   const draft = typeof params.draft === "boolean" ? params.draft : false;
@@ -159,6 +190,17 @@ try {
         title,
       },
     },
+    event: [{
+      type: "result.pr_created",
+      message: `PR #${prResult.prNumber} created`,
+      payload: {
+        prUrl: prResult.prUrl,
+        prNumber: prResult.prNumber,
+        branchName,
+        baseBranch: base,
+        repo,
+      },
+    }],
   });
 } catch (error) {
   const rawMessage = error instanceof Error ? error.message : String(error);

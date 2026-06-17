@@ -16,6 +16,7 @@
  *   - params.title      → PR title override
  *   - params.body       → PR body text
  *   - params.draft      → boolean, create as draft PR
+ *   - params.pushOnly   → boolean, push branch but skip PR creation (emits result.branch_pushed)
  *   - params.authEnv    → env var name for GitHub token (default: GITHUB_TOKEN)
  *   - state.blackbeltBootstrap.bookmarkName → fallback bookmark
  *
@@ -24,10 +25,12 @@
  *   2. First line of the bookmarked revision's jj description
  *   3. The bookmark name itself
  *
- * Output contract: stdout JSON with top-level `state.blackbeltGhPr`.
- * Stderr is reserved for diagnostics.
- * All known failure modes (missing jj, missing auth, unresolved bookmark,
- * push failure, API error) return a blackbeltGhPr failure payload.
+ * Output contract: stdout JSON with top-level `state.blackbeltGhPr` and an
+ * optional `event` array.  Successful PR creation emits result.pr_created;
+ * pushOnly mode emits result.branch_pushed.  Stderr is reserved for
+ * diagnostics.  All known failure modes (missing jj, missing auth,
+ * unresolved bookmark, push failure, API error) return a blackbeltGhPr
+ * failure payload with no event array.
  */
 import { execFile } from "node:child_process";
 
@@ -183,12 +186,42 @@ try {
   }
 
   // Infer PR title.
-  const title = await inferPrTitle(bookmarkName, pushRevision, params, cwd);
+  const title = typeof params.title === "string" && params.title.trim().length > 0
+    ? params.title.trim()
+    : await inferPrTitle(bookmarkName, pushRevision, params, cwd);
 
   // Resolve base branch.
   const base = typeof params.base === "string" && params.base.trim().length > 0
     ? params.base.trim()
     : await resolveDefaultBranch(repo, token, apiBaseUrl);
+
+  const pushOnly = typeof params.pushOnly === "boolean" ? params.pushOnly : false;
+
+  if (pushOnly) {
+    writeStdoutJson({
+      state: {
+        blackbeltGhPr: {
+          ok: true,
+          bookmarkName,
+          revision: preflight.adjusted ? preflight.revision : (revision ?? bookmarkName),
+          remote,
+          repo,
+          pushOnly: true,
+          ...(preflight.adjusted ? { revisionAdjusted: true, originalRevision: revision ?? bookmarkName } : {}),
+        },
+      },
+      event: [{
+        type: "result.branch_pushed",
+        message: `Branch ${bookmarkName} pushed to ${remote}`,
+        payload: {
+          branchName: bookmarkName,
+          remote,
+          repo,
+        },
+      }],
+    });
+    process.exit(0);
+  }
 
   // Create the pull request.
   const draft = typeof params.draft === "boolean" ? params.draft : false;
@@ -223,6 +256,17 @@ try {
         ...(preflight.adjusted ? { revisionAdjusted: true, originalRevision: revision ?? bookmarkName } : {}),
       },
     },
+    event: [{
+      type: "result.pr_created",
+      message: `PR #${prResult.prNumber} created`,
+      payload: {
+        prUrl: prResult.prUrl,
+        prNumber: prResult.prNumber,
+        branchName: bookmarkName,
+        baseBranch: base,
+        repo,
+      },
+    }],
   });
 } catch (error) {
   const rawMessage = error instanceof Error ? error.message : String(error);
