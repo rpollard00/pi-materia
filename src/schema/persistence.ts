@@ -1,7 +1,7 @@
 import { validateReservedHandoffFields, type HandoffObject } from "../domain/handoff.js";
 import { validateLoadout, type Loadout, type LoadoutLoop, type LoadoutSocket, type SocketId } from "../domain/loadout.js";
 import type { DomainIssue, DomainResult } from "../domain/result.js";
-import type { LoadoutSource, LoadoutUserLockState, MateriaConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, PiMateriaConfig, MateriaProfileConfig } from "../types.js";
+import type { EventingConfig, LoadoutSource, LoadoutUserLockState, MateriaConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, PiMateriaConfig, MateriaProfileConfig } from "../types.js";
 
 /**
  * Persistence/schema anti-corruption adapters.
@@ -19,6 +19,7 @@ export interface CurrentPersistedConfig {
   activeLoadoutId?: string;
   activeLoadout?: string;
   materia?: Record<string, MateriaConfig | null>;
+  eventing?: EventingConfig | null;
 }
 
 export interface CurrentPersistedProfileConfig {
@@ -132,6 +133,7 @@ export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Par
     ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
     ...(materia !== undefined ? { materia: cloneRecord(materia) } : {}),
     ...(isPlainObject(config.loadouts) ? { loadouts: Object.fromEntries(Object.entries(config.loadouts).map(([name, loadout]) => [name, loadout === null ? null : normalizePersistedLoadoutForApplication(loadout, materia ?? {})])) as PiMateriaConfig["loadouts"] } : {}),
+    ...(config.eventing !== undefined ? { eventing: config.eventing === null ? undefined : cloneRecord(config.eventing) as EventingConfig } : {}),
   };
 }
 
@@ -145,6 +147,7 @@ export function serializeCurrentPersistedConfig(config: Partial<PiMateriaConfig>
     ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
     ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
     ...(config.materia !== undefined ? { materia: cloneRecord(config.materia) } : {}),
+    ...(config.eventing !== undefined ? { eventing: config.eventing === undefined ? null : cloneRecord(config.eventing) as EventingConfig } : {}),
   };
 }
 

@@ -1392,3 +1392,336 @@ describe("config materia model settings", () => {
     await expect(loadConfig(dir, file)).rejects.toThrow(/Materia "Interactive-Plan" has invalid multiTurn\. Expected a boolean/);
   });
 });
+
+describe("eventing config", () => {
+  test("bundled defaults disable eventing with no sinks and a 30s heartbeat", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-default-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing).toBeDefined();
+      expect(loaded.config.eventing?.enabled).toBe(false);
+      expect(loaded.config.eventing?.sinks).toEqual({});
+      expect(loaded.config.eventing?.heartbeatIntervalMs).toBe(30000);
+      expect(loaded.config.eventing?.presets).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("enables eventing and adds sinks through user config layer", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-user-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          sinks: {
+            "my-webhook": {
+              id: "my-webhook",
+              kind: "webhook" as const,
+              url: "https://example.com/events",
+              method: "POST" as const,
+              headers: { "X-Custom": "value" },
+              eventFilter: { include: ["result.*"], exclude: ["lifecycle.heartbeat"] },
+              timeoutMs: 5000,
+              maxRetries: 2,
+            },
+          },
+        },
+      });
+
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.enabled).toBe(true);
+      expect(loaded.config.eventing?.sinks).toHaveProperty("my-webhook");
+      const sink = loaded.config.eventing!.sinks!["my-webhook"] as Record<string, unknown>;
+      expect(sink.id).toBe("my-webhook");
+      expect(sink.url).toBe("https://example.com/events");
+      expect(sink.method).toBe("POST");
+      expect(sink.timeoutMs).toBe(5000);
+      expect(sink.maxRetries).toBe(2);
+      // defaults from base config preserved
+      expect(loaded.config.eventing?.heartbeatIntervalMs).toBe(30000);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("merges sinks by id across layers", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-sink-merge-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const projectFile = path.join(cwd, ".pi", "pi-materia.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      // User layer: enable eventing and add sink A
+      await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          sinks: {
+            "sink-a": { id: "sink-a", url: "https://a.example.com" },
+          },
+        },
+      });
+
+      // Project layer: add sink B and override sink A's url
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(projectFile, JSON.stringify({
+        eventing: {
+          sinks: {
+            "sink-b": { id: "sink-b", url: "https://b.example.com" },
+            "sink-a": { url: "https://a-override.example.com" },
+          },
+        },
+      }), "utf8");
+
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.enabled).toBe(true);
+      expect(Object.keys(loaded.config.eventing?.sinks ?? {})).toEqual(expect.arrayContaining(["sink-a", "sink-b"]));
+      const sinkA = loaded.config.eventing!.sinks!["sink-a"] as Record<string, unknown>;
+      expect(sinkA.url).toBe("https://a-override.example.com");
+      const sinkB = loaded.config.eventing!.sinks!["sink-b"] as Record<string, unknown>;
+      expect(sinkB.url).toBe("https://b.example.com");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("disabled sinks are retained in config but skipped during dispatch merge", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-disabled-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          sinks: {
+            "active-webhook": { id: "active-webhook", url: "https://example.com" },
+            "disabled-webhook": { id: "disabled-webhook", enabled: false },
+          },
+        },
+      });
+
+      const loaded = await loadConfig(cwd);
+      const sinks = loaded.config.eventing?.sinks ?? {};
+      expect(sinks).toHaveProperty("active-webhook");
+      expect(sinks).toHaveProperty("disabled-webhook");
+      const disabled = sinks["disabled-webhook"] as Record<string, unknown>;
+      expect(disabled.enabled).toBe(false);
+      const active = sinks["active-webhook"] as Record<string, unknown>;
+      expect(active.enabled).toBeUndefined(); // defaults to true at runtime
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("unknown sink kinds are preserved in config", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-unknownkind-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          sinks: {
+            "future-sink": { id: "future-sink", kind: "slack", channel: "#alerts" },
+          },
+        },
+      });
+
+      const loaded = await loadConfig(cwd);
+      const future = loaded.config.eventing?.sinks?.["future-sink"] as Record<string, unknown>;
+      expect(future).toBeDefined();
+      expect(future.kind).toBe("slack");
+      expect(future.channel).toBe("#alerts");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("persists and roundtrips eventing config through save/load", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-roundtrip-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const savedPath = await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          heartbeatIntervalMs: 15000,
+          presets: ["agent-controller"],
+          sinks: {
+            "agent-controller-webhook": {
+              id: "agent-controller-webhook",
+              kind: "webhook" as const,
+              url: "https://agent-controller.example/events",
+              method: "POST" as const,
+              headers: { "X-Controller-Run-Id": "run-123" },
+              bodyTemplate: "mapped" as const,
+              bodyMapping: {
+                eventId: "eventId",
+                eventType: "type",
+                occurredAt: "occurredAt",
+                severity: "severity",
+                message: "message",
+                payload: "payload",
+                static: { source: "pi-materia" },
+              },
+              eventFilter: { include: ["lifecycle.*", "result.*"] },
+              timeoutMs: 30000,
+              maxRetries: 5,
+              retryBackoffMs: 2000,
+              maxBackoffMs: 60000,
+              discardingAfter: 10,
+            },
+          },
+        },
+      });
+
+      const raw = JSON.parse(await readFile(savedPath, "utf8"));
+      expect(raw.eventing.enabled).toBe(true);
+      expect(raw.eventing.heartbeatIntervalMs).toBe(15000);
+      expect(raw.eventing.presets).toEqual(["agent-controller"]);
+      expect(raw.eventing.sinks["agent-controller-webhook"].url).toBe("https://agent-controller.example/events");
+      expect(raw.eventing.sinks["agent-controller-webhook"].bodyMapping.static).toEqual({ source: "pi-materia" });
+      expect(raw.eventing.sinks["agent-controller-webhook"].eventFilter).toEqual({ include: ["lifecycle.*", "result.*"] });
+      expect(raw.eventing.sinks["agent-controller-webhook"].maxRetries).toBe(5);
+      expect(raw.eventing.sinks["agent-controller-webhook"].retryBackoffMs).toBe(2000);
+      expect(raw.eventing.sinks["agent-controller-webhook"].maxBackoffMs).toBe(60000);
+
+      const reloaded = await loadConfig(cwd);
+      expect(reloaded.config.eventing?.enabled).toBe(true);
+      expect(reloaded.config.eventing?.heartbeatIntervalMs).toBe(15000);
+      expect(reloaded.config.eventing?.presets).toEqual(["agent-controller"]);
+      const sink = reloaded.config.eventing!.sinks!["agent-controller-webhook"] as Record<string, unknown>;
+      expect(sink.url).toBe("https://agent-controller.example/events");
+      expect(sink.maxRetries).toBe(5);
+      expect(sink.retryBackoffMs).toBe(2000);
+      expect(sink.maxBackoffMs).toBe(60000);
+      expect(sink.discardingAfter).toBe(10);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("setting eventing to null in a patch removes it from effective config", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-null-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      // First, enable eventing
+      await saveMateriaConfigPatch(cwd, {
+        eventing: { enabled: true, heartbeatIntervalMs: 10000 },
+      });
+
+      let loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.enabled).toBe(true);
+
+      // Then null it out
+      await saveMateriaConfigPatch(cwd, { eventing: null });
+
+      loaded = await loadConfig(cwd);
+      // Falls back to default config
+      expect(loaded.config.eventing?.enabled).toBe(false);
+      expect(loaded.config.eventing?.heartbeatIntervalMs).toBe(30000);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("heartbeatIntervalMs override preserves other eventing fields", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-heartbeat-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          heartbeatIntervalMs: 60000,
+          sinks: { "slow-sink": { id: "slow-sink", url: "https://example.com" } },
+        },
+      });
+
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.heartbeatIntervalMs).toBe(60000);
+      expect(loaded.config.eventing?.enabled).toBe(true);
+      expect(loaded.config.eventing?.sinks).toHaveProperty("slow-sink");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("presets are additive across layers", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-presets-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const projectFile = path.join(cwd, ".pi", "pi-materia.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          presets: ["agent-controller"],
+        },
+      });
+
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(projectFile, JSON.stringify({
+        eventing: { presets: ["custom-monitor"] },
+      }), "utf8");
+
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.presets).toEqual(["agent-controller", "custom-monitor"]);
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
+  test("removing a sink by setting it to null in a layer", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-removesink-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const projectFile = path.join(cwd, ".pi", "pi-materia.json");
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      await saveMateriaConfigPatch(cwd, {
+        eventing: {
+          enabled: true,
+          sinks: {
+            "keep-me": { id: "keep-me", url: "https://keep.example.com" },
+            "remove-me": { id: "remove-me", url: "https://remove.example.com" },
+          },
+        },
+      });
+
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(projectFile, JSON.stringify({
+        eventing: { sinks: { "remove-me": null } },
+      }), "utf8");
+
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.sinks).toHaveProperty("keep-me");
+      expect(loaded.config.eventing?.sinks).not.toHaveProperty("remove-me");
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+});

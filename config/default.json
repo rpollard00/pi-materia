@@ -11,6 +11,12 @@
     "stopAtLimit": true
   },
   "activeLoadout": "Full-Auto",
+  "eventing": {
+    "enabled": false,
+    "sinks": {},
+    "heartbeatIntervalMs": 30000,
+    "presets": []
+  },
   "loadouts": {
     "Full-Auto": {
       "id": "default:full-auto",
