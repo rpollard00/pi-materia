@@ -10,10 +10,14 @@ import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import {
   EVENT_SIDECHANNEL_FIELD,
   ResultAccumulator,
+  SequenceCounter,
   createSequenceCounter,
   enrichEvents,
   validateMateriaEventArray,
+  type EnrichedEvent,
   type EnrichmentContext,
+  type EventSeverity,
+  type MateriaEventObject,
 } from "../domain/eventing.js";
 import { createEventBus, EventBus, flushBusOutcomes } from "./eventBus.js";
 import { WebhookSink } from "./webhookSink.js";
@@ -78,10 +82,107 @@ function getResultAccumulator(state: MateriaCastState): ResultAccumulator | unde
   return castResultAccumulators.get(state.castId);
 }
 
+// ── Lifecycle Event Emission ────────────────────────────────────────────
+
+/**
+ * Emit a runtime-owned lifecycle event through the event bus.
+ *
+ * Lifecycle events use a `lifecycle.` prefix (docs/runtime-eventing.md §7)
+ * and flow through the same bus, filters, artifacts, and sinks as
+ * materia-emitted events. If eventing is disabled (no bus), the call is a
+ * silent no-op.
+ *
+ * Each lifecycle event is enriched with runtime metadata (eventId,
+ * occurredAt, monotonic sequence, castId, and available socket/materia/item
+ * context) before dispatch.
+ */
+async function emitLifecycleEvent(
+  state: MateriaCastState,
+  type: string,
+  overrides: {
+    severity?: EventSeverity;
+    message?: string;
+    payload?: Record<string, unknown>;
+    socketId?: string;
+    materia?: string;
+    materiaLabel?: string;
+    visit?: number;
+    itemKey?: string;
+    itemLabel?: string;
+  } = {},
+): Promise<void> {
+  const bus = getEventBus(state);
+  if (!bus) return; // eventing disabled — silent no-op
+
+  const seq = castSequenceCounters.get(state.castId);
+  if (!seq) return;
+
+  const materiaEvent: MateriaEventObject = {
+    type,
+    severity: overrides.severity ?? "info",
+    ...(overrides.message !== undefined ? { message: overrides.message } : {}),
+    ...(overrides.payload !== undefined ? { payload: overrides.payload } : {}),
+  };
+
+  // Build enrichment context using caller-supplied overrides, falling back
+  // to generic lifecycle placeholders for cast-level events.
+  const enrichmentCtx: EnrichmentContext = {
+    castId: state.castId,
+    socketId: overrides.socketId ?? "lifecycle",
+    materia: overrides.materia ?? "pi-materia",
+    ...(overrides.materiaLabel !== undefined ? { materiaLabel: overrides.materiaLabel } : {}),
+    visit: overrides.visit ?? 0,
+    ...(overrides.itemKey !== undefined ? { itemKey: overrides.itemKey } : {}),
+    ...(overrides.itemLabel !== undefined ? { itemLabel: overrides.itemLabel } : {}),
+  };
+
+  const enrichedEvents = enrichEvents([materiaEvent], enrichmentCtx, seq, () => randomUUID());
+  for (const event of enrichedEvents) {
+    await bus.dispatch(event);
+  }
+}
+
 function removeEventBus(castId: string): void {
   castEventBuses.delete(castId);
   castSequenceCounters.delete(castId);
   castResultAccumulators.delete(castId);
+}
+
+/**
+ * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
+ * the event bus before clearing the cast state.
+ *
+ * This is the abort/cancel handler called when a user explicitly
+ * aborts a cast or a quest runner cancels it. The event bus is
+ * flushed and cleaned up before the cast state is cleared.
+ *
+ * Returns the cleared state for caller convenience.
+ */
+export async function cancelNativeCast(
+  pi: ExtensionAPI,
+  state: MateriaCastState,
+  reason = "aborted by user",
+): Promise<MateriaCastState> {
+  // Emit lifecycle.cast.cancelled before flushing/cleanup.
+  await emitLifecycleEvent(state, "lifecycle.cast.cancelled", {
+    severity: "warning",
+    message: reason,
+    payload: { reason },
+  });
+
+  // Flush event bus before terminal artifacts.
+  const bus = getEventBus(state);
+  if (bus) {
+    try { await bus.flush(); } catch { /* best-effort */ }
+    try { await flushBusOutcomes(bus, state.runDir); } catch { /* best-effort */ }
+  }
+
+  // Mark the run ended so clearCastState doesn't set endedAt again.
+  state.runState.endedAt ??= Date.now();
+
+  const cleared = clearCastState(pi, state, reason);
+  removeEventBus(state.castId);
+  return cleared;
 }
 
 /**
@@ -392,6 +493,18 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   // Initialize the event bus if eventing is enabled.
   initializeCastEventBus(config, state);
 
+  // Emit lifecycle.cast.started through the event bus (no-op if eventing disabled).
+  await emitLifecycleEvent(state, "lifecycle.cast.started", {
+    severity: "info",
+    message: request.slice(0, 200),
+    payload: {
+      request,
+      ...(loadoutIdentity.loadoutId ? { loadoutId: loadoutIdentity.loadoutId } : {}),
+      loadoutName: effectivePipeline.loadoutName,
+      pipeline: effectivePipeline.pipeline,
+    },
+  });
+
   pi.setSessionName(`materia: ${request.slice(0, 60)}`);
   saveCastState(pi, state);
   updateWidget(ctx, state, { replaceOwner: true });
@@ -613,7 +726,19 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       return;
     }
     const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { allowGenericTurnFailure: shouldRetryGenericTurnFailure(error) });
-    if (!recovered) await failCast(pi, ctx, state, error);
+    if (!recovered) {
+      // Emit lifecycle.socket.failed before the cast-level failure event.
+      await emitLifecycleEvent(state, "lifecycle.socket.failed", {
+        severity: "error",
+        socketId: currentSocketId(state),
+        materia: state.currentMateria,
+        visit: currentSocketVisit(state, undefined),
+        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+        payload: { error: error instanceof Error ? error.message : String(error) },
+      });
+      await failCast(pi, ctx, state, error);
+    }
     return;
   }
 
@@ -631,7 +756,19 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       return;
     }
     const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id, allowGenericTurnFailure: shouldRetryGenericTurnFailure(error) });
-    if (!recovered) await failCast(pi, ctx, state, error, latest.entry.id);
+    if (!recovered) {
+      // Emit lifecycle.socket.failed before the cast-level failure event.
+      await emitLifecycleEvent(state, "lifecycle.socket.failed", {
+        severity: "error",
+        socketId: currentSocketId(state),
+        materia: state.currentMateria,
+        visit: currentSocketVisit(state, undefined),
+        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+        payload: { error: error instanceof Error ? error.message : String(error) },
+      });
+      await failCast(pi, ctx, state, error, latest.entry.id);
+    }
     return;
   }
 
@@ -662,6 +799,19 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
       state.runState.lastMessage = `Multi-turn socket ${socket.id} waiting for refinement; run /materia continue to finalize.`;
       await writeUsage(state.runState);
       await appendEvent(state.runState, "socket_refinement", { socket: socket.id, materia: socketMateriaName(socket), artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
+
+      // Emit lifecycle.refinement.waiting through the event bus.
+      await emitLifecycleEvent(state, "lifecycle.refinement.waiting", {
+        severity: "info",
+        socketId: socket.id,
+        materia: resolvedMateriaId(socket) ?? socket.id,
+        materiaLabel: resolvedMateriaDisplayName(socket),
+        visit: socketVisit(state, socket.id),
+        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+        payload: { refinementTurn: refinement.turn },
+      });
+
       saveCastState(pi, state);
       ctx.ui.setStatus("materia", materiaStatusLabel(state, socket, { suffix: "refine", includeItem: false }));
       updateWidget(ctx, state);
@@ -670,20 +820,17 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     }
     await completeSocket(pi, ctx, state, text, latest.entry.id, { diagnostics: agentEndAdvancementDiagnostics(state, socket) });
   } catch (error) {
-    state.active = false;
-    state.phase = "failed";
-    state.multiTurnFinalizing = false;
-    setCurrentSocketState(state, "failed");
-    state.failedReason = error instanceof Error ? error.message : String(error);
-    state.runState.lastMessage = state.failedReason;
-    markRunEnded(state);
-    await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason });
-    await writeUsage(state.runState);
-    await appendManifest(state, { phase: "failed", entryId: latest.entry.id });
-    saveCastState(pi, state);
-    ctx.ui.setStatus("materia", "failed");
-    updateWidget(ctx, state);
-    ctx.ui.notify(`pi-materia cast failed: ${state.failedReason}`, "error");
+    // Emit lifecycle.socket.failed before the cast-level failure event.
+    await emitLifecycleEvent(state, "lifecycle.socket.failed", {
+      severity: "error",
+      socketId: currentSocketId(state),
+      materia: state.currentMateria,
+      visit: currentSocketVisit(state, undefined),
+      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+      ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+      payload: { error: error instanceof Error ? error.message : String(error) },
+    });
+    await failCast(pi, ctx, state, error, latest.entry.id);
   }
 }
 
@@ -771,6 +918,32 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   const advanceTarget = applyAdvance(state, socket, parsed);
   const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
   await appendEvent(state.runState, "socket_complete", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), artifact, parsed: effectiveResolvedSocketConfig(socket).parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
+
+  // Emit lifecycle.socket.completed through the event bus.
+  await emitLifecycleEvent(state, "lifecycle.socket.completed", {
+    severity: "debug",
+    socketId: socket.id,
+    materia: resolvedMateriaId(socket) ?? socket.id,
+    materiaLabel: resolvedMateriaDisplayName(socket),
+    visit: socketVisit(state, socket.id),
+    ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+    ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+    payload: { finalizedRefinement: finalizedRefinement || undefined },
+  });
+
+  // Emit lifecycle.status for progress visibility (runtime-owned status emission).
+  await emitLifecycleEvent(state, "lifecycle.status", {
+    severity: "info",
+    message: `Socket ${socket.id} completed`,
+    socketId: socket.id,
+    materia: resolvedMateriaId(socket) ?? socket.id,
+    materiaLabel: resolvedMateriaDisplayName(socket),
+    visit: socketVisit(state, socket.id),
+    ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+    ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+    payload: { phase: state.phase },
+  });
+
   await assertBudget(config, state.runState, ctx);
 
   let nextTarget = advanceTarget;
@@ -864,6 +1037,18 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   state.runState.lastMessage = socket.id;
   await writeUsage(state.runState);
   await appendEvent(state.runState, "socket_start", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: socketVisit(state, socket.id) });
+
+  // Emit lifecycle.socket.started through the event bus.
+  await emitLifecycleEvent(state, "lifecycle.socket.started", {
+    severity: "debug",
+    socketId: socket.id,
+    materia: resolvedMateriaId(socket) ?? socket.id,
+    materiaLabel: resolvedMateriaDisplayName(socket),
+    visit: socketVisit(state, socket.id),
+    ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+    ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+  });
+
   saveCastState(pi, state);
   updateWidget(ctx, state);
   ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
@@ -881,6 +1066,17 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
       const result = await executeUtilitySocket(state, socket);
       await completeSocket(pi, ctx, state, result.output, result.entryId, { diagnostics: nextDiagnostics });
     } catch (error) {
+      // Emit lifecycle.socket.failed before the cast-level failure event.
+      await emitLifecycleEvent(state, "lifecycle.socket.failed", {
+        severity: "error",
+        socketId: socket.id,
+        materia: resolvedMateriaId(socket) ?? socket.id,
+        materiaLabel: resolvedMateriaDisplayName(socket),
+        visit: socketVisit(state, socket.id),
+        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+        payload: { error: error instanceof Error ? error.message : String(error) },
+      });
       await failCast(pi, ctx, state, error, `utility:${socket.id}:${socketVisit(state, socket.id)}`);
     }
     return;
@@ -907,7 +1103,24 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
     return;
   }
   await appendAdvancementDiagnostic(ctx, state, "dispatch_scheduling", nextDiagnostics, { boundary: "async_prompt_dispatch_attempt", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), dispatchTriggerMode: nextDiagnostics?.dispatchTriggerMode ?? "immediate-triggerTurn" });
-  await dispatch();
+  try {
+    await dispatch();
+  } catch (error) {
+    // Emit lifecycle.socket.failed before cast-level failure so the event bus
+    // sees the socket failure event even for prompt-dispatch failures.
+    await emitLifecycleEvent(state, "lifecycle.socket.failed", {
+      severity: "error",
+      socketId: socket.id,
+      materia: resolvedMateriaId(socket) ?? socket.id,
+      materiaLabel: resolvedMateriaDisplayName(socket),
+      visit: socketVisit(state, socket.id),
+      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+      ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+      payload: { error: error instanceof Error ? error.message : String(error) },
+    });
+    await failCast(pi, ctx, state, error, `dispatch:${socket.id}`);
+    return;
+  }
 }
 
 function deferredPromptDispatchKey(state: MateriaCastState, socket: ResolvedMateriaSocket, diagnostics?: AdvancementLifecycleDiagnostics): string {
@@ -941,6 +1154,18 @@ async function scheduleDeferredPromptDispatch(pi: ExtensionAPI, ctx: ExtensionCo
         console.error(message, error);
         try {
           await appendEvent(state.runState, "deferred_dispatch_failure", { error: errorMessage(error), socket: socket.id, materia: socketMateriaName(socket), castId: state.castId, diagnostic: true });
+          // Emit lifecycle.socket.failed before cast-level failure so the event
+          // bus records the socket that failed to dispatch.
+          await emitLifecycleEvent(state, "lifecycle.socket.failed", {
+            severity: "error",
+            socketId: socket.id,
+            materia: resolvedMateriaId(socket) ?? socket.id,
+            materiaLabel: resolvedMateriaDisplayName(socket),
+            visit: socketVisit(state, socket.id),
+            ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+            ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+            payload: { error: errorMessage(error) },
+          });
           await failCast(pi, ctx, state, new Error(message), `deferred-dispatch:${socket.id}`);
         } catch (failError) {
           console.error(`Failed to persist deferred dispatch failure for socket "${socket.id}": ${errorMessage(failError)}`, failError);
@@ -994,7 +1219,21 @@ async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: Ext
     appendEvent,
     writeUsage,
     saveState: (nextState) => saveCastState(pi, nextState),
-    failCast: (nextState, nextError, entryId, failOptions) => failCast(pi, ctx, nextState, nextError, entryId, failOptions),
+    failCast: async (nextState, nextError, entryId, failOptions) => {
+      // Emit lifecycle.socket.failed before the cast-level failure event.
+      // This covers agent socket failures where same-socket recovery is
+      // exhausted and the workflow calls failCast internally.
+      await emitLifecycleEvent(nextState, "lifecycle.socket.failed", {
+        severity: "error",
+        socketId: currentSocketId(nextState),
+        materia: nextState.currentMateria,
+        visit: currentSocketVisit(nextState, undefined),
+        ...(nextState.currentItemKey !== undefined ? { itemKey: nextState.currentItemKey } : {}),
+        ...(nextState.currentItemLabel !== undefined ? { itemLabel: nextState.currentItemLabel } : {}),
+        payload: { error: nextError instanceof Error ? nextError.message : String(nextError) },
+      });
+      await failCast(pi, ctx, nextState, nextError, entryId, failOptions);
+    },
     updateToolScope: async (materia) => {
       const emittedWarnings: ToolScopeRuntimeWarning[] = [];
       updateToolScope(pi, materia, { context: { socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, visit: currentSocketVisit(state, undefined) }, onWarning: (warning) => { emittedWarnings.push(warning); } });
@@ -1101,6 +1340,18 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   state.runState.lastMessage = state.failedReason;
   markRunEnded(state);
 
+  // Emit lifecycle.cast.failed before flushing the event bus.
+  await emitLifecycleEvent(state, "lifecycle.cast.failed", {
+    severity: "error",
+    message: state.failedReason,
+    payload: {
+      error: state.failedReason,
+      socketId: currentSocketId(state),
+      materia: state.currentMateria,
+      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+    },
+  });
+
   // Flush event bus before terminal artifacts.
   const bus = getEventBus(state);
   if (bus) {
@@ -1140,6 +1391,21 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
   markRunEnded(state);
+
+  // Derive final outcome from accumulated result events and emit
+  // lifecycle.cast.completed before flushing the event bus.
+  const accumulator = getResultAccumulator(state);
+  const outcome = accumulator?.deriveOutcome() ?? "patch_created";
+  const resultEvents = accumulator?.getResultEvents() ?? [];
+  await emitLifecycleEvent(state, "lifecycle.cast.completed", {
+    severity: "info",
+    message,
+    payload: {
+      outcome,
+      resultCount: resultEvents.length,
+      resultTypes: resultEvents.map((e) => e.type),
+    },
+  });
 
   // Flush event bus before terminal artifacts.
   const bus = getEventBus(state);
@@ -1236,6 +1502,11 @@ export const nativeTestInternals = {
   resolveEmptyLoopExhaustionTarget,
   setCurrentItem,
   setPath,
+  emitLifecycleEvent,
+  cancelNativeCast,
+  getEventBus,
+  getResultAccumulator,
+  removeEventBus,
 };
 
 
