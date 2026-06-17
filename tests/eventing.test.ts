@@ -58,10 +58,17 @@ describe("validateMateriaEventArray", () => {
     if (result.ok) expect(result.value).toEqual([]);
   });
 
-  test("returns empty array when event is null", () => {
+  // Per §2.2 and §2.4: when the event property exists in parsed JSON but is
+  // null, that is an invalid non-array value, not an absent field. The caller
+  // (processSocketEvents) only invokes validation after confirming the property
+  // exists on the parsed object, so null here means `"event": null` in JSON.
+  test("rejects null event (must be an array when property is present)", () => {
     const result = validateMateriaEventArray(null);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toEqual([]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues[0].path).toBe("$.event");
+      expect(result.issues[0].message).toContain("must be an array");
+    }
   });
 
   test("accepts an empty array", () => {
@@ -175,6 +182,44 @@ describe("validateMateriaEventArray", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.issues[0].path).toBe("$.event");
+    }
+  });
+
+  // Regression: non-array scalar values for `event` must be rejected (§2.2, §2.4).
+  // These occur in JSON like `"event": true`, `"event": 42`, etc.
+  test("rejects event that is a boolean", () => {
+    const result = validateMateriaEventArray(true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues[0].path).toBe("$.event");
+      expect(result.issues[0].message).toContain("must be an array");
+    }
+  });
+
+  test("rejects event that is a boolean false", () => {
+    const result = validateMateriaEventArray(false);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues[0].path).toBe("$.event");
+      expect(result.issues[0].message).toContain("must be an array");
+    }
+  });
+
+  test("rejects event that is a number", () => {
+    const result = validateMateriaEventArray(42);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues[0].path).toBe("$.event");
+      expect(result.issues[0].message).toContain("must be an array");
+    }
+  });
+
+  test("rejects event that is a float", () => {
+    const result = validateMateriaEventArray(3.14);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues[0].path).toBe("$.event");
+      expect(result.issues[0].message).toContain("must be an array");
     }
   });
 

@@ -97,8 +97,10 @@ export interface EnrichedEvent extends MateriaEventObject {
 export function validateMateriaEventArray(
   value: unknown,
 ): DomainResult<MateriaEventObject[]> {
-  // Absent or null event is not an error — it's just absent.
-  if (value === undefined || value === null) return ok([]);
+  // Absent event is not an error — it's just absent.
+  // null is NOT treated as absent: when the event property exists in the parsed
+  // JSON but is null, that's an invalid non-array value per §2.2/§2.4.
+  if (value === undefined) return ok([]);
 
   if (!Array.isArray(value)) {
     return err(

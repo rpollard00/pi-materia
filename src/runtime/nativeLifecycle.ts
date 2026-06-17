@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { safeTimestamp } from "../utilities/artifacts.js";
 import { resolveArtifactRoot } from "../config/config.js";
@@ -6,6 +7,16 @@ import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
+import {
+  EVENT_SIDECHANNEL_FIELD,
+  createSequenceCounter,
+  enrichEvents,
+  validateMateriaEventArray,
+  type EnrichmentContext,
+} from "../domain/eventing.js";
+import { createEventBus, EventBus, flushBusOutcomes } from "./eventBus.js";
+import { WebhookSink } from "./webhookSink.js";
+import type { EventingConfig, EventingWebhookSinkConfig } from "../types.js";
 import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
@@ -34,12 +45,160 @@ import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, updateToolScope, type ToolScopeRuntimeWarning } from "./agentTurnState.js";
 import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, nextRefinementTurn, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit, startTaskAttempt } from "./sessionState.js";
-import { effectiveResolvedSocketConfig, resolvedMateriaDisplayName } from "./resolvedMateria.js";
+import { effectiveResolvedSocketConfig, resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
 export { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 
 
 const DEFAULT_MAX_SOCKET_VISITS = 25;
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
+
+// ── Event Bus Registry ──────────────────────────────────────────────────
+
+/** Per-cast event bus instances keyed by castId. */
+const castEventBuses = new Map<string, EventBus>();
+
+/** Per-cast sequence counter keyed by castId. */
+const castSequenceCounters = new Map<string, ReturnType<typeof createSequenceCounter>>();
+
+function getEventBus(state: MateriaCastState): EventBus | undefined {
+  return castEventBuses.get(state.castId);
+}
+
+function removeEventBus(castId: string): void {
+  castEventBuses.delete(castId);
+  castSequenceCounters.delete(castId);
+}
+
+/**
+ * Create and register the event bus for a cast when eventing is enabled.
+ *
+ * Registers the built-in local recording sink and any configured webhook sinks.
+ * The bus is stored in the module-level registry keyed by castId.
+ */
+function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState): EventBus | undefined {
+  const eventing = config.eventing;
+  if (!eventing?.enabled) return undefined;
+
+  const bus = createEventBus(state.runDir);
+  const seq = createSequenceCounter();
+
+  // Register configured webhook sinks.
+  if (eventing.sinks) {
+    for (const [sinkId, sinkConfig] of Object.entries(eventing.sinks)) {
+      if (!isEnabledWebhookSinkConfig(sinkConfig)) continue;
+      try {
+        bus.register(new WebhookSink(sinkConfig));
+      } catch {
+        // Sink creation failures are non-fatal — they are logged and skipped.
+        // The cast continues without this sink.
+      }
+    }
+  }
+
+  castEventBuses.set(state.castId, bus);
+  castSequenceCounters.set(state.castId, seq);
+  return bus;
+}
+
+function isEnabledWebhookSinkConfig(
+  config: unknown,
+): config is EventingWebhookSinkConfig {
+  if (typeof config !== "object" || config === null) return false;
+  const c = config as Record<string, unknown>;
+  if (c.enabled === false) return false;
+  // Must have a URL to be a webhook sink.
+  return typeof c.url === "string" && c.url.trim().length > 0;
+}
+
+/**
+ * Process the `event` side-channel from parsed JSON output.
+ *
+ * Per docs/runtime-eventing.md §3, events are extracted immediately after JSON
+ * parse, validated, enriched (when eventing enabled), dispatched, and then
+ * stripped from the parsed object before handoff semantics run.
+ *
+ * Extraction, validation, and stripping always occur when the `event` field is
+ * present, regardless of whether eventing is enabled. Dispatch is skipped when
+ * eventing is disabled or no EventBus is registered.
+ *
+ * - Agent sockets: invalid event shape triggers existing JSON repair/retry
+ *   flow (same as any other invalid JSON output field).
+ * - Utility sockets: invalid event shape is a hard failure — the utility
+ *   produced invalid structured output.
+ */
+async function processSocketEvents(
+  state: MateriaCastState,
+  parsed: unknown,
+  rawText: string,
+  socket: ResolvedMateriaSocket,
+): Promise<void> {
+  if (!isPlainObject(parsed)) return;
+  const parsedObj = parsed as Record<string, unknown>;
+
+  // Only process if the event field is present.
+  if (!Object.prototype.hasOwnProperty.call(parsedObj, EVENT_SIDECHANNEL_FIELD)) return;
+
+  const rawEvent = parsedObj[EVENT_SIDECHANNEL_FIELD];
+
+  // Validate the event side-channel (always, regardless of eventing enabled/disabled).
+  const validation = validateMateriaEventArray(rawEvent);
+
+  if (!validation.ok) {
+    const validationError = new Error(
+      `Invalid event side-channel for socket "${socket.id}": ${validation.issues.map((i) => `${i.path}: ${i.message}`).join("; ")}`,
+    );
+
+    if (isAgentResolvedSocket(socket)) {
+      // Agent sockets: trigger JSON repair/retry flow.
+      // Use the raw text so the repair prompt shows the original agent output.
+      state.jsonOutputRepair = buildJsonOutputRepairContext(
+        rawText,
+        validationError,
+        "handoff_validation",
+        validation.issues.map((i) => ({ path: i.path, message: i.message })),
+      );
+      // The event field is left in parsed so the repair context captures it.
+      // The caller (completeSocket) will detect jsonOutputRepair and retry.
+      throw validationError;
+    }
+
+    // Utility sockets: hard failure.
+    throw validationError;
+  }
+
+  const events = validation.value;
+
+  // Dispatch enriched events only when eventing is enabled and bus is available.
+  if (events.length > 0) {
+    const bus = getEventBus(state);
+    const seq = castSequenceCounters.get(state.castId);
+    if (bus && seq) {
+      const enrichmentCtx: EnrichmentContext = {
+        castId: state.castId,
+        socketId: socket.id,
+        materia: resolvedMateriaId(socket) ?? socket.id,
+        materiaLabel: resolvedMateriaDisplayName(socket),
+        visit: socketVisit(state, socket.id),
+        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+      };
+
+      const enrichedEvents = enrichEvents(events, enrichmentCtx, seq, () => randomUUID());
+
+      for (const enriched of enrichedEvents) {
+        await bus.dispatch(enriched);
+      }
+    }
+  }
+
+  // Always strip the event field before handoff semantics (docs/runtime-eventing.md §3.5).
+  // This happens regardless of whether eventing is enabled or dispatch occurred.
+  delete parsedObj[EVENT_SIDECHANNEL_FIELD];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 type AdvancementOrigin = "initial" | "command" | "agent_end";
 type PromptDispatchMode = "immediate" | "defer-agent-trigger";
@@ -205,6 +364,9 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
     pipeline,
   };
 
+  // Initialize the event bus if eventing is enabled.
+  initializeCastEventBus(config, state);
+
   pi.setSessionName(`materia: ${request.slice(0, 60)}`);
   saveCastState(pi, state);
   updateWidget(ctx, state, { replaceOwner: true });
@@ -340,6 +502,16 @@ async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   state.runState.lastMessage = `Recasting from socket ${socket.id}.`;
   await appendEvent(state.runState, "cast_recast", { socket: socket.id, materia: socketMateriaName(socket), previousFailure, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: socketVisit(state, socket.id), reusedActivePrompt: isAgentResolvedSocket(socket) && Boolean(state.activeTurnPrompt) });
   await writeUsage(state.runState);
+
+  // Re-initialize the event bus for the resumed/revived cast.
+  // The previous bus was cleaned up by failCast, but the castId is the same.
+  try {
+    const config = await loadConfigFromState(state);
+    initializeCastEventBus(config, state);
+  } catch {
+    // Config load or bus init failure is non-fatal for recast.
+  }
+
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
   updateWidget(ctx, state, { replaceOwner: true });
@@ -503,8 +675,43 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
 
   let parsed: unknown = text;
   if (effectiveResolvedSocketConfig(socket).parse === "json") {
+    // ── Phase 1: Parse JSON ───────────────────────────────────────
     try {
       parsed = parseSocketJson<unknown>(socket.id, text);
+    } catch (error) {
+      const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
+      if (isAgentResolvedSocket(socket)) {
+        if (options.finalizedMultiTurn) state.multiTurnFinalizing = true;
+        state.jsonOutputRepair = buildJsonOutputRepairContext(text, validationError, classifyJsonOutputValidationKind(error), handoffValidationIssues(error));
+        const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
+        if (recovered) return;
+        throw nonRecoverableTurnError(state, validationError);
+      }
+      throw validationError;
+    }
+
+    // ── Phase 2: Process event side-channel (docs/runtime-eventing.md §3)
+    //    Extracted, validated, enriched, dispatched, and stripped BEFORE
+    //    handoff validation so event never leaks into state or prompts.
+    try {
+      await processSocketEvents(state, parsed, text, socket);
+    } catch (eventError) {
+      // Agent sockets: invalid event shape triggers JSON repair/retry
+      // (same as any other invalid JSON output field).
+      // processSocketEvents already sets jsonOutputRepair for agents.
+      if (isAgentResolvedSocket(socket)) {
+        const validationError = eventError instanceof Error ? eventError : new Error(String(eventError));
+        if (options.finalizedMultiTurn) state.multiTurnFinalizing = true;
+        const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
+        if (recovered) return;
+        throw nonRecoverableTurnError(state, validationError);
+      }
+      // Utility sockets: hard failure propagates.
+      throw eventError;
+    }
+
+    // ── Phase 3: Validate handoff output (event already stripped) ─
+    try {
       parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: effectiveResolvedSocketConfig(socket), agentOutput: isAgentResolvedSocket(socket), workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)) });
     } catch (error) {
       const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
@@ -517,6 +724,8 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
       }
       throw validationError;
     }
+
+    // ── Phase 4: Record clean parsed output (event already stripped) ──
     state.jsonOutputRepair = undefined;
     state.lastJson = parsed;
     await recordSocketParsedJson({ state, socketId: socket.id, visit: socketVisit(state, socket.id), parsed });
@@ -856,6 +1065,15 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   state.failedReason = error instanceof Error ? error.message : String(error);
   state.runState.lastMessage = state.failedReason;
   markRunEnded(state);
+
+  // Flush event bus before terminal artifacts.
+  const bus = getEventBus(state);
+  if (bus) {
+    try { await bus.flush(); } catch { /* best-effort */ }
+    try { await flushBusOutcomes(bus, state.runDir); } catch { /* best-effort */ }
+    removeEventBus(state.castId);
+  }
+
   await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, socket: currentSocketId(state) });
   await writeUsage(state.runState);
   await appendManifest(state, { phase: "failed", socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
@@ -887,6 +1105,15 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
   markRunEnded(state);
+
+  // Flush event bus before terminal artifacts.
+  const bus = getEventBus(state);
+  if (bus) {
+    try { await bus.flush(); } catch { /* best-effort */ }
+    try { await flushBusOutcomes(bus, state.runDir); } catch { /* best-effort */ }
+    removeEventBus(state.castId);
+  }
+
   await writeUsage(state.runState);
   await appendEvent(state.runState, "cast_end", { ok: true, usage: state.runState.usage, entryId });
   await appendManifest(state, { phase: "complete", entryId });
