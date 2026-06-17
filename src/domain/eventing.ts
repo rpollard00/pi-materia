@@ -344,6 +344,52 @@ export function enrichEvents(
   });
 }
 
+// ── Sink Interface ─────────────────────────────────────────────────────
+
+/**
+ * Common interface for every event sink.
+ *
+ * Sinks receive enriched events in dispatch order. If a sink throws or rejects,
+ * the failure is captured as a diagnostic but does not propagate to the bus or
+ * other sinks (per docs/runtime-eventing.md §4.2).
+ */
+export interface EventSink {
+  /** Unique sink identifier (matches config sink id). */
+  readonly id: string;
+  /** Whether this sink is currently enabled for delivery. */
+  readonly enabled: boolean;
+  /** Deliver a single enriched event to this sink. */
+  deliver(event: EnrichedEvent): Promise<void>;
+  /** Optional flush — called when the bus wants sinks to finalize pending writes. */
+  flush?(): Promise<void>;
+}
+
+// ── Dispatch Outcomes ───────────────────────────────────────────────────
+
+/** A single sink delivery failure captured during dispatch. */
+export interface DispatchFailure {
+  /** Sink id that failed. */
+  sinkId: string;
+  /** Error message (redacted — never includes secrets or tokens). */
+  error: string;
+}
+
+/**
+ * Per-event dispatch outcome recorded to the dispatch artifact.
+ *
+ * Tracks which sinks received the event and any failures.
+ */
+export interface DispatchOutcome {
+  /** The event's unique identifier. */
+  eventId: string;
+  /** Sink ids that successfully received this event. */
+  deliveredTo: string[];
+  /** Sink failures (if any). */
+  failures: DispatchFailure[];
+  /** ISO 8601 timestamp of dispatch completion. */
+  occurredAt: string;
+}
+
 // ── Utilities ───────────────────────────────────────────────────────────
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
