@@ -21,7 +21,8 @@ import {
 } from "../domain/eventing.js";
 import { createEventBus, EventBus, flushBusOutcomes } from "./eventBus.js";
 import { WebhookSink } from "./webhookSink.js";
-import type { EventingConfig, EventingWebhookSinkConfig } from "../types.js";
+import { expandPresets } from "../eventing/presets.js";
+import type { EventingConfig, EventingWebhookSinkConfig, EventSinkConfig } from "../types.js";
 import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
@@ -278,16 +279,42 @@ function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState
   const seq = createSequenceCounter();
   const accumulator = new ResultAccumulator();
 
-  // Register configured webhook sinks.
-  if (eventing.sinks) {
-    for (const [sinkId, sinkConfig] of Object.entries(eventing.sinks)) {
-      if (!isEnabledWebhookSinkConfig(sinkConfig)) continue;
-      try {
-        bus.register(new WebhookSink(sinkConfig));
-      } catch {
-        // Sink creation failures are non-fatal — they are logged and skipped.
-        // The cast continues without this sink.
+  // Resolve presets into sink configurations before registering.
+  // Preset sinks are defaults — explicitly configured sinks with the same id
+  // take precedence (per docs/runtime-eventing.md §8.4).
+  const resolvedSinks: Record<string, EventSinkConfig> = { ...eventing.sinks };
+  if (eventing.presets && eventing.presets.length > 0) {
+    // Resolve the controller context directory from the CONTROLLER_CONTEXT_DIR
+    // env var (set by the agent_router per docs §13b.5). The preset resolver
+    // also checks this env var internally, but we pass it explicitly so the
+    // context file lookup is always available.
+    const controllerContextDir = process.env["CONTROLLER_CONTEXT_DIR"]?.trim();
+    const expanded = expandPresets(
+      eventing.presets,
+      eventing.sinks,
+      controllerContextDir,
+    );
+    // Preset sinks are added only when no existing sink with the same id exists.
+    for (const [sinkId, sinkConfig] of Object.entries(expanded.sinks)) {
+      if (!(sinkId in resolvedSinks)) {
+        resolvedSinks[sinkId] = sinkConfig;
       }
+    }
+    // Log preset expansion warnings to the existing events.jsonl diagnostic path.
+    // Fire-and-forget is acceptable here — these are non-critical diagnostics.
+    for (const warning of expanded.warnings) {
+      appendEvent(state.runState, "eventing_preset_warning", { warning }).catch(() => {});
+    }
+  }
+
+  // Register configured webhook sinks (both explicit and preset-expanded).
+  for (const [sinkId, sinkConfig] of Object.entries(resolvedSinks)) {
+    if (!isEnabledWebhookSinkConfig(sinkConfig)) continue;
+    try {
+      bus.register(new WebhookSink(sinkConfig));
+    } catch {
+      // Sink creation failures are non-fatal — they are logged and skipped.
+      // The cast continues without this sink.
     }
   }
 

@@ -147,6 +147,8 @@ export class WebhookSink implements EventSink {
       this.#config.bodyTemplate ?? "mapped",
       this.#config.bodyMapping,
       event,
+      this.#config.typeMap,
+      this.#config.severityMap,
     );
 
     let lastError: unknown;
@@ -365,6 +367,8 @@ function buildBody(
   template: "passthrough" | "mapped" | "none",
   mapping: EventBodyFieldMapping | undefined,
   event: EnrichedEvent,
+  typeMap?: Record<string, string>,
+  severityMap?: Record<string, string>,
 ): unknown {
   switch (template) {
     case "passthrough":
@@ -372,13 +376,15 @@ function buildBody(
     case "none":
       return {};
     case "mapped":
-      return buildMappedBody(mapping, event);
+      return buildMappedBody(mapping, event, typeMap, severityMap);
   }
 }
 
 function buildMappedBody(
   mapping: EventBodyFieldMapping | undefined,
   event: EnrichedEvent,
+  typeMap?: Record<string, string>,
+  severityMap?: Record<string, string>,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {};
 
@@ -387,11 +393,13 @@ function buildMappedBody(
   // key is the output body field name. When the mapping value is omitted the
   // known default enriched-event field name is used (see defaults below).
   applyMapping("eventId", mapping?.eventId, "eventId", body, event);
-  applyMapping("eventType", mapping?.eventType, "type", body, event);
+  applyEventTypeMapping("eventType", mapping?.eventType, "type", body, event, typeMap);
   applyMapping("occurredAt", mapping?.occurredAt, "occurredAt", body, event);
-  applyMapping("severity", mapping?.severity, "severity", body, event);
+  applyMapping("severity", mapping?.severity, "severity", body, event, severityMap);
   applyMapping("message", mapping?.message, "message", body, event);
   applyMapping("payload", mapping?.payload, "payload", body, event);
+  applyMapping("runtimeRunId", mapping?.runtimeRunId, "castId", body, event);
+  applyMapping("sequence", mapping?.sequence, "sequence", body, event);
 
   // Merge static fields last so they can override mapped fields.
   if (mapping?.static) {
@@ -407,6 +415,7 @@ function buildMappedBody(
  * @param outputKey   Body field name.
  * @param lookupKey   Enriched event field name to read from (configured value).
  * @param defaultKey  Enriched event field name to use when lookupKey is undefined.
+ * @param valueMap    Optional value transformation map (e.g. severityMap).
  */
 function applyMapping(
   outputKey: string,
@@ -414,9 +423,45 @@ function applyMapping(
   defaultKey: string,
   body: Record<string, unknown>,
   event: EnrichedEvent,
+  valueMap?: Record<string, string>,
 ): void {
   const sourceField = lookupKey ?? defaultKey;
-  const value = (event as unknown as Record<string, unknown>)[sourceField];
+  let value = (event as unknown as Record<string, unknown>)[sourceField];
+  if (value !== undefined && valueMap && typeof value === "string") {
+    const mapped = valueMap[value];
+    if (mapped !== undefined) {
+      value = mapped;
+    }
+  }
+  if (value !== undefined) {
+    body[outputKey] = value;
+  }
+}
+
+/**
+ * Write the eventType field with optional type mapping.
+ *
+ * When a `typeMap` is provided, the event's type is looked up in the map.
+ * If a mapping exists, the mapped value is used (e.g. `lifecycle.cast.started`
+ * becomes `runtime.accepted`). If no mapping exists, the original event type
+ * is used as-is.
+ */
+function applyEventTypeMapping(
+  outputKey: string,
+  lookupKey: string | undefined,
+  defaultKey: string,
+  body: Record<string, unknown>,
+  event: EnrichedEvent,
+  typeMap?: Record<string, string>,
+): void {
+  const sourceField = lookupKey ?? defaultKey;
+  let value = (event as unknown as Record<string, unknown>)[sourceField];
+  if (value !== undefined && typeMap && typeof value === "string") {
+    const mapped = typeMap[value];
+    if (mapped !== undefined) {
+      value = mapped;
+    }
+  }
   if (value !== undefined) {
     body[outputKey] = value;
   }

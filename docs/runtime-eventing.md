@@ -534,12 +534,14 @@ The preset maps `lifecycle.cast.completed` to `runtime.completed` with a
 
 The controller's `runId` is resolved from:
 
-1. `eventing.sinks["agent-controller-webhook"].headers["X-Controller-Run-Id"]` —
-   explicit configuration.
-2. `AGENT_CONTROLLER_RUN_ID` environment variable — set by the controller when
-   invoking pi-materia.
-3. A context file at `{controllerContextDir}/controller-run.json` containing a
-   `runId` field — written by the controller into the workspace.
+1. `CONTROLLER_RUN_ID` environment variable — set by the controller when
+   invoking pi-materia (per agent_router docs §13b.5).
+2. `CONTROLLER_CONTEXT_DIR` environment variable — if set, looks for
+   `controller-run.json` directly inside that directory (no `.agent/`
+   subdirectory; the agent_router writes context files flat into the
+   context dir per docs §7.3 and §13b.5).
+3. An explicit context directory passed programmatically — same lookup
+   as step 2.
 
 Resolution is tried in order; the first non-empty value is used. If no `runId` is
 resolved, the controller webhook sink logs a warning and skips delivery (rather than

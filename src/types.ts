@@ -649,7 +649,7 @@ export interface EventingWebhookSinkConfig {
   id: string;
   kind?: "webhook";
   enabled?: boolean;
-  /** POST endpoint URL. */
+  /** POST endpoint URL. Supports `{runId}` template resolved from AGENT_CONTROLLER_RUN_ID env var or context file. */
   url: string;
   /** HTTP method (default "POST"). */
   method?: "POST" | "PUT";
@@ -659,6 +659,10 @@ export interface EventingWebhookSinkConfig {
   bodyTemplate?: "passthrough" | "mapped" | "none";
   /** Field mapping used when bodyTemplate is "mapped". */
   bodyMapping?: EventBodyFieldMapping;
+  /** Optional pi-materia → controller event type mapping. Keys are pi-materia event types; values are the mapped type to send. */
+  typeMap?: Record<string, string>;
+  /** Optional severity value mapping. Keys are internal severity values; values are the mapped severity to send. Useful when an external system only accepts a subset of severities (e.g. the agent controller does not accept `debug`, so `{ "debug": "info" }` maps heartbeats to `info`). */
+  severityMap?: Record<string, string>;
   /** Optional event type filter applied before delivery. */
   eventFilter?: EventFilter;
   /** Delivery request timeout in milliseconds (default 10000). */
@@ -693,6 +697,10 @@ export interface EventBodyFieldMapping {
   message?: "message" | string;
   /** Field name for the payload. */
   payload?: "payload" | string;
+  /** Field name for the runtime-assigned run id (maps from enriched event's castId by default). */
+  runtimeRunId?: "castId" | string;
+  /** Field name for the monotonic per-cast event sequence. */
+  sequence?: "sequence" | string;
   /** Additional static fields merged into every delivery body. */
   static?: Record<string, unknown>;
 }
