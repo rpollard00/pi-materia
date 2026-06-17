@@ -121,6 +121,69 @@ export const HANDOFF_CONTRACT_DOC_TEXT = [
   `Legacy aliases (${HANDOFF_LEGACY_NON_CANONICAL_ALIASES.map((field) => JSON.stringify(field)).join(", ")}) are not canonical handoff fields. Obsolete broad-envelope fields such as summary, guidance, decisions, risks, feedback, and missing are not agent handoff fields in the small contract.`,
 ].join("\n\n");
 
+// ── Event Emission Synthetic Context ───────────────────────────────────
+
+/**
+ * Concise event emission instructions injected into synthetic cast context
+ * for JSON-output agent sockets. Per docs/runtime-eventing.md §11.5,
+ * this is kept minimal and separate from the main handoff contract text.
+ */
+export const EVENT_EMISSION_CONTEXT_TEXT = [
+  "## Event Emission (Optional)",
+  "",
+  "If this materia produces JSON output, you may include an optional top-level `event` array to report results and status to external systems. This is a side-channel — it does not affect routing, assignment, or downstream state, and it is stripped before handoff semantics run.",
+  "",
+  "- The `event` field is an array of event objects. It is never part of the agent handoff contract (workItems/satisfied/context).",
+  "- Text output sockets cannot emit JSON side-channel events. The `event` field is only available in JSON-output mode.",
+  "- Event objects require a `type` (dot-separated, e.g. \"result.pr_created\", \"status.progress\") and may optionally include `severity`, `message`, and `payload`.",
+  "- Severity defaults to \"info\" when omitted. Valid severities: debug, info, warning, error, critical.",
+  "",
+  "### Result Events",
+  "",
+  "Use result.* event types to signal the final outcome of your work:",
+  "",
+  '```json',
+  '{ "type": "result.pr_created", "message": "PR #42 created", "payload": { "prUrl": "https://github.com/org/repo/pull/42", "branchName": "agent/42-add-retry", "baseBranch": "main" } }',
+  '```',
+  "",
+  '```json',
+  '{ "type": "result.branch_pushed", "message": "Branch agent/42 pushed", "payload": { "branchName": "agent/42-add-retry", "remote": "origin" } }',
+  '```',
+  "",
+  '```json',
+  '{ "type": "result.no_changes_needed", "message": "No code changes required; acceptance criteria already satisfied." }',
+  '```',
+  "",
+  '```json',
+  '{ "type": "result.needs_human", "severity": "warning", "message": "Ambiguous acceptance criteria for retry behavior.", "payload": { "reason": "ambiguous_acceptance_criteria", "questions": ["Should 429 be retried?"] } }',
+  '```',
+  "",
+  "### Status and Progress Events",
+  "",
+  "Use status.* event types for intermediate progress reporting:",
+  "",
+  '```json',
+  '{ "type": "status.progress", "message": "Running unit tests", "payload": { "phase": "validation" } }',
+  '```',
+  "",
+  '```json',
+  '{ "type": "status.info", "message": "Identified 3 files needing changes", "payload": { "filesAffected": 3 } }',
+  '```',
+  "",
+  "Include an `event` array at the top level of your JSON output alongside workItems, satisfied, and context. Example combined output:",
+  "",
+  '```json',
+  '{',
+  '  "workItems": [{ "title": "feat: add retry logic", "context": "Implement retry with exponential backoff." }],',
+  '  "satisfied": true,',
+  '  "context": "Implementation complete.",',
+  '  "event": [',
+  '    { "type": "result.pr_created", "message": "PR #42 created", "payload": { "prUrl": "https://github.com/org/repo/pull/42" } }',
+  '  ]',
+  '}',
+  '```',
+].join("\n");
+
 void HANDOFF_EDGE_CONDITIONS;
 void HANDOFF_ENVELOPE_FIELDS;
 void HANDOFF_RESERVED_EVALUATOR_FIELDS;

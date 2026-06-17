@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -371,6 +371,166 @@ describe("application prompt assembly", () => {
     expect(synthetic).toContain("Cast id: cast-1");
     expect(synthetic).toContain("Original request: original request");
     expect(synthetic).toContain("Previous output:\nprevious answer");
+  });
+});
+
+describe("syntheticEventEmissionContext", () => {
+  function makeJsonSocket(): ResolvedMateriaAgentSocket {
+    return agentSocket({
+      id: "Socket-1",
+      socket: { materia: "Build", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Build feature." },
+    });
+  }
+
+  function makeTextSocket(): ResolvedMateriaAgentSocket {
+    return agentSocket({
+      id: "Socket-1",
+      socket: { materia: "Build", parse: "text" },
+      materia: { tools: "readWrite", prompt: "Build feature." },
+    });
+  }
+
+  test("returns event emission instructions for single-turn JSON sockets", () => {
+    const socket = makeJsonSocket();
+    const castState = state(socket);
+
+    const context = syntheticEventEmissionContext(castState);
+    expect(context).toBeDefined();
+    expect(context).toBeString();
+
+    // Title and general instructions
+    expect(context).toContain("## Event Emission (Optional)");
+    expect(context).toContain("does not affect routing, assignment, or downstream state");
+
+    // Text socket disclaimer
+    expect(context).toContain("Text output sockets cannot emit JSON side-channel events");
+
+    // Not part of handoff contract
+    expect(context).toContain("never part of the agent handoff contract");
+
+    // Type requirement
+    expect(context).toContain('"type"');
+    expect(context).toContain('"result.pr_created"');
+    expect(context).toContain('"status.progress"');
+
+    // Severity
+    expect(context).toContain('"severity"');
+    expect(context).toContain('"info"');
+    expect(context).toContain('debug, info, warning, error, critical');
+
+    // Result event examples
+    expect(context).toContain("### Result Events");
+    expect(context).toContain('result.pr_created');
+    expect(context).toContain('result.branch_pushed');
+    expect(context).toContain('result.no_changes_needed');
+    expect(context).toContain('result.needs_human');
+
+    // Status event examples
+    expect(context).toContain("### Status and Progress Events");
+    expect(context).toContain('status.progress');
+    expect(context).toContain('status.info');
+
+    // Combined output example
+    expect(context).toContain('Example combined output');
+    expect(context).toContain('"workItems"');
+    expect(context).toContain('"satisfied"');
+    expect(context).toContain('"context"');
+    expect(context).toContain('"event"');
+  });
+
+  test("returns undefined for text sockets", () => {
+    const socket = makeTextSocket();
+    const castState = state(socket);
+
+    expect(syntheticEventEmissionContext(castState)).toBeUndefined();
+  });
+
+  test("returns event emission instructions for multi-turn finalization", () => {
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan work.", multiTurn: true },
+    });
+    const castState = state(socket, { multiTurnFinalizing: true });
+
+    const context = syntheticEventEmissionContext(castState);
+    expect(context).toBeDefined();
+    expect(context).toContain("## Event Emission (Optional)");
+    expect(context).toContain('result.pr_created');
+  });
+
+  test("returns undefined during multi-turn refinement (conversational mode)", () => {
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan work.", multiTurn: true },
+    });
+    const castState = state(socket, { multiTurnFinalizing: false });
+
+    expect(syntheticEventEmissionContext(castState)).toBeUndefined();
+  });
+
+  test("event emission context is included in buildSyntheticCastContext for JSON sockets", () => {
+    const socket = makeJsonSocket();
+    const castState = state(socket, { lastOutput: "previous work output" });
+
+    const synthetic = buildSyntheticCastContext(castState);
+
+    expect(synthetic).toContain("## Event Emission (Optional)");
+    expect(synthetic).toContain('result.pr_created');
+    expect(synthetic).toContain('result.branch_pushed');
+    expect(synthetic).toContain('result.no_changes_needed');
+    expect(synthetic).toContain('result.needs_human');
+    expect(synthetic).toContain('status.progress');
+    expect(synthetic).toContain('status.info');
+
+    // Event context should come after handoff contract context
+    const eventIdx = synthetic.indexOf("## Event Emission (Optional)");
+    const handoffIdx = synthetic.indexOf("Agent-authored JSON handoffs are limited");
+    expect(handoffIdx).toBeGreaterThan(-1);
+    expect(eventIdx).toBeGreaterThan(handoffIdx);
+  });
+
+  test("event emission context is NOT included for text sockets in buildSyntheticCastContext", () => {
+    const socket = makeTextSocket();
+    const castState = state(socket, { lastOutput: "text output" });
+
+    const synthetic = buildSyntheticCastContext(castState);
+
+    expect(synthetic).not.toContain("## Event Emission (Optional)");
+    expect(synthetic).not.toContain('result.pr_created');
+    expect(synthetic).not.toContain('status.progress');
+  });
+
+  test("event emission context is included in multi-turn finalization prompt", () => {
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan work.", multiTurn: true },
+    });
+    const castState = state(socket, { multiTurnFinalizing: true });
+
+    const prompt = buildMultiTurnFinalizationPrompt(castState, socket);
+
+    expect(prompt).toContain("## Event Emission (Optional)");
+    expect(prompt).toContain('result.pr_created');
+    expect(prompt).toContain('status.progress');
+  });
+
+  test("event emission context is NOT included during multi-turn refinement", () => {
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan work.", multiTurn: true },
+    });
+    const castState = state(socket, { multiTurnFinalizing: false });
+
+    const prompt = buildSocketPrompt(castState, socket);
+
+    expect(prompt).not.toContain("## Event Emission (Optional)");
+    expect(prompt).not.toContain('result.pr_created');
+    expect(prompt).not.toContain('status.progress');
   });
 });
 
