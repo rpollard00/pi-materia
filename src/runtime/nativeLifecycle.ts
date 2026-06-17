@@ -68,6 +68,9 @@ const castSequenceCounters = new Map<string, ReturnType<typeof createSequenceCou
 /** Per-cast result accumulators keyed by castId. */
 const castResultAccumulators = new Map<string, ResultAccumulator>();
 
+/** Per-cast heartbeat interval timers keyed by castId. */
+const castHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
+
 function getEventBus(state: MateriaCastState): EventBus | undefined {
   return castEventBuses.get(state.castId);
 }
@@ -80,6 +83,77 @@ function getEventBus(state: MateriaCastState): EventBus | undefined {
  */
 function getResultAccumulator(state: MateriaCastState): ResultAccumulator | undefined {
   return castResultAccumulators.get(state.castId);
+}
+
+// ── Heartbeat ──────────────────────────────────────────────────────────
+
+/**
+ * Start a configurable heartbeat interval for a cast.
+ *
+ * Emits `lifecycle.heartbeat` events at the configured interval while
+ * the cast is active. The heartbeat stops automatically when the cast
+ * reaches a terminal state via {@link stopHeartbeat} or when the event
+ * bus is removed.
+ *
+ * Per docs/runtime-eventing.md §7.3–7.4: heartbeat is configurable and
+ * opt-in (default off). It stops on terminal states and exactly one
+ * terminal event is guaranteed.
+ */
+function startHeartbeat(state: MateriaCastState, config: PiMateriaConfig): void {
+  // Only start heartbeat when eventing is explicitly enabled and a bus is
+  // registered (docs/runtime-eventing.md §7.3–7.4: opt-in, default off).
+  if (!config.eventing?.enabled) return;
+  const intervalMs = config.eventing?.heartbeatIntervalMs;
+  if (!intervalMs || intervalMs <= 0) return;
+  // Defensive: don't start if the bus isn't available.
+  if (!castEventBuses.has(state.castId)) return;
+
+  // Clear any existing heartbeat for this cast (resume/revive safety).
+  stopHeartbeat(state.castId);
+
+  const startedAt = state.startedAt;
+  const castId = state.castId;
+
+  const interval = setInterval(() => {
+    // Check that the event bus is still registered before emitting.
+    // The bus is removed by removeEventBus after terminal events are
+    // dispatched, so this check prevents heartbeats after shutdown.
+    if (!castEventBuses.has(castId)) {
+      stopHeartbeat(castId);
+      return;
+    }
+
+    // Fire-and-forget: heartbeat delivery is best-effort. Failures are
+    // captured as diagnostics but do not affect cast progress.
+    void emitLifecycleEvent(state, "lifecycle.heartbeat", {
+      severity: "debug",
+      payload: {
+        phase: state.phase,
+        elapsedMs: Date.now() - startedAt,
+        socketId: state.currentSocketId,
+      },
+    });
+  }, intervalMs);
+
+  // Allow the event loop to exit cleanly (no ref prevents the timer from
+  // keeping the process alive when there is no other work).
+  interval.unref();
+
+  castHeartbeats.set(castId, interval);
+}
+
+/**
+ * Stop the heartbeat interval for a cast.
+ *
+ * Clears the interval timer and removes it from the registry.
+ * Safe to call multiple times or when no heartbeat is active.
+ */
+function stopHeartbeat(castId: string): void {
+  const interval = castHeartbeats.get(castId);
+  if (interval !== undefined) {
+    clearInterval(interval);
+    castHeartbeats.delete(castId);
+  }
 }
 
 // ── Lifecycle Event Emission ────────────────────────────────────────────
@@ -143,6 +217,7 @@ async function emitLifecycleEvent(
 }
 
 function removeEventBus(castId: string): void {
+  stopHeartbeat(castId);
   castEventBuses.delete(castId);
   castSequenceCounters.delete(castId);
   castResultAccumulators.delete(castId);
@@ -163,6 +238,10 @@ export async function cancelNativeCast(
   state: MateriaCastState,
   reason = "aborted by user",
 ): Promise<MateriaCastState> {
+  // Stop heartbeat before emitting the terminal event so no heartbeat
+  // fires after cancellation (docs/runtime-eventing.md §7.4).
+  stopHeartbeat(state.castId);
+
   // Emit lifecycle.cast.cancelled before flushing/cleanup.
   await emitLifecycleEvent(state, "lifecycle.cast.cancelled", {
     severity: "warning",
@@ -491,7 +570,13 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   };
 
   // Initialize the event bus if eventing is enabled.
-  initializeCastEventBus(config, state);
+  const eventBus = initializeCastEventBus(config, state);
+
+  // Start heartbeat only when eventing is enabled and the bus is registered.
+  // (docs/runtime-eventing.md §7.3: heartbeat is opt-in, default off).
+  if (eventBus) {
+    startHeartbeat(state, config);
+  }
 
   // Emit lifecycle.cast.started through the event bus (no-op if eventing disabled).
   await emitLifecycleEvent(state, "lifecycle.cast.started", {
@@ -643,9 +728,13 @@ async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
 
   // Re-initialize the event bus for the resumed/revived cast.
   // The previous bus was cleaned up by failCast, but the castId is the same.
+  // Restart heartbeat when eventing is enabled (docs/runtime-eventing.md §7.3).
   try {
     const config = await loadConfigFromState(state);
-    initializeCastEventBus(config, state);
+    const eventBus = initializeCastEventBus(config, state);
+    if (eventBus) {
+      startHeartbeat(state, config);
+    }
   } catch {
     // Config load or bus init failure is non-fatal for recast.
   }
@@ -1340,6 +1429,10 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   state.runState.lastMessage = state.failedReason;
   markRunEnded(state);
 
+  // Stop heartbeat before emitting the terminal event so no heartbeat
+  // fires after failure (docs/runtime-eventing.md §7.4).
+  stopHeartbeat(state.castId);
+
   // Emit lifecycle.cast.failed before flushing the event bus.
   await emitLifecycleEvent(state, "lifecycle.cast.failed", {
     severity: "error",
@@ -1391,6 +1484,10 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
   state.updatedAt = Date.now();
   state.runState.lastMessage = message;
   markRunEnded(state);
+
+  // Stop heartbeat before emitting the terminal event so no heartbeat
+  // fires after completion (docs/runtime-eventing.md §7.4).
+  stopHeartbeat(state.castId);
 
   // Derive final outcome from accumulated result events and emit
   // lifecycle.cast.completed before flushing the event bus.
@@ -1507,6 +1604,11 @@ export const nativeTestInternals = {
   getEventBus,
   getResultAccumulator,
   removeEventBus,
+  startHeartbeat,
+  stopHeartbeat,
+  initializeCastEventBus,
+  get castHeartbeats() { return castHeartbeats; },
+  get castEventBuses() { return castEventBuses; },
 };
 
 
