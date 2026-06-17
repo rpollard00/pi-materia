@@ -9,6 +9,7 @@ import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import {
   EVENT_SIDECHANNEL_FIELD,
+  ResultAccumulator,
   createSequenceCounter,
   enrichEvents,
   validateMateriaEventArray,
@@ -60,13 +61,27 @@ const castEventBuses = new Map<string, EventBus>();
 /** Per-cast sequence counter keyed by castId. */
 const castSequenceCounters = new Map<string, ReturnType<typeof createSequenceCounter>>();
 
+/** Per-cast result accumulators keyed by castId. */
+const castResultAccumulators = new Map<string, ResultAccumulator>();
+
 function getEventBus(state: MateriaCastState): EventBus | undefined {
   return castEventBuses.get(state.castId);
+}
+
+/**
+ * Get the result accumulator for a cast, if eventing is enabled.
+ *
+ * Returns undefined when eventing is disabled. Callers should handle
+ * that gracefully (e.g., skip outcome derivation for lifecycle events).
+ */
+function getResultAccumulator(state: MateriaCastState): ResultAccumulator | undefined {
+  return castResultAccumulators.get(state.castId);
 }
 
 function removeEventBus(castId: string): void {
   castEventBuses.delete(castId);
   castSequenceCounters.delete(castId);
+  castResultAccumulators.delete(castId);
 }
 
 /**
@@ -81,6 +96,7 @@ function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState
 
   const bus = createEventBus(state.runDir);
   const seq = createSequenceCounter();
+  const accumulator = new ResultAccumulator();
 
   // Register configured webhook sinks.
   if (eventing.sinks) {
@@ -97,6 +113,7 @@ function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState
 
   castEventBuses.set(state.castId, bus);
   castSequenceCounters.set(state.castId, seq);
+  castResultAccumulators.set(state.castId, accumulator);
   return bus;
 }
 
@@ -184,6 +201,14 @@ async function processSocketEvents(
       };
 
       const enrichedEvents = enrichEvents(events, enrichmentCtx, seq, () => randomUUID());
+
+      // Feed result.* events into the cast accumulator before dispatch.
+      const accumulator = getResultAccumulator(state);
+      if (accumulator) {
+        for (const enriched of enrichedEvents) {
+          accumulator.record(enriched);
+        }
+      }
 
       for (const enriched of enrichedEvents) {
         await bus.dispatch(enriched);

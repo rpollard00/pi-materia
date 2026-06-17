@@ -392,6 +392,172 @@ export interface DispatchOutcome {
   occurredAt: string;
 }
 
+// ── Result Accumulation & Final Outcome ───────────────────────────────
+
+/**
+ * Prefix shared by all result.* event types.
+ *
+ * Materia-emitted events with types starting with this prefix are tracked
+ * by the {@link ResultAccumulator} for final outcome derivation.
+ */
+export const RESULT_EVENT_PREFIX = "result." as const;
+
+/**
+ * Well-known result event type constants.
+ *
+ * These are the documented result types from docs/runtime-eventing.md §10–11.
+ * Materia may emit other result.* types; the accumulator tracks any type
+ * starting with {@link RESULT_EVENT_PREFIX} but uses these constants for
+ * outcome derivation.
+ */
+export const RESULT_EVENT_TYPES = {
+  PR_CREATED: "result.pr_created",
+  BRANCH_PUSHED: "result.branch_pushed",
+  NO_CHANGES_NEEDED: "result.no_changes_needed",
+  NEEDS_HUMAN: "result.needs_human",
+} as const;
+
+/**
+ * Final controller-facing outcome derived from accumulated result events.
+ *
+ * Precedence order (docs/runtime-eventing.md §10.2):
+ *   1. pr_created → `"pull_request_opened"`
+ *   2. branch_pushed → `"branch_pushed"`
+ *   3. no_changes_needed → `"no_changes_needed"`
+ *   4. needs_human → `"needs_human"`
+ *   5. Default (no explicit success result) → `"patch_created"`
+ */
+export type CastFinalOutcome =
+  | "pull_request_opened"
+  | "branch_pushed"
+  | "no_changes_needed"
+  | "needs_human"
+  | "patch_created";
+
+/**
+ * Accumulates result.* events during a cast and derives the final
+ * controller-facing outcome from the accumulated signals.
+ *
+ * ### Precedence Rules (docs/runtime-eventing.md §10.2–10.3)
+ *
+ * 1. {@link RESULT_EVENT_TYPES.PR_CREATED} → `"pull_request_opened"`
+ * 2. {@link RESULT_EVENT_TYPES.BRANCH_PUSHED} → `"branch_pushed"`
+ * 3. {@link RESULT_EVENT_TYPES.NO_CHANGES_NEEDED} → `"no_changes_needed"`
+ * 4. {@link RESULT_EVENT_TYPES.NEEDS_HUMAN} → `"needs_human"`
+ * 5. Default → `"patch_created"`
+ *
+ * ### Last-Wins Behavior
+ *
+ * If the same result type is emitted multiple times (e.g., two
+ * `result.pr_created` events for different PRs), the **last** event of
+ * that type wins for that type's signal. The precedence ladder then
+ * resolves across types.
+ *
+ * If both `result.needs_human` and `result.pr_created` are emitted, the
+ * precedence ladder means `pr_created` wins. This is intentional: if the
+ * materia managed to create a PR and then encountered a human-blocking
+ * issue, the PR exists and should be reported.
+ *
+ * ### Usage
+ *
+ * Create one accumulator per cast. Feed result events via {@link record}
+ * as they are enriched. Call {@link deriveOutcome} at cast completion to
+ * get the final outcome for lifecycle events and webhook delivery.
+ */
+export class ResultAccumulator {
+  /**
+   * Ordered list of all result.* events emitted during the cast.
+   *
+   * All result events are preserved (docs/runtime-eventing.md §10.1).
+   * Last-wins applies only when deriving a type's signal (§10.3), not to
+   * discarding prior events from the accumulated history.
+   */
+  readonly #all: EnrichedEvent[] = [];
+
+  /**
+   * Last event per result type for signal derivation and type-specific lookup.
+   *
+   * When the same result type is emitted multiple times, the last event
+   * of that type wins for that type's signal in {@link deriveOutcome} and
+   * {@link get}. All events remain in {@link #all} for history/context.
+   */
+  readonly #lastPerType = new Map<string, EnrichedEvent>();
+
+  /**
+   * Record an enriched event if it is a result.* event.
+   *
+   * Non-result events (types not starting with `"result."`) are silently
+   * ignored. Result events are appended to the full history and update
+   * the last-per-type slot for signal derivation (last-wins).
+   */
+  record(event: EnrichedEvent | MateriaEventObject): void {
+    if (!event.type.startsWith(RESULT_EVENT_PREFIX)) return;
+    const enriched = event as EnrichedEvent;
+    this.#all.push(enriched);
+    this.#lastPerType.set(enriched.type, enriched);
+  }
+
+  /**
+   * Derive the final controller-facing outcome from accumulated signals.
+   *
+   * Uses last-per-type precedence (docs/runtime-eventing.md §10.2–10.3):
+   * PR > branch > no_changes > needs_human > patch_created (default).
+   *
+   * @returns The derived {@link CastFinalOutcome}.
+   */
+  deriveOutcome(): CastFinalOutcome {
+    const types = new Set(this.#lastPerType.keys());
+
+    // Precedence ladder: check in priority order.
+    if (types.has(RESULT_EVENT_TYPES.PR_CREATED)) return "pull_request_opened";
+    if (types.has(RESULT_EVENT_TYPES.BRANCH_PUSHED)) return "branch_pushed";
+    if (types.has(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED)) return "no_changes_needed";
+    if (types.has(RESULT_EVENT_TYPES.NEEDS_HUMAN)) return "needs_human";
+
+    // Default: work completed but no explicit success result.
+    return "patch_created";
+  }
+
+  /**
+   * Return a snapshot of all accumulated result events in insertion order.
+   *
+   * Returns every result.* event emitted during the cast, not just the
+   * last-wins event per type (docs/runtime-eventing.md §10.1). Useful for
+   * including the full accumulated history in lifecycle terminal events.
+   */
+  getResultEvents(): EnrichedEvent[] {
+    return [...this.#all];
+  }
+
+  /**
+   * Return the last recorded event for a specific result type, if any.
+   *
+   * When the same type is emitted multiple times, returns the most recent
+   * event (last-wins for that type's signal).
+   *
+   * @param type — The exact result event type to look up.
+   */
+  get(type: string): EnrichedEvent | undefined {
+    return this.#lastPerType.get(type);
+  }
+
+  /** Total number of result.* events accumulated (including duplicates of the same type). */
+  get size(): number {
+    return this.#all.length;
+  }
+
+  /** Whether any result.* events have been accumulated. */
+  get hasResults(): boolean {
+    return this.#all.length > 0;
+  }
+
+  /** Clear all accumulated data (for testing). */
+  reset(): void {
+    this.#all.length = 0;
+    this.#lastPerType.clear();
+  }
+}
+
 // ── Utilities ───────────────────────────────────────────────────────────
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

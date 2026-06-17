@@ -4,12 +4,16 @@ import {
   EVENT_SEVERITY_LEVELS,
   EVENT_SIDECHANNEL_FIELD,
   DEFAULT_EVENT_SEVERITY,
+  RESULT_EVENT_PREFIX,
+  RESULT_EVENT_TYPES,
+  ResultAccumulator,
   SequenceCounter,
   createSequenceCounter,
   enrichEvents,
   isEventSeverity,
   isValidEventArray,
   validateMateriaEventArray,
+  type CastFinalOutcome,
   type EnrichedEvent,
   type EnrichmentContext,
   type MateriaEventObject,
@@ -915,5 +919,513 @@ describe("enrichEvents", () => {
       expect(result1[0][key]).toEqual(result2[0][key]);
       expect(result1[1][key]).toEqual(result2[1][key]);
     }
+  });
+});
+
+// ── ResultAccumulator ───────────────────────────────────────────────────
+
+/** Minimal enriched-like event shape for accumulator tests. */
+function mkEvent(type: string, overrides: Partial<EnrichedEvent> = {}): EnrichedEvent {
+  return {
+    eventId: `evt-${type}-${Math.random().toString(36).slice(2, 8)}`,
+    occurredAt: new Date().toISOString(),
+    sequence: 1,
+    castId: "test-cast",
+    socketId: "Socket-1",
+    materia: "Test-Materia",
+    visit: 1,
+    type,
+    severity: "info",
+    ...overrides,
+  };
+}
+
+describe("ResultAccumulator", () => {
+  describe("constants", () => {
+    test("RESULT_EVENT_PREFIX is 'result.'", () => {
+      expect(RESULT_EVENT_PREFIX).toBe("result.");
+    });
+
+    test("RESULT_EVENT_TYPES has expected values", () => {
+      expect(RESULT_EVENT_TYPES.PR_CREATED).toBe("result.pr_created");
+      expect(RESULT_EVENT_TYPES.BRANCH_PUSHED).toBe("result.branch_pushed");
+      expect(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED).toBe("result.no_changes_needed");
+      expect(RESULT_EVENT_TYPES.NEEDS_HUMAN).toBe("result.needs_human");
+    });
+  });
+
+  // ── Default outcome (no result events) ───────────────────────────────
+  describe("default outcome", () => {
+    test("no result events → patch_created", () => {
+      const acc = new ResultAccumulator();
+      expect(acc.deriveOutcome()).toBe("patch_created");
+      expect(acc.hasResults).toBe(false);
+      expect(acc.size).toBe(0);
+    });
+
+    test("only non-result events → patch_created", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent("status.progress"));
+      acc.record(mkEvent("lifecycle.cast.started"));
+      acc.record(mkEvent("error.timeout"));
+      expect(acc.deriveOutcome()).toBe("patch_created");
+      expect(acc.hasResults).toBe(false);
+      expect(acc.size).toBe(0);
+    });
+
+    test("empty record calls don't change default", () => {
+      const acc = new ResultAccumulator();
+      // Simulate what happens when no result.* events are emitted.
+      expect(acc.deriveOutcome()).toBe("patch_created");
+      expect(acc.getResultEvents()).toEqual([]);
+    });
+  });
+
+  // ── Single result type → corresponding outcome ───────────────────────
+  describe("single result type outcome mapping", () => {
+    test("pr_created → pull_request_opened", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED, {
+        message: "PR #42 created",
+        payload: { prUrl: "https://github.com/org/repo/pull/42" },
+      }));
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+      expect(acc.hasResults).toBe(true);
+      expect(acc.size).toBe(1);
+    });
+
+    test("branch_pushed → branch_pushed", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED, {
+        message: "Branch agent/42 pushed",
+      }));
+      expect(acc.deriveOutcome()).toBe("branch_pushed");
+      expect(acc.hasResults).toBe(true);
+      expect(acc.size).toBe(1);
+    });
+
+    test("no_changes_needed → no_changes_needed", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED, {
+        message: "No changes required",
+      }));
+      expect(acc.deriveOutcome()).toBe("no_changes_needed");
+      expect(acc.hasResults).toBe(true);
+      expect(acc.size).toBe(1);
+    });
+
+    test("needs_human → needs_human", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN, {
+        severity: "warning",
+        message: "Ambiguous acceptance criteria",
+        payload: { reason: "ambiguous" },
+      }));
+      expect(acc.deriveOutcome()).toBe("needs_human");
+      expect(acc.hasResults).toBe(true);
+      expect(acc.size).toBe(1);
+    });
+  });
+
+  // ── Precedence rules ─────────────────────────────────────────────────
+  describe("precedence: PR > branch > no_changes > needs_human > patch_created", () => {
+    test("PR + branch → pull_request_opened", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+    });
+
+    test("branch + PR (reverse order) → pull_request_opened", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+    });
+
+    test("PR + no_changes_needed → pull_request_opened", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+    });
+
+    test("PR + needs_human → pull_request_opened", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+    });
+
+    test("PR + needs_human + no_changes_needed + branch → pull_request_opened", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+    });
+
+    test("branch + no_changes_needed → branch_pushed", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      expect(acc.deriveOutcome()).toBe("branch_pushed");
+    });
+
+    test("branch + needs_human → branch_pushed", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      expect(acc.deriveOutcome()).toBe("branch_pushed");
+    });
+
+    test("no_changes_needed + needs_human → no_changes_needed", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED));
+      expect(acc.deriveOutcome()).toBe("no_changes_needed");
+    });
+
+    test("needs_human alone → needs_human", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN));
+      expect(acc.deriveOutcome()).toBe("needs_human");
+    });
+  });
+
+  // ── Last-wins for same type ──────────────────────────────────────────
+  describe("last-wins for same type", () => {
+    test("two pr_created events → both preserved, last wins for signal", () => {
+      const acc = new ResultAccumulator();
+      const first = mkEvent(RESULT_EVENT_TYPES.PR_CREATED, {
+        message: "PR #1 created",
+        payload: { prUrl: "https://github.com/org/repo/pull/1" },
+      });
+      const second = mkEvent(RESULT_EVENT_TYPES.PR_CREATED, {
+        message: "PR #2 created",
+        payload: { prUrl: "https://github.com/org/repo/pull/2" },
+      });
+
+      acc.record(first);
+      acc.record(second);
+
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+      // All events are preserved in the accumulated history (§10.1).
+      expect(acc.size).toBe(2);
+      expect(acc.getResultEvents()).toHaveLength(2);
+      expect(acc.getResultEvents()[0].message).toBe("PR #1 created");
+      expect(acc.getResultEvents()[1].message).toBe("PR #2 created");
+      // Last event wins for type-specific lookup and signal derivation (§10.3).
+      expect(acc.get(RESULT_EVENT_TYPES.PR_CREATED)?.message).toBe("PR #2 created");
+      expect(acc.get(RESULT_EVENT_TYPES.PR_CREATED)?.payload).toEqual({
+        prUrl: "https://github.com/org/repo/pull/2",
+      });
+    });
+
+    test("three branch_pushed events → all preserved, last wins for signal", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED, { message: "branch-1" }));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED, { message: "branch-2" }));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED, { message: "branch-3" }));
+
+      expect(acc.deriveOutcome()).toBe("branch_pushed");
+      // All three events are preserved.
+      expect(acc.size).toBe(3);
+      expect(acc.getResultEvents()).toHaveLength(3);
+      expect(acc.getResultEvents()[0].message).toBe("branch-1");
+      expect(acc.getResultEvents()[2].message).toBe("branch-3");
+      // Last event wins for type-specific lookup.
+      expect(acc.get(RESULT_EVENT_TYPES.BRANCH_PUSHED)?.message).toBe("branch-3");
+    });
+
+    test("multiple needs_human → both preserved, last wins for signal", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN, {
+        message: "First issue",
+        payload: { reason: "reason-1" },
+      }));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN, {
+        message: "Second issue",
+        payload: { reason: "reason-2" },
+      }));
+
+      expect(acc.deriveOutcome()).toBe("needs_human");
+      // Both events are preserved.
+      expect(acc.size).toBe(2);
+      expect(acc.getResultEvents()).toHaveLength(2);
+      expect(acc.getResultEvents()[0].message).toBe("First issue");
+      expect(acc.getResultEvents()[1].message).toBe("Second issue");
+      // Last event wins for type-specific lookup.
+      expect(acc.get(RESULT_EVENT_TYPES.NEEDS_HUMAN)?.message).toBe("Second issue");
+      expect(acc.get(RESULT_EVENT_TYPES.NEEDS_HUMAN)?.payload).toEqual({ reason: "reason-2" });
+    });
+  });
+
+  // ── Complex mixed sequences ──────────────────────────────────────────
+  describe("mixed event sequences", () => {
+    test("interleaved status + result events", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent("status.progress"));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      acc.record(mkEvent("status.progress"));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      acc.record(mkEvent("lifecycle.heartbeat"));
+
+      // PR wins over branch
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+      expect(acc.size).toBe(2); // branch + PR
+      expect(acc.hasResults).toBe(true);
+    });
+
+    test("result events from multiple sockets", () => {
+      const acc = new ResultAccumulator();
+      // Socket 3 emits branch_pushed
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED, {
+        socketId: "Socket-3",
+        sequence: 5,
+      }));
+      // Socket 7 emits pr_created
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED, {
+        socketId: "Socket-7",
+        sequence: 12,
+      }));
+
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+      expect(acc.get(RESULT_EVENT_TYPES.BRANCH_PUSHED)?.socketId).toBe("Socket-3");
+      expect(acc.get(RESULT_EVENT_TYPES.PR_CREATED)?.socketId).toBe("Socket-7");
+    });
+
+    test("branch_pushed only, with many status events → branch_pushed", () => {
+      const acc = new ResultAccumulator();
+      for (let i = 0; i < 10; i++) {
+        acc.record(mkEvent("status.progress", { message: `Step ${i}` }));
+      }
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      for (let i = 0; i < 5; i++) {
+        acc.record(mkEvent("status.info", { message: `Cleanup ${i}` }));
+      }
+
+      expect(acc.deriveOutcome()).toBe("branch_pushed");
+      expect(acc.size).toBe(1);
+    });
+
+    test("all four result types recorded → PR wins", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+      expect(acc.size).toBe(4);
+    });
+  });
+
+  // ── getResultEvents ──────────────────────────────────────────────────
+  describe("getResultEvents", () => {
+    test("returns empty array when no result events", () => {
+      const acc = new ResultAccumulator();
+      expect(acc.getResultEvents()).toEqual([]);
+    });
+
+    test("returns events in insertion order", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+
+      const results = acc.getResultEvents();
+      expect(results).toHaveLength(2);
+      expect(results[0].type).toBe(RESULT_EVENT_TYPES.BRANCH_PUSHED);
+      expect(results[1].type).toBe(RESULT_EVENT_TYPES.PR_CREATED);
+    });
+
+    test("returns all events including duplicates of the same type", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED, { message: "v1" }));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED, { message: "v2" }));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED, { message: "nc1" }));
+
+      // All three events are preserved in the accumulated history.
+      const results = acc.getResultEvents();
+      expect(results).toHaveLength(3);
+      expect(results[0].type).toBe(RESULT_EVENT_TYPES.BRANCH_PUSHED);
+      expect(results[0].message).toBe("v1");
+      expect(results[1].type).toBe(RESULT_EVENT_TYPES.BRANCH_PUSHED);
+      expect(results[1].message).toBe("v2");
+      expect(results[2].type).toBe(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED);
+      expect(results[2].message).toBe("nc1");
+    });
+  });
+
+  // ── get specific type ────────────────────────────────────────────────
+  describe("get by type", () => {
+    test("returns event for known type", () => {
+      const acc = new ResultAccumulator();
+      const event = mkEvent(RESULT_EVENT_TYPES.PR_CREATED, { message: "PR #99" });
+      acc.record(event);
+      expect(acc.get(RESULT_EVENT_TYPES.PR_CREATED)?.message).toBe("PR #99");
+    });
+
+    test("returns undefined for unknown type", () => {
+      const acc = new ResultAccumulator();
+      expect(acc.get(RESULT_EVENT_TYPES.PR_CREATED)).toBeUndefined();
+      expect(acc.get("result.unknown_type")).toBeUndefined();
+    });
+
+    test("returns undefined for non-result type", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent("status.progress"));
+      expect(acc.get("status.progress")).toBeUndefined();
+    });
+  });
+
+  // ── Custom result.* types ────────────────────────────────────────────
+  describe("custom result.* types", () => {
+    test("unknown result types are stored but don't affect default outcome", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent("result.custom_action"));
+      expect(acc.hasResults).toBe(true);
+      expect(acc.size).toBe(1);
+      // Custom result types don't map to a known outcome — patch_created is the fallback.
+      expect(acc.deriveOutcome()).toBe("patch_created");
+    });
+
+    test("custom result type + known result type → known wins", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent("result.custom_action"));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+      expect(acc.size).toBe(2);
+    });
+
+    test("custom result types are included in getResultEvents", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent("result.custom_action", { message: "custom" }));
+      const results = acc.getResultEvents();
+      expect(results).toHaveLength(1);
+      expect(results[0].type).toBe("result.custom_action");
+      expect(results[0].message).toBe("custom");
+    });
+  });
+
+  // ── Reset ────────────────────────────────────────────────────────────
+  describe("reset", () => {
+    test("clears all accumulated data", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      expect(acc.size).toBe(2);
+      expect(acc.hasResults).toBe(true);
+
+      acc.reset();
+
+      expect(acc.size).toBe(0);
+      expect(acc.hasResults).toBe(false);
+      expect(acc.deriveOutcome()).toBe("patch_created");
+      expect(acc.getResultEvents()).toEqual([]);
+    });
+
+    test("can accumulate again after reset", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      acc.reset();
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      expect(acc.deriveOutcome()).toBe("branch_pushed");
+      expect(acc.size).toBe(1);
+    });
+  });
+
+  // ── hasResults / size ────────────────────────────────────────────────
+  describe("hasResults and size", () => {
+    test("fresh accumulator has no results", () => {
+      const acc = new ResultAccumulator();
+      expect(acc.hasResults).toBe(false);
+      expect(acc.size).toBe(0);
+    });
+
+    test("reflects accumulated result events", () => {
+      const acc = new ResultAccumulator();
+      expect(acc.hasResults).toBe(false);
+
+      acc.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      expect(acc.hasResults).toBe(true);
+      expect(acc.size).toBe(1);
+
+      acc.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      expect(acc.hasResults).toBe(true);
+      expect(acc.size).toBe(2);
+    });
+
+    test("non-result events do not affect hasResults or size", () => {
+      const acc = new ResultAccumulator();
+      acc.record(mkEvent("status.progress"));
+      acc.record(mkEvent("lifecycle.heartbeat"));
+      expect(acc.hasResults).toBe(false);
+      expect(acc.size).toBe(0);
+    });
+  });
+
+  // ── TypeScript type covering ─────────────────────────────────────────
+  describe("type coverage", () => {
+    test("all CastFinalOutcome values are returned by deriveOutcome", () => {
+      const outcomes = new Set<CastFinalOutcome>();
+
+      // patch_created (default)
+      outcomes.add(new ResultAccumulator().deriveOutcome());
+
+      // pull_request_opened
+      const pr = new ResultAccumulator();
+      pr.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      outcomes.add(pr.deriveOutcome());
+
+      // branch_pushed
+      const branch = new ResultAccumulator();
+      branch.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+      outcomes.add(branch.deriveOutcome());
+
+      // no_changes_needed
+      const nc = new ResultAccumulator();
+      nc.record(mkEvent(RESULT_EVENT_TYPES.NO_CHANGES_NEEDED));
+      outcomes.add(nc.deriveOutcome());
+
+      // needs_human
+      const nh = new ResultAccumulator();
+      nh.record(mkEvent(RESULT_EVENT_TYPES.NEEDS_HUMAN));
+      outcomes.add(nh.deriveOutcome());
+
+      // All five outcomes covered.
+      expect(outcomes.size).toBe(5);
+      expect(outcomes.has("pull_request_opened")).toBe(true);
+      expect(outcomes.has("branch_pushed")).toBe(true);
+      expect(outcomes.has("no_changes_needed")).toBe(true);
+      expect(outcomes.has("needs_human")).toBe(true);
+      expect(outcomes.has("patch_created")).toBe(true);
+    });
+
+    test("MateriaEventObject accepted by record (non-enriched event)", () => {
+      const acc = new ResultAccumulator();
+      // record accepts EnrichedEvent | MateriaEventObject
+      const plainEvent: MateriaEventObject = {
+        type: RESULT_EVENT_TYPES.PR_CREATED,
+        message: "PR from plain object",
+      };
+      acc.record(plainEvent);
+      expect(acc.deriveOutcome()).toBe("pull_request_opened");
+    });
+  });
+
+  // ── Independent instances ────────────────────────────────────────────
+  describe("independent instances", () => {
+    test("two accumulators are independent", () => {
+      const acc1 = new ResultAccumulator();
+      const acc2 = new ResultAccumulator();
+
+      acc1.record(mkEvent(RESULT_EVENT_TYPES.PR_CREATED));
+      acc2.record(mkEvent(RESULT_EVENT_TYPES.BRANCH_PUSHED));
+
+      expect(acc1.deriveOutcome()).toBe("pull_request_opened");
+      expect(acc2.deriveOutcome()).toBe("branch_pushed");
+    });
   });
 });
