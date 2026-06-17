@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
-import { buildIsolatedMateriaContext, continueNativeCast, handleAgentEnd, materiaStatusLabel, prepareAgentStartSystemPrompt, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
-import { clearCastState } from "../infrastructure/castStateRepository.js";
+import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, materiaStatusLabel, prepareAgentStartSystemPrompt, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
 import { createArtifactCatalog, createCastStateRepository, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../infrastructure/index.js";
 
 export function createCastContextPort(): CastContextPort {
@@ -21,7 +20,7 @@ export function createCastLifecyclePort(): CastLifecyclePort<ExtensionContext, E
     continue: continueNativeCast,
     resume: async (api, ctx, castId) => { await resumeNativeCast(api, ctx, castId); },
     revive: async (api, ctx, castId) => { await reviveNativeCast(api, ctx, castId); },
-    clear: clearCastState,
+    clear: async (pi, state, reason) => { await cancelNativeCast(pi, state, reason); },
   };
 }
 

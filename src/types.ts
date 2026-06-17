@@ -14,6 +14,8 @@ export interface PiMateriaConfig {
   activeLoadout?: string;
   /** Top-level reusable materia behavior definitions. */
   materia: Record<string, MateriaConfig>;
+  /** Runtime eventing configuration for webhook sinks, heartbeats, and presets. */
+  eventing?: EventingConfig;
 }
 
 export interface LoadedConfig {
@@ -37,8 +39,9 @@ export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit
 export type LoadoutSource = MateriaConfigLayerScope;
 export type LoadoutUserLockState = "locked" | "unlocked";
 export type MateriaUserLockState = "locked" | "unlocked";
-export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia"> & {
+export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia" | "eventing"> & {
   materia?: Record<string, Partial<MateriaConfig> | null>;
+  eventing?: Partial<EventingConfig> | null;
 };
 
 export interface MateriaConfigLayer {
@@ -622,4 +625,90 @@ export interface MateriaUtilityConfig extends MateriaDefinitionMetadata {
   params?: Record<string, unknown>;
   timeoutMs?: number;
   assign?: Record<string, string>;
+}
+
+// ── Eventing Configuration ──────────────────────────────────────────────
+
+/** Top-level runtime eventing configuration. */
+export interface EventingConfig {
+  /** Master switch — default false. When false, no events are dispatched and no sinks are active. */
+  enabled?: boolean;
+  /** Named sink configurations keyed by sink id. */
+  sinks?: Record<string, EventSinkConfig>;
+  /** Heartbeat emission interval in milliseconds (default 30000 = 30s). Set to 0 or negative to disable. */
+  heartbeatIntervalMs?: number;
+  /** Named preset configurations to apply (e.g. "agent-controller"). */
+  presets?: string[];
+}
+
+/** Union of all supported sink config kinds. */
+export type EventSinkConfig = EventingWebhookSinkConfig | EventingDisabledSinkConfig;
+
+/** A webhook sink delivers events to an external HTTP endpoint. */
+export interface EventingWebhookSinkConfig {
+  id: string;
+  kind?: "webhook";
+  enabled?: boolean;
+  /** POST endpoint URL. Supports `{runId}` template resolved from AGENT_CONTROLLER_RUN_ID env var or context file. */
+  url: string;
+  /** HTTP method (default "POST"). */
+  method?: "POST" | "PUT";
+  /** Static headers added to every delivery request. Secret values are redacted in logs/artifacts. */
+  headers?: Record<string, string>;
+  /** Body construction strategy. "mapped" (default) uses bodyMapping; "passthrough" sends the entire enriched event; "none" sends an empty object. */
+  bodyTemplate?: "passthrough" | "mapped" | "none";
+  /** Field mapping used when bodyTemplate is "mapped". */
+  bodyMapping?: EventBodyFieldMapping;
+  /** Optional pi-materia → controller event type mapping. Keys are pi-materia event types; values are the mapped type to send. */
+  typeMap?: Record<string, string>;
+  /** Optional severity value mapping. Keys are internal severity values; values are the mapped severity to send. Useful when an external system only accepts a subset of severities (e.g. the agent controller does not accept `debug`, so `{ "debug": "info" }` maps heartbeats to `info`). */
+  severityMap?: Record<string, string>;
+  /** Optional event type filter applied before delivery. */
+  eventFilter?: EventFilter;
+  /** Delivery request timeout in milliseconds (default 10000). */
+  timeoutMs?: number;
+  /** Maximum delivery retries on network/5xx errors (default 3). */
+  maxRetries?: number;
+  /** Initial backoff in milliseconds for retries (default 1000, exponential). */
+  retryBackoffMs?: number;
+  /** Maximum backoff cap in milliseconds (default 30000). */
+  maxBackoffMs?: number;
+  /** Drop sink after this many consecutive failures (default 10). */
+  discardingAfter?: number;
+}
+
+/** A disabled sink entry preserved in config but skipped during dispatch. */
+export interface EventingDisabledSinkConfig {
+  id: string;
+  enabled: false;
+}
+
+/** Webhook body field mapping — controls which enriched event fields appear in the HTTP body. */
+export interface EventBodyFieldMapping {
+  /** Field name for the event id. */
+  eventId?: "eventId" | string;
+  /** Field name for the event type. */
+  eventType?: "type" | string;
+  /** Field name for the occurrence timestamp. */
+  occurredAt?: "occurredAt" | string;
+  /** Field name for severity. */
+  severity?: "severity" | string;
+  /** Field name for the message. */
+  message?: "message" | string;
+  /** Field name for the payload. */
+  payload?: "payload" | string;
+  /** Field name for the runtime-assigned run id (maps from enriched event's castId by default). */
+  runtimeRunId?: "castId" | string;
+  /** Field name for the monotonic per-cast event sequence. */
+  sequence?: "sequence" | string;
+  /** Additional static fields merged into every delivery body. */
+  static?: Record<string, unknown>;
+}
+
+/** Event filter controls which event types are delivered to a sink. */
+export interface EventFilter {
+  /** Glob-like type patterns to include (e.g. ["result.*", "lifecycle.*"]). */
+  include?: string[];
+  /** Glob-like patterns to exclude (takes priority over include). */
+  exclude?: string[];
 }

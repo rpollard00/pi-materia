@@ -1,5 +1,6 @@
 // Stable Pi-facing runtime facade. Implementation lives in focused runtime modules.
 export {
+  cancelNativeCast,
   continueNativeCast,
   currentMateria,
   handleAgentEnd,

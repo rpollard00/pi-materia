@@ -17,6 +17,7 @@
  *   - params.body       → PR body text
  *   - params.draft      → boolean, create as draft PR
  *   - params.base       → PR target branch (default: inferred from remote HEAD)
+ *   - params.pushOnly   → boolean, push branch but skip PR creation (emits result.branch_pushed)
  *   - params.authEnv    → env var name for ADO PAT (default: AZURE_DEVOPS_EXT_PAT)
  *   - params.apiBaseUrl → ADO API base URL override (for testing)
  *   - state.mimeBootstrap.branchName  → fallback branch
@@ -26,10 +27,12 @@
  *   2. Latest commit message on the branch (via `git log -1 --format=%s`)
  *   3. The branch name itself
  *
- * Output contract: stdout JSON with top-level `state.mimeAdoPr`.
- * Stderr is reserved for diagnostics.
- * All known failure modes (missing git, missing auth, push failure, API error)
- * return a mimeAdoPr failure payload.
+ * Output contract: stdout JSON with top-level `state.mimeAdoPr` and an
+ * optional `event` array.  Successful PR creation emits result.pr_created;
+ * pushOnly mode emits result.branch_pushed.  Stderr is reserved for
+ * diagnostics.  All known failure modes (missing git, missing auth,
+ * push failure, API error) return a mimeAdoPr failure payload with no event
+ * array.
  */
 import { execFile } from "node:child_process";
 
@@ -132,6 +135,37 @@ try {
     ? params.base.trim()
     : await resolveDefaultBranch(adoConfig.organization, adoConfig.project, adoConfig.repository, token, apiBaseUrl);
 
+  // Check for pushOnly mode before creating the PR.
+  const pushOnly = typeof params.pushOnly === "boolean" ? params.pushOnly : false;
+
+  if (pushOnly) {
+    writeStdoutJson({
+      state: {
+        mimeAdoPr: {
+          ok: true,
+          branchName,
+          remote,
+          organization: adoConfig.organization,
+          project: adoConfig.project,
+          repository: adoConfig.repository,
+          pushOnly: true,
+        },
+      },
+      event: [{
+        type: "result.branch_pushed",
+        message: `Branch ${branchName} pushed to ${remote}`,
+        payload: {
+          branchName,
+          remote,
+          organization: adoConfig.organization,
+          project: adoConfig.project,
+          repository: adoConfig.repository,
+        },
+      }],
+    });
+    process.exit(0);
+  }
+
   // Create the pull request.
   const draft = typeof params.draft === "boolean" ? params.draft : false;
   const body = typeof params.body === "string" && params.body.trim().length > 0
@@ -167,6 +201,19 @@ try {
         title,
       },
     },
+    event: [{
+      type: "result.pr_created",
+      message: `PR #${prResult.prNumber} created`,
+      payload: {
+        prUrl: prResult.prUrl,
+        prNumber: prResult.prNumber,
+        branchName,
+        baseBranch: base,
+        organization: adoConfig.organization,
+        project: adoConfig.project,
+        repository: adoConfig.repository,
+      },
+    }],
   });
 } catch (error) {
   const rawMessage = error instanceof Error ? error.message : String(error);

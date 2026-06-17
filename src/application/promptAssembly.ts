@@ -3,6 +3,7 @@ import {
   HANDOFF_CONTRACT_DOC_TEXT,
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
+  EVENT_EMISSION_CONTEXT_TEXT,
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
@@ -227,6 +228,7 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
     "Use only this cast context, the current materia prompt, and any tool results from this materia turn. Do not rely on unrelated earlier visible transcript messages.",
     multiTurnRefining ? multiTurnRefinementGuidance() : undefined,
     syntheticHandoffContractContext(state),
+    syntheticEventEmissionContext(state),
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
@@ -258,6 +260,23 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
     `Synthetic context exposure policy: include this concise contract summary only for ${exposureMode} that are already expected to produce final JSON. Do not expose it during multi-turn refinement; refinement turns must remain conversational until /materia continue. The authoritative final-output instructions are still injected separately by prompt assembly.`,
     HANDOFF_CONTRACT_DOC_TEXT,
   ].join("\n\n");
+}
+
+/**
+ * Returns concise event emission instructions for JSON-output agent sockets.
+ *
+ * Per docs/runtime-eventing.md §11, this is injected into synthetic cast
+ * context to teach JSON-output materia how to emit optional `event` arrays.
+ * Text sockets are never shown this context since they cannot produce JSON.
+ */
+export function syntheticEventEmissionContext(state: MateriaCastState): string | undefined {
+  const socket = activeResolvedSocket(state);
+  if (!socket || !isAgentResolvedSocket(socket) || effectiveResolvedSocketConfig(socket).parse !== "json") return undefined;
+
+  const activeMultiTurn = isActiveMultiTurnSocket(state);
+  if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
+
+  return EVENT_EMISSION_CONTEXT_TEXT;
 }
 
 export function findActiveMateriaPromptIndex(messages: unknown[]): number {

@@ -73,6 +73,8 @@ The command writes its result to stdout. With `parse: "json"`, stdout must be va
 
 Utility JSON is deterministic script output, not an agent handoff. Scripts may return structured data for explicit `assign` paths, and when a utility is configured to patch shared runtime state directly that structured patch belongs under a top-level `state` object. Do not model utility output as a broad agent envelope; agent-authored handoffs are limited to `workItems`, `satisfied`, and `context`.
 
+Utility JSON output may also include an optional `event` array for structured runtime event emission. The `event` field is a side-channel processed and stripped before state extraction — it does not affect `state.*` patches, routing, or handoff semantics. See [Runtime Eventing Contract](runtime-eventing.md).
+
 ## stdout, stderr, exit codes, and timeouts
 
 - Exit code `0` means stdout is the utility result.

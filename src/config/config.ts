@@ -14,7 +14,7 @@ import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoad
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
-import type { LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
+import type { EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 
 export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
@@ -515,6 +515,7 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: MateriaConfigPa
     activeLoadout: patch.activeLoadout ?? base.activeLoadout,
     activeLoadoutId: patch.activeLoadoutId ?? base.activeLoadoutId,
     materia: patch.materia ? mergeMateria(base.materia ?? {}, patch.materia) : base.materia,
+    eventing: patch.eventing === null ? undefined : (patch.eventing ? mergeEventing(base.eventing, patch.eventing) : base.eventing),
   };
 }
 
@@ -604,6 +605,7 @@ function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>, pr
     activeLoadout: parsed.activeLoadout ?? base.activeLoadout,
     activeLoadoutId: parsed.activeLoadoutId ?? base.activeLoadoutId,
     materia: mergeMateria(base.materia, parsed.materia),
+    eventing: mergeEventing(base.eventing, parsed.eventing),
   } as PiMateriaConfig;
 }
 
@@ -634,6 +636,41 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
 
 function hasLoadoutSocketMap(loadout: Record<string, unknown>): boolean {
   return loadout.sockets !== undefined;
+}
+
+function mergeEventing(base: PiMateriaConfig["eventing"], parsed: Partial<PiMateriaConfig>["eventing"]): PiMateriaConfig["eventing"] {
+  if (parsed === undefined) return base;
+  if (parsed === null) return undefined;
+  const merged: NonNullable<PiMateriaConfig["eventing"]> = {
+    ...(base ?? {}),
+    ...parsed,
+    sinks: mergeEventingSinks(base?.sinks, parsed.sinks),
+    presets: parsed.presets !== undefined ? mergePresets(base?.presets, parsed.presets) : base?.presets,
+  };
+  return merged;
+}
+
+function mergePresets(basePresets: string[] | undefined, parsedPresets: string[]): string[] {
+  const merged = [...(basePresets ?? [])];
+  for (const preset of parsedPresets) {
+    if (!merged.includes(preset)) merged.push(preset);
+  }
+  return merged;
+}
+
+function mergeEventingSinks(baseSinks: Record<string, EventSinkConfig> | undefined, parsedSinks: Record<string, unknown> | undefined): Record<string, EventSinkConfig> | undefined {
+  if (parsedSinks === undefined) return baseSinks;
+  const merged: Record<string, EventSinkConfig> = { ...(baseSinks ?? {}) };
+  for (const [id, sink] of Object.entries(parsedSinks)) {
+    if (sink === null) {
+      delete merged[id];
+      continue;
+    }
+    if (!isPlainObject(sink)) throw new Error(`Eventing sink "${id}" is invalid. Expected an object.`);
+    const baseSink = merged[id];
+    merged[id] = { ...(baseSink ?? {}), ...sink } as EventSinkConfig;
+  }
+  return merged;
 }
 
 function mergeMateria(baseMateria: Record<string, MateriaConfig>, parsedMateria: Partial<PiMateriaConfig>["materia"] | MateriaConfigPatch["materia"]): Record<string, MateriaConfig> {

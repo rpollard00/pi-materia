@@ -1230,6 +1230,102 @@ describe("Blackbelt-GH-PR utility script", () => {
       api.server.stop();
     }
   });
+
+  // ── Event emission ──────────────────────────────────────────────────
+
+  test("emits result.pr_created event on successful PR creation", async () => {
+    const api = startFakeGitHubApi();
+    try {
+      const result = await runPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "feat: event test",
+            repo: "test-owner/test-repo",
+          },
+          state: {},
+        },
+        { GITHUB_TOKEN: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.event).toBeDefined();
+      expect(Array.isArray(result.json.event)).toBe(true);
+      expect(result.json.event).toHaveLength(1);
+      expect(result.json.event[0].type).toBe("result.pr_created");
+      expect(result.json.event[0].message).toContain("PR #42");
+      expect(result.json.event[0].payload.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
+      expect(result.json.event[0].payload.prNumber).toBe(42);
+      expect(result.json.event[0].payload.branchName).toBe("blackbelt/test-bookmark");
+      expect(result.json.event[0].payload.baseBranch).toBe("main");
+      expect(result.json.event[0].payload.repo).toBe("test-owner/test-repo");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("pushOnly mode emits result.branch_pushed and does not create a PR", async () => {
+    const api = startFakeGitHubApi();
+    try {
+      const result = await runPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            pushOnly: true,
+            repo: "test-owner/test-repo",
+          },
+          state: {},
+        },
+        { GITHUB_TOKEN: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(true);
+      expect(result.json.state.blackbeltGhPr.pushOnly).toBe(true);
+      // Must not have PR fields.
+      expect(result.json.state.blackbeltGhPr.prUrl).toBeUndefined();
+      expect(result.json.state.blackbeltGhPr.prNumber).toBeUndefined();
+
+      // Verify event.
+      expect(result.json.event).toBeDefined();
+      expect(result.json.event).toHaveLength(1);
+      expect(result.json.event[0].type).toBe("result.branch_pushed");
+      expect(result.json.event[0].message).toContain("pushed");
+      expect(result.json.event[0].message).toContain("blackbelt/test-bookmark");
+      expect(result.json.event[0].payload.branchName).toBe("blackbelt/test-bookmark");
+      expect(result.json.event[0].payload.remote).toBe("origin");
+      expect(result.json.event[0].payload.repo).toBe("test-owner/test-repo");
+
+      // Verify the fake API was NOT called for PR creation.
+      const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
+      expect(jjLog).toContain("git push --bookmark blackbelt/test-bookmark");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("error output does not include event field", async () => {
+    const api = startFakeGitHubApi();
+    try {
+      const result = await runPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark" },
+          state: {},
+        },
+        { GITHUB_TOKEN: "test-token", PR_PUSH_FAIL: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltGhPr.ok).toBe(false);
+      // Error output must not include an event array.
+      expect(result.json.event).toBeUndefined();
+    } finally {
+      api.server.stop();
+    }
+  });
 });
 
 // ===========================================================================
@@ -1871,6 +1967,104 @@ describe("Blackbelt-ADO-PR utility script", () => {
 
       const jjLog = result.fake ? await readFile(result.fake.log, "utf8") : "";
       expect(jjLog).not.toContain("git push");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  // ── Event emission ──────────────────────────────────────────────────
+
+  test("emits result.pr_created event on successful ADO PR creation", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "feat: event test",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.event).toBeDefined();
+      expect(Array.isArray(result.json.event)).toBe(true);
+      expect(result.json.event).toHaveLength(1);
+      expect(result.json.event[0].type).toBe("result.pr_created");
+      expect(result.json.event[0].message).toContain("PR #99");
+      expect(result.json.event[0].payload.prUrl).toContain("pullrequest/99");
+      expect(result.json.event[0].payload.prNumber).toBe(99);
+      expect(result.json.event[0].payload.branchName).toBe("blackbelt/test-bookmark");
+      expect(result.json.event[0].payload.organization).toBe("test-org");
+      expect(result.json.event[0].payload.project).toBe("test-project");
+      expect(result.json.event[0].payload.repository).toBe("test-repo");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("pushOnly mode emits result.branch_pushed and skips ADO PR creation", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            pushOnly: true,
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.pushOnly).toBe(true);
+      // Must not have PR-specific fields.
+      expect(result.json.state.blackbeltAdoPr.prUrl).toBeUndefined();
+      expect(result.json.state.blackbeltAdoPr.prNumber).toBeUndefined();
+
+      // Verify event.
+      expect(result.json.event).toBeDefined();
+      expect(result.json.event).toHaveLength(1);
+      expect(result.json.event[0].type).toBe("result.branch_pushed");
+      expect(result.json.event[0].message).toContain("pushed");
+      expect(result.json.event[0].payload.branchName).toBe("blackbelt/test-bookmark");
+      expect(result.json.event[0].payload.remote).toBe("origin");
+      expect(result.json.event[0].payload.organization).toBe("test-org");
+      expect(result.json.event[0].payload.project).toBe("test-project");
+      expect(result.json.event[0].payload.repository).toBe("test-repo");
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("error output does not include event field", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const result = await runAdoPrUtility(
+        {
+          params: { bookmark: "blackbelt/test-bookmark" },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: "test-token", PR_PUSH_FAIL: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      // Error output must not include an event array.
+      expect(result.json.event).toBeUndefined();
     } finally {
       api.server.stop();
     }

@@ -117,3 +117,15 @@ Agents should keep using only `workItems`, `satisfied`, and `context`. Put actio
   "context": "The README still links to stale branch syntax."
 }
 ```
+
+## Event side-channel
+
+The reserved top-level field `event` is a runtime side-channel for structured event
+emission. It is processed before handoff semantics and stripped from the parsed JSON
+before validation, assignment, routing, state handoff, and downstream prompt context.
+`event` is **not** part of the agent handoff contract — it does not affect routing,
+work item assignment, or cast state.
+
+See [Runtime Eventing Contract](runtime-eventing.md) for the full event system design
+including the event array shape, processing pipeline, webhook delivery, result
+accumulation, and agent-controller integration.
