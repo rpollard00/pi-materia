@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
+import { buildSyntheticCastContext } from "../src/application/promptAssembly.js";
 import { EVENT_SIDECHANNEL_FIELD } from "../src/domain/eventing.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -403,6 +404,150 @@ describe("event stripping regression — downstream context", () => {
     expect(finalState.phase).toBe("complete");
     expect(finalState.lastJson).not.toHaveProperty(EVENT_SIDECHANNEL_FIELD);
     expect(JSON.stringify(finalState.data)).not.toContain(EVENT_SIDECHANNEL_FIELD);
+  });
+});
+
+describe("event stripping regression — raw state fields", () => {
+  test("state.lastOutput does not contain event after JSON agent completion", async () => {
+    const harness = await makeHarness(singleAgentJsonConfig());
+
+    await harness.runCommand("materia", "cast strip lastOutput");
+    harness.appendAssistantMessage(JSON.stringify({
+      workItems: [{ title: "Done", context: "All good." }],
+      satisfied: true,
+      context: "Work complete.",
+      [EVENT_SIDECHANNEL_FIELD]: [{ type: "result.pr_created", message: "PR #42 created", payload: { prUrl: "https://example.com/pr/42" } }],
+    }));
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = lastState(harness);
+    expect(state.phase).toBe("complete");
+
+    // state.lastOutput must be valid JSON without the event side-channel field
+    expect(state.lastOutput).toBeString();
+    const parsed = JSON.parse(state.lastOutput);
+    expect(parsed).not.toHaveProperty(EVENT_SIDECHANNEL_FIELD);
+    expect(state.lastOutput).not.toContain("result.pr_created");
+    expect(state.lastOutput).not.toContain("https://example.com/pr/42");
+
+    // But canonical handoff fields must be present
+    expect(parsed).toHaveProperty("workItems");
+    expect(parsed).toHaveProperty("satisfied", true);
+    expect(parsed).toHaveProperty("context", "Work complete.");
+  });
+
+  test("state.lastAssistantText does not contain event after JSON agent completion", async () => {
+    const harness = await makeHarness(singleAgentJsonConfig());
+
+    await harness.runCommand("materia", "cast strip lastAssistantText");
+    harness.appendAssistantMessage(JSON.stringify({
+      workItems: [{ title: "Done", context: "All good." }],
+      satisfied: true,
+      context: "Work complete.",
+      [EVENT_SIDECHANNEL_FIELD]: [{ type: "result.branch_pushed", message: "Branch pushed to origin" }],
+    }));
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = lastState(harness);
+    expect(state.phase).toBe("complete");
+
+    // state.lastAssistantText must be valid JSON without event data
+    expect(state.lastAssistantText).toBeString();
+    const parsed = JSON.parse(state.lastAssistantText);
+    expect(parsed).not.toHaveProperty(EVENT_SIDECHANNEL_FIELD);
+    expect(state.lastAssistantText).not.toContain("result.branch_pushed");
+    expect(state.lastAssistantText).not.toContain("Branch pushed to origin");
+
+    // Canonical fields present
+    expect(parsed).toHaveProperty("context", "Work complete.");
+  });
+
+  test("buildSyntheticCastContext does not contain event data", async () => {
+    const harness = await makeHarness(agentWithDownstreamConfig());
+
+    await harness.runCommand("materia", "cast check synthetic context");
+
+    // First socket: emit event with rich payload
+    harness.appendAssistantMessage(JSON.stringify({
+      workItems: [{ title: "Task 1", context: "Do task 1." }],
+      summary: "Plan completed",
+      satisfied: true,
+      [EVENT_SIDECHANNEL_FIELD]: [{ type: "result.pr_created", message: "PR #99 created", payload: { prUrl: "https://github.com/org/repo/pull/99", branchName: "agent/fix-bug" } }],
+    }));
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = lastState(harness);
+    expect(state.active).toBe(true);
+    expect(state.currentSocketId).toBe("Socket-2");
+
+    // Build the synthetic context that the next socket would receive
+    const context = buildSyntheticCastContext(state);
+    expect(context).toBeString();
+
+    // Event data must not appear in the synthetic context.
+    // Check for specific event payload values, not the generic word "event"
+    // which might appear in request text or field names.
+    expect(context).not.toContain("result.pr_created");
+    expect(context).not.toContain("PR #99 created");
+    expect(context).not.toContain("https://github.com/org/repo/pull/99");
+    expect(context).not.toContain("agent/fix-bug");
+
+    // The JSON key "event": must not appear anywhere in the Previous output section
+    const prevOutputStart = context.indexOf("Previous output:");
+    if (prevOutputStart >= 0) {
+      const prevOutputSection = context.slice(prevOutputStart);
+      expect(prevOutputSection).not.toContain(`"${EVENT_SIDECHANNEL_FIELD}"`);
+    }
+
+    // Canonical content should be present in the context
+    expect(context).toContain("Plan completed");
+  });
+
+  test("state.lastOutput does not contain event when event array is empty", async () => {
+    const harness = await makeHarness(singleAgentJsonConfig());
+
+    await harness.runCommand("materia", "cast empty event lastOutput");
+    harness.appendAssistantMessage(JSON.stringify({
+      workItems: [{ title: "Done", context: "All good." }],
+      satisfied: true,
+      context: "Work complete.",
+      [EVENT_SIDECHANNEL_FIELD]: [],
+    }));
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = lastState(harness);
+    expect(state.phase).toBe("complete");
+
+    // Even empty event array must not appear in lastOutput
+    expect(state.lastOutput).toBeString();
+    const parsed = JSON.parse(state.lastOutput);
+    expect(parsed).not.toHaveProperty(EVENT_SIDECHANNEL_FIELD);
+    expect(parsed).toHaveProperty("context", "Work complete.");
+  });
+
+  test("state.lastOutput unchanged for text (non-JSON) agent sockets", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "Agent", parse: "text" },
+          },
+        },
+      },
+      materia: { Agent: { type: "agent", tools: "readOnly", prompt: "Do the work." } },
+    });
+
+    await harness.runCommand("materia", "cast text socket lastOutput");
+    harness.appendAssistantMessage("Task completed successfully. Changes pushed.");
+    await harness.emit("agent_end", { messages: [] });
+
+    const state = lastState(harness);
+    expect(state.phase).toBe("complete");
+    // Text sockets keep raw output exactly as-is
+    expect(state.lastOutput).toBe("Task completed successfully. Changes pushed.");
   });
 });
 

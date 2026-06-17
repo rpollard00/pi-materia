@@ -710,6 +710,16 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
       throw eventError;
     }
 
+    // Strip event from raw text stored in state so it cannot leak into
+    // downstream synthetic context via lastOutput/lastAssistantText
+    // (docs/runtime-eventing.md §3.5). parsed already has event removed
+    // by processSocketEvents; re-stringify it to get clean text.
+    if (isPlainObject(parsed)) {
+      text = JSON.stringify(parsed);
+      state.lastOutput = text;
+      if (state.lastAssistantText) state.lastAssistantText = text;
+    }
+
     // ── Phase 3: Validate handoff output (event already stripped) ─
     try {
       parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: effectiveResolvedSocketConfig(socket), agentOutput: isAgentResolvedSocket(socket), workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)) });
