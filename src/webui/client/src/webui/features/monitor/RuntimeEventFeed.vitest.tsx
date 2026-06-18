@@ -302,3 +302,124 @@ describe('RuntimeEventFeed (expandable pretty details)', () => {
     expect(toggle.getAttribute('aria-label')).toBe('Collapse result.pr_created event #42');
   });
 });
+
+/*
+ * Regression coverage for the monitor provenance + duplicated-body bug.
+ *
+ * Legacy `events.jsonl` entries are converted to the `RuntimeEvent` shape by
+ * `normalizeArtifactEvents` (src/webui/launcher.ts). These tests fix the exact
+ * shape that normalizer emits for diagnostics like `advancement_lifecycle`
+ * (derived materia/socket + a distinct stage message) and for events with no
+ * distinct message, then assert the pretty ticker never echoes the type as the
+ * body and still surfaces the derived materia provenance.
+ */
+describe('RuntimeEventFeed (legacy normalized regression)', () => {
+  it('surfaces derived materia provenance and a distinct stage message (not the type) for advancement_lifecycle', () => {
+    // Shape produced by normalizeArtifactEvents for an advancement_lifecycle
+    // diagnostic carrying materiaName/currentSocketId/stage.
+    const event: RuntimeEvent = {
+      eventId: 'artifact-0000',
+      type: 'advancement_lifecycle',
+      severity: 'info',
+      message: 'dispatch',
+      payload: {
+        diagnostic: true,
+        stage: 'dispatch',
+        castId: 'cast-1',
+        currentSocketId: 'Socket-4',
+        sourceSocketId: 'Socket-3',
+        materiaName: 'Build',
+        sourceMateriaName: 'Auto-Plan',
+        phase: 'Build',
+        socketState: 'awaiting_agent_response',
+      },
+      occurredAt: '2026-06-17T22:00:00.000Z',
+      sequence: 1,
+      castId: 'cast-1',
+      socketId: 'Socket-4',
+      materia: 'Build',
+      visit: 0,
+    };
+
+    const { container } = render(<RuntimeEventFeed events={[event]} mode="pretty" />);
+
+    // Title is the type; the body is the distinct stage message — never a
+    // duplicate of the type (the previous regression).
+    expect(container.querySelector('.monitor-event-type')?.textContent).toBe('advancement_lifecycle');
+    const message = container.querySelector('.monitor-event-message');
+    expect(message?.textContent).toBe('dispatch');
+    expect(message?.textContent).not.toBe('advancement_lifecycle');
+
+    // Provenance surfaces the derived socket + materia name. Split on the
+    // joiner so the materia segment can be checked exactly: it must be 'Build',
+    // not the 'cast' fallback the normalizer uses without materia context.
+    const meta = container.querySelector('.monitor-event-meta');
+    const segments = meta?.textContent?.split(' · ') ?? [];
+    expect(segments).toContain('Socket-4');
+    expect(segments).toContain('Build');
+    expect(segments).not.toContain('cast');
+  });
+
+  it('omits the message body for a normalized event with no distinct message (no duplicate of the type)', () => {
+    // Shape produced by normalizeArtifactEvents for a socket_start event that
+    // carries no message/stage/request: `message` is absent entirely.
+    const event: RuntimeEvent = {
+      eventId: 'artifact-0001',
+      type: 'socket_start',
+      severity: 'info',
+      payload: { socket: 'Socket-1', materia: 'Build' },
+      occurredAt: '2026-06-17T22:00:00.000Z',
+      sequence: 2,
+      castId: 'cast-1',
+      socketId: 'Socket-1',
+      materia: 'Build',
+      visit: 0,
+    };
+
+    const { container } = render(<RuntimeEventFeed events={[event]} mode="pretty" />);
+
+    expect(container.querySelector('.monitor-event-type')?.textContent).toBe('socket_start');
+    // No distinct message → no message node rendered, so the type is never
+    // echoed as the body. Regression guard for the duplicated-body bug.
+    expect(container.querySelector('.monitor-event-message')).toBeNull();
+  });
+
+  it('preserves the original legacy payload (alternate materia/socket fields) in the expanded details', () => {
+    const payload = {
+      diagnostic: true,
+      stage: 'dispatch',
+      castId: 'cast-1',
+      currentSocketId: 'Socket-4',
+      materiaName: 'Build',
+      sourceMateriaName: 'Auto-Plan',
+    };
+    const event: RuntimeEvent = {
+      eventId: 'artifact-0000',
+      type: 'advancement_lifecycle',
+      severity: 'info',
+      message: 'dispatch',
+      payload,
+      occurredAt: '2026-06-17T22:00:00.000Z',
+      sequence: 1,
+      castId: 'cast-1',
+      socketId: 'Socket-4',
+      materia: 'Build',
+      visit: 0,
+    };
+
+    const { container } = render(<RuntimeEventFeed events={[event]} mode="pretty" />);
+    fireEvent.click(container.querySelector('.monitor-event-toggle') as HTMLButtonElement);
+
+    const details = container.querySelector('.monitor-event-details') as HTMLElement;
+    expect(details).toBeTruthy();
+    // The verbatim legacy payload remains inspectable in the expanded Payload
+    // JSON block, including the alternate provenance fields and the stage.
+    expect(within(details).getByText('Payload')).toBeTruthy();
+    expect(within(details).getByText(/"materiaName":\s*"Build"/)).toBeTruthy();
+    expect(within(details).getByText(/"sourceMateriaName":\s*"Auto-Plan"/)).toBeTruthy();
+    expect(within(details).getByText(/"stage":\s*"dispatch"/)).toBeTruthy();
+    // Derived materia provenance also surfaces in the runtime metadata list.
+    expect(within(details).getByText('Materia')).toBeTruthy();
+    expect(within(details).getByText('Build')).toBeTruthy();
+  });
+});
