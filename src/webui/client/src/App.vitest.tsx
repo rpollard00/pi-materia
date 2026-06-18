@@ -387,6 +387,46 @@ describe('Materia quests pane', () => {
     expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('');
     await waitFor(() => expect(document.querySelector('[data-toast-variant="success"]')?.textContent).toContain('Quest added'));
   });
+
+  it('preserves the quest log draft across tab navigation and clears it after submitting', async () => {
+    const fetchMock = createQuestFetchMock([]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    const multiLinePrompt = 'Rescue the villager.\nCheck the eastern path first.\nThen regroup at the inn.';
+    fireEvent.change(await screen.findByLabelText('Prompt'), { target: { value: multiLinePrompt } });
+    fireEvent.change(screen.getByLabelText(/Loadout override/), { target: { value: 'Full-Auto' } });
+    expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe(multiLinePrompt);
+
+    // Navigate away from the Quests tab: AppShell unmounts the quest workspace,
+    // which discards any tab-local component state.
+    await openTab('Loadout');
+    expect(screen.queryByRole('button', { name: 'Add quest' })).toBeNull();
+    expect(screen.queryByLabelText('Prompt')).toBeNull();
+
+    // Stop on another unrelated tab before returning so no intermediate tab can
+    // accidentally rehydrate the quest create form.
+    await openTab('Monitoring');
+    expect(screen.queryByRole('button', { name: 'Add quest' })).toBeNull();
+
+    // Navigate back without a browser refresh and assert the exact draft survives.
+    await openTab('Quests');
+    await screen.findByRole('button', { name: 'Add quest' });
+    expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe(multiLinePrompt);
+    expect((screen.getByLabelText(/Loadout override/) as HTMLSelectElement).value).toBe('Full-Auto');
+
+    // Intended reset path: submitting clears the preserved draft.
+    fireEvent.click(screen.getByRole('button', { name: 'Add quest' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/quests', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ prompt: multiLinePrompt, loadoutOverride: 'Full-Auto' }),
+    })));
+    await waitFor(() => expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe(''));
+    expect((screen.getByLabelText(/Loadout override/) as HTMLSelectElement).value).toBe('');
+    expect(document.querySelector('[data-toast-variant="success"]')?.textContent).toContain('Quest added');
+  });
 });
 
 describe('Materia loadout grid editor', () => {
