@@ -2116,12 +2116,30 @@
   color: rgb(203 213 225);
 }
 
-.monitor-event-head {
+.monitor-event-toggle {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.74rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 0.4rem;
+}
+
+.monitor-event-toggle:focus-visible {
+  outline: 2px solid rgb(103 232 249 / 0.7);
+  outline-offset: 2px;
+}
+
+.monitor-event-expanded {
+  background: rgb(15 23 42 / 0.82);
 }
 
 .monitor-event-badge {
@@ -2168,6 +2186,77 @@
   color: rgb(148 163 184);
   font-size: 0.68rem;
   word-break: break-word;
+}
+
+.monitor-event-caret {
+  color: rgb(148 163 184);
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.monitor-event-details {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.monitor-event-detail-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) 1fr;
+  gap: 0.2rem 0.75rem;
+}
+
+.monitor-event-detail-row {
+  display: contents;
+}
+
+.monitor-event-detail-list dt {
+  color: rgb(148 163 184);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.monitor-event-detail-list dd {
+  margin: 0;
+  color: rgb(226 232 240);
+  font-size: 0.74rem;
+  word-break: break-word;
+}
+
+.monitor-event-detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.monitor-event-detail-label {
+  margin: 0;
+  color: rgb(148 163 184);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.monitor-event-detail-pre {
+  margin: 0;
+  border-radius: 0.6rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(0 0 0 / 0.28);
+  padding: 0.5rem 0.65rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: rgb(226 232 240);
+}
+
+.monitor-event-detail-empty {
+  margin: 0;
+  color: rgb(148 163 184);
+  font-size: 0.74rem;
 }
 
 .monitor-feed-raw {

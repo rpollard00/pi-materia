@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { RuntimeEvent } from '../../types.js';
 import {
   DEFAULT_SEVERITY,
+  CANONICAL_EVENT_FIELDS,
   castLabel,
   eventKey,
   formatEventTime,
   itemLabel,
   materiaLabel,
   normalizeSeverity,
+  runtimeMetadataFields,
   severityClassName,
+  sourceMetadataFields,
+  unknownEventFields,
 } from './runtimeEventFormat.js';
 
 describe('runtimeEventFormat', () => {
@@ -55,5 +59,84 @@ describe('runtimeEventFormat', () => {
     expect(eventKey({ eventId: 'evt-1' } as RuntimeEvent, 0)).toBe('evt-1');
     expect(eventKey({ sequence: 7 } as RuntimeEvent, 1)).toBe('seq-7');
     expect(eventKey({} as RuntimeEvent, 3)).toBe('idx-3');
+  });
+});
+
+describe('expanded detail helpers', () => {
+  it('extracts runtime metadata pairs in a stable order, omitting missing fields', () => {
+    expect(runtimeMetadataFields({} as RuntimeEvent)).toEqual([]);
+
+    const pairs = runtimeMetadataFields({
+      eventId: 'evt-1',
+      sequence: 7,
+      occurredAt: '2026-06-17T22:00:00.000Z',
+      castId: 'cast-1',
+      socketId: 'Socket-7',
+      visit: 2,
+      materia: 'Blackbelt-GH-PR',
+      materiaLabel: 'GitHub PR Creator',
+      itemKey: 'WI-3',
+      itemLabel: 'feat: retry',
+    } as RuntimeEvent);
+
+    expect(pairs.map((p) => p.label)).toEqual([
+      'Event ID',
+      'Sequence',
+      'Occurred at',
+      'Cast',
+      'Socket',
+      'Visit',
+      'Materia',
+      'Materia label',
+      'Item key',
+      'Item',
+    ]);
+    expect(pairs[0]).toEqual({ label: 'Event ID', value: 'evt-1' });
+    expect(pairs[1]).toEqual({ label: 'Sequence', value: '7' });
+  });
+
+  it('extracts source provenance and tolerates a malformed source', () => {
+    expect(sourceMetadataFields({} as RuntimeEvent)).toEqual([]);
+    expect(sourceMetadataFields({ source: null } as unknown as RuntimeEvent)).toEqual([]);
+    expect(sourceMetadataFields({ source: 'nope' } as RuntimeEvent)).toEqual([]);
+    expect(
+      sourceMetadataFields({ source: { materia: 'Blackbelt-GH-PR', socketId: 'Socket-7' } } as RuntimeEvent),
+    ).toEqual([
+      { label: 'Source materia', value: 'Blackbelt-GH-PR' },
+      { label: 'Source socket', value: 'Socket-7' },
+    ]);
+  });
+
+  it('isolates forward-compatible unknown fields from canonical ones', () => {
+    expect(unknownEventFields({} as RuntimeEvent)).toEqual({});
+    // Canonical fields are never reported as unknown.
+    expect(unknownEventFields({ eventId: 'evt-1', payload: { a: 1 }, source: {} } as RuntimeEvent)).toEqual({});
+    // Anything outside the contract is preserved verbatim, nested values included.
+    const result = unknownEventFields({
+      eventId: 'evt-1',
+      custom: 'x',
+      nested: { y: 2 },
+    } as RuntimeEvent);
+    expect(result).toEqual({ custom: 'x', nested: { y: 2 } });
+  });
+
+  it('lists the full canonical contract for unknown-field detection', () => {
+    expect(CANONICAL_EVENT_FIELDS).toEqual([
+      'eventId',
+      'occurredAt',
+      'sequence',
+      'castId',
+      'socketId',
+      'materia',
+      'materiaLabel',
+      'visit',
+      'itemKey',
+      'itemLabel',
+      'type',
+      'severity',
+      'message',
+      'payload',
+      'source',
+    ]);
   });
 });

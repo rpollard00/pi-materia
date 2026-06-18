@@ -1,4 +1,4 @@
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuntimeEvent } from '../../types.js';
 import { formatEventTime } from './runtimeEventFormat.js';
@@ -125,5 +125,121 @@ describe('RuntimeEventFeed (pretty ticker)', () => {
     expect(pre).toBeTruthy();
     expect(getByText(/"type":\s*"status\.progress"/)).toBeTruthy();
     expect(getByText(/"customMarker":\s*"keep-me"/)).toBeTruthy();
+  });
+});
+
+describe('RuntimeEventFeed (expandable pretty details)', () => {
+  it('renders collapsed rows by default with an accessible disclosure toggle', () => {
+    const { container } = render(<RuntimeEventFeed events={[makeEvent()]} mode="pretty" />);
+
+    const toggle = container.querySelector('.monitor-event-toggle') as HTMLButtonElement;
+    expect(toggle).toBeTruthy();
+    expect(toggle.tagName).toBe('BUTTON');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBeTruthy();
+    expect(toggle.getAttribute('aria-label')).toContain('Expand');
+
+    // Collapsed: no details region is rendered.
+    expect(container.querySelector('.monitor-event-details')).toBeNull();
+  });
+
+  it('expands on click to reveal runtime metadata, source, and payload', () => {
+    const event = makeEvent({
+      payload: { prUrl: 'https://github.com/org/repo/pull/42', branchName: 'agent/42-add-retry' },
+      source: { materia: 'Blackbelt-GH-PR', socketId: 'Socket-7' },
+    });
+    const { container } = render(<RuntimeEventFeed events={[event]} mode="pretty" />);
+
+    const toggle = container.querySelector('.monitor-event-toggle') as HTMLButtonElement;
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toContain('Collapse');
+
+    const details = container.querySelector('.monitor-event-details') as HTMLElement;
+    expect(details).toBeTruthy();
+    expect(details.id).toBe(toggle.getAttribute('aria-controls'));
+
+    // Runtime metadata (raw timestamp + ids elided by the compact ticker).
+    expect(within(details).getByText('Event ID')).toBeTruthy();
+    expect(within(details).getByText('evt-001')).toBeTruthy();
+    expect(within(details).getByText('Occurred at')).toBeTruthy();
+    expect(within(details).getByText('2026-06-17T22:00:00.000Z')).toBeTruthy();
+    // Self-reported source provenance.
+    expect(within(details).getByText('Source materia')).toBeTruthy();
+    expect(within(details).getByText('Source socket')).toBeTruthy();
+    // Payload pretty-printed as JSON.
+    expect(within(details).getByText('Payload')).toBeTruthy();
+    expect(
+      within(details).getByText(/"prUrl":\s*"https:\/\/github\.com\/org\/repo\/pull\/42"/),
+    ).toBeTruthy();
+  });
+
+  it('collapses an expanded event when toggled again', () => {
+    const { container } = render(
+      <RuntimeEventFeed events={[makeEvent({ payload: { phase: 'validation' } })]} mode="pretty" />,
+    );
+
+    const toggle = container.querySelector('.monitor-event-toggle') as HTMLButtonElement;
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('.monitor-event-details')).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.monitor-event-details')).toBeNull();
+  });
+
+  it('preserves expansion across snapshot refreshes keyed by eventId', () => {
+    const event = makeEvent({ eventId: 'evt-persist', payload: { phase: 'validation' } });
+    const { container, rerender } = render(<RuntimeEventFeed events={[event]} mode="pretty" />);
+
+    const toggle = container.querySelector('.monitor-event-toggle') as HTMLButtonElement;
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    // Simulate an SSE snapshot refresh: a newer event is prepended (newest-first)
+    // while the expanded event reappears with the same eventId.
+    const refreshed: RuntimeEvent[] = [
+      makeEvent({ eventId: 'evt-newer', sequence: 99, type: 'status.progress', message: 'newer' }),
+      { ...event },
+    ];
+    rerender(<RuntimeEventFeed events={refreshed} mode="pretty" />);
+
+    const rows = container.querySelectorAll('.monitor-event');
+    const persistedRow = Array.from(rows).find(
+      (row) => row.querySelector('.monitor-event-type')?.textContent === 'result.pr_created',
+    );
+    expect(persistedRow).toBeTruthy();
+    const persistedToggle = persistedRow?.querySelector('.monitor-event-toggle') as HTMLButtonElement;
+    expect(persistedToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(persistedRow?.querySelector('.monitor-event-details')).toBeTruthy();
+  });
+
+  it('expands each row independently', () => {
+    const events = [
+      makeEvent({ eventId: 'evt-a', sequence: 1 }),
+      makeEvent({ eventId: 'evt-b', sequence: 2, payload: { ok: true } }),
+    ];
+    const { container } = render(<RuntimeEventFeed events={events} mode="pretty" />);
+
+    const toggles = container.querySelectorAll('.monitor-event-toggle');
+    fireEvent.click(toggles[1]);
+
+    expect(toggles[0].getAttribute('aria-expanded')).toBe('false');
+    expect(toggles[1].getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelectorAll('.monitor-event-details').length).toBe(1);
+  });
+
+  it('exposes an accessible expand/collapse label including sequence', () => {
+    const { container } = render(
+      <RuntimeEventFeed events={[makeEvent({ sequence: 42, type: 'result.pr_created' })]} mode="pretty" />,
+    );
+
+    const toggle = container.querySelector('.monitor-event-toggle') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-label')).toBe('Expand result.pr_created event #42');
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-label')).toBe('Collapse result.pr_created event #42');
   });
 });
