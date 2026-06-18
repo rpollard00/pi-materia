@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { AddQuestResponse, UpdateQuestResponse } from '../../types.js';
 import { QuestCreateForm, QuestEditForm } from './QuestCreateForm.js';
+import { resetQuestDraftStoreForTests } from './questDraftStore.js';
 
 const persistedLoadouts = {
   Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
@@ -33,7 +34,10 @@ const updateQuestResponse = {
   },
 } satisfies UpdateQuestResponse;
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  resetQuestDraftStoreForTests();
+});
 
 describe('QuestCreateForm layout', () => {
   it('keeps loadout controls in the left controls wrapper and prompt as the right layout item', () => {
@@ -131,5 +135,48 @@ describe('QuestEditForm', () => {
 
     expect(onCancel).toHaveBeenCalled();
     expect(onUpdateQuest).not.toHaveBeenCalled();
+  });
+});
+
+describe('QuestCreateForm draft retention across unmount/remount', () => {
+  function renderCreateForm(onAddQuest = vi.fn(async () => addQuestResponse)) {
+    render(
+      <QuestCreateForm
+        persistedLoadouts={persistedLoadouts}
+        questDefaultLoadoutId="user:alpha"
+        setQuestDefaultLoadout={vi.fn(async (loadoutId: string | null) => loadoutId)}
+        onAddQuest={onAddQuest}
+        submitting={false}
+      />,
+    );
+    return { onAddQuest };
+  }
+
+  it('preserves the prompt and loadout override when the panel unmounts and remounts (tab switch)', () => {
+    renderCreateForm();
+    const multiLinePrompt = 'Rescue the villager.\nCheck the eastern path first.\nThen regroup at the inn.';
+    fireEvent.change(screen.getByLabelText(/prompt/i), { target: { value: multiLinePrompt } });
+    fireEvent.change(screen.getByLabelText(/loadout override/i), { target: { value: 'Beta' } });
+
+    // Simulate navigating to another Materia tab: AppShell unmounts the quest workspace.
+    cleanup();
+    expect(screen.queryByLabelText(/prompt/i)).toBeNull();
+
+    // Simulate navigating back: the quest workspace remounts.
+    renderCreateForm();
+
+    expect((screen.getByLabelText(/prompt/i) as HTMLTextAreaElement).value).toBe(multiLinePrompt);
+    expect((screen.getByLabelText(/loadout override/i) as HTMLSelectElement).value).toBe('Beta');
+  });
+
+  it('clears the preserved draft after a successful submission', async () => {
+    const { onAddQuest } = renderCreateForm();
+    fireEvent.change(screen.getByLabelText(/prompt/i), { target: { value: 'Storm the keep' } });
+    fireEvent.click(screen.getByRole('button', { name: /add quest/i }));
+
+    await waitFor(() => expect(onAddQuest).toHaveBeenCalledWith({ prompt: 'Storm the keep' }));
+
+    expect((screen.getByLabelText(/prompt/i) as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByLabelText(/loadout override/i) as HTMLSelectElement).value).toBe('');
   });
 });
