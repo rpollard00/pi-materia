@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isOrchestrationOnlyMessage, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -371,6 +371,147 @@ describe("application prompt assembly", () => {
     expect(synthetic).toContain("Cast id: cast-1");
     expect(synthetic).toContain("Original request: original request");
     expect(synthetic).toContain("Previous output:\nprevious answer");
+  });
+});
+
+describe("buildIsolatedMateriaContext", () => {
+  function materiaPromptMessage(prompt: string): unknown {
+    return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: "Socket-1", socketId: "Socket-1", materiaName: "Build" }, timestamp: 3 };
+  }
+
+  function questOrchestrationCard(content: string, details: Record<string, unknown> = {}): unknown {
+    return {
+      role: "custom",
+      customType: "pi-materia",
+      content,
+      display: true,
+      details: { prefix: "quest", materiaName: "orchestrator", eventType: "run", orchestration: true, ...details },
+      timestamp: 4,
+    };
+  }
+
+  const QUEST_RUNNER_CARD = [
+    "Started continuous quest runner and launched quest quest-zllugjpp: filter the palette",
+    "Cast: 2026-06-18T05-07-25-666Z",
+    "Runner: enabled",
+    "Mode: continuous run; auto-advances while enabled until /materia quest stop",
+    "Loadout: Rude (user:reno-copy:b73f1393-eaec-45b1-9b4a-d7deb2048920)",
+  ].join("\n");
+
+  test("filters quest runner orchestration cards appended after the hidden materia prompt", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "unrelated earlier transcript" }], timestamp: 1 },
+      materiaPromptMessage("<materia-instructions>\nBuild it.\n</materia-instructions>"),
+      // Runtime appends the user-facing quest card after the triggerTurn materia prompt.
+      questOrchestrationCard(QUEST_RUNNER_CARD),
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+
+    // Synthetic cast context replaces the earlier transcript and remains present.
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    expect(serialized).not.toContain("unrelated earlier transcript");
+    // The hidden materia prompt must survive isolation.
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("Build it.");
+    // The quest runner orchestration card must be fully removed.
+    expect(serialized).not.toContain("Started continuous quest runner");
+    expect(serialized).not.toContain("Runner: enabled");
+    expect(serialized).not.toContain("Mode: continuous run");
+    expect(serialized).not.toContain("Loadout: Rude");
+  });
+
+  test("also filters quest runner cards that precede the materia prompt", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    const messages = [
+      questOrchestrationCard(QUEST_RUNNER_CARD),
+      materiaPromptMessage("<materia-instructions>\nBuild it.\n</materia-instructions>"),
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).not.toContain("Started continuous quest runner");
+    expect(serialized).not.toContain("Loadout: Rude");
+  });
+
+  test("filters quest-prefix cards even without the explicit orchestration flag", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    const messages = [
+      materiaPromptMessage("<materia-instructions>\nBuild it.\n</materia-instructions>"),
+      questOrchestrationCard("Quest runner stopped.", { eventType: "stop", orchestration: undefined }),
+    ];
+    delete (messages[1] as { details?: { orchestration?: unknown } }).details!.orchestration;
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    expect(JSON.stringify(isolated)).not.toContain("Quest runner stopped.");
+  });
+
+  test("preserves assistant, toolResult, ordinary user refinement, and non-quest custom messages", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    const messages = [
+      materiaPromptMessage("<materia-instructions>\nBuild it.\n</materia-instructions>"),
+      { role: "assistant", content: [{ type: "text", text: "I will read the file." }], timestamp: 5 },
+      { role: "toolResult", content: [{ type: "text", text: "file contents" }], timestamp: 6 },
+      { role: "user", content: [{ type: "text", text: "please focus on the palette filter" }], timestamp: 7 },
+      { role: "custom", customType: "pi-materia", content: "status card", display: true, details: { prefix: "status", materiaName: "orchestrator", eventType: "status" }, timestamp: 8 },
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+    expect(serialized).toContain("I will read the file.");
+    expect(serialized).toContain("file contents");
+    expect(serialized).toContain("please focus on the palette filter");
+    // Non-quest custom display cards are out of scope and remain untouched.
+    expect(serialized).toContain("status card");
+  });
+
+  test("returns messages unchanged when no active materia prompt is present", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "plain conversation" }] },
+      questOrchestrationCard(QUEST_RUNNER_CARD),
+    ];
+
+    expect(buildIsolatedMateriaContext(messages, castState)).toBe(messages);
+  });
+});
+
+describe("isOrchestrationOnlyMessage", () => {
+  test("flags custom messages marked orchestration or with a quest prefix", () => {
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest", orchestration: true } })).toBe(true);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest" } })).toBe(true);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { orchestration: true } })).toBe(true);
+  });
+
+  test("preserves the hidden materia prompt and non-quest custom cards", () => {
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>", details: { phase: "Socket-1" } })).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "status", details: { prefix: "status" } })).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "orphan", details: {} })).toBe(false);
+  });
+
+  test("never treats user, assistant, tool, or toolResult messages as orchestration", () => {
+    expect(isOrchestrationOnlyMessage({ role: "user", content: [{ type: "text", text: "Started continuous quest runner" }] })).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "assistant", content: [{ type: "text", text: "ack" }] })).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "toolResult", content: [] })).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "tool", content: [] })).toBe(false);
+  });
+
+  test("handles malformed inputs defensively", () => {
+    expect(isOrchestrationOnlyMessage(null)).toBe(false);
+    expect(isOrchestrationOnlyMessage(undefined)).toBe(false);
+    expect(isOrchestrationOnlyMessage("text")).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "custom" })).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "custom", details: "not-an-object" })).toBe(false);
+    expect(isOrchestrationOnlyMessage({ role: "custom", details: null })).toBe(false);
   });
 });
 

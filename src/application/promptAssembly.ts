@@ -199,7 +199,13 @@ export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaC
   if (!shouldUseIsolatedMateriaContext(state)) return messages;
   const materiaStart = findActiveMateriaPromptIndex(messages);
   if (materiaStart < 0) return messages;
-  return [createUserMessage(buildSyntheticCastContext(state)), ...messages.slice(materiaStart)];
+  // Drop pi-materia orchestration-only custom messages (e.g. quest runner status
+  // cards) that the runtime appends after the hidden pi-materia-prompt. They are
+  // user-facing display only and must never become agent context. The materia
+  // prompt itself, assistant/tool/toolResult turns, and genuine user refinement
+  // messages are preserved because they are not orchestration custom messages.
+  const preserved = messages.slice(materiaStart).filter((message) => !isOrchestrationOnlyMessage(message));
+  return [createUserMessage(buildSyntheticCastContext(state)), ...preserved];
 }
 
 export function shouldUseIsolatedMateriaContext(state: MateriaCastState): boolean {
@@ -291,6 +297,30 @@ export function findActiveMateriaPromptIndex(messages: unknown[]): number {
 
 export function isToolOrAssistantMessage(message: { role?: unknown }): boolean {
   return message.role === "assistant" || message.role === "tool" || message.role === "toolResult";
+}
+
+/**
+ * Detects pi-materia orchestration-only custom messages that must never become
+ * agent context. Quest runner lifecycle cards (and any card explicitly flagged
+ * orchestration) are user-facing display only; they carry no agent input and are
+ * filtered from isolated materia context even when the runtime appends them
+ * after the hidden pi-materia-prompt. Only `role: "custom"` messages are
+ * considered, so the materia prompt, assistant/tool/toolResult turns, and
+ * ordinary user refinement messages are always preserved. See sendQuestMessage
+ * in src/index.ts, which stamps these cards with details.orchestration === true
+ * and details.prefix === "quest".
+ */
+export function isOrchestrationOnlyMessage(message: unknown): boolean {
+  if (typeof message !== "object" || message === null) return false;
+  const record = message as { role?: unknown; details?: unknown };
+  if (record.role !== "custom") return false;
+  const details = record.details;
+  if (typeof details !== "object" || details === null) return false;
+  const detailRecord = details as { orchestration?: unknown; prefix?: unknown };
+  if (detailRecord.orchestration === true) return true;
+  // Defense-in-depth: quest-prefix cards are orchestration display messages
+  // even if the explicit flag is missing on a runner lifecycle path.
+  return detailRecord.prefix === "quest";
 }
 
 export function createUserMessage(content: string): unknown {
