@@ -3,12 +3,20 @@ import { err, ok, type DomainIssue, type DomainResult } from "./result.js";
 export const HANDOFF_WORK_ITEMS_FIELD = "workItems" as const;
 export const HANDOFF_SATISFIED_FIELD = "satisfied" as const;
 export const HANDOFF_CONTEXT_FIELD = "context" as const;
+/**
+ * Canonical renderable text payload: the materia's primary user-facing prose
+ * output (e.g. narration, notes, descriptions). The raw JSON value is
+ * authoritative; TUI rendering is a one-way presentation layer. Downstream
+ * materia may consume it via assignment (e.g. `$.text`) or state references.
+ */
+export const HANDOFF_TEXT_FIELD = "text" as const;
 
 /** Top-level fields authored by agent JSON handoffs. */
 export const HANDOFF_ENVELOPE_FIELDS = [
   HANDOFF_WORK_ITEMS_FIELD,
   HANDOFF_SATISFIED_FIELD,
   HANDOFF_CONTEXT_FIELD,
+  HANDOFF_TEXT_FIELD,
 ] as const;
 
 export const HANDOFF_RESERVED_CONTROL_FIELDS = [
@@ -35,6 +43,8 @@ export interface HandoffEnvelope {
   workItems: HandoffWorkItem[];
   satisfied: boolean;
   context: string;
+  /** Canonical renderable text payload (authoritative prose output). */
+  text: string;
 }
 
 export const HANDOFF_ALWAYS_EDGE_CONDITION = "always" as const;
@@ -54,6 +64,7 @@ export const HANDOFF_ENVELOPE_EXAMPLE: HandoffEnvelope = {
   [HANDOFF_WORK_ITEMS_FIELD]: [],
   [HANDOFF_SATISFIED_FIELD]: false,
   [HANDOFF_CONTEXT_FIELD]: "",
+  [HANDOFF_TEXT_FIELD]: "",
 };
 
 export const HANDOFF_WORK_ITEM_EXAMPLE: HandoffWorkItem = {
@@ -75,6 +86,7 @@ export function createHandoffEnvelope(
     ...init,
     [HANDOFF_WORK_ITEMS_FIELD]: init[HANDOFF_WORK_ITEMS_FIELD] ?? [],
     [HANDOFF_CONTEXT_FIELD]: init[HANDOFF_CONTEXT_FIELD] ?? "",
+    [HANDOFF_TEXT_FIELD]: init[HANDOFF_TEXT_FIELD] ?? "",
   };
 }
 

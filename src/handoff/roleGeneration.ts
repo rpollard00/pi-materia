@@ -207,7 +207,7 @@ export function buildRoleGenerationPrompt(
     "You generate concise pi-materia role prompt instructions.",
     "Return only the role prompt text to place in a Materia config `prompt` field.",
     "The prompt should define the agent's responsibilities, operating style, constraints, and expected output behavior.",
-    "When the generated role prompt asks for agent JSON or handoff output, describe only socket-relevant fields from the small contract: workItems, satisfied, and context.",
+    "When the generated role prompt asks for agent JSON or handoff output, describe only socket-relevant fields from the small contract: workItems, satisfied, context, and text.",
     "Do not include markdown fences, commentary about generation, or UI instructions.",
     roleGenerationContext(generates),
     profile.extraInstructions ? `Additional operator instructions:\n${profile.extraInstructions}` : undefined,

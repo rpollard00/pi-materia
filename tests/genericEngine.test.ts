@@ -170,6 +170,21 @@ describe("generic engine helper mechanics", () => {
     expect(target).toEqual({ utility: { result: { value: 7 } } });
   });
 
+  test("captures renderable text payloads into the handoff envelope", () => {
+    const state = makeState({ data: { envelope: { satisfied: false }, context: "existing context" } });
+    const parsed = {
+      text: "## Summary\n\nNarration prose for downstream consumption.",
+      satisfied: true,
+    };
+
+    applyGenericHandoffEnvelope(state, parsed);
+
+    expect(state.data.envelope).toMatchObject(parsed);
+    expect(state.data.envelope?.text).toBe(parsed.text);
+    // Raw JSON remains authoritative: prose is not spread into top-level state keys.
+    expect(state.data).not.toHaveProperty("text");
+  });
+
   test("preserves small handoff fields from JSON socket output", () => {
     const state = makeState({ data: { envelope: { satisfied: false }, context: "existing context" } });
     const parsed = {

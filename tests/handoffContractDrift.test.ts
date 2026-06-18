@@ -42,7 +42,7 @@ describe("handoff contract drift regressions", () => {
 
     const generated = buildRoleGenerationPrompt("write a JSON evaluator role");
     expect(generated).toContain(
-      "describe only socket-relevant fields from the small contract: workItems, satisfied, and context",
+      "describe only socket-relevant fields from the small contract: workItems, satisfied, context, and text",
     );
     expect(generated).not.toContain("entire canonical envelope");
     expect(generated).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);

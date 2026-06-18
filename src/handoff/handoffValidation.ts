@@ -3,6 +3,7 @@ import {
   HANDOFF_ENVELOPE_FIELDS,
   HANDOFF_LEGACY_NON_CANONICAL_ALIASES,
   HANDOFF_SATISFIED_FIELD,
+  HANDOFF_TEXT_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
 } from "./handoffContract.js";
 import { formatHandoffWorkItemShape, parseHandoffWorkItem } from "../domain/handoff.js";
@@ -183,6 +184,14 @@ function validateAgentTopLevelFields(value: Record<string, unknown>, issues: Han
       expected: "string",
       message: `Agent handoff field ${JSON.stringify(HANDOFF_CONTEXT_FIELD)} must be a string when present.`,
       reason: "Agent context is accumulated as plain explanatory text for downstream prompts.",
+    });
+  }
+  if (Object.prototype.hasOwnProperty.call(value, HANDOFF_TEXT_FIELD) && typeof value[HANDOFF_TEXT_FIELD] !== "string") {
+    issues.push({
+      path: `$.${HANDOFF_TEXT_FIELD}`,
+      expected: "string",
+      message: `Agent handoff field ${JSON.stringify(HANDOFF_TEXT_FIELD)} must be a string when present.`,
+      reason: "The text field is the materia's authoritative renderable prose payload; the TUI renders it as a one-way presentation layer.",
     });
   }
   if (Object.prototype.hasOwnProperty.call(value, HANDOFF_SATISFIED_FIELD) && typeof value[HANDOFF_SATISFIED_FIELD] !== "boolean") {

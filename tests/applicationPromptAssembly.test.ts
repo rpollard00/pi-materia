@@ -175,7 +175,7 @@ describe("application prompt assembly", () => {
     });
     const evalPrompt = buildSocketPrompt(state(evalSocket), evalSocket);
 
-    expect(evalPrompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(evalPrompt).toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
     expect(evalPrompt).not.toContain("reworkFeedback");
     expect(evalPrompt).not.toContain("lastFeedback");
   });
@@ -316,7 +316,7 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Materia isolated context.");
     expect(prompt).toContain("Command-triggered finalization");
     expect(prompt).toContain("Canonical handoff contract context:");
-    expect(prompt).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, and context");
+    expect(prompt).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, context, and text");
     expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");

@@ -9,6 +9,7 @@ Agent-authored handoff JSON is intentionally small. The only top-level fields in
 - `workItems`: an optional array of generated or refined work units.
 - `satisfied`: an optional boolean reserved for `satisfied` / `not_satisfied` graph control.
 - `context`: optional explanatory text for downstream agents.
+- `text`: optional renderable prose — the materia's primary user-facing text output (for example narration, notes, or a description). See [Renderable text payloads](#renderable-text-payloads).
 
 Shape reference:
 
@@ -16,11 +17,31 @@ Shape reference:
 {
   "workItems": [],
   "satisfied": true,
-  "context": "plain text handoff context"
+  "context": "plain text handoff context",
+  "text": "optional renderable prose payload"
 }
 ```
 
 Do not ask agents to emit a broad envelope. Obsolete broad-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, `missing`, or `state` are not part of the agent handoff contract.
+
+## Renderable text payloads
+
+`text` is the canonical field for materia whose primary product is displayable prose (for example a Narrate materia producing a cast summary, or a materia that turns a description into branch-name notes). It lets a text-style materia emit JSON-first output while still appearing to the user as clean text.
+
+- The raw JSON `text` value is authoritative. TUI rendering is a one-way presentation layer; rendered text must never replace or mutate the underlying JSON handoff or cast state.
+- Emit `text` only when this socket's main product is renderable prose that downstream materia may consume. Do not duplicate narration into `context`.
+- Downstream materia consume the payload through normal assignment and state references (for example `assign: { "narration": "$.text" }` on the emitting socket, or `{{state.envelope.text}}` / a dedicated state path in a following socket's prompt). Consumption is opt-in per graph; narration is not hard-wired to any consumer.
+- Use `context` for accumulating cross-socket handoff notes. Use `text` for the materia's discrete prose payload.
+
+Example narration output:
+
+```json
+{
+  "text": "## Summary\n\nImplemented the retry toggle and added tests."
+}
+```
+
+A following socket can then surface that prose as PR notes, branch-name input, or any other derived context without the narration materia needing to know about its consumers.
 
 ## Generated work items
 

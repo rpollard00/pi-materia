@@ -22,6 +22,16 @@ describe("handoff JSON runtime validation", () => {
     expect(() => validateHandoffJsonOutput({ context: { nested: true } }, { socketId: "Agent", socket: socket(), agentOutput: true })).toThrow(/context" must be a string/);
     expect(() => validateHandoffJsonOutput({ satisfied: "yes" }, { socketId: "Agent", socket: socket(), agentOutput: true })).toThrow(/satisfied" must be a boolean/);
     expect(() => validateHandoffJsonOutput({ workItems: {} }, { socketId: "Agent", socket: socket(), agentOutput: true })).toThrow(/workItems" must be an array/);
+    expect(() => validateHandoffJsonOutput({ text: { prose: true } }, { socketId: "Agent", socket: socket(), agentOutput: true })).toThrow(/text" must be a string/);
+    expect(() => validateHandoffJsonOutput({ text: ["narration"] }, { socketId: "Agent", socket: socket(), agentOutput: true })).toThrow(/text" must be a string/);
+  });
+
+  test("accepts renderable text payloads as canonical agent handoff output", () => {
+    const value = { text: "## Summary\n\nImplemented the toggle and added tests." };
+    expect(validateHandoffJsonOutput(value, { socketId: "Narrate", socket: socket({ assign: { narration: "$.text" } }), agentOutput: true })).toBe(value);
+    // text is optional and may combine with other canonical fields.
+    const combined = { text: "narration prose", satisfied: true, context: "handoff notes" };
+    expect(validateHandoffJsonOutput(combined, { socketId: "Narrate", socket: socket({ edges: [{ when: "satisfied", to: "Next" }] }), agentOutput: true })).toBe(combined);
   });
 
   test("accepts canonical satisfied booleans for satisfied routing", () => {
