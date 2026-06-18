@@ -26,6 +26,12 @@ export interface AppliedMateriaModelSettings extends ActiveModelInfo {
   thinkingFallbackReason?: string;
   fallbackReason?: string;
   warnings?: string[];
+  /** True when pi.setModel was called, succeeded, and the model actually differs
+   *  from the previously-active model (by provider/id). False for omitted/blank
+   *  model settings, failed fallback, same-model continuation, and thinking-only
+   *  changes. This signals a context-window reset and callers may suppress
+   *  proactive compaction for the immediate turn. */
+  modelSwitched?: boolean;
 }
 
 export class MateriaModelSettingsError extends Error {
@@ -105,6 +111,8 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
   let appliedModel: Model<Api> | undefined;
   let appliedThinking: ThinkingLevel | undefined;
 
+  let modelSwitched: boolean | undefined;
+
   if (modelExplicit) {
     const resolved = await resolveConfiguredModel(ctx, requestedModel);
     if (resolved.ok) {
@@ -121,6 +129,11 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
       }
       if (ok) {
         appliedModel = resolved.model;
+        // Model was explicitly applied and setModel succeeded.
+        // Signal a switch only if the provider or id actually changed
+        // compared to the active model before application.
+        modelSwitched = initialActive.provider !== resolved.model.provider
+          || initialActive.modelId !== resolved.model.id;
       } else {
         modelFallbackReason = "credentials_missing";
         const detail = setModelError
@@ -177,6 +190,7 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
     modelFallbackReason,
     thinkingFallbackReason,
     fallbackReason,
+    ...(modelSwitched !== undefined ? { modelSwitched } : {}),
     ...(warnings.length ? { warnings } : {}),
   };
 }
