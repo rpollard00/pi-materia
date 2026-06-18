@@ -111,6 +111,27 @@ describe('MateriaPalettePanel filtering and sorting', () => {
     expect(onSelectMateria).toHaveBeenCalledWith('Audit');
   });
 
+  it('keeps a stable scroll container around the palette regardless of filter results', () => {
+    // The scrollable list container is always present, even before filtering,
+    // so its height stays stable as the filtered result count changes.
+    const { container, getByTestId, queryByTestId } = renderPanel();
+    expect(getByTestId('palette-list')).toBeTruthy();
+
+    // Filtering to a single result keeps the stable container in place.
+    fireEvent.change(getByTestId('palette-filter-input'), { target: { value: 'git' } });
+    const list = getByTestId('palette-list');
+    expect(list.querySelector('[data-testid="palette-grid"]')).toBeTruthy();
+
+    // Filtering to nothing still keeps the container; only its contents change.
+    fireEvent.change(getByTestId('palette-filter-input'), { target: { value: 'zzznomatch' } });
+    expect(queryByTestId('palette-grid')).toBeNull();
+    expect(getByTestId('palette-list').querySelector('[data-testid="palette-no-results"]')).toBeTruthy();
+
+    // Resetting the filter restores the grid inside the same container.
+    fireEvent.click(getByTestId('palette-filter-clear'));
+    expect(getByTestId('palette-list').querySelector('[data-testid="palette-grid"]')).toBeTruthy();
+  });
+
   it('renders an empty state when there are no materia definitions', () => {
     const { getByTestId, queryByTestId } = renderPanel({ palette: [], materia: {} });
     expect(queryByTestId('palette-grid')).toBeNull();

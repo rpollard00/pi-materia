@@ -282,6 +282,12 @@
   min-width: 0;
 }
 
+/* Let the side panel's flex children grow/shrink inside the stretched grid
+   row so the materia palette can adopt a stable height. */
+.loadout-side-panel {
+  min-height: 0;
+}
+
 .loadout-graph-panel {
   display: flex;
   min-height: clamp(34rem, 76vh, 58rem);
@@ -1247,6 +1253,51 @@
   padding: 0.9rem;
   color: rgb(186 230 253 / 0.78);
   font-size: 0.82rem;
+}
+
+/*
+  Palette layout stability: the materia list scrolls inside a container with a
+  stable height so filtering (which changes the result count) never resizes the
+  palette or the surrounding page. The title and controls stay pinned above the
+  scrolling region.
+*/
+.materia-palette-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.materia-palette-list {
+  display: flex;
+  min-height: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  margin-top: 1rem;
+  /* Definite height (independent of content) keeps the stacked/narrow layout
+     from growing or shrinking as the filtered result count changes. */
+  height: clamp(20rem, 62vh, 42rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.35rem;
+  scrollbar-color: rgb(103 232 238 / 0.38) rgb(2 6 23 / 0.36);
+}
+
+.materia-palette-list .palette-empty {
+  margin-top: 0;
+}
+
+@media (min-width: 1280px) {
+  /* On wide layouts the palette fills the side panel, whose height is driven
+     by the graph panel row, instead of using a fixed viewport height. */
+  .materia-palette-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .materia-palette-list {
+    flex: 1 1 0;
+    height: auto;
+  }
 }
 
 .materia-button,
