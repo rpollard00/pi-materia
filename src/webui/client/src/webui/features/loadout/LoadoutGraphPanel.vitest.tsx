@@ -699,6 +699,30 @@ describe('LoadoutGraphPanel modal viewport centering', () => {
     return backdrop.closest('.loadout-graph-panel, .fantasy-panel');
   }
 
+  // Geometry-based regression model. jsdom does not compute layout, so
+  // getBoundingClientRect is always zeros and cannot distinguish a viewport-
+  // centered modal from a canvas-centered one. This helper reproduces the CSS
+  // containing-block rule behind the bug: a `position: fixed` element resolves
+  // against the viewport UNLESS an ancestor establishes a containing block.
+  // The `.fantasy-panel` (backdrop-filter) and any canvas zoom/pan transform
+  // each establish one, so a modal trapped in the panel resolves against the
+  // full `panelBox` (the long canvas), while a modal portaled to document.body
+  // has no such ancestor and resolves against the `viewport`.
+  interface ModalBox {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }
+
+  function modalCenter(box: ModalBox) {
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  }
+
+  function resolveFixedBox(fixedElement: Element, viewport: ModalBox, panelBox: ModalBox): ModalBox {
+    return fixedElement.closest('.loadout-graph-panel, .fantasy-panel') ? panelBox : viewport;
+  }
+
   it('portals the socket action modal out of the graph panel on a short canvas', () => {
     const base = renderPanel();
     const baseViewModel = base.props.viewModel;
@@ -753,6 +777,73 @@ describe('LoadoutGraphPanel modal viewport centering', () => {
     expect(backdropPanelAncestor(backdrop)).toBeNull();
     expect(container.contains(backdrop)).toBe(false);
     expect(document.body.contains(backdrop)).toBe(true);
+  });
+
+  it('centers the socket action modal on the viewport, not the canvas midpoint, when scrolled', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    const baseSocketModal = base.props.socketModal;
+    base.unmount();
+
+    // Simulate a long workflow: canvas much taller than the viewport.
+    const sockets = baseViewModel.activeLoadout!.sockets!;
+    const tallGraph = {
+      ...(baseViewModel.loadoutGraph as object),
+      height: 8000,
+      sockets: [
+        { id: 'Socket-1', socket: sockets['Socket-1'], index: 0, x: 24, y: 24 },
+        { id: 'Socket-2', socket: sockets['Socket-2'], index: 1, x: 180, y: 7800 },
+      ],
+    } as never;
+
+    const { getByTestId } = renderPanel({
+      viewModel: { ...baseViewModel, loadoutGraph: tallGraph, editPolicy: unlockedUserPolicy },
+      socketModal: {
+        state: { ...baseSocketModal.state, socketActionMode: 'actions', socketActionId: 'Socket-2' },
+        actions: baseSocketModal.actions,
+      },
+    });
+
+    const backdrop = getByTestId('socket-action-modal').parentElement!;
+    // User scrolled away from the top to the bottom of the long canvas to reach
+    // Socket-2 (y=7800); the visible viewport covers y in [7280, 8000).
+    const viewport = { x: 0, y: 7280, width: 1280, height: 720 };
+    const panelBox = { x: 0, y: 0, width: 1280, height: 8000 }; // full long canvas
+
+    const resolvedCenter = modalCenter(resolveFixedBox(backdrop, viewport, panelBox));
+    const viewportCenter = modalCenter(viewport);
+    const canvasCenter = modalCenter(panelBox);
+
+    // The modal must center on the user's visible viewport...
+    expect(resolvedCenter.x).toBe(viewportCenter.x);
+    expect(resolvedCenter.y).toBe(viewportCenter.y);
+    // ...which is far from the canvas midpoint (the pre-fix off-screen spawn).
+    expect(canvasCenter.y).toBe(4000);
+    expect(Math.abs(resolvedCenter.y - canvasCenter.y)).toBeGreaterThan(1000);
+  });
+
+  it('still centers the socket action modal on the viewport for a short canvas', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    const baseSocketModal = base.props.socketModal;
+    base.unmount();
+
+    const { getByTestId } = renderPanel({
+      viewModel: { ...baseViewModel, editPolicy: unlockedUserPolicy },
+      socketModal: {
+        state: { ...baseSocketModal.state, socketActionMode: 'actions', socketActionId: 'Socket-1' },
+        actions: baseSocketModal.actions,
+      },
+    });
+
+    const backdrop = getByTestId('socket-action-modal').parentElement!;
+    // Normal case: short canvas inside a taller viewport.
+    const viewport = { x: 0, y: 0, width: 1280, height: 720 };
+    const panelBox = { x: 0, y: 0, width: 1280, height: 240 };
+
+    const resolvedCenter = modalCenter(resolveFixedBox(backdrop, viewport, panelBox));
+    // The fix must not regress the short-canvas case: still viewport-centered.
+    expect(resolvedCenter).toEqual(modalCenter(viewport));
   });
 
   it('portals the loop control modal out of the graph panel', () => {
