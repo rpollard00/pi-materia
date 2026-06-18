@@ -23,11 +23,38 @@ export async function handleMonitorEventsRoute(req: IncomingMessage, res: Server
     'cache-control': 'no-cache, no-transform',
     connection: 'keep-alive',
   });
-  const writeSnapshot = async () => {
-    const snapshot = await getMonitorSnapshot(deps);
-    res.write(`event: monitor\ndata: ${JSON.stringify(snapshot)}\n\n`);
+
+  let aborted = false;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  const teardown = () => {
+    aborted = true;
+    if (interval !== undefined) {
+      clearInterval(interval);
+      interval = undefined;
+    }
   };
-  await writeSnapshot();
-  const interval = setInterval(() => { void writeSnapshot().catch(() => undefined); }, 1500);
-  req.on('close', () => clearInterval(interval));
+  req.on('close', teardown);
+  req.on('error', teardown);
+  res.on('close', teardown);
+
+  const writeSnapshot = async () => {
+    if (aborted) return;
+    try {
+      const snapshot = await getMonitorSnapshot(deps);
+      if (!aborted) res.write(`event: monitor\ndata: ${JSON.stringify(snapshot)}\n\n`);
+    } catch {
+      // Swallow snapshot/write failures so the interval stays alive;
+      // the client will fall back to polling on its own.
+    }
+  };
+
+  try {
+    await writeSnapshot();
+  } catch {
+    // Initial write failed; client will fall back to polling.
+  }
+
+  if (!aborted) {
+    interval = setInterval(() => { void writeSnapshot(); }, 1500);
+  }
 }
