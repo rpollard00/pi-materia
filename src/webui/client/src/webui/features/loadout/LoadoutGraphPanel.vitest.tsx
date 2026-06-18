@@ -647,8 +647,8 @@ describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
     });
   }
 
-  function replacementOrder(container: HTMLElement): string[] {
-    const list = container.querySelector('[data-testid="materia-replacement-list"]');
+  function replacementOrder(): string[] {
+    const list = document.body.querySelector('[data-testid="materia-replacement-list"]');
     if (!list) return [];
     return Array.from(list.querySelectorAll<HTMLButtonElement>('[data-testid^="replacement-materia-"]'))
       .map((button) => button.dataset.testid?.replace('replacement-materia-', '') ?? '');
@@ -660,17 +660,17 @@ describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
     expect(getByTestId('replacement-filter-input')).toBeTruthy();
     expect(getByTestId('replacement-sort-trigger')).toBeTruthy();
     expect(getByTestId('replacement-sort-direction')).toBeTruthy();
-    expect(replacementOrder(container)).toEqual(['Audit', 'Build', 'detectVcs']);
+    expect(replacementOrder()).toEqual(['Audit', 'Build', 'detectVcs']);
   });
 
   it('filters the replacement list by text and type', () => {
     const { container, getByTestId } = renderReplacePanel();
 
     fireEvent.change(getByTestId('replacement-filter-input'), { target: { value: 'core' } });
-    expect(replacementOrder(container)).toEqual(['Audit', 'Build']);
+    expect(replacementOrder()).toEqual(['Audit', 'Build']);
 
     fireEvent.change(getByTestId('replacement-filter-input'), { target: { value: 'utility' } });
-    expect(replacementOrder(container)).toEqual(['detectVcs']);
+    expect(replacementOrder()).toEqual(['detectVcs']);
   });
 
   it('sorts utilities before agents when type is descending', () => {
@@ -678,7 +678,7 @@ describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
     fireEvent.click(getByTestId('replacement-sort-trigger'));
     fireEvent.click(getByTestId('replacement-sort-option-type'));
     fireEvent.click(getByTestId('replacement-sort-direction'));
-    expect(replacementOrder(container)).toEqual(['detectVcs', 'Build', 'Audit']);
+    expect(replacementOrder()).toEqual(['detectVcs', 'Build', 'Audit']);
   });
 
   it('shows a no-results state when no replacement materia matches', () => {
@@ -686,5 +686,97 @@ describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
     fireEvent.change(getByTestId('replacement-filter-input'), { target: { value: 'zzznomatch' } });
     expect(queryByTestId('replacement-materia-Build')).toBeNull();
     expect(getByTestId('replacement-no-results').textContent).toBe('No matching materia.');
+  });
+});
+
+describe('LoadoutGraphPanel modal viewport centering', () => {
+  // Regression: the `.fantasy-panel` ancestor uses backdrop-filter, which
+  // establishes a containing block for `position: fixed` descendants. Without
+  // portaling, the modal overlay centers on the full canvas/panel box (off-screen
+  // on a long scrolled canvas) instead of the visible viewport. The modals must
+  // portal to document.body so canvas size, scroll, and zoom/pan cannot move them.
+  function backdropPanelAncestor(backdrop: Element): Element | null {
+    return backdrop.closest('.loadout-graph-panel, .fantasy-panel');
+  }
+
+  it('portals the socket action modal out of the graph panel on a short canvas', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    const baseSocketModal = base.props.socketModal;
+    base.unmount();
+
+    const { container, getByTestId } = renderPanel({
+      viewModel: { ...baseViewModel, editPolicy: unlockedUserPolicy },
+      socketModal: {
+        state: { ...baseSocketModal.state, socketActionMode: 'actions', socketActionId: 'Socket-1' },
+        actions: baseSocketModal.actions,
+      },
+    });
+
+    const modal = getByTestId('socket-action-modal');
+    const backdrop = modal.parentElement;
+    expect(backdrop?.className).toContain('socket-action-backdrop');
+    // Portaled: the overlay lives on document.body, not trapped in the panel.
+    expect(backdropPanelAncestor(backdrop!)).toBeNull();
+    expect(container.contains(backdrop)).toBe(false);
+    expect(document.body.contains(backdrop)).toBe(true);
+  });
+
+  it('keeps the socket action modal viewport-anchored on a long scrolled canvas', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    const baseSocketModal = base.props.socketModal;
+    base.unmount();
+
+    // Simulate a long workflow: canvas much taller than the viewport.
+    const sockets = baseViewModel.activeLoadout!.sockets!;
+    const tallGraph = {
+      ...(baseViewModel.loadoutGraph as object),
+      height: 8000,
+      sockets: [
+        { id: 'Socket-1', socket: sockets['Socket-1'], index: 0, x: 24, y: 24 },
+        { id: 'Socket-2', socket: sockets['Socket-2'], index: 1, x: 180, y: 7800 },
+      ],
+    } as never;
+
+    const { container, getByTestId } = renderPanel({
+      viewModel: { ...baseViewModel, loadoutGraph: tallGraph, editPolicy: unlockedUserPolicy },
+      socketModal: {
+        state: { ...baseSocketModal.state, socketActionMode: 'actions', socketActionId: 'Socket-1' },
+        actions: baseSocketModal.actions,
+      },
+    });
+
+    const backdrop = getByTestId('socket-action-modal').parentElement!;
+    expect(backdrop.className).toContain('socket-action-backdrop');
+    // Long canvas must not pull the modal into the panel's containing block.
+    expect(backdropPanelAncestor(backdrop)).toBeNull();
+    expect(container.contains(backdrop)).toBe(false);
+    expect(document.body.contains(backdrop)).toBe(true);
+  });
+
+  it('portals the loop control modal out of the graph panel', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: { reviewLoop: { sockets: ['Socket-1', 'Socket-2'], exit: { from: 'Socket-2', when: 'satisfied' as const, to: 'end' } } },
+    };
+    const { container, getByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        loopRegions: [{ id: 'reviewLoop', label: 'Review', x: 12, y: 12, width: 280, height: 160, summary: 'Socket-1, Socket-2', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)' }],
+      },
+    });
+
+    fireEvent.click(getByTestId('loop-cycle-edge-reviewLoop'));
+
+    const backdrop = getByTestId('loop-control-modal').parentElement!;
+    expect(backdrop.className).toContain('socket-action-backdrop');
+    expect(backdropPanelAncestor(backdrop)).toBeNull();
+    expect(container.contains(backdrop)).toBe(false);
+    expect(document.body.contains(backdrop)).toBe(true);
   });
 });
