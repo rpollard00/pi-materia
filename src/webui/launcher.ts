@@ -477,6 +477,15 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
     runDir ? readArtifactSummary(runDir) : Promise.resolve(undefined),
     runDir ? readRuntimeEvents(runDir) : Promise.resolve([]),
   ]);
+  // When eventing is disabled, runtimeEvents is empty but artifactSummary.events
+  // still contains lifecycle events (cast_start, socket_start, etc.) written to
+  // {runDir}/events.jsonl by appendEvent. Normalize them into enriched-event-
+  // compatible entries so the monitor panel shows events without requiring the
+  // opt-in eventing feature. When eventing is enabled, the real runtimeEvents
+  // take precedence (no duplication).
+  const effectiveRuntimeEvents = runtimeEvents.length > 0
+    ? runtimeEvents
+    : normalizeArtifactEvents(artifactSummary?.events ?? [], state?.castId);
   const activeLoadoutSnapshot = await readActiveLoadoutSnapshot(ctx.cwd, configuredPath);
   const activeCastLoadoutIdentity = state ? resolveActiveCastLoadoutIdentity(state) : undefined;
   return {
@@ -493,7 +502,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
     ...activeLoadoutSnapshot,
     toolRegistry: readPiToolRegistry(pi),
     artifactSummary,
-    runtimeEvents,
+    runtimeEvents: effectiveRuntimeEvents,
     activeCast: state ? {
       castId: state.castId,
       active: state.active,
@@ -623,6 +632,58 @@ async function readEventsFile(file: string): Promise<MateriaMonitorEventEntry[]>
   } catch {
     return [];
   }
+}
+
+/**
+ * Normalize legacy artifact-summary events into enriched-event-compatible
+ * entries when the opt-in runtime eventing feature is disabled.
+ *
+ * Legacy events are written to `{runDir}/events.jsonl` by `appendEvent` with
+ * shape `{ ts, type, data }`. The `data` payload carries rich cast lifecycle
+ * metadata (socket, materia, item, visit, etc.). This normalization extracts
+ * known fields and presents them newest-first so the monitor panel shows
+ * meaningful rows even without the enriched event bus.
+ *
+ * When runtime eventing is enabled, the real `runtimeEvents` take precedence
+ * and these normalized entries are never used (no duplication).
+ */
+function normalizeArtifactEvents(
+  events: MateriaMonitorEventEntry[],
+  castId?: string,
+): import("../domain/eventing.js").EnrichedEvent[] {
+  return events
+    .filter((event): event is MateriaMonitorEventEntry & { type: string } => typeof event.type === "string" && event.type.length > 0)
+    .reverse() // newest-first to match runtimeEvents convention
+    .map((event, index) => {
+      const data = isRecord(event.data) ? event.data : {};
+      const socketId = typeof data.socket === "string" ? data.socket : "";
+      const materia = typeof data.materia === "string" ? data.materia : "cast";
+      const materiaLabel = typeof data.materiaLabel === "string" ? data.materiaLabel : undefined;
+      const itemKey = typeof data.itemKey === "string" ? data.itemKey : undefined;
+      const itemLabel = typeof data.itemLabel === "string" ? data.itemLabel : undefined;
+      const visit = typeof data.visit === "number" ? data.visit : 0;
+      const message = typeof data.request === "string" ? data.request : event.type;
+
+      return {
+        // Materia-emitted canonical fields
+        type: event.type,
+        severity: "info",
+        message,
+        payload: event.data as Record<string, unknown> | undefined,
+        source: undefined,
+        // Runtime-enriched fields (emulated from legacy event data)
+        eventId: `artifact-${String(index).padStart(4, "0")}`,
+        occurredAt: event.ts ? new Date(event.ts).toISOString() : new Date().toISOString(),
+        sequence: index + 1,
+        castId: castId ?? "",
+        socketId,
+        materia,
+        ...(materiaLabel !== undefined ? { materiaLabel } : {}),
+        visit,
+        ...(itemKey !== undefined ? { itemKey } : {}),
+        ...(itemLabel !== undefined ? { itemLabel } : {}),
+      };
+    });
 }
 
 function summarizeUnknown(value: unknown): string {
