@@ -255,7 +255,7 @@ Result context includes the bookmark name in brackets (e.g. `[bookmark: blackbel
 
 ### Commit-Sigil
 
-`Commit-Sigil` is a pass-through generator validator. It is `generator: true` because it produces canonical top-level `workItems` for downstream generator and loop-region semantics — the `Release` loadout loop consumes `workItems` from the Commit-Sigil socket. It does **not** rewrite, filter, or transform titles; it echoes the input `workItems` array unchanged while validating each title against Conventional Commit format (`type: description` or `type(scope): description`, with optional `!` for breaking changes).
+`Commit-Sigil` is a pass-through generator validator. It is `generator: true` because it produces canonical top-level `workItems` for downstream generator and loop-region semantics — downstream loop regions consume `workItems` from the Commit-Sigil socket. It does **not** rewrite, filter, or transform titles; it echoes the input `workItems` array unchanged while validating each title against Conventional Commit format (`type: description` or `type(scope): description`, with optional `!` for breaking changes).
 
 The script reads work items from `state.workItems` (with a top-level `workItems` fallback for direct tests), validates each `title` string, and writes canonical generator output:
 
