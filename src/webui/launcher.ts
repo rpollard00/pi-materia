@@ -537,6 +537,24 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/**
+ * Returns the first non-empty trimmed string among the candidate `values`.
+ *
+ * Legacy `events.jsonl` payloads carry provenance under a variety of field
+ * names: canonical events use `materia`/`socket`, while diagnostics such as
+ * `advancement_lifecycle` use `materiaName`/`currentSocketId` and handoff
+ * events use `sourceMateriaName`/`sourceSocketId`/`targetMateriaName`/
+ * `targetSocketId`. This lets normalization derive materia/socket identity
+ * from whichever alternate field a given legacy event happens to populate.
+ */
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const candidate = nonEmptyString(value);
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
 function readPiToolRegistry(pi?: ExtensionAPI): MateriaToolRegistrySnapshot {
   if (!pi) {
     return { ok: false, available: false, tools: [], warnings: ["Pi tool registry is unavailable for this WebUI session."] };
@@ -656,9 +674,13 @@ function normalizeArtifactEvents(
     .reverse() // newest-first to match runtimeEvents convention
     .map((event, index) => {
       const data = isRecord(event.data) ? event.data : {};
-      const socketId = typeof data.socket === "string" ? data.socket : "";
-      const materia = typeof data.materia === "string" ? data.materia : "cast";
-      const materiaLabel = typeof data.materiaLabel === "string" ? data.materiaLabel : undefined;
+      // Legacy payloads carry socket/materia identity under a mix of field
+      // names. Prefer canonical `socket`/`materia`, then fall back to the
+      // alternate fields diagnostics and handoff events use, so materia-
+      // scoped events do not degrade to a cast-level `"cast"` provenance.
+      const socketId = firstNonEmptyString(data.socket, data.currentSocketId, data.sourceSocketId, data.targetSocketId) ?? "";
+      const materia = firstNonEmptyString(data.materia, data.materiaName, data.sourceMateriaName, data.targetMateriaName) ?? "cast";
+      const materiaLabel = nonEmptyString(data.materiaLabel);
       const itemKey = typeof data.itemKey === "string" ? data.itemKey : undefined;
       const itemLabel = typeof data.itemLabel === "string" ? data.itemLabel : undefined;
       const visit = typeof data.visit === "number" ? data.visit : 0;
@@ -734,6 +756,7 @@ export const webUiLauncherTestInternals = {
   resetMateriaWebUiBuildPromise,
   createActiveLoadoutSetter,
   currentSessionSnapshot,
+  normalizeArtifactEvents,
   readPiToolRegistry,
   loadMateriaWebUiProfileConfig: loadProfileConfig,
   webUiSessionKey,
