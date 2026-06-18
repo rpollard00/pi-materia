@@ -2078,6 +2078,46 @@
   max-height: 30rem;
 }
 
+/* Wraps the scroll container so the Return-to-latest chip can float over it. */
+.monitor-feed-scroll-wrap {
+  position: relative;
+  margin-top: 0.9rem;
+}
+
+.monitor-feed-latest {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(103 232 249 / 0.4);
+  background: rgb(2 6 23 / 0.92);
+  padding: 0.35rem 0.75rem;
+  color: rgb(224 242 254);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  z-index: 2;
+}
+
+.monitor-feed-latest:hover {
+  background: rgb(8 47 73 / 0.95);
+  border-color: rgb(103 232 249 / 0.7);
+  transform: translateX(-50%) translateY(-1px);
+}
+
+.monitor-feed-latest:focus-visible {
+  outline: 2px solid rgb(103 232 249 / 0.7);
+  outline-offset: 2px;
+}
+
 .monitor-feed-empty {
   display: flex;
   flex-direction: column;

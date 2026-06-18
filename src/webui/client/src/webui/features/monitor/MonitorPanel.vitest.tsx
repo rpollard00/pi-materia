@@ -162,3 +162,157 @@ describe('MonitorPanel runtime event shell', () => {
     expect(screen.getByText('2 events')).toBeTruthy();
   });
 });
+
+describe('MonitorPanel event feed scroll behavior', () => {
+  /** The scroll container that owns the feed's scroll position. */
+  function getScrollContainer(): HTMLElement {
+    const node = document.querySelector('.monitor-feed-scroll');
+    if (!node) throw new Error('feed scroll container not rendered');
+    return node as HTMLElement;
+  }
+
+  it('does not show the Return to latest button while at the top', () => {
+    renderPanel({ monitor: { runtimeEvents: [makeEvent()] } as MonitorSnapshot });
+
+    expect(screen.queryByRole('button', { name: 'Return to latest events' })).toBeNull();
+  });
+
+  it('shows the Return to latest button when scrolled away from the newest events', () => {
+    renderPanel({ monitor: { runtimeEvents: [makeEvent()] } as MonitorSnapshot });
+
+    const scroller = getScrollContainer();
+    scroller.scrollTop = 250; // scrolled back into older events
+    fireEvent.scroll(scroller);
+
+    expect(screen.getByRole('button', { name: 'Return to latest events' })).toBeTruthy();
+  });
+
+  it('hides the Return to latest button when scrolled back to the top', () => {
+    renderPanel({ monitor: { runtimeEvents: [makeEvent()] } as MonitorSnapshot });
+
+    const scroller = getScrollContainer();
+    scroller.scrollTop = 250;
+    fireEvent.scroll(scroller);
+    expect(screen.getByRole('button', { name: 'Return to latest events' })).toBeTruthy();
+
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+    expect(screen.queryByRole('button', { name: 'Return to latest events' })).toBeNull();
+  });
+
+  it('re-pins to the top and hides the button when Return to latest is clicked', () => {
+    renderPanel({ monitor: { runtimeEvents: [makeEvent()] } as MonitorSnapshot });
+
+    const scroller = getScrollContainer();
+    scroller.scrollTop = 400;
+    fireEvent.scroll(scroller);
+
+    const button = screen.getByRole('button', { name: 'Return to latest events' });
+    fireEvent.click(button);
+
+    expect(scroller.scrollTop).toBe(0);
+    expect(screen.queryByRole('button', { name: 'Return to latest events' })).toBeNull();
+  });
+
+  it('preserves the visible scroll position when events are prepended while scrolled away (no bounce)', () => {
+    // Newest-first snapshot refresh: a newer event is prepended at the top.
+    const firstEvent = makeEvent({ eventId: 'evt-1', sequence: 10, type: 'status.progress' });
+    const { rerender } = render(
+      <MonitorPanel
+        monitor={{ runtimeEvents: [firstEvent] } as MonitorSnapshot}
+        currentMonitorSocket={undefined}
+        elapsed="0:00"
+      />,
+    );
+
+    const scroller = getScrollContainer();
+    scroller.scrollTop = 300; // reading older events, away from the top
+    fireEvent.scroll(scroller);
+    expect(screen.getByRole('button', { name: 'Return to latest events' })).toBeTruthy();
+
+    // A newer event streams in (newest-first -> prepended at the top).
+    rerender(
+      <MonitorPanel
+        monitor={{
+          runtimeEvents: [
+            makeEvent({ eventId: 'evt-2', sequence: 20, type: 'result.pr_created' }),
+            firstEvent,
+          ],
+        } as MonitorSnapshot}
+        currentMonitorSocket={undefined}
+        elapsed="0:00"
+      />,
+    );
+
+    // The feed must not yank the user back to the top.
+    expect(scroller.scrollTop).toBe(300);
+    expect(screen.getByRole('button', { name: 'Return to latest events' })).toBeTruthy();
+  });
+
+  it('keeps the newest events visible while at the top as new events stream in', () => {
+    const { rerender } = render(
+      <MonitorPanel
+        monitor={{ runtimeEvents: [makeEvent({ eventId: 'evt-1', sequence: 10 })] } as MonitorSnapshot}
+        currentMonitorSocket={undefined}
+        elapsed="0:00"
+      />,
+    );
+
+    const scroller = getScrollContainer();
+    expect(scroller.scrollTop).toBe(0);
+    expect(screen.queryByRole('button', { name: 'Return to latest events' })).toBeNull();
+
+    // Newest event streams in (prepended at the top). The user is at the top,
+    // so the feed re-pins to keep the newest event visible.
+    rerender(
+      <MonitorPanel
+        monitor={{
+          runtimeEvents: [
+            makeEvent({ eventId: 'evt-2', sequence: 20, type: 'result.pr_created' }),
+            makeEvent({ eventId: 'evt-1', sequence: 10 }),
+          ],
+        } as MonitorSnapshot}
+        currentMonitorSocket={undefined}
+        elapsed="0:00"
+      />,
+    );
+
+    expect(scroller.scrollTop).toBe(0);
+    expect(screen.queryByRole('button', { name: 'Return to latest events' })).toBeNull();
+  });
+
+  it('preserves scroll position in Raw mode the same as Pretty mode', () => {
+    const firstEvent = makeEvent({ eventId: 'evt-1', sequence: 10 });
+    const { rerender } = render(
+      <MonitorPanel
+        monitor={{ runtimeEvents: [firstEvent] } as MonitorSnapshot}
+        currentMonitorSocket={undefined}
+        elapsed="0:00"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
+
+    const scroller = getScrollContainer();
+    scroller.scrollTop = 180;
+    fireEvent.scroll(scroller);
+    expect(screen.getByRole('button', { name: 'Return to latest events' })).toBeTruthy();
+
+    rerender(
+      <MonitorPanel
+        monitor={{
+          runtimeEvents: [
+            makeEvent({ eventId: 'evt-2', sequence: 20, type: 'result.pr_created' }),
+            firstEvent,
+          ],
+        } as MonitorSnapshot}
+        currentMonitorSocket={undefined}
+        elapsed="0:00"
+      />,
+    );
+
+    // Still in Raw mode, scrolled away: the feed must not bounce to the top.
+    expect(scroller.scrollTop).toBe(180);
+    expect(screen.getByRole('button', { name: 'Return to latest events' })).toBeTruthy();
+  });
+});

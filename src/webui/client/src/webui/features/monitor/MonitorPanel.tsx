@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { MonitorSnapshot } from '../../types.js';
 import { RuntimeEventFeed } from './RuntimeEventFeed.js';
 import type { MonitorEventViewMode } from './runtimeEventFormat.js';
+import { useEventFeedScroll } from './useEventFeedScroll.js';
 
 export interface MonitorPanelProps {
   monitor: MonitorSnapshot | undefined;
@@ -26,6 +27,11 @@ export function MonitorPanel({ monitor, currentMonitorSocket, elapsed }: Monitor
   const [viewMode, setViewMode] = useState<MonitorEventViewMode>('pretty');
   const runtimeEvents = monitor?.runtimeEvents ?? [];
   const eventCount = runtimeEvents.length;
+  // Newest events live at the top of the feed. While the user is at/near the
+  // top the feed re-pins to the latest events; once they scroll back into older
+  // events the visible position is preserved across snapshot refreshes, with a
+  // Return to latest affordance to jump back to the top.
+  const feedScroll = useEventFeedScroll(runtimeEvents);
 
   return (
     <section className="fantasy-panel p-6" aria-label="Live session monitor">
@@ -77,8 +83,27 @@ export function MonitorPanel({ monitor, currentMonitorSocket, elapsed }: Monitor
             </p>
           </div>
         ) : (
-          <div className="monitor-scroll monitor-feed-scroll">
-            <RuntimeEventFeed events={runtimeEvents} mode={viewMode} />
+          <div className="monitor-feed-scroll-wrap">
+            <div
+              className="monitor-scroll monitor-feed-scroll"
+              ref={feedScroll.containerRef}
+              onScroll={feedScroll.onScroll}
+              role="log"
+              aria-label="Runtime events feed"
+              aria-live="polite"
+            >
+              <RuntimeEventFeed events={runtimeEvents} mode={viewMode} />
+            </div>
+            {feedScroll.showReturnToLatest ? (
+              <button
+                type="button"
+                className="monitor-feed-latest"
+                onClick={feedScroll.scrollToLatest}
+                aria-label="Return to latest events"
+              >
+                <span aria-hidden="true">↑</span> Return to latest
+              </button>
+            ) : null}
           </div>
         )}
       </article>
