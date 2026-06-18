@@ -1,7 +1,14 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { MonitorSnapshot } from '../../types.js';
 import { RuntimeEventFeed } from './RuntimeEventFeed.js';
+import { SeverityFilterMenu } from './SeverityFilterMenu.js';
 import type { MonitorEventViewMode } from './runtimeEventFormat.js';
+import {
+  DEFAULT_SEVERITY_FILTER,
+  filterRuntimeEventsBySeverity,
+  severityFilterLabel,
+  type MonitorSeverityFilter,
+} from './runtimeEventSeverityFilter.js';
 import { useEventFeedScroll } from './useEventFeedScroll.js';
 
 export interface MonitorPanelProps {
@@ -25,13 +32,26 @@ export interface MonitorPanelProps {
  */
 export function MonitorPanel({ monitor, currentMonitorSocket, elapsed }: MonitorPanelProps) {
   const [viewMode, setViewMode] = useState<MonitorEventViewMode>('pretty');
+  const [severityFilter, setSeverityFilter] = useState<MonitorSeverityFilter>(DEFAULT_SEVERITY_FILTER);
   const runtimeEvents = monitor?.runtimeEvents ?? [];
-  const eventCount = runtimeEvents.length;
+  // Apply the severity filter before anything else reads the event list so the
+  // feed, the scroll controller, the count, and the empty state all see the
+  // same filtered result for both Pretty and Raw modes. Memoized on the
+  // snapshot array + filter so the scroll hook's identity-based dependency
+  // only re-runs when one of those actually changes.
+  const filteredEvents = useMemo(
+    () => filterRuntimeEventsBySeverity(runtimeEvents, severityFilter),
+    [runtimeEvents, severityFilter],
+  );
+  const totalCount = runtimeEvents.length;
+  const filteredCount = filteredEvents.length;
+  const isFiltered = severityFilter !== 'all';
+  const hasNoEventsAtAll = totalCount === 0;
   // Newest events live at the top of the feed. While the user is at/near the
   // top the feed re-pins to the latest events; once they scroll back into older
   // events the visible position is preserved across snapshot refreshes, with a
   // Return to latest affordance to jump back to the top.
-  const feedScroll = useEventFeedScroll(runtimeEvents);
+  const feedScroll = useEventFeedScroll(filteredEvents);
 
   return (
     <section className="fantasy-panel p-6" aria-label="Live session monitor">
@@ -51,35 +71,51 @@ export function MonitorPanel({ monitor, currentMonitorSocket, elapsed }: Monitor
       </div>
 
       <div className="monitor-feed-toolbar">
-        <div className="monitor-view-toggle" role="group" aria-label="Event view mode">
-          <button
-            type="button"
-            aria-pressed={viewMode === 'pretty'}
-            className={viewMode === 'pretty' ? 'is-active' : undefined}
-            onClick={() => setViewMode('pretty')}
-          >
-            Pretty
-          </button>
-          <button
-            type="button"
-            aria-pressed={viewMode === 'raw'}
-            className={viewMode === 'raw' ? 'is-active' : undefined}
-            onClick={() => setViewMode('raw')}
-          >
-            Raw
-          </button>
+        <div className="monitor-feed-toolbar-group">
+          <div className="monitor-view-toggle" role="group" aria-label="Event view mode">
+            <button
+              type="button"
+              aria-pressed={viewMode === 'pretty'}
+              className={viewMode === 'pretty' ? 'is-active' : undefined}
+              onClick={() => setViewMode('pretty')}
+            >
+              Pretty
+            </button>
+            <button
+              type="button"
+              aria-pressed={viewMode === 'raw'}
+              className={viewMode === 'raw' ? 'is-active' : undefined}
+              onClick={() => setViewMode('raw')}
+            >
+              Raw
+            </button>
+          </div>
+          <SeverityFilterMenu value={severityFilter} onChange={setSeverityFilter} />
         </div>
         <p className="monitor-feed-count" aria-live="polite">
-          {eventCount === 0 ? 'No events' : `${eventCount} event${eventCount === 1 ? '' : 's'}`}
+          {filteredCount === 0
+            ? 'No events'
+            : isFiltered
+              ? `${filteredCount} of ${totalCount} event${totalCount === 1 ? '' : 's'}`
+              : `${filteredCount} event${filteredCount === 1 ? '' : 's'}`}
         </p>
       </div>
 
       <article className="monitor-card monitor-feed-card">
-        {eventCount === 0 ? (
+        {hasNoEventsAtAll ? (
           <div className="monitor-feed-empty" data-testid="monitor-feed-empty">
             <p className="monitor-feed-empty-title">No runtime events yet</p>
             <p className="monitor-feed-empty-hint">
               Events emitted by materia and runtime lifecycle transitions will appear here as the cast progresses.
+            </p>
+          </div>
+        ) : filteredCount === 0 ? (
+          <div className="monitor-feed-empty" data-testid="monitor-feed-empty">
+            <p className="monitor-feed-empty-title">No events match the selected level</p>
+            <p className="monitor-feed-empty-hint">
+              No runtime events are recorded at the{' '}
+              <strong>{severityFilterLabel(severityFilter)}</strong> level. Choose a different severity or
+              <strong> All levels</strong> to see more events.
             </p>
           </div>
         ) : (
@@ -92,7 +128,7 @@ export function MonitorPanel({ monitor, currentMonitorSocket, elapsed }: Monitor
               aria-label="Runtime events feed"
               aria-live="polite"
             >
-              <RuntimeEventFeed events={runtimeEvents} mode={viewMode} />
+              <RuntimeEventFeed events={filteredEvents} mode={viewMode} />
             </div>
             {feedScroll.showReturnToLatest ? (
               <button

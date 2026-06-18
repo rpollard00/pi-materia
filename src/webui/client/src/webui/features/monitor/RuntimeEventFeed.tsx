@@ -32,7 +32,7 @@ import {
  *   object verbatim (including forward-compatible unknown fields) for debugging.
  */
 export interface RuntimeEventFeedProps {
-  events: RuntimeEvent[];
+  events: readonly RuntimeEvent[];
   mode: MonitorEventViewMode;
 }
 
