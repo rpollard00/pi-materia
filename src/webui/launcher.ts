@@ -555,6 +555,34 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Candidate payload fields for the compact-row body, in priority order.
+ *
+ * The compact pretty row already shows the event `type` as its bold title, so
+ * the body must surface a distinct, more informative value. We prefer an
+ * explicit human `message`, then event-specific concise labels (the `stage`
+ * diagnostics such as `advancement_lifecycle` carry), then the originating
+ * `request` lifecycle events like `cast_start` record.
+ */
+const EVENT_BODY_FIELDS: readonly string[] = ["message", "stage", "request"];
+
+/**
+ * Derive a compact-row body message distinct from the event type/title.
+ *
+ * Returns the first non-empty candidate among {@link EVENT_BODY_FIELDS} that
+ * does not merely repeat the event `type` (which the row already shows as its
+ * title). Returns `undefined` when no distinct human-readable text exists so
+ * the compact row omits the body; the full payload remains available in the
+ * expanded/raw JSON views.
+ */
+function deriveEventMessage(type: string, data: Record<string, unknown>): string | undefined {
+  for (const field of EVENT_BODY_FIELDS) {
+    const candidate = nonEmptyString(data[field]);
+    if (candidate && candidate !== type) return candidate;
+  }
+  return undefined;
+}
+
 function readPiToolRegistry(pi?: ExtensionAPI): MateriaToolRegistrySnapshot {
   if (!pi) {
     return { ok: false, available: false, tools: [], warnings: ["Pi tool registry is unavailable for this WebUI session."] };
@@ -684,13 +712,17 @@ function normalizeArtifactEvents(
       const itemKey = typeof data.itemKey === "string" ? data.itemKey : undefined;
       const itemLabel = typeof data.itemLabel === "string" ? data.itemLabel : undefined;
       const visit = typeof data.visit === "number" ? data.visit : 0;
-      const message = typeof data.request === "string" ? data.request : event.type;
+      // The compact row already shows `type` as its title, so the body must
+      // surface a distinct value (explicit message, diagnostic stage, or
+      // originating request). Omit it entirely when none is available rather
+      // than echoing the type; the full payload stays in expanded/raw JSON.
+      const message = deriveEventMessage(event.type, data);
 
       return {
         // Materia-emitted canonical fields
         type: event.type,
         severity: "info",
-        message,
+        ...(message !== undefined ? { message } : {}),
         payload: event.data as Record<string, unknown> | undefined,
         source: undefined,
         // Runtime-enriched fields (emulated from legacy event data)
@@ -757,6 +789,7 @@ export const webUiLauncherTestInternals = {
   createActiveLoadoutSetter,
   currentSessionSnapshot,
   normalizeArtifactEvents,
+  deriveEventMessage,
   readPiToolRegistry,
   loadMateriaWebUiProfileConfig: loadProfileConfig,
   webUiSessionKey,

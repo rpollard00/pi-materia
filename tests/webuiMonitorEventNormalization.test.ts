@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { MateriaMonitorEventEntry } from "../src/webui/server/session.js";
 import { webUiLauncherTestInternals } from "../src/webui/launcher.js";
 
-const { normalizeArtifactEvents } = webUiLauncherTestInternals;
+const { normalizeArtifactEvents, deriveEventMessage } = webUiLauncherTestInternals;
 
 function entry(type: string, data: Record<string, unknown>, ts = 1_700_000_000_000): MateriaMonitorEventEntry {
   return { ts, type, data };
@@ -105,5 +105,80 @@ describe("normalizeArtifactEvents provenance", () => {
 
     expect(normalized.map((event) => event.type)).toEqual(["socket_complete", "socket_start", "cast_start"]);
     expect(normalized.map((event) => event.sequence)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("normalizeArtifactEvents compact message", () => {
+  test("advancement_lifecycle surfaces the stage instead of echoing the type as the body", () => {
+    // The compact pretty row already shows `type` as its bold title, so the
+    // body must not repeat it. Diagnostics carry a concise `stage` label.
+    const normalized = normalizeArtifactEvents(
+      [entry("advancement_lifecycle", {
+        diagnostic: true,
+        stage: "dispatch",
+        castId: "cast-1",
+        currentSocketId: "Socket-4",
+        materiaName: "Build",
+      })],
+      "cast-1",
+    );
+
+    expect(normalized[0].message).toBe("dispatch");
+    expect(normalized[0].message).not.toBe("advancement_lifecycle");
+  });
+
+  test("omits the message entirely when no distinct body text exists", () => {
+    // socket_start has no message/stage/request; the body should be absent so
+    // the row does not show `socket_start` as both title and body. The full
+    // payload remains available in the expanded/raw JSON view.
+    const normalized = normalizeArtifactEvents(
+      [entry("socket_start", { socket: "Socket-1", materia: "Build" })],
+    );
+
+    expect(normalized[0].message).toBeUndefined();
+  });
+
+  test("prefers an explicit data.message over stage and request", () => {
+    const normalized = normalizeArtifactEvents(
+      [entry("tool_scope_warning", {
+        warning: true,
+        message: "Tool 'gh' is unavailable",
+        stage: "ignored-stage",
+        request: "ignored-request",
+        socket: "Socket-2",
+        materia: "Build",
+      })],
+    );
+
+    expect(normalized[0].message).toBe("Tool 'gh' is unavailable");
+  });
+
+  test("still surfaces the originating request for lifecycle events like cast_start", () => {
+    const normalized = normalizeArtifactEvents(
+      [entry("cast_start", { request: "do the thing", nativeSession: true })],
+    );
+
+    expect(normalized[0].message).toBe("do the thing");
+  });
+
+  test("a data.message equal to the type is skipped so the body never duplicates the title", () => {
+    const normalized = normalizeArtifactEvents(
+      [entry("weird_event", { message: "weird_event", request: "do the thing" })],
+    );
+
+    expect(normalized[0].message).toBe("do the thing");
+  });
+});
+
+describe("deriveEventMessage", () => {
+  test("returns the first distinct candidate among message, stage, request", () => {
+    expect(deriveEventMessage("cast_start", { request: "hi" })).toBe("hi");
+    expect(deriveEventMessage("advancement_lifecycle", { stage: "agent_end" })).toBe("agent_end");
+    expect(deriveEventMessage("tool_scope_warning", { message: "warn" })).toBe("warn");
+  });
+
+  test("returns undefined when every candidate is missing or equal to the type", () => {
+    expect(deriveEventMessage("socket_start", { socket: "Socket-1" })).toBeUndefined();
+    expect(deriveEventMessage("echo", { message: "echo", stage: "echo" })).toBeUndefined();
   });
 });
