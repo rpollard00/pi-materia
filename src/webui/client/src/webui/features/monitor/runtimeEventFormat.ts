@@ -66,6 +66,17 @@ export function itemLabel(event: RuntimeEvent): string {
 }
 
 /**
+ * Return the cast id when present and useful for the collapsed ticker.
+ *
+ * `castId` is shared across all events in a single-cast feed, so the caller
+ * is free to omit it; this helper only surfaces the value so the provenance
+ * line never throws on a partial event.
+ */
+export function castLabel(event: RuntimeEvent): string {
+  return typeof event.castId === 'string' && event.castId.length > 0 ? event.castId : '';
+}
+
+/**
  * Stable React key for an event.
  *
  * Prefers the enriched `eventId`; falls back to `sequence` then the render

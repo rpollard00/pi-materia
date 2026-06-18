@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RuntimeEvent } from '../../types.js';
 import {
   DEFAULT_SEVERITY,
+  castLabel,
   eventKey,
   formatEventTime,
   itemLabel,
@@ -41,6 +42,13 @@ describe('runtimeEventFormat', () => {
     expect(itemLabel({ itemLabel: 'feat: retry', itemKey: 'WI-3' } as RuntimeEvent)).toBe('feat: retry');
     expect(itemLabel({ itemKey: 'WI-3' } as RuntimeEvent)).toBe('WI-3');
     expect(itemLabel({} as RuntimeEvent)).toBe('');
+  });
+
+  it('surfaces the cast id when present and an empty fallback otherwise', () => {
+    expect(castLabel({ castId: 'cast-1' } as RuntimeEvent)).toBe('cast-1');
+    expect(castLabel({ castId: '' } as RuntimeEvent)).toBe('');
+    expect(castLabel({} as RuntimeEvent)).toBe('');
+    expect(castLabel({ castId: 42 } as unknown as RuntimeEvent)).toBe('');
   });
 
   it('keys events by eventId, then sequence, then render index', () => {

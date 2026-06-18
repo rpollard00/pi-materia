@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from '../../types.js';
 import {
+  castLabel,
   eventKey,
   formatEventTime,
   itemLabel,
@@ -16,14 +17,14 @@ import {
  * mode. The shell ({@link MonitorPanel}) owns the view mode and empty state;
  * this component focuses on rendering a non-empty event list.
  *
- * - **Pretty**: compact ticker rows emphasizing canonical fields (severity,
- *   type, message, time, sequence, provenance). Severity styling is applied
- *   via {@link severityClassName}.
+ * - **Pretty**: compact ticker rows emphasizing the canonical enriched fields
+ *   (docs/runtime-eventing.md §3.3). Each collapsed row surfaces severity,
+ *   type, message, time, sequence, and provenance (socket, materia, work item,
+ *   cast) with clear severity accents and graceful fallbacks for missing
+ *   optional fields. Expand/collapse and scroll behavior are layered on by
+ *   later work items.
  * - **Raw**: each event pretty-printed as JSON, preserving the full recorded
  *   object verbatim (including forward-compatible unknown fields) for debugging.
- *
- * The feed is a baseline shell rendering; later work items expand the pretty
- * ticker, add expand/collapse, and refine raw/scroll behavior.
  */
 export interface RuntimeEventFeedProps {
   events: RuntimeEvent[];
@@ -51,6 +52,7 @@ export function RuntimeEventFeed({ events, mode }: RuntimeEventFeedProps) {
           event.socketId,
           materiaLabel(event),
           itemLabel(event),
+          castLabel(event),
         ].filter((value): value is string => typeof value === 'string' && value.length > 0);
         return (
           <li key={eventKey(event, index)} className={`monitor-event ${severityClassName(event.severity)}`}>
