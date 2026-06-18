@@ -340,6 +340,11 @@ describe("proactive compaction skip on model switch", () => {
     // No compaction should have occurred because the model switch reset the context.
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
 
+    // Assert no proactive_compaction_start event was emitted.
+    const eventsContent = await readCastFile(harness, "events.jsonl");
+    const events = eventsContent.trim().split("\n").map((line: string) => JSON.parse(line));
+    expect(events.filter((event: any) => event.type === "proactive_compaction_start")).toHaveLength(0);
+
     // Both trigger turns should have occurred.
     const triggerTurns = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
     expect(triggerTurns).toHaveLength(2);
@@ -363,6 +368,11 @@ describe("proactive compaction skip on model switch", () => {
 
     // Proactive compaction should have fired because usage is above the threshold.
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
+
+    // Assert proactive_compaction_start event was emitted.
+    const eventsContent = await readCastFile(harness, "events.jsonl");
+    const events = eventsContent.trim().split("\n").map((line: string) => JSON.parse(line));
+    expect(events.some((event: any) => event.type === "proactive_compaction_start")).toBe(true);
 
     // Trigger turn should still occur.
     const triggerTurns = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
