@@ -44,8 +44,12 @@ export function deriveRetryBudget(state: MateriaCastState): MateriaRetryBudget |
  * allowance's effective max. Exposed so renderers/tests can isolate this branch.
  */
 export function deriveSameSocketRecoveryBudget(state: MateriaCastState): MateriaRetryBudget | undefined {
+  // No recovery allowances means no active same-socket recovery. Short-circuit before
+  // computing the recovery key, which assumes a fully populated cast state (pipeline,
+  // visits) and is invoked here from the always-on status widget renderer.
+  if (!state.recoveryAllowances) return undefined;
   const key = recoveryIdentityKey(state);
-  const allowance = state.recoveryAllowances?.[key];
+  const allowance = state.recoveryAllowances[key];
   if (!isValidRecoveryAllowance(allowance)) return undefined;
   // recoveryAttempts[key] counts completed retries; the in-flight attempt is 1-based,
   // so the first attempt for a step renders as 1/max.

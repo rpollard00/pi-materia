@@ -216,7 +216,7 @@ function isToolTimeoutFailure(message: string): boolean {
 function currentSocketVisit(state: MateriaCastState, fallback = 0): number {
   const socketId = currentSocketId(state);
   if (!socketId) return fallback;
-  return state.visits[socketId] ?? fallback;
+  return state.visits?.[socketId] ?? fallback;
 }
 
 function currentRefinementTurn(state: MateriaCastState, socketId: string): number {

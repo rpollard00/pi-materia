@@ -10,6 +10,7 @@ import {
   loopSockets,
   resolvedPipelineSockets,
 } from "../loadout/loadoutAccessors.js";
+import { deriveRetryBudget, type MateriaRetryBudget } from "./retryBudget.js";
 import type {
   MateriaCastState,
   MateriaRunState,
@@ -270,6 +271,7 @@ export type MateriaStatusSegmentKind =
   | "cast"
   | "loadout"
   | "attempt"
+  | "retry"
   | "elapsed"
   | "usage"
   | "task"
@@ -296,8 +298,9 @@ const FIRST_LINE_SEGMENTS: Array<{
   priority: number;
 }> = [
   { kind: "cast", label: "✦", width: 10, priority: 80 },
-  { kind: "loadout", label: "⌘", width: 30, priority: 100 },
+  { kind: "loadout", label: "⌘", width: 29, priority: 100 },
   { kind: "attempt", label: "↻", width: 7, priority: 70 },
+  { kind: "retry", label: "⟳", width: 7, priority: 68 },
   { kind: "elapsed", label: "◷", width: 8, priority: 75 },
   { kind: "usage", label: "Σ", width: 12, priority: 60 },
 ];
@@ -322,6 +325,7 @@ function createMateriaRunStatusModel(
     cast: state.endedAt === undefined ? "active" : "done",
     loadout: formatLoadoutMateria(state.loadoutName, displayMateriaName(state)),
     attempt: String(state.attempt ?? "-"),
+    retry: "-",
     elapsed: formatElapsed(elapsedUntil - state.startedAt),
     usage: `${formatCompactNumber(usage.input + usage.cacheRead)}/${formatCompactNumber(usage.output + usage.cacheWrite)}`,
     task: displayMateriaStatusValue(state, state.currentTask ?? "-"),
@@ -337,6 +341,7 @@ function createConfiguredLoadoutStatusModel(
     cast: "ready",
     loadout: formatLoadoutMateria(loadoutName || "-", "no active cast"),
     attempt: "-",
+    retry: "-",
     elapsed: "-",
     usage: "-",
     task: "active loadout",
@@ -373,6 +378,7 @@ function createMateriaCastStatusModel(
       ),
     ),
     attempt: loop?.turn ?? String(state.runState.attempt ?? "-"),
+    retry: formatRetryBudget(deriveRetryBudget(state)),
     elapsed: formatElapsed(
       (state.runState.endedAt ?? now) - state.runState.startedAt,
     ),
@@ -636,6 +642,10 @@ function displayMateriaStatusValue(
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function formatRetryBudget(budget: MateriaRetryBudget | undefined): string {
+  return budget ? `${budget.current}/${budget.max}` : "-";
 }
 
 function formatElapsed(milliseconds: number): string {
