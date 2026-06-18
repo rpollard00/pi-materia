@@ -8,6 +8,7 @@ import {
   itemLabel,
   materiaLabel,
   normalizeSeverity,
+  rawEventJson,
   severityClassName,
   type MonitorEventViewMode,
 } from './runtimeEventFormat.js';
@@ -58,7 +59,7 @@ export function RuntimeEventFeed({ events, mode }: RuntimeEventFeedProps) {
       <ul className="monitor-feed-list" aria-label="Runtime events (raw JSON)">
         {events.map((event, index) => (
           <li key={eventKey(event, index)} className="monitor-feed-raw">
-            <pre className="monitor-feed-raw-pre">{JSON.stringify(event, null, 2)}</pre>
+            <pre className="monitor-feed-raw-pre">{rawEventJson(event)}</pre>
           </li>
         ))}
       </ul>

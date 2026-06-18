@@ -9,6 +9,7 @@ import {
   itemLabel,
   materiaLabel,
   normalizeSeverity,
+  rawEventJson,
   runtimeMetadataFields,
   severityClassName,
   sourceMetadataFields,
@@ -59,6 +60,25 @@ describe('runtimeEventFormat', () => {
     expect(eventKey({ eventId: 'evt-1' } as RuntimeEvent, 0)).toBe('evt-1');
     expect(eventKey({ sequence: 7 } as RuntimeEvent, 1)).toBe('seq-7');
     expect(eventKey({} as RuntimeEvent, 3)).toBe('idx-3');
+  });
+
+  it('serializes the complete event as indented JSON for raw debugging', () => {
+    const event = {
+      eventId: 'evt-1',
+      sequence: 7,
+      payload: { prUrl: 'https://github.com/org/repo/pull/42' },
+      source: { materia: 'Blackbelt-GH-PR', socketId: 'Socket-7' },
+      customMarker: 'keep-me',
+      customNested: { ok: true, count: 3 },
+    } as RuntimeEvent;
+
+    const json = rawEventJson(event);
+
+    // Pretty-printed with a stable 2-space indent (multi-line output).
+    expect(json).toContain('\n  ');
+    // Round-trips back to the exact object — canonical, nested, and unknown
+    // fields are all preserved verbatim, nothing filtered or reordered.
+    expect(JSON.parse(json)).toEqual(event);
   });
 });
 

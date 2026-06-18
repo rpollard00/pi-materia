@@ -55,6 +55,20 @@ export function formatEventTime(occurredAt: unknown): string {
   return date.toLocaleTimeString();
 }
 
+/**
+ * Pretty-print a runtime event as indented JSON for the raw debugging view.
+ *
+ * Raw mode (docs/runtime-eventing.md §5) must show each event exactly as
+ * received in the snapshot. This serializes the complete recorded object —
+ * canonical enriched fields, nested `payload`/`source` values, and any
+ * forward-compatible unknown fields — without filtering or reordering, using a
+ * stable 2-space indent for readable debugging. The caller renders events
+ * newest-first; this helper only formats one event and never mutates its input.
+ */
+export function rawEventJson(event: RuntimeEvent): string {
+  return JSON.stringify(event, null, 2);
+}
+
 /** Prefer the materia display label, falling back to the materia id. */
 export function materiaLabel(event: RuntimeEvent): string {
   return event.materiaLabel || event.materia || '';

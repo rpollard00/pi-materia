@@ -106,6 +106,42 @@ describe('MonitorPanel runtime event shell', () => {
     expect(within(rawFeed).getByText(/"customMarker":\s*"keep-me"/)).toBeTruthy();
   });
 
+  it('toggles to Raw then back to Pretty, restoring pretty rendering', () => {
+    renderPanel({ monitor: { runtimeEvents: [makeEvent({ type: 'result.pr_created' })] } as MonitorSnapshot });
+
+    // Fresh render defaults to Pretty.
+    expect(screen.getByLabelText('Runtime events')).toBeTruthy();
+    expect(screen.queryByLabelText('Runtime events (raw JSON)')).toBeNull();
+
+    // Switch to Raw — pretty chrome is replaced by the raw JSON feed.
+    fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
+    expect(screen.getByRole('button', { name: 'Raw' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByLabelText('Runtime events (raw JSON)')).toBeTruthy();
+    expect(screen.queryByLabelText('Runtime events')).toBeNull();
+
+    // Switch back to Pretty — pretty chrome returns and the raw feed is gone.
+    fireEvent.click(screen.getByRole('button', { name: 'Pretty' }));
+    expect(screen.getByRole('button', { name: 'Pretty' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByLabelText('Runtime events')).toBeTruthy();
+    expect(screen.queryByLabelText('Runtime events (raw JSON)')).toBeNull();
+  });
+
+  it('renders raw JSON newest-first across multiple events', () => {
+    const events = [
+      makeEvent({ eventId: 'evt-3', sequence: 30, type: 'result.pr_created', message: 'newest' }),
+      makeEvent({ eventId: 'evt-2', sequence: 20, type: 'status.progress', message: 'middle' }),
+      makeEvent({ eventId: 'evt-1', sequence: 10, type: 'lifecycle.cast.started', message: 'oldest' }),
+    ];
+    renderPanel({ monitor: { runtimeEvents: events } as MonitorSnapshot });
+    fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
+
+    const rawFeed = screen.getByLabelText('Runtime events (raw JSON)');
+    const seqs = Array.from(rawFeed.querySelectorAll('.monitor-feed-raw-pre')).map((pre) =>
+      JSON.parse(pre.textContent ?? '{}').sequence,
+    );
+    expect(seqs).toEqual([30, 20, 10]);
+  });
+
   it('reports the event count and pluralizes correctly', () => {
     const { rerender } = render(
       <MonitorPanel

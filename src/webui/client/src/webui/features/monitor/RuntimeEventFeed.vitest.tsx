@@ -117,14 +117,73 @@ describe('RuntimeEventFeed (pretty ticker)', () => {
     expect(meta).toContain('WI-3'); // item key fallback
   });
 
-  it('renders the full event as pretty-printed JSON in raw mode', () => {
-    const event = makeEvent({ type: 'status.progress', message: 'Running unit tests', customMarker: 'keep-me' });
-    const { container, getByText } = render(<RuntimeEventFeed events={[event]} mode="raw" />);
+});
+
+describe('RuntimeEventFeed (raw JSON mode)', () => {
+  it('renders every event as its own pretty-printed JSON block, newest-first', () => {
+    const events = [
+      makeEvent({ eventId: 'evt-3', sequence: 30, type: 'result.pr_created', message: 'newest' }),
+      makeEvent({ eventId: 'evt-2', sequence: 20, type: 'status.progress', message: 'middle' }),
+      makeEvent({ eventId: 'evt-1', sequence: 10, type: 'lifecycle.cast.started', message: 'oldest' }),
+    ];
+
+    const { container } = render(<RuntimeEventFeed events={events} mode="raw" />);
+
+    const pres = container.querySelectorAll('.monitor-feed-raw-pre');
+    expect(pres.length).toBe(3);
+
+    // Newest-first snapshot order is preserved verbatim (the feed never re-sorts).
+    const seqs = Array.from(pres).map((pre) => JSON.parse(pre.textContent ?? '{}').sequence);
+    expect(seqs).toEqual([30, 20, 10]);
+  });
+
+  it('preserves the complete event object exactly as received, including unknown and nested fields', () => {
+    const event = makeEvent({
+      payload: { prUrl: 'https://github.com/org/repo/pull/42', branchName: 'agent/42-add-retry' },
+      source: { materia: 'Blackbelt-GH-PR', socketId: 'Socket-7' },
+      customMarker: 'keep-me',
+      customNested: { ok: true, count: 3 },
+    });
+
+    const { container } = render(<RuntimeEventFeed events={[event]} mode="raw" />);
 
     const pre = container.querySelector('.monitor-feed-raw-pre');
     expect(pre).toBeTruthy();
-    expect(getByText(/"type":\s*"status\.progress"/)).toBeTruthy();
-    expect(getByText(/"customMarker":\s*"keep-me"/)).toBeTruthy();
+    // The rendered JSON round-trips back to the exact event object received.
+    expect(JSON.parse(pre?.textContent ?? 'null')).toEqual(event);
+  });
+
+  it('uses raw-specific rendering and omits the pretty ticker chrome', () => {
+    const { container } = render(<RuntimeEventFeed events={[makeEvent()]} mode="raw" />);
+
+    // Raw mode renders the JSON pre block...
+    expect(container.querySelector('.monitor-feed-raw-pre')).toBeTruthy();
+    // ...and does not render the pretty disclosure chrome.
+    expect(container.querySelector('.monitor-event')).toBeNull();
+    expect(container.querySelector('.monitor-event-toggle')).toBeNull();
+    expect(container.querySelector('.monitor-event-badge')).toBeNull();
+  });
+
+  it('does not reorder events when switching between pretty and raw mode', () => {
+    const events = [
+      makeEvent({ eventId: 'evt-3', sequence: 30, type: 'result.pr_created' }),
+      makeEvent({ eventId: 'evt-2', sequence: 20, type: 'status.progress' }),
+      makeEvent({ eventId: 'evt-1', sequence: 10, type: 'lifecycle.cast.started' }),
+    ];
+
+    const { container, rerender } = render(<RuntimeEventFeed events={events} mode="pretty" />);
+    const prettySeqs = Array.from(container.querySelectorAll('.monitor-event-seq')).map((node) =>
+      Number(node.textContent?.replace('#', '')),
+    );
+
+    rerender(<RuntimeEventFeed events={events} mode="raw" />);
+    const rawSeqs = Array.from(container.querySelectorAll('.monitor-feed-raw-pre')).map((pre) =>
+      JSON.parse(pre.textContent ?? '{}').sequence,
+    );
+
+    // Both modes render the identical snapshot order; switching never reorders.
+    expect(rawSeqs).toEqual(prettySeqs);
+    expect(rawSeqs).toEqual([30, 20, 10]);
   });
 });
 
