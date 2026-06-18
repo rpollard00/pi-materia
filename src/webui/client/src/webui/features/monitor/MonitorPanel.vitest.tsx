@@ -316,3 +316,258 @@ describe('MonitorPanel event feed scroll behavior', () => {
     expect(screen.getByRole('button', { name: 'Return to latest events' })).toBeTruthy();
   });
 });
+
+/**
+ * Severity filter dropdown coverage.
+ *
+ * The runtime event monitor exposes a compact, palette-style severity filter
+ * built on the shared CompactOptionMenu. These tests prove the dropdown is
+ * populated from the event contract, defaults to showing everything, narrows
+ * the feed for each canonical level (including normalizing missing/invalid
+ * severities to info), applies to both Pretty and Raw views, and shares the
+ * accessible menu behavior with the materia palette sort dropdown.
+ */
+describe('MonitorPanel severity filter', () => {
+  /** Pretty-mode feed messages currently rendered, in order. */
+  function prettyMessages(): string[] {
+    const feed = screen.queryByLabelText('Runtime events');
+    if (!feed) return [];
+    return Array.from(feed.querySelectorAll('.monitor-event-message')).map(
+      (node) => node.textContent ?? '',
+    );
+  }
+
+  /** Raw-mode event sequences currently rendered, in order. */
+  function rawSequences(): number[] {
+    return Array.from(document.querySelectorAll('.monitor-feed-raw-pre')).map((pre) =>
+      JSON.parse(pre.textContent ?? '{}').sequence,
+    );
+  }
+
+  function openSeverityMenu(): HTMLElement {
+    fireEvent.click(screen.getByTestId('monitor-severity-trigger'));
+    return screen.getByTestId('monitor-severity-menu');
+  }
+
+  function selectSeverity(value: string): void {
+    fireEvent.click(screen.getByTestId('monitor-severity-trigger'));
+    fireEvent.click(screen.getByTestId(`monitor-severity-option-${value}`));
+  }
+
+  const mixedSeverityEvents: RuntimeEvent[] = [
+    makeEvent({ eventId: 'sev-1', sequence: 1, severity: 'debug', type: 'status.progress', message: 'Debug line' }),
+    makeEvent({ eventId: 'sev-2', sequence: 2, severity: 'info', type: 'status.progress', message: 'Info line' }),
+    makeEvent({ eventId: 'sev-3', sequence: 3, severity: 'warning', type: 'status.progress', message: 'Warning line' }),
+    makeEvent({ eventId: 'sev-4', sequence: 4, severity: 'error', type: 'status.progress', message: 'Error line' }),
+    makeEvent({ eventId: 'sev-5', sequence: 5, severity: 'critical', type: 'status.progress', message: 'Critical line' }),
+  ];
+
+  it('renders the severity filter trigger in the feed toolbar', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    const trigger = screen.getByTestId('monitor-severity-trigger');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    // The trigger lives next to the Pretty/Raw toggle in the toolbar group.
+    expect(trigger.closest('.monitor-feed-toolbar')).toBeTruthy();
+  });
+
+  it('lists All levels plus every contract severity in order, using shared menu semantics', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    const menu = openSeverityMenu();
+    expect(menu.getAttribute('role')).toBe('menu');
+    expect(screen.getByTestId('monitor-severity-trigger').getAttribute('aria-expanded')).toBe('true');
+
+    const options = Array.from(menu.querySelectorAll('[role="menuitemradio"]'));
+    expect(options.map((option) => option.getAttribute('data-testid'))).toEqual([
+      'monitor-severity-option-all',
+      'monitor-severity-option-debug',
+      'monitor-severity-option-info',
+      'monitor-severity-option-warning',
+      'monitor-severity-option-error',
+      'monitor-severity-option-critical',
+    ]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      'All levels',
+      'Debug',
+      'Info',
+      'Warning',
+      'Error',
+      'Critical',
+    ]);
+  });
+
+  it('defaults to All levels with that option marked active', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    const menu = openSeverityMenu();
+    const checked = Array.from(menu.querySelectorAll('[role="menuitemradio"]')).filter(
+      (option) => option.getAttribute('aria-checked') === 'true',
+    );
+    expect(checked).toHaveLength(1);
+    expect(checked[0]?.getAttribute('data-testid')).toBe('monitor-severity-option-all');
+    expect(screen.getByTestId('monitor-severity-option-all').className).toContain('monitor-severity-option-active');
+
+    // Default view shows every event with an unfiltered count.
+    expect(prettyMessages()).toEqual(['Debug line', 'Info line', 'Warning line', 'Error line', 'Critical line']);
+    expect(screen.getByText('5 events')).toBeTruthy();
+  });
+
+  it('filters the Pretty feed to each canonical level and updates the count', () => {
+    const cases: Array<[string, string]> = [
+      ['debug', 'Debug line'],
+      ['info', 'Info line'],
+      ['warning', 'Warning line'],
+      ['error', 'Error line'],
+      ['critical', 'Critical line'],
+    ];
+
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    for (const [level, expectedMessage] of cases) {
+      selectSeverity(level);
+      expect(prettyMessages()).toEqual([expectedMessage]);
+      // Filtered count is reported as "N of total".
+      expect(screen.getByText(`1 of 5 events`)).toBeTruthy();
+    }
+  });
+
+  it('restores the full feed when All levels is selected again', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    selectSeverity('error');
+    expect(prettyMessages()).toEqual(['Error line']);
+
+    selectSeverity('all');
+    expect(prettyMessages()).toEqual(['Debug line', 'Info line', 'Warning line', 'Error line', 'Critical line']);
+    expect(screen.getByText('5 events')).toBeTruthy();
+  });
+
+  it('treats a missing severity as info so it matches the info filter only', () => {
+    const events: RuntimeEvent[] = [
+      makeEvent({ eventId: 'mis-1', sequence: 1, severity: undefined, message: 'No severity here' }),
+      makeEvent({ eventId: 'mis-2', sequence: 2, severity: 'debug', message: 'Real debug' }),
+    ];
+    renderPanel({ monitor: { runtimeEvents: events } as MonitorSnapshot });
+
+    // Default shows both, with the missing-severity event normalized to info.
+    const feed = screen.getByLabelText('Runtime events');
+    expect(within(feed).getByText('No severity here')).toBeTruthy();
+
+    selectSeverity('info');
+    expect(prettyMessages()).toEqual(['No severity here']);
+
+    selectSeverity('debug');
+    expect(prettyMessages()).toEqual(['Real debug']);
+
+    // The missing-severity event never leaks into a non-info level.
+    selectSeverity('warning');
+    expect(prettyMessages()).toEqual([]);
+  });
+
+  it('treats an unrecognized severity as info', () => {
+    const events: RuntimeEvent[] = [
+      makeEvent({
+        eventId: 'bad-1',
+        sequence: 1,
+        severity: 'bogus' as RuntimeEvent['severity'],
+        message: 'Bad severity',
+      }),
+    ];
+    renderPanel({ monitor: { runtimeEvents: events } as MonitorSnapshot });
+
+    selectSeverity('info');
+    expect(prettyMessages()).toEqual(['Bad severity']);
+  });
+
+  it('applies the active filter to both Pretty and Raw views', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    // Narrow to warning in Pretty mode.
+    selectSeverity('warning');
+    expect(prettyMessages()).toEqual(['Warning line']);
+
+    // Switching to Raw keeps the same filtered set — the filter is mode-agnostic.
+    fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
+    expect(rawSequences()).toEqual([3]);
+
+    // Switching back to Pretty still shows only the warning event.
+    fireEvent.click(screen.getByRole('button', { name: 'Pretty' }));
+    expect(prettyMessages()).toEqual(['Warning line']);
+  });
+
+  it('reflects the filter in Raw mode even when switched before filtering', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
+    expect(rawSequences()).toEqual([1, 2, 3, 4, 5]);
+
+    selectSeverity('critical');
+    expect(rawSequences()).toEqual([5]);
+  });
+
+  it('shows a clear no-match empty state and zero count when no events match the level', () => {
+    const events: RuntimeEvent[] = [
+      makeEvent({ eventId: 'p-1', sequence: 1, severity: 'debug', message: 'only debug' }),
+      makeEvent({ eventId: 'p-2', sequence: 2, severity: 'info', message: 'only info' }),
+    ];
+    renderPanel({ monitor: { runtimeEvents: events } as MonitorSnapshot });
+
+    selectSeverity('critical');
+
+    // The no-match empty state (distinct from the no-events-at-all state) names
+    // the selected level and points back to All levels.
+    const empty = screen.getByTestId('monitor-feed-empty');
+    expect(empty.textContent).toMatch(/No events match the selected level/i);
+    expect(empty.textContent).toMatch(/Critical/);
+    expect(empty.textContent).toMatch(/All levels/);
+    // The toolbar count reports no events are visible.
+    expect(screen.getByText('No events')).toBeTruthy();
+    // No feed is rendered when nothing matches.
+    expect(screen.queryByLabelText('Runtime events')).toBeNull();
+    expect(screen.queryByLabelText('Runtime events (raw JSON)')).toBeNull();
+  });
+
+  it('keeps the no-events-at-all copy distinct from the no-match copy', () => {
+    // Zero recorded events still shows the "no runtime events yet" state even
+    // after a filter is chosen, because there is nothing to filter.
+    renderPanel({ monitor: { runtimeEvents: [] } as MonitorSnapshot });
+
+    selectSeverity('error');
+    expect(screen.getByTestId('monitor-feed-empty').textContent).toMatch(/No runtime events yet/i);
+  });
+
+  it('shares the compact menu behavior: option select closes the menu', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    openSeverityMenu();
+    expect(screen.getByTestId('monitor-severity-menu')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('monitor-severity-option-error'));
+    expect(screen.queryByTestId('monitor-severity-menu')).toBeNull();
+
+    // Reopening reflects the newly active value.
+    const menu = openSeverityMenu();
+    const checked = Array.from(menu.querySelectorAll('[role="menuitemradio"]')).filter(
+      (option) => option.getAttribute('aria-checked') === 'true',
+    );
+    expect(checked[0]?.getAttribute('data-testid')).toBe('monitor-severity-option-error');
+  });
+
+  it('shares the compact menu behavior: outside click and Escape close, Escape restores focus', () => {
+    renderPanel({ monitor: { runtimeEvents: mixedSeverityEvents } as MonitorSnapshot });
+
+    // Outside pointer down closes the open menu.
+    openSeverityMenu();
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByTestId('monitor-severity-menu')).toBeNull();
+
+    // Escape closes the menu and returns focus to the trigger.
+    const trigger = screen.getByTestId('monitor-severity-trigger');
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('monitor-severity-menu')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('monitor-severity-menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+});
