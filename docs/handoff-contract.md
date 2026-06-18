@@ -44,6 +44,42 @@ Example narration output:
 
 A following socket can then surface that prose as PR notes, branch-name input, or any other derived context without the narration materia needing to know about its consumers.
 
+### End-to-end example
+
+A representative two-socket loadout (`examples/text-consumption-loadout.json`) shows the full flow: a Narrate materia emits structured renderable text, the TUI renders it as clean prose, and a PR-Notes materia consumes the raw payload without hard-coding the producer.
+
+```json
+{
+  "loadouts": {
+    "Text Consumption Example": {
+      "entry": "Socket-1",
+      "sockets": {
+        "Socket-1": {
+          "materia": "Narrate",
+          "parse": "json",
+          "assign": { "narration": "$.text" },
+          "edges": [{ "when": "always", "to": "Socket-2" }]
+        },
+        "Socket-2": { "materia": "PR-Notes", "parse": "json" }
+      }
+    }
+  },
+  "materia": {
+    "Narrate": { "type": "agent", "tools": "readOnly", "prompt": "Produce a clean prose summary. Return JSON with a top-level `text` field only." },
+    "PR-Notes": { "type": "agent", "tools": "readOnly", "prompt": "Turn upstream narration into PR notes.\n\nUpstream narration:\n{{state.narration}}" }
+  }
+}
+```
+
+What happens at runtime:
+
+1. Narrate emits `{ "text": "..." }`. The TUI renderer shows the prose to the user as clean text (a `materia_text` presentation message), hiding transport metadata.
+2. The raw JSON stays authoritative: it is mirrored at `state.data.envelope.text` (latest only) and accumulated in `state.data.texts` (append-only, source-attributed).
+3. The emitting socket's `assign: { "narration": "$.text" }` captures the payload into a named state slot, and the generic "Prior renderable text payloads" context section surfaces accumulated payloads to following sockets.
+4. PR-Notes consumes the prior text via `{{state.narration}}` (or the prior-text section). Narration is not hard-wired: it only flows to PR-Notes because this graph routes it.
+
+Rendering is a one-way presentation layer; it never replaces or mutates the underlying JSON handoff. Regression coverage in `tests/textConsumptionFlowNative.test.ts` exercises the flow end to end and verifies the rendered presentation does not alter the authoritative envelope.
+
 ## Generated work items
 
 Generated units of work use `workItems`, not `tasks`. Each agent-produced work item contains only `title:string` and `context:string`:
