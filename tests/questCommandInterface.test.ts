@@ -54,6 +54,13 @@ function latestMateriaMessage(harness: FakePiHarness): string {
   return String(messages.at(-1)?.content ?? "");
 }
 
+function questCardSends(harness: FakePiHarness, eventType: string): Array<{ message: any; options?: any }> {
+  return harness.sentMessages.filter(({ message }) => {
+    const details = (message as any)?.details;
+    return (message as any)?.customType === "pi-materia" && details?.prefix === "quest" && details?.eventType === eventType;
+  });
+}
+
 async function flushDeferredDispatch(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -793,5 +800,66 @@ describe("/materia quest command interface", () => {
     expect(board.quests[0].status).toBe("succeeded");
     const errors = harness.notifications.filter((notification) => notification.type === "error").map((notification) => notification.message);
     expect(errors.some((message) => message.includes("No pending pi-materia quests"))).toBe(true);
+  });
+
+  test("runner control cards stay user-visible but are marked orchestration-only and never trigger a turn", async () => {
+    // run + auto-advance: the continuous runner drains two utility quests back to back.
+    const runHarness = await makeHarness();
+    await runHarness.runCommand("materia", "quest add First immediate quest");
+    const seededRunBoard = await readBoard(runHarness);
+    seededRunBoard.quests.push({ ...seededRunBoard.quests[0], id: "quest-second", title: "Second immediate quest", prompt: "Second immediate quest" });
+    await writeFile(path.join(runHarness.cwd, ".pi", "pi-materia", "quest-board.json"), JSON.stringify(seededRunBoard, null, 2));
+    await runHarness.runCommand("materia", "quest run");
+
+    const runCards = questCardSends(runHarness, "run");
+    expect(runCards).toHaveLength(1);
+    expect(runCards[0].message.display).toBe(true);
+    expect(runCards[0].message.content).toContain("Started continuous quest runner and launched");
+    expect(runCards[0].message.details.orchestration).toBe(true);
+    expect(runCards[0].message.details.prefix).toBe("quest");
+    expect(runCards[0].options?.triggerTurn).not.toBe(true);
+
+    const autoCards = questCardSends(runHarness, "auto-advance");
+    expect(autoCards.length).toBeGreaterThanOrEqual(1);
+    expect(autoCards[0].message.display).toBe(true);
+    expect(autoCards[0].message.details.orchestration).toBe(true);
+    expect(autoCards[0].options?.triggerTurn).not.toBe(true);
+
+    // runonce: one-shot launch emits the runonce runner card.
+    const onceHarness = await makeHarness();
+    await onceHarness.runCommand("materia", "quest add Build once");
+    await onceHarness.runCommand("materia", "quest runonce");
+    const runonceCards = questCardSends(onceHarness, "runonce");
+    expect(runonceCards).toHaveLength(1);
+    expect(runonceCards[0].message.display).toBe(true);
+    expect(runonceCards[0].message.content).toContain("Launched quest");
+    expect(runonceCards[0].message.details.orchestration).toBe(true);
+    expect(runonceCards[0].options?.triggerTurn).not.toBe(true);
+
+    // stop: disabling the runner emits the stop runner card.
+    const stopHarness = await makeHarness();
+    await stopHarness.runCommand("materia", "quest run");
+    await stopHarness.runCommand("materia", "quest stop");
+    const stopCards = questCardSends(stopHarness, "stop");
+    expect(stopCards).toHaveLength(1);
+    expect(stopCards[0].message.display).toBe(true);
+    expect(stopCards[0].message.content).toContain("Quest runner stopped");
+    expect(stopCards[0].message.details.orchestration).toBe(true);
+    expect(stopCards[0].options?.triggerTurn).not.toBe(true);
+  });
+
+  test("explicit quest command cards stay user-visible without the orchestration-only flag", async () => {
+    const harness = await makeHarness();
+    await harness.runCommand("materia", "quest add Build something");
+    const addCards = questCardSends(harness, "add");
+    expect(addCards).toHaveLength(1);
+    expect(addCards[0].message.display).toBe(true);
+    expect(addCards[0].message.details.orchestration).toBeUndefined();
+    expect(addCards[0].message.details.prefix).toBe("quest");
+
+    await harness.runCommand("materia", "quest status");
+    const statusCards = questCardSends(harness, "status");
+    expect(statusCards.at(-1)?.message.display).toBe(true);
+    expect(statusCards.at(-1)?.message.details.orchestration).toBeUndefined();
   });
 });
