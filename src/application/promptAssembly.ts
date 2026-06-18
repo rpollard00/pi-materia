@@ -5,6 +5,10 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
   EVENT_EMISSION_CONTEXT_TEXT,
 } from "../handoff/handoffContract.js";
+import {
+  HANDOFF_TEXTS_STATE_KEY,
+  type PriorTextPayload,
+} from "../domain/handoff.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
@@ -235,6 +239,7 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
     multiTurnRefining ? multiTurnRefinementGuidance() : undefined,
     syntheticHandoffContractContext(state),
     syntheticEventEmissionContext(state),
+    syntheticPriorTextContext(state),
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
@@ -283,6 +288,54 @@ export function syntheticEventEmissionContext(state: MateriaCastState): string |
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
 
   return EVENT_EMISSION_CONTEXT_TEXT;
+}
+
+/**
+ * Renders accumulated upstream renderable text payloads as clean context for
+ * following materia. Unlike `state.data.envelope` (latest socket only), the
+ * append-only `state.data[HANDOFF_TEXTS_STATE_KEY]` collection survives
+ * intervening sockets, so a following socket can consume prior prose (e.g.
+ * Narrate narration reused as PR notes, or a description feeding branch-name
+ * generation) without hard-coding the source materia.
+ *
+ * Exposure is purely additive context: it surfaces the authoritative prose
+ * and never mutates the underlying JSON handoff. Returns undefined when no
+ * prior text payloads have been accumulated so sockets without upstream text
+ * see no extra prompt section.
+ */
+export function syntheticPriorTextContext(state: MateriaCastState): string | undefined {
+  const entries = collectPriorTextEntries(state.data[HANDOFF_TEXTS_STATE_KEY]);
+  if (entries.length === 0) return undefined;
+  const formatted = entries
+    .map((entry, index) => formatPriorTextEntry(entry, index))
+    .join("\n\n");
+  return [
+    "Prior renderable text payloads:",
+    "The prose below was emitted by upstream materia as their authoritative renderable text payload. Consume whichever payload(s) are relevant to this socket as input context; the list is upstream context, not routing instructions, and should not be echoed verbatim. Each entry is also available in raw JSON under state.data.texts, and the most recent payload is mirrored at state.data.envelope.text.",
+    formatted,
+  ].join("\n\n");
+}
+
+function collectPriorTextEntries(value: unknown): PriorTextPayload[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is PriorTextPayload => {
+    if (!isPlainObjectEntry(entry)) return false;
+    return typeof entry.text === "string" && entry.text.trim().length > 0;
+  });
+}
+
+function formatPriorTextEntry(entry: PriorTextPayload, index: number): string {
+  const source = formatPriorTextSource(entry);
+  const heading = source ? `Prior text #${index + 1} (${source})` : `Prior text #${index + 1}`;
+  return `${heading}\n${entry.text.trim()}`;
+}
+
+function formatPriorTextSource(entry: PriorTextPayload): string {
+  return [entry.socket, entry.materia].filter((part): part is string => typeof part === "string" && part.length > 0).join(" ");
+}
+
+function isPlainObjectEntry(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function findActiveMateriaPromptIndex(messages: unknown[]): number {

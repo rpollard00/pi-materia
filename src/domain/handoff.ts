@@ -11,6 +11,17 @@ export const HANDOFF_CONTEXT_FIELD = "context" as const;
  */
 export const HANDOFF_TEXT_FIELD = "text" as const;
 
+/**
+ * Runtime accumulation key under `state.data` that preserves every upstream
+ * renderable text payload for following materia. Unlike `state.data.envelope`
+ * (which holds only the latest socket's handoff), this append-only array
+ * survives intervening sockets so a following materia can consume prior text
+ * payloads (e.g. Narrate narration reused as PR notes) without hard-coding the
+ * source materia. It is a runtime accumulation key, NOT an agent-authored
+ * handoff field, and must not be added to {@link HANDOFF_ENVELOPE_FIELDS}.
+ */
+export const HANDOFF_TEXTS_STATE_KEY = "texts" as const;
+
 /** Top-level fields authored by agent JSON handoffs. */
 export const HANDOFF_ENVELOPE_FIELDS = [
   HANDOFF_WORK_ITEMS_FIELD,
@@ -44,6 +55,21 @@ export interface HandoffEnvelope {
   satisfied: boolean;
   context: string;
   /** Canonical renderable text payload (authoritative prose output). */
+  text: string;
+}
+
+/**
+ * A single accumulated renderable text payload entry stored under
+ * `state.data[HANDOFF_TEXTS_STATE_KEY]`. Each entry records the source
+ * socket/materia alongside the authoritative prose so following materia can
+ * consume prior text payloads generically, without hard-coding the producer.
+ */
+export interface PriorTextPayload {
+  /** Resolved socket id that emitted the payload. */
+  socket: string;
+  /** Display label for the emitting materia, when known. */
+  materia?: string;
+  /** Authoritative renderable prose emitted by the upstream materia. */
   text: string;
 }
 

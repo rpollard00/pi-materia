@@ -30,7 +30,8 @@ Do not ask agents to emit a broad envelope. Obsolete broad-envelope fields such 
 
 - The raw JSON `text` value is authoritative. TUI rendering is a one-way presentation layer; rendered text must never replace or mutate the underlying JSON handoff or cast state.
 - Emit `text` only when this socket's main product is renderable prose that downstream materia may consume. Do not duplicate narration into `context`.
-- Downstream materia consume the payload through normal assignment and state references (for example `assign: { "narration": "$.text" }` on the emitting socket, or `{{state.envelope.text}}` / a dedicated state path in a following socket's prompt). Consumption is opt-in per graph; narration is not hard-wired to any consumer.
+- Every emitted `text` payload is accumulated in order under `state.data.texts` (an append-only array of `{ socket, materia?, text }` entries) so following materia can consume prior prose even after intervening sockets have run. Unlike `state.data.envelope.text`, which mirrors only the most recently emitted payload, the `texts` collection preserves all upstream payloads with their source attribution.
+- Prompt assembly surfaces accumulated payloads to following materia as a "Prior renderable text payloads" context section, and each entry is also reachable in raw JSON at `state.data.texts`; the most recent payload is mirrored at `state.data.envelope.text`. Downstream materia consume the payload through normal state references in their prompt (for example `{{state.texts}}`, a dedicated assignment, or the rendered prior-text context section). Consumption is opt-in per graph; narration is not hard-wired to any consumer.
 - Use `context` for accumulating cross-socket handoff notes. Use `text` for the materia's discrete prose payload.
 
 Example narration output:
