@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import type { MonitorSnapshot } from '../../types.js';
-import { formatTime } from '../../utils/display.js';
+import { RuntimeEventFeed } from './RuntimeEventFeed.js';
+import type { MonitorEventViewMode } from './runtimeEventFormat.js';
+import { useEventFeedScroll } from './useEventFeedScroll.js';
 
 export interface MonitorPanelProps {
   monitor: MonitorSnapshot | undefined;
@@ -7,14 +10,38 @@ export interface MonitorPanelProps {
   elapsed: string;
 }
 
+/**
+ * Runtime event monitor shell.
+ *
+ * Replaces the legacy emitted-outputs / artifact-summary / recent-artifacts
+ * cards with a single runtime event feed (docs/runtime-eventing.md §5).
+ *
+ * The shell keeps the useful session header stats (socket, state, elapsed),
+ * renders a Pretty/Raw toggle (Pretty selected by default), and shows an empty
+ * state when no `runtimeEvents` are present. Existing snapshot fields remain
+ * available on the prop for compatibility but the old cards are no longer
+ * rendered. Feed rendering, expansion, raw mode, and scroll behavior are
+ * layered on by the feed component and subsequent work items.
+ */
 export function MonitorPanel({ monitor, currentMonitorSocket, elapsed }: MonitorPanelProps) {
+  const [viewMode, setViewMode] = useState<MonitorEventViewMode>('pretty');
+  const runtimeEvents = monitor?.runtimeEvents ?? [];
+  const eventCount = runtimeEvents.length;
+  // Newest events live at the top of the feed. While the user is at/near the
+  // top the feed re-pins to the latest events; once they scroll back into older
+  // events the visible position is preserved across snapshot refreshes, with a
+  // Return to latest affordance to jump back to the top.
+  const feedScroll = useEventFeedScroll(runtimeEvents);
+
   return (
     <section className="fantasy-panel p-6" aria-label="Live session monitor">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-sm uppercase tracking-[0.35em] text-cyan-200">session monitor</p>
-          <h2 className="mt-2 text-3xl font-black text-white">Live cast telemetry</h2>
-          <p className="mt-2 max-w-4xl text-sm text-slate-400">Scoped to the Pi session that launched <code>/materia ui</code>. Native materia session entries and run artifacts are streamed from this session only.</p>
+          <h2 className="mt-2 text-3xl font-black text-white">Runtime event monitor</h2>
+          <p className="mt-2 max-w-4xl text-sm text-slate-400">
+            Live runtime event stream for the Pi session that launched <code>/materia ui</code>. Events emitted by materia and runtime lifecycle transitions stream in as the cast progresses, newest first.
+          </p>
         </div>
         <div className="monitor-stat-grid">
           <div><span>socket</span><b>{currentMonitorSocket ?? 'idle'}</b></div>
@@ -22,36 +49,64 @@ export function MonitorPanel({ monitor, currentMonitorSocket, elapsed }: Monitor
           <div><span>elapsed</span><b>{elapsed}</b></div>
         </div>
       </div>
-      <div className="grid gap-4 xl:grid-cols-3">
-        <article className="monitor-card xl:col-span-1">
-          <h3>Emitted outputs</h3>
-          <div className="monitor-scroll">
-            {(monitor?.emittedOutputs ?? []).length === 0 ? <p className="text-sm text-slate-500">Waiting for session output…</p> : monitor?.emittedOutputs?.slice(-10).reverse().map((output) => (
-              <div key={output.id} className="monitor-output">
-                <div><b>{output.type}</b><span>{formatTime(output.timestamp)}</span></div>
-                <p>{output.text}</p>
-              </div>
-            ))}
-          </div>
-        </article>
-        <article className="monitor-card xl:col-span-1">
-          <h3>Artifact summary</h3>
-          <pre className="monitor-summary">{monitor?.artifactSummary?.summary ?? 'No pi-materia artifacts found for this launched session yet.'}</pre>
-          {monitor?.artifactSummary?.runDir && <p className="mt-3 break-all text-xs text-cyan-100/70">{monitor.artifactSummary.runDir}</p>}
-        </article>
-        <article className="monitor-card xl:col-span-1">
-          <h3>Recent artifacts</h3>
-          <div className="monitor-scroll">
-            {(monitor?.artifactSummary?.outputs ?? []).length === 0 ? <p className="text-sm text-slate-500">Artifacts will appear as sockets emit context and output files.</p> : monitor?.artifactSummary?.outputs?.slice(-8).reverse().map((entry, index) => (
-              <details key={`${entry.artifact}-${index}`} className="monitor-artifact">
-                <summary>{entry.socket ?? entry.phase ?? 'cast'} · {entry.kind ?? 'artifact'}</summary>
-                <p className="break-all text-xs text-cyan-100/70">{entry.artifact}</p>
-                {entry.content && <pre>{entry.content}</pre>}
-              </details>
-            ))}
-          </div>
-        </article>
+
+      <div className="monitor-feed-toolbar">
+        <div className="monitor-view-toggle" role="group" aria-label="Event view mode">
+          <button
+            type="button"
+            aria-pressed={viewMode === 'pretty'}
+            className={viewMode === 'pretty' ? 'is-active' : undefined}
+            onClick={() => setViewMode('pretty')}
+          >
+            Pretty
+          </button>
+          <button
+            type="button"
+            aria-pressed={viewMode === 'raw'}
+            className={viewMode === 'raw' ? 'is-active' : undefined}
+            onClick={() => setViewMode('raw')}
+          >
+            Raw
+          </button>
+        </div>
+        <p className="monitor-feed-count" aria-live="polite">
+          {eventCount === 0 ? 'No events' : `${eventCount} event${eventCount === 1 ? '' : 's'}`}
+        </p>
       </div>
+
+      <article className="monitor-card monitor-feed-card">
+        {eventCount === 0 ? (
+          <div className="monitor-feed-empty" data-testid="monitor-feed-empty">
+            <p className="monitor-feed-empty-title">No runtime events yet</p>
+            <p className="monitor-feed-empty-hint">
+              Events emitted by materia and runtime lifecycle transitions will appear here as the cast progresses.
+            </p>
+          </div>
+        ) : (
+          <div className="monitor-feed-scroll-wrap">
+            <div
+              className="monitor-scroll monitor-feed-scroll"
+              ref={feedScroll.containerRef}
+              onScroll={feedScroll.onScroll}
+              role="log"
+              aria-label="Runtime events feed"
+              aria-live="polite"
+            >
+              <RuntimeEventFeed events={runtimeEvents} mode={viewMode} />
+            </div>
+            {feedScroll.showReturnToLatest ? (
+              <button
+                type="button"
+                className="monitor-feed-latest"
+                onClick={feedScroll.scrollToLatest}
+                aria-label="Return to latest events"
+              >
+                <span aria-hidden="true">↑</span> Return to latest
+              </button>
+            ) : null}
+          </div>
+        )}
+      </article>
     </section>
   );
 }

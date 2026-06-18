@@ -32,6 +32,13 @@ export interface MateriaWebUiSessionSnapshot {
   uiStartedAt: number;
   now: number;
   emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }>;
+  /**
+   * Bounded, newest-first enriched runtime events from
+   * `{runDir}/events/events.jsonl` (docs/runtime-eventing.md §5). Separate
+   * from the legacy operational `artifactSummary.events` stream. Each event
+   * is preserved verbatim for raw debugging.
+   */
+  runtimeEvents?: import('../../domain/eventing.js').EnrichedEvent[];
   /** Canonical runtime active loadout id/name for WebUI/TUI synchronization. */
   activeLoadoutId?: string;
   activeLoadout?: string;

@@ -16,6 +16,8 @@ import type { MateriaWebUiSessionSnapshot } from './session.js';
 // from this entry point while route/service implementations live in focused
 // backend modules next to it.
 export { buildMateriaModelCatalog } from './modelCatalog.js';
+export { DEFAULT_RUNTIME_EVENT_LIMIT, RUNTIME_EVENTS_RELATIVE_PATH, readRuntimeEvents } from './runtimeEventReader.js';
+export type { RuntimeEventReaderOptions } from './runtimeEventReader.js';
 export type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 export type { MateriaModelCatalogModel, MateriaModelCatalogResponse, MateriaModelCatalogSource } from './modelCatalog.js';
 export type { MateriaGetRoleGenerationPreferenceCallback, MateriaRoleGenerationPreference, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';

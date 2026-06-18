@@ -174,6 +174,39 @@ export interface ToolRegistrySnapshot {
   warnings?: string[];
 }
 
+/** Severity levels for runtime events (docs/runtime-eventing.md §2.3). */
+export type RuntimeEventSeverity = 'debug' | 'info' | 'warning' | 'error' | 'critical';
+
+/**
+ * Enriched runtime event rendered in the monitor feed.
+ *
+ * Mirrors the canonical enriched event shape from docs/runtime-eventing.md §3.3.
+ * Fields are optional to tolerate partial/malformed recorded events, and an
+ * index signature preserves forward-compatible unknown fields for the raw
+ * debugging view. Newest events arrive first in `MonitorSnapshot.runtimeEvents`.
+ */
+export interface RuntimeEvent {
+  // Runtime-enriched canonical fields
+  eventId?: string;
+  occurredAt?: string;
+  sequence?: number;
+  castId?: string;
+  socketId?: string;
+  materia?: string;
+  materiaLabel?: string;
+  visit?: number;
+  itemKey?: string;
+  itemLabel?: string;
+  // Materia-emitted canonical fields
+  type?: string;
+  severity?: RuntimeEventSeverity;
+  message?: string;
+  payload?: Record<string, unknown>;
+  source?: { materia?: string; socketId?: string };
+  // Forward-compatible unknown fields preserved verbatim for raw debugging.
+  [key: string]: unknown;
+}
+
 export type QuestStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'blocked';
 
 export interface QuestRunnerState {
@@ -330,6 +363,13 @@ export interface MonitorSnapshot {
   uiStartedAt?: number;
   now?: number;
   emittedOutputs?: Array<{ id: string; type: string; text: string; timestamp?: number; socket?: string }>;
+  /**
+   * Bounded, newest-first enriched runtime events from the runtime eventing
+   * `events/events.jsonl` artifact (docs/runtime-eventing.md §5). Each event is
+   * preserved verbatim so the raw debugging view can show the exact recorded
+   * object, including forward-compatible unknown fields.
+   */
+  runtimeEvents?: RuntimeEvent[];
   activeLoadoutId?: string;
   activeLoadout?: string;
   toolRegistry?: ToolRegistrySnapshot;

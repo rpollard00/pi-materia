@@ -5,7 +5,7 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaDeleteQuestInput, type MateriaDeleteQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, readRuntimeEvents, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaDeleteQuestInput, type MateriaDeleteQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { clearStaleDefaultLoadoutPreference, getRoleGenerationPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
@@ -469,7 +469,14 @@ function listen(server: RunningWebUiServer["server"], host: string, port: number
 
 async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string, uiStartedAt: number, configuredPath?: string, pi?: ExtensionAPI): Promise<MateriaWebUiSessionSnapshot> {
   const state = loadActiveCastState(ctx);
-  const artifactSummary = state?.runDir ? await readArtifactSummary(state.runDir) : undefined;
+  const runDir = state?.runDir;
+  // Runtime events live at {runDir}/events/events.jsonl and are read newest-first
+  // alongside (but separate from) the legacy artifact summary so neither stream
+  // can break the other.
+  const [artifactSummary, runtimeEvents] = await Promise.all([
+    runDir ? readArtifactSummary(runDir) : Promise.resolve(undefined),
+    runDir ? readRuntimeEvents(runDir) : Promise.resolve([]),
+  ]);
   const activeLoadoutSnapshot = await readActiveLoadoutSnapshot(ctx.cwd, configuredPath);
   const activeCastLoadoutIdentity = state ? resolveActiveCastLoadoutIdentity(state) : undefined;
   return {
@@ -486,6 +493,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
     ...activeLoadoutSnapshot,
     toolRegistry: readPiToolRegistry(pi),
     artifactSummary,
+    runtimeEvents,
     activeCast: state ? {
       castId: state.castId,
       active: state.active,

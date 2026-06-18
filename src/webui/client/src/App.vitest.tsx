@@ -1882,7 +1882,7 @@ describe('Materia loadout grid editor', () => {
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Live cast telemetry' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Runtime event monitor' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Loadout Grid' })).toBeNull();
   });
 
@@ -1893,7 +1893,7 @@ describe('Materia loadout grid editor', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { name: 'Loadout Grid' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Live cast telemetry' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Runtime event monitor' })).toBeNull();
   });
 
   it('removes the standalone Pipeline Graph tab and falls back to Loadout for old graph URLs', async () => {
@@ -3468,12 +3468,13 @@ describe('Materia loadout grid editor', () => {
       activeCast: { castId: 'cast-1', active: true, phase: 'Build', currentSocketId: 'Socket-2', currentMateria: 'Build', socketState: 'awaiting_agent_response', awaitingResponse: true, runDir: '/tmp/run', artifactRoot: '/tmp', startedAt: 1_000, updatedAt: 61_000 },
       emittedOutputs: [{ id: 'entry-1', type: 'pi-materia', text: 'Build · materia_prompt', timestamp: 61_000, socket: 'Build' }],
       artifactSummary: { runDir: '/tmp/run', summary: 'Completed sockets: planner', outputs: [{ socket: 'Build', kind: 'socket_output', artifact: 'sockets/Build/1.md', content: 'built' }] },
+      runtimeEvents: [{ eventId: 'evt-1', type: 'status.progress', severity: 'info', message: 'Running unit tests', sequence: 3, occurredAt: '2026-06-17T22:00:00.000Z', socketId: 'Socket-2', materia: 'Build', materiaLabel: 'Build', visit: 1 }],
     }) }));
 
     await waitFor(() => expect(screen.getByTestId('socket-Socket-2').className).toContain('materia-socket-active'));
     await openTab('Monitoring');
     expect(await screen.findByText('awaiting_agent_response')).toBeTruthy();
-    expect(screen.getByText('Completed sockets: planner')).toBeTruthy();
+    expect(screen.getByText('status.progress')).toBeTruthy();
   });
 
   it('applies external active-loadout monitor events without overwriting staged loadout edits', async () => {

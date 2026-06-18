@@ -2019,56 +2019,345 @@
   padding-right: 0.25rem;
 }
 
-.monitor-output,
-.monitor-artifact {
-  border-radius: 0.85rem;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  background: rgb(15 23 42 / 0.58);
-  padding: 0.75rem;
-  color: rgb(203 213 225);
-}
+/* Runtime event feed (replaces legacy emitted-outputs/artifact cards) */
 
-.monitor-output + .monitor-output,
-.monitor-artifact + .monitor-artifact {
-  margin-top: 0.6rem;
-}
-
-.monitor-output div {
+.monitor-feed-toolbar {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  color: rgb(224 242 254);
-  font-size: 0.72rem;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
-.monitor-output span {
+.monitor-view-toggle {
+  display: inline-flex;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(103 232 249 / 0.22);
+  background: rgb(2 6 23 / 0.62);
+  padding: 0.25rem;
+}
+
+.monitor-view-toggle button {
+  border-radius: 0.65rem;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0.4rem 0.9rem;
+  color: rgb(148 163 184);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.monitor-view-toggle button:hover {
+  color: rgb(224 242 254);
+}
+
+.monitor-view-toggle button.is-active,
+.monitor-view-toggle button[aria-pressed='true'] {
+  background: rgb(103 232 249 / 0.16);
+  border-color: rgb(103 232 249 / 0.4);
+  color: rgb(224 242 254);
+}
+
+.monitor-feed-count {
+  color: rgb(148 163 184);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.monitor-feed-card {
+  margin-top: 0.9rem;
+}
+
+.monitor-feed-scroll {
+  margin-top: 0;
+  max-height: 30rem;
+}
+
+/* Wraps the scroll container so the Return-to-latest chip can float over it. */
+.monitor-feed-scroll-wrap {
+  position: relative;
+  margin-top: 0.9rem;
+}
+
+.monitor-feed-latest {
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(103 232 249 / 0.4);
+  background: rgb(2 6 23 / 0.92);
+  padding: 0.35rem 0.75rem;
+  color: rgb(224 242 254);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  z-index: 2;
+}
+
+.monitor-feed-latest:hover {
+  background: rgb(8 47 73 / 0.95);
+  border-color: rgb(103 232 249 / 0.7);
+  transform: translateX(-50%) translateY(-1px);
+}
+
+.monitor-feed-latest:focus-visible {
+  outline: 2px solid rgb(103 232 249 / 0.7);
+  outline-offset: 2px;
+}
+
+.monitor-feed-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.25rem;
   color: rgb(148 163 184);
 }
 
-.monitor-output p,
-.monitor-summary,
-.monitor-artifact pre {
-  margin-top: 0.45rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 0.78rem;
-  line-height: 1.45;
+.monitor-feed-empty-title {
+  color: rgb(203 213 225);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
-.monitor-summary,
-.monitor-artifact pre {
-  max-height: 14rem;
-  overflow: auto;
-  border-radius: 0.75rem;
-  background: rgb(0 0 0 / 0.24);
-  padding: 0.75rem;
+.monitor-feed-empty-hint {
+  max-width: 42rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.monitor-feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.monitor-event {
+  border-radius: 0.85rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-left-width: 3px;
+  background: rgb(15 23 42 / 0.58);
+  padding: 0.6rem 0.75rem;
+  color: rgb(203 213 225);
+}
+
+.monitor-event-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 0.4rem;
+}
+
+.monitor-event-toggle:focus-visible {
+  outline: 2px solid rgb(103 232 249 / 0.7);
+  outline-offset: 2px;
+}
+
+.monitor-event-expanded {
+  background: rgb(15 23 42 / 0.82);
+}
+
+.monitor-event-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.monitor-event-type {
+  color: rgb(224 242 254);
+  font-size: 0.82rem;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.monitor-event-seq {
+  color: rgb(148 163 184);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.monitor-event-time {
+  margin-left: auto;
+  color: rgb(148 163 184);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.monitor-event-message {
+  margin-top: 0.35rem;
+  color: rgb(226 232 240);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.monitor-event-meta {
+  margin-top: 0.3rem;
+  color: rgb(148 163 184);
+  font-size: 0.68rem;
+  word-break: break-word;
+}
+
+.monitor-event-caret {
+  color: rgb(148 163 184);
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.monitor-event-details {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.monitor-event-detail-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) 1fr;
+  gap: 0.2rem 0.75rem;
+}
+
+.monitor-event-detail-row {
+  display: contents;
+}
+
+.monitor-event-detail-list dt {
+  color: rgb(148 163 184);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.monitor-event-detail-list dd {
+  margin: 0;
+  color: rgb(226 232 240);
+  font-size: 0.74rem;
+  word-break: break-word;
+}
+
+.monitor-event-detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.monitor-event-detail-label {
+  margin: 0;
+  color: rgb(148 163 184);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.monitor-event-detail-pre {
+  margin: 0;
+  border-radius: 0.6rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(0 0 0 / 0.28);
+  padding: 0.5rem 0.65rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.72rem;
+  line-height: 1.45;
   color: rgb(226 232 240);
 }
 
-.monitor-artifact summary {
-  cursor: pointer;
-  color: rgb(224 242 254);
-  font-weight: 700;
+.monitor-event-detail-empty {
+  margin: 0;
+  color: rgb(148 163 184);
+  font-size: 0.74rem;
+}
+
+.monitor-feed-raw {
+  border-radius: 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background: rgb(0 0 0 / 0.24);
+  padding: 0.6rem 0.75rem;
+}
+
+.monitor-feed-raw + .monitor-feed-raw {
+  margin-top: 0;
+}
+
+.monitor-feed-raw-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgb(226 232 240);
+}
+
+/* Severity accents for pretty event rows and badges. */
+.monitor-event-severity-debug {
+  border-left-color: rgb(100 116 139);
+}
+.monitor-event-severity-debug .monitor-event-badge {
+  background: rgb(100 116 139 / 0.22);
+  color: rgb(203 213 225);
+}
+
+.monitor-event-severity-info {
+  border-left-color: rgb(34 211 238);
+}
+.monitor-event-severity-info .monitor-event-badge {
+  background: rgb(34 211 238 / 0.18);
+  color: rgb(165 243 252);
+}
+
+.monitor-event-severity-warning {
+  border-left-color: rgb(245 158 11);
+}
+.monitor-event-severity-warning .monitor-event-badge {
+  background: rgb(245 158 11 / 0.2);
+  color: rgb(253 224 71);
+}
+
+.monitor-event-severity-error {
+  border-left-color: rgb(244 63 94);
+}
+.monitor-event-severity-error .monitor-event-badge {
+  background: rgb(244 63 94 / 0.2);
+  color: rgb(254 205 211);
+}
+
+.monitor-event-severity-critical {
+  border-left-color: rgb(217 70 239);
+}
+.monitor-event-severity-critical .monitor-event-badge {
+  background: rgb(217 70 239 / 0.24);
+  color: rgb(240 171 252);
 }
 
 .materia-toast-viewport {
