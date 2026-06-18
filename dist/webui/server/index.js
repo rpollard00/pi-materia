@@ -6,6 +6,7 @@ import { handleMateriaWebUiRequest } from './routes.js';
 // from this entry point while route/service implementations live in focused
 // backend modules next to it.
 export { buildMateriaModelCatalog } from './modelCatalog.js';
+export { DEFAULT_RUNTIME_EVENT_LIMIT, RUNTIME_EVENTS_RELATIVE_PATH, readRuntimeEvents } from './runtimeEventReader.js';
 const defaultStaticDir = resolve(fileURLToPath(new URL('../../../dist/webui/client', import.meta.url)));
 export function createMateriaWebUiServer(options = {}) {
     const host = options.host ?? '127.0.0.1';
