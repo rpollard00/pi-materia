@@ -360,50 +360,9 @@ describe("Commit-Sigil generator utility", () => {
     expect((materia as Record<string, unknown>).command).toBeUndefined();
   });
 
-  test("resolving Release loadout materializes Socket-9 Commit-Sigil with workItems assignment", async () => {
+  test("Socket-5 Auto-Eval lastFeedback/context assignment is preserved in Full-Auto", async () => {
     const config = await loadDefaultConfig();
-    config.activeLoadout = "Release";
-    const { resolvePipeline } = await import("../src/runtime/pipeline.js");
-    const { effectiveResolvedSocketConfig } = await import("../src/runtime/resolvedMateria.js");
-    const pipeline = resolvePipeline(config);
-
-    const s9 = pipeline.sockets["Socket-9"];
-    expect(s9).toBeDefined();
-    expect(s9.materiaId).toBe("Commit-Sigil");
-    expect(s9.materia.type).toBe("utility");
-    expect(s9.materia.generator).toBe(true);
-    // parse:json and assign:workItems are derived at runtime by effectiveResolvedSocketConfig
-    const effective = effectiveResolvedSocketConfig(s9);
-    expect(effective.parse).toBe("json");
-    expect(effective.assign).toEqual({ lastFeedback: "$.context", workItems: "$.workItems" });
-    // Satisfied/not_satisfied routing edges are preserved
-    expect(s9.socket.edges).toEqual([
-      { when: "satisfied", to: "Socket-8" },
-      { when: "not_satisfied", to: "Socket-3", maxTraversals: 3 },
-    ]);
-  });
-
-  test("Release loop still consumes from Socket-8 Auto-Architect, not Socket-9 Commit-Sigil", async () => {
-    const config = await loadDefaultConfig();
-    config.activeLoadout = "Release";
-    const { resolvePipeline } = await import("../src/runtime/pipeline.js");
-    const pipeline = resolvePipeline(config);
-
-    // LoopSelection consumes workItems from Auto-Architect (Socket-8), not Commit-Sigil
-    const loop = pipeline.loops?.loopSelection;
-    expect(loop).toBeDefined();
-    expect(loop?.consumes?.from).toBe("Socket-8");
-    expect(loop?.consumes?.output).toBe("workItems");
-    expect(loop?.exit).toEqual({ from: "Socket-6", when: "satisfied", to: "end" });
-    // Loop sockets are Build/Eval/Maintain (Socket-4/5/6)
-    expect(loop?.sockets).toEqual(["Socket-4", "Socket-5", "Socket-6"]);
-    // Commit-Sigil (Socket-9) is NOT in the loop
-    expect(loop?.sockets).not.toContain("Socket-9");
-  });
-
-  test("Socket-5 Auto-Eval lastFeedback/context assignment is preserved in Release", async () => {
-    const config = await loadDefaultConfig();
-    config.activeLoadout = "Release";
+    config.activeLoadout = "Full-Auto";
     const { resolvePipeline } = await import("../src/runtime/pipeline.js");
     const pipeline = resolvePipeline(config);
 

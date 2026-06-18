@@ -285,3 +285,158 @@ describe("native per-materia model settings", () => {
     expect(harness.sentMessages.some(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toBe(false);
   });
 });
+
+function twoAgentLargeToSmallModelConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "Socket-1",
+        sockets: {
+          "Socket-1": { materia: "Build", edges: [{ when: 'always', to: 'Socket-2' }] },
+          "Socket-2": { materia: "Review" },
+        },
+      },
+    },
+    materia: {
+      Build: { tools: "coding", prompt: "Build materia", model: "large-provider/large-model" },
+      Review: { tools: "readOnly", prompt: "Review materia", model: "small-provider/small-model" },
+    },
+  };
+}
+
+describe("proactive compaction skip on model switch", () => {
+  test("switching from large-window to small-window model skips proactive compaction for the immediate turn", async () => {
+    const harness = await makeHarness(twoAgentLargeToSmallModelConfig());
+    harness.models = [
+      { provider: "large-provider", id: "large-model", name: "Large Model", api: "large-api", contextWindow: 1_000_000 },
+      { provider: "small-provider", id: "small-model", name: "Small Model", api: "small-api", contextWindow: 272_000 },
+    ];
+    // Set the active model to the large one initially (simulating Socket-1 already used it).
+    harness.activeModel = harness.models[0];
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    // Socket-1 starts with the large model.
+    await harness.runCommand("materia", "cast switch model");
+
+    expect(harness.setModelCalls).toHaveLength(1);
+    expect(harness.setModelCalls[0]).toMatchObject({ provider: "large-provider", id: "large-model" });
+
+    // Complete Socket-1 so it transitions to Socket-2.
+    harness.appendAssistantMessage("build done");
+
+    // Before Socket-2 dispatch, set stale context usage from the large model.
+    // This simulates the pre-turn snapshot still reflecting the large window.
+    harness.contextUsage = { tokens: 900_000, contextWindow: 272_000, percent: (900_000 / 272_000) * 100 };
+
+    await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
+
+    // Socket-2 should have set the small model.
+    expect(harness.setModelCalls).toHaveLength(2);
+    expect(harness.setModelCalls[1]).toMatchObject({ provider: "small-provider", id: "small-model" });
+
+    // No compaction should have occurred because the model switch reset the context.
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+
+    // Assert no proactive_compaction_start event was emitted.
+    const eventsContent = await readCastFile(harness, "events.jsonl");
+    const events = eventsContent.trim().split("\n").map((line: string) => JSON.parse(line));
+    expect(events.filter((event: any) => event.type === "proactive_compaction_start")).toHaveLength(0);
+
+    // Both trigger turns should have occurred.
+    const triggerTurns = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggerTurns).toHaveLength(2);
+  });
+
+  test("ongoing same-model session with usage above threshold still triggers proactive compaction", async () => {
+    const harness = await makeHarness(agentConfig());
+    harness.models = [
+      { provider: "test", id: "same-model", name: "Same Model", api: "test", contextWindow: 272_000 },
+    ];
+    harness.activeModel = harness.models[0];
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    // Set usage high enough to trigger compaction.
+    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+
+    await harness.runCommand("materia", "cast ongoing same model");
+
+    // No model switch occurred (same model, no explicit model setting).
+    expect(harness.setModelCalls).toHaveLength(0);
+
+    // Proactive compaction should have fired because usage is above the threshold.
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
+
+    // Assert proactive_compaction_start event was emitted.
+    const eventsContent = await readCastFile(harness, "events.jsonl");
+    const events = eventsContent.trim().split("\n").map((line: string) => JSON.parse(line));
+    expect(events.some((event: any) => event.type === "proactive_compaction_start")).toBe(true);
+
+    // Trigger turn should still occur.
+    const triggerTurns = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn);
+    expect(triggerTurns).toHaveLength(1);
+  });
+
+  test("re-applying the same model explicitly does not skip proactive compaction", async () => {
+    const harness = await makeHarness(agentConfig({ model: "test/same-model" }));
+    harness.models = [
+      { provider: "test", id: "same-model", name: "Same Model", api: "test", contextWindow: 272_000 },
+    ];
+    // The active model already matches the configured model.
+    harness.activeModel = harness.models[0];
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    // Set usage high enough to trigger compaction.
+    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+
+    await harness.runCommand("materia", "cast same model reapply");
+
+    // setModel was called but with the same model.
+    expect(harness.setModelCalls).toHaveLength(1);
+
+    // Proactive compaction should still fire because modelSwitched is false (same model).
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
+  });
+
+  test("model fallback does not skip proactive compaction", async () => {
+    const harness = await makeHarness(agentConfig({ model: "unknown/ghost" }));
+    harness.models = [
+      { provider: "test", id: "fallback-model", name: "Fallback", api: "test", contextWindow: 272_000 },
+    ];
+    harness.activeModel = harness.models[0];
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    // Set usage high enough to trigger compaction.
+    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+
+    await harness.runCommand("materia", "cast unknown model fallback");
+
+    // setModel was never called (unknown model).
+    expect(harness.setModelCalls).toHaveLength(0);
+
+    // Proactive compaction should still fire.
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
+  });
+
+  test("thinking-only change does not skip proactive compaction", async () => {
+    const harness = await makeHarness(agentConfig({ thinking: "high" }));
+    harness.models = [
+      { provider: "test", id: "model", name: "Model", api: "test", contextWindow: 272_000 },
+    ];
+    harness.activeModel = harness.models[0];
+    (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
+
+    // Set usage high enough to trigger compaction.
+    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+
+    await harness.runCommand("materia", "cast thinking only change");
+
+    // No model switch — only thinking changed.
+    expect(harness.setModelCalls).toHaveLength(0);
+
+    // Proactive compaction should still fire.
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
+  });
+});

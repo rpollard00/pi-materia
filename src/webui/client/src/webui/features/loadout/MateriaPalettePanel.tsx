@@ -1,8 +1,11 @@
 import type { DragEvent } from 'react';
+import { useMemo } from 'react';
 import { getSocketLabel, socketColor, type MateriaConfig, type PipelineSocket } from '../../../loadoutModel.js';
 import { Orb } from '../../components/Orb.js';
+import { MateriaPaletteControls, useMateriaPaletteControls } from '../../components/MateriaPaletteControls.js';
 import type { DragPayload } from '../../types.js';
 import { formatIteratorBehavior, hasIteratorBehavior, isGeneratorSocket, iteratorBadgeLabel } from '../../utils/graphLayout.js';
+import { selectMateriaPaletteRows } from '../../utils/materiaPaletteFiltering.js';
 
 export interface MateriaPalettePanelProps {
   palette: Array<[string, PipelineSocket]>;
@@ -13,30 +16,43 @@ export interface MateriaPalettePanelProps {
 }
 
 export function MateriaPalettePanel({ palette, materia, selectedMateriaId, onDragMateria, onSelectMateria }: MateriaPalettePanelProps) {
+  const controls = useMateriaPaletteControls();
+  const rows = useMemo(
+    () => selectMateriaPaletteRows(palette, { materia, query: controls.query, sortMode: controls.sortMode, direction: controls.direction }),
+    [palette, materia, controls.query, controls.sortMode, controls.direction],
+  );
+
   return (
     <section className="fantasy-panel p-5">
       <h2 className="text-xl font-bold" title="Click once to select for swap/insert, or drag into a socket.">Materia palette</h2>
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        {palette.map(([id, socket], index) => {
-          const definition = materia[id];
-          const group = typeof definition?.group === 'string' ? definition.group : undefined;
-          const description = typeof definition?.description === 'string' ? definition.description : undefined;
-          const isIterator = hasIteratorBehavior(socket, materia);
-          const isGenerator = isGeneratorSocket(socket, materia);
-          const iteratorDetails = isIterator ? formatIteratorBehavior(socket, materia) : undefined;
-          const title = [description, iteratorDetails].filter(Boolean).join('\n') || undefined;
-          return (
-            <button key={id} draggable title={title} data-testid={`palette-${id}`} onDragStart={(event) => onDragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => onSelectMateria(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''} ${isIterator ? 'palette-orb-iterator' : ''} ${isGenerator ? 'palette-orb-generator' : ''}`}>
-              <Orb small color={socketColor(id, index, materia, socket)} label={id} iterator={isIterator} />
-              <span className="flex flex-col items-start leading-tight">
-                <span>{getSocketLabel(id, socket, materia)}</span>
-                {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
-                {isIterator && <span className={`materia-iterator-badge palette-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      <MateriaPaletteControls state={controls} testIdPrefix="palette" />
+      {palette.length === 0 ? (
+        <p className="palette-empty" data-testid="palette-empty">No materia definitions available.</p>
+      ) : rows.length === 0 ? (
+        <p className="palette-empty" data-testid="palette-no-results">No matching materia.</p>
+      ) : (
+        <div className="mt-4 grid grid-cols-2 gap-3" data-testid="palette-grid">
+          {rows.map(({ id, socket, index }) => {
+            const definition = materia[id];
+            const group = typeof definition?.group === 'string' ? definition.group : undefined;
+            const description = typeof definition?.description === 'string' ? definition.description : undefined;
+            const isIterator = hasIteratorBehavior(socket, materia);
+            const isGenerator = isGeneratorSocket(socket, materia);
+            const iteratorDetails = isIterator ? formatIteratorBehavior(socket, materia) : undefined;
+            const title = [description, iteratorDetails].filter(Boolean).join('\n') || undefined;
+            return (
+              <button key={id} draggable title={title} data-testid={`palette-${id}`} onDragStart={(event) => onDragMateria({ kind: 'palette', materiaId: id }, event)} onClick={() => onSelectMateria(selectedMateriaId === id ? undefined : id)} className={`palette-orb ${selectedMateriaId === id ? 'palette-orb-selected' : ''} ${isIterator ? 'palette-orb-iterator' : ''} ${isGenerator ? 'palette-orb-generator' : ''}`}>
+                <Orb small color={socketColor(id, index, materia, socket)} label={id} iterator={isIterator} />
+                <span className="flex flex-col items-start leading-tight">
+                  <span>{getSocketLabel(id, socket, materia)}</span>
+                  {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
+                  {isIterator && <span className={`materia-iterator-badge palette-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

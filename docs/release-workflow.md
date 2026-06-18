@@ -26,7 +26,7 @@ Example work item titles:
 - `fix(config): correct loadout socket wiring`
 - `ci!: switch to trusted npm publishing`
 
-The `Release` loadout (see below) routes work items through `Commit-Sigil`, a utility that validates titles before execution. Invalid titles loop back for correction.
+`Commit-Sigil`, a utility materia, validates work item titles before execution. When included in a loadout pipeline, invalid titles loop back for correction.
 
 ### Commit message version bumps
 
@@ -97,25 +97,9 @@ npm view @rpollard00/pi-materia --json | jq '.provenance'
 
 Or visit the package page on npmjs.com — published versions with provenance display a "Provenance" badge with a link to the signed attestation.
 
-## Release loadout
+## Available loadouts
 
-pi-materia ships several pre-configured loadouts in `config/default.json`. For release-related development work, use the `Release` loadout:
-
-```bash
-# Activate the Release loadout (or set activeLoadout in config/default.json)
-pi-materia --loadout Release
-```
-
-The `Release` loadout routes planning through `Commit-Sigil` before `Auto-Architect` and `Build`. This ensures all work item titles follow Conventional Commit format before implementation begins. If titles don't validate, the pipeline loops back to planning for correction.
-
-Key loadout differences:
-
-| Loadout | Planner | Title validation | Eval loop |
-|---|---|---|---|
-| `Full-Auto` | Auto-Plan → Auto-Architect | No | Build → Auto-Eval (retry 3x) |
-| `Release` | Auto-Plan → Commit-Sigil → Auto-Architect | Yes (Commit-Sigil) | Build → Auto-Eval (retry 3x) |
-
-Use the `Release` loadout when making changes that will become part of a release — especially CI/CD, packaging, or publish-related changes. For other development, `Full-Auto` or `Planning-Consult` are appropriate.
+pi-materia ships several pre-configured loadouts in `config/default.json`. Use `--loadout` or set `activeLoadout` to select one. For most development work, `Full-Auto` or `Planning-Consult` are appropriate choices.
 
 ## Maintainer flow
 
@@ -155,9 +139,9 @@ git log --oneline v0.1.2..main
 
 Ensure commit subjects use `feat:` for features (minor bump) and `fix:` for bug fixes (patch bump). Commits like `chore:`, `docs:`, `ci:`, or `refactor:` alone won't bump the version.
 
-### Release loadout title validation fails
+### Commit-Sigil title validation fails
 
-When using the `Release` loadout, `Commit-Sigil` validates work item titles before implementation. If titles fail validation:
+When `Commit-Sigil` is included in a loadout pipeline, it validates work item titles before implementation. If titles fail validation:
 
 - Check that all work item titles start with a Conventional Commit type (`feat:`, `fix:`, `ci:`, `docs:`, `chore:`, etc.)
 - Ensure the type is followed by `: ` (colon and space)

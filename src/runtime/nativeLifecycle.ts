@@ -820,7 +820,7 @@ async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionCo
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
   updateWidget(ctx, state);
-  await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, socket));
+  await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, socket), { skipProactiveCompaction: appliedModel.modelSwitched });
 }
 
 export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
@@ -1210,7 +1210,8 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
   saveCastState(pi, state);
   await updateSocketToolScope(pi, ctx, state, socket);
-  const dispatch = () => sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket), { diagnostics: nextDiagnostics });
+  const skipProactiveCompaction = appliedModel.modelSwitched === true;
+  const dispatch = () => sendMateriaTurn(pi, ctx, state, buildSocketPrompt(state, socket), { diagnostics: nextDiagnostics, skipProactiveCompaction });
   if (shouldDeferAgentPromptDispatch(nextDiagnostics)) {
     const scheduled = await scheduleDeferredPromptDispatch(pi, ctx, state, socket, dispatch, nextDiagnostics);
     if (scheduled) {
