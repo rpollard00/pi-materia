@@ -1139,8 +1139,13 @@
 .palette-controls-search {
   position: relative;
   display: flex;
-  flex: 1 1 9rem;
-  min-width: 0;
+  /* basis 0 so the filter grows to fill only the leftover space after the
+     sort selector and direction toggle claim their content width. This keeps
+     all three controls on one row inside the narrow (18rem) loadout side
+     panel; the 5rem floor lets the row wrap cleanly on genuinely narrow
+     screens instead of overlapping or crushing the input. */
+  flex: 1 1 0;
+  min-width: 5rem;
   align-items: center;
 }
 

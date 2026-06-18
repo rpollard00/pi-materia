@@ -137,4 +137,15 @@ describe('MateriaPalettePanel filtering and sorting', () => {
     expect(queryByTestId('palette-grid')).toBeNull();
     expect(getByTestId('palette-empty').textContent).toBe('No materia definitions available.');
   });
+
+  it('renders the filter, sort, and direction controls in one toolbar container', () => {
+    // All three controls share a single .palette-controls flex container so
+    // the CSS can keep them aligned on one row at loadout page widths.
+    const { container } = renderPanel();
+    const toolbar = container.querySelector('.palette-controls');
+    expect(toolbar).toBeTruthy();
+    expect(toolbar?.querySelector('[data-testid="palette-filter-input"]')).toBeTruthy();
+    expect(toolbar?.querySelector('[data-testid="palette-sort-select"]')).toBeTruthy();
+    expect(toolbar?.querySelector('[data-testid="palette-sort-direction"]')).toBeTruthy();
+  });
 });
