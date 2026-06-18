@@ -658,7 +658,7 @@ describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
     const { container, getByTestId } = renderReplacePanel();
     expect(getByTestId('materia-replacement-list')).toBeTruthy();
     expect(getByTestId('replacement-filter-input')).toBeTruthy();
-    expect(getByTestId('replacement-sort-select')).toBeTruthy();
+    expect(getByTestId('replacement-sort-trigger')).toBeTruthy();
     expect(getByTestId('replacement-sort-direction')).toBeTruthy();
     expect(replacementOrder(container)).toEqual(['Audit', 'Build', 'detectVcs']);
   });
@@ -675,7 +675,8 @@ describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
 
   it('sorts utilities before agents when type is descending', () => {
     const { container, getByTestId } = renderReplacePanel();
-    fireEvent.change(getByTestId('replacement-sort-select'), { target: { value: 'type' } });
+    fireEvent.click(getByTestId('replacement-sort-trigger'));
+    fireEvent.click(getByTestId('replacement-sort-option-type'));
     fireEvent.click(getByTestId('replacement-sort-direction'));
     expect(replacementOrder(container)).toEqual(['detectVcs', 'Build', 'Audit']);
   });

@@ -56,7 +56,8 @@ describe('MateriaPalettePanel filtering and sorting', () => {
   it('sorts agents before utilities by type ascending and flips on descending', () => {
     const { container, getByTestId } = renderPanel();
 
-    fireEvent.change(getByTestId('palette-sort-select'), { target: { value: 'type' } });
+    fireEvent.click(getByTestId('palette-sort-trigger'));
+    fireEvent.click(getByTestId('palette-sort-option-type'));
     expect(rowOrder(container)).toEqual(['Audit', 'Build', 'detectVcs', 'ensureGit']);
 
     fireEvent.click(getByTestId('palette-sort-direction'));
@@ -66,7 +67,8 @@ describe('MateriaPalettePanel filtering and sorting', () => {
   it('sorts by group with ungrouped last while ascending and reversed while descending', () => {
     const { container, getByTestId } = renderPanel();
 
-    fireEvent.change(getByTestId('palette-sort-select'), { target: { value: 'group' } });
+    fireEvent.click(getByTestId('palette-sort-trigger'));
+    fireEvent.click(getByTestId('palette-sort-option-group'));
     expect(rowOrder(container)).toEqual(['Audit', 'Build', 'detectVcs', 'ensureGit']);
 
     fireEvent.click(getByTestId('palette-sort-direction'));
@@ -145,7 +147,45 @@ describe('MateriaPalettePanel filtering and sorting', () => {
     const toolbar = container.querySelector('.palette-controls');
     expect(toolbar).toBeTruthy();
     expect(toolbar?.querySelector('[data-testid="palette-filter-input"]')).toBeTruthy();
-    expect(toolbar?.querySelector('[data-testid="palette-sort-select"]')).toBeTruthy();
+    expect(toolbar?.querySelector('[data-testid="palette-sort-trigger"]')).toBeTruthy();
     expect(toolbar?.querySelector('[data-testid="palette-sort-direction"]')).toBeTruthy();
+  });
+
+  it('exposes all sort fields from the compact sort menu and marks the active one', () => {
+    // The native dropdown is gone; a compact icon trigger now opens a menu that
+    // exposes every sort field and marks the selected one for sighted and AT users.
+    const { container, getByTestId, queryByTestId } = renderPanel();
+
+    // Menu is closed initially: no popover, trigger is collapsed.
+    expect(queryByTestId('palette-sort-menu')).toBeNull();
+    expect(getByTestId('palette-sort-trigger').getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(getByTestId('palette-sort-trigger'));
+    const menu = getByTestId('palette-sort-menu');
+    expect(menu.getAttribute('role')).toBe('menu');
+    expect(getByTestId('palette-sort-trigger').getAttribute('aria-expanded')).toBe('true');
+
+    // Every existing sort field is available as a menuitemradio.
+    const options = Array.from(menu.querySelectorAll('[role="menuitemradio"]'));
+    expect(options.map((option) => option.getAttribute('data-testid'))).toEqual([
+      'palette-sort-option-name',
+      'palette-sort-option-type',
+      'palette-sort-option-group',
+    ]);
+
+    // Name is selected by default and is the only checked option.
+    const checked = options.filter((option) => option.getAttribute('aria-checked') === 'true');
+    expect(checked).toHaveLength(1);
+    expect(checked[0]?.getAttribute('data-testid')).toBe('palette-sort-option-name');
+    expect(getByTestId('palette-sort-option-name').className).toContain('palette-sort-option-active');
+
+    // Selecting another field updates sorting and the active indicator.
+    fireEvent.click(getByTestId('palette-sort-option-type'));
+    expect(rowOrder(container)).toEqual(['Audit', 'Build', 'detectVcs', 'ensureGit']);
+    expect(queryByTestId('palette-sort-menu')).toBeNull();
+
+    fireEvent.click(getByTestId('palette-sort-trigger'));
+    expect(getByTestId('palette-sort-option-type').getAttribute('aria-checked')).toBe('true');
+    expect(getByTestId('palette-sort-option-name').getAttribute('aria-checked')).toBe('false');
   });
 });
