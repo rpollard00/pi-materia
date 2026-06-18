@@ -54,6 +54,13 @@ function latestMateriaMessage(harness: FakePiHarness): string {
   return String(messages.at(-1)?.content ?? "");
 }
 
+function questCardSends(harness: FakePiHarness, eventType: string): Array<{ message: any; options?: any }> {
+  return harness.sentMessages.filter(({ message }) => {
+    const details = (message as any)?.details;
+    return (message as any)?.customType === "pi-materia" && details?.prefix === "quest" && details?.eventType === eventType;
+  });
+}
+
 async function flushDeferredDispatch(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -793,5 +800,138 @@ describe("/materia quest command interface", () => {
     expect(board.quests[0].status).toBe("succeeded");
     const errors = harness.notifications.filter((notification) => notification.type === "error").map((notification) => notification.message);
     expect(errors.some((message) => message.includes("No pending pi-materia quests"))).toBe(true);
+  });
+
+  test("runner control cards stay user-visible but are marked orchestration-only and never trigger a turn", async () => {
+    // run + auto-advance: the continuous runner drains two utility quests back to back.
+    const runHarness = await makeHarness();
+    await runHarness.runCommand("materia", "quest add First immediate quest");
+    const seededRunBoard = await readBoard(runHarness);
+    seededRunBoard.quests.push({ ...seededRunBoard.quests[0], id: "quest-second", title: "Second immediate quest", prompt: "Second immediate quest" });
+    await writeFile(path.join(runHarness.cwd, ".pi", "pi-materia", "quest-board.json"), JSON.stringify(seededRunBoard, null, 2));
+    await runHarness.runCommand("materia", "quest run");
+
+    const runCards = questCardSends(runHarness, "run");
+    expect(runCards).toHaveLength(1);
+    expect(runCards[0].message.display).toBe(true);
+    expect(runCards[0].message.content).toContain("Started continuous quest runner and launched");
+    expect(runCards[0].message.details.orchestration).toBe(true);
+    expect(runCards[0].message.details.prefix).toBe("quest");
+    expect(runCards[0].options?.triggerTurn).not.toBe(true);
+
+    const autoCards = questCardSends(runHarness, "auto-advance");
+    expect(autoCards.length).toBeGreaterThanOrEqual(1);
+    expect(autoCards[0].message.display).toBe(true);
+    expect(autoCards[0].message.details.orchestration).toBe(true);
+    expect(autoCards[0].options?.triggerTurn).not.toBe(true);
+
+    // runonce: one-shot launch emits the runonce runner card.
+    const onceHarness = await makeHarness();
+    await onceHarness.runCommand("materia", "quest add Build once");
+    await onceHarness.runCommand("materia", "quest runonce");
+    const runonceCards = questCardSends(onceHarness, "runonce");
+    expect(runonceCards).toHaveLength(1);
+    expect(runonceCards[0].message.display).toBe(true);
+    expect(runonceCards[0].message.content).toContain("Launched quest");
+    expect(runonceCards[0].message.details.orchestration).toBe(true);
+    expect(runonceCards[0].options?.triggerTurn).not.toBe(true);
+
+    // stop: disabling the runner emits the stop runner card.
+    const stopHarness = await makeHarness();
+    await stopHarness.runCommand("materia", "quest run");
+    await stopHarness.runCommand("materia", "quest stop");
+    const stopCards = questCardSends(stopHarness, "stop");
+    expect(stopCards).toHaveLength(1);
+    expect(stopCards[0].message.display).toBe(true);
+    expect(stopCards[0].message.content).toContain("Quest runner stopped");
+    expect(stopCards[0].message.details.orchestration).toBe(true);
+    expect(stopCards[0].options?.triggerTurn).not.toBe(true);
+  });
+
+  test("context hook strips the quest runner card from isolated agent context after /materia quest run", async () => {
+    // Use an agent quest loadout so /materia quest run launches a real agent cast
+    // (hidden materia prompt + triggerTurn) that stays active and awaiting
+    // response, which is exactly when context isolation engages. The explicit
+    // --loadout Test override guarantees the user-facing card renders a Loadout
+    // line so the regression covers every orchestration string from the bug.
+    const harness = await makeHarness(agentQuestConfig());
+    await harness.runCommand("materia", "quest add --loadout Test Filter the materia palette on the loadout page");
+    await harness.runCommand("materia", "quest run");
+
+    // Sanity: the runner launched the agent cast and it is active and awaiting
+    // response, so emitting the context hook will go through isolation.
+    const activeState = loadActiveCastState(harness.ctx);
+    expect(activeState?.active).toBe(true);
+    expect(activeState?.awaitingResponse).toBe(true);
+
+    const hiddenPromptMessage = harness.sentMessages
+      .map(({ message }) => message as { customType?: string; content?: string })
+      .find((message) => message.customType === "pi-materia-prompt");
+    const runCardMessage = questCardSends(harness, "run").at(-1)?.message as
+      | { content?: string; details?: { orchestration?: true; prefix?: string; eventType?: string } }
+      | undefined;
+    expect(hiddenPromptMessage).toBeDefined();
+    expect(runCardMessage).toBeDefined();
+    expect(hiddenPromptMessage!.content).toContain("<materia-instructions>");
+    expect(runCardMessage!.details?.orchestration).toBe(true);
+    expect(runCardMessage!.details?.prefix).toBe("quest");
+
+    // The real user-facing card carries every orchestration string we must isolate.
+    const cardContent = String(runCardMessage!.content);
+    expect(cardContent).toContain("Started continuous quest runner");
+    expect(cardContent).toContain("Runner:");
+    expect(cardContent).toContain("Loadout:");
+    expect(cardContent).toContain("Mode: continuous run");
+
+    // Simulate the transcript Pi passes to the context hook: earlier unrelated
+    // user text, then the hidden materia prompt, then the user-facing quest
+    // runner card appended AFTER the prompt (the leaked-context bug scenario).
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "unrelated earlier transcript" }] },
+      { role: "custom", customType: "pi-materia-prompt", content: hiddenPromptMessage!.content, display: false, details: { phase: "Socket-1", socketId: "Socket-1", materiaName: "Build" } },
+      { role: "custom", customType: "pi-materia", content: cardContent, display: true, details: runCardMessage!.details },
+    ];
+
+    const contextResults = await harness.emit("context", { messages });
+    const isolated = (contextResults.at(-1) as { messages?: unknown[] } | undefined)?.messages;
+    expect(isolated).toBeDefined();
+    const serialized = JSON.stringify(isolated);
+    const syntheticContent = String((isolated as Array<{ content?: unknown }>)[0].content);
+
+    // Synthetic cast context replaces the earlier transcript and remains present.
+    expect((isolated as Array<{ role?: string }>)[0]).toMatchObject({ role: "user" });
+    expect(syntheticContent).toContain("Materia isolated context.");
+    expect(syntheticContent).toContain("Cast id:");
+    expect(serialized).not.toContain("unrelated earlier transcript");
+
+    // The hidden materia prompt must survive isolation.
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("</materia-instructions>");
+
+    // The quest runner orchestration card must be fully removed even though it
+    // was appended after the hidden materia prompt. The card's own Mode line
+    // ("Mode: continuous run") is distinct from the synthetic context's own
+    // legitimate "Mode: awaiting_agent_response" line checked below.
+    expect(serialized).not.toContain("Started continuous quest runner");
+    expect(serialized).not.toContain("Runner:");
+    expect(serialized).not.toContain("Loadout:");
+    expect(serialized).not.toContain("Mode: continuous run");
+    expect(serialized).not.toContain("auto-advances while enabled");
+    expect(syntheticContent).toContain("Mode: awaiting_agent_response");
+  });
+
+  test("explicit quest command cards stay user-visible without the orchestration-only flag", async () => {
+    const harness = await makeHarness();
+    await harness.runCommand("materia", "quest add Build something");
+    const addCards = questCardSends(harness, "add");
+    expect(addCards).toHaveLength(1);
+    expect(addCards[0].message.display).toBe(true);
+    expect(addCards[0].message.details.orchestration).toBeUndefined();
+    expect(addCards[0].message.details.prefix).toBe("quest");
+
+    await harness.runCommand("materia", "quest status");
+    const statusCards = questCardSends(harness, "status");
+    expect(statusCards.at(-1)?.message.display).toBe(true);
+    expect(statusCards.at(-1)?.message.details.orchestration).toBeUndefined();
   });
 });

@@ -1,15 +1,10 @@
 import { ArrowDownAZ, ArrowUpAZ, Search, X } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import { PaletteSortMenu } from './PaletteSortMenu.js';
 import {
   type PaletteSortDirection,
   type PaletteSortMode,
 } from '../utils/materiaPaletteFiltering.js';
-
-export const paletteSortModes: ReadonlyArray<{ value: PaletteSortMode; label: string }> = [
-  { value: 'name', label: 'Name' },
-  { value: 'type', label: 'Type' },
-  { value: 'group', label: 'Group' },
-];
 
 export interface MateriaPaletteControlsState {
   query: string;
@@ -74,17 +69,11 @@ export function MateriaPaletteControls({ state, testIdPrefix }: MateriaPaletteCo
           </button>
         )}
       </div>
-      <select
-        className="palette-sort-select"
-        aria-label="Sort materia"
-        value={sortMode}
-        onChange={(event) => setSortMode(event.target.value as PaletteSortMode)}
-        data-testid={`${testIdPrefix}-sort-select`}
-      >
-        {paletteSortModes.map((mode) => (
-          <option key={mode.value} value={mode.value}>{mode.label}</option>
-        ))}
-      </select>
+      <PaletteSortMenu
+        sortMode={sortMode}
+        onSortModeChange={setSortMode}
+        testIdPrefix={testIdPrefix}
+      />
       <button
         type="button"
         className="palette-direction-toggle"

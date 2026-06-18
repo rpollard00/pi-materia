@@ -282,6 +282,12 @@
   min-width: 0;
 }
 
+/* Let the side panel's flex children grow/shrink inside the stretched grid
+   row so the materia palette can adopt a stable height. */
+.loadout-side-panel {
+  min-height: 0;
+}
+
 .loadout-graph-panel {
   display: flex;
   min-height: clamp(34rem, 76vh, 58rem);
@@ -1133,8 +1139,13 @@
 .palette-controls-search {
   position: relative;
   display: flex;
-  flex: 1 1 9rem;
-  min-width: 0;
+  /* basis 0 so the filter grows to fill only the leftover space after the
+     sort selector and direction toggle claim their content width. This keeps
+     all three controls on one row inside the narrow (18rem) loadout side
+     panel; the 5rem floor lets the row wrap cleanly on genuinely narrow
+     screens instead of overlapping or crushing the input. */
+  flex: 1 1 0;
+  min-width: 5rem;
   align-items: center;
 }
 
@@ -1193,24 +1204,102 @@
   background: rgb(8 47 73 / 0.62);
 }
 
-.palette-sort-select {
+.palette-sort-menu {
+  position: relative;
+  display: flex;
   flex: 0 0 auto;
+}
+
+/* Icon-only trigger sized to match the direction toggle so the two compact
+   controls stay aligned on the same toolbar row. */
+.palette-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
   border-radius: 9999px;
   border: 1px solid rgb(207 250 254 / 0.16);
   background: rgb(2 6 23 / 0.82);
-  padding: 0.4rem 0.6rem;
-  color: rgb(224 242 254);
-  font-size: 0.74rem;
-  letter-spacing: normal;
-  text-transform: none;
-  outline: none;
+  color: rgb(207 250 254 / 0.92);
   cursor: pointer;
   transition: 160ms ease;
 }
 
-.palette-sort-select:focus {
+.palette-sort-trigger:hover,
+.palette-sort-trigger[aria-expanded="true"],
+.palette-sort-trigger:focus-visible {
   border-color: rgb(165 243 252 / 0.62);
+  background: rgb(8 47 73 / 0.72);
   box-shadow: 0 0 18px rgb(34 211 238 / 0.16);
+}
+
+.palette-sort-trigger:focus-visible {
+  outline: none;
+}
+
+.palette-sort-popover {
+  position: absolute;
+  /* Anchor to the right edge of the trigger wrapper so the menu grows leftward
+     inside the narrow (18rem) loadout side panel without overflowing the page. */
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 30;
+  display: grid;
+  min-width: 8.5rem;
+  gap: 0.15rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(103 232 249 / 0.28);
+  background: rgb(15 23 42 / 0.98);
+  padding: 0.35rem;
+  box-shadow: 0 20px 50px rgb(2 6 23 / 0.48), 0 0 24px rgb(34 211 238 / 0.12);
+}
+
+.palette-sort-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: transparent;
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+  color: rgb(226 232 240);
+  cursor: pointer;
+  transition: 140ms ease;
+}
+
+.palette-sort-option:hover,
+.palette-sort-option:focus-visible {
+  background: rgb(8 47 73 / 0.82);
+  color: rgb(255 255 255);
+  outline: none;
+}
+
+/* Visually mark the active sort field to complement the menuitemradio /
+   aria-checked signal for assistive tech. */
+.palette-sort-option-active {
+  background: rgb(8 47 73 / 0.66);
+  color: rgb(224 242 254);
+}
+
+.palette-sort-option-check {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  opacity: 0;
+  stroke: currentColor;
+  stroke-width: 3;
+}
+
+.palette-sort-option-check-visible {
+  opacity: 1;
+  color: rgb(103 232 254);
 }
 
 .palette-direction-toggle {
@@ -1247,6 +1336,51 @@
   padding: 0.9rem;
   color: rgb(186 230 253 / 0.78);
   font-size: 0.82rem;
+}
+
+/*
+  Palette layout stability: the materia list scrolls inside a container with a
+  stable height so filtering (which changes the result count) never resizes the
+  palette or the surrounding page. The title and controls stay pinned above the
+  scrolling region.
+*/
+.materia-palette-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.materia-palette-list {
+  display: flex;
+  min-height: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  margin-top: 1rem;
+  /* Definite height (independent of content) keeps the stacked/narrow layout
+     from growing or shrinking as the filtered result count changes. */
+  height: clamp(20rem, 62vh, 42rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.35rem;
+  scrollbar-color: rgb(103 232 238 / 0.38) rgb(2 6 23 / 0.36);
+}
+
+.materia-palette-list .palette-empty {
+  margin-top: 0;
+}
+
+@media (min-width: 1280px) {
+  /* On wide layouts the palette fills the side panel, whose height is driven
+     by the graph panel row, instead of using a fixed viewport height. */
+  .materia-palette-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .materia-palette-list {
+    flex: 1 1 0;
+    height: auto;
+  }
 }
 
 .materia-button,

@@ -25,6 +25,7 @@ import type {
   SocketPropertyFormState,
 } from '../../types.js';
 import { Orb } from '../../components/Orb.js';
+import { Portal } from '../../components/Portal.js';
 import { MateriaPaletteControls, useMateriaPaletteControls } from '../../components/MateriaPaletteControls.js';
 import {
   buildSocketHoverDetails,
@@ -610,8 +611,9 @@ function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopCo
   const loopLabel = formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets);
 
   return (
-    <div className="socket-action-backdrop" role="presentation" onMouseDown={closeLoopControls}>
-      <section className="socket-action-modal loop-control-modal" role="dialog" aria-modal="true" aria-labelledby="loop-control-title" data-testid="loop-control-modal" onMouseDown={(event) => event.stopPropagation()}>
+    <Portal>
+      <div className="socket-action-backdrop" role="presentation" onMouseDown={closeLoopControls}>
+        <section className="socket-action-modal loop-control-modal" role="dialog" aria-modal="true" aria-labelledby="loop-control-title" data-testid="loop-control-modal" onMouseDown={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-cyan-200">loop controls</p>
@@ -635,6 +637,7 @@ function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopCo
         </div>
       </section>
     </div>
+    </Portal>
   );
 }
 
@@ -690,8 +693,9 @@ function SocketActionModal(props: SocketActionModalProps) {
   const readonlyTitle = !editPolicy.canEdit ? editPolicy.reason : undefined;
 
   return (
-    <div className="socket-action-backdrop" role="presentation" onMouseDown={closeSocketActionModal}>
-      <section className="socket-action-modal" role="dialog" aria-modal="true" aria-labelledby="socket-action-title" data-testid="socket-action-modal" onMouseDown={(event) => event.stopPropagation()}>
+    <Portal>
+      <div className="socket-action-backdrop" role="presentation" onMouseDown={closeSocketActionModal}>
+        <section className="socket-action-modal" role="dialog" aria-modal="true" aria-labelledby="socket-action-title" data-testid="socket-action-modal" onMouseDown={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : socketActionMode === 'connect' ? 'connect edge' : 'socket actions'}</p><h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{formatSocketLabel(socketActionId, activeLoadout.sockets[socketActionId])}</h3><p className="mt-1 text-sm text-slate-300">Socket id: {socketActionId}</p></div><button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' || socketActionMode === 'connect' ? 'Cancel' : 'Close'}</button></div>
         {!editPolicy.canEdit && <p className="mt-4 rounded-xl border border-amber-300/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="status">{editPolicy.reason}</p>}
         {socketActionMode === 'replace' ? (
@@ -705,5 +709,6 @@ function SocketActionModal(props: SocketActionModalProps) {
         )}
       </section>
     </div>
+    </Portal>
   );
 }

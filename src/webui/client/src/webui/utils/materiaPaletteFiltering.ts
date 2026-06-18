@@ -4,6 +4,15 @@ import { hasIteratorBehavior, isGeneratorSocket } from './graphLayout.js';
 export type PaletteSortMode = 'name' | 'type' | 'group';
 export type PaletteSortDirection = 'asc' | 'desc';
 
+/** Sort field choices surfaced by the palette toolbar. Co-located with the
+ * mode type so the compact sort menu and any future consumers share one source
+ * of truth for the available fields and their display labels. */
+export const paletteSortModes: ReadonlyArray<{ value: PaletteSortMode; label: string }> = [
+  { value: 'name', label: 'Name' },
+  { value: 'type', label: 'Type' },
+  { value: 'group', label: 'Group' },
+];
+
 export interface MateriaPaletteEntry {
   id: string;
   socket: PipelineSocket;

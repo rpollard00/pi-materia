@@ -65,7 +65,7 @@ export default function piMateria(pi: ExtensionAPI) {
         const result = await useCases.runOnce({ pi, session: ctx, cwd: ctx.cwd, configuredPath: getConfiguredConfigPath(), ...(input.questId ? { questId: input.questId } : {}) });
         const board = result?.board ?? (await boards.loadOrCreate());
         if (result) {
-          sendQuestMessage(pi, renderQuestStarted(result, "runonce"), "runonce");
+          sendQuestMessage(pi, renderQuestStarted(result, "runonce"), "runonce", { orchestration: true });
           ctx.ui.notify(`pi-materia quest ${result.quest.id} launched as cast ${result.state.castId}.`, "info");
         }
         const reason = input.questId ? "not_found" : "waiting";
@@ -86,7 +86,7 @@ export default function piMateria(pi: ExtensionAPI) {
       const useCases = createQuestRunnerUseCases(ctx.cwd, boards);
       try {
         const board = await useCases.stopRunner();
-        sendQuestMessage(pi, renderQuestStopped(board), "stop");
+        sendQuestMessage(pi, renderQuestStopped(board), "stop", { orchestration: true });
         ctx.ui.notify("pi-materia quest runner stopped. Active casts were not aborted.", "info");
         return { ok: true, action: "stop", boardPath: boards.boardPath, board, reason: "runner_stopped", message: "Quest runner stopped. Active casts were not aborted." };
       } catch (error) {
@@ -440,7 +440,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
     }
     try {
       const board = await input.useCases.stopRunner();
-      sendQuestMessage(input.pi, renderQuestStopped(board), "stop");
+      sendQuestMessage(input.pi, renderQuestStopped(board), "stop", { orchestration: true });
       input.ctx.ui.notify("pi-materia quest runner stopped. Active casts were not aborted.", "info");
     } catch (error) {
       notifyQuestError(input.ctx, "stop", error);
@@ -526,7 +526,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
         input.ctx.ui.notify(questStartNotFoundMessage(status.board.quests.length, questId), "error");
         return;
       }
-      sendQuestMessage(input.pi, renderQuestStarted(result, "runonce"), "runonce");
+      sendQuestMessage(input.pi, renderQuestStarted(result, "runonce"), "runonce", { orchestration: true });
       input.ctx.ui.notify(`pi-materia quest ${result.quest.id} launched as cast ${result.state.castId}.`, "info");
     } catch (error) {
       notifyQuestError(input.ctx, action, error);
@@ -677,13 +677,27 @@ function sendQuestStartedMessages(input: { pi: ExtensionAPI; ctx: ExtensionConte
   input.started.forEach((started, index) => {
     if (!started) return;
     const mode = index === 0 ? input.firstMode : "auto-advance";
-    sendQuestMessage(input.pi, renderQuestStarted(started, mode), mode);
+    sendQuestMessage(input.pi, renderQuestStarted(started, mode), mode, { orchestration: true });
     input.ctx.ui.notify(mode === "auto-advance" ? `pi-materia quest ${started.quest.id} auto-launched as cast ${started.state.castId}.` : `pi-materia quest ${started.quest.id} launched as cast ${started.state.castId}.`, "info");
   });
 }
 
-function sendQuestMessage(pi: ExtensionAPI, lines: string[], eventType: string): void {
-  pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "quest", materiaName: "orchestrator", eventType } });
+interface SendQuestMessageOptions {
+  /**
+   * Marks this quest card as orchestration-only: visible to the user but never
+   * exposed as agent context. Pi custom messages have no native
+   * exclude-from-context flag (only bashExecution supports excludeFromContext,
+   * and convertToLlm always maps custom messages to user context), so context
+   * isolation recognizes this explicit details flag instead. See
+   * buildIsolatedMateriaContext in src/application/promptAssembly.ts.
+   */
+  orchestration?: true;
+}
+
+function sendQuestMessage(pi: ExtensionAPI, lines: string[], eventType: string, options: SendQuestMessageOptions = {}): void {
+  const details: { prefix: "quest"; materiaName: "orchestrator"; eventType: string; orchestration?: true } = { prefix: "quest", materiaName: "orchestrator", eventType };
+  if (options.orchestration) details.orchestration = true;
+  pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details });
 }
 
 function questStartNotFoundMessage(totalQuests: number, questId?: string): string {
