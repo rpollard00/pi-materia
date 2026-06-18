@@ -48,6 +48,12 @@ interface QuestCreateFormProps extends QuestDefaultLoadoutProps {
   persistedLoadouts: Record<string, PipelineConfig>;
   onAddQuest: (payload: AddQuestRequest) => Promise<AddQuestResponse | undefined>;
   submitting: boolean;
+  /**
+   * Active quest board context for the create-form draft (typically the board
+   * path). The draft is preserved across tab switches within the same context
+   * and reset when this context changes to a different known board.
+   */
+  draftContextKey?: string;
 }
 
 interface QuestEditFormProps {
@@ -180,8 +186,8 @@ export function QuestForm({ mode, persistedLoadouts, initialValues, submitLabel,
   );
 }
 
-export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout, onAddQuest, submitting }: QuestCreateFormProps) {
-  const draft = useQuestDraft();
+export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout, onAddQuest, submitting, draftContextKey }: QuestCreateFormProps) {
+  const draft = useQuestDraft(draftContextKey);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -226,7 +232,7 @@ export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, ques
       persistedLoadouts={persistedLoadouts}
       initialValues={draft}
       draftValues={draft}
-      onDraftChange={setQuestDraft}
+      onDraftChange={(values) => setQuestDraft(draftContextKey, values)}
       submitLabel="Add quest"
       submittingLabel="Adding…"
       headingKicker="New Quest"

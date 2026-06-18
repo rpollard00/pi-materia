@@ -5,6 +5,7 @@ import type { DeleteQuestResponse, QuestBoardResponse, QuestSummary, UpdateQuest
 import { Toaster, resetToastStoreForTests } from '../../../toast/index.js';
 import { QuestPanel } from './QuestPanel.js';
 import { useQuestBoard } from './useQuestBoard.js';
+import { resetQuestDraftStoreForTests } from './questDraftStore.js';
 
 vi.mock('./useQuestBoard.js', () => ({
   useQuestBoard: vi.fn(),
@@ -97,6 +98,7 @@ function renderPanel(overrides: Partial<ReturnType<typeof useQuestBoard>> = {}) 
 afterEach(() => {
   cleanup();
   resetToastStoreForTests();
+  resetQuestDraftStoreForTests();
   mockedUseQuestBoard.mockReset();
 });
 
@@ -186,6 +188,89 @@ describe('QuestPanel editing flow', () => {
 
     expect(update).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /add quest/i })).not.toBeNull();
+  });
+});
+
+describe('QuestPanel draft context reset', () => {
+  function hookReturnValue(overrides: Partial<ReturnType<typeof useQuestBoard>> = {}) {
+    return {
+      board,
+      loading: false,
+      error: undefined,
+      refresh: vi.fn(),
+      add: vi.fn(),
+      submitting: false,
+      update: vi.fn(),
+      updateSubmitting: false,
+      reorder: vi.fn(),
+      reorderSubmitting: false,
+      requeue: vi.fn(),
+      requeueSubmitting: false,
+      runQuest: vi.fn(),
+      runQuestOnce: vi.fn(),
+      stopQuestRunner: vi.fn(),
+      deleteQuest: vi.fn(),
+      deleteSubmitting: false,
+      deletingQuestId: undefined,
+      controlSubmitting: false,
+      controlAction: undefined,
+      ...overrides,
+    };
+  }
+
+  function renderPanelTree() {
+    const buildTree = () => (
+      <>
+        <QuestPanel
+          persistedLoadouts={{
+            Alpha: { id: 'user:alpha', entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+          }}
+          questDefaultLoadoutId={null}
+          setQuestDefaultLoadout={vi.fn()}
+        />
+        <Toaster />
+      </>
+    );
+    const result = render(buildTree());
+    // Pass a fresh element so React actually re-renders (a stable element reference
+    // bails out and never re-reads the mocked quest board).
+    return { rerender: () => result.rerender(buildTree()) };
+  }
+
+  test('resets the create-form draft when the quest board path changes', async () => {
+    mockedUseQuestBoard.mockReturnValue(hookReturnValue({ board: { ...board, boardPath: '/project-a/.pi/quest-board.json' } }));
+    const { rerender } = renderPanelTree();
+
+    const createForm = () => screen.getByRole('form', { name: /add to the quest log/i });
+    const prompt = () => within(createForm()).getByLabelText(/prompt/i) as HTMLTextAreaElement;
+    fireEvent.change(prompt(), { target: { value: 'Draft for board A' } });
+    expect(prompt().value).toBe('Draft for board A');
+
+    mockedUseQuestBoard.mockReturnValue(hookReturnValue({ board: { ...board, boardPath: '/project-b/.pi/quest-board.json' } }));
+    rerender();
+
+    await waitFor(() => expect(prompt().value).toBe(''));
+  });
+
+  test('keeps the create-form draft when the board path stays the same across a board refresh', async () => {
+    mockedUseQuestBoard.mockReturnValue(hookReturnValue({ board: { ...board, boardPath: '/project-a/.pi/quest-board.json' } }));
+    const { rerender } = renderPanelTree();
+
+    const createForm = () => screen.getByRole('form', { name: /add to the quest log/i });
+    const prompt = () => within(createForm()).getByLabelText(/prompt/i) as HTMLTextAreaElement;
+    fireEvent.change(prompt(), { target: { value: 'Draft that should survive refresh' } });
+
+    // A routine board refresh changes counts/quests but not the board path, so the draft must survive.
+    mockedUseQuestBoard.mockReturnValue(hookReturnValue({
+      board: {
+        ...board,
+        boardPath: '/project-a/.pi/quest-board.json',
+        counts: { total: 3, pending: 2, running: 0, succeeded: 1, failed: 0, blocked: 0, completed: 1, terminal: 1 },
+      },
+    }));
+    rerender();
+
+    await waitFor(() => expect(prompt().value).toBe('Draft that should survive refresh'));
   });
 });
 
