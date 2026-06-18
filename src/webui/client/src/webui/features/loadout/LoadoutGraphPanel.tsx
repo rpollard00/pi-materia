@@ -25,6 +25,7 @@ import type {
   SocketPropertyFormState,
 } from '../../types.js';
 import { Orb } from '../../components/Orb.js';
+import { MateriaPaletteControls, useMateriaPaletteControls } from '../../components/MateriaPaletteControls.js';
 import {
   buildSocketHoverDetails,
   edgeConditionClass,
@@ -37,6 +38,7 @@ import {
   isGeneratorSocket,
   iteratorBadgeLabel,
 } from '../../utils/graphLayout.js';
+import { selectMateriaPaletteRows } from '../../utils/materiaPaletteFiltering.js';
 
 export type SocketActionMode = 'actions' | 'replace' | 'edit' | 'connect';
 
@@ -675,6 +677,15 @@ function SocketActionModal(props: SocketActionModalProps) {
     setEdgeTargetId, setSocketActionMode, setSocketPropertyForm, socketLabel,
   } = props;
 
+  const replacementControls = useMateriaPaletteControls();
+  const resetReplacementControls = replacementControls.reset;
+  // Reset filter/sort state whenever a different socket action target is opened.
+  useEffect(() => { resetReplacementControls(); }, [socketActionId, resetReplacementControls]);
+  const replacementRows = useMemo(
+    () => selectMateriaPaletteRows(palette, { materia, query: replacementControls.query, sortMode: replacementControls.sortMode, direction: replacementControls.direction }),
+    [palette, materia, replacementControls.query, replacementControls.sortMode, replacementControls.direction],
+  );
+
   if (!socketActionId || !activeLoadout?.sockets?.[socketActionId]) return null;
   const readonlyTitle = !editPolicy.canEdit ? editPolicy.reason : undefined;
 
@@ -684,7 +695,7 @@ function SocketActionModal(props: SocketActionModalProps) {
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs uppercase tracking-[0.3em] text-cyan-200">{socketActionMode === 'replace' ? 'replace materia' : socketActionMode === 'edit' ? 'edit socket properties' : socketActionMode === 'connect' ? 'connect edge' : 'socket actions'}</p><h3 id="socket-action-title" className="mt-1 text-2xl font-black text-white">{formatSocketLabel(socketActionId, activeLoadout.sockets[socketActionId])}</h3><p className="mt-1 text-sm text-slate-300">Socket id: {socketActionId}</p></div><button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>{socketActionMode === 'replace' || socketActionMode === 'edit' || socketActionMode === 'connect' ? 'Cancel' : 'Close'}</button></div>
         {!editPolicy.canEdit && <p className="mt-4 rounded-xl border border-amber-300/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="status">{editPolicy.reason}</p>}
         {socketActionMode === 'replace' ? (
-          <div className="mt-5"><p className="text-sm text-slate-300">Choose reusable materia to assign to this socket. Socket id, edges, traversal settings, and layout metadata will be preserved.</p><div className="materia-replacement-list mt-4" role="list" aria-label="Available replacement materia" data-testid="materia-replacement-list">{palette.map(([id, socket], index) => (<button key={id} type="button" className="materia-replacement-row" data-testid={`replacement-materia-${id}`} disabled={!editPolicy.canEdit} title={readonlyTitle} onClick={() => replaceMateriaFromModal(socketActionId, id)}><Orb small color={socketColor(id, index, materia, socket)} label={id} /><span className="flex min-w-0 flex-col text-left"><span className="truncate font-black text-cyan-50">{id}</span><span className="truncate text-xs text-slate-300">{getSocketLabel(id, socket, materia)}</span></span></button>))}</div>{palette.length === 0 && <p className="mt-4 text-sm text-amber-200">No available materia definitions found.</p>}</div>
+          <div className="mt-5"><p className="text-sm text-slate-300">Choose reusable materia to assign to this socket. Socket id, edges, traversal settings, and layout metadata will be preserved.</p><MateriaPaletteControls state={replacementControls} testIdPrefix="replacement" /><div className="materia-replacement-list mt-4" role="list" aria-label="Available replacement materia" data-testid="materia-replacement-list">{replacementRows.map(({ id, socket, index }) => (<button key={id} type="button" className="materia-replacement-row" data-testid={`replacement-materia-${id}`} disabled={!editPolicy.canEdit} title={readonlyTitle} onClick={() => replaceMateriaFromModal(socketActionId, id)}><Orb small color={socketColor(id, index, materia, socket)} label={id} /><span className="flex min-w-0 flex-col text-left"><span className="truncate font-black text-cyan-50">{id}</span><span className="truncate text-xs text-slate-300">{getSocketLabel(id, socket, materia)}</span></span></button>))}</div>{palette.length === 0 ? <p className="mt-4 text-sm text-amber-200">No available materia definitions found.</p> : replacementRows.length === 0 && <p className="palette-empty mt-4" data-testid="replacement-no-results">No matching materia.</p>}</div>
         ) : socketActionMode === 'edit' ? (
           <div className="mt-5 space-y-4" data-testid="socket-property-editor"><p className="text-sm text-slate-300">Edit socket-level traversal limits and explicit layout coordinates. Empty fields clear that socket property.</p><div className="grid gap-3 sm:grid-cols-3"><label className="graph-field">Max visits<input data-testid="socket-max-visits" inputMode="numeric" value={socketPropertyForm.maxVisits} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxVisits: event.target.value })} placeholder="default" /></label><label className="graph-field">Retries / edge traversals<input data-testid="socket-max-edge-traversals" inputMode="numeric" value={socketPropertyForm.maxEdgeTraversals} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxEdgeTraversals: event.target.value })} placeholder="default" /></label><label className="graph-field">Max output bytes<input data-testid="socket-max-output-bytes" inputMode="numeric" value={socketPropertyForm.maxOutputBytes} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, maxOutputBytes: event.target.value })} placeholder="default" /></label></div><div className="grid gap-3 sm:grid-cols-2"><label className="graph-field">Layout X<input data-testid="socket-layout-x" value={socketPropertyForm.layoutX} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutX: event.target.value })} placeholder="auto" /></label><label className="graph-field">Layout Y<input data-testid="socket-layout-y" value={socketPropertyForm.layoutY} onChange={(event) => setSocketPropertyForm({ ...socketPropertyForm, layoutY: event.target.value })} placeholder="auto" /></label></div>{socketPropertyError && <p className="socket-property-error" role="alert">{socketPropertyError}</p>}<div className="flex flex-wrap gap-3"><button type="button" className="materia-button" data-testid="save-socket-properties" disabled={!editPolicy.canEdit} title={readonlyTitle} onClick={() => saveSocketProperties(socketActionId)}>Save socket properties</button><button type="button" className="materia-button-secondary" onClick={closeSocketActionModal}>Cancel</button></div></div>
         ) : socketActionMode === 'connect' ? (

@@ -618,3 +618,72 @@ describe('LoadoutGraphPanel zoom behavior', () => {
     expect(canvasActions.handleSocketClick).toHaveBeenCalledWith('Socket-1', expect.anything());
   });
 });
+
+describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
+  function renderReplacePanel() {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    const baseSocketModal = base.props.socketModal;
+    base.unmount();
+
+    const materia = {
+      Build: { prompt: 'build', group: 'Core' },
+      Audit: { prompt: 'audit', group: 'Core' },
+      detectVcs: { type: 'utility' as const, utility: 'vcs.detect', label: 'Detect VCS', group: 'Utility' },
+    };
+    const palette = [['Build', { materia: 'Build' }], ['Audit', { materia: 'Audit' }], ['detectVcs', { materia: 'detectVcs' }]] as Array<[string, { materia: string }]>;
+
+    return renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        materia,
+        palette: palette as never,
+        editPolicy: unlockedUserPolicy,
+      },
+      socketModal: {
+        state: { ...baseSocketModal.state, socketActionMode: 'replace', socketActionId: 'Socket-1' },
+        actions: baseSocketModal.actions,
+      },
+    });
+  }
+
+  function replacementOrder(container: HTMLElement): string[] {
+    const list = container.querySelector('[data-testid="materia-replacement-list"]');
+    if (!list) return [];
+    return Array.from(list.querySelectorAll<HTMLButtonElement>('[data-testid^="replacement-materia-"]'))
+      .map((button) => button.dataset.testid?.replace('replacement-materia-', '') ?? '');
+  }
+
+  it('renders shared filter/sort controls and defaults to name ascending', () => {
+    const { container, getByTestId } = renderReplacePanel();
+    expect(getByTestId('materia-replacement-list')).toBeTruthy();
+    expect(getByTestId('replacement-filter-input')).toBeTruthy();
+    expect(getByTestId('replacement-sort-select')).toBeTruthy();
+    expect(getByTestId('replacement-sort-direction')).toBeTruthy();
+    expect(replacementOrder(container)).toEqual(['Audit', 'Build', 'detectVcs']);
+  });
+
+  it('filters the replacement list by text and type', () => {
+    const { container, getByTestId } = renderReplacePanel();
+
+    fireEvent.change(getByTestId('replacement-filter-input'), { target: { value: 'core' } });
+    expect(replacementOrder(container)).toEqual(['Audit', 'Build']);
+
+    fireEvent.change(getByTestId('replacement-filter-input'), { target: { value: 'utility' } });
+    expect(replacementOrder(container)).toEqual(['detectVcs']);
+  });
+
+  it('sorts utilities before agents when type is descending', () => {
+    const { container, getByTestId } = renderReplacePanel();
+    fireEvent.change(getByTestId('replacement-sort-select'), { target: { value: 'type' } });
+    fireEvent.click(getByTestId('replacement-sort-direction'));
+    expect(replacementOrder(container)).toEqual(['detectVcs', 'Build', 'Audit']);
+  });
+
+  it('shows a no-results state when no replacement materia matches', () => {
+    const { getByTestId, queryByTestId } = renderReplacePanel();
+    fireEvent.change(getByTestId('replacement-filter-input'), { target: { value: 'zzznomatch' } });
+    expect(queryByTestId('replacement-materia-Build')).toBeNull();
+    expect(getByTestId('replacement-no-results').textContent).toBe('No matching materia.');
+  });
+});

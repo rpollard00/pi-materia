@@ -1122,6 +1122,133 @@
   box-shadow: 0 0 28px rgb(168 85 247 / 0.22), 0 0 34px rgb(34 211 238 / 0.12);
 }
 
+.palette-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.palette-controls-search {
+  position: relative;
+  display: flex;
+  flex: 1 1 9rem;
+  min-width: 0;
+  align-items: center;
+}
+
+.palette-controls-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-width: 2.25;
+}
+
+.palette-controls-icon-leading {
+  position: absolute;
+  left: 0.6rem;
+  color: rgb(165 243 252 / 0.7);
+  pointer-events: none;
+}
+
+.palette-filter-input {
+  width: 100%;
+  border-radius: 9999px;
+  border: 1px solid rgb(207 250 254 / 0.16);
+  background: rgb(2 6 23 / 0.82);
+  padding: 0.4rem 1.85rem 0.4rem 1.85rem;
+  color: rgb(224 242 254);
+  font-size: 0.78rem;
+  letter-spacing: normal;
+  text-transform: none;
+  outline: none;
+  transition: 160ms ease;
+}
+
+.palette-filter-input:focus {
+  border-color: rgb(165 243 252 / 0.62);
+  box-shadow: 0 0 18px rgb(34 211 238 / 0.16);
+}
+
+.palette-controls-clear {
+  position: absolute;
+  right: 0.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(165 243 252 / 0.7);
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.palette-controls-clear:hover {
+  color: rgb(224 242 254);
+  background: rgb(8 47 73 / 0.62);
+}
+
+.palette-sort-select {
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  border: 1px solid rgb(207 250 254 / 0.16);
+  background: rgb(2 6 23 / 0.82);
+  padding: 0.4rem 0.6rem;
+  color: rgb(224 242 254);
+  font-size: 0.74rem;
+  letter-spacing: normal;
+  text-transform: none;
+  outline: none;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.palette-sort-select:focus {
+  border-color: rgb(165 243 252 / 0.62);
+  box-shadow: 0 0 18px rgb(34 211 238 / 0.16);
+}
+
+.palette-direction-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(207 250 254 / 0.16);
+  background: rgb(2 6 23 / 0.82);
+  color: rgb(207 250 254 / 0.92);
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.palette-direction-toggle:hover,
+.palette-direction-toggle:focus-visible {
+  border-color: rgb(165 243 252 / 0.62);
+  background: rgb(8 47 73 / 0.72);
+  box-shadow: 0 0 18px rgb(34 211 238 / 0.16);
+}
+
+.palette-direction-toggle[aria-pressed="true"] {
+  border-color: rgb(165 243 252 / 0.55);
+  background: rgb(8 47 73 / 0.82);
+}
+
+.palette-empty {
+  margin: 0.75rem 0 0;
+  border-radius: 1rem;
+  border: 1px dashed rgb(103 232 254 / 0.26);
+  background: rgb(15 23 42 / 0.48);
+  padding: 0.9rem;
+  color: rgb(186 230 253 / 0.78);
+  font-size: 0.82rem;
+}
+
 .materia-button,
 .materia-button-secondary {
   border-radius: 9999px;
