@@ -12,14 +12,25 @@ import type { RuntimeEvent, RuntimeEventSeverity } from '../../types.js';
 /** Monitor feed view modes for the Pretty/Raw toggle. */
 export type MonitorEventViewMode = 'pretty' | 'raw';
 
-/** Canonical severity levels (docs/runtime-eventing.md §2.3). */
-const SEVERITIES: ReadonlySet<string> = new Set([
+/**
+ * Canonical severity levels in contract/display order
+ * (docs/runtime-eventing.md §2.3).
+ *
+ * Single source of truth for the event contract severities so normalization,
+ * the monitor severity filter dropdown, and any future consumers all agree on
+ * the set and order of levels. Exported readonly so consumers can iterate it
+ * without mutating the contract.
+ */
+export const RUNTIME_EVENT_SEVERITIES: readonly RuntimeEventSeverity[] = [
   'debug',
   'info',
   'warning',
   'error',
   'critical',
-]);
+];
+
+/** Canonical severity levels (docs/runtime-eventing.md §2.3). */
+const SEVERITIES: ReadonlySet<string> = new Set(RUNTIME_EVENT_SEVERITIES);
 
 /** Severity used when an event omits or carries an unrecognized severity. */
 export const DEFAULT_SEVERITY: RuntimeEventSeverity = 'info';

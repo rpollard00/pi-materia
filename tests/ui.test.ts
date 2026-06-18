@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { recoveryIdentityKey } from "../src/application/recoveryPolicy.js";
 import { clearWidgetTicker, formatCostLabel, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 
@@ -194,7 +195,7 @@ describe("persistent Materia widget formatting", () => {
 
     const stableLines = renderMateriaRunWidget(stableState, 2_000);
     const dynamicLines = renderMateriaRunWidget(dynamicState, 2_000);
-    for (const marker of ["✦", "⌘", "↻", "◷", "Σ"]) {
+    for (const marker of ["✦", "⌘", "↻", "⟳", "◷", "Σ"]) {
       expect(dynamicLines[0].indexOf(marker)).toBe(stableLines[0].indexOf(marker));
     }
     expect(dynamicLines).toHaveLength(stableLines.length);
@@ -208,7 +209,7 @@ describe("persistent Materia widget formatting", () => {
 
     const shortLines = renderMateriaCastStatusWidget(shortStatus, 2_000);
     const longLines = renderMateriaCastStatusWidget(longStatus, 2_000);
-    for (const marker of ["✦", "⌘", "↻", "◷", "Σ"]) {
+    for (const marker of ["✦", "⌘", "↻", "⟳", "◷", "Σ"]) {
       expect(longLines[0].indexOf(marker)).toBe(shortLines[0].indexOf(marker));
     }
     expect(longLines).toHaveLength(3);
@@ -320,7 +321,7 @@ describe("persistent Materia widget formatting", () => {
 
     const basicLines = renderMateriaRunWidget(run, 2_000);
     const richLines = renderMateriaCastStatusWidget(resumed, 2_000);
-    for (const marker of ["✦", "⌘", "↻", "◷", "Σ"]) {
+    for (const marker of ["✦", "⌘", "↻", "⟳", "◷", "Σ"]) {
       expect(richLines[0].indexOf(marker)).toBe(basicLines[0].indexOf(marker));
     }
     expect(richLines[0]).toContain("⌘ Review ◉ Build");
@@ -374,6 +375,57 @@ describe("persistent Materia widget formatting", () => {
     expect(lines).toHaveLength(3);
     expect(lines.every((line) => line.length <= 78)).toBe(true);
     expect(lines.join("\n")).not.toContain("estimated token value");
+  });
+});
+
+describe("persistent Materia widget retry budget", () => {
+  function recoveryLoopCastState(
+    allowance: { effectiveMax: number; originalMax?: number; reviveCount?: number },
+    attempts: number,
+  ): MateriaCastState {
+    const base = loopCastState();
+    const key = recoveryIdentityKey(base);
+    return {
+      ...base,
+      recoveryAllowances: {
+        [key]: {
+          originalMaxAttempts: allowance.originalMax ?? allowance.effectiveMax,
+          effectiveMaxAttempts: allowance.effectiveMax,
+          reviveCount: allowance.reviveCount ?? 0,
+        },
+      },
+      recoveryAttempts: { [key]: attempts },
+    };
+  }
+
+  test("renders same-socket recovery budget as ⟳ current/max on the compact first line", () => {
+    const first = renderMateriaCastStatusWidget(recoveryLoopCastState({ effectiveMax: 3 }, 0), 2_000);
+    const second = renderMateriaCastStatusWidget(recoveryLoopCastState({ effectiveMax: 3 }, 1), 2_000);
+    const third = renderMateriaCastStatusWidget(recoveryLoopCastState({ effectiveMax: 3 }, 2), 2_000);
+
+    expect(first[0]).toContain("⟳ 1/3");
+    expect(second[0]).toContain("⟳ 2/3");
+    expect(third[0]).toContain("⟳ 3/3");
+    for (const lines of [first, second, third]) {
+      expect(lines.every((line) => line.length <= 78)).toBe(true);
+    }
+  });
+
+  test("reflects a revived effective max in the retry budget denominator", () => {
+    // Original 3-attempt budget exhausted, then /materia revive raised the effective max to 6.
+    const lines = renderMateriaCastStatusWidget(
+      recoveryLoopCastState({ effectiveMax: 6, originalMax: 3, reviveCount: 1 }, 3),
+      2_000,
+    );
+    expect(lines[0]).toContain("⟳ 4/6");
+    expect(lines[0]).not.toContain("⟳ 4/3");
+    expect(lines.every((line) => line.length <= 78)).toBe(true);
+  });
+
+  test("shows ⟳ - on the first line when no retry budget is available", () => {
+    const lines = renderMateriaCastStatusWidget(loopCastState(), 2_000);
+    expect(lines[0]).toContain("⟳ -");
+    expect(lines.every((line) => line.length <= 78)).toBe(true);
   });
 });
 

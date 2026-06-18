@@ -3,6 +3,7 @@ import type { PipelineConfig } from '../../../loadoutModel.js';
 import type { AddQuestRequest, AddQuestResponse, UpdateQuestRequest, UpdateQuestResponse } from '../../types.js';
 import { toast } from '../../../toast/index.js';
 import { QuestDefaultLoadoutSelector } from './QuestDefaultLoadoutSelector.js';
+import { clearQuestDraft, setQuestDraft, useQuestDraft } from './questDraftStore.js';
 
 export interface QuestDefaultLoadoutProps {
   questDefaultLoadoutId: string | null;
@@ -33,12 +34,26 @@ interface QuestFormProps {
   onCancel?: () => void;
   onSubmit: (values: QuestFormValues) => Promise<void> | void;
   questDefaultLoadoutProps?: QuestDefaultLoadoutProps;
+  /**
+   * Optional controlled draft source. When provided (create mode), the form
+   * reads its prompt/loadoutOverride from the draft and reports every edit via
+   * onDraftChange so the value survives tab unmount/remount. When omitted
+   * (edit mode), the form keeps its existing component-local state.
+   */
+  draftValues?: QuestFormValues;
+  onDraftChange?: (values: QuestFormValues) => void;
 }
 
 interface QuestCreateFormProps extends QuestDefaultLoadoutProps {
   persistedLoadouts: Record<string, PipelineConfig>;
   onAddQuest: (payload: AddQuestRequest) => Promise<AddQuestResponse | undefined>;
   submitting: boolean;
+  /**
+   * Active quest board context for the create-form draft (typically the board
+   * path). The draft is preserved across tab switches within the same context
+   * and reset when this context changes to a different known board.
+   */
+  draftContextKey?: string;
 }
 
 interface QuestEditFormProps {
@@ -60,18 +75,38 @@ function questUpdatedLabel(response: UpdateQuestResponse, fallback?: string): st
   return quest?.title || quest?.id || fallback || 'quest';
 }
 
-export function QuestForm({ mode, persistedLoadouts, initialValues, submitLabel, submittingLabel, headingKicker, headingTitle, headingDescription, disabled = false, submitting = false, statusMessage, errorMessage, onCancel, onSubmit, questDefaultLoadoutProps }: QuestFormProps) {
-  const [loadoutOverride, setLoadoutOverride] = useState(initialValues.loadoutOverride);
-  const [prompt, setPrompt] = useState(initialValues.prompt);
+export function QuestForm({ mode, persistedLoadouts, initialValues, submitLabel, submittingLabel, headingKicker, headingTitle, headingDescription, disabled = false, submitting = false, statusMessage, errorMessage, onCancel, onSubmit, questDefaultLoadoutProps, draftValues, onDraftChange }: QuestFormProps) {
+  const isControlled = draftValues !== undefined;
+  const [localLoadoutOverride, setLocalLoadoutOverride] = useState(initialValues.loadoutOverride);
+  const [localPrompt, setLocalPrompt] = useState(initialValues.prompt);
+  const prompt = isControlled ? draftValues.prompt : localPrompt;
+  const loadoutOverride = isControlled ? draftValues.loadoutOverride : localLoadoutOverride;
   const formDisabled = disabled || submitting;
   const titleId = mode === 'edit' ? 'quest-edit-title' : 'quest-create-title';
   const loadoutId = mode === 'edit' ? 'quest-edit-loadout-override' : 'quest-loadout-override';
   const promptId = mode === 'edit' ? 'quest-edit-prompt' : 'quest-prompt';
 
+  function handlePromptChange(value: string) {
+    if (isControlled) {
+      onDraftChange?.({ prompt: value, loadoutOverride: draftValues.loadoutOverride });
+      return;
+    }
+    setLocalPrompt(value);
+  }
+
+  function handleLoadoutOverrideChange(value: string) {
+    if (isControlled) {
+      onDraftChange?.({ prompt: draftValues.prompt, loadoutOverride: value });
+      return;
+    }
+    setLocalLoadoutOverride(value);
+  }
+
   useEffect(() => {
-    setLoadoutOverride(initialValues.loadoutOverride);
-    setPrompt(initialValues.prompt);
-  }, [initialValues.loadoutOverride, initialValues.prompt]);
+    if (isControlled) return;
+    setLocalLoadoutOverride(initialValues.loadoutOverride);
+    setLocalPrompt(initialValues.prompt);
+  }, [initialValues.loadoutOverride, initialValues.prompt, isControlled]);
 
   const loadoutOptions = useMemo(() => Object.entries(persistedLoadouts)
     .sort(([left], [right]) => left.localeCompare(right)), [persistedLoadouts]);
@@ -118,7 +153,7 @@ export function QuestForm({ mode, persistedLoadouts, initialValues, submitLabel,
             <select
               id={loadoutId}
               value={loadoutOverride}
-              onChange={(event) => setLoadoutOverride(event.target.value)}
+              onChange={(event) => handleLoadoutOverrideChange(event.target.value)}
               disabled={formDisabled}
             >
               <option value="">No override — use quest default, then active fallback</option>
@@ -137,7 +172,7 @@ export function QuestForm({ mode, persistedLoadouts, initialValues, submitLabel,
           <textarea
             id={promptId}
             value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
+            onChange={(event) => handlePromptChange(event.target.value)}
             disabled={formDisabled}
             rows={4}
             placeholder="Describe the quest objective…"
@@ -151,8 +186,8 @@ export function QuestForm({ mode, persistedLoadouts, initialValues, submitLabel,
   );
 }
 
-export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout, onAddQuest, submitting }: QuestCreateFormProps) {
-  const [formKey, setFormKey] = useState(0);
+export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, questDefaultLoadoutWarning, setQuestDefaultLoadout, onAddQuest, submitting, draftContextKey }: QuestCreateFormProps) {
+  const draft = useQuestDraft(draftContextKey);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -179,7 +214,9 @@ export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, ques
 
     const createdLabel = questCreatedLabel(response);
     const message = `Added quest: ${createdLabel}`;
-    setFormKey((value) => value + 1);
+    // Clear the preserved draft only on explicit successful completion so
+    // navigating away and back keeps the in-progress text.
+    clearQuestDraft();
     setStatusMessage(message);
     toast({
       id: `quest-add-success:${response.quest?.id ?? createdLabel}`,
@@ -191,10 +228,11 @@ export function QuestCreateForm({ persistedLoadouts, questDefaultLoadoutId, ques
 
   return (
     <QuestForm
-      key={formKey}
       mode="create"
       persistedLoadouts={persistedLoadouts}
-      initialValues={{ prompt: '', loadoutOverride: '' }}
+      initialValues={draft}
+      draftValues={draft}
+      onDraftChange={(values) => setQuestDraft(draftContextKey, values)}
       submitLabel="Add quest"
       submittingLabel="Adding…"
       headingKicker="New Quest"

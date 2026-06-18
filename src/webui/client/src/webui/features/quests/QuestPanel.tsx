@@ -206,6 +206,7 @@ export function QuestPanel({ persistedLoadouts = {}, questDefaultLoadoutId, ques
           setQuestDefaultLoadout={setQuestDefaultLoadout}
           onAddQuest={add}
           submitting={submitting}
+          draftContextKey={board?.boardPath}
         />
       ) : (
         <QuestEditForm
