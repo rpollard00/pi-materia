@@ -83,6 +83,17 @@ describe("socket output requirements", () => {
     ]);
   });
 
+  test("explicit $.text assignment is represented as a consumed renderable-text payload path", () => {
+    const requirements = deriveSocketOutputRequirements({
+      socket: socket({ assign: { prNotes: "$.text" } }),
+    });
+
+    expect(requirements.requiredFields).toEqual([]);
+    expect(requirements.consumedPayloadPaths).toEqual([
+      { targetPath: "prNotes", payloadPath: "$.text", topLevelField: "text", reason: "Socket assignment maps prNotes from $.text." },
+    ]);
+  });
+
   test("assigning runtime workItems from $.workItems requires top-level workItems array", () => {
     const requirements = deriveSocketOutputRequirements({ socket: socket({ assign: { workItems: "$.workItems" } }) });
 

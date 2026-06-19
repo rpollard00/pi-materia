@@ -275,6 +275,23 @@ describe("application prompt assembly", () => {
     expect(prompt).not.toContain('"satisfied"');
   });
 
+  test("explicit $.text assignment sockets instruct models to emit a top-level string text field without extra handoff fields", () => {
+    const socket = agentSocket({
+      socket: { materia: "Narrate", parse: "json", assign: { prNotes: "$.text" } },
+      materia: { tools: "readOnly", prompt: "Narrate the result." },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(prompt).toContain("Payload paths consumed by this socket:");
+    expect(prompt).toContain("$.text for assignment to prNotes");
+    expect(prompt).toContain('top-level "text" string');
+    expect(prompt).toContain("primary user-facing text");
+    // The text assignment does not require the control or work-generating fields.
+    expect(prompt).not.toContain('"workItems" at $.workItems');
+    expect(prompt).not.toContain('"satisfied" at $.satisfied');
+    expect(prompt).not.toContain("Required payload fields:");
+  });
+
   test("nested custom assign JSON sockets render nested payload paths without full-envelope fields", () => {
     const socket = agentSocket({
       socket: { materia: "Review", parse: "json", assign: { "review.route": "$.review.route", "review.label": "$.artifacts.0.label" } },

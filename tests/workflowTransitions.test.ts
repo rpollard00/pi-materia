@@ -161,6 +161,23 @@ describe("workflow transitions", () => {
     expect(cast.data.meta).toEqual({ label: "snapshot" });
   });
 
+  test("explicit $.text assignment is the durable handoff path into run state", () => {
+    const cast = state({ data: {} });
+    const current = {
+      id: "Narrate",
+      socket: { materia: "Narrate", parse: "json", assign: { prNotes: "$.text" } },
+      materia: { tools: "readOnly", prompt: "narrate" },
+    } satisfies ResolvedMateriaSocket;
+
+    applyAssignments(cast, current, { satisfied: true, context: "internal only", text: "## Summary\n\nShipped the feature." });
+
+    // Renderable text is persisted into a named state slot by explicit
+    // assignment, while the surrounding handoff metadata is not mirrored.
+    expect(cast.data.prNotes).toBe("## Summary\n\nShipped the feature.");
+    expect(cast.data.envelope).toBeUndefined();
+    expect(cast.data).not.toHaveProperty("texts");
+  });
+
   test("advance increments cursor and routes final-item exhaustion through canonical loop exits", () => {
     const current = socket("Socket-2", { advance: { cursor: "workItemIndex", items: "state.workItems", done: "Legacy-Done", when: "satisfied" } });
     const cast = state({

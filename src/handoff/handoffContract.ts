@@ -99,6 +99,12 @@ export function formatSocketOutputFinalInstruction(
   if (consumedPaths.length > 0)
     lines.push("Payload paths consumed by this socket:", ...consumedPaths);
 
+  if (consumesRenderableTextPayload(requirements)) {
+    lines.push(
+      `This socket persists renderable prose via assignment, so emit your primary user-facing text as a top-level ${JSON.stringify(HANDOFF_TEXT_FIELD)} string. Do not add other handoff fields (workItems, satisfied, context) unless this socket's routing or work generation also requires them.`,
+    );
+  }
+
   const reservedRequiredRules = requirements.reservedFieldTypeRules
     .filter((rule) => rule.required)
     .map(
@@ -113,6 +119,14 @@ export function formatSocketOutputFinalInstruction(
 
 function articleForType(type: string): string {
   return /^[aeiou]/i.test(type) ? "an" : "a";
+}
+
+function consumesRenderableTextPayload(
+  requirements: SocketOutputRequirements,
+): boolean {
+  return requirements.consumedPayloadPaths.some(
+    (path) => path.payloadPath === `$.${HANDOFF_TEXT_FIELD}`,
+  );
 }
 
 export const HANDOFF_CONTRACT_DOC_TEXT = [
