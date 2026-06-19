@@ -96,7 +96,7 @@ describe("materia text output native rendering", () => {
     expect(materiaTextMessages(harness)).toHaveLength(0);
   });
 
-  test("keeps the authoritative text payload in cast state for downstream materia", async () => {
+  test("keeps the authoritative text payload available for downstream materia without mirroring it into envelope state", async () => {
     const harness = await makeHarness(narrateConfig());
 
     await harness.runCommand("materia", "cast describe the change");
@@ -106,13 +106,16 @@ describe("materia text output native rendering", () => {
     );
     await harness.emit("agent_end", { messages: [] });
 
-    // Rendering is a one-way presentation layer: the raw envelope text remains
-    // the source of truth in cast state for downstream consumption.
+    // Rendering is a one-way presentation layer: the raw parsed payload remains
+    // the authoritative source (kept in lastJson for replay/debugging and to
+    // drive rendering), but renderable text is NOT mirrored into durable
+    // envelope state. Downstream materia consume it via explicit assignment.
     const castStates = harness.appendedEntries
       .filter((entry) => entry.customType === "pi-materia-cast-state")
-      .map((entry) => entry.data as { data?: { envelope?: { text?: unknown } } });
+      .map((entry) => entry.data as { lastJson?: { text?: unknown }; data?: { envelope?: Record<string, unknown> } });
     const latest = castStates[castStates.length - 1];
-    expect(latest?.data?.envelope?.text).toBe("Authoritative narration payload.");
+    expect(latest?.lastJson).toMatchObject({ text: "Authoritative narration payload." });
+    expect(latest?.data?.envelope).not.toHaveProperty("text");
 
     expect(materiaTextMessages(harness)).toHaveLength(1);
     expect(materiaTextMessages(harness)[0]?.content).toBe("Authoritative narration payload.");

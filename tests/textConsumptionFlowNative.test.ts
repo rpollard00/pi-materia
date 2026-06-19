@@ -6,8 +6,6 @@ import piMateria from "../src/index.js";
 import type { MateriaCastState } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
 import { MATERIA_TEXT_OUTPUT_EVENT_TYPE } from "../src/presentation/textOutput.js";
-import { syntheticPriorTextContext } from "../src/application/promptAssembly.js";
-import { HANDOFF_TEXTS_STATE_KEY } from "../src/domain/handoff.js";
 
 const previousProfileDir = process.env.PI_MATERIA_PROFILE_DIR;
 
@@ -17,10 +15,10 @@ afterEach(() => {
 });
 
 /**
- * Two-socket loadout that exercises the renderable text consumption flow end to
+ * Two-socket loadout that exercises the renderable text handoff flow end to
  * end: Narrate emits structured renderable text, the TUI renderer shows it as
- * clean prose, and PR-Notes consumes the raw payload via a dedicated assignment
- * plus the generic prior-text context section.
+ * clean prose, and PR-Notes consumes the raw payload via a dedicated explicit
+ * assignment (`assign: { narration: "$.text" }`).
  */
 function textConsumptionConfig() {
   return {
@@ -100,7 +98,7 @@ const NARRATION_PROSE = "## Summary\n\nAdded the retry toggle and covered it wit
 const RAW_NARRATION = `  ${NARRATION_PROSE}  `;
 
 describe("renderable text consumption flow", () => {
-  test("a text-like materia emits structured text, the TUI renders it as prose, and a following materia consumes the raw payload", async () => {
+  test("a text-like materia emits structured text, the TUI renders it as prose, and a following materia consumes the raw payload via explicit assignment", async () => {
     const harness = await makeHarness(textConsumptionConfig());
 
     await harness.runCommand("materia", "cast add retry toggle");
@@ -119,32 +117,31 @@ describe("renderable text consumption flow", () => {
     expect(textMessages[0]?.content).toBe(NARRATION_PROSE);
     expect(JSON.stringify(textMessages[0]?.details)).not.toContain("internal handoff notes only");
 
-    // 2. The raw JSON remains authoritative: it is mirrored at envelope.text
-    //    (latest only) and accumulated in state.data.texts (source-attributed).
+    // 2. The raw JSON remains authoritative for replay/debugging in lastJson,
+    //    but renderable text is no longer mirrored into durable shared state:
+    //    state.data.envelope has no text and nothing is accumulated under texts.
     const state = latestState(harness);
-    expect(state.data.envelope?.text).toBe(NARRATION_PROSE);
-    const texts = state.data[HANDOFF_TEXTS_STATE_KEY] as Array<{ socket: string; materia?: string; text: string }>;
-    expect(texts).toEqual([{ socket: "Socket-1", materia: "Narrate", text: NARRATION_PROSE }]);
+    expect(state.lastJson).toMatchObject({ text: NARRATION_PROSE });
+    expect(state.data.envelope).not.toHaveProperty("text");
+    expect(state.data.texts).toBeUndefined();
 
-    // 3. The dedicated assignment captures the raw payload into a named state
-    //    slot so a following materia can consume it without hard-coding Narrate.
+    // 3. The dedicated explicit assignment captures the raw payload into a
+    //    named state slot so a following materia can consume it without
+    //    hard-coding Narrate.
     expect(state.data.narration).toBe(NARRATION_PROSE);
 
     // 4. The following socket (PR-Notes) receives the resolved narration in its
-    //    dispatched prompt — it consumes the raw text payload as input context.
+    //    dispatched prompt via {{state.narration}} — the only durable handoff
+    //    path for renderable text.
     const prompts = promptMessages(harness);
     expect(prompts).toHaveLength(2);
     const prNotesPrompt = prompts[1];
-    // Socket-2 is the PR-Notes materia (its prompt body) and consumes the
-    // resolved narration prose as input context.
     expect(prNotesPrompt).toContain("Turn narration into PR notes");
     expect(prNotesPrompt).toContain(NARRATION_PROSE);
 
-    // 5. The generic prior-text context section also exposes the accumulated
-    //    payload to following materia, independent of the dedicated assignment.
-    const priorText = syntheticPriorTextContext(state);
-    expect(priorText).toContain("Prior renderable text payloads:");
-    expect(priorText).toContain(NARRATION_PROSE);
+    // 5. Unassigned renderable text is not leaked into following prompts as a
+    //    synthetic prior-text context section.
+    expect(prNotesPrompt).not.toContain("Prior renderable text payloads:");
   });
 
   test("rendering is a one-way presentation layer that does not replace or mutate the underlying JSON handoff", async () => {
@@ -160,22 +157,23 @@ describe("renderable text consumption flow", () => {
     const state = latestState(harness);
     const textMessages = materiaTextMessages(harness);
 
-    // The authoritative envelope.text preserves the raw payload verbatim
-    // (including surrounding whitespace), while the rendered display message
-    // normalizes it for presentation. They intentionally differ: rendering is a
-    // one-way presentation layer and must not replace or mutate the JSON handoff.
+    // The authoritative parsed payload (state.lastJson) preserves the raw text
+    // verbatim (including surrounding whitespace), while the rendered display
+    // message normalizes it for presentation. They intentionally differ:
+    // rendering is a one-way presentation layer and must not replace or mutate
+    // the JSON handoff.
     expect(textMessages).toHaveLength(1);
-    expect(state.data.envelope?.text).toBe(RAW_NARRATION);
+    expect(state.lastJson).toMatchObject({ text: RAW_NARRATION });
     expect(textMessages[0]?.content).toBe(NARRATION_PROSE);
-    expect(textMessages[0]?.content).not.toBe(state.data.envelope?.text);
+    expect(textMessages[0]?.content).not.toBe((state.lastJson as { text?: string }).text);
 
-    // The accumulated texts collection holds the normalized prose exactly once.
-    const texts = state.data[HANDOFF_TEXTS_STATE_KEY] as Array<{ text: string }>;
-    expect(texts).toHaveLength(1);
-    expect(texts[0]?.text).toBe(NARRATION_PROSE);
+    // Renderable text is never mirrored into durable envelope state, and no
+    // accumulation collection is populated.
+    expect(state.data.envelope).not.toHaveProperty("text");
+    expect(state.data.texts).toBeUndefined();
 
-    // The agent's `context` handoff field is preserved (not overwritten by the
-    // narration rendering), confirming rendering touches only presentation.
+    // The agent's `context` handoff field is still mirrored (not overwritten by
+    // the narration rendering), confirming rendering touches only presentation.
     expect(state.data.envelope?.context).toBe("handoff context must survive rendering");
 
     // No duplicate raw-text output: exactly one materia_text display message and
@@ -187,7 +185,7 @@ describe("renderable text consumption flow", () => {
     expect(proseDisplays).toHaveLength(1);
   });
 
-  test("sockets without a text payload render normally and expose no prior-text context", async () => {
+  test("sockets without a text payload render normally and expose no text state", async () => {
     const harness = await makeHarness(textConsumptionConfig());
 
     await harness.runCommand("materia", "cast no narration");
@@ -201,9 +199,8 @@ describe("renderable text consumption flow", () => {
     expect(materiaTextMessages(harness)).toHaveLength(0);
 
     const state = latestState(harness);
-    // envelope.text is absent and no prior-text context section is surfaced.
-    expect(state.data.envelope?.text).toBeUndefined();
-    expect(state.data[HANDOFF_TEXTS_STATE_KEY]).toBeUndefined();
-    expect(syntheticPriorTextContext(state)).toBeUndefined();
+    // Renderable text is never mirrored into durable state or accumulated.
+    expect(state.data.envelope).not.toHaveProperty("text");
+    expect(state.data.texts).toBeUndefined();
   });
 });

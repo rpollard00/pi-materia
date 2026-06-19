@@ -3,7 +3,6 @@ import { activeMateriaSystemPrompt, nativeTestInternals } from "../src/castRunti
 import { applyGenericHandoffEnvelope } from "../src/application/handoff.js";
 import { applyAdvance, applyAssignments, evaluateCondition, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../src/application/workflowTransitions.js";
 import { resolvePipeline } from "../src/runtime/pipeline.js";
-import { HANDOFF_TEXTS_STATE_KEY } from "../src/domain/handoff.js";
 import type { MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket } from "../src/types.js";
 
 function makeState(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
@@ -171,84 +170,27 @@ describe("generic engine helper mechanics", () => {
     expect(target).toEqual({ utility: { result: { value: 7 } } });
   });
 
-  test("captures renderable text payloads into the handoff envelope", () => {
+  test("does not mirror renderable text into the handoff envelope state", () => {
+    const socket = {
+      id: "Narrate",
+      socket: { materia: "Narrate" },
+      materia: { tools: "none", prompt: "narrate", label: "Narrate" },
+    } satisfies ResolvedMateriaSocket;
     const state = makeState({ data: { envelope: { satisfied: false }, context: "existing context" } });
     const parsed = {
       text: "## Summary\n\nNarration prose for downstream consumption.",
       satisfied: true,
     };
 
-    applyGenericHandoffEnvelope(state, parsed);
+    applyGenericHandoffEnvelope(state, parsed, socket);
 
-    expect(state.data.envelope).toMatchObject(parsed);
-    expect(state.data.envelope?.text).toBe(parsed.text);
-    // Raw JSON remains authoritative: prose is not spread into top-level state keys.
+    // text is a renderable current-output payload, not durable shared state.
+    // It is consumed only via explicit assignment (e.g. "$.text"), so it is
+    // neither mirrored into state.data.envelope nor accumulated for later sockets.
+    expect(state.data.envelope).toMatchObject({ satisfied: true });
+    expect(state.data.envelope).not.toHaveProperty("text");
     expect(state.data).not.toHaveProperty("text");
-    // The payload is also accumulated for downstream consumption.
-    expect(state.data[HANDOFF_TEXTS_STATE_KEY]).toEqual([
-      { socket: "handoff", text: parsed.text },
-    ]);
-  });
-
-  test("accumulates renderable text payloads across sockets while envelope keeps only the latest", () => {
-    const narrateSocket = {
-      id: "Narrate",
-      socket: { materia: "Narrate" },
-      materia: { tools: "none", prompt: "narrate", label: "Narrate" },
-    } satisfies ResolvedMateriaSocket;
-    const interimSocket = {
-      id: "Branch-Notes",
-      socket: { materia: "Branch-Notes" },
-      materia: { tools: "none", prompt: "describe", label: "Branch-Notes" },
-    } satisfies ResolvedMateriaSocket;
-    const state = makeState({ data: {} });
-
-    applyGenericHandoffEnvelope(state, { text: "Narration prose for PR notes.", satisfied: true }, narrateSocket);
-    // An intervening socket emits its own text, overwriting envelope.text.
-    // The prior Narrate payload must still survive in the accumulation so a
-    // following socket (e.g. Blackbelt-PR) can consume both, not just the latest.
-    applyGenericHandoffEnvelope(state, { text: "branch-name input prose", satisfied: true }, interimSocket);
-
-    expect(state.data.envelope?.text).toBe("branch-name input prose");
-    expect(state.data[HANDOFF_TEXTS_STATE_KEY]).toEqual([
-      { socket: "Narrate", materia: "Narrate", text: "Narration prose for PR notes." },
-      { socket: "Branch-Notes", materia: "Branch-Notes", text: "branch-name input prose" },
-    ]);
-  });
-
-  test("accumulates multiple text payloads preserving order and source labels", () => {
-    const first = {
-      id: "Describe",
-      socket: { materia: "Describe" },
-      materia: { tools: "none", prompt: "describe", label: "Describe" },
-    } satisfies ResolvedMateriaSocket;
-    const second = {
-      id: "Narrate",
-      socket: { materia: "Narrate" },
-      materia: { tools: "none", prompt: "narrate", label: "Narrate" },
-    } satisfies ResolvedMateriaSocket;
-    const state = makeState({ data: {} });
-
-    applyGenericHandoffEnvelope(state, { text: "  branch-name input prose  " }, first);
-    applyGenericHandoffEnvelope(state, { text: "second narration" }, second);
-
-    expect(state.data[HANDOFF_TEXTS_STATE_KEY]).toEqual([
-      { socket: "Describe", materia: "Describe", text: "branch-name input prose" },
-      { socket: "Narrate", materia: "Narrate", text: "second narration" },
-    ]);
-  });
-
-  test("ignores empty text payloads while preserving accumulated entries", () => {
-    const socket = {
-      id: "Narrate",
-      socket: { materia: "Narrate" },
-      materia: { tools: "none", prompt: "narrate", label: "Narrate" },
-    } satisfies ResolvedMateriaSocket;
-    const state = makeState({ data: { [HANDOFF_TEXTS_STATE_KEY]: [{ socket: "Prior", text: "kept" }] } });
-
-    applyGenericHandoffEnvelope(state, { text: "   ", satisfied: true }, socket);
-
-    expect(state.data[HANDOFF_TEXTS_STATE_KEY]).toEqual([{ socket: "Prior", text: "kept" }]);
+    expect(state.data).not.toHaveProperty("texts");
   });
 
   test("preserves small handoff fields from JSON socket output", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isOrchestrationOnlyMessage, syntheticEventEmissionContext, syntheticPriorTextContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isOrchestrationOnlyMessage, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -672,121 +672,6 @@ describe("syntheticEventEmissionContext", () => {
     expect(prompt).not.toContain("## Event Emission (Optional)");
     expect(prompt).not.toContain('result.pr_created');
     expect(prompt).not.toContain('status.progress');
-  });
-});
-
-describe("syntheticPriorTextContext", () => {
-  function makeJsonSocket(): ResolvedMateriaAgentSocket {
-    return agentSocket({
-      id: "Socket-4",
-      socket: { materia: "Blackbelt-PR", parse: "json" },
-      materia: { tools: "readWrite", prompt: "Draft PR notes from upstream text." },
-    });
-  }
-
-  function makeTextSocket(): ResolvedMateriaAgentSocket {
-    return agentSocket({
-      id: "Socket-4",
-      socket: { materia: "Build", parse: "text" },
-      materia: { tools: "readWrite", prompt: "Build feature." },
-    });
-  }
-
-  test("returns undefined when no prior text payloads are accumulated", () => {
-    const socket = makeJsonSocket();
-    const castState = state(socket);
-
-    expect(syntheticPriorTextContext(castState)).toBeUndefined();
-  });
-
-  test("renders accumulated prior text payloads with source labels and prose", () => {
-    const socket = makeJsonSocket();
-    const castState = state(socket, {
-      data: {
-        item: { title: "Item 1", context: "Implement item 1." },
-        texts: [
-          { socket: "Narrate", materia: "Narrate", text: "Narration prose for PR notes." },
-        ],
-      },
-    });
-
-    const context = syntheticPriorTextContext(castState);
-    expect(context).toBeDefined();
-    expect(context).toContain("Prior renderable text payloads:");
-    expect(context).toContain("Consume whichever payload(s) are relevant to this socket as input context");
-    expect(context).toContain("Prior text #1 (Narrate Narrate)");
-    expect(context).toContain("Narration prose for PR notes.");
-    expect(context).toContain("state.data.texts");
-    expect(context).toContain("state.data.envelope.text");
-  });
-
-  test("preserves order across multiple accumulated payloads", () => {
-    const socket = makeJsonSocket();
-    const castState = state(socket, {
-      data: {
-        texts: [
-          { socket: "Describe", text: "branch-name input" },
-          { socket: "Narrate", materia: "Narrate", text: "second narration" },
-        ],
-      },
-    });
-
-    const context = syntheticPriorTextContext(castState);
-    expect(context).toContain("Prior text #1 (Describe)");
-    expect(context).toContain("branch-name input");
-    expect(context).toContain("Prior text #2 (Narrate Narrate)");
-    expect(context).toContain("second narration");
-    expect(context!.indexOf("Prior text #1")).toBeLessThan(context!.indexOf("Prior text #2"));
-  });
-
-  test("is exposed to both JSON and text output sockets", () => {
-    const jsonState = state(makeJsonSocket(), { data: { texts: [{ socket: "Narrate", text: "narration" }] } });
-    const textState = state(makeTextSocket(), { data: { texts: [{ socket: "Narrate", text: "narration" }] } });
-
-    expect(syntheticPriorTextContext(jsonState)).toContain("Prior renderable text payloads:");
-    expect(syntheticPriorTextContext(textState)).toContain("Prior renderable text payloads:");
-  });
-
-  test("filters malformed and empty entries and reindexes kept payloads", () => {
-    const socket = makeJsonSocket();
-    const castState = state(socket, {
-      data: {
-        texts: [
-          { socket: "Narrate", text: "kept narration" },
-          { socket: "Empty", text: "   " },
-          { malformed: true },
-          "not-an-object",
-        ],
-      },
-    });
-
-    const context = syntheticPriorTextContext(castState);
-    expect(context).toContain("Prior text #1 (Narrate)");
-    expect(context).toContain("kept narration");
-    expect(context).not.toContain("Prior text #2");
-  });
-
-  test("is included in buildSyntheticCastContext when prior texts exist", () => {
-    const socket = makeJsonSocket();
-    const castState = state(socket, {
-      lastOutput: "previous work output",
-      data: {
-        item: { title: "Item 1", context: "Implement item 1." },
-        texts: [{ socket: "Narrate", materia: "Narrate", text: "Narration prose." }],
-      },
-    });
-
-    const synthetic = buildSyntheticCastContext(castState);
-    expect(synthetic).toContain("Prior renderable text payloads:");
-    expect(synthetic).toContain("Narration prose.");
-  });
-
-  test("is omitted from buildSyntheticCastContext when no prior texts exist", () => {
-    const socket = makeJsonSocket();
-    const castState = state(socket, { lastOutput: "previous work output" });
-
-    const synthetic = buildSyntheticCastContext(castState);
-    expect(synthetic).not.toContain("Prior renderable text payloads:");
   });
 });
 
