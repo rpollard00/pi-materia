@@ -2,6 +2,7 @@ import { HANDOFF_CONTEXT_FIELD } from "../handoff/handoffContract.js";
 import { resolvedMateriaDisplayName, resolvedMateriaId } from "../runtime/resolvedMateria.js";
 import type { MateriaCastState, MateriaEdgeConfig, ResolvedMateriaSocket } from "../types.js";
 import { isPlainObject } from "./workflowTransitions.js";
+import { stripRenderableTextField } from "./handoffPromptSanitization.js";
 
 const MAX_REWORK_FEEDBACK_ENTRIES = 5;
 const MAX_REASON_CHARS = 900;
@@ -62,6 +63,20 @@ export function renderReworkFeedbackPromptContext(state: MateriaCastState, targe
 function conciseReasonText(parsed: unknown, rawOutput: string): string {
   const context = isPlainObject(parsed) ? parsed[HANDOFF_CONTEXT_FIELD] : undefined;
   if (typeof context === "string" && context.trim()) return truncateText(normalizeWhitespace(context), MAX_REASON_CHARS);
+  // When the prior output is a JSON handoff, derive the bounded excerpt from
+  // the parsed payload with renderable `text` stripped, so prose reaches later
+  // materia only through explicit assignment/templating and never as default
+  // automatic rework context. Free-text (parse:"text") outputs are not JSON
+  // handoffs; their raw output is the actual intended output and is passed
+  // through unchanged. The authoritative raw JSON stays in state.lastJson and
+  // the lastJson artifact for debugging and replay.
+  if (isPlainObject(parsed)) {
+    const sanitized = stripRenderableTextField(parsed);
+    if (sanitized) {
+      return `No top-level context was provided; bounded previous output excerpt: ${truncateText(normalizeWhitespace(sanitized), MAX_OUTPUT_CHARS)}`;
+    }
+    return "No top-level context was provided; previous JSON output carried only renderable text.";
+  }
   const output = normalizeWhitespace(rawOutput);
   return output ? `No top-level context was provided; bounded previous output excerpt: ${truncateText(output, MAX_OUTPUT_CHARS)}` : "No top-level context or output text was provided by the prior socket.";
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isOrchestrationOnlyMessage, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -672,6 +672,68 @@ describe("syntheticEventEmissionContext", () => {
     expect(prompt).not.toContain("## Event Emission (Optional)");
     expect(prompt).not.toContain('result.pr_created');
     expect(prompt).not.toContain('status.progress');
+  });
+});
+
+describe("sanitizePreviousOutput", () => {
+  function makeState(overrides: Partial<Pick<MateriaCastState, "lastAssistantText" | "lastOutput" | "lastJson">> = {}): MateriaCastState {
+    return state(agentSocket(), overrides);
+  }
+
+  test("returns undefined when there is no previous output", () => {
+    expect(sanitizePreviousOutput(makeState({ lastAssistantText: undefined, lastOutput: undefined }))).toBeUndefined();
+  });
+
+  test("returns free-text previous output unchanged", () => {
+    expect(sanitizePreviousOutput(makeState({ lastOutput: "build complete", lastJson: undefined }))).toBe("build complete");
+  });
+
+  test("returns JSON previous output unchanged when it has no text field", () => {
+    const json = { "satisfied": true };
+    expect(sanitizePreviousOutput(makeState({ lastOutput: JSON.stringify(json), lastJson: json }))).toBe(JSON.stringify(json));
+  });
+
+  test("strips renderable text from JSON previous output", () => {
+    const json = { "satisfied": true, "text": "## Summary\n\nNarration prose." };
+    const result = sanitizePreviousOutput(makeState({ lastOutput: JSON.stringify(json), lastJson: json }));
+    expect(result).toBeDefined();
+    expect(result).not.toContain("Narration prose");
+    expect(result).toContain("satisfied");
+  });
+
+  test("returns undefined when text was the only field in JSON previous output", () => {
+    const json = { "text": "narration only" };
+    expect(sanitizePreviousOutput(makeState({ lastOutput: JSON.stringify(json), lastJson: json }))).toBeUndefined();
+  });
+
+  test("does not sanitize when lastJson is not the parsed form of the output", () => {
+    const staleJson = { "satisfied": true };
+    const result = sanitizePreviousOutput(makeState({ lastOutput: "plain text output", lastJson: staleJson }));
+    expect(result).toBe("plain text output");
+  });
+
+  test("strips text from previous output in buildSyntheticCastContext", () => {
+    const json = { "satisfied": true, "text": "renderable narration prose" };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).toContain("Previous output:");
+    expect(synthetic).toContain("satisfied");
+    expect(synthetic).not.toContain("renderable narration prose");
+  });
+
+  test("omits Previous output section entirely when text was the only field", () => {
+    const json = { "text": "narration only" };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).not.toContain("Previous output:");
+    expect(synthetic).not.toContain("narration only");
+  });
+
+  test("preserves text in lastJson for debugging and replay", () => {
+    const json = { "satisfied": true, "text": "renderable narration prose" };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    sanitizePreviousOutput(castState);
+    expect(castState.lastJson).toEqual(json);
   });
 });
 
