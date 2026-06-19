@@ -30,8 +30,8 @@ Do not ask agents to emit a broad envelope. Obsolete broad-envelope fields such 
 
 - The raw JSON `text` value is authoritative. TUI rendering is a one-way presentation layer; rendered text must never replace or mutate the underlying JSON handoff or cast state.
 - Emit `text` only when this socket's main product is renderable prose that downstream materia may consume. Do not duplicate narration into `context`.
-- Every emitted `text` payload is accumulated in order under `state.data.texts` (an append-only array of `{ socket, materia?, text }` entries) so following materia can consume prior prose even after intervening sockets have run. Unlike `state.data.envelope.text`, which mirrors only the most recently emitted payload, the `texts` collection preserves all upstream payloads with their source attribution.
-- Prompt assembly surfaces accumulated payloads to following materia as a "Prior renderable text payloads" context section, and each entry is also reachable in raw JSON at `state.data.texts`; the most recent payload is mirrored at `state.data.envelope.text`. Downstream materia consume the payload through normal state references in their prompt (for example `{{state.texts}}`, a dedicated assignment, or the rendered prior-text context section). Consumption is opt-in per graph; narration is not hard-wired to any consumer.
+- `text` is a current-output payload, not automatic shared state. It is not mirrored into `state.data.envelope` or accumulated into any implicit collection, and it is not injected into following prompts unless a socket explicitly asks for it. The authoritative raw value stays in `state.lastJson` (and the `lastJson` artifact) for debugging and replay.
+- Downstream materia consume `text` only through an explicit socket assignment (for example `assign: { "prNotes": "$.text" }`), which persists the value into a named `state.data` slot, or through a prompt template that reads that slot. Consumption is opt-in per graph; narration is never hard-wired to a consumer.
 - Use `context` for accumulating cross-socket handoff notes. Use `text` for the materia's discrete prose payload.
 
 Example narration output:
@@ -46,7 +46,7 @@ A following socket can then surface that prose as PR notes, branch-name input, o
 
 ### End-to-end example
 
-A representative two-socket loadout (`examples/text-consumption-loadout.json`) shows the full flow: a Narrate materia emits structured renderable text, the TUI renders it as clean prose, and a PR-Notes materia consumes the raw payload without hard-coding the producer.
+A representative two-socket loadout (`examples/text-consumption-loadout.json`) shows the durable handoff path: a Narrate materia emits structured renderable text as top-level `text`, the emitting socket explicitly assigns that value into state, and a deterministic utility consumes the assigned slot without hard-coding the producer.
 
 ```json
 {
@@ -57,16 +57,16 @@ A representative two-socket loadout (`examples/text-consumption-loadout.json`) s
         "Socket-1": {
           "materia": "Narrate",
           "parse": "json",
-          "assign": { "narration": "$.text" },
+          "assign": { "prNotes": "$.text" },
           "edges": [{ "when": "always", "to": "Socket-2" }]
         },
-        "Socket-2": { "materia": "PR-Notes", "parse": "json" }
+        "Socket-2": { "materia": "PR-Notes-Consumer", "parse": "json" }
       }
     }
   },
   "materia": {
-    "Narrate": { "type": "agent", "tools": "readOnly", "prompt": "Produce a clean prose summary. Return JSON with a top-level `text` field only." },
-    "PR-Notes": { "type": "agent", "tools": "readOnly", "prompt": "Turn upstream narration into PR notes.\n\nUpstream narration:\n{{state.narration}}" }
+    "Narrate": { "type": "agent", "tools": "readOnly", "prompt": "Produce PR-ready notes. Return JSON with a top-level string `text` field only." },
+    "PR-Notes-Consumer": { "type": "utility", "command": ["node", "-e", "...read input.state.prNotes and emit JSON..."], "parse": "json" }
   }
 }
 ```
@@ -74,11 +74,11 @@ A representative two-socket loadout (`examples/text-consumption-loadout.json`) s
 What happens at runtime:
 
 1. Narrate emits `{ "text": "..." }`. The TUI renderer shows the prose to the user as clean text (a `materia_text` presentation message), hiding transport metadata.
-2. The raw JSON stays authoritative: it is mirrored at `state.data.envelope.text` (latest only) and accumulated in `state.data.texts` (append-only, source-attributed).
-3. The emitting socket's `assign: { "narration": "$.text" }` captures the payload into a named state slot, and the generic "Prior renderable text payloads" context section surfaces accumulated payloads to following sockets.
-4. PR-Notes consumes the prior text via `{{state.narration}}` (or the prior-text section). Narration is not hard-wired: it only flows to PR-Notes because this graph routes it.
+2. The raw JSON stays authoritative for debugging and replay in `state.lastJson`, but `text` is not mirrored into `state.data.envelope` or any implicit collection, and no synthetic prior-text section is added to following prompts.
+3. The emitting socket's `assign: { "prNotes": "$.text" }` is the durable handoff path: it persists the payload into `state.data.prNotes`.
+4. The utility consumes the assigned slot from its input (`input.state.prNotes`) and emits its own canonical output. Narration is not hard-wired: it only reaches the utility because this graph assigns and routes it.
 
-Rendering is a one-way presentation layer; it never replaces or mutates the underlying JSON handoff. Regression coverage in `tests/textConsumptionFlowNative.test.ts` exercises the flow end to end and verifies the rendered presentation does not alter the authoritative envelope.
+Rendering is a one-way presentation layer; it never replaces or mutates the underlying JSON handoff. Regression coverage in `tests/textConsumptionFlowNative.test.ts` exercises the flow end to end and verifies the rendered presentation does not alter the authoritative payload.
 
 ## Generated work items
 

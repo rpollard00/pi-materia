@@ -8,18 +8,13 @@
         "Socket-1": {
           "materia": "Narrate",
           "parse": "json",
-          "assign": {
-            "narration": "$.text"
-          },
+          "assign": { "prNotes": "$.text" },
           "edges": [
-            {
-              "when": "always",
-              "to": "Socket-2"
-            }
+            { "when": "always", "to": "Socket-2" }
           ]
         },
         "Socket-2": {
-          "materia": "PR-Notes",
+          "materia": "PR-Notes-Consumer",
           "parse": "json"
         }
       }
@@ -30,17 +25,21 @@
       "type": "agent",
       "label": "Narrate",
       "group": "Text",
-      "description": "Produces a clean, user-facing prose summary emitted as the canonical renderable text payload.",
+      "description": "Produces PR-ready notes emitted as the canonical renderable text payload (top-level `text`).",
       "tools": "readOnly",
-      "prompt": "You are the pi-materia narration materia. Produce a clean, user-facing prose summary of the cast request.\n\nThis socket's primary product is displayable narration, so emit it as the canonical renderable text payload. Do NOT duplicate the narration into context.\n\nReturn JSON with a top-level `text` field only (no markdown fences or extra prose)."
+      "prompt": "You are the pi-materia narration materia. Produce PR-ready notes for the cast request.\n\nThis socket's primary product is displayable prose, so emit it as the canonical renderable text payload. Do NOT duplicate the notes into `context`.\n\nReturn JSON with a top-level string `text` field only (no markdown fences, workItems, satisfied, or extra prose)."
     },
-    "PR-Notes": {
-      "type": "agent",
-      "label": "PR Notes",
+    "PR-Notes-Consumer": {
+      "type": "utility",
+      "label": "PR Notes Consumer",
       "group": "Text",
-      "description": "Turns upstream renderable text into concise PR notes without hard-coding the producer.",
-      "tools": "readOnly",
-      "prompt": "You are the pi-materia PR-notes materia. Turn upstream narration into concise PR notes.\n\nUpstream narration (from the Narrate materia):\n{{state.narration}}\n\nConsume that prose as input. Do not echo it verbatim; derive PR-ready notes from it. The upstream payload is also accumulated in state.data.texts, so the 'Prior renderable text payloads' context section is available as a generic alternative to the dedicated assignment."
+      "description": "Deterministic consumer that reads the explicitly assigned PR notes from input.state.prNotes and emits canonical handoff output. Demonstrates that renderable text reaches downstream materia only through explicit assignment, not automatic accumulation.",
+      "command": [
+        "node",
+        "-e",
+        "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const i=JSON.parse(d||'{}');const notes=((i.state||{}).prNotes)||'';process.stdout.write(JSON.stringify({satisfied:true,context:'Consumed upstream PR notes ('+String(notes).length+' chars) from input.state.prNotes.'}))})"
+      ],
+      "parse": "json"
     }
   }
 }

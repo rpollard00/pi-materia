@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import piMateria from "../src/index.js";
@@ -41,6 +41,46 @@ function textConsumptionConfig() {
     materia: {
       Narrate: { type: "agent", tools: "readOnly", prompt: "Narrate {{request}}" },
       "PR-Notes": { type: "agent", tools: "readOnly", prompt: "Turn narration into PR notes.\n\nUpstream narration:\n{{state.narration}}" },
+    },
+  };
+}
+
+/**
+ * Variant loadout where the renderable-text consumer is a deterministic utility
+ * rather than an agent: Narrate emits top-level `text`, Socket-1 explicitly
+ * assigns it into `state.data.prNotes`, and a utility reads that slot from its
+ * input (`input.state.prNotes`) and emits canonical handoff output. This is the
+ * durable handoff path for renderable text.
+ */
+function textConsumptionUtilityConfig() {
+  return {
+    artifactDir: ".pi/pi-materia",
+    activeLoadout: "Test",
+    loadouts: {
+      Test: {
+        entry: "Socket-1",
+        sockets: {
+          "Socket-1": {
+            materia: "Narrate",
+            parse: "json",
+            assign: { prNotes: "$.text" },
+            edges: [{ when: "always", to: "Socket-2" }],
+          },
+          "Socket-2": { materia: "PR-Notes-Consumer", parse: "json" },
+        },
+      },
+    },
+    materia: {
+      Narrate: { type: "agent", tools: "readOnly", prompt: "Narrate {{request}}" },
+      "PR-Notes-Consumer": {
+        type: "utility",
+        command: [
+          "node",
+          "-e",
+          "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const i=JSON.parse(d||'{}');const notes=((i.state||{}).prNotes)||'';process.stdout.write(JSON.stringify({satisfied:true,context:'Consumed upstream PR notes ('+String(notes).length+' chars) from input.state.prNotes.'}))})",
+        ],
+        parse: "json",
+      },
     },
   };
 }
@@ -202,5 +242,44 @@ describe("renderable text consumption flow", () => {
     // Renderable text is never mirrored into durable state or accumulated.
     expect(state.data.envelope).not.toHaveProperty("text");
     expect(state.data.texts).toBeUndefined();
+  });
+
+  test("a deterministic utility consumes the explicitly assigned renderable text via input.state", async () => {
+    const harness = await makeHarness(textConsumptionUtilityConfig());
+
+    await harness.runCommand("materia", "cast retry toggle");
+    harness.appendAssistantMessage(
+      JSON.stringify({ satisfied: true, context: "internal handoff notes only", text: NARRATION_PROSE }),
+      { usage: { input: 1, output: 1, totalTokens: 2, cost: { total: 0.01 } } },
+    );
+    await harness.emit("agent_end", { messages: [] });
+    await flushDeferredDispatch();
+
+    // 1. Narrate still renders clean prose from the current payload; transport
+    //    metadata (context) is hidden from the display message.
+    const textMessages = materiaTextMessages(harness);
+    expect(textMessages).toHaveLength(1);
+    expect(textMessages[0]?.content).toBe(NARRATION_PROSE);
+
+    const state = latestState(harness);
+
+    // 2. Explicit assignment is the durable handoff path: the payload persists
+    //    into state.data.prNotes. No automatic text state is created.
+    expect(state.data.prNotes).toBe(NARRATION_PROSE);
+    expect(state.data.envelope).not.toHaveProperty("text");
+    expect(state.data.texts).toBeUndefined();
+
+    // 3. The deterministic utility received the assigned slot through its
+    //    input: input.state.prNotes is the only durable path renderable text
+    //    takes to reach a downstream utility.
+    const utilityInputPath = path.join(state.runDir!, "sockets", "Socket-2", "1.input.json");
+    const utilityInput = JSON.parse(await readFile(utilityInputPath, "utf8")) as { state?: { prNotes?: string } };
+    expect(utilityInput.state?.prNotes).toBe(NARRATION_PROSE);
+
+    // 4. The utility produced canonical handoff output derived from the
+    //    consumed notes, and the cast completed.
+    expect(state.phase).toBe("complete");
+    expect(state.lastJson).toMatchObject({ satisfied: true });
+    expect(String((state.lastJson as { context?: string }).context)).toContain("Consumed upstream PR notes");
   });
 });
