@@ -15,8 +15,27 @@ import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApp
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
 import type { EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
+import {
+  CENTRAL_CATALOG_LAYER_LABEL,
+  type CentralCatalogConfigSource,
+  centralCatalogSourceToPartial,
+  isCentralCatalogSourceEmpty,
+} from "./centralCatalogSource.js";
 
-export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
+/**
+ * Options for {@link loadConfig}.
+ */
+export interface LoadConfigOptions {
+  /**
+   * Optional central catalog definitions surfaced as the read-only `central`
+   * layer between bundled defaults and user config
+   * (docs/enterprise-control-plane.md §5). Omit it, or pass an empty source,
+   * to keep precedence unchanged for purely local workflows.
+   */
+  centralSource?: CentralCatalogConfigSource;
+}
+
+export async function loadConfig(cwd: string, configuredPath?: string, options: LoadConfigOptions = {}): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
   await syncShippedUtilityScripts(getUserMateriaDir());
   const defaultPath = getBundledDefaultConfigPath();
@@ -25,6 +44,14 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
   const layers: MateriaConfigLayer[] = [{ scope: "default", path: defaultPath, loaded: true }];
   const partials: Partial<PiMateriaConfig>[] = [await readConfigPartial(defaultPath)];
+
+  // Central catalog layer: read-only provenance, consulted only when central
+  // definitions are supplied. Sits above bundled defaults and below user config
+  // so local definitions always win (docs/enterprise-control-plane.md §5, §10).
+  if (!isCentralCatalogSourceEmpty(options.centralSource)) {
+    layers.push({ scope: "central", loaded: true });
+    partials.push(centralCatalogSourceToPartial(options.centralSource!));
+  }
 
   if (existsSync(userPath)) {
     layers.push({ scope: "user", path: userPath, loaded: true });
@@ -58,7 +85,7 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const questDefaultLoadout = resolveQuestDefaultLoadout(profile.questDefaultLoadoutId, config.loadouts, loadoutSources);
   return {
     config,
-    source: loadedLayers.map((layer) => layer.path).join(" < "),
+    source: loadedLayers.map((layer) => layer.path ?? (layer.scope === "central" ? CENTRAL_CATALOG_LAYER_LABEL : layer.scope)).join(" < "),
     layers,
     loadoutSources,
     materiaSources,
@@ -565,7 +592,14 @@ function buildMateriaCommandSources(partials: Partial<PiMateriaConfig>[], layers
 }
 
 function resolveUtilityExecutionBindings(config: PiMateriaConfig, commandSources: Record<string, MateriaConfigLayerScope>, layers: MateriaConfigLayer[]): void {
-  const configDirs = new Map(layers.filter((layer) => layer.loaded).map((layer) => [layer.scope, path.dirname(layer.path)]));
+  // Only file-backed layers contribute a resolution directory; the read-only
+  // `central` layer has no local path, so central utility materia keep their
+  // commands as-is (typically absolute) and are not path-resolved.
+  const configDirs = new Map(
+    layers
+      .filter((layer) => layer.loaded && layer.path !== undefined)
+      .map((layer) => [layer.scope, path.dirname(layer.path!)]),
+  );
   for (const [id, definition] of Object.entries(config.materia ?? {})) {
     if (definition.type !== "utility") continue;
     if (isShippedUtilityScriptRef(definition.script)) {
@@ -885,7 +919,7 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
 }
 
 function isLoadoutSource(value: unknown): value is MateriaConfigLayerScope {
-  return value === "default" || value === "user" || value === "project" || value === "explicit";
+  return value === "default" || value === "central" || value === "user" || value === "project" || value === "explicit";
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

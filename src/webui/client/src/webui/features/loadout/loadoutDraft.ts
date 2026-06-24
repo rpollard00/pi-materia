@@ -157,11 +157,16 @@ export function buildConfigToSave(
 ) {
   const preparedDraft = canonicalizeUtilitySocketReferences(normalizeMateriaConfigEdges(normalizedDraft));
   assertValidLoadoutSaveSemantics(preparedDraft);
+  // Shipped defaults and read-only central-catalog definitions are never
+  // written through a normal save: central must not silently overwrite local
+  // files (docs/enterprise-control-plane.md §5, §10). Promoting central content
+  // into a local scope is an explicit copy/update/replace action (§12).
+  const isReadOnlySource = (source: LoadoutSourceScope | undefined) => source === 'default' || source === 'central';
   const loadouts: Record<string, PipelineConfig | null> = Object.fromEntries(
-    Object.entries(preparedDraft.loadouts ?? {}).filter(([name, loadout]) => resolvedLoadoutSource(name, loadout, loadoutSources) !== 'default'),
+    Object.entries(preparedDraft.loadouts ?? {}).filter(([name, loadout]) => !isReadOnlySource(resolvedLoadoutSource(name, loadout, loadoutSources))),
   );
   for (const name of deletedLoadoutNames) {
-    if (loadoutSources[name] === 'default') continue;
+    if (isReadOnlySource(loadoutSources[name])) continue;
     loadouts[name] = null;
   }
   return fromWebUiConfigDto({ ...preparedDraft, loadouts } as never) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };

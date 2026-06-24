@@ -34,7 +34,7 @@ function isLoadedConfigResponse(value: unknown): value is LoadedConfigResponse {
 }
 
 function isLoadoutSourceScope(value: unknown): value is LoadoutSourceScope {
-  return value === 'default' || value === 'user' || value === 'project' || value === 'explicit';
+  return value === 'default' || value === 'central' || value === 'user' || value === 'project' || value === 'explicit';
 }
 
 function normalizeSourceMap(value: unknown): Record<string, LoadoutSourceScope> {

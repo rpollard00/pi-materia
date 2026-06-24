@@ -35,7 +35,10 @@ export interface SocketPropertyFormState {
   layoutY: string;
 }
 
-export type LoadoutSourceScope = 'default' | 'user' | 'project' | 'explicit';
+// Read-only `central` provenance is included so central-catalog definitions
+// surface distinctly and are treated as non-writable (they are never a save
+// target). See docs/enterprise-control-plane.md §5.
+export type LoadoutSourceScope = 'default' | 'central' | 'user' | 'project' | 'explicit';
 
 export interface LoadedConfigResponse {
   config?: MateriaConfig;

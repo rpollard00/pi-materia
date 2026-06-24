@@ -35,7 +35,16 @@ export interface LoadedConfig {
   questDefaultLoadoutWarning?: string;
 }
 
-export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
+/**
+ * Config layer scope / definition provenance. Precedence is lowest-to-highest:
+ * `default` < `central` < `user` < `project` < `explicit`.
+ *
+ * `central` is a read-only provenance value for definitions surfaced from the
+ * central catalog layer; it is never a writable local save target
+ * (docs/enterprise-control-plane.md §5). The writable local scopes remain
+ * `default | user | project | explicit`.
+ */
+export type MateriaConfigLayerScope = "default" | "central" | "user" | "project" | "explicit";
 export type LoadoutSource = MateriaConfigLayerScope;
 export type LoadoutUserLockState = "locked" | "unlocked";
 export type MateriaUserLockState = "locked" | "unlocked";
@@ -46,7 +55,12 @@ export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia" | "eve
 
 export interface MateriaConfigLayer {
   scope: MateriaConfigLayerScope;
-  path: string;
+  /**
+   * Filesystem path backing the layer. Absent for non-file layers such as the
+   * read-only `central` catalog layer, which has no local backing file
+   * (docs/enterprise-control-plane.md §5).
+   */
+  path?: string;
   loaded: boolean;
 }
 

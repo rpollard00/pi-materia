@@ -141,6 +141,23 @@ describe('loadout draft mutations', () => {
     expect(payload.loadouts?.Beta).toBeNull();
   });
 
+  it('omits read-only central-catalog loadouts and their deletion markers from save payloads', () => {
+    const frozen = deepFreeze({
+      ...config,
+      loadouts: {
+        Alpha: { ...config.loadouts.Alpha },
+        'Central-Flow': { entry: 'Socket-1', sockets: { 'Socket-1': { materia: 'Build' } } },
+      },
+    } satisfies MateriaConfig);
+    const payload = buildConfigToSave(frozen, ['Alpha', 'Central-Flow'], { Alpha: 'user', 'Central-Flow': 'central' });
+
+    // Central-catalog definitions are read-only: never written or deleted through a
+    // normal save, so central content cannot silently overwrite local files.
+    // (docs/enterprise-control-plane.md §5, §10, §12)
+    expect(payload.loadouts?.Alpha).toBeNull();
+    expect(payload.loadouts?.['Central-Flow']).toBeUndefined();
+  });
+
   it('includes source-less user and project loadouts identified by loadoutSources', () => {
     const frozen = deepFreeze({
       ...config,
