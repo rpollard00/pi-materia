@@ -1,6 +1,6 @@
 import type { ToolScopeSpec } from "./domain/toolScope.js";
 import type { CatalogDriftInfo, CatalogOriginProvenance } from "./domain/catalogProvenance.js";
-import type { MateriaThinkingLevel } from "./thinking.js";
+import type { MateriaThinkingLevel } from "./domain/thinking.js";
 
 export interface PiMateriaConfig {
   artifactDir?: string;

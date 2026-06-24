@@ -5,7 +5,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { loadProfileConfig } from "../config/config.js";
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "../graph/generator.js";
 import { getActiveModelInfo } from "../config/modelSettings.js";
-import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
+import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 import type { MateriaGeneratorConfig, MateriaRoleGenerationProfileConfig } from "../types.js";
 import { buildMateriaModelCatalog, type MateriaModelCatalogModel, type MateriaModelCatalogResponse } from "../modelCatalog.js";
 

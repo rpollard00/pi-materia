@@ -13,3 +13,5 @@ export * from "./auth.js";
 export * from "./audit.js";
 export * from "./catalogProvenance.js";
 export * from "./catalogActions.js";
+export * from "./thinking.js";
+export * from "./modelPolicy.js";

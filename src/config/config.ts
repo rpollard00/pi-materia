@@ -13,7 +13,7 @@ import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoadout } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
-import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
+import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 import type { EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 import {
   CENTRAL_CATALOG_LAYER_LABEL,

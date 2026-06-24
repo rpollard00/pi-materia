@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel, type MateriaThinkingLevel } from '../../thinking.js';
+import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel, type MateriaThinkingLevel } from '../../domain/thinking.js';
 import { errorMessage, isPlainObject, readJsonBody, sendJson } from './http.js';
 
 export interface MateriaRoleGenerationPreference {

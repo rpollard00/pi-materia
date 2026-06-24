@@ -18,7 +18,42 @@ export {
 import type { EnrichedEvent } from "../domain/eventing.js";
 import type { Permission } from "../domain/identity.js";
 import type { ScopePath } from "../domain/scope.js";
-import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
+// Model-policy contracts are pure domain invariants (docs/enterprise-control-plane.md
+// §11). Re-exported here so the control-plane DTO surface stays the stable import
+// path for adapters/central/UI code, mirroring the catalog-provenance re-export.
+import type {
+  ModelPolicyDocument,
+} from "../domain/modelPolicy.js";
+
+export {
+  MODEL_POLICY_SEVERITIES,
+  availableRuntimeModel,
+  evaluateModelPolicy,
+  isModelPolicyModelRef,
+  isModelPolicySeverity,
+  isModelPolicyThinkingConstraint,
+  isValidModelPolicyDocument,
+  modelPolicyAllowsThinking,
+  modelPolicyAllowsValue,
+  modelPolicyDeniesValue,
+  policyHasConstraints,
+  policySeverity,
+  selectPolicyPreferredModel,
+  suggestThinkingLevel,
+  toAvailableRuntimeModels,
+  unavailablePreferredModels,
+  type AvailableRuntimeModel,
+  type AvailableRuntimeModels,
+  type ModelPolicyCandidate,
+  type ModelPolicyDecisionStatus,
+  type ModelPolicyDenialReason,
+  type ModelPolicyDocument,
+  type ModelPolicyEvaluation,
+  type ModelPolicyModelRef,
+  type ModelPolicyPreferredSuggestion,
+  type ModelPolicySeverity,
+  type ModelPolicyThinkingConstraint,
+} from "../domain/modelPolicy.js";
 
 /**
  * Control-plane application DTOs and ports.
@@ -196,106 +231,10 @@ export interface CatalogQuery {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// Model-policy DTOs (docs/enterprise-control-plane.md §11)
+// Model-policy contracts: see re-export block above and src/domain/modelPolicy.ts
+// (docs/enterprise-control-plane.md §11). The ModelPolicyPort below is the
+// application-level port; DTOs/evaluation live in the domain layer.
 // ───────────────────────────────────────────────────────────────────────
-
-/** A model reference by its local Pi model-registry value (e.g. "zai/glm-4.6"). */
-export interface ModelPolicyModelRef {
-  value: string;
-  label?: string;
-}
-
-/** Thinking-level constraint applied to model selection. */
-export interface ModelPolicyThinkingConstraint {
-  /** Allowed thinking levels; when present, selection is constrained to these. */
-  allow?: readonly MateriaThinkingLevel[];
-  /** Maximum thinking level allowed, inclusive. */
-  max?: MateriaThinkingLevel;
-}
-
-/** How a policy violation is treated when it cannot be satisfied exactly. */
-export type ModelPolicySeverity = "advisory" | "enforced";
-
-export const MODEL_POLICY_SEVERITIES = ["advisory", "enforced"] as const;
-
-export function isModelPolicySeverity(value: unknown): value is ModelPolicySeverity {
-  return typeof value === "string" && (MODEL_POLICY_SEVERITIES as readonly string[]).includes(value);
-}
-
-/**
- * A model-policy document. Constraints map to §11 behavior:
- * - `deny` is hard (denied models must not be selected);
- * - `allow` constrains the selectable set;
- * - `prefer` is advisory (warn/fallback when unavailable locally);
- * - `thinking` constrains thinking-level selection where required.
- *
- * The local Pi model registry remains the available-runtime source of truth.
- * When no policy is configured, existing local selection behavior is preserved.
- */
-export interface ModelPolicyDocument {
-  id: string;
-  name?: string;
-  description?: string;
-  /** Allowed model values; when present, selection is constrained to these. */
-  allow?: readonly ModelPolicyModelRef[];
-  /** Denied model values; hard exclusion. */
-  deny?: readonly ModelPolicyModelRef[];
-  /** Preferred model values; advisory unless available and allowed. */
-  prefer?: readonly ModelPolicyModelRef[];
-  thinking?: ModelPolicyThinkingConstraint;
-  /** Default severity for unsatisfiable constraints. Per-constraint behavior follows §11. */
-  severity?: ModelPolicySeverity;
-  /** Central version of the policy document (provenance/drift). */
-  version?: string;
-  /** RFC3339 timestamp the policy was last updated centrally. */
-  updatedAt?: string;
-}
-
-/** True when a model value matches a policy reference list (exact value match). */
-export function modelPolicyAllowsValue(refs: readonly ModelPolicyModelRef[] | undefined, value: string | undefined): boolean {
-  if (refs === undefined || refs.length === 0) return true;
-  if (value === undefined) return false;
-  return refs.some((ref) => ref.value === value);
-}
-
-/** True when a model value is explicitly denied by a policy reference list. */
-export function modelPolicyDeniesValue(refs: readonly ModelPolicyModelRef[] | undefined, value: string | undefined): boolean {
-  if (refs === undefined || value === undefined) return false;
-  return refs.some((ref) => ref.value === value);
-}
-
-/** True when a thinking level satisfies a thinking constraint; undefined constraint = always allowed. */
-export function modelPolicyAllowsThinking(constraint: ModelPolicyThinkingConstraint | undefined, level: MateriaThinkingLevel | undefined): boolean {
-  if (constraint === undefined) return true;
-  if (constraint.allow !== undefined) {
-    if (level === undefined) return false;
-    if (!constraint.allow.includes(level)) return false;
-  }
-  if (constraint.max !== undefined && level !== undefined) {
-    if (thinkingRank(level) > thinkingRank(constraint.max)) return false;
-  }
-  return true;
-}
-
-const THINKING_RANK: Record<MateriaThinkingLevel, number> = Object.fromEntries(
-  MATERIA_THINKING_LEVELS.map((level, index) => [level, index]),
-) as Record<MateriaThinkingLevel, number>;
-
-function thinkingRank(level: MateriaThinkingLevel): number {
-  return THINKING_RANK[level];
-}
-
-/** Guard for thinking constraint shape (used by policy DTO construction/validation). */
-export function isModelPolicyThinkingConstraint(value: unknown): value is ModelPolicyThinkingConstraint {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  if (record.allow !== undefined) {
-    if (!Array.isArray(record.allow) || !record.allow.every((entry) => isMateriaThinkingLevel(entry))) return false;
-  }
-  if (record.max !== undefined && !isMateriaThinkingLevel(record.max)) return false;
-  return true;
-}
-
 // ───────────────────────────────────────────────────────────────────────
 // Telemetry/status DTOs (docs/enterprise-control-plane.md §15)
 // ───────────────────────────────────────────────────────────────────────
