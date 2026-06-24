@@ -1,5 +1,6 @@
 import { requirePermission, type CentralAuth } from "../auth/index.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
+import { handleCentralCatalogRoute } from "./catalog.js";
 import { handleCentralHealthRoute } from "./health.js";
 import { sendJson } from "./http.js";
 import { handleCentralStatusRoute } from "./status.js";
@@ -30,11 +31,12 @@ export interface MateriaCentralRouteDeps {
  * the same contracts). Route matching precedes auth, so unknown routes still
  * return 404 rather than leaking existence through a 401.
  *
- * Catalog, model-policy, telemetry-ingestion, and admin route handlers arrive
- * in later work items (§16.6, §16.13, §16.15, §16.16); add them as ordered
- * branches below, each calling {@link requirePermission} with the matching
- * permission (`catalog.read`/`catalog.write`, `model-policy.read`/`write`,
- * `admin.read`/`write`, `telemetry.read`/`telemetry.ingest`).
+ * Catalog read/admin-write routes are wired below (§16.6), guarded with
+ * `catalog.read` / `catalog.write`. Model-policy, telemetry-ingestion, and the
+ * broader admin route handlers arrive in later work items (§16.13, §16.15,
+ * §16.16); add them as ordered branches, each calling {@link requirePermission}
+ * with the matching permission (`model-policy.read`/`write`, `admin.read`/`write`,
+ * `telemetry.read`/`telemetry.ingest`).
  */
 export async function handleMateriaCentralRequest(
   req: IncomingMessage,
@@ -56,8 +58,17 @@ export async function handleMateriaCentralRequest(
     return;
   }
 
+  // Central catalog read + admin write surface (§16.6). Kind is part of the
+  // path so materia and loadout definitions sharing an id do not collide.
+  // Reads require catalog.read; admin writes require catalog.write. Sub-path
+  // and method routing (and 404/405 precedence over auth) live in the handler.
+  const catalogPath = new URL(req.url ?? "", "http://localhost").pathname;
+  if (catalogPath === "/api/catalog" || catalogPath.startsWith("/api/catalog/")) {
+    await handleCentralCatalogRoute(req, res, { catalog: deps.ports.catalog, admin: deps.ports.admin, auth: deps.auth });
+    return;
+  }
+
   // Future route groups (each guarded with requirePermission):
-  //   /api/catalog/*        → catalog.read / catalog.write      (§16.6, §16.9)
   //   /api/model-policy/*   → model-policy.read / .write         (§16.13, §16.14)
   //   /api/admin/*          → admin.read / admin.write           (§16.6)
   //   /api/telemetry/ingest → telemetry.ingest                   (§16.15)

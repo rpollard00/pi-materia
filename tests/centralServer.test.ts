@@ -79,16 +79,18 @@ describe("central server skeleton — in-memory control-plane ports", () => {
     expect(after.runtimeCount).toBe(1);
   });
 
-  test("catalog and model-policy placeholders are empty until later work items land", async () => {
+  test("catalog starts empty and model-policy remains a placeholder", async () => {
     const ports = createInMemoryCentralPorts();
+    // Catalog repository is now wired (§16.6) but starts empty until admin writes land items.
     expect(await ports.catalog.list()).toEqual([]);
     expect(await ports.catalog.get("anything")).toBeUndefined();
     expect(await ports.catalog.head("anything")).toBeUndefined();
+    // Model-policy APIs are still a later work item (§16.13).
     expect(await ports.modelPolicy.getActivePolicy()).toBeUndefined();
     expect(await ports.modelPolicy.listPolicies()).toEqual([]);
   });
 
-  test("admin metadata reports dev-token auth and rejects catalog writes", async () => {
+  test("admin metadata reports dev-token auth and catalog writes route through the repository", async () => {
     const ports = createInMemoryCentralPorts({ label: "dev", startedAt: "2026-06-24T00:00:00.000Z" });
     const metadata = await ports.admin.getMetadata();
     expect(metadata.server.mode).toBe("central-admin");
@@ -102,9 +104,16 @@ describe("central server skeleton — in-memory control-plane ports", () => {
     const oauthMetadata = await oauthPorts.admin.getMetadata();
     expect(oauthMetadata.server.authMethods).toEqual(["dev-token", "oauth"]);
 
-    await expect(ports.admin.createCatalogItem({ id: "x", kind: "loadout", content: { definition: {} } })).rejects.toThrow(/catalog repository/);
-    await expect(ports.admin.updateCatalogItem({ id: "x" })).rejects.toThrow(/catalog repository/);
-    await expect(ports.admin.deleteCatalogItem({ id: "x" })).rejects.toThrow(/catalog repository/);
+    // Admin writes now route through the central catalog repository (§16.6).
+    const created = await ports.admin.createCatalogItem({ id: "x", kind: "loadout", content: { definition: { sockets: [] } } });
+    expect(created.action).toBe("created");
+    expect(created.summary.id).toBe("x");
+    expect(created.summary.kind).toBe("loadout");
+    expect(created.summary.version).toBe("1");
+
+    // update/delete on an unknown item surface a not-found error.
+    await expect(ports.admin.updateCatalogItem({ id: "missing" })).rejects.toThrow(/not found/);
+    await expect(ports.admin.deleteCatalogItem({ id: "missing" })).rejects.toThrow(/not found/);
   });
 
   test("queryEvents honors cast, sequence, and limit filters", async () => {

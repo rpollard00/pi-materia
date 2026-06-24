@@ -20,6 +20,11 @@ import {
 import type { AuthMethodKind } from "../../domain/auth.js";
 import type { EnrichedEvent } from "../../domain/eventing.js";
 import {
+  createInMemoryCentralCatalogRepository,
+  type CentralCatalogRepository,
+  type InMemoryCentralCatalogRepositoryOptions,
+} from "./centralCatalogRepository.js";
+import {
   CENTRAL_IN_MEMORY_EVENT_CAP,
   nowIso,
 } from "./shared.js";
@@ -29,18 +34,21 @@ import {
  *
  * Backs the central server skeleton (docs/enterprise-control-plane.md §16.4)
  * with in-memory adapters that report `central-admin` topology and serve the
- * status surface. The implementations are intentionally minimal placeholders:
+ * status surface. The implementations are intentionally minimal placeholders
+ * except where a work item has landed:
  *
- * - **Catalog**: empty. The versioned central catalog repository is a later
- *   work item (§16.6); admin writes are rejected here until that lands.
+ * - **Catalog**: backed by the in-memory central catalog repository
+ *   (§16.6). Read APIs serve loadout/materia definitions with stable ids,
+ *   monotonic versions, timestamps, provenance, and content hashes; admin
+ *   writes go through the admin port below. Central catalog data is **not**
+ *   writable through normal local/project editing paths.
  * - **Model policy**: none served. Policy APIs are a later work item (§16.13).
  * - **Telemetry**: a small bounded in-memory event store so `status()` reports
  *   real counts. Full normalized ingestion/query is a later work item (§16.15,
  *   §16.16).
- * - **Admin**: server metadata only. Auth methods now default to
- *   `["dev-token"]` and are configurable; dev-token auth + RBAC guards central
- *   routes (§16.5). Catalog admin writes still require the catalog repository
- *   (§16.6).
+ * - **Admin**: server metadata plus the central catalog admin write surface
+ *   (§16.6). Auth methods default to `["dev-token"]` and are configurable;
+ *   dev-token auth + RBAC guards central routes (§16.5).
  *
  * The adapter never starts or touches a local repository session.
  */
@@ -58,6 +66,15 @@ export interface InMemoryCentralPortsOptions {
    * (docs/enterprise-control-plane.md §13, §16.5). OAuth/OIDC is a future kind.
    */
   authMethods?: readonly AuthMethodKind[];
+  /**
+   * Inject an existing central catalog repository. Defaults to a fresh
+   * in-memory repository, optionally seeded via {@link catalogSeed}.
+   */
+  catalogRepository?: CentralCatalogRepository;
+  /** Initial central catalog items applied to a freshly created repository. */
+  catalogSeed?: InMemoryCentralCatalogRepositoryOptions["seed"];
+  /** Stable clock for catalog timestamps (tests); defaults to nowIso(). */
+  catalogClock?: InMemoryCentralCatalogRepositoryOptions["clock"];
 }
 
 /** Internal record tying an ingested event to its originating runtime for query filtering. */
@@ -73,6 +90,12 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
   });
   const startedAt = options.startedAt ?? nowIso();
   const authMethods: readonly AuthMethodKind[] = options.authMethods ?? ["dev-token"];
+  const catalogRepository: CentralCatalogRepository =
+    options.catalogRepository ??
+    createInMemoryCentralCatalogRepository({
+      ...(options.catalogSeed !== undefined ? { seed: options.catalogSeed } : {}),
+      ...(options.catalogClock !== undefined ? { clock: options.catalogClock } : {}),
+    });
   const store: IngestedEventRecord[] = [];
 
   function pushEvents(input: TelemetryIngestInput): number {
@@ -86,15 +109,16 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
 
   const catalog: CatalogAccessPort = {
     mode: () => modeMetadata,
-    // Central catalog repository is a later work item (§16.6).
-    async list(): Promise<CatalogItemSummary[]> {
-      return [];
+    // Backed by the in-memory central catalog repository (§16.6). Read-only
+    // here; admin writes go through the admin port below.
+    async list(query?): Promise<CatalogItemSummary[]> {
+      return catalogRepository.list(query);
     },
-    async get(_id: string): Promise<CatalogItem | undefined> {
-      return undefined;
+    async get(id: string, kind?): Promise<CatalogItem | undefined> {
+      return catalogRepository.get(id, kind);
     },
-    async head(_id: string): Promise<CatalogItemSummary | undefined> {
-      return undefined;
+    async head(id: string, kind?): Promise<CatalogItemSummary | undefined> {
+      return catalogRepository.head(id, kind);
     },
   };
 
@@ -161,15 +185,16 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
         },
       };
     },
-    // Central catalog admin writes require the catalog repository (§16.6).
-    async createCatalogItem(_input: CreateCatalogItemInput): Promise<CatalogItemWriteResult> {
-      throw new Error("Central catalog repository is not available in the skeleton; catalog admin writes arrive in a later work item.");
+    // Central catalog admin writes: the only path that may write central
+    // catalog data (§16.6). Routed through the in-memory repository.
+    async createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItemWriteResult> {
+      return catalogRepository.create(input);
     },
-    async updateCatalogItem(_input: UpdateCatalogItemInput): Promise<CatalogItemWriteResult> {
-      throw new Error("Central catalog repository is not available in the skeleton; catalog admin writes arrive in a later work item.");
+    async updateCatalogItem(input: UpdateCatalogItemInput): Promise<CatalogItemWriteResult> {
+      return catalogRepository.update(input);
     },
-    async deleteCatalogItem(_input: DeleteCatalogItemInput): Promise<CatalogItemWriteResult> {
-      throw new Error("Central catalog repository is not available in the skeleton; catalog admin writes arrive in a later work item.");
+    async deleteCatalogItem(input: DeleteCatalogItemInput): Promise<CatalogItemWriteResult> {
+      return catalogRepository.delete(input);
     },
   };
 

@@ -21,6 +21,17 @@ export {
 } from "./controlPlane/inMemoryCentralPorts.js";
 
 export {
+  createInMemoryCentralCatalogRepository,
+  hashCentralContent,
+  type CentralCatalogRepository,
+  type InMemoryCentralCatalogRepositoryOptions,
+  CatalogConflictError,
+  CatalogNotFoundError,
+  CatalogVersionMismatchError,
+  CentralCatalogWriteError,
+} from "./controlPlane/centralCatalogRepository.js";
+
+export {
   CENTRAL_SERVICE_ID,
   CENTRAL_CONTROL_PLANE_SCOPE,
   CENTRAL_IN_MEMORY_EVENT_CAP,
@@ -31,6 +42,11 @@ export {
   handleMateriaCentralRequest,
   type MateriaCentralRouteDeps,
 } from "./server/routes.js";
+
+export {
+  handleCentralCatalogRoute,
+  type CentralCatalogRouteDeps,
+} from "./server/catalog.js";
 
 export {
   sendJson,

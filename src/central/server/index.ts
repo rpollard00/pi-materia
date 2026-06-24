@@ -14,6 +14,8 @@ export { handleCentralHealthRoute } from "./health.js";
 export type { CentralHealthRouteDeps } from "./health.js";
 export { handleCentralStatusRoute } from "./status.js";
 export type { CentralStatusRouteDeps } from "./status.js";
+export { handleCentralCatalogRoute } from "./catalog.js";
+export type { CentralCatalogRouteDeps } from "./catalog.js";
 export { handleMateriaCentralRequest } from "./routes.js";
 export type { MateriaCentralRouteDeps } from "./routes.js";
 
