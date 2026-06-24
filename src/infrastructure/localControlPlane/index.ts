@@ -10,6 +10,7 @@ export { createLocalCatalogAccessPort } from "./catalogPort.js";
 export { createLocalModelPolicyPort } from "./modelPolicyPort.js";
 export { createLocalTelemetryStatusPort } from "./telemetryPort.js";
 export { createLocalAdminMetadataPort } from "./adminPort.js";
+export { createLocalConfigCatalogStore, type LocalConfigCatalogStoreOptions } from "./catalogStore.js";
 
 /**
  * Build the local control-plane ports, wrapping existing local config/model/

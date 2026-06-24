@@ -12,3 +12,4 @@ export * from "./identity.js";
 export * from "./auth.js";
 export * from "./audit.js";
 export * from "./catalogProvenance.js";
+export * from "./catalogActions.js";
