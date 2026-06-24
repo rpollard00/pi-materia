@@ -134,6 +134,10 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   const host = profile.webui?.host?.trim() || "127.0.0.1";
   const port = profile.webui?.preferredPort ?? profile.webui?.port ?? 0;
   const autoOpenBrowser = profile.webui?.autoOpenBrowser ?? profile.webui?.openBrowser ?? false;
+  // Central control-plane base URL is optional. When unset/invalid the WebUI
+  // stays in the default local-only workflow; the server revalidates it via
+  // resolveCentralApiBaseUrl (docs/enterprise-control-plane.md §2, §8).
+  const centralApiBaseUrl = profile.webui?.centralApiBaseUrl;
   const sessionFile = ctx.sessionManager.getSessionFile() ?? "";
   const sessionId = ctx.sessionManager.getSessionId() ?? "";
   const cwd = ctx.cwd;
@@ -143,6 +147,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   const { server } = createMateriaWebUiServer({
     host,
     port,
+    ...(centralApiBaseUrl !== undefined ? { mode: { centralApiBaseUrl } } : {}),
     session: {
       key: sessionKey,
       cwd,

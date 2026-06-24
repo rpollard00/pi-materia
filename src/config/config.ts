@@ -411,6 +411,16 @@ function normalizeProfileConfig(parsed: Record<string, unknown>, file: string): 
     else warnInvalidProfileConfig(file, "Ignoring invalid webui profile config. Expected an object.");
   }
 
+  // Validate webui.centralApiBaseUrl so an invalid/unsafe value degrades to
+  // the default local-only workflow rather than breaking the WebUI
+  // (docs/enterprise-control-plane.md §2, §8). The launcher revalidates at the
+  // server boundary via the WebUI mode helper.
+  if (profile.webui) {
+    const validCentralUrl = normalizeCentralApiBaseUrl(profile.webui.centralApiBaseUrl, file);
+    if (validCentralUrl === undefined) delete profile.webui.centralApiBaseUrl;
+    else profile.webui.centralApiBaseUrl = validCentralUrl;
+  }
+
   if (parsed.defaultLoadoutId !== undefined) {
     if (parsed.defaultLoadoutId === null) profile.defaultLoadoutId = null;
     else if (typeof parsed.defaultLoadoutId === "string" && parsed.defaultLoadoutId.trim()) profile.defaultLoadoutId = parsed.defaultLoadoutId.trim();
@@ -480,6 +490,33 @@ function normalizeRoleGenerationProfileConfig(value: unknown, file: string): Mat
 
 function warnInvalidProfileConfig(file: string, message: string): void {
   console.warn(`[pi-materia] Profile config ${file}: ${message}`);
+}
+
+/**
+ * Normalize an optional central control-plane base URL for the WebUI profile.
+ * Returns a trimmed http(s) URL, or `undefined` when unset/invalid (after
+ * warning). Unset/invalid means purely local and changes no default behavior
+ * (docs/enterprise-control-plane.md §2, §8).
+ */
+function normalizeCentralApiBaseUrl(value: unknown, file: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected a string.");
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected an http(s) URL.");
+      return undefined;
+    }
+    return trimmed;
+  } catch {
+    warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected an http(s) URL.");
+    return undefined;
+  }
 }
 
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {

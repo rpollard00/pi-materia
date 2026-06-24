@@ -11,6 +11,7 @@ import type { MateriaSetQuestDefaultLoadoutCallback } from './questDefaultLoadou
 import type { MateriaAddQuestInput, MateriaAddQuestResult, MateriaDeleteQuestInput, MateriaDeleteQuestResult, MateriaQuestBoardSource, MateriaQuestControlInput, MateriaQuestControlResult, MateriaReorderQuestInput, MateriaReorderQuestResult, MateriaRequeueQuestInput, MateriaRequeueQuestResult, MateriaUpdateQuestInput, MateriaUpdateQuestResult } from './quests.js';
 import type { MateriaRolePromptGenerationRequest, MateriaRolePromptGenerationResult } from './roleGeneration.js';
 import type { MateriaWebUiSessionSnapshot } from './session.js';
+import type { BackendModeOptions } from './mode.js';
 
 // Compatibility facade: consumers and tests import public WebUI server helpers
 // from this entry point while route/service implementations live in focused
@@ -27,11 +28,29 @@ export type { MateriaSetActiveLoadoutCallback, MateriaSetActiveLoadoutFailureCod
 export type { MateriaSetDefaultLoadoutCallback, MateriaSetDefaultLoadoutFailureCode, MateriaSetDefaultLoadoutResult } from './defaultLoadout.js';
 export type { MateriaSetQuestDefaultLoadoutCallback, MateriaSetQuestDefaultLoadoutFailureCode, MateriaSetQuestDefaultLoadoutResult } from './questDefaultLoadout.js';
 export type { MateriaMonitorArtifactEntry, MateriaMonitorEventEntry, MateriaToolRegistrySnapshot, MateriaWebUiSessionSnapshot } from './session.js';
+export {
+  WEBUI_BACKEND_SERVICE,
+  handleBackendModeRoute,
+  isCentralSameOrigin,
+  resolveBackendMode,
+  resolveCentralApiBaseUrl,
+  resolveCentralOrigin,
+  type BackendModeEndpointDescriptor,
+  type BackendModeOptions,
+  type BackendModeResponse,
+  type BackendModeRouteDeps,
+} from './mode.js';
 
 export interface MateriaWebUiServerOptions {
   host?: string;
   port?: number;
   staticDir?: string;
+  /**
+   * Backend mode discovery options surfaced via `GET /api/backend-mode`
+   * (docs/enterprise-control-plane.md §8). When omitted the server reports
+   * `local-only` mode with no central control plane configured.
+   */
+  mode?: BackendModeOptions;
   session?: {
     key: string;
     cwd: string;
@@ -72,7 +91,7 @@ export function createMateriaWebUiServer(options: MateriaWebUiServerOptions = {}
   const staticDir = resolve(options.staticDir ?? defaultStaticDir);
 
   const server = createServer(async (req, res) => {
-    await handleMateriaWebUiRequest(req, res, { staticDir, session: options.session });
+    await handleMateriaWebUiRequest(req, res, { staticDir, session: options.session, ...(options.mode !== undefined ? { mode: options.mode } : {}) });
   });
 
   return { server, host, port, staticDir };

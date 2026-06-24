@@ -3,6 +3,7 @@ import type {
   ActiveLoadoutResponse,
   AddQuestRequest,
   AddQuestResponse,
+  BackendModeResponse,
   ConfigResponse,
   DefaultLoadoutResponse,
   DeleteQuestResponse,
@@ -42,6 +43,11 @@ async function fetchJson<TBody>(input: RequestInfo | URL, init?: RequestInit): P
 
 export async function getConfig(): Promise<ConfigResponse> {
   return (await fetchJson<ConfigResponse>('/api/config')).body;
+}
+
+/** Discover whether the UI is connected to local session APIs, a central control plane, or both. */
+export async function getBackendMode(): Promise<BackendModeResponse> {
+  return (await fetchJson<BackendModeResponse>('/api/backend-mode')).body;
 }
 
 export async function saveConfig(target: SaveTarget, config: SaveConfigPayload): Promise<ApiResponse<{ ok?: boolean; error?: string; target?: SaveTarget }>> {

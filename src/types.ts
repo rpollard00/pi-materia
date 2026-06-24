@@ -91,6 +91,15 @@ export interface MateriaProfileConfig {
     preferredPort?: number;
     port?: number;
     host?: string;
+    /**
+     * Optional absolute base URL of a central control plane the local WebUI
+     * runtime should connect to. When set, the WebUI reports
+     * `central-connected` mode and surfaces central catalog/model-policy/admin
+     * state separately from local session state
+     * (docs/enterprise-control-plane.md §2, §8). Unset/invalid means purely
+     * local (`local-only`) and changes no default behavior.
+     */
+    centralApiBaseUrl?: string;
   };
   /** Durable user preference used only to initialize the runtime active loadout. */
   defaultLoadoutId?: string | null;

@@ -4,6 +4,47 @@ import type { MateriaConfig, PipelineConfig, PipelineSocket } from '../loadoutMo
 
 export type SaveTarget = 'user' | 'project' | 'explicit';
 
+/**
+ * Operating mode reported by backend mode discovery
+ * (docs/enterprise-control-plane.md §2). Defined locally to keep the frontend
+ * response shape self-contained and decoupled from the backend application
+ * layer.
+ */
+export type BackendControlPlaneMode = 'local-only' | 'central-connected' | 'central-admin';
+
+/** Per-surface capability flags for separate central vs. local rendering. */
+export interface BackendModeCapabilities {
+  catalog?: boolean;
+  modelPolicy?: boolean;
+  telemetry?: boolean;
+  admin?: boolean;
+}
+
+/** Frontend-facing endpoint routing hint returned by backend mode discovery. */
+export interface BackendModeEndpointDescriptor {
+  available?: boolean;
+  sameOrigin?: boolean;
+  baseUrl?: string;
+}
+
+/**
+ * `GET /api/backend-mode` response body. Tells the frontend whether it is
+ * connected to same-origin local session APIs, a configured central control
+ * plane, or both, plus per-surface capability metadata.
+ */
+export interface BackendModeResponse {
+  ok?: boolean;
+  scope?: string;
+  service?: string;
+  mode?: BackendControlPlaneMode;
+  hasLocalSession?: boolean;
+  hasCentral?: boolean;
+  centralApiBaseUrl?: string;
+  capabilities?: BackendModeCapabilities;
+  endpoints?: { local?: BackendModeEndpointDescriptor; central?: BackendModeEndpointDescriptor };
+  label?: string;
+}
+
 export interface MateriaFormState {
   editingSocketId: string;
   name: string;
