@@ -11,3 +11,4 @@ export * from "./scope.js";
 export * from "./identity.js";
 export * from "./auth.js";
 export * from "./audit.js";
+export * from "./catalogProvenance.js";

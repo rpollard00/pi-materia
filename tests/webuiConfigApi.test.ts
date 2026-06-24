@@ -79,6 +79,30 @@ describe("GET /api/config", () => {
       questDefaultLoadoutId: "default:full-auto",
     });
   });
+
+  test("surfaces informational catalog drift from loaded config", async () => {
+    const baseUrl = await startTestServer(undefined, async () => ({
+      source: "test",
+      config: { materia: { Build: { tools: "coding", prompt: "build" } } },
+      materiaSources: { Build: "user" },
+      catalogDrift: {
+        materia: { Build: { status: "behind", centralVersion: "5", centralContentHash: "sha256:central-new" } },
+      },
+    }));
+
+    const response = await fetch(`${baseUrl}/api/config`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      source: "test",
+      config: { materia: { Build: { tools: "coding", prompt: "build" } } },
+      materiaSources: { Build: "user" },
+      catalogDrift: {
+        materia: { Build: { status: "behind", centralVersion: "5", centralContentHash: "sha256:central-new" } },
+      },
+    });
+  });
 });
 
 describe("POST /api/config", () => {

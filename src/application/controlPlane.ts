@@ -1,5 +1,20 @@
 import type { AuditMetadata } from "../domain/audit.js";
 import type { AuthMethodKind } from "../domain/auth.js";
+// Catalog origin provenance and drift resolution are pure domain invariants
+// (docs/enterprise-control-plane.md §14). Re-exported here so the control-plane
+// DTO surface stays the stable import path for adapters/central code.
+export {
+  CATALOG_DRIFT_STATUSES,
+  isCatalogDriftStatus,
+  isValidCatalogOriginProvenance,
+  readCatalogOriginProvenance,
+  resolveCatalogDrift,
+  type CatalogDriftCentralSummary,
+  type CatalogDriftInfo,
+  type CatalogDriftStatus,
+  type CatalogOriginProvenance,
+  type CatalogOriginScope,
+} from "../domain/catalogProvenance.js";
 import type { EnrichedEvent } from "../domain/eventing.js";
 import type { Permission } from "../domain/identity.js";
 import type { ScopePath } from "../domain/scope.js";
@@ -171,37 +186,6 @@ export interface CatalogItemSummary {
 /** A full catalog item: summary plus its definition content. */
 export interface CatalogItem extends CatalogItemSummary {
   content: CatalogItemContent;
-}
-
-/** Provenance recorded on a local definition that originated from a central catalog item (§14.1). */
-export interface CatalogOriginProvenance {
-  /** Stable central id of the origin catalog item. */
-  catalogItemId: string;
-  /** Central version recorded at copy/update/replace time. */
-  catalogVersion: string;
-  /** Central content hash recorded at copy/update/replace time. */
-  catalogContentHash: string;
-  /** Local scope the definition now lives in; never `central` for a writable local file. */
-  source: "user" | "project" | "explicit";
-}
-
-export const CATALOG_DRIFT_STATUSES = ["current", "behind", "diverged", "orphaned"] as const;
-export type CatalogDriftStatus = (typeof CATALOG_DRIFT_STATUSES)[number];
-
-export function isCatalogDriftStatus(value: unknown): value is CatalogDriftStatus {
-  return typeof value === "string" && (CATALOG_DRIFT_STATUSES as readonly string[]).includes(value);
-}
-
-/** Drift of a local definition against its central origin, resolved at load time (§14.2). */
-export interface CatalogDriftInfo {
-  status: CatalogDriftStatus;
-  /** Current central version (resolved at load), when central was reachable. */
-  centralVersion?: string;
-  /** Current central content hash (resolved at load), when central was reachable. */
-  centralContentHash?: string;
-  /** True when central was unreachable and drift could not be computed. */
-  stale?: boolean;
-  reason?: string;
 }
 
 /** Filter for catalog listing queries. */

@@ -21,6 +21,8 @@ import {
   centralCatalogSourceToPartial,
   isCentralCatalogSourceEmpty,
 } from "./centralCatalogSource.js";
+import { resolveConfigCatalogDrift } from "./catalogDrift.js";
+import { isValidCatalogOriginProvenance, type CatalogOriginProvenance } from "../domain/catalogProvenance.js";
 
 /**
  * Options for {@link loadConfig}.
@@ -83,12 +85,22 @@ export async function loadConfig(cwd: string, configuredPath?: string, options: 
   resolveUtilityExecutionBindings(config, materiaCommandSources, loadedLayers);
   const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
   const questDefaultLoadout = resolveQuestDefaultLoadout(profile.questDefaultLoadoutId, config.loadouts, loadoutSources);
+  // Catalog drift is informational and never mutates local files: it compares
+  // recorded central origins against the current central summaries and surfaces
+  // the result for loaded config/WebUI (docs/enterprise-control-plane.md §14).
+  const catalogDrift = resolveConfigCatalogDrift({
+    config,
+    loadoutSources,
+    materiaSources,
+    centralSource: options.centralSource,
+  });
   return {
     config,
     source: loadedLayers.map((layer) => layer.path ?? (layer.scope === "central" ? CENTRAL_CATALOG_LAYER_LABEL : layer.scope)).join(" < "),
     layers,
     loadoutSources,
     materiaSources,
+    ...(catalogDrift ? { catalogDrift } : {}),
     defaultMateriaIds,
     defaultLoadoutId: defaultLoadout.loadoutId,
     ...(defaultLoadout.warning ? { defaultLoadoutWarning: defaultLoadout.warning } : {}),
@@ -781,6 +793,7 @@ function rejectReadonlyDefaultLoadoutSaves(patch: Pick<MateriaConfigPatch, "load
 
 function validateLoadoutGraphs(loadouts: PiMateriaConfig["loadouts"] | undefined): void {
   for (const [name, loadout] of Object.entries(loadouts ?? {}) as Array<[string, MateriaPipelineConfig]>) {
+    validateCatalogOrigin(`loadouts.${name}`, loadout.catalogOrigin);
     try {
       assertValidPipelineGraph(loadout);
     } catch (error) {
@@ -807,6 +820,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
     if ("systemPrompt" in materia) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
     validateMateriaLockState(name, materia.lockState);
+    validateCatalogOrigin(`materia.${name}`, materia.catalogOrigin);
     const type = ensureMateriaDefinitionType(materia);
     if (type === "utility") {
       validateUtilityMateria(name, materia);
@@ -876,6 +890,14 @@ function validateMateriaParseMode(name: string, parse: unknown): void {
 function validateMateriaLockState(name: string, lockState: unknown): void {
   if (lockState === undefined) return;
   if (!isMateriaLockState(lockState)) throw new Error(`Materia "${name}" has invalid lockState. Expected "locked" or "unlocked".`);
+}
+
+/** Validate persisted catalog origin provenance when present (docs/enterprise-control-plane.md §14.1). */
+function validateCatalogOrigin(path: string, value: unknown): asserts value is CatalogOriginProvenance | undefined {
+  if (value === undefined) return;
+  if (!isValidCatalogOriginProvenance(value)) {
+    throw new Error(`${path} has invalid catalogOrigin. Expected { catalogItemId, catalogVersion, catalogContentHash, source }.`);
+  }
 }
 
 function isMateriaLockState(value: unknown): value is MateriaUserLockState {

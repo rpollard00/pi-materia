@@ -394,6 +394,13 @@ Drift status semantics:
 | `diverged` | Local content no longer equals the recorded origin hash (locally edited) **and** central has changed. |
 | `orphaned` | Origin `catalogItemId` no longer exists in central (deleted or renamed). |
 
+The **content hash is the authoritative drift signal**: `behind`/`diverged` are
+resolved from content-hash comparison, so a central metadata-only republish that
+bumps `version` without changing definition content is treated as `current`.
+`centralVersion` is still reported for UIs. Local and central content hashes
+use the same deterministic key-stable digest, so an unedited local copy compares
+equal to its recorded origin hash.
+
 ### 14.3 User-visible drift behavior
 
 - Drift is **informational only**. It is surfaced in loaded config and in WebUI API

@@ -1,4 +1,5 @@
 import type { ToolScopeSpec } from "./domain/toolScope.js";
+import type { CatalogDriftInfo, CatalogOriginProvenance } from "./domain/catalogProvenance.js";
 import type { MateriaThinkingLevel } from "./thinking.js";
 
 export interface PiMateriaConfig {
@@ -24,6 +25,13 @@ export interface LoadedConfig {
   layers?: MateriaConfigLayer[];
   loadoutSources?: Record<string, MateriaConfigLayerScope>;
   materiaSources?: Record<string, MateriaConfigLayerScope>;
+  /**
+   * Resolved catalog drift for local definitions that originated from a central
+   * catalog item, keyed by loadout name / materia id. Informational only; never
+   * auto-applied (docs/enterprise-control-plane.md §14). Absent when central
+   * drift could not be resolved (central unreachable or no summaries).
+   */
+  catalogDrift?: ResolvedConfigCatalogDrift;
   defaultMateriaIds?: string[];
   /** Validated user preference for the default loadout. Missing or stale values are exposed as null. */
   defaultLoadoutId?: string | null;
@@ -33,6 +41,16 @@ export interface LoadedConfig {
   questDefaultLoadoutId?: string | null;
   /** Human-readable warning when a configured quest default preference could not be resolved exactly. */
   questDefaultLoadoutWarning?: string;
+}
+
+/**
+ * Resolved catalog drift surfaced in {@link LoadedConfig} and WebUI API responses.
+ * A re-export of the config-layer drift snapshot shape so `types.ts` consumers
+ * do not need to import the config module directly.
+ */
+export interface ResolvedConfigCatalogDrift {
+  loadouts?: Record<string, CatalogDriftInfo>;
+  materia?: Record<string, CatalogDriftInfo>;
 }
 
 /**
@@ -436,6 +454,13 @@ export interface MateriaPipelineConfig {
   lockState?: LoadoutUserLockState;
   /** Optional provenance for duplicates or local copies derived from a shipped default. */
   originDefaultId?: string;
+  /**
+   * Catalog origin provenance for a local copy that originated from a central
+   * catalog item. Informational; never auto-applied
+   * (docs/enterprise-control-plane.md §14). Only present on writable local
+   * (user/project/explicit) loadouts.
+   */
+  catalogOrigin?: CatalogOriginProvenance;
   entry: string;
   /** Canonical socket map for core/domain/application code. */
   sockets?: Record<string, MateriaPipelineSocketConfig>;
@@ -611,6 +636,13 @@ export interface MateriaDefinitionMetadata {
   generator?: boolean;
   /** User-controlled lock state for editable materia definitions. */
   lockState?: MateriaUserLockState;
+  /**
+   * Catalog origin provenance for a local copy that originated from a central
+   * catalog item. Informational; never auto-applied
+   * (docs/enterprise-control-plane.md §14). Only present on writable local
+   * (user/project/explicit) definitions.
+   */
+  catalogOrigin?: CatalogOriginProvenance;
   /** Generated list metadata. Prefer generator: true for the standard workItems contract. */
   generates?: MateriaGeneratorConfig;
 }

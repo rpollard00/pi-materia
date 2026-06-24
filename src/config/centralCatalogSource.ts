@@ -15,12 +15,39 @@ import type { MateriaConfig, MateriaPipelineConfig, PiMateriaConfig } from "../t
  * materia reference validation, etc.). Central loadouts/materia intentionally
  * carry no persisted `source` field — their provenance is expressed through the
  * `central` layer scope in `loadoutSources`/`materiaSources`.
+ *
+ * `summaries` carries the current central version/content-hash per catalog item
+ * id so config loading can resolve drift of local copies that originated from
+ * these central items (§14). It is optional; when absent, drift is left unset
+ * rather than fabricated (§14.3).
  */
 export interface CentralCatalogConfigSource {
   /** Central loadout definitions keyed by display name. */
   readonly loadouts?: Readonly<Record<string, MateriaPipelineConfig>>;
   /** Central materia definitions keyed by materia id. */
   readonly materia?: Readonly<Record<string, MateriaConfig>>;
+  /**
+   * Current central catalog item summaries keyed by catalog item id, used to
+   * resolve drift against local copies. Populated by the control-plane adapter
+   * from `CatalogAccessPort`; content hashes must be in the same deterministic
+   * space as local definition digests (see `computeDefinitionDigest`).
+   */
+  readonly summaries?: Readonly<Record<string, CentralCatalogItemSummary>>;
+}
+
+/**
+ * Central catalog item summary used for drift comparison: the current central
+ * version and content hash for a catalog item id. A structural subset of the
+ * application `CatalogItemSummary`; kept local to the config layer so config
+ * loading does not depend on the application control-plane DTOs.
+ */
+export interface CentralCatalogItemSummary {
+  /** Current central version (monotonic string). */
+  readonly version: string;
+  /** Current central content hash of the definition. */
+  readonly contentHash: string;
+  /** RFC3339 timestamp of the last central update, when known. */
+  readonly updatedAt?: string;
 }
 
 /** Label surfaced for the central layer where file-backed layers show a path. */
@@ -32,6 +59,21 @@ export function isCentralCatalogSourceEmpty(source: CentralCatalogConfigSource |
   const hasLoadouts = source.loadouts !== undefined && Object.keys(source.loadouts).length > 0;
   const hasMateria = source.materia !== undefined && Object.keys(source.materia).length > 0;
   return !hasLoadouts && !hasMateria;
+}
+
+/**
+ * True when a central source carries catalog summaries that enable drift
+ * resolution. Drift is left unset (not fabricated) when this is false
+ * (docs/enterprise-control-plane.md §14.3).
+ */
+export function hasCentralCatalogSummaries(source: CentralCatalogConfigSource | undefined): boolean {
+  return source?.summaries !== undefined && Object.keys(source.summaries).length > 0;
+}
+
+/** Composite key for {@link CentralCatalogConfigSource.summaries}, disambiguating
+ *  loadout and materia catalog items that may share an id (`${kind}:${id}`). */
+export function centralCatalogSummaryKey(kind: "loadout" | "materia", catalogItemId: string): string {
+  return `${kind}:${catalogItemId}`;
 }
 
 /**
