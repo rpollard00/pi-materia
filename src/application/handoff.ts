@@ -2,9 +2,10 @@ import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import {
   HANDOFF_CONTEXT_FIELD,
   HANDOFF_SATISFIED_FIELD,
+  HANDOFF_TEXT_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
   pickHandoffEnvelopeFields,
-} from "../handoff/handoffContract.js";
+} from "../domain/handoff.js";
 import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
 import { isPlainObject } from "./workflowTransitions.js";
 
@@ -13,10 +14,17 @@ export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unk
 
   applyUtilityStatePatch(state, parsed, socket);
 
+  // `text` is a renderable current-output payload, not durable shared state.
+  // Exclude it from the implicit `state.data.envelope` mirror so prose is not
+  // handed off unless a socket explicitly assigns it (e.g.
+  // `assign: { "prNotes": "$.text" }`). The authoritative raw value remains in
+  // `state.lastJson` for debugging/replay and drives TUI rendering directly.
+  const picked = pickHandoffEnvelopeFields(parsed);
+  delete picked[HANDOFF_TEXT_FIELD];
   const envelope = isPlainObject(state.data.envelope)
     ? { ...(state.data.envelope as Record<string, unknown>) }
     : {};
-  Object.assign(envelope, pickHandoffEnvelopeFields(parsed));
+  Object.assign(envelope, picked);
   if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
 
   const workItems = parsed[HANDOFF_WORK_ITEMS_FIELD];
@@ -46,8 +54,13 @@ function appendAgentContext(existing: unknown, context: string, socket?: Resolve
 
 function contextLabel(socket?: ResolvedMateriaSocket): string {
   if (!socket) return "handoff context";
-  const materia = socket.materia.label ?? (isUtilitySocket(socket) ? socket.materiaId : socket.socket.materia) ?? "materia";
-  return `${socket.id} ${materia}`;
+  return `${socket.id} ${materiaLabel(socket) ?? "materia"}`;
+}
+
+/** Resolve a display label for the materia backing a socket, when available. */
+function materiaLabel(socket?: ResolvedMateriaSocket): string | undefined {
+  if (!socket) return undefined;
+  return socket.materia.label ?? (isUtilitySocket(socket) ? socket.materiaId : socket.socket.materia);
 }
 
 function isUtilitySocket(socket: ResolvedMateriaSocket): socket is Extract<ResolvedMateriaSocket, { materiaId: string }> {

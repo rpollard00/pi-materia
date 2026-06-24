@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildUtilityInput, executeUtilitySocketWithDeps, type UtilityResolvedSocket } from "../src/application/utilityExecution.js";
 import type { MateriaCastState } from "../src/types.js";
 
-function state(): MateriaCastState {
+function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
   return {
     version: 1,
     active: true,
@@ -27,6 +27,7 @@ function state(): MateriaCastState {
     pipeline: { entry: {} as never, sockets: {} },
     currentItemKey: "item-a",
     currentItemLabel: "Item A",
+    ...overrides,
   } as MateriaCastState;
 }
 
@@ -38,6 +39,15 @@ describe("application utility execution", () => {
   test("builds stable utility input with canonical socketId", () => {
     const input = buildUtilityInput(state(), utilitySocket({ type: "utility", label: "Utility Label", utility: "echo", params: { answer: 42 } }));
     expect(input).toMatchObject({ cwd: "/tmp/project", request: "do utility work", castId: "cast-1", socketId: "Socket-1", materiaId: "Utility", materiaLabel: "Utility Label", params: { answer: 42 }, itemKey: "item-a", itemLabel: "Item A", state: { existing: true } });
+  });
+
+  test("exposes explicitly assigned renderable text to deterministic utilities as input.state", () => {
+    const cast = state({ data: { existing: true, prNotes: "## Summary\n\nShipped the feature." } });
+    const input = buildUtilityInput(cast, utilitySocket({ type: "utility", label: "PR Notes Consumer", utility: "echo" }));
+
+    // Explicit `assign: { prNotes: "$.text" }` persists renderable text into
+    // state.data.prNotes; utilities consume that durable slot via input.state.
+    expect(input.state).toMatchObject({ prNotes: "## Summary\n\nShipped the feature." });
   });
 
   test("routes command utilities through the command executor boundary and records input", async () => {

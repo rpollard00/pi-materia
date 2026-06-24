@@ -170,6 +170,29 @@ describe("generic engine helper mechanics", () => {
     expect(target).toEqual({ utility: { result: { value: 7 } } });
   });
 
+  test("does not mirror renderable text into the handoff envelope state", () => {
+    const socket = {
+      id: "Narrate",
+      socket: { materia: "Narrate" },
+      materia: { tools: "none", prompt: "narrate", label: "Narrate" },
+    } satisfies ResolvedMateriaSocket;
+    const state = makeState({ data: { envelope: { satisfied: false }, context: "existing context" } });
+    const parsed = {
+      text: "## Summary\n\nNarration prose for downstream consumption.",
+      satisfied: true,
+    };
+
+    applyGenericHandoffEnvelope(state, parsed, socket);
+
+    // text is a renderable current-output payload, not durable shared state.
+    // It is consumed only via explicit assignment (e.g. "$.text"), so it is
+    // neither mirrored into state.data.envelope nor accumulated for later sockets.
+    expect(state.data.envelope).toMatchObject({ satisfied: true });
+    expect(state.data.envelope).not.toHaveProperty("text");
+    expect(state.data).not.toHaveProperty("text");
+    expect(state.data).not.toHaveProperty("texts");
+  });
+
   test("preserves small handoff fields from JSON socket output", () => {
     const state = makeState({ data: { envelope: { satisfied: false }, context: "existing context" } });
     const parsed = {

@@ -1,0 +1,45 @@
+{
+  "artifactDir": ".pi/pi-materia",
+  "activeLoadout": "Text Consumption Example",
+  "loadouts": {
+    "Text Consumption Example": {
+      "entry": "Socket-1",
+      "sockets": {
+        "Socket-1": {
+          "materia": "Narrate",
+          "parse": "json",
+          "assign": { "prNotes": "$.text" },
+          "edges": [
+            { "when": "always", "to": "Socket-2" }
+          ]
+        },
+        "Socket-2": {
+          "materia": "PR-Notes-Consumer",
+          "parse": "json"
+        }
+      }
+    }
+  },
+  "materia": {
+    "Narrate": {
+      "type": "agent",
+      "label": "Narrate",
+      "group": "Text",
+      "description": "Produces PR-ready notes emitted as the canonical renderable text payload (top-level `text`).",
+      "tools": "readOnly",
+      "prompt": "You are the pi-materia narration materia. Produce PR-ready notes for the cast request.\n\nThis socket's primary product is displayable prose, so emit it as the canonical renderable text payload. Do NOT duplicate the notes into `context`.\n\nReturn JSON with a top-level string `text` field only (no markdown fences, workItems, satisfied, or extra prose)."
+    },
+    "PR-Notes-Consumer": {
+      "type": "utility",
+      "label": "PR Notes Consumer",
+      "group": "Text",
+      "description": "Deterministic consumer that reads the explicitly assigned PR notes from input.state.prNotes and emits canonical handoff output. Demonstrates that renderable text reaches downstream materia only through explicit assignment, not automatic accumulation.",
+      "command": [
+        "node",
+        "-e",
+        "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const i=JSON.parse(d||'{}');const notes=((i.state||{}).prNotes)||'';process.stdout.write(JSON.stringify({satisfied:true,context:'Consumed upstream PR notes ('+String(notes).length+' chars) from input.state.prNotes.'}))})"
+      ],
+      "parse": "json"
+    }
+  }
+}

@@ -73,18 +73,68 @@ describe("runtime rework feedback", () => {
     expect(renderReworkFeedbackPromptContext(cast, "Socket-7")).toBeUndefined();
   });
 
-  test("falls back to bounded output excerpt when context is missing", () => {
+  test("falls back to bounded sanitized JSON excerpt when context is missing from a JSON handoff", () => {
     const cast = state();
     captureReworkFeedbackForRoute(cast, {
       sourceSocket: socket(),
       targetSocketId: "Socket-4",
       edge: { when: "not_satisfied", to: "Socket-4" },
-      parsed: { satisfied: false },
+      parsed: { satisfied: false, workItems: [{ title: "x".repeat(2_000), context: "y" }] },
+      rawOutput: JSON.stringify({ satisfied: false, workItems: [{ title: "x".repeat(2_000), context: "y" }] }),
+    });
+
+    const rendered = renderReworkFeedbackPromptContext(cast, "Socket-4") ?? "";
+    expect(rendered).toContain("No top-level context was provided");
+    expect(rendered).toContain("bounded previous output excerpt");
+    expect(rendered.length).toBeLessThan(2_400);
+  });
+
+  test("strips renderable text from JSON handoff rework excerpt when context is missing", () => {
+    const cast = state();
+    const prose = "Sensitive narration prose that must not leak as default context.";
+    captureReworkFeedbackForRoute(cast, {
+      sourceSocket: socket(),
+      targetSocketId: "Socket-4",
+      edge: { when: "not_satisfied", to: "Socket-4" },
+      parsed: { satisfied: false, text: prose },
+      rawOutput: JSON.stringify({ satisfied: false, text: prose }),
+    });
+
+    const rendered = renderReworkFeedbackPromptContext(cast, "Socket-4") ?? "";
+    expect(rendered).toContain("No top-level context was provided");
+    expect(rendered).not.toContain(prose);
+    expect(rendered).toContain("satisfied");
+  });
+
+  test("does not leak renderable text when JSON handoff carried only text", () => {
+    const cast = state();
+    const prose = "Narration-only payload prose.";
+    captureReworkFeedbackForRoute(cast, {
+      sourceSocket: socket(),
+      targetSocketId: "Socket-4",
+      edge: { when: "not_satisfied", to: "Socket-4" },
+      parsed: { text: prose },
+      rawOutput: JSON.stringify({ text: prose }),
+    });
+
+    const rendered = renderReworkFeedbackPromptContext(cast, "Socket-4") ?? "";
+    expect(rendered).toContain("only renderable text");
+    expect(rendered).not.toContain(prose);
+  });
+
+  test("passes free-text output through as the bounded excerpt when context is missing", () => {
+    const cast = state();
+    captureReworkFeedbackForRoute(cast, {
+      sourceSocket: socket(),
+      targetSocketId: "Socket-4",
+      edge: { when: "not_satisfied", to: "Socket-4" },
+      parsed: "x".repeat(2_000),
       rawOutput: "x".repeat(2_000),
     });
 
     const rendered = renderReworkFeedbackPromptContext(cast, "Socket-4") ?? "";
     expect(rendered).toContain("No top-level context was provided");
+    expect(rendered).toContain("bounded previous output excerpt");
     expect(rendered.length).toBeLessThan(2_400);
   });
 });

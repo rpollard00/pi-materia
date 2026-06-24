@@ -9,7 +9,8 @@ import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequireme
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { renderReworkFeedbackPromptContext } from "./reworkFeedback.js";
-import { currentItem, getPath, readObjectField } from "./workflowTransitions.js";
+import { stripRenderableTextField } from "./handoffPromptSanitization.js";
+import { currentItem, getPath, isPlainObject, readObjectField } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
 // - synthetic cast context owns the shared handoff contract summary for JSON sockets in final-output mode;
@@ -223,7 +224,7 @@ export function isActiveMultiTurnSocket(state: MateriaCastState): boolean {
 }
 
 export function buildSyntheticCastContext(state: MateriaCastState): string {
-  const latestOutput = state.lastAssistantText ?? state.lastOutput;
+  const previousOutput = sanitizePreviousOutput(state);
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   const multiTurnRefining = activeMultiTurn && state.multiTurnFinalizing !== true;
   const mode = activeMultiTurn
@@ -249,8 +250,44 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
     "Generic cast data:",
     JSON.stringify(state.data, null, 2),
     "",
-    latestOutput ? `Previous output:\n${latestOutput}` : undefined,
+    previousOutput ? `Previous output:\n${previousOutput}` : undefined,
   ].filter(Boolean).join("\n");
+}
+
+/**
+ * Returns the previous socket's output for the automatic "Previous output"
+ * prompt section, with unassigned renderable text sanitized out.
+ *
+ * JSON sockets store their authoritative parsed payload in `state.lastJson`
+ * and a matching re-stringified copy in `lastOutput`/`lastAssistantText`
+ * (with the `event` side-channel already stripped). When those agree, the
+ * previous output is canonical JSON handoff and we strip the renderable `text`
+ * payload from the parsed form so prose reaches following materia only through
+ * explicit assignment (e.g. `assign: { "prNotes": "$.text" }`) or templating
+ * — not as default context. The authoritative raw JSON stays in `state.lastJson`
+ * and the `lastJson` artifact for debugging and replay; this helper only
+ * affects the displayed previous-output context.
+ *
+ * Free-text (parse:"text") outputs never match a parsed `lastJson`, so they are
+ * passed through unchanged. Returns undefined when there is no previous output
+ * or the previous JSON output carried only a renderable `text` payload, so no
+ * empty/noisy section is emitted.
+ */
+export function sanitizePreviousOutput(state: MateriaCastState): string | undefined {
+  const latestOutput = state.lastAssistantText ?? state.lastOutput;
+  if (typeof latestOutput !== "string" || latestOutput.length === 0) return undefined;
+  const lastJson = state.lastJson;
+  // Only sanitize when lastJson is the parsed form of latestOutput. JSON
+  // sockets set both to the same compact re-stringified payload on completion,
+  // so agreement reliably identifies canonical JSON handoff without touching
+  // free-text (parse:"text") outputs, which never pair lastJson with their own
+  // raw text this way. This also tolerates a stale lastJson left by an earlier
+  // JSON socket after an intervening text socket: its stringification will not
+  // match the text output, so the prose-free text output is shown unchanged.
+  if (isPlainObject(lastJson) && JSON.stringify(lastJson) === latestOutput) {
+    return stripRenderableTextField(lastJson);
+  }
+  return latestOutput;
 }
 
 export function syntheticHandoffContractContext(state: MateriaCastState): string | undefined {

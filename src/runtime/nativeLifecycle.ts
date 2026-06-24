@@ -38,6 +38,7 @@ import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/h
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
+import { buildMateriaTextOutputMessage } from "../presentation/textOutput.js";
 import type { LoadedConfig, MateriaCastState, MateriaJsonOutputValidationKind, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
 import { createRunState, recordUsageModelSelection } from "../telemetry/usage.js";
@@ -1030,6 +1031,10 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   }
 
   applyGenericHandoffEnvelope(state, parsed, socket);
+  // Surface the canonical renderable text payload as clean TUI prose. This is a
+  // one-way presentation layer: it never mutates cast state or the authoritative
+  // JSON envelope, which remains consumable by downstream materia.
+  emitMateriaTextOutput(pi, state, socket, parsed);
   applyAssignments(state, socket, parsed);
   const advanceTarget = applyAdvance(state, socket, parsed);
   const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
@@ -1576,6 +1581,26 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
     details: { phase: state.phase, socketId: currentSocketId(state), materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, materiaModel: state.currentMateriaModel },
   }, { triggerTurn: true });
   await appendAdvancementDiagnostic(ctx, state, "dispatch_execution_exit", diagnostics, { boundary: "async_prompt_dispatch_attempt", dispatchTriggerMode: diagnostics?.dispatchTriggerMode ?? "immediate-triggerTurn" });
+}
+
+/**
+ * Surface a materia's canonical renderable text payload as clean TUI prose.
+ * Pure presentation: only emits a display message when the parsed handoff
+ * carries a non-empty `text` field, and never mutates cast state or the
+ * authoritative JSON envelope.
+ */
+function emitMateriaTextOutput(pi: ExtensionAPI, state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): void {
+  const notificationMateria = resolvedMateriaDisplayName(socket) ?? socketMateriaName(socket);
+  const display = formatMateriaNotificationDisplay(notificationMateria, socket.id);
+  const message = buildMateriaTextOutputMessage({
+    parsed,
+    materiaName: display.materiaName,
+    socketId: socket.id,
+    socketOrdinal: display.socketOrdinal,
+    itemKey: state.currentItemKey,
+    itemLabel: state.currentItemLabel,
+  });
+  if (message) pi.sendMessage(message);
 }
 
 export async function prepareAgentStartSystemPrompt(input: { pi: ExtensionAPI; session: ExtensionContext; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined> {

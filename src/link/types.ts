@@ -176,6 +176,8 @@ export interface PreviousCastHandoff {
   satisfied?: boolean;
   /** Previous agent handoff fields use the same small contract: plain-text downstream context. */
   context?: string;
+  /** Previous agent handoff fields use the same small contract: renderable text payload. */
+  text?: string;
 }
 
 export interface LinkCastStateData {
