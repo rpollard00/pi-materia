@@ -17,6 +17,7 @@ import {
   type TelemetryStatusPort,
   type UpdateCatalogItemInput,
 } from "../../application/controlPlane.js";
+import type { AuthMethodKind } from "../../domain/auth.js";
 import type { EnrichedEvent } from "../../domain/eventing.js";
 import {
   CENTRAL_IN_MEMORY_EVENT_CAP,
@@ -36,8 +37,10 @@ import {
  * - **Telemetry**: a small bounded in-memory event store so `status()` reports
  *   real counts. Full normalized ingestion/query is a later work item (§16.15,
  *   §16.16).
- * - **Admin**: server metadata only, with no configured auth methods. The
- *   dev-token auth + RBAC surface is a later work item (§16.5).
+ * - **Admin**: server metadata only. Auth methods now default to
+ *   `["dev-token"]` and are configurable; dev-token auth + RBAC guards central
+ *   routes (§16.5). Catalog admin writes still require the catalog repository
+ *   (§16.6).
  *
  * The adapter never starts or touches a local repository session.
  */
@@ -49,6 +52,12 @@ export interface InMemoryCentralPortsOptions {
   startedAt?: string;
   /** Central API base URL surfaced through mode metadata. */
   centralApiBaseUrl?: string;
+  /**
+   * Auth method kinds the server reports in admin metadata. Defaults to
+   * `["dev-token"]` now that dev-token auth guards central routes
+   * (docs/enterprise-control-plane.md §13, §16.5). OAuth/OIDC is a future kind.
+   */
+  authMethods?: readonly AuthMethodKind[];
 }
 
 /** Internal record tying an ingested event to its originating runtime for query filtering. */
@@ -63,6 +72,7 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
     ...(options.centralApiBaseUrl !== undefined ? { centralApiBaseUrl: options.centralApiBaseUrl } : {}),
   });
   const startedAt = options.startedAt ?? nowIso();
+  const authMethods: readonly AuthMethodKind[] = options.authMethods ?? ["dev-token"];
   const store: IngestedEventRecord[] = [];
 
   function pushEvents(input: TelemetryIngestInput): number {
@@ -143,8 +153,8 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
       return {
         server: {
           mode: "central-admin",
-          // Dev-token auth + RBAC is a later work item (§16.5).
-          authMethods: [],
+          // Dev-token auth + RBAC is wired (§16.5); reports the configured method kinds.
+          authMethods,
           capabilities: modeMetadata.capabilities,
           ...(options.label !== undefined ? { label: options.label } : {}),
           startedAt,

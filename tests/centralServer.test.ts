@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   CENTRAL_CONTROL_PLANE_SCOPE,
   CENTRAL_SERVICE_ID,
+  DEFAULT_DEV_TOKEN_ADMIN,
   createInMemoryCentralPorts,
   createMateriaCentralServer,
   type MateriaCentralServer,
@@ -10,6 +11,9 @@ import type { ControlPlanePorts, TelemetryIngestInput } from "../src/application
 import type { EnrichedEvent } from "../src/domain/eventing.js";
 
 const servers: Array<MateriaCentralServer["server"]> = [];
+
+/** Reader token grants telemetry.read (and the other read perms); used for status reads. */
+const READER_AUTH = { Authorization: `Bearer ${DEFAULT_DEV_TOKEN_ADMIN}` };
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
@@ -84,14 +88,19 @@ describe("central server skeleton — in-memory control-plane ports", () => {
     expect(await ports.modelPolicy.listPolicies()).toEqual([]);
   });
 
-  test("admin metadata reports no auth methods yet and rejects catalog writes", async () => {
+  test("admin metadata reports dev-token auth and rejects catalog writes", async () => {
     const ports = createInMemoryCentralPorts({ label: "dev", startedAt: "2026-06-24T00:00:00.000Z" });
     const metadata = await ports.admin.getMetadata();
     expect(metadata.server.mode).toBe("central-admin");
-    expect(metadata.server.authMethods).toEqual([]);
+    expect(metadata.server.authMethods).toEqual(["dev-token"]);
     expect(metadata.server.label).toBe("dev");
     expect(metadata.server.startedAt).toBe("2026-06-24T00:00:00.000Z");
     expect(metadata.server.capabilities).toEqual({ catalog: true, modelPolicy: true, telemetry: true, admin: true });
+
+    // authMethods is configurable so a future OAuth adapter can advertise its kind.
+    const oauthPorts = createInMemoryCentralPorts({ authMethods: ["dev-token", "oauth"] });
+    const oauthMetadata = await oauthPorts.admin.getMetadata();
+    expect(oauthMetadata.server.authMethods).toEqual(["dev-token", "oauth"]);
 
     await expect(ports.admin.createCatalogItem({ id: "x", kind: "loadout", content: { definition: {} } })).rejects.toThrow(/catalog repository/);
     await expect(ports.admin.updateCatalogItem({ id: "x" })).rejects.toThrow(/catalog repository/);
@@ -132,7 +141,7 @@ describe("central server skeleton — HTTP routes", () => {
 
   test("GET /api/status returns a central-admin status snapshot", async () => {
     const baseUrl = await startTestServer();
-    const response = await fetch(`${baseUrl}/api/status`);
+    const response = await fetch(`${baseUrl}/api/status`, { headers: READER_AUTH });
     const body = (await response.json()) as {
       ok: boolean;
       scope: string;
@@ -178,7 +187,7 @@ describe("central server skeleton — HTTP routes", () => {
     await ports.telemetry.ingest({ runtimeId: "rt-1", events: [enrichedEvent()] });
     const baseUrl = await startTestServer({ ports });
 
-    const response = await fetch(`${baseUrl}/api/status`);
+    const response = await fetch(`${baseUrl}/api/status`, { headers: READER_AUTH });
     const body = (await response.json()) as { status: { eventCount: number; runtimeCount: number } };
     expect(response.status).toBe(200);
     expect(body.status.eventCount).toBe(1);
@@ -198,7 +207,7 @@ describe("central server skeleton — HTTP routes", () => {
     };
     const baseUrl = await startTestServer({ ports: throwingPorts });
 
-    const response = await fetch(`${baseUrl}/api/status`);
+    const response = await fetch(`${baseUrl}/api/status`, { headers: READER_AUTH });
     const body = (await response.json()) as { ok: boolean; scope: string; service: string; error: string };
 
     expect(response.status).toBe(500);

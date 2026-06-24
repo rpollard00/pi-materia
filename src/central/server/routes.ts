@@ -1,3 +1,4 @@
+import { requirePermission, type CentralAuth } from "../auth/index.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { handleCentralHealthRoute } from "./health.js";
 import { sendJson } from "./http.js";
@@ -7,6 +8,8 @@ import type { ControlPlanePorts } from "../../application/controlPlane.js";
 
 export interface MateriaCentralRouteDeps {
   ports: ControlPlanePorts;
+  /** Auth configuration used by route guards (dev-token adapter today). */
+  auth: CentralAuth;
   /** Mode reported on health envelopes; defaults to the ports' reported mode. */
   label?: string;
 }
@@ -20,10 +23,18 @@ export interface MateriaCentralRouteDeps {
  * `/api/monitor/*`) are **not** exposed here — the central server has no local
  * repository session (docs/enterprise-control-plane.md §3.3, §8, §9).
  *
- * Only health/status routes are wired at the skeleton stage. Catalog,
- * model-policy, telemetry-ingestion, and admin routes arrive in later work
- * items (§16.6, §16.13, §16.15, §16.16) and should be added as ordered branches
- * below, mirroring this dispatcher's style.
+ * Route authorization follows docs/enterprise-control-plane.md §13: central
+ * route groups are gated by the domain principal/permission contracts. Health
+ * is intentionally public (liveness). Other central routes require a permission
+ * resolved through the dev-token adapter today (future OAuth adapter produces
+ * the same contracts). Route matching precedes auth, so unknown routes still
+ * return 404 rather than leaking existence through a 401.
+ *
+ * Catalog, model-policy, telemetry-ingestion, and admin route handlers arrive
+ * in later work items (§16.6, §16.13, §16.15, §16.16); add them as ordered
+ * branches below, each calling {@link requirePermission} with the matching
+ * permission (`catalog.read`/`catalog.write`, `model-policy.read`/`write`,
+ * `admin.read`/`write`, `telemetry.read`/`telemetry.ingest`).
  */
 export async function handleMateriaCentralRequest(
   req: IncomingMessage,
@@ -32,15 +43,24 @@ export async function handleMateriaCentralRequest(
 ): Promise<void> {
   const mode = deps.ports.telemetry.mode().mode;
 
+  // Health is public so liveness/readiness probes work without credentials.
   if (req.url?.startsWith("/api/health")) {
     handleCentralHealthRoute(res, { mode, ...(deps.label !== undefined ? { label: deps.label } : {}) });
     return;
   }
 
+  // Central monitoring/status read surface (§15, §16.16). Requires telemetry.read.
   if (req.url?.startsWith("/api/status")) {
+    if (requirePermission({ auth: deps.auth, req, res, permission: "telemetry.read" }) === undefined) return;
     await handleCentralStatusRoute(res, { telemetry: deps.ports.telemetry });
     return;
   }
+
+  // Future route groups (each guarded with requirePermission):
+  //   /api/catalog/*        → catalog.read / catalog.write      (§16.6, §16.9)
+  //   /api/model-policy/*   → model-policy.read / .write         (§16.13, §16.14)
+  //   /api/admin/*          → admin.read / admin.write           (§16.6)
+  //   /api/telemetry/ingest → telemetry.ingest                   (§16.15)
 
   sendJson(res, 404, {
     ok: false,

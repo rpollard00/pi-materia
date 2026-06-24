@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { errorMessage, sendJson } from "./http.js";
@@ -25,6 +26,14 @@ export interface MateriaCentralServerOptions {
    * future central-connected client adapter.
    */
   ports?: ControlPlanePorts;
+  /**
+   * Auth configuration for the route guards. Defaults to a dev-token adapter
+   * with the documented development-only token set and the default central role
+   * registry. Supply a custom {@link CentralAuth} (future OAuth/OIDC adapter +
+   * custom roles) for non-local deployments (docs/enterprise-control-plane.md
+   * §13).
+   */
+  auth?: CentralAuth;
   /** Human-readable label surfaced on health/status envelopes. */
   label?: string;
 }
@@ -38,6 +47,8 @@ export interface MateriaCentralServer {
   port: number;
   /** Control-plane ports backing the server. */
   ports: ControlPlanePorts;
+  /** Resolved auth configuration used by route guards. */
+  auth: CentralAuth;
 }
 
 /**
@@ -52,17 +63,21 @@ export interface MateriaCentralServer {
 export function createMateriaCentralServer(options: MateriaCentralServerOptions = {}): MateriaCentralServer {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 0;
-  const ports = options.ports ?? createInMemoryCentralPorts({ ...(options.label !== undefined ? { label: options.label } : {}) });
+  const auth = options.auth ?? createDefaultCentralAuth();
+  const ports = options.ports ?? createInMemoryCentralPorts({
+    ...(options.label !== undefined ? { label: options.label } : {}),
+    authMethods: [auth.methodKind],
+  });
 
   const server = createServer(async (req, res) => {
     try {
-      await handleMateriaCentralRequest(req, res, { ports, ...(options.label !== undefined ? { label: options.label } : {}) });
+      await handleMateriaCentralRequest(req, res, { ports, auth, ...(options.label !== undefined ? { label: options.label } : {}) });
     } catch (error) {
       sendJson(res, 500, { ok: false, scope: "control-plane", service: CENTRAL_SERVICE_ID, error: errorMessage(error) });
     }
   });
 
-  return { server, host, port, ports };
+  return { server, host, port, ports, auth };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
