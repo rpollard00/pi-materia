@@ -344,6 +344,7 @@ describe('Materia quests pane', () => {
       questSummary({ id: 'quest-pending-1', title: 'Gather moon herbs', status: 'pending' }),
     ]);
     fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ ok: true })));
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ ok: true })));
     fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig })));
     fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify(questBoardResponse([
       questSummary({ id: 'quest-pending-1', title: 'Gather moon herbs', status: 'pending' }),
@@ -1209,8 +1210,8 @@ describe('Materia loadout grid editor', () => {
     await waitFor(() => expect(screen.getByTestId('loop-region-taskIteration').getAttribute('title')).toContain('Exit: Socket-3 (Auto-Eval).Satisfied → Socket-4 (Maintain)'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.loops.taskIteration.exit).toEqual({ from: 'Socket-3', when: 'satisfied', to: 'Socket-4' });
   });
 
@@ -1247,8 +1248,8 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.loops).toBeUndefined();
     expect(saved.sockets['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2' }]);
     expect(saved.sockets['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
@@ -1302,8 +1303,8 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByTestId('loop-region-loopSelection')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.loops.loopSelection).toEqual({
       sockets: ['Socket-2', 'Socket-3', 'Socket-4'],
       consumes: { from: 'Socket-1', output: 'workItems' },
@@ -1334,8 +1335,8 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByTestId('edge-Socket-2-Socket-2-0')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.loops.loopSelection).toEqual({
       sockets: ['Socket-2'],
       consumes: { from: 'Socket-1', output: 'workItems' },
@@ -1368,8 +1369,8 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByTestId('loop-region-loopSelection')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.sockets['Socket-2'].edges.filter((edge: { to: string }) => edge.to === 'Socket-2')).toEqual([{ when: 'not_satisfied', to: 'Socket-2' }]);
   });
 
@@ -1399,8 +1400,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('loop-region-loopSelection')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.sockets['Socket-2']).toBeUndefined();
     expect(saved.sockets['Socket-1'].edges).toBeUndefined();
     expect(saved.sockets['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }]);
@@ -1435,8 +1436,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     expect(saved.sockets['Socket-1'].socketKind).toBe('entry');
     expect(saved.sockets['Socket-2'].socketKind).toBe('normal');
     expect(saved.sockets['Socket-5'].socketKind).toBe('normal');
@@ -1763,8 +1764,8 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByText(/Staged edge Socket-3 \(Auto-Eval\) → Socket-4 \(Maintain\) as Satisfied\./)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedEdge = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'].sockets['Socket-3'].edges[0];
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedEdge = configPostBody(fetchMock).config.loadouts['Full-Auto'].sockets['Socket-3'].edges[0];
     expect(savedEdge).toEqual({ when: 'satisfied', to: 'Socket-4' });
   });
 
@@ -1792,8 +1793,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('edge-Socket-3-Socket-2-1').getAttribute('class')).toContain('loadout-edge-default');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedSockets = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'].sockets;
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedSockets = configPostBody(fetchMock).config.loadouts['Full-Auto'].sockets;
     expect(savedSockets['Socket-3'].edges).toEqual([
       { when: 'satisfied', to: 'Socket-4' },
       { when: 'always', to: 'Socket-2' },
@@ -1819,7 +1820,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('edge-Socket-3-Socket-2-1').getAttribute('class')).toContain('loadout-edge-satisfied');
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('creates new loadouts with exactly one empty typed entry socket', async () => {
@@ -1842,8 +1843,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByText('Entry')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedConfig = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config;
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedConfig = configPostBody(fetchMock).config;
     const created = Object.entries(savedConfig.loadouts).find(([name]) => name.startsWith('New Loadout'))?.[1] as PipelineConfig | undefined;
     expect(created).toBeTruthy();
     expect(Object.keys(created?.sockets ?? {})).toEqual(['Socket-1']);
@@ -1872,8 +1873,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByText('Empty socket')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedConfig = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config;
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedConfig = configPostBody(fetchMock).config;
     const created = Object.entries(savedConfig.loadouts).find(([name]) => name.startsWith('New Loadout'))?.[1] as PipelineConfig | undefined;
     expect(created).toBeTruthy();
     expect(created?.sockets?.['Socket-1']).toEqual({ empty: true, socketKind: 'entry', edges: [{ when: 'always', to: 'Socket-2' }] });
@@ -1908,8 +1909,8 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedConfig = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config;
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedConfig = configPostBody(fetchMock).config;
     const created = Object.entries(savedConfig.loadouts).find(([name]) => name.startsWith('New Loadout'))?.[1] as PipelineConfig | undefined;
     expect(created).toBeTruthy();
     expect(savedConfig.materia).toEqual(initialMateria);
@@ -1979,8 +1980,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByText('staged edits')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saveCall = fetchMock.mock.calls[2];
+    await waitForConfigPostCount(fetchMock, 1);
+    const saveCall = configPostCalls(fetchMock)[0];
     expect(saveCall[0]).toBe('/api/config');
     expect(JSON.parse(String(saveCall[1]?.body)).target).toBe('user');
     const savedLoadout = JSON.parse(String(saveCall[1]?.body)).config.loadouts['Full-Auto'];
@@ -2007,8 +2008,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.drop(screen.getByTestId('socket-Socket-2'), { dataTransfer });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedLoadout = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const saved = savedLoadout.sockets;
     expect(saved['Socket-2'].materia).toBe('Maintain');
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
@@ -2038,8 +2039,8 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByText(/Cleared materia from Socket-4/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedLoadout = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const saved = savedLoadout.sockets;
     expect(saved['Socket-4']).toMatchObject({ empty: true });
     expect(saved['Socket-4'].layout).toBeUndefined();
@@ -2069,8 +2070,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear socket' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedLoadout = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const savedBuild = savedLoadout.sockets['Socket-2'];
     expect(savedBuild).toMatchObject({ empty: true, edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'socket-shift' });
     expect(savedBuild.layout).toBeUndefined();
@@ -2119,11 +2120,11 @@ describe('Materia loadout grid editor', () => {
     expect(await screen.findByTestId('socket-Socket-3')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Planning-Consult'].sockets;
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts['Planning-Consult'].sockets;
     expect(saved['Socket-2'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
     expect(saved['Socket-3']).toEqual({ empty: true, socketKind: 'normal' });
-    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.activeLoadout).toBe('Full-Auto');
+    expect(configPostBody(fetchMock).config.activeLoadout).toBe('Full-Auto');
   });
 
   it('replaces socket materia from the modal while preserving socket graph metadata', async () => {
@@ -2142,8 +2143,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('replacement-materia-Maintain'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedLoadout = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const saved = savedLoadout.sockets;
     expect(Object.keys(saved)).toContain('Socket-2');
     expect(saved['Socket-2'].materia).toBe('Maintain');
@@ -2171,7 +2172,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('edits socket properties while preserving materia and graph metadata', async () => {
@@ -2195,8 +2196,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(screen.getByTestId('save-socket-properties'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedLoadout = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const saved = savedLoadout.sockets;
     expect(saved['Socket-2']).toMatchObject({ materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'socket-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 } });
     expect(saved['Socket-2'].layout).toBeUndefined();
@@ -2227,7 +2228,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('socket-property-editor')).toBeTruthy();
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('preserves socket graph structure and parse semantics when dragging a palette materia into a socket', async () => {
@@ -2246,8 +2247,8 @@ describe('Materia loadout grid editor', () => {
     fireEvent.drop(screen.getByTestId('socket-Socket-2'), { dataTransfer });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedLoadout = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts['Full-Auto'];
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const savedBuild = savedLoadout.sockets['Socket-2'];
     expect(savedBuild.materia).toBe('Maintain');
     expect(savedBuild.parse).toBe('json');
@@ -2304,7 +2305,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByText('staged edits')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('creates a validated edge between existing sockets from the socket modal', async () => {
@@ -2330,8 +2331,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('edge-Socket-1-Socket-2-0').getAttribute('class')).toContain('loadout-edge-unsatisfied');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts.Edges.sockets;
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts.Edges.sockets;
     expect(saved['Socket-1'].edges).toEqual([{ to: 'Socket-2', when: 'not_satisfied' }]);
     expect(saved['Socket-2']).toBeTruthy();
   });
@@ -2378,8 +2379,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts.Edges;
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts.Edges;
     expect(saved.loops.reviewLoop.exits).toEqual([{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-3' }]);
     expect(saved.sockets['Socket-1'].edges).toBeUndefined();
   });
@@ -2410,7 +2411,7 @@ describe('Materia loadout grid editor', () => {
     expect((await findToastAlert()).textContent).toContain('require Socket-1 (Start) to parse JSON');
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('prevents conditional loop-exit routes from sockets with omitted parse mode', async () => {
@@ -2439,7 +2440,7 @@ describe('Materia loadout grid editor', () => {
     expect((await findToastAlert()).textContent).toContain('require Socket-1 (Start) to parse JSON');
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('creates a new socket from a loop exit by recording loop metadata instead of a normal edge', async () => {
@@ -2467,8 +2468,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('loop-exit-edge-reviewLoop-exit:Socket-1:always').dataset.edgeKind).toBe('loop-exit');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts.Edges;
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts.Edges;
     expect(saved.loops.reviewLoop.exits).toEqual([{ id: 'exit:Socket-1:always', from: 'Socket-1', condition: 'always', targetSocketId: 'Socket-4' }]);
     expect(saved.sockets['Socket-1'].edges).toBeUndefined();
     expect(saved.sockets['Socket-4']).toMatchObject({ empty: true, socketKind: 'normal' });
@@ -2518,8 +2519,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('edge-Socket-1-Socket-2-0')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts.Edges.sockets;
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts.Edges.sockets;
     expect(saved['Socket-1'].edges).toBeUndefined();
     expect(saved['Socket-1']).toBeTruthy();
     expect(saved['Socket-2']).toBeTruthy();
@@ -2547,7 +2548,7 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('edge-Socket-1-Socket-3-1')).toBeNull();
     expect(screen.queryByText('staged edits')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(configPostCalls(fetchMock)).toHaveLength(0);
   });
 
   it('removes a current default flow without dropping conditional edges or sockets', async () => {
@@ -2572,8 +2573,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('edge-Socket-1-Socket-3-0')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const saved = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts.Edges.sockets;
+    await waitForConfigPostCount(fetchMock, 1);
+    const saved = configPostBody(fetchMock).config.loadouts.Edges.sockets;
     expect(saved['Socket-1'].next).toBeUndefined();
     expect(saved['Socket-1'].edges).toEqual([{ to: 'Socket-3', when: 'satisfied' }]);
     expect(saved['Socket-2']).toBeTruthy();
@@ -2603,8 +2604,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.queryByTestId('socket-action-modal')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    const savedLoadout = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)).config.loadouts.Edges;
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts.Edges;
     const savedStart = savedLoadout.sockets['Socket-1'];
     expect(savedStart.layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-1'].x).toBeCloseTo(8 / 208);
@@ -3315,8 +3316,8 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByTestId('materia-command')).toHaveProperty('value', 'npm test');
     expect(screen.getByTestId('materia-params')).toHaveProperty('value', JSON.stringify({ ci: true }, null, 2));
     expect(screen.getByTestId('materia-timeout')).toHaveProperty('value', '90000');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    expect(fetchMock.mock.calls.map((call) => call[0]).sort()).toEqual(['/api/config', '/api/models', '/api/monitor', '/api/profile/role-generation']);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+    expect(fetchMock.mock.calls.map((call) => call[0]).sort()).toEqual(['/api/backend-mode', '/api/config', '/api/models', '/api/monitor', '/api/profile/role-generation']);
   });
 
   it('edits custom tool allowlists distinctly from presets', async () => {
@@ -3598,5 +3599,112 @@ describe('Materia loadout grid editor', () => {
     expect(screen.getByText('Cast cast-1 finished after Build.')).toBeTruthy();
     expect(screen.getAllByText('Cast completed')).toHaveLength(1);
     expect(screen.getByRole('status').getAttribute('data-toast-variant')).toBe('success');
+  });
+});
+
+describe('Materia WebUI central mode guarding', () => {
+  function createBackendModeFetchMock(mode: 'local-only' | 'central-admin', config: typeof testConfig = testConfig) {
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/backend-mode') {
+        if (mode === 'central-admin') {
+          return new Response(JSON.stringify({
+            ok: true,
+            scope: 'session',
+            service: 'pi-materia-webui',
+            mode: 'central-admin',
+            hasLocalSession: false,
+            hasCentral: true,
+            centralApiBaseUrl: 'https://central.example.com',
+            capabilities: { catalog: true, modelPolicy: true, telemetry: true, admin: true },
+            endpoints: {
+              local: { available: false, sameOrigin: true, baseUrl: '' },
+              central: { available: true, sameOrigin: false, baseUrl: 'https://central.example.com' },
+            },
+          }));
+        }
+        return new Response(JSON.stringify({
+          ok: true,
+          scope: 'session',
+          service: 'pi-materia-webui',
+          mode: 'local-only',
+          hasLocalSession: true,
+          hasCentral: false,
+          capabilities: { catalog: false, modelPolicy: false, telemetry: false, admin: false },
+          endpoints: { local: { available: true, sameOrigin: true, baseUrl: '' }, central: { available: false, sameOrigin: false } },
+        }));
+      }
+      if (input === '/api/config') return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+      // Local-session-only endpoints must remain unused once central-admin is
+      // resolved; returning a 404 here keeps any brief optimistic-window fetch
+      // from surfacing quest/monitor data.
+      if (input === '/api/quests' || input === '/api/quests/run' || input === '/api/quests/runonce' || input === '/api/quests/stop' || input === '/api/monitor') {
+        return new Response(JSON.stringify({ ok: false, error: 'no local session' }), { status: 404 });
+      }
+      return new Response(JSON.stringify({ ok: true }));
+    });
+  }
+
+  function stubNoopEventSource() {
+    class MockEventSource {
+      url: string;
+      constructor(url: string) { this.url = url; }
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal('EventSource', MockEventSource);
+  }
+
+  it('guards quest controls behind a local-session notice in central-admin mode', async () => {
+    stubNoopEventSource();
+    vi.stubGlobal('fetch', createBackendModeFetchMock('central-admin'));
+
+    render(<App />);
+    await openTab('Quests');
+
+    await screen.findByTestId('quests-local-session-required');
+    expect(screen.getByRole('heading', { name: 'Quests need a local session' })).toBeTruthy();
+    // Quest runner controls and the create form are not rendered.
+    expect(screen.queryByRole('button', { name: 'Run quests continuously' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Run one pending quest' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop quest auto-advance' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add quest' })).toBeNull();
+  });
+
+  it('guards live monitoring behind a local-session notice in central-admin mode', async () => {
+    stubNoopEventSource();
+    vi.stubGlobal('fetch', createBackendModeFetchMock('central-admin'));
+
+    render(<App />);
+    await openTab('Monitoring');
+
+    await screen.findByTestId('monitor-local-session-required');
+    expect(screen.getByRole('heading', { name: 'Live monitoring needs a local session' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Runtime event monitor' })).toBeNull();
+    expect(screen.queryByTestId('monitor-feed-empty')).toBeNull();
+  });
+
+  it('disables active runtime loadout controls in central-admin mode', async () => {
+    stubNoopEventSource();
+    vi.stubGlobal('fetch', createBackendModeFetchMock('central-admin'));
+
+    render(<App />);
+
+    const activeSelect = await screen.findByLabelText('Configured active loadout') as HTMLSelectElement;
+    await waitFor(() => expect(activeSelect.disabled).toBe(true));
+    expect(activeSelect.title).toBe('A local session is required to change the active runtime loadout.');
+  });
+
+  it('keeps quest and monitor controls available in local-only mode', async () => {
+    stubNoopEventSource();
+    const fetchMock = createBackendModeFetchMock('local-only');
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    await openTab('Quests');
+
+    expect(screen.queryByTestId('quests-local-session-required')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run quests continuously' })).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Run one pending quest' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop quest auto-advance' })).toBeTruthy();
   });
 });

@@ -32,6 +32,14 @@ export interface LoadoutListPanelProps {
   onSetRuntimeActiveLoadout: (loadoutId: string) => Promise<string>;
   getLoadoutLockEligibility: (name: string, lockState: LoadoutLockState) => LoadoutLockEligibility;
   onToggleLoadoutLock: (name: string, lockState: LoadoutLockState) => boolean;
+  /**
+   * Whether the active runtime loadout controls (the configured-active
+   * selector and the "Set configured active" action) are enabled. Disabled
+   * when no local session is attached (central-admin), since those controls
+   * drive the local runtime/session active loadout
+   * (docs/enterprise-control-plane.md §8). Defaults to `true`.
+   */
+  runtimeActiveLoadoutControlsEnabled?: boolean;
 }
 
 export interface LoadoutSelectorViewModel {
@@ -210,7 +218,7 @@ function LoadoutActionsMenu({ name, isConfiguredActive, isDefaultLoadout, isQues
   );
 }
 
-export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiveLoadoutId, runtimeActiveLoadoutId, runningLoadoutIdentity, defaultLoadoutId, questDefaultLoadoutId = null, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetQuestDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock }: LoadoutListPanelProps) {
+export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiveLoadoutId, runtimeActiveLoadoutId, runningLoadoutIdentity, defaultLoadoutId, questDefaultLoadoutId = null, persistedLoadouts, loadoutSources, canDeleteLoadout, onCreateLoadout, onSwitchEditingLoadout, onDeleteLoadout, onDuplicateLoadout, onSetDefaultLoadout, onSetQuestDefaultLoadout, onSetRuntimeActiveLoadout, getLoadoutLockEligibility, onToggleLoadoutLock, runtimeActiveLoadoutControlsEnabled = true }: LoadoutListPanelProps) {
   const activeConfiguredLoadoutId = configuredActiveLoadoutId ?? runtimeActiveLoadoutId;
   const [activeChangePending, setActiveChangePending] = useState(false);
   const [activeChangeMessage, setActiveChangeMessage] = useState('');
@@ -258,7 +266,8 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiv
         <select
           className="mt-1 w-full rounded-xl border border-cyan-200/20 bg-slate-950/80 px-3 py-2 text-sm normal-case tracking-normal text-cyan-100 disabled:opacity-60"
           value={activeConfiguredLoadoutId ?? ''}
-          disabled={activeChangePending || persistedRows.length === 0}
+          disabled={!runtimeActiveLoadoutControlsEnabled || activeChangePending || persistedRows.length === 0}
+          title={!runtimeActiveLoadoutControlsEnabled ? 'A local session is required to change the active runtime loadout.' : undefined}
           onChange={(event) => void changeRuntimeActiveLoadout(event.target.value, event.currentTarget.selectedOptions[0]?.textContent ?? undefined)}
           aria-label="Configured active loadout"
         >
@@ -325,7 +334,7 @@ export function LoadoutListPanel({ loadouts, editingLoadoutName, configuredActiv
                 isConfiguredActive={isConfiguredActive}
                 isDefaultLoadout={isDefaultLoadout}
                 isQuestDefaultLoadout={isQuestDefaultLoadout}
-                canSetRuntimeActive={persisted && !isConfiguredActive && !activeChangePending}
+                canSetRuntimeActive={runtimeActiveLoadoutControlsEnabled && persisted && !isConfiguredActive && !activeChangePending}
                 canSetDefault={persisted && !isDefaultLoadout}
                 canSetQuestDefault={persisted && !isQuestDefaultLoadout && !questDefaultChangePending}
                 deleteDisabled={deleteDisabled}

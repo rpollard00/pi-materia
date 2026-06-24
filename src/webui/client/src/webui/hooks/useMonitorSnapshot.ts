@@ -2,10 +2,23 @@ import { useEffect, useState } from 'react';
 import { getMonitorSnapshot } from '../api/index.js';
 import type { MonitorSnapshot } from '../types.js';
 
-export function useMonitorSnapshot() {
+export interface UseMonitorSnapshotOptions {
+  /**
+   * Whether a local session is attached and live monitoring should run. When
+   * `false` (central-admin with no local session) the snapshot stays
+   * `undefined` and no polling/SSE is started against the local monitor
+   * endpoints, which would not exist for that topology
+   * (docs/enterprise-control-plane.md §8). Defaults to `true` so the default
+   * local-only workflow is unchanged.
+   */
+  enabled?: boolean;
+}
+
+export function useMonitorSnapshot({ enabled = true }: UseMonitorSnapshotOptions = {}) {
   const [monitor, setMonitor] = useState<MonitorSnapshot>();
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let sseError = false;
     let pollingTimer: number | undefined;
@@ -73,7 +86,7 @@ export function useMonitorSnapshot() {
       events?.close();
       stopPolling();
     };
-  }, []);
+  }, [enabled]);
 
   return monitor;
 }

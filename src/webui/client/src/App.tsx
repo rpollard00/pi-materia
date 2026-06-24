@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AppShell } from './webui/components/AppShell.js';
+import { LocalSessionRequired } from './webui/components/LocalSessionRequired.js';
 import { LoadoutListPanel } from './webui/features/loadout/LoadoutListPanel.js';
 import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePanel.js';
 import { StageApplyPanel } from './webui/features/loadout/StageApplyPanel.js';
@@ -11,6 +12,7 @@ import { useAppNavigation } from './webui/hooks/useAppNavigation.js';
 import { emitLoadoutStatusToast, type LoadoutStatusOptions, type LoadoutStatusToastIntent } from './webui/utils/loadoutNotifications.js';
 import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
+import { useBackendMode } from './webui/hooks/useBackendMode.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
 import { useMateriaEditorController } from './webui/features/materia-editor/useMateriaEditorController.js';
 import { useLoadoutSocketInteractionController } from './webui/features/loadout/useLoadoutSocketInteractionController.js';
@@ -65,7 +67,15 @@ export function App() {
   } = useWebuiConfig();
   const modalErrorResetRef = useRef(() => undefined as void);
   const socketPropertyErrorResetRef = useRef(() => undefined as void);
-  const monitor = useMonitorSnapshot();
+  // Backend mode discovery reports whether this UI is attached to a local
+  // session, a central control plane, or both. We guard local-session-only
+  // controls only when discovery has authoritatively resolved a central-admin
+  // topology (no local session); during loading/error we keep the local
+  // workflow fully available so the default local-only experience is never
+  // blocked (docs/enterprise-control-plane.md §8, §9).
+  const backendMode = useBackendMode();
+  const localSessionAvailable = backendMode.loadState !== 'ready' || backendMode.hasLocalSession;
+  const monitor = useMonitorSnapshot({ enabled: localSessionAvailable });
   useCastCompletionToasts(monitor);
 
   useEffect(() => {
@@ -224,6 +234,7 @@ export function App() {
             onSetRuntimeActiveLoadout={setRuntimeActiveLoadout}
             getLoadoutLockEligibility={getLoadoutLockEligibility}
             onToggleLoadoutLock={setLoadoutLockState}
+            runtimeActiveLoadoutControlsEnabled={localSessionAvailable}
           />
 
           <LoadoutGraphPanel
@@ -326,15 +337,33 @@ export function App() {
         </div>
       )}
       materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} toolRegistry={monitor?.toolRegistry} />}
-      questWorkspace={(
-        <QuestPanel
-          persistedLoadouts={persistedLoadouts}
-          questDefaultLoadoutId={questDefaultLoadoutId}
-          questDefaultLoadoutWarning={questDefaultLoadoutWarning}
-          setQuestDefaultLoadout={setQuestDefaultLoadout}
-        />
-      )}
-      monitorWorkspace={<MonitorPanel monitor={monitor} currentMonitorSocket={currentMonitorSocket} elapsed={elapsed} />}
+      questWorkspace={
+        localSessionAvailable ? (
+          <QuestPanel
+            persistedLoadouts={persistedLoadouts}
+            questDefaultLoadoutId={questDefaultLoadoutId}
+            questDefaultLoadoutWarning={questDefaultLoadoutWarning}
+            setQuestDefaultLoadout={setQuestDefaultLoadout}
+          />
+        ) : (
+          <LocalSessionRequired
+            title="Quests need a local session"
+            description="The quest board is a project-local outer-loop queue tied to this repository session. Connect this UI to a local pi-materia session to view, create, and run quests."
+            testId="quests-local-session-required"
+          />
+        )
+      }
+      monitorWorkspace={
+        localSessionAvailable ? (
+          <MonitorPanel monitor={monitor} currentMonitorSocket={currentMonitorSocket} elapsed={elapsed} />
+        ) : (
+          <LocalSessionRequired
+            title="Live monitoring needs a local session"
+            description="The runtime event monitor streams live events from the local pi-materia session that launched this UI. Connect this UI to a local session to monitor an active cast."
+            testId="monitor-local-session-required"
+          />
+        )
+      }
     />
   );
 }
