@@ -7,3 +7,7 @@ export * from "./routing.js";
 export * from "./toolScope.js";
 export * from "./questBoard.js";
 export * from "./eventing.js";
+export * from "./scope.js";
+export * from "./identity.js";
+export * from "./auth.js";
+export * from "./audit.js";
