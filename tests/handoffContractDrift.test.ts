@@ -42,8 +42,9 @@ describe("handoff contract drift regressions", () => {
 
     const generated = buildRoleGenerationPrompt("write a JSON evaluator role");
     expect(generated).toContain(
-      "describe only socket-relevant fields from the small contract: workItems, satisfied, context, and text",
+      "describe only socket-relevant fields from the small contract. The default explanatory handoff fields are workItems, satisfied, and context",
     );
+    expect(generated).toContain("reserve explanatory notes for context");
     expect(generated).not.toContain("entire canonical envelope");
     expect(generated).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(generated).not.toContain(
@@ -286,5 +287,44 @@ describe("handoff contract drift regressions", () => {
         }
       }
     }
+  });
+
+  test("bundled default JSON materia prompts reserve context and do not invite top-level text leakage", async () => {
+    const rawDefault = JSON.parse(
+      await readFile(path.resolve("config", "default.json"), "utf8"),
+    ) as { materia?: Record<string, { prompt?: string; parse?: string }> };
+
+    // Ordinary evaluator/maintainer/planner/architect/chain-context JSON
+    // sockets must reserve explanatory notes for `context` and explicitly tell
+    // the model not to emit a top-level `text` field, so default prompts never
+    // imply generic JSON sockets emit renderable text.
+    const nonTextJsonRoles = [
+      "Auto-Eval",
+      "Maintain",
+      "GitMaintain",
+      "Auto-Plan",
+      "Interactive-Plan",
+      "Auto-Architect",
+      "Chain-Context",
+    ];
+    for (const role of nonTextJsonRoles) {
+      const prompt = String(rawDefault.materia?.[role]?.prompt ?? "");
+      expect(
+        prompt,
+        `${role} should reserve explanatory notes for context`,
+      ).toMatch(/context/i);
+      expect(
+        prompt,
+        `${role} should tell the model not to emit a top-level text field`,
+      ).toMatch(/do not emit a top-level text field/i);
+      expect(rawDefault.materia?.[role]?.parse).toBe("json");
+    }
+
+    // Renderable-prose (parse:text) sockets remain the canonical opt-in text
+    // example and must not carry the non-text no-text-field disclaimer.
+    const narratePrompt = String(rawDefault.materia?.Narrate?.prompt ?? "");
+    expect(rawDefault.materia?.Narrate?.parse).toBe("text");
+    expect(narratePrompt).toContain("Return markdown text only");
+    expect(narratePrompt).not.toMatch(/do not emit a top-level text field/i);
   });
 });
