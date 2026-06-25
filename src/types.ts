@@ -280,6 +280,20 @@ export interface MateriaCastState {
   lastAssistantText?: string;
   /** Hidden prompt for the active in-flight agent turn; used to retry without re-running socket start. */
   activeTurnPrompt?: string;
+  /**
+   * Active-turn provenance captured when a prompt is dispatched: the socket id,
+   * visit, materia, and the session entry boundary after which an assistant
+   * response is valid for this turn. handleAgentEnd uses this to ignore
+   * duplicate or stale agent_end callbacks that do not belong to the turn
+   * currently awaiting a response (e.g. a duplicate source-socket agent_end
+   * arriving after routing has advanced to the target socket).
+   */
+  activeTurn?: {
+    socketId: string;
+    visit: number;
+    materia?: string;
+    boundaryEntryId?: string;
+  };
   multiTurnFinalizing?: boolean;
   failedReason?: string;
   startedAt: number;
