@@ -1,6 +1,6 @@
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import {
-  HANDOFF_CONTRACT_DOC_TEXT,
+  formatHandoffContractDocText,
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
   EVENT_EMISSION_CONTEXT_TEXT,
@@ -327,11 +327,16 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
 
+  const requirements = deriveSocketOutputRequirements({
+    socket: effectiveResolvedSocketConfig(socket),
+    socketId: socket.id,
+    workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
+  });
   const exposureMode = activeMultiTurn ? "/materia continue finalization" : "single-turn JSON sockets";
   return [
     "Canonical handoff contract context:",
     `Synthetic context exposure policy: include this concise contract summary only for ${exposureMode} that are already expected to produce final JSON. Do not expose it during multi-turn refinement; refinement turns must remain conversational until /materia continue. The authoritative final-output instructions are still injected separately by prompt assembly.`,
-    HANDOFF_CONTRACT_DOC_TEXT,
+    formatHandoffContractDocText({ renderableTextIntent: requirements.renderableTextIntent }),
   ].join("\n\n");
 }
 

@@ -73,7 +73,7 @@ export function formatSocketOutputFinalInstruction(
 
   const lines = [
     "Final output format: Return only one top-level JSON object for this socket adapter. Do not include markdown fences, prose, commentary, or explanations.",
-    "Agent handoff fields are limited to workItems, satisfied, context, and text. Emit only the fields relevant to this socket's configured placement, routing, and assignments.",
+    socketScopedHandoffFieldGuidance(requirements),
   ];
 
   const requiredFields = requirements.requiredFields.map(
@@ -101,7 +101,7 @@ export function formatSocketOutputFinalInstruction(
 
   if (requirements.renderableTextIntent) {
     lines.push(
-      `This socket persists renderable prose via assignment, so emit your primary user-facing text as a top-level ${JSON.stringify(HANDOFF_TEXT_FIELD)} string. Do not add other handoff fields (workItems, satisfied, context) unless this socket's routing or work generation also requires them.`,
+      `This socket persists renderable prose via assignment, so emit your primary user-facing text as a top-level ${JSON.stringify(HANDOFF_TEXT_FIELD)} string and do not duplicate it into ${JSON.stringify(HANDOFF_CONTEXT_FIELD)}. Do not add other handoff fields (${JSON.stringify(HANDOFF_WORK_ITEMS_FIELD)}, ${JSON.stringify(HANDOFF_SATISFIED_FIELD)}) unless this socket's routing or work generation also requires them.`,
     );
   }
 
@@ -117,19 +117,82 @@ export function formatSocketOutputFinalInstruction(
   return lines.join("\n");
 }
 
+/**
+ * Socket-scoped handoff field summary for the final JSON instruction.
+ *
+ * Non-text JSON sockets are told explanatory notes belong in `context` and must
+ * not emit a top-level `text` field; text-enabled sockets keep the full
+ * four-field summary so renderable-prose output remains an explicit opt-in.
+ */
+function socketScopedHandoffFieldGuidance(requirements: SocketOutputRequirements): string {
+  const emitOnly = "Emit only the fields relevant to this socket's configured placement, routing, and assignments.";
+  if (requirements.renderableTextIntent) {
+    return `Agent handoff fields are limited to ${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, ${HANDOFF_CONTEXT_FIELD}, and ${HANDOFF_TEXT_FIELD}. ${emitOnly}`;
+  }
+  return `Agent handoff fields are limited to ${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, and ${HANDOFF_CONTEXT_FIELD}. Explanatory notes belong in ${HANDOFF_CONTEXT_FIELD}; do not emit a top-level ${HANDOFF_TEXT_FIELD} field for this socket (${HANDOFF_TEXT_FIELD} is reserved for renderable-prose sockets). ${emitOnly}`;
+}
+
 function articleForType(type: string): string {
   return /^[aeiou]/i.test(type) ? "an" : "a";
 }
 
-export const HANDOFF_CONTRACT_DOC_TEXT = [
-  "A pi-materia agent handoff is a small JSON object consumed by socket adapters for generated work, graph routing, downstream prompt context, renderable text payloads, and artifacts. Agent-authored JSON handoffs are limited to top-level workItems, satisfied, context, and text.",
-  "workItems is the top-level array for generated or refined work units. Generated units use workItems, not tasks. Each agent-produced work item contains only title:string and context:string. Agents should not provide work item ids, descriptions, acceptance arrays, or nested context objects; runtime/UI code may derive internal keys separately.",
-  `satisfied is the reserved boolean graph-control field for satisfied/not_satisfied routing and advancement. ${HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT} It should only appear when the socket participates in that control flow.`,
-  "context is optional top-level explanatory text for downstream agents. It is plain text, not arbitrary structured state.",
-  "text is optional top-level renderable prose: the materia's primary user-facing text output (such as narration, notes, or descriptions) that downstream materia may consume. It is the canonical display-text handoff payload. The raw JSON text value is authoritative; TUI rendering is a one-way presentation layer that must not replace or mutate the underlying JSON handoff. Use text for the materia's main prose product; use context for accumulating cross-socket handoff notes.",
-  "Utility/script materia are separate producers. They may return deterministic structured data under a top-level state object when configured; utility state patches are not part of the agent handoff output contract and must not be mixed into agent-authored handoffs.",
-  `Legacy aliases (${HANDOFF_LEGACY_NON_CANONICAL_ALIASES.map((field) => JSON.stringify(field)).join(", ")}) are not canonical handoff fields. Obsolete broad-envelope fields such as summary, guidance, decisions, risks, feedback, and missing are not agent handoff fields in the small contract.`,
-].join("\n\n");
+const HANDOFF_WORK_ITEMS_DOC_PARAGRAPH = "workItems is the top-level array for generated or refined work units. Generated units use workItems, not tasks. Each agent-produced work item contains only title:string and context:string. Agents should not provide work item ids, descriptions, acceptance arrays, or nested context objects; runtime/UI code may derive internal keys separately.";
+
+const HANDOFF_SATISFIED_DOC_PARAGRAPH = `satisfied is the reserved boolean graph-control field for satisfied/not_satisfied routing and advancement. ${HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT} It should only appear when the socket participates in that control flow.`;
+
+const HANDOFF_CONTEXT_DOC_PARAGRAPH = "context is optional top-level explanatory text for downstream agents. It is plain text, not arbitrary structured state, and is the default cross-socket field for handoff notes.";
+
+const HANDOFF_TEXT_DOC_PARAGRAPH = `text is optional top-level renderable prose: the materia's primary user-facing text output (such as narration, notes, or descriptions) that downstream materia may consume. It is the canonical display-text handoff payload. The raw JSON ${JSON.stringify(HANDOFF_TEXT_FIELD)} value is authoritative; TUI rendering is a one-way presentation layer that must not replace or mutate the underlying JSON handoff. Use ${HANDOFF_TEXT_FIELD} for the materia's main prose product and do not duplicate it into ${HANDOFF_CONTEXT_FIELD}; use ${HANDOFF_CONTEXT_FIELD} for accumulating cross-socket handoff notes.`;
+
+const HANDOFF_NO_TEXT_DOC_PARAGRAPH = `${HANDOFF_TEXT_FIELD} is a reserved top-level renderable-prose field, not a generic explanatory field. This socket does not consume renderable text, so do not emit a top-level ${HANDOFF_TEXT_FIELD} field; put all explanatory notes for downstream agents in ${HANDOFF_CONTEXT_FIELD} instead.`;
+
+const HANDOFF_UTILITY_DOC_PARAGRAPH = "Utility/script materia are separate producers. They may return deterministic structured data under a top-level state object when configured; utility state patches are not part of the agent handoff output contract and must not be mixed into agent-authored handoffs.";
+
+const HANDOFF_LEGACY_DOC_PARAGRAPH = `Legacy aliases (${HANDOFF_LEGACY_NON_CANONICAL_ALIASES.map((field) => JSON.stringify(field)).join(", ")}) are not canonical handoff fields. Obsolete broad-envelope fields such as summary, guidance, decisions, risks, feedback, and missing are not agent handoff fields in the small contract.`;
+
+export interface HandoffContractDocOptions {
+  /**
+   * When true (the default), the contract doc describes top-level `text` as an
+   * available renderable-prose field. When false, it scopes the documented
+   * fields to workItems/satisfied/context and instructs the socket not to emit
+   * `text`, reserving it for renderable-prose sockets that opt in.
+   */
+  renderableTextIntent?: boolean;
+}
+
+/**
+ * Builds the synthetic handoff contract prose scoped to the active socket's
+ * renderable-text intent.
+ *
+ * Non-text JSON sockets get explicit guidance that explanatory notes belong in
+ * `context` and a top-level `text` field must not be emitted. Text-enabled
+ * sockets keep the full renderable-prose field description and are told not to
+ * duplicate prose into `context`. Keeping `context` as the default explanatory
+ * field and `text` opt-in is what stops ordinary evaluator/maintainer/planner
+ * sockets from emitting misplaced renderable-text payloads.
+ */
+export function formatHandoffContractDocText(options?: HandoffContractDocOptions): string {
+  const renderableTextIntent = options?.renderableTextIntent ?? true;
+  const purposes = renderableTextIntent
+    ? "generated work, graph routing, downstream prompt context, renderable text payloads, and artifacts"
+    : "generated work, graph routing, downstream prompt context, and artifacts";
+  const fields = renderableTextIntent
+    ? `${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, ${HANDOFF_CONTEXT_FIELD}, and ${HANDOFF_TEXT_FIELD}`
+    : `${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, and ${HANDOFF_CONTEXT_FIELD}`;
+  const textParagraph = renderableTextIntent ? HANDOFF_TEXT_DOC_PARAGRAPH : HANDOFF_NO_TEXT_DOC_PARAGRAPH;
+
+  return [
+    `A pi-materia agent handoff is a small JSON object consumed by socket adapters for ${purposes}. Agent-authored JSON handoffs are limited to top-level ${fields}.`,
+    HANDOFF_WORK_ITEMS_DOC_PARAGRAPH,
+    HANDOFF_SATISFIED_DOC_PARAGRAPH,
+    HANDOFF_CONTEXT_DOC_PARAGRAPH,
+    textParagraph,
+    HANDOFF_UTILITY_DOC_PARAGRAPH,
+    HANDOFF_LEGACY_DOC_PARAGRAPH,
+  ].join("\n\n");
+}
+
+export const HANDOFF_CONTRACT_DOC_TEXT = formatHandoffContractDocText();
 
 // ── Event Emission Synthetic Context ───────────────────────────────────
 
