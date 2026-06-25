@@ -56,7 +56,10 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
     }]);
   }
 
-  if (options.agentOutput) validateAgentTopLevelFields(value, issues, requirements, options.socket);
+  if (options.agentOutput) {
+    validateAgentTopLevelFields(value, issues, requirements, options.socket);
+    addMisplacedTextRepairHint(value, issues, requirements);
+  }
 
   if (!requirements) {
     if (issues.length > 0) throw new HandoffJsonValidationError(socketId, issues);
@@ -210,6 +213,38 @@ function validateAgentTopLevelFields(value: Record<string, unknown>, issues: Han
       reason: "Generated work belongs in workItems as title/context objects.",
     });
   }
+}
+
+/**
+ * Flags a top-level renderable `text` payload on a non-text-enabled JSON agent
+ * socket as a structured repair issue. Renderable text is opt-in (only sockets
+ * that consume `$.text` via assignment or carry explicit renderable-text intent
+ * may emit it), so ordinary Auto-Plan/Auto-Eval/Maintain/Chain-Context sockets
+ * must keep explanatory prose in `context`.
+ *
+ * Repair guidance is context-aware: when `context` is already present and
+ * non-empty the model is told to drop the duplicate `text`; otherwise it is
+ * told to move the prose into `context`. Non-string `text` is left to the type
+ * check so the two issue categories never overlap.
+ */
+function addMisplacedTextRepairHint(value: Record<string, unknown>, issues: HandoffValidationIssue[], requirements: SocketOutputRequirements | undefined): void {
+  if (requirements?.renderableTextIntent !== false) return;
+  if (!Object.prototype.hasOwnProperty.call(value, HANDOFF_TEXT_FIELD)) return;
+  if (typeof value[HANDOFF_TEXT_FIELD] !== "string") return;
+  const contextValue = value[HANDOFF_CONTEXT_FIELD];
+  const hasContext = typeof contextValue === "string" && contextValue.trim().length > 0;
+  const textAssignmentExample = JSON.stringify("$.text");
+  const reservation = `${JSON.stringify(HANDOFF_TEXT_FIELD)} is reserved for renderable-prose sockets that opt in via ${textAssignmentExample} assignment or explicit intent.`;
+  issues.push({
+    path: `$.${HANDOFF_TEXT_FIELD}`,
+    expected: "present",
+    message: hasContext
+      ? `Duplicate top-level renderable text field ${JSON.stringify(HANDOFF_TEXT_FIELD)}: this socket already carries ${JSON.stringify(HANDOFF_CONTEXT_FIELD)} and is not configured for renderable text output.`
+      : `Unexpected top-level renderable text field ${JSON.stringify(HANDOFF_TEXT_FIELD)}: this socket is not configured for renderable text output.`,
+    reason: hasContext
+      ? `Drop ${JSON.stringify(HANDOFF_TEXT_FIELD)} and keep your explanation in ${JSON.stringify(HANDOFF_CONTEXT_FIELD)}. ${reservation}`
+      : `Move your explanatory prose into ${JSON.stringify(HANDOFF_CONTEXT_FIELD)} (the default handoff notes field). ${reservation}`,
+  });
 }
 
 function socketUsesCustomJsonPayloadCondition(socket: MateriaPipelineSocketConfig | undefined): boolean {

@@ -24,6 +24,7 @@ function narrateConfig() {
           "Socket-1": {
             materia: "Narrate",
             parse: "json",
+            assign: { narration: "$.text" },
             edges: [{ when: "always", to: "end" }],
           },
         },
