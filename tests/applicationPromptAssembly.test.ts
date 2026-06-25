@@ -972,6 +972,100 @@ describe("sanitizePreviousOutput", () => {
     sanitizePreviousOutput(castState);
     expect(castState.lastJson).toEqual(json);
   });
+
+  test("suppresses 'Casting **<name>**' transition card noise", () => {
+    const castState = state(agentSocket(), { lastAssistantText: "Casting **Narrata (7)**" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses plain 'Casting <name> (n)' transition card noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "Casting Narrata (7)" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses 'Casting <name> Socket-n' transition card noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "Casting Buildga Socket-4" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses '◆ Materia' renderer-label noise", () => {
+    const castState = state(agentSocket(), { lastAssistantText: "◆ Materia: Narrata (7) materia materia prompt" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses prompt-banner eventType noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "Casting Narrata (7) materia materia prompt" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses materia_prompt eventType token noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "materia_prompt dispatched for Socket-7" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("does not suppress legitimate text that happens to contain 'casting'", () => {
+    // Lowercase 'casting' without card markers must pass through unchanged.
+    const castState = state(agentSocket(), { lastOutput: "I am casting a wide net across the module." });
+    expect(sanitizePreviousOutput(castState)).toBe("I am casting a wide net across the module.");
+  });
+
+  test("defensively strips event side-channel from JSON previous output", () => {
+    // Defensive case: lastJson still carries event (e.g. stale/unexpected),
+    // and lastOutput is its raw serialization. Event must not leak.
+    const json = { "satisfied": true, "event": [{ "type": "result.pr_created", "message": "PR #99", "payload": { "branchName": "agent/fix" } }] };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    const result = sanitizePreviousOutput(castState);
+    expect(result).toBe(JSON.stringify({ "satisfied": true }));
+    expect(result).not.toContain("result.pr_created");
+    expect(result).not.toContain("PR #99");
+    expect(result).not.toContain("agent/fix");
+    expect(result).not.toContain("event");
+  });
+
+  test("defensively strips event side-channel when lastOutput is the clean form", () => {
+    // Normal case mirrored defensively: lastJson carries event but lastOutput
+    // is the event-stripped serialization. Event still stripped, satisfied kept.
+    const json = { "satisfied": true, "event": [{ "type": "result.pr_created", "message": "leak" }] };
+    const clean = JSON.stringify({ "satisfied": true });
+    const castState = state(agentSocket(), { lastOutput: clean, lastJson: json });
+    const result = sanitizePreviousOutput(castState);
+    expect(result).toBe(clean);
+    expect(result).not.toContain("event");
+    expect(result).not.toContain("leak");
+  });
+
+  test("preserves legitimate canonical JSON handoff for routing-aware downstream", () => {
+    const json = { "satisfied": true };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    expect(sanitizePreviousOutput(castState)).toBe(JSON.stringify({ "satisfied": true }));
+  });
+
+  test("display noise is omitted from buildSyntheticCastContext Previous output", () => {
+    const castState = state(agentSocket(), { lastAssistantText: "Casting **Narrata (7)**\n\nfix: some work item" });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).not.toContain("Previous output:");
+    expect(synthetic).not.toContain("Casting");
+    expect(synthetic).not.toContain("Narrata");
+  });
+
+  test("◆ Materia banner noise is omitted from buildSyntheticCastContext", () => {
+    const castState = state(agentSocket(), { lastOutput: "◆ Materia: Narrata (7) materia materia prompt" });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).not.toContain("Previous output:");
+    expect(synthetic).not.toContain("◆ Materia");
+    expect(synthetic).not.toContain("materia_prompt");
+  });
+
+  test("event side-channel does not leak into buildSyntheticCastContext when lastJson carries it", () => {
+    const json = { "satisfied": true, "event": [{ "type": "result.pr_created", "message": "PR #99", "payload": { "branchName": "agent/fix" } }] };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).toContain("Previous output:");
+    expect(synthetic).toContain("satisfied");
+    expect(synthetic).not.toContain("result.pr_created");
+    expect(synthetic).not.toContain("PR #99");
+    expect(synthetic).not.toContain("agent/fix");
+  });
 });
 
 describe("buildTimeoutRecoveryHint", () => {

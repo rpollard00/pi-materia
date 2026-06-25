@@ -9,7 +9,7 @@ import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequireme
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { renderReworkFeedbackPromptContext } from "./reworkFeedback.js";
-import { stripRenderableTextField } from "./handoffPromptSanitization.js";
+import { isMateriaDisplayNoise, stripEventSideChannelField, stripRenderableTextField } from "./handoffPromptSanitization.js";
 import { currentItem, getPath, isPlainObject, readObjectField } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
@@ -271,31 +271,51 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
  * JSON sockets store their authoritative parsed payload in `state.lastJson`
  * and a matching re-stringified copy in `lastOutput`/`lastAssistantText`
  * (with the `event` side-channel already stripped). When those agree, the
- * previous output is canonical JSON handoff and we strip the renderable `text`
- * payload from the parsed form so prose reaches following materia only through
- * explicit assignment (e.g. `assign: { "prNotes": "$.text" }`) or templating
- * — not as default context. The authoritative raw JSON stays in `state.lastJson`
- * and the `lastJson` artifact for debugging and replay; this helper only
- * affects the displayed previous-output context.
+ * previous output is canonical JSON handoff and we defensively strip the
+ * `event` side-channel and the renderable `text` payload from the parsed form
+ * so only intentional fields reach following materia — prose flows only
+ * through explicit assignment (e.g. `assign: { "prNotes": "$.text" }`) or
+ * templating, and event side-channel data never leaks as default context.
+ * The authoritative raw JSON stays in `state.lastJson` and the `lastJson`
+ * artifact for debugging and replay; this helper only affects the displayed
+ * previous-output context.
  *
- * Free-text (parse:"text") outputs never match a parsed `lastJson`, so they are
- * passed through unchanged. Returns undefined when there is no previous output
- * or the previous JSON output carried only a renderable `text` payload, so no
+ * Display-card/banner strings that leak from the runtime UI into
+ * `lastAssistantText`/`lastOutput` (e.g. "Casting **X**", "◆ Materia: ...",
+ * or prompt-banner eventType text) are suppressed entirely: they are
+ * orchestration-only and must never become agent input.
+ *
+ * Free-text (parse:"text") outputs never match a parsed `lastJson`, so they
+ * are passed through unchanged (unless they are display noise). Returns
+ * undefined when there is no previous output, the output is display noise, or
+ * the previous JSON output carried only a renderable `text` payload, so no
  * empty/noisy section is emitted.
  */
 export function sanitizePreviousOutput(state: MateriaCastState): string | undefined {
   const latestOutput = state.lastAssistantText ?? state.lastOutput;
   if (typeof latestOutput !== "string" || latestOutput.length === 0) return undefined;
+  // Suppress orchestration-only display cards/banner strings leaked from the
+  // runtime UI so they cannot become agent input via previous output.
+  if (isMateriaDisplayNoise(latestOutput)) return undefined;
   const lastJson = state.lastJson;
-  // Only sanitize when lastJson is the parsed form of latestOutput. JSON
-  // sockets set both to the same compact re-stringified payload on completion,
-  // so agreement reliably identifies canonical JSON handoff without touching
-  // free-text (parse:"text") outputs, which never pair lastJson with their own
-  // raw text this way. This also tolerates a stale lastJson left by an earlier
-  // JSON socket after an intervening text socket: its stringification will not
-  // match the text output, so the prose-free text output is shown unchanged.
-  if (isPlainObject(lastJson) && JSON.stringify(lastJson) === latestOutput) {
-    return stripRenderableTextField(lastJson);
+  if (!isPlainObject(lastJson)) return latestOutput;
+  // Defensively strip the event side-channel. The runtime normally strips
+  // event before storing lastJson and re-stringifying lastOutput, but this
+  // guarantees event data never reaches downstream prompts via this path even
+  // for stale/unexpected payloads. Returns the same reference when there is
+  // no event field.
+  const eventStripped = stripEventSideChannelField(lastJson);
+  // Identify canonical JSON handoff via agreement between the parsed form and
+  // the raw output. JSON sockets set both to the same compact re-stringified
+  // payload on completion, so agreement reliably identifies canonical JSON
+  // handoff without touching free-text (parse:"text") outputs, which never
+  // pair lastJson with their own raw text this way. Accept agreement against
+  // either the event-stripped form (normal) or the raw event-bearing form
+  // (defensive), then re-emit with event + renderable text stripped.
+  const agreesClean = JSON.stringify(eventStripped) === latestOutput;
+  const agreesRawWithEvent = eventStripped !== lastJson && JSON.stringify(lastJson) === latestOutput;
+  if (agreesClean || agreesRawWithEvent) {
+    return stripRenderableTextField(eventStripped);
   }
   return latestOutput;
 }
