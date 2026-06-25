@@ -38,10 +38,11 @@ export interface MateriaCentralRouteDeps {
  * `catalog.read` / `catalog.write`. Model-policy read/admin-write routes and
  * the optional model-catalog read route are wired below (§16.13), guarded with
  * `model-policy.read` / `model-policy.write`. Telemetry ingestion is wired
- * below (§16.15), guarded with `telemetry.ingest`. The broader admin route
- * handlers and telemetry read APIs arrive in later work items (§16.16); add
- * them as ordered branches, each calling {@link requirePermission} with the
- * matching permission (`admin.read`/`write`, `telemetry.read`).
+ * below (§16.15), guarded with `telemetry.ingest`, and the central monitoring
+ * read surface (`GET /api/telemetry/events`) is wired below (§16.16), guarded
+ * with `telemetry.read`. The broader admin route handlers arrive in later work
+ * items; add them as ordered branches, each calling {@link requirePermission}
+ * with the matching permission (`admin.read`/`write`).
  */
 export async function handleMateriaCentralRequest(
   req: IncomingMessage,
@@ -63,11 +64,12 @@ export async function handleMateriaCentralRequest(
     return;
   }
 
-  // Central telemetry ingestion surface (§15, §16.15). Requires
-  // telemetry.ingest (the `central-telemetry-sink` permission). Sub-path and
-  // method routing (and 404/405 precedence over auth) live in the handler.
-  // The status read surface (/api/status) is handled above; broader telemetry
-  // read APIs arrive in §16.16.
+  // Central telemetry ingestion + monitoring-read surface (§15, §16.15,
+  // §16.16). Ingestion requires telemetry.ingest (the
+  // `central-telemetry-sink` permission); `GET /api/telemetry/events` reads
+  // require telemetry.read. Sub-path and method routing (and 404/405
+  // precedence over auth) live in the handler. The status read surface
+  // (/api/status) is handled above.
   const pathname = new URL(req.url ?? "", "http://localhost").pathname;
   if (pathname === "/api/telemetry" || pathname.startsWith("/api/telemetry/")) {
     await handleCentralTelemetryRoute(req, res, { telemetry: deps.ports.telemetry, auth: deps.auth });
@@ -105,7 +107,6 @@ export async function handleMateriaCentralRequest(
 
   // Future route groups (each guarded with requirePermission):
   //   /api/admin/*            → admin.read / admin.write   (§16.6)
-  //   /api/telemetry/events   → telemetry.read             (§16.16)
 
   sendJson(res, 404, {
     ok: false,

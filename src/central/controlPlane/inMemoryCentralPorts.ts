@@ -62,8 +62,10 @@ import {
  *   real counts. Normalized ingestion is exposed through the central HTTP route
  *   `POST /api/telemetry/ingest` (§16.15), which normalizes inbound webhook/
  *   passthrough payloads into the canonical enriched-event shape before calling
- *   `ingest()`; the store therefore only ever holds normalized events. Broader
- *   telemetry read APIs arrive in a later work item (§16.16).
+ *   `ingest()`; the store therefore only ever holds normalized events. The
+ *   monitoring read APIs (`GET /api/status`, `GET /api/telemetry/events`)
+ *   expose that in-memory store and the status snapshot for central monitoring
+ *   views (§15, §16.16).
  * - **Admin**: server metadata plus the central catalog admin write surface
  *   (§16.6). Auth methods default to `["dev-token"]` and are configurable;
  *   dev-token auth + RBAC guards central routes (§16.5).
