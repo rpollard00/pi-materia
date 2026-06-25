@@ -37,6 +37,7 @@ import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryAc
 import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
+import { resolveActiveModelPolicy } from "./modelPolicyResolver.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
 import { buildMateriaTextOutputMessage } from "../presentation/textOutput.js";
 import type { LoadedConfig, MateriaCastState, MateriaJsonOutputValidationKind, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
@@ -803,7 +804,7 @@ async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionCo
     state.multiTurnFinalizing = false;
     throw new Error(`Cannot finalize refinement for socket "${socket.id}" because its resolved materia is not multi-turn.`);
   }
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking });
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking, policy: await resolveActiveModelPolicy(pi, ctx) });
   const materiaModel = materiaModelSelection(appliedModel);
   state.currentMateria = socketMateriaName(socket);
   state.currentMateriaModel = materiaModel;
@@ -1206,7 +1207,7 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   state.awaitingResponse = true;
   setCurrentSocketState(state, "awaiting_agent_response");
   saveCastState(pi, state);
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking });
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking, policy: await resolveActiveModelPolicy(pi, ctx) });
   const materiaModel = materiaModelSelection(appliedModel);
   state.currentMateriaModel = materiaModel;
   state.runState.currentMateriaModel = materiaModel;
@@ -1617,7 +1618,7 @@ export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: Exte
   const socket = currentSocketOrThrow(state);
   if (!isAgentResolvedSocket(socket)) return;
 
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking });
+  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking, policy: await resolveActiveModelPolicy(pi, ctx) });
   const materiaModel = materiaModelSelection(appliedModel);
   state.currentMateria = socketMateriaName(socket);
   state.currentMateriaModel = materiaModel;

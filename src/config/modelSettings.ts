@@ -1,6 +1,16 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
+import {
+  evaluateModelPolicy,
+  policyHasConstraints,
+  toAvailableRuntimeModels,
+  type AvailableRuntimeModels,
+  type ModelPolicyDenialReason,
+  type ModelPolicyDocument,
+  type ModelPolicyPreferredSuggestion,
+} from "../domain/modelPolicy.js";
+import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 
 export interface ActiveModelInfo {
   model?: Model<Api>;
@@ -15,6 +25,14 @@ export interface MateriaModelSettings {
   materiaName: string;
   model?: string;
   thinking?: string;
+  /**
+   * Optional model-policy document used to constrain selection
+   * (docs/enterprise-control-plane.md §11). When absent or free of constraints,
+   * selection behavior is preserved exactly. Denied models are never selected;
+   * preferred models are advisory (surfaced, not auto-selected); thinking
+   * violations yield a clamp suggestion that is applied where possible.
+   */
+  policy?: ModelPolicyDocument;
 }
 
 export interface AppliedMateriaModelSettings extends ActiveModelInfo {
@@ -32,6 +50,14 @@ export interface AppliedMateriaModelSettings extends ActiveModelInfo {
    *  changes. This signals a context-window reset and callers may suppress
    *  proactive compaction for the immediate turn. */
   modelSwitched?: boolean;
+  /** True when a constraining model policy was evaluated for this selection. */
+  modelPolicyEvaluated?: boolean;
+  /** Present when an explicit model was not applied because policy denied it. */
+  modelPolicyDenied?: { reason: ModelPolicyDenialReason; message: string };
+  /** Advisory preferred model that is available locally and allowed (not auto-selected). */
+  preferredSuggestion?: ModelPolicyPreferredSuggestion;
+  /** True when the applied thinking was clamped to satisfy policy. */
+  thinkingPolicyClamped?: boolean;
 }
 
 export class MateriaModelSettingsError extends Error {
@@ -47,7 +73,7 @@ const STANDARD_REASONING_THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "
 const NON_REASONING_THINKING_LEVELS: ThinkingLevel[] = ["off"];
 
 type MaybePromise<T> = T | Promise<T>;
-type ModelFallbackReason = "unknown_model" | "ambiguous_model" | "credentials_missing" | "model_registry_unavailable";
+type ModelFallbackReason = "unknown_model" | "ambiguous_model" | "credentials_missing" | "model_registry_unavailable" | "policy_denied";
 type ThinkingFallbackReason = "unknown_thinking" | "unsupported_thinking" | "thinking_runtime_unavailable";
 
 type ModelRegistryLike = {
@@ -97,13 +123,17 @@ export function getActiveModelInfo(pi: ExtensionAPI, ctx: ExtensionContext): Act
 export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: ExtensionContext, settings: MateriaModelSettings): Promise<AppliedMateriaModelSettings> {
   const requestedModel = normalizeOptionalSetting(settings.model);
   const requestedThinking = normalizeOptionalSetting(settings.thinking);
+  const policy = settings.policy;
+  const policyConstrained = policyHasConstraints(policy);
   const modelExplicit = requestedModel !== undefined;
   const thinkingExplicit = requestedThinking !== undefined;
   const warnings: string[] = [];
   let modelFallbackReason: ModelFallbackReason | undefined;
   let thinkingFallbackReason: ThinkingFallbackReason | undefined;
 
-  if (!modelExplicit && !thinkingExplicit) {
+  // With no configured model/thinking and no constraining policy this is a pure
+  // no-op that preserves the active Pi session state exactly.
+  if (!modelExplicit && !thinkingExplicit && !policyConstrained) {
     return { ...getActiveModelInfo(pi, ctx), modelExplicit, thinkingExplicit };
   }
 
@@ -113,7 +143,55 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
 
   let modelSwitched: boolean | undefined;
 
-  if (modelExplicit) {
+  // ── Model policy evaluation (docs/enterprise-control-plane.md §11) ──────
+  // Denied models are never selected; preferred models are advisory (surfaced,
+  // not auto-selected); thinking violations yield a clamp suggestion. Without a
+  // constraining policy this is skipped entirely and existing local selection
+  // behavior is preserved.
+  let modelPolicyEvaluated = false;
+  let modelPolicyDenied: { reason: ModelPolicyDenialReason; message: string } | undefined;
+  let preferredSuggestion: ModelPolicyPreferredSuggestion | undefined;
+  let policyThinkingClamp: ThinkingLevel | undefined;
+  let skipModelApplication = false;
+
+  const candidateModelValue = modelExplicit ? requestedModel : activeModelValue(initialActive);
+  if (policyConstrained && candidateModelValue !== undefined) {
+    modelPolicyEvaluated = true;
+    const available = await readAvailableRuntimeModelsForPolicy(ctx);
+    const candidateThinkingLevel = resolvePolicyCandidateThinking(requestedThinking, initialActive.thinking);
+    const evaluation = evaluateModelPolicy({
+      policy: policy!,
+      candidate: { modelValue: candidateModelValue, ...(candidateThinkingLevel !== undefined ? { thinkingLevel: candidateThinkingLevel } : {}) },
+      available,
+    });
+
+    if (evaluation.status === "denied") {
+      if (modelExplicit) {
+        // Denied configured model: never select it. Fall back to the active Pi
+        // session model and record the policy denial so callers can surface it.
+        skipModelApplication = true;
+        modelPolicyDenied = { reason: evaluation.denialReason!, message: evaluation.denialMessage! };
+        modelFallbackReason = "policy_denied";
+        warnings.push(`Materia "${settings.materiaName}" configured model "${requestedModel}" was not applied: ${evaluation.denialMessage}`);
+      } else {
+        // The active model itself is denied, but no model is configured to
+        // switch to. Surface the violation and continue on the active model
+        // (graceful degradation) rather than failing the cast.
+        warnings.push(`Materia "${settings.materiaName}": active Pi model "${candidateModelValue}" is denied by policy "${policy!.id}", but no configured model is available to switch to.`);
+      }
+    } else if (!evaluation.unconstrained) {
+      if (evaluation.suggestedThinkingLevel !== undefined) {
+        policyThinkingClamp = evaluation.suggestedThinkingLevel;
+      }
+      if (evaluation.preferredSuggestion !== undefined) {
+        preferredSuggestion = evaluation.preferredSuggestion;
+      }
+      for (const policyWarning of evaluation.warnings) warnings.push(policyWarning);
+    }
+  }
+
+  // ── Model application (skipped when policy denies a configured model) ───
+  if (modelExplicit && !skipModelApplication) {
     const resolved = await resolveConfiguredModel(ctx, requestedModel);
     if (resolved.ok) {
       const setModel = maybeSetModel(pi);
@@ -147,19 +225,23 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
     }
   }
 
-  if (thinkingExplicit) {
+  // ── Thinking application ────────────────────────────────────────────────
+  // Apply an explicit thinking setting, or a policy clamp when the candidate
+  // thinking violates a constraining policy.
+  const thinkingInput = policyThinkingClamp ?? requestedThinking;
+  if (thinkingInput !== undefined) {
     const activeAfterModel = getActiveModelInfo(pi, ctx);
     const effectiveModel = appliedModel ?? activeAfterModel.model ?? initialActive.model;
-    const resolvedThinking = resolveConfiguredThinking(requestedThinking);
+    const resolvedThinking = resolveConfiguredThinking(thinkingInput);
     const supportedLevels = supportedThinkingLevelsFor(effectiveModel);
     if (!resolvedThinking.ok) {
       thinkingFallbackReason = resolvedThinking.reason;
       appliedThinking = await applyThinkingFallback(pi, ctx, supportedLevels);
-      warnings.push(thinkingFallbackWarning(settings.materiaName, requestedThinking, resolvedThinking.detail, effectiveModel, appliedThinking));
+      warnings.push(thinkingFallbackWarning(settings.materiaName, thinkingInput, resolvedThinking.detail, effectiveModel, appliedThinking));
     } else if (supportedLevels && !supportedLevels.includes(resolvedThinking.level)) {
       thinkingFallbackReason = "unsupported_thinking";
       appliedThinking = await applyThinkingFallback(pi, ctx, supportedLevels);
-      warnings.push(thinkingFallbackWarning(settings.materiaName, requestedThinking, `supported levels for the effective model are ${supportedLevels.join(", ")}`, effectiveModel, appliedThinking));
+      warnings.push(thinkingFallbackWarning(settings.materiaName, thinkingInput, `supported levels for the effective model are ${supportedLevels.join(", ")}`, effectiveModel, appliedThinking));
     } else {
       const setThinkingLevel = maybeSetThinkingLevel(pi);
       if (typeof setThinkingLevel !== "function") {
@@ -169,6 +251,9 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
       setThinkingLevel.call(pi, appliedThinking);
     }
   }
+
+  // A clamp is only "applied" when the final thinking equals the policy clamp.
+  const thinkingPolicyClamped = policyThinkingClamp !== undefined && appliedThinking === policyThinkingClamp;
 
   for (const warning of warnings) ctx.ui.notify(warning, "warning");
 
@@ -191,6 +276,10 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
     thinkingFallbackReason,
     fallbackReason,
     ...(modelSwitched !== undefined ? { modelSwitched } : {}),
+    ...(modelPolicyEvaluated ? { modelPolicyEvaluated } : {}),
+    ...(modelPolicyDenied !== undefined ? { modelPolicyDenied } : {}),
+    ...(preferredSuggestion !== undefined ? { preferredSuggestion } : {}),
+    ...(thinkingPolicyClamped ? { thinkingPolicyClamped } : {}),
     ...(warnings.length ? { warnings } : {}),
   };
 }
@@ -236,6 +325,45 @@ function readAllModels(registry: ModelRegistryLike | undefined): Model<Api>[] {
   } catch {
     return [];
   }
+}
+
+/** The selectable model value (`provider/id`) for the active Pi session model, if any. */
+function activeModelValue(active: ActiveModelInfo): string | undefined {
+  if (active.provider && active.modelId) return `${active.provider}/${active.modelId}`;
+  return active.modelId ?? active.modelName;
+}
+
+/** `provider/id` value for a registry model, the policy model-value space. */
+function modelRegistryValue(model: Model<Api>): string {
+  return `${model.provider}/${model.id}`;
+}
+
+/**
+ * Resolve the thinking level to evaluate against a policy: the explicit request
+ * when it is a known level, else the active Pi thinking level when known. This
+ * only drives policy evaluation; normal thinking resolution is handled separately.
+ */
+function resolvePolicyCandidateThinking(requestedThinking: string | undefined, activeThinking: ThinkingLevel | undefined): MateriaThinkingLevel | undefined {
+  if (requestedThinking !== undefined) {
+    const level = requestedThinking.trim().toLowerCase();
+    return isMateriaThinkingLevel(level) ? level : undefined;
+  }
+  if (activeThinking !== undefined && isMateriaThinkingLevel(activeThinking)) return activeThinking;
+  return undefined;
+}
+
+/**
+ * Read the models available in the local runtime as policy available-runtime
+ * entries. Prefers credentials-available models and falls back to all registered
+ * models so preferred-model availability reflects what the runtime can select.
+ */
+async function readAvailableRuntimeModelsForPolicy(ctx: ExtensionContext): Promise<AvailableRuntimeModels> {
+  const registry = ctx.modelRegistry as unknown as ModelRegistryLike | undefined;
+  const available = await readAvailableModels(registry);
+  if (available !== undefined && available.length > 0) {
+    return toAvailableRuntimeModels(available.map(modelRegistryValue));
+  }
+  return toAvailableRuntimeModels(readAllModels(registry).map(modelRegistryValue));
 }
 
 function matchModelReference(value: string, models: Model<Api>[]): ModelReferenceMatch {
