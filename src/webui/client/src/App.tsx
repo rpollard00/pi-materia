@@ -6,6 +6,7 @@ import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePane
 import { StageApplyPanel } from './webui/features/loadout/StageApplyPanel.js';
 import { LoadoutGraphPanel } from './webui/features/loadout/LoadoutGraphPanel.js';
 import { MateriaEditorPanel } from './webui/features/materia-editor/MateriaEditorPanel.js';
+import { CentralModelPolicyPanel } from './webui/features/central/CentralModelPolicyPanel.js';
 import { MonitorPanel } from './webui/features/monitor/MonitorPanel.js';
 import { QuestPanel } from './webui/features/quests/QuestPanel.js';
 import { useAppNavigation } from './webui/hooks/useAppNavigation.js';
@@ -13,6 +14,7 @@ import { emitLoadoutStatusToast, type LoadoutStatusOptions, type LoadoutStatusTo
 import { useCastCompletionToasts } from './webui/hooks/useCastCompletionToasts.js';
 import { useMonitorSnapshot } from './webui/hooks/useMonitorSnapshot.js';
 import { useBackendMode } from './webui/hooks/useBackendMode.js';
+import { useCentralModelPolicy } from './webui/hooks/useCentralModelPolicy.js';
 import { useWebuiConfig } from './webui/hooks/useWebuiConfig.js';
 import { useMateriaEditorController } from './webui/features/materia-editor/useMateriaEditorController.js';
 import { useLoadoutSocketInteractionController } from './webui/features/loadout/useLoadoutSocketInteractionController.js';
@@ -76,6 +78,19 @@ export function App() {
   const backendMode = useBackendMode();
   const localSessionAvailable = backendMode.loadState !== 'ready' || backendMode.hasLocalSession;
   const monitor = useMonitorSnapshot({ enabled: localSessionAvailable });
+  // Central model-policy/catalog reads are independent of local session/model
+  // availability (docs/enterprise-control-plane.md §11). Only fetch when
+  // discovery has resolved a central control plane with the modelPolicy
+  // capability and an absolute central base URL.
+  const centralModelPolicyEnabled =
+    backendMode.loadState === 'ready' &&
+    backendMode.hasCentral &&
+    backendMode.capabilities.modelPolicy &&
+    Boolean(backendMode.centralApiBaseUrl);
+  const centralModelPolicy = useCentralModelPolicy({
+    enabled: centralModelPolicyEnabled,
+    baseUrl: backendMode.centralApiBaseUrl,
+  });
   useCastCompletionToasts(monitor);
 
   useEffect(() => {
@@ -336,7 +351,18 @@ export function App() {
           </aside>
         </div>
       )}
-      materiaEditorWorkspace={<MateriaEditorPanel controller={materiaEditorController} toolRegistry={monitor?.toolRegistry} />}
+      materiaEditorWorkspace={(
+        <div className="flex flex-col gap-6">
+          {centralModelPolicyEnabled ? (
+            <CentralModelPolicyPanel
+              state={centralModelPolicy}
+              centralApiBaseUrl={backendMode.centralApiBaseUrl}
+              centralSameOrigin={backendMode.centralSameOrigin}
+            />
+          ) : null}
+          <MateriaEditorPanel controller={materiaEditorController} toolRegistry={monitor?.toolRegistry} />
+        </div>
+      )}
       questWorkspace={
         localSessionAvailable ? (
           <QuestPanel

@@ -2,6 +2,8 @@ import { requirePermission, type CentralAuth } from "../auth/index.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { handleCentralCatalogRoute } from "./catalog.js";
 import { handleCentralHealthRoute } from "./health.js";
+import { handleCentralModelCatalogRoute } from "./modelCatalog.js";
+import { handleCentralModelPolicyRoute } from "./modelPolicy.js";
 import { sendJson } from "./http.js";
 import { handleCentralStatusRoute } from "./status.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -32,11 +34,12 @@ export interface MateriaCentralRouteDeps {
  * return 404 rather than leaking existence through a 401.
  *
  * Catalog read/admin-write routes are wired below (§16.6), guarded with
- * `catalog.read` / `catalog.write`. Model-policy, telemetry-ingestion, and the
- * broader admin route handlers arrive in later work items (§16.13, §16.15,
- * §16.16); add them as ordered branches, each calling {@link requirePermission}
- * with the matching permission (`model-policy.read`/`write`, `admin.read`/`write`,
- * `telemetry.read`/`telemetry.ingest`).
+ * `catalog.read` / `catalog.write`. Model-policy read/admin-write routes and
+ * the optional model-catalog read route are wired below (§16.13), guarded with
+ * `model-policy.read` / `model-policy.write`. Telemetry-ingestion and the
+ * broader admin route handlers arrive in later work items (§16.15, §16.16); add
+ * them as ordered branches, each calling {@link requirePermission} with the
+ * matching permission (`admin.read`/`write`, `telemetry.read`/`telemetry.ingest`).
  */
 export async function handleMateriaCentralRequest(
   req: IncomingMessage,
@@ -68,8 +71,27 @@ export async function handleMateriaCentralRequest(
     return;
   }
 
+  // Central model-policy read + admin write surface (§16.13). Serves policy
+  // documents independently from local Pi model availability. Reads require
+  // model-policy.read; admin writes require model-policy.write. Sub-path and
+  // method routing (and 404/405 precedence over auth) live in the handler.
+  if (catalogPath === "/api/model-policy" || catalogPath.startsWith("/api/model-policy/")) {
+    await handleCentralModelPolicyRoute(req, res, {
+      modelPolicy: deps.ports.modelPolicy,
+      admin: deps.ports.admin,
+      auth: deps.auth,
+    });
+    return;
+  }
+
+  // Optional central model-catalog metadata (§16.13). Presentation metadata
+  // only; never constrains selection. Requires model-policy.read.
+  if (catalogPath === "/api/model-catalog" || catalogPath.startsWith("/api/model-catalog/")) {
+    await handleCentralModelCatalogRoute(req, res, { modelPolicy: deps.ports.modelPolicy, auth: deps.auth });
+    return;
+  }
+
   // Future route groups (each guarded with requirePermission):
-  //   /api/model-policy/*   → model-policy.read / .write         (§16.13, §16.14)
   //   /api/admin/*          → admin.read / admin.write           (§16.6)
   //   /api/telemetry/ingest → telemetry.ingest                   (§16.15)
 

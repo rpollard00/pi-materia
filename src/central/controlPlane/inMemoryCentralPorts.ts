@@ -6,16 +6,22 @@ import {
   type CatalogItem,
   type CatalogItemSummary,
   type CatalogItemWriteResult,
+  type CentralModelCatalog,
   type ControlPlaneModeMetadata,
   type ControlPlanePorts,
   type CreateCatalogItemInput,
+  type CreateModelPolicyInput,
   type DeleteCatalogItemInput,
+  type DeleteModelPolicyInput,
   type ModelPolicyDocument,
   type ModelPolicyPort,
+  type ModelPolicyWriteResult,
+  type SetActiveModelPolicyInput,
   type TelemetryIngestInput,
   type TelemetryIngestResult,
   type TelemetryStatusPort,
   type UpdateCatalogItemInput,
+  type UpdateModelPolicyInput,
 } from "../../application/controlPlane.js";
 import type { AuthMethodKind } from "../../domain/auth.js";
 import type { EnrichedEvent } from "../../domain/eventing.js";
@@ -24,6 +30,11 @@ import {
   type CentralCatalogRepository,
   type InMemoryCentralCatalogRepositoryOptions,
 } from "./centralCatalogRepository.js";
+import {
+  createInMemoryModelPolicyRepository,
+  type CentralModelPolicyRepository,
+  type InMemoryModelPolicyRepositoryOptions,
+} from "./inMemoryModelPolicyRepository.js";
 import {
   CENTRAL_IN_MEMORY_EVENT_CAP,
   nowIso,
@@ -42,7 +53,11 @@ import {
  *   monotonic versions, timestamps, provenance, and content hashes; admin
  *   writes go through the admin port below. Central catalog data is **not**
  *   writable through normal local/project editing paths.
- * - **Model policy**: none served. Policy APIs are a later work item (§16.13).
+ * - **Model policy**: backed by the in-memory model-policy repository
+ *   (§16.13). Read APIs serve policy documents with monotonic versions,
+ *   timestamps, and an active designation; admin writes go through the admin
+ *   port below. Optional central model-catalog metadata is seeded and served
+ *   separately from local Pi model availability (§11).
  * - **Telemetry**: a small bounded in-memory event store so `status()` reports
  *   real counts. Full normalized ingestion/query is a later work item (§16.15,
  *   §16.16).
@@ -75,6 +90,21 @@ export interface InMemoryCentralPortsOptions {
   catalogSeed?: InMemoryCentralCatalogRepositoryOptions["seed"];
   /** Stable clock for catalog timestamps (tests); defaults to nowIso(). */
   catalogClock?: InMemoryCentralCatalogRepositoryOptions["clock"];
+  /**
+   * Inject an existing central model-policy repository. Defaults to a fresh
+   * in-memory repository, optionally seeded via {@link policySeed}.
+   */
+  policyRepository?: CentralModelPolicyRepository;
+  /** Initial central model-policy documents applied to a freshly created repository. */
+  policySeed?: InMemoryModelPolicyRepositoryOptions["seed"];
+  /** Stable clock for model-policy timestamps (tests); defaults to nowIso(). */
+  policyClock?: InMemoryModelPolicyRepositoryOptions["clock"];
+  /**
+   * Optional central model-catalog metadata, served read-only and independently
+   * from local Pi model availability (§11). Omit when no central catalog is
+   * configured.
+   */
+  modelCatalog?: CentralModelCatalog;
 }
 
 /** Internal record tying an ingested event to its originating runtime for query filtering. */
@@ -96,6 +126,13 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
       ...(options.catalogSeed !== undefined ? { seed: options.catalogSeed } : {}),
       ...(options.catalogClock !== undefined ? { clock: options.catalogClock } : {}),
     });
+  const policyRepository: CentralModelPolicyRepository =
+    options.policyRepository ??
+    createInMemoryModelPolicyRepository({
+      ...(options.policySeed !== undefined ? { seed: options.policySeed } : {}),
+      ...(options.policyClock !== undefined ? { clock: options.policyClock } : {}),
+    });
+  const modelCatalog: CentralModelCatalog | undefined = options.modelCatalog;
   const store: IngestedEventRecord[] = [];
 
   function pushEvents(input: TelemetryIngestInput): number {
@@ -124,12 +161,23 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
 
   const modelPolicy: ModelPolicyPort = {
     mode: () => modeMetadata,
-    // Central model-policy APIs are a later work item (§16.13).
+    // Backed by the in-memory model-policy repository (§16.13). Read-only here;
+    // admin writes go through the admin port below. Optional model-catalog
+    // metadata is served separately from local Pi model availability (§11).
     async getActivePolicy(): Promise<ModelPolicyDocument | undefined> {
-      return undefined;
+      return policyRepository.getActive();
+    },
+    async getActivePolicyId(): Promise<string | undefined> {
+      return policyRepository.getActivePolicyId();
     },
     async listPolicies(): Promise<ModelPolicyDocument[]> {
-      return [];
+      return policyRepository.list();
+    },
+    async getPolicy(id: string): Promise<ModelPolicyDocument | undefined> {
+      return policyRepository.get(id);
+    },
+    async getModelCatalog(): Promise<CentralModelCatalog | undefined> {
+      return modelCatalog;
     },
   };
 
@@ -195,6 +243,20 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
     },
     async deleteCatalogItem(input: DeleteCatalogItemInput): Promise<CatalogItemWriteResult> {
       return catalogRepository.delete(input);
+    },
+    // Central model-policy admin writes: the only path that may write central
+    // model-policy data (§16.13). Routed through the in-memory repository.
+    async createModelPolicy(input: CreateModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      return policyRepository.create(input);
+    },
+    async updateModelPolicy(input: UpdateModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      return policyRepository.update(input);
+    },
+    async deleteModelPolicy(input: DeleteModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      return policyRepository.remove(input);
+    },
+    async setActiveModelPolicy(input: SetActiveModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      return policyRepository.setActive(input);
     },
   };
 

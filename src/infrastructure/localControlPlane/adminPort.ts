@@ -4,8 +4,13 @@ import {
   type CatalogItemWriteResult,
   type ControlPlaneServerInfo,
   type CreateCatalogItemInput,
+  type CreateModelPolicyInput,
   type DeleteCatalogItemInput,
+  type DeleteModelPolicyInput,
+  type ModelPolicyWriteResult,
+  type SetActiveModelPolicyInput,
   type UpdateCatalogItemInput,
+  type UpdateModelPolicyInput,
 } from "../../application/controlPlane.js";
 import { type LocalControlPlaneAdapterOptions, localAdapterModeMetadata } from "./shared.js";
 
@@ -29,6 +34,12 @@ export function createLocalAdminMetadataPort(options: LocalControlPlaneAdapterOp
     );
   }
 
+  function rejectPolicyWrite(action: string): never {
+    throw new Error(
+      `Central model-policy ${action} is not available in local-only mode. Central model-policy data is administered on the central control plane, not the local control-plane admin port.`,
+    );
+  }
+
   return {
     mode,
     async getMetadata(): Promise<AdminMetadataSnapshot> {
@@ -49,6 +60,21 @@ export function createLocalAdminMetadataPort(options: LocalControlPlaneAdapterOp
     },
     async deleteCatalogItem(_input: DeleteCatalogItemInput): Promise<CatalogItemWriteResult> {
       rejectCentralWrite("delete");
+    },
+    // Central model-policy admin writes are unsupported for the same reason as
+    // catalog writes: central policy data is not writable from local-only mode,
+    // and local model selection is not gated by central policy here (§11, §13).
+    async createModelPolicy(_input: CreateModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      rejectPolicyWrite("create");
+    },
+    async updateModelPolicy(_input: UpdateModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      rejectPolicyWrite("update");
+    },
+    async deleteModelPolicy(_input: DeleteModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      rejectPolicyWrite("delete");
+    },
+    async setActiveModelPolicy(_input: SetActiveModelPolicyInput): Promise<ModelPolicyWriteResult> {
+      rejectPolicyWrite("activate");
     },
   };
 }

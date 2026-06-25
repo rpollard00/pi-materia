@@ -16,8 +16,17 @@ export function createLocalModelPolicyPort(options: LocalControlPlaneAdapterOpti
     async getActivePolicy() {
       return undefined;
     },
+    async getActivePolicyId() {
+      return undefined;
+    },
     async listPolicies() {
       return [];
+    },
+    async getPolicy() {
+      return undefined;
+    },
+    async getModelCatalog() {
+      return undefined;
     },
   };
 }

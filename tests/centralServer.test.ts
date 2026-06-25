@@ -79,15 +79,17 @@ describe("central server skeleton — in-memory control-plane ports", () => {
     expect(after.runtimeCount).toBe(1);
   });
 
-  test("catalog starts empty and model-policy remains a placeholder", async () => {
+  test("catalog starts empty and model-policy repository starts empty", async () => {
     const ports = createInMemoryCentralPorts();
-    // Catalog repository is now wired (§16.6) but starts empty until admin writes land items.
+    // Catalog repository is wired (§16.6) but starts empty until admin writes land items.
     expect(await ports.catalog.list()).toEqual([]);
     expect(await ports.catalog.get("anything")).toBeUndefined();
     expect(await ports.catalog.head("anything")).toBeUndefined();
-    // Model-policy APIs are still a later work item (§16.13).
+    // Model-policy repository is wired (§16.13) but starts empty with no active policy.
     expect(await ports.modelPolicy.getActivePolicy()).toBeUndefined();
+    expect(await ports.modelPolicy.getActivePolicyId()).toBeUndefined();
     expect(await ports.modelPolicy.listPolicies()).toEqual([]);
+    expect(await ports.modelPolicy.getPolicy("anything")).toBeUndefined();
   });
 
   test("admin metadata reports dev-token auth and catalog writes route through the repository", async () => {
@@ -228,5 +230,24 @@ describe("central server skeleton — HTTP routes", () => {
     // The server stays up and healthy after an isolated handler error.
     const health = await fetch(`${baseUrl}/api/health`);
     expect(health.status).toBe(200);
+  });
+});
+
+describe("central server — CORS for cross-origin WebUI reads", () => {
+  test("OPTIONS preflight returns 204 with permissive CORS headers", async () => {
+    const baseUrl = await startTestServer();
+    const response = await fetch(`${baseUrl}/api/model-policy`, { method: "OPTIONS" });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect((response.headers.get("access-control-allow-headers") ?? "").toLowerCase()).toContain("authorization");
+    expect((response.headers.get("access-control-allow-methods") ?? "").toUpperCase()).toContain("GET");
+  });
+
+  test("GET responses carry CORS headers so cross-origin WebUI reads succeed", async () => {
+    const baseUrl = await startTestServer();
+    const response = await fetch(`${baseUrl}/api/health`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-headers")).toBeTruthy();
   });
 });

@@ -17,6 +17,7 @@ export {
 } from "../domain/catalogProvenance.js";
 import type { EnrichedEvent } from "../domain/eventing.js";
 import type { Permission } from "../domain/identity.js";
+import type { MateriaThinkingLevel } from "../domain/thinking.js";
 import type { ScopePath } from "../domain/scope.js";
 // Model-policy contracts are pure domain invariants (docs/enterprise-control-plane.md
 // §11). Re-exported here so the control-plane DTO surface stays the stable import
@@ -235,6 +236,89 @@ export interface CatalogQuery {
 // (docs/enterprise-control-plane.md §11). The ModelPolicyPort below is the
 // application-level port; DTOs/evaluation live in the domain layer.
 // ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Model-policy admin write DTOs. Only admin APIs may write central model-policy
+ * documents (§3.3, §11); normal local/project editing paths must not be able to
+ * write them. These mirror the catalog admin write DTOs and back the central
+ * {@link AdminMetadataPort} write surface.
+ */
+
+/** Input to create a central model-policy document. */
+export interface CreateModelPolicyInput {
+  /** Policy id; authoritative — also assigned to the stored document's `id`. */
+  id: string;
+  /** Constraint document. `id`/`version`/`updatedAt` are managed by the store. */
+  document: ModelPolicyDocument;
+  /** Mark this policy as the active one after creating it. */
+  setActive?: boolean;
+  /** Authoring principal id, recorded for audit. */
+  principalId?: string;
+}
+
+/** Input to update a central model-policy document. */
+export interface UpdateModelPolicyInput {
+  id: string;
+  /** Replacement constraint document, when provided. */
+  document?: ModelPolicyDocument;
+  /** Expected current version for optimistic concurrency; omit to ignore. */
+  expectedVersion?: string;
+  /** Mark this policy as the active one after updating it. */
+  setActive?: boolean;
+  principalId?: string;
+}
+
+/** Input to delete a central model-policy document. */
+export interface DeleteModelPolicyInput {
+  id: string;
+  expectedVersion?: string;
+  principalId?: string;
+}
+
+/** Input to designate the active model-policy document. */
+export interface SetActiveModelPolicyInput {
+  id: string;
+  principalId?: string;
+}
+
+/** Outcome of a model-policy admin write action. */
+export interface ModelPolicyWriteResult {
+  action: "created" | "updated" | "deleted" | "activated";
+  /** Stored policy document after the write (omitted for `deleted`). */
+  policy?: ModelPolicyDocument;
+  /** Id of the active policy after the write, when one is active. */
+  activePolicyId?: string;
+  /** Optional audit record produced for the write. */
+  audit?: AuditMetadata;
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Central model-catalog metadata (docs/enterprise-control-plane.md §11)
+// ───────────────────────────────────────────────────────────────────────
+
+/**
+ * A model the central control plane knows about, independent of local Pi
+ * runtime availability. Optional presentation metadata only — it never
+ * constrains selection on its own; model-policy documents do (§11).
+ */
+export interface CentralModelCatalogEntry {
+  /** Model value (matches the local Pi model-registry value space, e.g. "zai/glm-4.6"). */
+  value: string;
+  label?: string;
+  vendor?: string;
+  /** Thinking levels the central catalog records for this model, when known. */
+  supportedThinkingLevels?: readonly MateriaThinkingLevel[];
+  deprecated?: boolean;
+  notes?: string;
+}
+
+/** Optional central model-catalog metadata served separately from local Pi model availability. */
+export interface CentralModelCatalog {
+  entries: readonly CentralModelCatalogEntry[];
+  /** RFC3339 timestamp the catalog was last updated centrally. */
+  updatedAt?: string;
+}
+
 // ───────────────────────────────────────────────────────────────────────
 // Telemetry/status DTOs (docs/enterprise-control-plane.md §15)
 // ───────────────────────────────────────────────────────────────────────
@@ -384,13 +468,26 @@ export interface CatalogAccessPort {
   head(id: string, kind?: CatalogItemKind): Promise<CatalogItemSummary | undefined>;
 }
 
-/** Read access to central model-policy documents, independent of local model availability. */
+/**
+ * Read access to central model-policy documents, independent of local model
+ * availability (docs/enterprise-control-plane.md §11). Also serves optional
+ * central model-catalog metadata; both are read-only here. Admin writes for
+ * policy documents go through {@link AdminMetadataPort}, the only central model
+ * policy write path. When no policy is configured, selection behavior is
+ * preserved exactly by callers (§11).
+ */
 export interface ModelPolicyPort {
   mode(): ControlPlaneModeMetadata;
   /** Active policy document for the calling scope/principal, or undefined when none configured. */
   getActivePolicy(): Promise<ModelPolicyDocument | undefined>;
+  /** Id of the active policy document, or undefined when none is active. */
+  getActivePolicyId(): Promise<string | undefined>;
   /** All known policy documents (for admin views). */
   listPolicies(): Promise<ModelPolicyDocument[]>;
+  /** Fetch a single policy document by id, or undefined when absent. */
+  getPolicy(id: string): Promise<ModelPolicyDocument | undefined>;
+  /** Optional central model-catalog metadata, independent of local Pi model availability. */
+  getModelCatalog(): Promise<CentralModelCatalog | undefined>;
 }
 
 /**
@@ -409,10 +506,11 @@ export interface TelemetryStatusPort {
 }
 
 /**
- * Admin metadata and catalog administration. Carries server/principal/role
- * metadata reads plus the central catalog admin write surface (the only path
- * that may write central catalog data). All actions are RBAC-guarded at the
- * central server; local session behavior is not gated by this port.
+ * Admin metadata and catalog/model-policy administration. Carries
+ * server/principal/role metadata reads plus the central catalog and model-policy
+ * admin write surfaces (the only paths that may write central catalog/policy
+ * data). All actions are RBAC-guarded at the central server; local session
+ * behavior is not gated by this port.
  */
 export interface AdminMetadataPort {
   mode(): ControlPlaneModeMetadata;
@@ -421,6 +519,14 @@ export interface AdminMetadataPort {
   createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItemWriteResult>;
   updateCatalogItem(input: UpdateCatalogItemInput): Promise<CatalogItemWriteResult>;
   deleteCatalogItem(input: DeleteCatalogItemInput): Promise<CatalogItemWriteResult>;
+  /** Create a central model-policy document (the only model-policy write path). */
+  createModelPolicy(input: CreateModelPolicyInput): Promise<ModelPolicyWriteResult>;
+  /** Update a central model-policy document. */
+  updateModelPolicy(input: UpdateModelPolicyInput): Promise<ModelPolicyWriteResult>;
+  /** Delete a central model-policy document. */
+  deleteModelPolicy(input: DeleteModelPolicyInput): Promise<ModelPolicyWriteResult>;
+  /** Designate the active model-policy document. */
+  setActiveModelPolicy(input: SetActiveModelPolicyInput): Promise<ModelPolicyWriteResult>;
 }
 
 /**

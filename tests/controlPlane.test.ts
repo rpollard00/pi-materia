@@ -195,7 +195,10 @@ class FakeControlPlane implements ControlPlanePorts {
     this.modelPolicy = {
       mode: () => this.modeMetadata,
       getActivePolicy: async () => this.policy,
+      getActivePolicyId: async () => (this.policy ? this.policy.id : undefined),
       listPolicies: async () => (this.policy ? [this.policy] : []),
+      getPolicy: async (id) => (this.policy && this.policy.id === id ? this.policy : undefined),
+      getModelCatalog: async () => undefined,
     };
     this.telemetry = {
       mode: () => this.modeMetadata,
@@ -249,6 +252,18 @@ class FakeControlPlane implements ControlPlanePorts {
         if (!existing) throw new Error(`catalog item ${input.id} not found`);
         this.items.delete(input.id);
         return { action: "deleted", summary: this.summarize(existing) };
+      },
+      createModelPolicy: async () => {
+        throw new Error("model-policy writes are not supported by the trivial fake");
+      },
+      updateModelPolicy: async () => {
+        throw new Error("model-policy writes are not supported by the trivial fake");
+      },
+      deleteModelPolicy: async () => {
+        throw new Error("model-policy writes are not supported by the trivial fake");
+      },
+      setActiveModelPolicy: async () => {
+        throw new Error("model-policy writes are not supported by the trivial fake");
       },
     };
   }

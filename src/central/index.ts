@@ -32,6 +32,16 @@ export {
 } from "./controlPlane/centralCatalogRepository.js";
 
 export {
+  createInMemoryModelPolicyRepository,
+  type CentralModelPolicyRepository,
+  type InMemoryModelPolicyRepositoryOptions,
+  CentralModelPolicyWriteError,
+  ModelPolicyConflictError,
+  ModelPolicyNotFoundError,
+  ModelPolicyVersionMismatchError,
+} from "./controlPlane/inMemoryModelPolicyRepository.js";
+
+export {
   CENTRAL_SERVICE_ID,
   CENTRAL_CONTROL_PLANE_SCOPE,
   CENTRAL_IN_MEMORY_EVENT_CAP,
@@ -47,6 +57,16 @@ export {
   handleCentralCatalogRoute,
   type CentralCatalogRouteDeps,
 } from "./server/catalog.js";
+
+export {
+  handleCentralModelPolicyRoute,
+  type CentralModelPolicyRouteDeps,
+} from "./server/modelPolicy.js";
+
+export {
+  handleCentralModelCatalogRoute,
+  type CentralModelCatalogRouteDeps,
+} from "./server/modelCatalog.js";
 
 export {
   sendJson,

@@ -4,6 +4,8 @@ import type {
   AddQuestRequest,
   AddQuestResponse,
   BackendModeResponse,
+  CentralModelCatalogResponse,
+  CentralModelPolicyResponse,
   ConfigResponse,
   DefaultLoadoutResponse,
   DeleteQuestResponse,
@@ -86,6 +88,48 @@ export async function getModels(): Promise<ModelCatalogResponse> {
   const response = await fetch('/api/models');
   if (!response.ok) throw new Error(`Model catalog request failed with HTTP ${response.status}`);
   return normalizeModelCatalog(await response.json());
+}
+
+/** Options for reading a central control-plane API surface. */
+export interface CentralReadOptions {
+  /** Absolute central API base URL (from backend mode discovery). */
+  baseUrl: string;
+  /** Optional `Authorization` header value (e.g. a dev-stage bearer token). */
+  authorization?: string;
+}
+
+function centralUrl(baseUrl: string, path: string): string {
+  const trimmed = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+  return `${trimmed}${path}`;
+}
+
+function centralHeaders(options: CentralReadOptions): Record<string, string> | undefined {
+  return options.authorization ? { authorization: options.authorization } : undefined;
+}
+
+/**
+ * Read the active central model-policy document. Served by the central control
+ * plane independently from local Pi model availability
+ * (docs/enterprise-control-plane.md §11). Requires `model-policy.read`.
+ */
+export async function getCentralModelPolicy(options: CentralReadOptions): Promise<CentralModelPolicyResponse> {
+  const response = await fetch(centralUrl(options.baseUrl, '/api/model-policy'), {
+    ...(centralHeaders(options) ? { headers: centralHeaders(options) } : {}),
+  });
+  if (!response.ok) throw new Error(`Central model-policy request failed with HTTP ${response.status}`);
+  return (await response.json()) as CentralModelPolicyResponse;
+}
+
+/**
+ * Read optional central model-catalog metadata. Presentation metadata only;
+ * never constrains selection on its own (§11). Requires `model-policy.read`.
+ */
+export async function getCentralModelCatalog(options: CentralReadOptions): Promise<CentralModelCatalogResponse> {
+  const response = await fetch(centralUrl(options.baseUrl, '/api/model-catalog'), {
+    ...(centralHeaders(options) ? { headers: centralHeaders(options) } : {}),
+  });
+  if (!response.ok) throw new Error(`Central model-catalog request failed with HTTP ${response.status}`);
+  return (await response.json()) as CentralModelCatalogResponse;
 }
 
 export async function getMonitorSnapshot(): Promise<MonitorSnapshot> {

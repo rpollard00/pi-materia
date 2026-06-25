@@ -2,20 +2,24 @@ import { createServer } from "node:http";
 import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
-import { errorMessage, sendJson } from "./http.js";
+import { errorMessage, handleCentralCorsPreflight, sendJson } from "./http.js";
 import { handleMateriaCentralRequest } from "./routes.js";
 import type { ControlPlanePorts } from "../../application/controlPlane.js";
 
 export { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 export type { InMemoryCentralPortsOptions } from "../controlPlane/inMemoryCentralPorts.js";
 export { CENTRAL_SERVICE_ID, CENTRAL_CONTROL_PLANE_SCOPE } from "../controlPlane/shared.js";
-export { sendJson, readJsonBody, isPlainObject, errorMessage } from "./http.js";
+export { sendJson, readJsonBody, isPlainObject, errorMessage, applyCentralCorsHeaders, handleCentralCorsPreflight, CENTRAL_CORS_ALLOW_ORIGIN } from "./http.js";
 export { handleCentralHealthRoute } from "./health.js";
 export type { CentralHealthRouteDeps } from "./health.js";
 export { handleCentralStatusRoute } from "./status.js";
 export type { CentralStatusRouteDeps } from "./status.js";
 export { handleCentralCatalogRoute } from "./catalog.js";
 export type { CentralCatalogRouteDeps } from "./catalog.js";
+export { handleCentralModelPolicyRoute } from "./modelPolicy.js";
+export type { CentralModelPolicyRouteDeps } from "./modelPolicy.js";
+export { handleCentralModelCatalogRoute } from "./modelCatalog.js";
+export type { CentralModelCatalogRouteDeps } from "./modelCatalog.js";
 export { handleMateriaCentralRequest } from "./routes.js";
 export type { MateriaCentralRouteDeps } from "./routes.js";
 
@@ -73,6 +77,7 @@ export function createMateriaCentralServer(options: MateriaCentralServerOptions 
 
   const server = createServer(async (req, res) => {
     try {
+      if (handleCentralCorsPreflight(req, res)) return;
       await handleMateriaCentralRequest(req, res, { ports, auth, ...(options.label !== undefined ? { label: options.label } : {}) });
     } catch (error) {
       sendJson(res, 500, { ok: false, scope: "control-plane", service: CENTRAL_SERVICE_ID, error: errorMessage(error) });

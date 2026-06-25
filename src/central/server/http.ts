@@ -13,6 +13,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
  */
 
 export function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  applyCentralCorsHeaders(res);
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
 }
@@ -45,4 +46,45 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// CORS (docs/enterprise-control-plane.md §11)
+// ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolved CORS allow-origin value for the central server.
+ *
+ * The central control plane is read cross-origin by the WebUI (the UI is served
+ * by the local session server while the central API lives elsewhere by
+ * default), so the read surface must answer browser preflight and carry
+ * `Access-Control-Allow-*` headers. The value is dev-friendly by default
+ * (`*`) and overridable via `MATERIA_CENTRAL_CORS_ORIGIN` for non-local
+ * deployments. This is a transport concern only; it does not weaken the RBAC
+ * guards on central routes.
+ */
+export const CENTRAL_CORS_ALLOW_ORIGIN = (process.env.MATERIA_CENTRAL_CORS_ORIGIN ?? "*").trim() || "*";
+
+const CENTRAL_CORS_ALLOW_HEADERS = "authorization, content-type";
+const CENTRAL_CORS_ALLOW_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
+
+/** Write the central CORS response headers. Idempotent and side-effect free beyond headers. */
+export function applyCentralCorsHeaders(res: ServerResponse): void {
+  res.setHeader("Access-Control-Allow-Origin", CENTRAL_CORS_ALLOW_ORIGIN);
+  res.setHeader("Access-Control-Allow-Headers", CENTRAL_CORS_ALLOW_HEADERS);
+  res.setHeader("Access-Control-Allow-Methods", CENTRAL_CORS_ALLOW_METHODS);
+  res.setHeader("Access-Control-Max-Age", "600");
+}
+
+/**
+ * Handle a CORS preflight (`OPTIONS`) request. Returns `true` when the request
+ * was a preflight that has been answered (and the caller should stop
+ * processing); `false` otherwise. Answers `204 No Content` with CORS headers.
+ */
+export function handleCentralCorsPreflight(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.method !== "OPTIONS") return false;
+  applyCentralCorsHeaders(res);
+  res.writeHead(204);
+  res.end();
+  return true;
 }
