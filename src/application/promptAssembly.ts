@@ -198,7 +198,15 @@ export function resolveTemplateValue(key: string, state: MateriaCastState): unkn
 
 export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaCastState): unknown[] {
   if (!shouldUseIsolatedMateriaContext(state)) return messages;
-  const materiaStart = findActiveMateriaPromptIndex(messages);
+  // Anchor on the active socket's own hidden materia prompt: match the latest
+  // pi-materia-prompt custom message whose details.socketId and materiaName
+  // agree with the current cast state. This excludes prior socket prompts that
+  // also carry a <materia-instructions> block, which content-only discovery
+  // cannot distinguish from the current socket's prompt.
+  const materiaStart = findActiveMateriaPromptIndex(messages, {
+    socketId: currentSocketId(state),
+    materiaName: state.currentMateria,
+  });
   if (materiaStart < 0) return messages;
   // Drop pi-materia orchestration-only custom messages (visible "◆ Materia" /
   // "Casting <name>" transition cards, quest runner status cards, and anything
@@ -324,7 +332,80 @@ export function syntheticEventEmissionContext(state: MateriaCastState): string |
   return EVENT_EMISSION_CONTEXT_TEXT;
 }
 
-export function findActiveMateriaPromptIndex(messages: unknown[]): number {
+/** Active socket identity used to anchor prompt discovery on the current turn. */
+export interface ActiveMateriaPromptLookup {
+  /** Current socket id. When set, only prompts with a matching details.socketId are preferred. */
+  socketId?: string;
+  /** Current materia name. When set, only prompts with a matching details.materiaName are preferred. */
+  materiaName?: string;
+}
+
+interface MateriaPromptCandidate {
+  socketId?: string;
+  materiaName?: string;
+  hasMetadata: boolean;
+}
+
+/**
+ * Locate the active socket's hidden materia prompt so buildIsolatedMateriaContext
+ * can anchor isolated agent context on it.
+ *
+ * Discovery prefers metadata-aware matching for the active socket: the latest
+ * pi-materia-prompt custom message whose details.socketId and materiaName match
+ * the current cast state. This excludes prior socket prompts even when they too
+ * contain a <materia-instructions> block, which content-only discovery cannot
+ * distinguish. When a socket-anchored lookup is requested but only a prior
+ * socket's prompt is present, no content fallback occurs: the prior prompt is
+ * excluded rather than leaked, and the caller returns the transcript unchanged.
+ *
+ * The defensive content-only fallback is reached only when metadata cannot
+ * anchor discovery — either the lookup carries no socket id/materia name, or no
+ * candidate pi-materia-prompt message carries socket/materia details at all
+ * (older runtime versions, tests, mocks). In that case the latest message that
+ * contains a <materia-instructions> block is selected, preserving prior behavior.
+ */
+export function findActiveMateriaPromptIndex(messages: unknown[], lookup?: ActiveMateriaPromptLookup): number {
+  const hasLookupCriteria = Boolean(lookup && (lookup.socketId || lookup.materiaName));
+  let sawPromptWithMetadata = false;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const candidate = readMateriaPromptCandidate(messages[i]);
+    if (!candidate) continue;
+    if (candidate.hasMetadata) sawPromptWithMetadata = true;
+    if (hasLookupCriteria && materiaPromptCandidateMatches(candidate, lookup!)) return i;
+  }
+
+  // A socket-anchored lookup was requested and at least one prompt carried
+  // socket/materia metadata, yet none matched the active socket. Do not fall
+  // back to content-only discovery: that could surface a prior socket's prompt.
+  if (hasLookupCriteria && sawPromptWithMetadata) return -1;
+
+  // Defensive fallback: metadata cannot anchor discovery (no lookup criteria, or
+  // no candidate carries socket/materia details). Fall back to content-only
+  // discovery of the latest <materia-instructions> block.
+  return findContentAnchoredPromptIndex(messages);
+}
+
+/** Reads the socket/materia metadata (if any) from a pi-materia-prompt message. */
+function readMateriaPromptCandidate(message: unknown): MateriaPromptCandidate | undefined {
+  if (typeof message !== "object" || message === null) return undefined;
+  const record = message as { customType?: unknown; details?: unknown };
+  if (record.customType !== "pi-materia-prompt") return undefined;
+  const details = typeof record.details === "object" && record.details !== null ? (record.details as Record<string, unknown>) : {};
+  const socketId = typeof details.socketId === "string" ? details.socketId : undefined;
+  const materiaName = typeof details.materiaName === "string" ? details.materiaName : undefined;
+  return { socketId, materiaName, hasMetadata: socketId !== undefined || materiaName !== undefined };
+}
+
+/** A candidate matches when it carries metadata that agrees with the lookup. */
+function materiaPromptCandidateMatches(candidate: MateriaPromptCandidate, lookup: ActiveMateriaPromptLookup): boolean {
+  if (!candidate.hasMetadata) return false;
+  if (lookup.socketId !== undefined && candidate.socketId !== lookup.socketId) return false;
+  if (lookup.materiaName !== undefined && candidate.materiaName !== lookup.materiaName) return false;
+  return true;
+}
+
+function findContentAnchoredPromptIndex(messages: unknown[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i] as { content?: unknown; role?: unknown };
     if (isToolOrAssistantMessage(message)) continue;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, findActiveMateriaPromptIndex, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -396,6 +396,12 @@ describe("buildIsolatedMateriaContext", () => {
     return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: "Socket-1", socketId: "Socket-1", materiaName: "Build" }, timestamp: 3 };
   }
 
+  // Flexible hidden pi-materia-prompt builder so tests can stage prompts from
+  // different sockets/materia (mirrors sendMateriaTurn details).
+  function materiaPromptMessageFor(prompt: string, socketId: string, materiaName: string, details: Record<string, unknown> = {}): unknown {
+    return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: socketId, socketId, materiaName, ...details }, timestamp: 3 };
+  }
+
   function questOrchestrationCard(content: string, details: Record<string, unknown> = {}): unknown {
     return {
       role: "custom",
@@ -547,6 +553,65 @@ describe("buildIsolatedMateriaContext", () => {
     expect(JSON.stringify(isolated)).toContain("<materia-instructions>");
   });
 
+  test("anchors on the current socket prompt and excludes prior socket prompts with <materia-instructions>", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const castState = state(socket, { currentSocketId: "Socket-4", phase: "Socket-4", currentMateria: "Buildga" });
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "earlier transcript noise" }], timestamp: 1 },
+      // Prior socket prompt: also contains <materia-instructions> but belongs to Socket-3.
+      materiaPromptMessageFor("<materia-instructions>\nPlan the work.\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+      // Current socket prompt: Socket-4 / Buildga.
+      materiaPromptMessageFor("<materia-instructions>\nBuildga builds the fix.\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+
+    // Synthetic cast context replaces the earlier transcript.
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    expect(serialized).not.toContain("earlier transcript noise");
+    // Prior socket prompt must be fully excluded even though it carries <materia-instructions>.
+    expect(serialized).not.toContain("Plan the work.");
+    expect(serialized).not.toContain("Auto-Plan");
+    // Current socket prompt is anchored and preserved.
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("Buildga builds the fix.");
+  });
+
+  test("returns transcript unchanged when only a prior socket prompt is present (no content fallback leak)", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const castState = state(socket, { currentSocketId: "Socket-4", phase: "Socket-4", currentMateria: "Buildga" });
+    // Only a prior socket prompt is present; the current socket's prompt has not
+    // been emitted yet. Isolation must not fall back to content-only discovery
+    // and leak the prior socket prompt as the anchor.
+    const messages = [
+      materiaPromptMessageFor("<materia-instructions>\nPlan the work.\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+    ];
+
+    expect(buildIsolatedMateriaContext(messages, castState)).toBe(messages);
+  });
+
+  test("defensively falls back to content-only discovery when prompts lack metadata", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const castState = state(socket, { currentSocketId: "Socket-4", phase: "Socket-4", currentMateria: "Buildga" });
+    // Lookup carries criteria, but the only pi-materia-prompt message has no
+    // socketId/materiaName details (older runtime/test fixture). Discovery must
+    // fall back to content-only and still anchor on the <materia-instructions> block.
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "earlier transcript noise" }], timestamp: 1 },
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nBuild it.\n</materia-instructions>", display: false, details: {}, timestamp: 2 },
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    expect(serialized).not.toContain("earlier transcript noise");
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("Build it.");
+  });
+
   test("returns messages unchanged when no active materia prompt is present", () => {
     const socket = agentSocket();
     const castState = state(socket);
@@ -556,6 +621,95 @@ describe("buildIsolatedMateriaContext", () => {
     ];
 
     expect(buildIsolatedMateriaContext(messages, castState)).toBe(messages);
+  });
+});
+
+describe("findActiveMateriaPromptIndex", () => {
+  function promptMessage(prompt: string, socketId: string, materiaName: string, details: Record<string, unknown> = {}): unknown {
+    return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: socketId, socketId, materiaName, ...details } };
+  }
+
+  test("prefers the latest metadata-matched prompt for the active socket", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nfirst turn\n</materia-instructions>", "Socket-4", "Buildga"),
+      promptMessage("<materia-instructions>\nsecond turn\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    // Latest Socket-4 prompt wins over the earlier one for the same socket.
+    const idx = findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" });
+    expect(idx).toBe(1);
+    expect((messages[idx] as { content: string }).content).toContain("second turn");
+  });
+
+  test("excludes a prior socket prompt even when it carries <materia-instructions>", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nplan\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+      promptMessage("<materia-instructions>\nbuild\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(1);
+  });
+
+  test("returns -1 when only a prior socket prompt is present (no content fallback leak)", () => {
+    const messages = [promptMessage("<materia-instructions>\nplan\n</materia-instructions>", "Socket-3", "Auto-Plan")];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(-1);
+  });
+
+  test("anchors on socketId alone when materiaName is unknown", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nplan\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+      promptMessage("<materia-instructions>\nbuild\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4" })).toBe(1);
+  });
+
+  test("keeps current-socket prompt isolation stable across multi-turn refinement", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nprior socket\n</materia-instructions>", "Socket-2", "Rude"),
+      promptMessage("<materia-instructions>\nrefine the palette\n</materia-instructions>", "Socket-2", "Rude"),
+      { role: "assistant", content: [{ type: "text", text: "first draft" }] },
+      { role: "user", content: [{ type: "text", text: "make it darker" }] },
+    ];
+
+    // A second isolation pass for the same socket re-anchors on the same
+    // Socket-2 prompt regardless of intervening assistant/user messages.
+    const first = findActiveMateriaPromptIndex(messages, { socketId: "Socket-2", materiaName: "Rude" });
+    const second = findActiveMateriaPromptIndex(messages, { socketId: "Socket-2", materiaName: "Rude" });
+    expect(first).toBe(second);
+    expect(first).toBe(1);
+    expect((messages[first] as { content: string }).content).toContain("refine the palette");
+  });
+
+  test("falls back to content-only discovery when a prompt lacks metadata", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "noise" }] },
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nbuild\n</materia-instructions>", display: false, details: {} },
+    ];
+
+    // Lookup has criteria but the candidate carries no metadata: fall back.
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(1);
+  });
+
+  test("falls back to content-only discovery when no lookup criteria are provided", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "noise" }] },
+      promptMessage("<materia-instructions>\nbuild\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages)).toBe(1);
+    expect(findActiveMateriaPromptIndex(messages, {})).toBe(1);
+  });
+
+  test("returns -1 when no materia prompt is present", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "plain conversation" }] },
+      { role: "custom", customType: "pi-materia", content: "status", details: { prefix: "status" } },
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(-1);
+    expect(findActiveMateriaPromptIndex(messages)).toBe(-1);
   });
 });
 
