@@ -393,6 +393,134 @@ describe("application prompt assembly", () => {
   });
 });
 
+describe("socket-specific renderable text suppression", () => {
+  // The opt-in renderable-text model keeps `context` as the default
+  // cross-socket explanatory field. Non-text JSON sockets (planner/evaluator/
+  // maintainer/chain-context) receive required JSON instructions but no generic
+  // top-level `text` guidance; only sockets that consume `$.text` (or carry
+  // explicit renderable-text intent) emit renderable prose. This is what stops
+  // ordinary evaluator/maintainer/planner sockets from emitting misplaced
+  // top-level `text` payloads alongside `context`.
+
+  function expectRequiredJsonFinalInstructions(prompt: string): void {
+    expect(prompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(prompt).toContain("Emit only the fields relevant to this socket's configured placement, routing, and assignments");
+  }
+
+  function expectNoGenericRenderableTextGuidance(prompt: string): void {
+    // Field list scoped to workItems/satisfied/context; never the text-enabled list.
+    expect(prompt).not.toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
+    // No renderable-prose emit instruction.
+    expect(prompt).not.toContain('top-level "text" string');
+    expect(prompt).not.toContain("primary user-facing text");
+  }
+
+  test("Auto-Plan generator prompt includes required JSON instructions without generic text guidance", () => {
+    const socket = agentSocket({
+      socket: { materia: "Auto-Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Auto-Plan"), generator: true },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expectRequiredJsonFinalInstructions(prompt);
+    // Generator output requirement and placement guidance present.
+    expect(prompt).toContain('"workItems" at $.workItems: array');
+    expect(prompt).toContain("Emit top-level workItems");
+    // Non-text field list with explicit no-text guidance.
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(prompt).toContain("do not emit a top-level text field");
+    expectNoGenericRenderableTextGuidance(prompt);
+  });
+
+  test("Auto-Eval satisfied-routing prompt includes required JSON instructions without generic text guidance", () => {
+    const socket = agentSocket({
+      socket: {
+        materia: "Auto-Eval",
+        parse: "json",
+        assign: { lastFeedback: "$.context", lastCheck: "$" },
+        edges: [{ when: "satisfied", to: "Socket-Maintain" }, { when: "not_satisfied", to: "Socket-Build" }],
+      },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Auto-Eval") },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expectRequiredJsonFinalInstructions(prompt);
+    // Control field requirement and consumed context path present.
+    expect(prompt).toContain('"satisfied" at $.satisfied: boolean');
+    expect(prompt).toContain("$.context for assignment to lastFeedback");
+    // Non-text field list with explicit no-text guidance.
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(prompt).toContain("do not emit a top-level text field");
+    expectNoGenericRenderableTextGuidance(prompt);
+  });
+
+  test("explicit $.text assignment prompt opts into top-level renderable text guidance", () => {
+    const socket = agentSocket({
+      socket: { materia: "Narrate", parse: "json", assign: { prNotes: "$.text" } },
+      materia: { tools: "readOnly", prompt: "Narrate the result as renderable prose." },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expectRequiredJsonFinalInstructions(prompt);
+    expect(prompt).toContain("$.text for assignment to prNotes");
+    // Text-enabled field list and renderable-prose emit instruction.
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
+    expect(prompt).toContain('top-level "text" string');
+    expect(prompt).toContain("primary user-facing text");
+    // Renderable-prose sockets are told not to duplicate prose into context.
+    expect(prompt).toContain('do not duplicate it into "context"');
+  });
+
+  test("non-text JSON synthetic handoff contract and event wording omit renderable text", () => {
+    const socket = agentSocket({
+      socket: {
+        materia: "Auto-Eval",
+        parse: "json",
+        assign: { lastFeedback: "$.context", lastCheck: "$" },
+        edges: [{ when: "satisfied", to: "Socket-Maintain" }, { when: "not_satisfied", to: "Socket-Build" }],
+      },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Auto-Eval") },
+    });
+    const synthetic = buildSyntheticCastContext(state(socket));
+
+    // Synthetic handoff contract context scopes fields to
+    // workItems/satisfied/context and explicitly reserves `text` for
+    // renderable-prose sockets.
+    expect(synthetic).toContain("Canonical handoff contract context:");
+    expect(synthetic).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, and context");
+    expect(synthetic).toContain("do not emit a top-level text field");
+    // The generic renderable-prose field description is absent for non-text sockets.
+    expect(synthetic).not.toContain("primary user-facing text output");
+    // Event side-channel wording is field-neutral for non-text sockets.
+    expect(synthetic).toContain("workItems/satisfied/context)");
+    expect(synthetic).not.toContain("workItems/satisfied/context/text)");
+  });
+
+  test("multi-turn refinement hides the final JSON contract and all text guidance until /materia continue", () => {
+    const socket = agentSocket({
+      socket: { materia: "Plan", parse: "json", assign: { workItems: "$.workItems" } },
+      materia: { tools: "readOnly", prompt: "Plan collaboratively into work items.", multiTurn: true },
+    });
+
+    // Refinement turn: conversational; no final JSON contract or text guidance.
+    const refinementPrompt = buildSocketPrompt(state(socket), socket);
+    expect(refinementPrompt).toContain("Current multi-turn mode: refinement conversation");
+    expect(refinementPrompt).toContain("/materia continue is the only way to finalize");
+    expect(refinementPrompt).not.toContain("Final output format: Return only one top-level JSON object");
+    expect(refinementPrompt).not.toContain("Agent handoff fields are limited");
+    expectNoGenericRenderableTextGuidance(refinementPrompt);
+
+    // Finalization turn: required JSON instructions return, but the non-text
+    // Plan socket still suppresses renderable-text guidance.
+    const finalizationPrompt = buildMultiTurnFinalizationPrompt(state(socket, { multiTurnFinalizing: true }), socket);
+    expect(finalizationPrompt).toContain("Command-triggered finalization");
+    expect(finalizationPrompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(finalizationPrompt).toContain('"workItems" at $.workItems: array');
+    expect(finalizationPrompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expectNoGenericRenderableTextGuidance(finalizationPrompt);
+  });
+});
+
 describe("buildIsolatedMateriaContext", () => {
   function materiaPromptMessage(prompt: string): unknown {
     return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: "Socket-1", socketId: "Socket-1", materiaName: "Build" }, timestamp: 3 };
