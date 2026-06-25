@@ -118,6 +118,19 @@ export function formatSocketOutputFinalInstruction(
 }
 
 /**
+ * Comma-separated list of canonical top-level handoff fields scoped to the
+ * active socket's renderable-text intent. Non-text sockets omit `text` so
+ * shared prose (handoff contract summary, event side-channel guidance) never
+ * invites an ordinary planner/evaluator socket to emit a top-level `text`
+ * payload.
+ */
+function handoffFieldList(renderableTextIntent: boolean): string {
+  return renderableTextIntent
+    ? `${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, ${HANDOFF_CONTEXT_FIELD}, and ${HANDOFF_TEXT_FIELD}`
+    : `${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, and ${HANDOFF_CONTEXT_FIELD}`;
+}
+
+/**
  * Socket-scoped handoff field summary for the final JSON instruction.
  *
  * Non-text JSON sockets are told explanatory notes belong in `context` and must
@@ -176,9 +189,7 @@ export function formatHandoffContractDocText(options?: HandoffContractDocOptions
   const purposes = renderableTextIntent
     ? "generated work, graph routing, downstream prompt context, renderable text payloads, and artifacts"
     : "generated work, graph routing, downstream prompt context, and artifacts";
-  const fields = renderableTextIntent
-    ? `${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, ${HANDOFF_CONTEXT_FIELD}, and ${HANDOFF_TEXT_FIELD}`
-    : `${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, and ${HANDOFF_CONTEXT_FIELD}`;
+  const fields = handoffFieldList(renderableTextIntent);
   const textParagraph = renderableTextIntent ? HANDOFF_TEXT_DOC_PARAGRAPH : HANDOFF_NO_TEXT_DOC_PARAGRAPH;
 
   return [
@@ -197,65 +208,97 @@ export const HANDOFF_CONTRACT_DOC_TEXT = formatHandoffContractDocText();
 // ── Event Emission Synthetic Context ───────────────────────────────────
 
 /**
- * Concise event emission instructions injected into synthetic cast context
- * for JSON-output agent sockets. Per docs/runtime-eventing.md §11.5,
- * this is kept minimal and separate from the main handoff contract text.
+ * Options for {@link formatEventEmissionContextText}.
  */
-export const EVENT_EMISSION_CONTEXT_TEXT = [
-  "## Event Emission (Optional)",
-  "",
-  "If this materia produces JSON output, you may include an optional top-level `event` array to report results and status to external systems. This is a side-channel — it does not affect routing, assignment, or downstream state, and it is stripped before handoff semantics run.",
-  "",
-  "- The `event` field is an array of event objects. It is never part of the agent handoff contract (workItems/satisfied/context/text).",
-  "- Text output sockets cannot emit JSON side-channel events. The `event` field is only available in JSON-output mode.",
-  "- Event objects require a `type` (dot-separated, e.g. \"result.pr_created\", \"status.progress\") and may optionally include `severity`, `message`, and `payload`.",
-  "- Severity defaults to \"info\" when omitted. Valid severities: debug, info, warning, error, critical.",
-  "",
-  "### Result Events",
-  "",
-  "Use result.* event types to signal the final outcome of your work:",
-  "",
-  '```json',
-  '{ "type": "result.pr_created", "message": "PR #42 created", "payload": { "prUrl": "https://github.com/org/repo/pull/42", "branchName": "agent/42-add-retry", "baseBranch": "main" } }',
-  '```',
-  "",
-  '```json',
-  '{ "type": "result.branch_pushed", "message": "Branch agent/42 pushed", "payload": { "branchName": "agent/42-add-retry", "remote": "origin" } }',
-  '```',
-  "",
-  '```json',
-  '{ "type": "result.no_changes_needed", "message": "No code changes required; acceptance criteria already satisfied." }',
-  '```',
-  "",
-  '```json',
-  '{ "type": "result.needs_human", "severity": "warning", "message": "Ambiguous acceptance criteria for retry behavior.", "payload": { "reason": "ambiguous_acceptance_criteria", "questions": ["Should 429 be retried?"] } }',
-  '```',
-  "",
-  "### Status and Progress Events",
-  "",
-  "Use status.* event types for intermediate progress reporting:",
-  "",
-  '```json',
-  '{ "type": "status.progress", "message": "Running unit tests", "payload": { "phase": "validation" } }',
-  '```',
-  "",
-  '```json',
-  '{ "type": "status.info", "message": "Identified 3 files needing changes", "payload": { "filesAffected": 3 } }',
-  '```',
-  "",
-  "Include an `event` array at the top level of your JSON output alongside workItems, satisfied, context, and text. Example combined output:",
-  "",
-  '```json',
-  '{',
-  '  "workItems": [{ "title": "feat: add retry logic", "context": "Implement retry with exponential backoff." }],',
-  '  "satisfied": true,',
-  '  "context": "Implementation complete.",',
-  '  "event": [',
-  '    { "type": "result.pr_created", "message": "PR #42 created", "payload": { "prUrl": "https://github.com/org/repo/pull/42" } }',
-  '  ]',
-  '}',
-  '```',
-].join("\n");
+export interface EventEmissionContextOptions {
+  /**
+   * When true (the default), event-emission prose references the full handoff
+   * field list including `text`. When false, the prose is scoped to
+   * workItems/satisfied/context and never mentions `text`, so planner,
+   * evaluator, maintainer, and chain-context sockets are not invited to emit a
+   * renderable-text payload. Event validation and stripping behavior are
+   * unchanged either way; only the synthetic wording is scoped.
+   */
+  renderableTextIntent?: boolean;
+}
+
+/**
+ * Builds the concise event emission instructions injected into synthetic cast
+ * context for JSON-output agent sockets. Per docs/runtime-eventing.md §11.5,
+ * this is kept minimal and separate from the main handoff contract text.
+ *
+ * Field references are scoped to the active socket's renderable-text intent so
+ * non-text JSON sockets only see workItems/satisfied/context and never `text`.
+ */
+export function formatEventEmissionContextText(options?: EventEmissionContextOptions): string {
+  const renderableTextIntent = options?.renderableTextIntent ?? true;
+  const fields = handoffFieldList(renderableTextIntent);
+  const contractFields = renderableTextIntent
+    ? `${HANDOFF_WORK_ITEMS_FIELD}/${HANDOFF_SATISFIED_FIELD}/${HANDOFF_CONTEXT_FIELD}/${HANDOFF_TEXT_FIELD}`
+    : `${HANDOFF_WORK_ITEMS_FIELD}/${HANDOFF_SATISFIED_FIELD}/${HANDOFF_CONTEXT_FIELD}`;
+  return [
+    "## Event Emission (Optional)",
+    "",
+    "If this materia produces JSON output, you may include an optional top-level `event` array to report results and status to external systems. This is a side-channel — it does not affect routing, assignment, or downstream state, and it is stripped before handoff semantics run.",
+    "",
+    `- The \`event\` field is an array of event objects. It is never part of the agent handoff contract (${contractFields}).`,
+    "- Text output sockets cannot emit JSON side-channel events. The `event` field is only available in JSON-output mode.",
+    "- Event objects require a `type` (dot-separated, e.g. \"result.pr_created\", \"status.progress\") and may optionally include `severity`, `message`, and `payload`.",
+    "- Severity defaults to \"info\" when omitted. Valid severities: debug, info, warning, error, critical.",
+    "",
+    "### Result Events",
+    "",
+    "Use result.* event types to signal the final outcome of your work:",
+    "",
+    '```json',
+    '{ "type": "result.pr_created", "message": "PR #42 created", "payload": { "prUrl": "https://github.com/org/repo/pull/42", "branchName": "agent/42-add-retry", "baseBranch": "main" } }',
+    '```',
+    "",
+    '```json',
+    '{ "type": "result.branch_pushed", "message": "Branch agent/42 pushed", "payload": { "branchName": "agent/42-add-retry", "remote": "origin" } }',
+    '```',
+    "",
+    '```json',
+    '{ "type": "result.no_changes_needed", "message": "No code changes required; acceptance criteria already satisfied." }',
+    '```',
+    "",
+    '```json',
+    '{ "type": "result.needs_human", "severity": "warning", "message": "Ambiguous acceptance criteria for retry behavior.", "payload": { "reason": "ambiguous_acceptance_criteria", "questions": ["Should 429 be retried?"] } }',
+    '```',
+    "",
+    "### Status and Progress Events",
+    "",
+    "Use status.* event types for intermediate progress reporting:",
+    "",
+    '```json',
+    '{ "type": "status.progress", "message": "Running unit tests", "payload": { "phase": "validation" } }',
+    '```',
+    "",
+    '```json',
+    '{ "type": "status.info", "message": "Identified 3 files needing changes", "payload": { "filesAffected": 3 } }',
+    '```',
+    "",
+    `Include an \`event\` array at the top level of your JSON output alongside ${fields}. Example combined output:`,
+    "",
+    '```json',
+    '{',
+    '  "workItems": [{ "title": "feat: add retry logic", "context": "Implement retry with exponential backoff." }],',
+    '  "satisfied": true,',
+    '  "context": "Implementation complete.",',
+    '  "event": [',
+    '    { "type": "result.pr_created", "message": "PR #42 created", "payload": { "prUrl": "https://github.com/org/repo/pull/42" } }',
+    '  ]',
+    '}',
+    '```',
+  ].join("\n");
+}
+
+/**
+ * Default event emission instructions (full handoff field list, including
+ * `text`). Prefer {@link formatEventEmissionContextText} with the active
+ * socket's renderable-text intent so non-text sockets get scoped wording.
+ */
+export const EVENT_EMISSION_CONTEXT_TEXT = formatEventEmissionContextText();
 
 void HANDOFF_EDGE_CONDITIONS;
 void HANDOFF_ENVELOPE_FIELDS;

@@ -1,9 +1,9 @@
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import {
+  formatEventEmissionContextText,
   formatHandoffContractDocText,
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
-  EVENT_EMISSION_CONTEXT_TEXT,
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
@@ -346,6 +346,9 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
  * Per docs/runtime-eventing.md §11, this is injected into synthetic cast
  * context to teach JSON-output materia how to emit optional `event` arrays.
  * Text sockets are never shown this context since they cannot produce JSON.
+ * Field references are scoped to the active socket's renderable-text intent,
+ * so non-text sockets (planner/evaluator/maintainer/chain-context) never see
+ * `text` in the event side-channel wording.
  */
 export function syntheticEventEmissionContext(state: MateriaCastState): string | undefined {
   const socket = activeResolvedSocket(state);
@@ -354,7 +357,12 @@ export function syntheticEventEmissionContext(state: MateriaCastState): string |
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
 
-  return EVENT_EMISSION_CONTEXT_TEXT;
+  const requirements = deriveSocketOutputRequirements({
+    socket: effectiveResolvedSocketConfig(socket),
+    socketId: socket.id,
+    workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
+  });
+  return formatEventEmissionContextText({ renderableTextIntent: requirements.renderableTextIntent });
 }
 
 /** Active socket identity used to anchor prompt discovery on the current turn. */

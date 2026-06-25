@@ -817,6 +817,26 @@ describe("syntheticEventEmissionContext", () => {
     expect(context).toContain('"satisfied"');
     expect(context).toContain('"context"');
     expect(context).toContain('"event"');
+
+    // Non-text JSON socket: event wording is field-neutral and must not invite
+    // a top-level renderable `text` payload alongside the event side-channel.
+    expect(context).toContain("workItems/satisfied/context)");
+    expect(context).toContain("alongside workItems, satisfied, and context");
+    expect(context).not.toMatch(/context\/text\)/);
+    expect(context).not.toMatch(/alongside workItems, satisfied, context, and text/);
+  });
+
+  test("scopes event wording to renderable-text intent for $.text sockets", () => {
+    const socket = agentSocket({
+      socket: { materia: "Narrate", parse: "json", assign: { prNotes: "$.text" } },
+      materia: { tools: "readOnly", prompt: "Narrate the result." },
+    });
+    const context = syntheticEventEmissionContext(state(socket));
+
+    expect(context).toBeDefined();
+    // Text-enabled sockets keep the full field list including `text`.
+    expect(context).toContain("workItems/satisfied/context/text)");
+    expect(context).toContain("alongside workItems, satisfied, context, and text");
   });
 
   test("returns undefined for text sockets", () => {
