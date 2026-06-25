@@ -15,6 +15,7 @@ describe("socket output requirements", () => {
     expect(requirements.requiredFields).toEqual([]);
     expect(requirements.consumedPayloadPaths).toEqual([]);
     expect(requirements.reservedFieldTypeRules).toEqual([]);
+    expect(requirements.renderableTextIntent).toBe(false);
   });
 
   test("planner/generator JSON sockets require a top-level object and workItems", () => {
@@ -127,5 +128,84 @@ describe("socket output requirements", () => {
       { targetPath: "note", payloadPath: "$.diagnostics.note", topLevelField: "diagnostics", reason: "Socket assignment maps note from $.diagnostics.note." },
     ]);
     expect(requirements.requiredFields.map((field) => field.field)).not.toEqual(expect.arrayContaining(["summary", "guidance", "risks", "feedback", "missing"]));
+  });
+});
+
+describe("socket renderable-text intent (opt-in)", () => {
+  test("Auto-Plan (workItems producer) reports no renderable-text intent", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket(), socketId: "Socket-1", workItemProducingSocketIds: new Set(["Socket-1"]) });
+
+    expect(requirements.renderableTextIntent).toBe(false);
+    expect(requirements.renderableTextIntentReason).toBeUndefined();
+  });
+
+  test("Auto-Eval (satisfied routing) reports no renderable-text intent", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket({ edges: [{ when: "not_satisfied", to: "Socket-2" }] }) });
+
+    expect(requirements.renderableTextIntent).toBe(false);
+    expect(requirements.renderableTextIntentReason).toBeUndefined();
+  });
+
+  test("Maintain (custom assigns) reports no renderable-text intent", () => {
+    const requirements = deriveSocketOutputRequirements({
+      socket: socket({ assign: { checkpointCreated: "$.checkpointCreated", commands: "$.commands" } }),
+    });
+
+    expect(requirements.renderableTextIntent).toBe(false);
+    expect(requirements.renderableTextIntentReason).toBeUndefined();
+  });
+
+  test("Chain-Context (no routing, no text assignment) reports no renderable-text intent", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket({ edges: [{ when: "always", to: "Socket-2" }], assign: { notes: "$.context" } }) });
+
+    expect(requirements.renderableTextIntent).toBe(false);
+    expect(requirements.renderableTextIntentReason).toBeUndefined();
+  });
+
+  test("text-consumption socket via assign $.text reports renderable-text intent", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket({ assign: { prNotes: "$.text" } }) });
+
+    expect(requirements.renderableTextIntent).toBe(true);
+    expect(requirements.renderableTextIntentReason).toContain("$.text");
+    expect(requirements.renderableTextIntentReason).toContain("prNotes");
+  });
+
+  test("nested $.text assignment still reports renderable-text intent", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket({ assign: { "summary.text": "$.text" } }) });
+
+    expect(requirements.renderableTextIntent).toBe(true);
+  });
+
+  test("explicit renderable-text intent metadata opts a socket in without a $.text assignment", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket({ edges: [{ when: "always", to: "Socket-2" }] }), renderableTextIntent: true });
+
+    expect(requirements.renderableTextIntent).toBe(true);
+    expect(requirements.renderableTextIntentReason).toContain("explicit renderable-text intent");
+  });
+
+  test("explicit false intent metadata does not suppress a genuine $.text assignment", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket({ assign: { prNotes: "$.text" } }), renderableTextIntent: false });
+
+    // Assignment-based intent is authoritative; explicit metadata only adds intent.
+    expect(requirements.renderableTextIntent).toBe(true);
+  });
+
+  test("parse:text sockets are unaffected and report no renderable-text intent even with explicit metadata", () => {
+    const requirements = deriveSocketOutputRequirements({ socket: socket({ parse: "text" }), renderableTextIntent: true });
+
+    expect(requirements.parse).toBe("text");
+    expect(requirements.requiresJsonObject).toBe(false);
+    expect(requirements.renderableTextIntent).toBe(false);
+  });
+
+  test("generator sockets with a $.text assignment still report renderable-text intent alongside workItems", () => {
+    const requirements = deriveSocketOutputRequirements({
+      socket: socket({ assign: { prNotes: "$.text" } }),
+      socketId: "Socket-1",
+      workItemProducingSocketIds: new Set(["Socket-1"]),
+    });
+
+    expect(requirements.renderableTextIntent).toBe(true);
+    expect(requirements.requiredFields.map((field) => field.field)).toContain("workItems");
   });
 });
