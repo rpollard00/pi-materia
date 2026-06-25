@@ -16,10 +16,11 @@ export const CENTRAL_SERVICE_ID = "pi-materia-central";
 export const CENTRAL_CONTROL_PLANE_SCOPE = "control-plane";
 
 /**
- * Soft cap on retained ingested events in the skeleton in-memory store. The
- * real telemetry ingestion store is a later work item
- * (docs/enterprise-control-plane.md §15, §16.15); this cap only keeps the
- * skeleton bounded.
+ * Soft cap on retained ingested events in the in-memory central telemetry store.
+ * The ingestion endpoint (`POST /api/telemetry/ingest`, §16.15) stores normalized
+ * events in memory initially; this cap keeps that store bounded (oldest events
+ * are dropped when it is reached). Persistence is a later work item
+ * (docs/enterprise-control-plane.md §15).
  */
 export const CENTRAL_IN_MEMORY_EVENT_CAP = 1000;
 

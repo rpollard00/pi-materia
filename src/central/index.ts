@@ -69,6 +69,19 @@ export {
 } from "./server/modelCatalog.js";
 
 export {
+  handleCentralTelemetryRoute,
+  type CentralTelemetryRouteDeps,
+} from "./server/telemetry.js";
+
+export {
+  normalizeEnrichedEvent,
+  normalizeTelemetryIngestBody,
+  type NormalizedTelemetryIngest,
+  type NormalizeTelemetryIngestOptions,
+  type NormalizeTelemetryIngestResult,
+} from "./controlPlane/telemetryIngest.js";
+
+export {
   sendJson,
   readJsonBody,
   isPlainObject,

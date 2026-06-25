@@ -20,6 +20,8 @@ export { handleCentralModelPolicyRoute } from "./modelPolicy.js";
 export type { CentralModelPolicyRouteDeps } from "./modelPolicy.js";
 export { handleCentralModelCatalogRoute } from "./modelCatalog.js";
 export type { CentralModelCatalogRouteDeps } from "./modelCatalog.js";
+export { handleCentralTelemetryRoute } from "./telemetry.js";
+export type { CentralTelemetryRouteDeps } from "./telemetry.js";
 export { handleMateriaCentralRequest } from "./routes.js";
 export type { MateriaCentralRouteDeps } from "./routes.js";
 
