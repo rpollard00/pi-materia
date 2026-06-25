@@ -1567,11 +1567,18 @@ async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: M
 
   const notificationMateria = resolvedMateriaDisplayName(activeResolvedSocket(state)) ?? state.currentMateria;
   const display = formatMateriaNotificationDisplay(notificationMateria, currentSocketId(state));
+  // Visible transition/status card ("◆ Materia" / "Casting <name>"). This is a
+  // display-only orchestration card: it must never become agent input. It is
+  // tagged details.orchestration === true (plus prefix "materia" and eventType
+  // "materia_prompt") so buildIsolatedMateriaContext/isOrchestrationOnlyMessage
+  // can filter it. The hidden pi-materia-prompt below is the actual agent
+  // context and is intentionally left untagged so it still carries the current
+  // socket/materia details. See src/application/promptAssembly.ts.
   pi.sendMessage({
     customType: "pi-materia",
     content: formatMateriaCastContent(notificationMateria, currentSocketId(state), state.currentItemLabel),
     display: true,
-    details: { prefix: "materia", socketId: currentSocketId(state), materiaName: display.materiaName, socketOrdinal: display.socketOrdinal, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "materia_prompt", materiaModel: state.currentMateriaModel },
+    details: { orchestration: true, prefix: "materia", socketId: currentSocketId(state), materiaName: display.materiaName, socketOrdinal: display.socketOrdinal, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, eventType: "materia_prompt", materiaModel: state.currentMateriaModel },
   });
 
   pi.appendEntry("pi-materia-context", { phase: state.phase, socketId: currentSocketId(state), materiaName: state.currentMateria, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), artifact: contextArtifact, materiaModel: state.currentMateriaModel });
