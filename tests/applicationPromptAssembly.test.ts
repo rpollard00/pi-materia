@@ -407,6 +407,20 @@ describe("buildIsolatedMateriaContext", () => {
     };
   }
 
+  // Mirrors the visible transition card emitted by sendMateriaTurn in
+  // src/runtime/nativeLifecycle.ts: customType "pi-materia", display true,
+  // details.prefix "materia" + details.eventType "materia_prompt".
+  function materiaTransitionCard(content: string, details: Record<string, unknown> = {}): unknown {
+    return {
+      role: "custom",
+      customType: "pi-materia",
+      content,
+      display: true,
+      details: { prefix: "materia", materiaName: "Narrata", socketId: "Socket-7", socketOrdinal: 7, itemLabel: "fix: filter transition cards", eventType: "materia_prompt", orchestration: true, ...details },
+      timestamp: 4,
+    };
+  }
+
   const QUEST_RUNNER_CARD = [
     "Started continuous quest runner and launched quest quest-zllugjpp: filter the palette",
     "Cast: 2026-06-18T05-07-25-666Z",
@@ -490,6 +504,49 @@ describe("buildIsolatedMateriaContext", () => {
     expect(serialized).toContain("status card");
   });
 
+  test("filters displayed materia transition cards that follow the hidden prompt (Narrata)", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    // Mirrors sendMateriaTurn: a hidden pi-materia-prompt followed by the
+    // visible "◆ Materia: Narrata (7)" / "Casting Narrata (7)" transition card.
+    const transitionContent = "Casting **Narrata (7)**\n\nfix: filter transition cards";
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "earlier visible transcript noise" }], timestamp: 1 },
+      materiaPromptMessage("<materia-instructions>\nBuild the isolated-context transition filter.\n</materia-instructions>"),
+      materiaTransitionCard(transitionContent),
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+
+    // Synthetic cast context replaces the earlier transcript and remains present.
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    expect(serialized).not.toContain("earlier visible transcript noise");
+    // The hidden materia prompt must survive isolation.
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("Build the isolated-context transition filter.");
+    // The displayed Narrata transition card prose must be fully removed.
+    expect(serialized).not.toContain("Casting");
+    expect(serialized).not.toContain("Narrata");
+    expect(serialized).not.toContain("◆ Materia");
+  });
+
+  test("filters materia transition cards even without the explicit orchestration flag", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    const messages = [
+      materiaPromptMessage("<materia-instructions>\nBuild it.\n</materia-instructions>"),
+      materiaTransitionCard("Casting **Narrata (7)**", { orchestration: undefined }),
+    ];
+    delete (messages[1] as { details?: { orchestration?: unknown } }).details!.orchestration;
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    expect(JSON.stringify(isolated)).not.toContain("Casting");
+    expect(JSON.stringify(isolated)).not.toContain("Narrata");
+    expect(JSON.stringify(isolated)).toContain("<materia-instructions>");
+  });
+
   test("returns messages unchanged when no active materia prompt is present", () => {
     const socket = agentSocket();
     const castState = state(socket);
@@ -503,14 +560,23 @@ describe("buildIsolatedMateriaContext", () => {
 });
 
 describe("isOrchestrationOnlyMessage", () => {
-  test("flags custom messages marked orchestration or with a quest prefix", () => {
+  test("flags custom messages marked orchestration or with a quest/materia transition signature", () => {
+    // Explicit orchestration flag (covers quest runner and materia cards alike).
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest", orchestration: true } })).toBe(true);
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest" } })).toBe(true);
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { orchestration: true } })).toBe(true);
+    // Defense-in-depth: quest-prefix cards without the explicit flag.
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest" } })).toBe(true);
+    // Defense-in-depth: materia transition cards (prefix "materia" and/or
+    // eventType "materia_prompt") without the explicit orchestration flag.
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { prefix: "materia", eventType: "materia_prompt" } })).toBe(true);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { prefix: "materia" } })).toBe(true);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { eventType: "materia_prompt" } })).toBe(true);
   });
 
   test("preserves the hidden materia prompt and non-quest custom cards", () => {
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>", details: { phase: "Socket-1" } })).toBe(false);
+    // The hidden pi-materia-prompt carries socket/materia details but none of
+    // the display-card signatures, so it is never mistaken for a transition card.
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>", details: { phase: "Socket-7", socketId: "Socket-7", materiaName: "Narrata" } })).toBe(false);
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "status", details: { prefix: "status" } })).toBe(false);
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "orphan", details: {} })).toBe(false);
   });

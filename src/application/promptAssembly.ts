@@ -200,11 +200,13 @@ export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaC
   if (!shouldUseIsolatedMateriaContext(state)) return messages;
   const materiaStart = findActiveMateriaPromptIndex(messages);
   if (materiaStart < 0) return messages;
-  // Drop pi-materia orchestration-only custom messages (e.g. quest runner status
-  // cards) that the runtime appends after the hidden pi-materia-prompt. They are
-  // user-facing display only and must never become agent context. The materia
-  // prompt itself, assistant/tool/toolResult turns, and genuine user refinement
-  // messages are preserved because they are not orchestration custom messages.
+  // Drop pi-materia orchestration-only custom messages (visible "◆ Materia" /
+  // "Casting <name>" transition cards, quest runner status cards, and anything
+  // tagged details.orchestration/prefix/eventType) that the runtime emits around
+  // the hidden pi-materia-prompt. They are user-facing display only and must
+  // never become agent context. The hidden pi-materia-prompt itself,
+  // assistant/tool/toolResult turns, and genuine user refinement messages are
+  // preserved because they are not display-only orchestration custom messages.
   const preserved = messages.slice(materiaStart).filter((message) => !isOrchestrationOnlyMessage(message));
   return [createUserMessage(buildSyntheticCastContext(state)), ...preserved];
 }
@@ -338,14 +340,19 @@ export function isToolOrAssistantMessage(message: { role?: unknown }): boolean {
 
 /**
  * Detects pi-materia orchestration-only custom messages that must never become
- * agent context. Quest runner lifecycle cards (and any card explicitly flagged
- * orchestration) are user-facing display only; they carry no agent input and are
- * filtered from isolated materia context even when the runtime appends them
- * after the hidden pi-materia-prompt. Only `role: "custom"` messages are
- * considered, so the materia prompt, assistant/tool/toolResult turns, and
- * ordinary user refinement messages are always preserved. See sendQuestMessage
- * in src/index.ts, which stamps these cards with details.orchestration === true
- * and details.prefix === "quest".
+ * agent context. Visible during-cast transition/status cards and quest runner
+ * lifecycle cards (plus any card explicitly flagged orchestration) are
+ * user-facing display only; they carry no agent input and are filtered from
+ * isolated materia context even when the runtime appends them after the hidden
+ * pi-materia-prompt. A message is orchestration-only when it is `role: "custom"`
+ * and its details carry `orchestration === true`, `prefix === "materia"`,
+ * `prefix === "quest"`, or `eventType === "materia_prompt"`. The hidden
+ * pi-materia-prompt carries none of these signatures, so it is always preserved.
+ * Only `role: "custom"` messages are considered, so the materia prompt,
+ * assistant/tool/toolResult turns, and ordinary user refinement messages are
+ * always preserved. See sendMateriaTurn in src/runtime/nativeLifecycle.ts
+ * (prefix "materia" / eventType "materia_prompt" transition cards) and
+ * sendQuestMessage in src/index.ts (prefix "quest" lifecycle cards).
  */
 export function isOrchestrationOnlyMessage(message: unknown): boolean {
   if (typeof message !== "object" || message === null) return false;
@@ -353,11 +360,19 @@ export function isOrchestrationOnlyMessage(message: unknown): boolean {
   if (record.role !== "custom") return false;
   const details = record.details;
   if (typeof details !== "object" || details === null) return false;
-  const detailRecord = details as { orchestration?: unknown; prefix?: unknown };
+  const detailRecord = details as { orchestration?: unknown; prefix?: unknown; eventType?: unknown };
   if (detailRecord.orchestration === true) return true;
-  // Defense-in-depth: quest-prefix cards are orchestration display messages
-  // even if the explicit flag is missing on a runner lifecycle path.
-  return detailRecord.prefix === "quest";
+  // Defense-in-depth: transition/status cards are orchestration display messages
+  // even when the explicit flag is missing. During casts the runtime emits a
+  // visible "◆ Materia" / "Casting <name>" card (prefix "materia", eventType
+  // "materia_prompt") right before the hidden pi-materia-prompt, and the quest
+  // runner emits prefix "quest" lifecycle cards. The hidden pi-materia-prompt
+  // itself carries none of these signatures (no orchestration/prefix/eventType
+  // in its details), so it is always preserved as agent context. Only
+  // role:"custom" messages are considered, so user/assistant/tool/toolResult
+  // turns and ordinary user refinement messages are never filtered.
+  if (detailRecord.prefix === "materia" || detailRecord.prefix === "quest") return true;
+  return detailRecord.eventType === "materia_prompt";
 }
 
 export function createUserMessage(content: string): unknown {
