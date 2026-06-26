@@ -511,6 +511,32 @@ This preset configures a webhook sink targeting the agent controller's runtime e
 endpoint with body mapping that translates generic pi-materia events to the controller's
 `runtime.*` event contract.
 
+#### 9.1.1 Auto-activation from a controller launch
+
+When agent_router invokes pi-materia it sets the `CONTROLLER_*` environment
+variables (`CONTROLLER_RUN_ID`, `CONTROLLER_EVENT_URL`, `CONTROLLER_CONTEXT_DIR`)
+but does **not** set the documented `PI_MATERIA_EVENTING_*` overlay variables.
+To make the preset activate without manual config, the eventing env overlay
+(see §8.4) detects a controller launch from any non-empty `CONTROLLER_*` var
+and, when one is present, auto-enables eventing and adds the `agent-controller`
+preset — unless an explicit `PI_MATERIA_EVENTING_*` value already set that
+field.
+
+Composition rules (precedence: explicit overlay wins per field):
+
+| Field | Explicit `PI_MATERIA_EVENTING_*` | Controller launch (no explicit) | Result |
+|-------|----------------------------------|---------------------------------|--------|
+| `enabled` | `ENABLED=true/false` | `enabled=true` | explicit value, else controller default |
+| `presets` | `PRESETS=...` | `presets=["agent-controller"]` (additive) | explicit list, else controller default merged onto config |
+| `heartbeatIntervalMs` | `HEARTBEAT_MS=N` | unchanged | explicit value, else config default |
+
+Opt-out: a controller launch never overrides an explicit
+`PI_MATERIA_EVENTING_ENABLED=false`, so a launcher can disable eventing even
+when running under agent_router. The activation is in-memory only and is never
+written back to config files (it is persisted for the cast lifetime via the
+resolved config artifact). A diagnostic is surfaced in session logs when
+controller activation engages.
+
 ### 9.2 Event Mapping
 
 The preset maps pi-materia events to agent controller events:

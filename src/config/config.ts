@@ -14,7 +14,7 @@ import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoad
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
-import type { EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
+import type { EventingConfig, EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 import {
   CENTRAL_CATALOG_LAYER_LABEL,
   type CentralCatalogConfigSource,
@@ -24,6 +24,7 @@ import {
 import { resolveConfigCatalogDrift } from "./catalogDrift.js";
 import { isValidCatalogOriginProvenance, type CatalogOriginProvenance } from "../domain/catalogProvenance.js";
 import { readEventingEnvOverlay, type EventingEnvSource } from "../eventing/envOverlay.js";
+import { detectControllerLaunch } from "../eventing/presets.js";
 
 /**
  * Options for {@link loadConfig}.
@@ -740,14 +741,28 @@ function mergeEventing(base: PiMateriaConfig["eventing"], parsed: Partial<PiMate
 
 /**
  * Apply the documented `PI_MATERIA_EVENTING_*` environment overlay on top of a
- * fully-merged config.
+ * fully-merged config, composed with controller-launch auto-activation.
  *
  * Called from {@link loadConfig} after `mergeConfigLayers` so launch-time
- * values supplied by a controller (e.g. agent_router) take precedence over
- * every file-backed layer (default/central/user/project/explicit). The overlay
- * only touches the top-level eventing switches (`enabled`, `presets`,
- * `heartbeatIntervalMs`) parsed by {@link readEventingEnvOverlay}; configured
- * sinks are preserved untouched and are merged additively for `presets`.
+ * values take precedence over every file-backed layer
+ * (default/central/user/project/explicit). Two independent env sources compose
+ * here, in precedence order:
+ *
+ * 1. **Explicit `PI_MATERIA_EVENTING_*` overlay** (parsed by
+ *    {@link readEventingEnvOverlay}) — the documented opt-in/opt-out vars a
+ *    launcher may set. Highest precedence.
+ * 2. **Controller-launch auto-activation** ({@link detectControllerLaunch}) —
+ *    when agent_router sets `CONTROLLER_*` env vars (which it does on every
+ *    launch) but does NOT set `PI_MATERIA_EVENTING_*`, eventing and the
+ *    `agent-controller` preset are enabled automatically so state updates
+ *    reach the controller without manual config. Controller activation only
+ *    supplies defaults for fields the explicit overlay left unset, so an
+ *    explicit `PI_MATERIA_EVENTING_ENABLED=false` opts out even under a
+ *    controller launch.
+ *
+ * The overlay only touches the top-level eventing switches (`enabled`,
+ * `presets`, `heartbeatIntervalMs`); configured sinks are preserved untouched
+ * and `presets` is merged additively (de-duplicated).
  *
  * The overlay is in-memory only: this function never writes to config files.
  * Invalid documented values are ignored and surfaced as non-fatal warnings
@@ -758,7 +773,7 @@ function mergeEventing(base: PiMateriaConfig["eventing"], parsed: Partial<PiMate
  * @param env - Environment to read (defaults to `process.env`). Injected for
  *   deterministic testing without mutating the real process environment.
  * @returns A config with the env overlay applied, or the same `config` when no
- *   documented variable was present.
+ *   documented variable or controller launch was present.
  */
 export function applyEventingEnvOverlay(
   config: PiMateriaConfig,
@@ -770,9 +785,65 @@ export function applyEventingEnvOverlay(
   for (const diagnostic of diagnostics) {
     console.warn(`[pi-materia] ${diagnostic.varName}: ${diagnostic.message}`);
   }
-  if (!present) return config;
-  const eventing = mergeEventing(config.eventing, overlay);
+
+  // Controller-launch auto-activation (docs/runtime-eventing.md §9.1).
+  // agent_router sets CONTROLLER_* env vars when invoking pi-materia but does
+  // NOT set the documented PI_MATERIA_EVENTING_* overlay vars. Detecting the
+  // controller launch lets the agent-controller preset activate automatically
+  // so state/lifecycle updates reach the controller without manual config.
+  // Explicit PI_MATERIA_EVENTING_* values still take precedence — e.g.
+  // PI_MATERIA_EVENTING_ENABLED=false opts out even under a controller launch.
+  const controller = detectControllerLaunch(env);
+  const composed = composeControllerActivation(overlay, controller.present);
+
+  if (!present && !controller.present) return config;
+
+  // Surface controller auto-activation so agent_router integration is debuggable
+  // from session logs. This is informational (a positive expected signal), not a
+  // failure, so it never blocks config load or unrelated local runs.
+  if (controller.present && composed.controllerActivated) {
+    console.warn(
+      `[pi-materia] Controller launch detected (${controller.detected.join(", ")}); ` +
+      `auto-enabling eventing with the "agent-controller" preset so state updates ` +
+      `reach the controller. Set PI_MATERIA_EVENTING_ENABLED=false to opt out.`,
+    );
+  }
+
+  const eventing = mergeEventing(config.eventing, composed.overlay);
   return eventing === config.eventing ? config : { ...config, eventing };
+}
+
+/**
+ * Compose the explicit `PI_MATERIA_EVENTING_*` overlay with controller-launch
+ * auto-activation.
+ *
+ * Controller activation supplies **defaults only** for fields the explicit
+ * overlay left unset, so explicit values always win: a controller launch never
+ * overrides an explicit `enabled: false` (opt-out) or an explicit `presets`
+ * list. When the explicit overlay already set every field, controller
+ * activation contributes nothing.
+ *
+ * Returns the composed partial eventing config plus a flag indicating whether
+ * controller activation supplied any default (for diagnostics).
+ */
+function composeControllerActivation(
+  explicit: Readonly<Partial<EventingConfig>>,
+  controllerPresent: boolean,
+): { overlay: Partial<EventingConfig>; controllerActivated: boolean } {
+  if (!controllerPresent) {
+    return { overlay: { ...explicit }, controllerActivated: false };
+  }
+  const composed: Partial<EventingConfig> = { ...explicit };
+  let activated = false;
+  if (composed.enabled === undefined) {
+    composed.enabled = true;
+    activated = true;
+  }
+  if (composed.presets === undefined) {
+    composed.presets = ["agent-controller"];
+    activated = true;
+  }
+  return { overlay: composed, controllerActivated: activated };
 }
 
 function mergePresets(basePresets: string[] | undefined, parsedPresets: string[]): string[] {

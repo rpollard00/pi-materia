@@ -111,6 +111,79 @@ export function resolveControllerUrl(): string {
   return base.replace(/\/+$/, "");
 }
 
+// ── Controller Launch Detection ─────────────────────────────────────────
+
+/**
+ * Environment source accepted by controller-launch detection.
+ *
+ * Mirrors {@link EventingEnvSource} from `envOverlay.ts`: accepting an explicit
+ * record (instead of reading `process.env` directly) keeps detection pure and
+ * testable.
+ */
+export type ControllerEnvSource = Readonly<Record<string, string | undefined>>;
+
+/**
+ * Controller environment variables that indicate pi-materia was launched by an
+ * agent_router (agent controller) process.
+ *
+ * The agent_router sets all three when invoking pi-materia (see
+ * {@link PiMateriaRuntime} in agent_router docs §13b.5 / `PiMateriaRuntime.cs`).
+ * Their presence is the reliable signal that eventing should target the
+ * controller without manual config. The agent_router does **not** set the
+ * documented `PI_MATERIA_EVENTING_*` overlay variables, so this detection is
+ * what activates the agent-controller preset under a controller launch.
+ */
+export const CONTROLLER_LAUNCH_ENV_VARS = [
+  CONTROLLER_RUN_ID_ENV,
+  CONTROLLER_EVENT_URL_ENV,
+  CONTROLLER_CONTEXT_DIR_ENV,
+] as const;
+
+/**
+ * Result of detecting an agent_router controller launch from the environment.
+ */
+export interface ControllerLaunchDetection {
+  /**
+   * Whether at least one controller env variable is set to a non-empty value.
+   *
+   * When true, the eventing env overlay (see `applyEventingEnvOverlay` in
+   * `config/config.ts`) auto-enables eventing and the `agent-controller` preset
+   * so state/lifecycle updates reach the controller without manual config.
+   */
+  readonly present: boolean;
+  /**
+   * Controller env variables that were detected (non-empty), in declared order.
+   * Used for diagnostics; empty when {@link present} is false.
+   */
+  readonly detected: readonly string[];
+}
+
+/**
+ * Detect whether pi-materia was launched by an agent_router controller.
+ *
+ * A controller launch is signalled by any non-empty `CONTROLLER_*` environment
+ * variable ({@link CONTROLLER_LAUNCH_ENV_VARS}). This is used by the eventing
+ * env overlay to auto-enable the agent-controller preset so agent_router
+ * receives state and lifecycle events without manual config or undocumented
+ * env vars.
+ *
+ * Only the documented controller env variables are inspected. Empty/whitespace
+ * values are ignored. Performs no I/O.
+ *
+ * @param env - Environment record to inspect (defaults to `process.env`).
+ * @returns Whether a controller launch was detected and which vars were set.
+ */
+export function detectControllerLaunch(env: ControllerEnvSource = process.env): ControllerLaunchDetection {
+  const detected: string[] = [];
+  for (const name of CONTROLLER_LAUNCH_ENV_VARS) {
+    const value = env[name];
+    if (typeof value === "string" && value.trim()) {
+      detected.push(name);
+    }
+  }
+  return { present: detected.length > 0, detected };
+}
+
 // ── Agent-Controller Preset ─────────────────────────────────────────────
 
 /**

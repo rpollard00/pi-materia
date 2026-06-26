@@ -1901,4 +1901,84 @@ describe("eventing env overlay merge", () => {
       else process.env.PI_MATERIA_EVENTING_PRESETS = previousPresets;
     }
   });
+
+  // ── Controller-launch auto-activation ───────────────────────────
+  // agent_router sets CONTROLLER_* env vars (but NOT PI_MATERIA_EVENTING_*).
+  // Their presence must auto-enable eventing + the agent-controller preset so
+  // state updates reach the controller without manual config.
+  test("controller launch (CONTROLLER_* env) auto-enables eventing + agent-controller preset", () => {
+    const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1" });
+    expect(result).not.toBe(config);
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+    // Untouched config fields are preserved.
+    expect(result.eventing?.heartbeatIntervalMs).toBe(30000);
+    expect(result.eventing?.sinks).toEqual({});
+  });
+
+  test("controller activation works via CONTROLLER_EVENT_URL alone", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_EVENT_URL: "https://ctrl.example/runs/r1/events" });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+  });
+
+  test("returns the same config when neither overlay nor controller vars are present", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    expect(applyEventingEnvOverlay(config, {})).toBe(config);
+    // Whitespace-only controller vars are ignored (treated as unset).
+    expect(applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "   ", CONTROLLER_EVENT_URL: "" })).toBe(config);
+  });
+
+  test("explicit PI_MATERIA_EVENTING_ENABLED=false opts out under a controller launch", () => {
+    const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1", PI_MATERIA_EVENTING_ENABLED: "false" });
+    expect(result.eventing?.enabled).toBe(false);
+    // Presets were not explicitly disabled, so controller activation still adds agent-controller.
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+  });
+
+  test("explicit PI_MATERIA_EVENTING_PRESETS takes precedence over controller activation", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1", PI_MATERIA_EVENTING_PRESETS: "custom-monitor" });
+    // enabled not set explicitly → controller activation enables it.
+    expect(result.eventing?.enabled).toBe(true);
+    // Explicit presets win — agent-controller is NOT added.
+    expect(result.eventing?.presets).toEqual(["custom-monitor"]);
+  });
+
+  test("controller activation merges agent-controller additively onto config-defined presets", () => {
+    const config = { eventing: { enabled: false, presets: ["custom-monitor"], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1" });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.presets).toEqual(["custom-monitor", "agent-controller"]);
+  });
+
+  test("explicit overlay + controller vars compose (explicit wins per field)", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, {
+      CONTROLLER_RUN_ID: "run-1",
+      PI_MATERIA_EVENTING_ENABLED: "true",
+      PI_MATERIA_EVENTING_HEARTBEAT_MS: "7000",
+    });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.heartbeatIntervalMs).toBe(7000);
+    // presets not set explicitly → controller activation supplies agent-controller.
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+  });
+
+  test("controller activation surfaces an informational diagnostic warning", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: string) => { warnings.push(message); };
+    try {
+      applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1" });
+      expect(warnings.some((w) => w.includes("Controller launch detected"))).toBe(true);
+      expect(warnings.some((w) => w.includes("CONTROLLER_RUN_ID"))).toBe(true);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
