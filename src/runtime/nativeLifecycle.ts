@@ -49,6 +49,7 @@ import { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
 import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.js";
 import { castLoadoutIdentity, hashConfig, loadConfigFromState, resolvePersistedCastLoadoutIdentity } from "./configPersistence.js";
+import { emitCastStartStdout } from "./stdoutLifecycleWiring.js";
 import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, describeStaleCompletion, recordActiveTurnProvenance, updateToolScope, type StaleCompletionReason, type ToolScopeRuntimeWarning } from "./agentTurnState.js";
@@ -701,6 +702,20 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   // multiTurn flags so future misconfigurations are diagnosable at a glance.
   const socketDetails = buildPipelineSocketDetails(pipeline);
   await appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, ...(loadoutIdentity.loadoutId ? { loadoutId: loadoutIdentity.loadoutId } : {}), nativeSession: true, isolatedMateriaContext: true, socketDetails, ...(options?.startEventDetails ?? {}) });
+
+  // Forward the controller-compatible cast_start to pi's stdout JSONL stream
+  // (RPC mode only; silent in TUI/interactive/json/print). This is an
+  // ADDITIONAL sink alongside the artifact write above — the artifact record
+  // remains the source of truth. Best-effort: a failure here can never fail
+  // the cast. Emitted before the fail-fast validation so the controller sees
+  // cast_start even on a multiTurn-rejection path.
+  await emitCastStartStdout({
+    castId,
+    config,
+    socketDetails,
+    loadoutName: effectivePipeline.loadoutName,
+    ...(loadoutIdentity.loadoutId ? { loadoutId: loadoutIdentity.loadoutId } : {}),
+  });
 
   const state: MateriaCastState = {
     version: 2,
