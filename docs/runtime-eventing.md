@@ -599,6 +599,45 @@ The `"agent-controller"` preset is an example of what the generic eventing syste
 support. Users can define their own sinks with different URLs, mappings, filters, and
 delivery parameters for any external system that accepts HTTP webhooks.
 
+### 9.6 Webhook Activation Diagnostics
+
+When agent-controller webhook delivery is **expected** (a controller launch is
+detected, the `agent-controller` preset is referenced, or an `agent-controller-webhook`
+sink is configured) the runtime evaluates whether delivery will actually be active
+and surfaces clear diagnostics. This exists so agent_router integration gaps — the
+most common cause of "we fired webhooks at the wrong location / never received state
+updates" — are debuggable from session logs and cast artifacts.
+
+Diagnostics are **non-fatal**: they never fail config load, the cast, or unrelated
+local runs. When no delivery is expected (ordinary local run with no controller /
+preset / sink), no diagnostics are produced.
+
+Each diagnostic is written to the cast's operational event stream as an
+`eventing_webhook_diagnostic` entry and echoed to `console.warn`:
+
+```jsonl
+{"ts": 1234567890, "type": "eventing_webhook_diagnostic", "data": {"severity": "warning", "reason": "run_id_unresolved", "message": "Controller launch detected but no runId could be resolved...", "active": false}}
+```
+
+Reported reason codes:
+
+| Reason | When emitted |
+|--------|--------------|
+| `eventing_disabled` | Eventing master switch is off, so no events are dispatched. |
+| `preset_missing` | Eventing is enabled but neither the `agent-controller` preset nor an `agent-controller-webhook` sink is present. |
+| `controller_environment_missing` | The preset/sink is configured but no `CONTROLLER_*` environment was detected (running outside an agent_router launch). |
+| `run_id_unresolved` | A controller launch was detected but no runId could be resolved (set `CONTROLLER_RUN_ID` or provide `controller-run.json`). The preset disables the sink in this case. |
+| `target_url_missing` | The configured sink has no `url`. |
+| `target_url_invalid` | The configured sink `url` is not an absolute http(s) URL. |
+| `sink_disabled` | The sink is explicitly disabled (`enabled: false`) for a reason other than an unresolved runId. |
+| `active` | Informational confirmation: delivery is active. Includes the redacted target URL (origin + pathname; query/fragment stripped per §6.6). |
+
+When delivery is active, a single `info` diagnostic with reason `active` is emitted
+instead of warnings, so a successful agent_router integration is positively
+confirmable from the artifact stream. Diagnostics are emitted once per cast
+initialization (at cast start and on recast/revive), reflecting the fully-resolved
+sink after preset expansion.
+
 ## 10. Result Accumulation and Final Outcome
 
 ### 10.1 Accumulation
