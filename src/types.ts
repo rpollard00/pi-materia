@@ -1,5 +1,6 @@
 import type { ToolScopeSpec } from "./domain/toolScope.js";
-import type { MateriaThinkingLevel } from "./thinking.js";
+import type { CatalogDriftInfo, CatalogOriginProvenance } from "./domain/catalogProvenance.js";
+import type { MateriaThinkingLevel } from "./domain/thinking.js";
 
 export interface PiMateriaConfig {
   artifactDir?: string;
@@ -24,6 +25,13 @@ export interface LoadedConfig {
   layers?: MateriaConfigLayer[];
   loadoutSources?: Record<string, MateriaConfigLayerScope>;
   materiaSources?: Record<string, MateriaConfigLayerScope>;
+  /**
+   * Resolved catalog drift for local definitions that originated from a central
+   * catalog item, keyed by loadout name / materia id. Informational only; never
+   * auto-applied (docs/enterprise-control-plane.md §14). Absent when central
+   * drift could not be resolved (central unreachable or no summaries).
+   */
+  catalogDrift?: ResolvedConfigCatalogDrift;
   defaultMateriaIds?: string[];
   /** Validated user preference for the default loadout. Missing or stale values are exposed as null. */
   defaultLoadoutId?: string | null;
@@ -35,7 +43,26 @@ export interface LoadedConfig {
   questDefaultLoadoutWarning?: string;
 }
 
-export type MateriaConfigLayerScope = "default" | "user" | "project" | "explicit";
+/**
+ * Resolved catalog drift surfaced in {@link LoadedConfig} and WebUI API responses.
+ * A re-export of the config-layer drift snapshot shape so `types.ts` consumers
+ * do not need to import the config module directly.
+ */
+export interface ResolvedConfigCatalogDrift {
+  loadouts?: Record<string, CatalogDriftInfo>;
+  materia?: Record<string, CatalogDriftInfo>;
+}
+
+/**
+ * Config layer scope / definition provenance. Precedence is lowest-to-highest:
+ * `default` < `central` < `user` < `project` < `explicit`.
+ *
+ * `central` is a read-only provenance value for definitions surfaced from the
+ * central catalog layer; it is never a writable local save target
+ * (docs/enterprise-control-plane.md §5). The writable local scopes remain
+ * `default | user | project | explicit`.
+ */
+export type MateriaConfigLayerScope = "default" | "central" | "user" | "project" | "explicit";
 export type LoadoutSource = MateriaConfigLayerScope;
 export type LoadoutUserLockState = "locked" | "unlocked";
 export type MateriaUserLockState = "locked" | "unlocked";
@@ -46,7 +73,12 @@ export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia" | "eve
 
 export interface MateriaConfigLayer {
   scope: MateriaConfigLayerScope;
-  path: string;
+  /**
+   * Filesystem path backing the layer. Absent for non-file layers such as the
+   * read-only `central` catalog layer, which has no local backing file
+   * (docs/enterprise-control-plane.md §5).
+   */
+  path?: string;
   loaded: boolean;
 }
 
@@ -59,6 +91,15 @@ export interface MateriaProfileConfig {
     preferredPort?: number;
     port?: number;
     host?: string;
+    /**
+     * Optional absolute base URL of a central control plane the local WebUI
+     * runtime should connect to. When set, the WebUI reports
+     * `central-connected` mode and surfaces central catalog/model-policy/admin
+     * state separately from local session state
+     * (docs/enterprise-control-plane.md §2, §8). Unset/invalid means purely
+     * local (`local-only`) and changes no default behavior.
+     */
+    centralApiBaseUrl?: string;
   };
   /** Durable user preference used only to initialize the runtime active loadout. */
   defaultLoadoutId?: string | null;
@@ -239,6 +280,20 @@ export interface MateriaCastState {
   lastAssistantText?: string;
   /** Hidden prompt for the active in-flight agent turn; used to retry without re-running socket start. */
   activeTurnPrompt?: string;
+  /**
+   * Active-turn provenance captured when a prompt is dispatched: the socket id,
+   * visit, materia, and the session entry boundary after which an assistant
+   * response is valid for this turn. handleAgentEnd uses this to ignore
+   * duplicate or stale agent_end callbacks that do not belong to the turn
+   * currently awaiting a response (e.g. a duplicate source-socket agent_end
+   * arriving after routing has advanced to the target socket).
+   */
+  activeTurn?: {
+    socketId: string;
+    visit: number;
+    materia?: string;
+    boundaryEntryId?: string;
+  };
   multiTurnFinalizing?: boolean;
   failedReason?: string;
   startedAt: number;
@@ -422,6 +477,13 @@ export interface MateriaPipelineConfig {
   lockState?: LoadoutUserLockState;
   /** Optional provenance for duplicates or local copies derived from a shipped default. */
   originDefaultId?: string;
+  /**
+   * Catalog origin provenance for a local copy that originated from a central
+   * catalog item. Informational; never auto-applied
+   * (docs/enterprise-control-plane.md §14). Only present on writable local
+   * (user/project/explicit) loadouts.
+   */
+  catalogOrigin?: CatalogOriginProvenance;
   entry: string;
   /** Canonical socket map for core/domain/application code. */
   sockets?: Record<string, MateriaPipelineSocketConfig>;
@@ -597,6 +659,13 @@ export interface MateriaDefinitionMetadata {
   generator?: boolean;
   /** User-controlled lock state for editable materia definitions. */
   lockState?: MateriaUserLockState;
+  /**
+   * Catalog origin provenance for a local copy that originated from a central
+   * catalog item. Informational; never auto-applied
+   * (docs/enterprise-control-plane.md §14). Only present on writable local
+   * (user/project/explicit) definitions.
+   */
+  catalogOrigin?: CatalogOriginProvenance;
   /** Generated list metadata. Prefer generator: true for the standard workItems contract. */
   generates?: MateriaGeneratorConfig;
 }

@@ -35,6 +35,7 @@
   "scripts": {
     "dev:webui": "vite --config src/webui/client/vite.config.ts",
     "dev:webui:server": "tsx watch src/webui/server/index.ts",
+    "dev:central:server": "tsx watch src/central/server/index.ts",
     "build:webui": "vite build --config src/webui/client/vite.config.ts && tsc -p src/webui/server/tsconfig.json --noEmit false",
     "test": "bun test",
     "test:watch": "bun test --watch",

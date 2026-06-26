@@ -449,6 +449,67 @@ describe("native multi-turn runtime", () => {
     expect(duplicateSkips[0].data.idempotencyKey).toContain(`${state.castId}:Socket-3:1:Socket-4`);
   });
 
+  test("duplicate source-socket agent_end after routing is ignored via active-turn provenance", async () => {
+    const harness = await makeHarness(singleTurnConfig());
+    const planEnvelope = JSON.stringify({ workItems: [{ title: "Ship it", context: "Do the work" }], satisfied: true, context: "Plan" });
+
+    await harness.runCommand("materia", "cast build the feature");
+    // Socket-1 (Plan) initial prompt dispatched immediately (1 triggerTurn so far).
+    harness.appendAssistantMessage(planEnvelope);
+    await harness.emit("agent_end", { messages: [] });
+
+    // Plan completed and routed to Socket-2 (Build); Build dispatch is deferred,
+    // so active-turn provenance still points at the source (Plan) socket.
+    const routedState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(routedState.currentSocketId).toBe("Socket-2");
+    expect(routedState.currentMateria).toBe("Build");
+    expect(routedState.socketState).toBe("awaiting_agent_response");
+    expect(routedState.activeTurn).toMatchObject({ socketId: "Socket-1", materia: "Plan" });
+    const triggerTurnsAfterRoute = harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn).length;
+    expect(triggerTurnsAfterRoute).toBe(1);
+
+    // Simulate a stale re-emission of the source (Plan) response arriving during
+    // the deferred-dispatch window, followed by a duplicate source agent_end.
+    harness.appendAssistantMessage(planEnvelope);
+    await harness.emit("agent_end", { messages: [] });
+
+    // The stale completion must not dispatch anything or advance the target.
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(triggerTurnsAfterRoute);
+    expect(harness.suppressedTriggerTurnSends).toHaveLength(0);
+
+    const stateAfterDuplicate = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(stateAfterDuplicate.active).toBe(true);
+    expect(stateAfterDuplicate.currentSocketId).toBe("Socket-2");
+    expect(stateAfterDuplicate.currentMateria).toBe("Build");
+    expect(stateAfterDuplicate.socketState).toBe("awaiting_agent_response");
+
+    // The source must not be re-completed and the target must not be advanced.
+    const events = await readRunEvents(stateAfterDuplicate);
+    const socketCompletes = events.filter((event: any) => event.type === "socket_complete");
+    expect(socketCompletes).toHaveLength(1);
+    expect(socketCompletes[0].data.socket).toBe("Socket-1");
+    expect(events.filter((event: any) => event.type === "socket_start").map((event: any) => event.data.socket)).toEqual(["Socket-1", "Socket-2"]);
+
+    // A diagnostic event records the ignored stale completion with provenance.
+    const staleIgnored = events.filter((event: any) => event.type === "stale_agent_end_ignored");
+    expect(staleIgnored).toHaveLength(1);
+    expect(staleIgnored[0].data).toMatchObject({
+      reason: "active_turn_socket_mismatch",
+      activeTurnSocketId: "Socket-1",
+      activeTurnMateria: "Plan",
+      currentSocketId: "Socket-2",
+    });
+
+    // After flushing deferred dispatch, the Build prompt appears exactly once.
+    await flushDeferredDispatch();
+    const buildPrompts = harness.sentMessages.filter(({ message }) => {
+      const prompt = message as any;
+      return prompt.customType === "pi-materia-prompt" && prompt.details?.socketId === "Socket-2" && prompt.details?.materiaName === "Build";
+    });
+    expect(buildPrompts).toHaveLength(1);
+    expect(harness.sentMessages.filter(({ options }) => (options as { triggerTurn?: boolean } | undefined)?.triggerTurn)).toHaveLength(triggerTurnsAfterRoute + 1);
+  });
+
   test("bundled Planning-Consult pauses after planner output until /materia continue advances to Build", async () => {
     const harness = await makeBundledDefaultHarness();
     const finalPlan = '{"workItems":[{"title":"Ship it","context":"Do the work"}],"satisfied":true,"context":"Plan"}';

@@ -5,7 +5,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { loadProfileConfig } from "../config/config.js";
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "../graph/generator.js";
 import { getActiveModelInfo } from "../config/modelSettings.js";
-import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
+import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 import type { MateriaGeneratorConfig, MateriaRoleGenerationProfileConfig } from "../types.js";
 import { buildMateriaModelCatalog, type MateriaModelCatalogModel, type MateriaModelCatalogResponse } from "../modelCatalog.js";
 
@@ -207,7 +207,7 @@ export function buildRoleGenerationPrompt(
     "You generate concise pi-materia role prompt instructions.",
     "Return only the role prompt text to place in a Materia config `prompt` field.",
     "The prompt should define the agent's responsibilities, operating style, constraints, and expected output behavior.",
-    "When the generated role prompt asks for agent JSON or handoff output, describe only socket-relevant fields from the small contract: workItems, satisfied, context, and text.",
+    "When the generated role prompt asks for agent JSON or handoff output, describe only socket-relevant fields from the small contract. The default explanatory handoff fields are workItems, satisfied, and context; reserve explanatory notes for context. Only describe a top-level text field when the role is an explicit renderable-prose socket that emits user-facing display text, and then tell it not to duplicate that text into context.",
     "Do not include markdown fences, commentary about generation, or UI instructions.",
     roleGenerationContext(generates),
     profile.extraInstructions ? `Additional operator instructions:\n${profile.extraInstructions}` : undefined,
@@ -226,7 +226,7 @@ function roleGenerationContext(generates: MateriaGeneratorConfig | null | undefi
     `- items path: state.${canonical.output}`,
     `- cursor: ${canonical.cursor}`,
     `- done behavior: ${canonical.done}`,
-    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt should place generated units of work in workItems, use only title:string and context:string for each generated item, avoid ids/descriptions/acceptance arrays/nested context objects, and ask only for socket-relevant handoff fields.",
+    "Treat this as socket adapter metadata for assignment and iteration. The generated role prompt should place generated units of work in workItems, use only title:string and context:string for each generated item, avoid ids/descriptions/acceptance arrays/nested context objects, ask only for socket-relevant handoff fields, reserve explanatory notes for context, and do not ask for a top-level text field unless the role is an explicit renderable-prose socket.",
   ].join("\n");
 }
 

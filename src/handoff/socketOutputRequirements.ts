@@ -2,6 +2,7 @@ import {
   HANDOFF_NOT_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_EDGE_CONDITION,
   HANDOFF_SATISFIED_FIELD,
+  HANDOFF_TEXT_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../domain/handoff.js";
 import type { MateriaEdgeCondition, MateriaParseMode, MateriaPipelineSocketConfig } from "../types.js";
@@ -42,6 +43,14 @@ export interface SocketOutputRequirementsInput {
   workItemProducingSocketIds?: ReadonlySet<string> | readonly string[];
   /** True when normalized graph semantics identify this socket as a workItems-producing generator/planner. */
   workItemsProducer?: boolean;
+  /**
+   * Explicit renderable-text intent metadata. When true, the socket expects a
+   * top-level renderable `text` payload even when no assignment consumes
+   * `$.text` directly. Sourced from socket intent metadata rather than
+   * assignment detection, so a renderable-prose socket can opt in without a
+   * `$.text` assignment target.
+   */
+  renderableTextIntent?: boolean;
 }
 
 export interface SocketOutputRequirements {
@@ -51,6 +60,19 @@ export interface SocketOutputRequirements {
   requiredFields: SocketOutputFieldRequirement[];
   consumedPayloadPaths: SocketOutputConsumedPath[];
   reservedFieldTypeRules: SocketOutputTypeRule[];
+  /**
+   * True when this socket expects a top-level renderable `text` payload.
+   *
+   * Renderable text is opt-in: only JSON agent sockets that consume `$.text`
+   * via assignment or carry explicit renderable-text intent metadata report
+   * intent. `context` remains the default cross-socket explanatory handoff
+   * field, so Auto-Plan, Auto-Eval, Maintain, and Chain-Context sockets report
+   * no renderable-text intent. Non-JSON (`parse: "text"`) sockets are
+   * unaffected and report no intent.
+   */
+  renderableTextIntent: boolean;
+  /** Why renderable-text intent is reported; undefined when intent is false. */
+  renderableTextIntentReason?: string;
 }
 
 const SATISFACTION_CONDITIONS = new Set<MateriaEdgeCondition>([
@@ -71,10 +93,12 @@ export function deriveSocketOutputRequirements(input: SocketOutputRequirementsIn
       requiredFields: [],
       consumedPayloadPaths: [],
       reservedFieldTypeRules: [],
+      renderableTextIntent: false,
     };
   }
 
   const consumedPayloadPaths = deriveConsumedPayloadPaths(input.socket.assign);
+  const renderableTextIntent = deriveRenderableTextIntent(consumedPayloadPaths, input.renderableTextIntent);
   const requiredFields = new Map<string, SocketOutputFieldRequirement>();
 
   if (socketConsumesSatisfied(input.socket)) {
@@ -118,7 +142,35 @@ export function deriveSocketOutputRequirements(input: SocketOutputRequirementsIn
         ? "This reserved field is required by the current socket requirements and must have its canonical type."
         : "When present, this reserved canonical handoff field must have its canonical type.",
     })),
+    renderableTextIntent: renderableTextIntent.intent,
+    ...(renderableTextIntent.reason ? { renderableTextIntentReason: renderableTextIntent.reason } : {}),
   };
+}
+
+interface RenderableTextIntentResult {
+  intent: boolean;
+  reason?: string;
+}
+
+/**
+ * Renderable text is opt-in for JSON agent sockets. A socket expects a
+ * top-level renderable `text` payload only when it carries explicit
+ * renderable-text intent metadata or its assignment consumes `$.text`.
+ * Otherwise explanatory prose belongs in `context`, so planner/evaluator,
+ * maintainer, and chain-context sockets report no renderable-text intent.
+ */
+function deriveRenderableTextIntent(
+  consumedPayloadPaths: readonly SocketOutputConsumedPath[],
+  explicitIntent: boolean | undefined,
+): RenderableTextIntentResult {
+  if (explicitIntent === true) {
+    return { intent: true, reason: "Socket carries explicit renderable-text intent metadata." };
+  }
+  const textConsumer = consumedPayloadPaths.find((path) => path.payloadPath === `$.${HANDOFF_TEXT_FIELD}`);
+  if (textConsumer) {
+    return { intent: true, reason: `Socket assignment consumes renderable text from ${textConsumer.payloadPath} for ${textConsumer.targetPath}.` };
+  }
+  return { intent: false };
 }
 
 export function socketConsumesSatisfied(socket: Pick<MateriaPipelineSocketConfig, "edges" | "advance">): boolean {

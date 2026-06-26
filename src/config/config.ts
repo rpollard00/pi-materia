@@ -13,10 +13,31 @@ import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoadout } from "../loadout/defaultLoadoutResolver.js";
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
-import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../thinking.js";
+import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 import type { EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
+import {
+  CENTRAL_CATALOG_LAYER_LABEL,
+  type CentralCatalogConfigSource,
+  centralCatalogSourceToPartial,
+  isCentralCatalogSourceEmpty,
+} from "./centralCatalogSource.js";
+import { resolveConfigCatalogDrift } from "./catalogDrift.js";
+import { isValidCatalogOriginProvenance, type CatalogOriginProvenance } from "../domain/catalogProvenance.js";
 
-export async function loadConfig(cwd: string, configuredPath?: string): Promise<LoadedConfig> {
+/**
+ * Options for {@link loadConfig}.
+ */
+export interface LoadConfigOptions {
+  /**
+   * Optional central catalog definitions surfaced as the read-only `central`
+   * layer between bundled defaults and user config
+   * (docs/enterprise-control-plane.md §5). Omit it, or pass an empty source,
+   * to keep precedence unchanged for purely local workflows.
+   */
+  centralSource?: CentralCatalogConfigSource;
+}
+
+export async function loadConfig(cwd: string, configuredPath?: string, options: LoadConfigOptions = {}): Promise<LoadedConfig> {
   await ensureUserProfileConfig();
   await syncShippedUtilityScripts(getUserMateriaDir());
   const defaultPath = getBundledDefaultConfigPath();
@@ -25,6 +46,14 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   const explicitPath = configuredPath ? resolveFromCwd(cwd, configuredPath) : undefined;
   const layers: MateriaConfigLayer[] = [{ scope: "default", path: defaultPath, loaded: true }];
   const partials: Partial<PiMateriaConfig>[] = [await readConfigPartial(defaultPath)];
+
+  // Central catalog layer: read-only provenance, consulted only when central
+  // definitions are supplied. Sits above bundled defaults and below user config
+  // so local definitions always win (docs/enterprise-control-plane.md §5, §10).
+  if (!isCentralCatalogSourceEmpty(options.centralSource)) {
+    layers.push({ scope: "central", loaded: true });
+    partials.push(centralCatalogSourceToPartial(options.centralSource!));
+  }
 
   if (existsSync(userPath)) {
     layers.push({ scope: "user", path: userPath, loaded: true });
@@ -56,12 +85,22 @@ export async function loadConfig(cwd: string, configuredPath?: string): Promise<
   resolveUtilityExecutionBindings(config, materiaCommandSources, loadedLayers);
   const defaultLoadout = resolveDefaultLoadout(profile.defaultLoadoutId, config.loadouts, loadoutSources);
   const questDefaultLoadout = resolveQuestDefaultLoadout(profile.questDefaultLoadoutId, config.loadouts, loadoutSources);
+  // Catalog drift is informational and never mutates local files: it compares
+  // recorded central origins against the current central summaries and surfaces
+  // the result for loaded config/WebUI (docs/enterprise-control-plane.md §14).
+  const catalogDrift = resolveConfigCatalogDrift({
+    config,
+    loadoutSources,
+    materiaSources,
+    centralSource: options.centralSource,
+  });
   return {
     config,
-    source: loadedLayers.map((layer) => layer.path).join(" < "),
+    source: loadedLayers.map((layer) => layer.path ?? (layer.scope === "central" ? CENTRAL_CATALOG_LAYER_LABEL : layer.scope)).join(" < "),
     layers,
     loadoutSources,
     materiaSources,
+    ...(catalogDrift ? { catalogDrift } : {}),
     defaultMateriaIds,
     defaultLoadoutId: defaultLoadout.loadoutId,
     ...(defaultLoadout.warning ? { defaultLoadoutWarning: defaultLoadout.warning } : {}),
@@ -372,6 +411,16 @@ function normalizeProfileConfig(parsed: Record<string, unknown>, file: string): 
     else warnInvalidProfileConfig(file, "Ignoring invalid webui profile config. Expected an object.");
   }
 
+  // Validate webui.centralApiBaseUrl so an invalid/unsafe value degrades to
+  // the default local-only workflow rather than breaking the WebUI
+  // (docs/enterprise-control-plane.md §2, §8). The launcher revalidates at the
+  // server boundary via the WebUI mode helper.
+  if (profile.webui) {
+    const validCentralUrl = normalizeCentralApiBaseUrl(profile.webui.centralApiBaseUrl, file);
+    if (validCentralUrl === undefined) delete profile.webui.centralApiBaseUrl;
+    else profile.webui.centralApiBaseUrl = validCentralUrl;
+  }
+
   if (parsed.defaultLoadoutId !== undefined) {
     if (parsed.defaultLoadoutId === null) profile.defaultLoadoutId = null;
     else if (typeof parsed.defaultLoadoutId === "string" && parsed.defaultLoadoutId.trim()) profile.defaultLoadoutId = parsed.defaultLoadoutId.trim();
@@ -441,6 +490,33 @@ function normalizeRoleGenerationProfileConfig(value: unknown, file: string): Mat
 
 function warnInvalidProfileConfig(file: string, message: string): void {
   console.warn(`[pi-materia] Profile config ${file}: ${message}`);
+}
+
+/**
+ * Normalize an optional central control-plane base URL for the WebUI profile.
+ * Returns a trimmed http(s) URL, or `undefined` when unset/invalid (after
+ * warning). Unset/invalid means purely local and changes no default behavior
+ * (docs/enterprise-control-plane.md §2, §8).
+ */
+function normalizeCentralApiBaseUrl(value: unknown, file: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected a string.");
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected an http(s) URL.");
+      return undefined;
+    }
+    return trimmed;
+  } catch {
+    warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected an http(s) URL.");
+    return undefined;
+  }
 }
 
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
@@ -565,7 +641,14 @@ function buildMateriaCommandSources(partials: Partial<PiMateriaConfig>[], layers
 }
 
 function resolveUtilityExecutionBindings(config: PiMateriaConfig, commandSources: Record<string, MateriaConfigLayerScope>, layers: MateriaConfigLayer[]): void {
-  const configDirs = new Map(layers.filter((layer) => layer.loaded).map((layer) => [layer.scope, path.dirname(layer.path)]));
+  // Only file-backed layers contribute a resolution directory; the read-only
+  // `central` layer has no local path, so central utility materia keep their
+  // commands as-is (typically absolute) and are not path-resolved.
+  const configDirs = new Map(
+    layers
+      .filter((layer) => layer.loaded && layer.path !== undefined)
+      .map((layer) => [layer.scope, path.dirname(layer.path!)]),
+  );
   for (const [id, definition] of Object.entries(config.materia ?? {})) {
     if (definition.type !== "utility") continue;
     if (isShippedUtilityScriptRef(definition.script)) {
@@ -747,6 +830,7 @@ function rejectReadonlyDefaultLoadoutSaves(patch: Pick<MateriaConfigPatch, "load
 
 function validateLoadoutGraphs(loadouts: PiMateriaConfig["loadouts"] | undefined): void {
   for (const [name, loadout] of Object.entries(loadouts ?? {}) as Array<[string, MateriaPipelineConfig]>) {
+    validateCatalogOrigin(`loadouts.${name}`, loadout.catalogOrigin);
     try {
       assertValidPipelineGraph(loadout);
     } catch (error) {
@@ -773,6 +857,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (!isPlainObject(materia)) throw new Error(`Materia "${name}" is invalid. Expected a materia object.`);
     if ("systemPrompt" in materia) throw new Error(`Materia "${name}" configures obsolete systemPrompt. Use prompt instead.`);
     validateMateriaLockState(name, materia.lockState);
+    validateCatalogOrigin(`materia.${name}`, materia.catalogOrigin);
     const type = ensureMateriaDefinitionType(materia);
     if (type === "utility") {
       validateUtilityMateria(name, materia);
@@ -844,6 +929,14 @@ function validateMateriaLockState(name: string, lockState: unknown): void {
   if (!isMateriaLockState(lockState)) throw new Error(`Materia "${name}" has invalid lockState. Expected "locked" or "unlocked".`);
 }
 
+/** Validate persisted catalog origin provenance when present (docs/enterprise-control-plane.md §14.1). */
+function validateCatalogOrigin(path: string, value: unknown): asserts value is CatalogOriginProvenance | undefined {
+  if (value === undefined) return;
+  if (!isValidCatalogOriginProvenance(value)) {
+    throw new Error(`${path} has invalid catalogOrigin. Expected { catalogItemId, catalogVersion, catalogContentHash, source }.`);
+  }
+}
+
 function isMateriaLockState(value: unknown): value is MateriaUserLockState {
   return value === "locked" || value === "unlocked";
 }
@@ -885,7 +978,7 @@ function rejectObsoleteConfigFields(config: Record<string, unknown>, file: strin
 }
 
 function isLoadoutSource(value: unknown): value is MateriaConfigLayerScope {
-  return value === "default" || value === "user" || value === "project" || value === "explicit";
+  return value === "default" || value === "central" || value === "user" || value === "project" || value === "explicit";
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

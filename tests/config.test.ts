@@ -318,6 +318,42 @@ describe("layered config loading and persistence", () => {
     }
   });
 
+  test("normalizes webui.centralApiBaseUrl profile config and warns for invalid values", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    const previousWarn = console.warn;
+    const warnings: string[] = [];
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    console.warn = (message?: unknown) => warnings.push(String(message));
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        webui: { preferredPort: 4321, centralApiBaseUrl: "  https://central.example.com/api  " },
+      }), "utf8");
+
+      const profile = await loadProfileConfig();
+      expect(profile.webui?.preferredPort).toBe(4321);
+      expect(profile.webui?.centralApiBaseUrl).toBe("https://central.example.com/api");
+      expect(warnings).toEqual([]);
+
+      // An empty value clears the field (local-only) without warning.
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({ webui: { centralApiBaseUrl: "   " } }), "utf8");
+      const cleared = await loadProfileConfig();
+      expect(cleared.webui?.centralApiBaseUrl).toBeUndefined();
+
+      // Invalid scheme / non-URL values are rejected with a warning and degrade
+      // to the default local-only workflow.
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({ webui: { centralApiBaseUrl: "ftp://nope" } }), "utf8");
+      const invalidScheme = await loadProfileConfig();
+      expect(invalidScheme.webui?.centralApiBaseUrl).toBeUndefined();
+      expect(warnings.join("\n")).toContain("webui.centralApiBaseUrl");
+    } finally {
+      console.warn = previousWarn;
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("saves nullable role-generation thinking preference without replacing sibling fields", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;

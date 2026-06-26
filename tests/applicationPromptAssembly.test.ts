@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, findActiveMateriaPromptIndex, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -175,7 +175,8 @@ describe("application prompt assembly", () => {
     });
     const evalPrompt = buildSocketPrompt(state(evalSocket), evalSocket);
 
-    expect(evalPrompt).toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
+    expect(evalPrompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(evalPrompt).toContain("do not emit a top-level text field");
     expect(evalPrompt).not.toContain("reworkFeedback");
     expect(evalPrompt).not.toContain("lastFeedback");
   });
@@ -333,7 +334,8 @@ describe("application prompt assembly", () => {
     expect(prompt).toContain("Materia isolated context.");
     expect(prompt).toContain("Command-triggered finalization");
     expect(prompt).toContain("Canonical handoff contract context:");
-    expect(prompt).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, context, and text");
+    expect(prompt).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, and context");
+    expect(prompt).toContain("do not emit a top-level text field");
     expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
     expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
     expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");
@@ -391,9 +393,143 @@ describe("application prompt assembly", () => {
   });
 });
 
+describe("socket-specific renderable text suppression", () => {
+  // The opt-in renderable-text model keeps `context` as the default
+  // cross-socket explanatory field. Non-text JSON sockets (planner/evaluator/
+  // maintainer/chain-context) receive required JSON instructions but no generic
+  // top-level `text` guidance; only sockets that consume `$.text` (or carry
+  // explicit renderable-text intent) emit renderable prose. This is what stops
+  // ordinary evaluator/maintainer/planner sockets from emitting misplaced
+  // top-level `text` payloads alongside `context`.
+
+  function expectRequiredJsonFinalInstructions(prompt: string): void {
+    expect(prompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(prompt).toContain("Emit only the fields relevant to this socket's configured placement, routing, and assignments");
+  }
+
+  function expectNoGenericRenderableTextGuidance(prompt: string): void {
+    // Field list scoped to workItems/satisfied/context; never the text-enabled list.
+    expect(prompt).not.toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
+    // No renderable-prose emit instruction.
+    expect(prompt).not.toContain('top-level "text" string');
+    expect(prompt).not.toContain("primary user-facing text");
+  }
+
+  test("Auto-Plan generator prompt includes required JSON instructions without generic text guidance", () => {
+    const socket = agentSocket({
+      socket: { materia: "Auto-Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Auto-Plan"), generator: true },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expectRequiredJsonFinalInstructions(prompt);
+    // Generator output requirement and placement guidance present.
+    expect(prompt).toContain('"workItems" at $.workItems: array');
+    expect(prompt).toContain("Emit top-level workItems");
+    // Non-text field list with explicit no-text guidance.
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(prompt).toContain("do not emit a top-level text field");
+    expectNoGenericRenderableTextGuidance(prompt);
+  });
+
+  test("Auto-Eval satisfied-routing prompt includes required JSON instructions without generic text guidance", () => {
+    const socket = agentSocket({
+      socket: {
+        materia: "Auto-Eval",
+        parse: "json",
+        assign: { lastFeedback: "$.context", lastCheck: "$" },
+        edges: [{ when: "satisfied", to: "Socket-Maintain" }, { when: "not_satisfied", to: "Socket-Build" }],
+      },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Auto-Eval") },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expectRequiredJsonFinalInstructions(prompt);
+    // Control field requirement and consumed context path present.
+    expect(prompt).toContain('"satisfied" at $.satisfied: boolean');
+    expect(prompt).toContain("$.context for assignment to lastFeedback");
+    // Non-text field list with explicit no-text guidance.
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(prompt).toContain("do not emit a top-level text field");
+    expectNoGenericRenderableTextGuidance(prompt);
+  });
+
+  test("explicit $.text assignment prompt opts into top-level renderable text guidance", () => {
+    const socket = agentSocket({
+      socket: { materia: "Narrate", parse: "json", assign: { prNotes: "$.text" } },
+      materia: { tools: "readOnly", prompt: "Narrate the result as renderable prose." },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expectRequiredJsonFinalInstructions(prompt);
+    expect(prompt).toContain("$.text for assignment to prNotes");
+    // Text-enabled field list and renderable-prose emit instruction.
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
+    expect(prompt).toContain('top-level "text" string');
+    expect(prompt).toContain("primary user-facing text");
+    // Renderable-prose sockets are told not to duplicate prose into context.
+    expect(prompt).toContain('do not duplicate it into "context"');
+  });
+
+  test("non-text JSON synthetic handoff contract and event wording omit renderable text", () => {
+    const socket = agentSocket({
+      socket: {
+        materia: "Auto-Eval",
+        parse: "json",
+        assign: { lastFeedback: "$.context", lastCheck: "$" },
+        edges: [{ when: "satisfied", to: "Socket-Maintain" }, { when: "not_satisfied", to: "Socket-Build" }],
+      },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Auto-Eval") },
+    });
+    const synthetic = buildSyntheticCastContext(state(socket));
+
+    // Synthetic handoff contract context scopes fields to
+    // workItems/satisfied/context and explicitly reserves `text` for
+    // renderable-prose sockets.
+    expect(synthetic).toContain("Canonical handoff contract context:");
+    expect(synthetic).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, and context");
+    expect(synthetic).toContain("do not emit a top-level text field");
+    // The generic renderable-prose field description is absent for non-text sockets.
+    expect(synthetic).not.toContain("primary user-facing text output");
+    // Event side-channel wording is field-neutral for non-text sockets.
+    expect(synthetic).toContain("workItems/satisfied/context)");
+    expect(synthetic).not.toContain("workItems/satisfied/context/text)");
+  });
+
+  test("multi-turn refinement hides the final JSON contract and all text guidance until /materia continue", () => {
+    const socket = agentSocket({
+      socket: { materia: "Plan", parse: "json", assign: { workItems: "$.workItems" } },
+      materia: { tools: "readOnly", prompt: "Plan collaboratively into work items.", multiTurn: true },
+    });
+
+    // Refinement turn: conversational; no final JSON contract or text guidance.
+    const refinementPrompt = buildSocketPrompt(state(socket), socket);
+    expect(refinementPrompt).toContain("Current multi-turn mode: refinement conversation");
+    expect(refinementPrompt).toContain("/materia continue is the only way to finalize");
+    expect(refinementPrompt).not.toContain("Final output format: Return only one top-level JSON object");
+    expect(refinementPrompt).not.toContain("Agent handoff fields are limited");
+    expectNoGenericRenderableTextGuidance(refinementPrompt);
+
+    // Finalization turn: required JSON instructions return, but the non-text
+    // Plan socket still suppresses renderable-text guidance.
+    const finalizationPrompt = buildMultiTurnFinalizationPrompt(state(socket, { multiTurnFinalizing: true }), socket);
+    expect(finalizationPrompt).toContain("Command-triggered finalization");
+    expect(finalizationPrompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(finalizationPrompt).toContain('"workItems" at $.workItems: array');
+    expect(finalizationPrompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expectNoGenericRenderableTextGuidance(finalizationPrompt);
+  });
+});
+
 describe("buildIsolatedMateriaContext", () => {
   function materiaPromptMessage(prompt: string): unknown {
     return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: "Socket-1", socketId: "Socket-1", materiaName: "Build" }, timestamp: 3 };
+  }
+
+  // Flexible hidden pi-materia-prompt builder so tests can stage prompts from
+  // different sockets/materia (mirrors sendMateriaTurn details).
+  function materiaPromptMessageFor(prompt: string, socketId: string, materiaName: string, details: Record<string, unknown> = {}): unknown {
+    return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: socketId, socketId, materiaName, ...details }, timestamp: 3 };
   }
 
   function questOrchestrationCard(content: string, details: Record<string, unknown> = {}): unknown {
@@ -403,6 +539,20 @@ describe("buildIsolatedMateriaContext", () => {
       content,
       display: true,
       details: { prefix: "quest", materiaName: "orchestrator", eventType: "run", orchestration: true, ...details },
+      timestamp: 4,
+    };
+  }
+
+  // Mirrors the visible transition card emitted by sendMateriaTurn in
+  // src/runtime/nativeLifecycle.ts: customType "pi-materia", display true,
+  // details.prefix "materia" + details.eventType "materia_prompt".
+  function materiaTransitionCard(content: string, details: Record<string, unknown> = {}): unknown {
+    return {
+      role: "custom",
+      customType: "pi-materia",
+      content,
+      display: true,
+      details: { prefix: "materia", materiaName: "Narrata", socketId: "Socket-7", socketOrdinal: 7, itemLabel: "fix: filter transition cards", eventType: "materia_prompt", orchestration: true, ...details },
       timestamp: 4,
     };
   }
@@ -490,6 +640,108 @@ describe("buildIsolatedMateriaContext", () => {
     expect(serialized).toContain("status card");
   });
 
+  test("filters displayed materia transition cards that follow the hidden prompt (Narrata)", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    // Mirrors sendMateriaTurn: a hidden pi-materia-prompt followed by the
+    // visible "◆ Materia: Narrata (7)" / "Casting Narrata (7)" transition card.
+    const transitionContent = "Casting **Narrata (7)**\n\nfix: filter transition cards";
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "earlier visible transcript noise" }], timestamp: 1 },
+      materiaPromptMessage("<materia-instructions>\nBuild the isolated-context transition filter.\n</materia-instructions>"),
+      materiaTransitionCard(transitionContent),
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+
+    // Synthetic cast context replaces the earlier transcript and remains present.
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    expect(serialized).not.toContain("earlier visible transcript noise");
+    // The hidden materia prompt must survive isolation.
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("Build the isolated-context transition filter.");
+    // The displayed Narrata transition card prose must be fully removed.
+    expect(serialized).not.toContain("Casting");
+    expect(serialized).not.toContain("Narrata");
+    expect(serialized).not.toContain("◆ Materia");
+  });
+
+  test("filters materia transition cards even without the explicit orchestration flag", () => {
+    const socket = agentSocket();
+    const castState = state(socket);
+    const messages = [
+      materiaPromptMessage("<materia-instructions>\nBuild it.\n</materia-instructions>"),
+      materiaTransitionCard("Casting **Narrata (7)**", { orchestration: undefined }),
+    ];
+    delete (messages[1] as { details?: { orchestration?: unknown } }).details!.orchestration;
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    expect(JSON.stringify(isolated)).not.toContain("Casting");
+    expect(JSON.stringify(isolated)).not.toContain("Narrata");
+    expect(JSON.stringify(isolated)).toContain("<materia-instructions>");
+  });
+
+  test("anchors on the current socket prompt and excludes prior socket prompts with <materia-instructions>", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const castState = state(socket, { currentSocketId: "Socket-4", phase: "Socket-4", currentMateria: "Buildga" });
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "earlier transcript noise" }], timestamp: 1 },
+      // Prior socket prompt: also contains <materia-instructions> but belongs to Socket-3.
+      materiaPromptMessageFor("<materia-instructions>\nPlan the work.\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+      // Current socket prompt: Socket-4 / Buildga.
+      materiaPromptMessageFor("<materia-instructions>\nBuildga builds the fix.\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+
+    // Synthetic cast context replaces the earlier transcript.
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    expect(serialized).not.toContain("earlier transcript noise");
+    // Prior socket prompt must be fully excluded even though it carries <materia-instructions>.
+    expect(serialized).not.toContain("Plan the work.");
+    expect(serialized).not.toContain("Auto-Plan");
+    // Current socket prompt is anchored and preserved.
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("Buildga builds the fix.");
+  });
+
+  test("returns transcript unchanged when only a prior socket prompt is present (no content fallback leak)", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const castState = state(socket, { currentSocketId: "Socket-4", phase: "Socket-4", currentMateria: "Buildga" });
+    // Only a prior socket prompt is present; the current socket's prompt has not
+    // been emitted yet. Isolation must not fall back to content-only discovery
+    // and leak the prior socket prompt as the anchor.
+    const messages = [
+      materiaPromptMessageFor("<materia-instructions>\nPlan the work.\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+    ];
+
+    expect(buildIsolatedMateriaContext(messages, castState)).toBe(messages);
+  });
+
+  test("defensively falls back to content-only discovery when prompts lack metadata", () => {
+    const socket = agentSocket({ id: "Socket-4" });
+    const castState = state(socket, { currentSocketId: "Socket-4", phase: "Socket-4", currentMateria: "Buildga" });
+    // Lookup carries criteria, but the only pi-materia-prompt message has no
+    // socketId/materiaName details (older runtime/test fixture). Discovery must
+    // fall back to content-only and still anchor on the <materia-instructions> block.
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "earlier transcript noise" }], timestamp: 1 },
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nBuild it.\n</materia-instructions>", display: false, details: {}, timestamp: 2 },
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    expect(serialized).not.toContain("earlier transcript noise");
+    expect(serialized).toContain("<materia-instructions>");
+    expect(serialized).toContain("Build it.");
+  });
+
   test("returns messages unchanged when no active materia prompt is present", () => {
     const socket = agentSocket();
     const castState = state(socket);
@@ -502,15 +754,113 @@ describe("buildIsolatedMateriaContext", () => {
   });
 });
 
+describe("findActiveMateriaPromptIndex", () => {
+  function promptMessage(prompt: string, socketId: string, materiaName: string, details: Record<string, unknown> = {}): unknown {
+    return { role: "custom", customType: "pi-materia-prompt", content: prompt, display: false, details: { phase: socketId, socketId, materiaName, ...details } };
+  }
+
+  test("prefers the latest metadata-matched prompt for the active socket", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nfirst turn\n</materia-instructions>", "Socket-4", "Buildga"),
+      promptMessage("<materia-instructions>\nsecond turn\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    // Latest Socket-4 prompt wins over the earlier one for the same socket.
+    const idx = findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" });
+    expect(idx).toBe(1);
+    expect((messages[idx] as { content: string }).content).toContain("second turn");
+  });
+
+  test("excludes a prior socket prompt even when it carries <materia-instructions>", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nplan\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+      promptMessage("<materia-instructions>\nbuild\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(1);
+  });
+
+  test("returns -1 when only a prior socket prompt is present (no content fallback leak)", () => {
+    const messages = [promptMessage("<materia-instructions>\nplan\n</materia-instructions>", "Socket-3", "Auto-Plan")];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(-1);
+  });
+
+  test("anchors on socketId alone when materiaName is unknown", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nplan\n</materia-instructions>", "Socket-3", "Auto-Plan"),
+      promptMessage("<materia-instructions>\nbuild\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4" })).toBe(1);
+  });
+
+  test("keeps current-socket prompt isolation stable across multi-turn refinement", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nprior socket\n</materia-instructions>", "Socket-2", "Rude"),
+      promptMessage("<materia-instructions>\nrefine the palette\n</materia-instructions>", "Socket-2", "Rude"),
+      { role: "assistant", content: [{ type: "text", text: "first draft" }] },
+      { role: "user", content: [{ type: "text", text: "make it darker" }] },
+    ];
+
+    // A second isolation pass for the same socket re-anchors on the same
+    // Socket-2 prompt regardless of intervening assistant/user messages.
+    const first = findActiveMateriaPromptIndex(messages, { socketId: "Socket-2", materiaName: "Rude" });
+    const second = findActiveMateriaPromptIndex(messages, { socketId: "Socket-2", materiaName: "Rude" });
+    expect(first).toBe(second);
+    expect(first).toBe(1);
+    expect((messages[first] as { content: string }).content).toContain("refine the palette");
+  });
+
+  test("falls back to content-only discovery when a prompt lacks metadata", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "noise" }] },
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nbuild\n</materia-instructions>", display: false, details: {} },
+    ];
+
+    // Lookup has criteria but the candidate carries no metadata: fall back.
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(1);
+  });
+
+  test("falls back to content-only discovery when no lookup criteria are provided", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "noise" }] },
+      promptMessage("<materia-instructions>\nbuild\n</materia-instructions>", "Socket-4", "Buildga"),
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages)).toBe(1);
+    expect(findActiveMateriaPromptIndex(messages, {})).toBe(1);
+  });
+
+  test("returns -1 when no materia prompt is present", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "plain conversation" }] },
+      { role: "custom", customType: "pi-materia", content: "status", details: { prefix: "status" } },
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(-1);
+    expect(findActiveMateriaPromptIndex(messages)).toBe(-1);
+  });
+});
+
 describe("isOrchestrationOnlyMessage", () => {
-  test("flags custom messages marked orchestration or with a quest prefix", () => {
+  test("flags custom messages marked orchestration or with a quest/materia transition signature", () => {
+    // Explicit orchestration flag (covers quest runner and materia cards alike).
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest", orchestration: true } })).toBe(true);
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest" } })).toBe(true);
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { orchestration: true } })).toBe(true);
+    // Defense-in-depth: quest-prefix cards without the explicit flag.
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest" } })).toBe(true);
+    // Defense-in-depth: materia transition cards (prefix "materia" and/or
+    // eventType "materia_prompt") without the explicit orchestration flag.
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { prefix: "materia", eventType: "materia_prompt" } })).toBe(true);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { prefix: "materia" } })).toBe(true);
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { eventType: "materia_prompt" } })).toBe(true);
   });
 
   test("preserves the hidden materia prompt and non-quest custom cards", () => {
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>", details: { phase: "Socket-1" } })).toBe(false);
+    // The hidden pi-materia-prompt carries socket/materia details but none of
+    // the display-card signatures, so it is never mistaken for a transition card.
+    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>", details: { phase: "Socket-7", socketId: "Socket-7", materiaName: "Narrata" } })).toBe(false);
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "status", details: { prefix: "status" } })).toBe(false);
     expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "orphan", details: {} })).toBe(false);
   });
@@ -595,6 +945,26 @@ describe("syntheticEventEmissionContext", () => {
     expect(context).toContain('"satisfied"');
     expect(context).toContain('"context"');
     expect(context).toContain('"event"');
+
+    // Non-text JSON socket: event wording is field-neutral and must not invite
+    // a top-level renderable `text` payload alongside the event side-channel.
+    expect(context).toContain("workItems/satisfied/context)");
+    expect(context).toContain("alongside workItems, satisfied, and context");
+    expect(context).not.toMatch(/context\/text\)/);
+    expect(context).not.toMatch(/alongside workItems, satisfied, context, and text/);
+  });
+
+  test("scopes event wording to renderable-text intent for $.text sockets", () => {
+    const socket = agentSocket({
+      socket: { materia: "Narrate", parse: "json", assign: { prNotes: "$.text" } },
+      materia: { tools: "readOnly", prompt: "Narrate the result." },
+    });
+    const context = syntheticEventEmissionContext(state(socket));
+
+    expect(context).toBeDefined();
+    // Text-enabled sockets keep the full field list including `text`.
+    expect(context).toContain("workItems/satisfied/context/text)");
+    expect(context).toContain("alongside workItems, satisfied, context, and text");
   });
 
   test("returns undefined for text sockets", () => {
@@ -751,6 +1121,100 @@ describe("sanitizePreviousOutput", () => {
     const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
     sanitizePreviousOutput(castState);
     expect(castState.lastJson).toEqual(json);
+  });
+
+  test("suppresses 'Casting **<name>**' transition card noise", () => {
+    const castState = state(agentSocket(), { lastAssistantText: "Casting **Narrata (7)**" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses plain 'Casting <name> (n)' transition card noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "Casting Narrata (7)" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses 'Casting <name> Socket-n' transition card noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "Casting Buildga Socket-4" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses '◆ Materia' renderer-label noise", () => {
+    const castState = state(agentSocket(), { lastAssistantText: "◆ Materia: Narrata (7) materia materia prompt" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses prompt-banner eventType noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "Casting Narrata (7) materia materia prompt" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("suppresses materia_prompt eventType token noise", () => {
+    const castState = state(agentSocket(), { lastOutput: "materia_prompt dispatched for Socket-7" });
+    expect(sanitizePreviousOutput(castState)).toBeUndefined();
+  });
+
+  test("does not suppress legitimate text that happens to contain 'casting'", () => {
+    // Lowercase 'casting' without card markers must pass through unchanged.
+    const castState = state(agentSocket(), { lastOutput: "I am casting a wide net across the module." });
+    expect(sanitizePreviousOutput(castState)).toBe("I am casting a wide net across the module.");
+  });
+
+  test("defensively strips event side-channel from JSON previous output", () => {
+    // Defensive case: lastJson still carries event (e.g. stale/unexpected),
+    // and lastOutput is its raw serialization. Event must not leak.
+    const json = { "satisfied": true, "event": [{ "type": "result.pr_created", "message": "PR #99", "payload": { "branchName": "agent/fix" } }] };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    const result = sanitizePreviousOutput(castState);
+    expect(result).toBe(JSON.stringify({ "satisfied": true }));
+    expect(result).not.toContain("result.pr_created");
+    expect(result).not.toContain("PR #99");
+    expect(result).not.toContain("agent/fix");
+    expect(result).not.toContain("event");
+  });
+
+  test("defensively strips event side-channel when lastOutput is the clean form", () => {
+    // Normal case mirrored defensively: lastJson carries event but lastOutput
+    // is the event-stripped serialization. Event still stripped, satisfied kept.
+    const json = { "satisfied": true, "event": [{ "type": "result.pr_created", "message": "leak" }] };
+    const clean = JSON.stringify({ "satisfied": true });
+    const castState = state(agentSocket(), { lastOutput: clean, lastJson: json });
+    const result = sanitizePreviousOutput(castState);
+    expect(result).toBe(clean);
+    expect(result).not.toContain("event");
+    expect(result).not.toContain("leak");
+  });
+
+  test("preserves legitimate canonical JSON handoff for routing-aware downstream", () => {
+    const json = { "satisfied": true };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    expect(sanitizePreviousOutput(castState)).toBe(JSON.stringify({ "satisfied": true }));
+  });
+
+  test("display noise is omitted from buildSyntheticCastContext Previous output", () => {
+    const castState = state(agentSocket(), { lastAssistantText: "Casting **Narrata (7)**\n\nfix: some work item" });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).not.toContain("Previous output:");
+    expect(synthetic).not.toContain("Casting");
+    expect(synthetic).not.toContain("Narrata");
+  });
+
+  test("◆ Materia banner noise is omitted from buildSyntheticCastContext", () => {
+    const castState = state(agentSocket(), { lastOutput: "◆ Materia: Narrata (7) materia materia prompt" });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).not.toContain("Previous output:");
+    expect(synthetic).not.toContain("◆ Materia");
+    expect(synthetic).not.toContain("materia_prompt");
+  });
+
+  test("event side-channel does not leak into buildSyntheticCastContext when lastJson carries it", () => {
+    const json = { "satisfied": true, "event": [{ "type": "result.pr_created", "message": "PR #99", "payload": { "branchName": "agent/fix" } }] };
+    const castState = state(agentSocket(), { lastOutput: JSON.stringify(json), lastJson: json });
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).toContain("Previous output:");
+    expect(synthetic).toContain("satisfied");
+    expect(synthetic).not.toContain("result.pr_created");
+    expect(synthetic).not.toContain("PR #99");
+    expect(synthetic).not.toContain("agent/fix");
   });
 });
 

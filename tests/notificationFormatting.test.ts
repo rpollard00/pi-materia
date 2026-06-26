@@ -40,5 +40,10 @@ describe("materia cast notification formatting", () => {
     expect(message?.content).toBe("Casting **Interactive-Plan (3)**");
     expect(message?.content).not.toContain("Socket-3");
     expect(message?.details).toMatchObject({ socketId: "Socket-3", materiaName: "Interactive-Plan", socketOrdinal: 3, eventType: "materia_prompt" });
+    // Transition/status cards are display-only orchestration UI and must be
+    // tagged so they can be filtered from isolated agent context, while the
+    // hidden pi-materia-prompt remains available as agent context.
+    expect(message?.details?.orchestration).toBe(true);
+    expect(message?.details?.prefix).toBe("materia");
   });
 });

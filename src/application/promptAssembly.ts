@@ -1,15 +1,15 @@
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import {
-  HANDOFF_CONTRACT_DOC_TEXT,
+  formatEventEmissionContextText,
+  formatHandoffContractDocText,
   formatHandoffJsonFinalInstruction,
   HANDOFF_WORK_ITEMS_FIELD,
-  EVENT_EMISSION_CONTEXT_TEXT,
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { renderReworkFeedbackPromptContext } from "./reworkFeedback.js";
-import { stripRenderableTextField } from "./handoffPromptSanitization.js";
+import { isMateriaDisplayNoise, stripEventSideChannelField, stripRenderableTextField } from "./handoffPromptSanitization.js";
 import { currentItem, getPath, isPlainObject, readObjectField } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
@@ -198,13 +198,23 @@ export function resolveTemplateValue(key: string, state: MateriaCastState): unkn
 
 export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaCastState): unknown[] {
   if (!shouldUseIsolatedMateriaContext(state)) return messages;
-  const materiaStart = findActiveMateriaPromptIndex(messages);
+  // Anchor on the active socket's own hidden materia prompt: match the latest
+  // pi-materia-prompt custom message whose details.socketId and materiaName
+  // agree with the current cast state. This excludes prior socket prompts that
+  // also carry a <materia-instructions> block, which content-only discovery
+  // cannot distinguish from the current socket's prompt.
+  const materiaStart = findActiveMateriaPromptIndex(messages, {
+    socketId: currentSocketId(state),
+    materiaName: state.currentMateria,
+  });
   if (materiaStart < 0) return messages;
-  // Drop pi-materia orchestration-only custom messages (e.g. quest runner status
-  // cards) that the runtime appends after the hidden pi-materia-prompt. They are
-  // user-facing display only and must never become agent context. The materia
-  // prompt itself, assistant/tool/toolResult turns, and genuine user refinement
-  // messages are preserved because they are not orchestration custom messages.
+  // Drop pi-materia orchestration-only custom messages (visible "◆ Materia" /
+  // "Casting <name>" transition cards, quest runner status cards, and anything
+  // tagged details.orchestration/prefix/eventType) that the runtime emits around
+  // the hidden pi-materia-prompt. They are user-facing display only and must
+  // never become agent context. The hidden pi-materia-prompt itself,
+  // assistant/tool/toolResult turns, and genuine user refinement messages are
+  // preserved because they are not display-only orchestration custom messages.
   const preserved = messages.slice(materiaStart).filter((message) => !isOrchestrationOnlyMessage(message));
   return [createUserMessage(buildSyntheticCastContext(state)), ...preserved];
 }
@@ -261,31 +271,51 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
  * JSON sockets store their authoritative parsed payload in `state.lastJson`
  * and a matching re-stringified copy in `lastOutput`/`lastAssistantText`
  * (with the `event` side-channel already stripped). When those agree, the
- * previous output is canonical JSON handoff and we strip the renderable `text`
- * payload from the parsed form so prose reaches following materia only through
- * explicit assignment (e.g. `assign: { "prNotes": "$.text" }`) or templating
- * — not as default context. The authoritative raw JSON stays in `state.lastJson`
- * and the `lastJson` artifact for debugging and replay; this helper only
- * affects the displayed previous-output context.
+ * previous output is canonical JSON handoff and we defensively strip the
+ * `event` side-channel and the renderable `text` payload from the parsed form
+ * so only intentional fields reach following materia — prose flows only
+ * through explicit assignment (e.g. `assign: { "prNotes": "$.text" }`) or
+ * templating, and event side-channel data never leaks as default context.
+ * The authoritative raw JSON stays in `state.lastJson` and the `lastJson`
+ * artifact for debugging and replay; this helper only affects the displayed
+ * previous-output context.
  *
- * Free-text (parse:"text") outputs never match a parsed `lastJson`, so they are
- * passed through unchanged. Returns undefined when there is no previous output
- * or the previous JSON output carried only a renderable `text` payload, so no
+ * Display-card/banner strings that leak from the runtime UI into
+ * `lastAssistantText`/`lastOutput` (e.g. "Casting **X**", "◆ Materia: ...",
+ * or prompt-banner eventType text) are suppressed entirely: they are
+ * orchestration-only and must never become agent input.
+ *
+ * Free-text (parse:"text") outputs never match a parsed `lastJson`, so they
+ * are passed through unchanged (unless they are display noise). Returns
+ * undefined when there is no previous output, the output is display noise, or
+ * the previous JSON output carried only a renderable `text` payload, so no
  * empty/noisy section is emitted.
  */
 export function sanitizePreviousOutput(state: MateriaCastState): string | undefined {
   const latestOutput = state.lastAssistantText ?? state.lastOutput;
   if (typeof latestOutput !== "string" || latestOutput.length === 0) return undefined;
+  // Suppress orchestration-only display cards/banner strings leaked from the
+  // runtime UI so they cannot become agent input via previous output.
+  if (isMateriaDisplayNoise(latestOutput)) return undefined;
   const lastJson = state.lastJson;
-  // Only sanitize when lastJson is the parsed form of latestOutput. JSON
-  // sockets set both to the same compact re-stringified payload on completion,
-  // so agreement reliably identifies canonical JSON handoff without touching
-  // free-text (parse:"text") outputs, which never pair lastJson with their own
-  // raw text this way. This also tolerates a stale lastJson left by an earlier
-  // JSON socket after an intervening text socket: its stringification will not
-  // match the text output, so the prose-free text output is shown unchanged.
-  if (isPlainObject(lastJson) && JSON.stringify(lastJson) === latestOutput) {
-    return stripRenderableTextField(lastJson);
+  if (!isPlainObject(lastJson)) return latestOutput;
+  // Defensively strip the event side-channel. The runtime normally strips
+  // event before storing lastJson and re-stringifying lastOutput, but this
+  // guarantees event data never reaches downstream prompts via this path even
+  // for stale/unexpected payloads. Returns the same reference when there is
+  // no event field.
+  const eventStripped = stripEventSideChannelField(lastJson);
+  // Identify canonical JSON handoff via agreement between the parsed form and
+  // the raw output. JSON sockets set both to the same compact re-stringified
+  // payload on completion, so agreement reliably identifies canonical JSON
+  // handoff without touching free-text (parse:"text") outputs, which never
+  // pair lastJson with their own raw text this way. Accept agreement against
+  // either the event-stripped form (normal) or the raw event-bearing form
+  // (defensive), then re-emit with event + renderable text stripped.
+  const agreesClean = JSON.stringify(eventStripped) === latestOutput;
+  const agreesRawWithEvent = eventStripped !== lastJson && JSON.stringify(lastJson) === latestOutput;
+  if (agreesClean || agreesRawWithEvent) {
+    return stripRenderableTextField(eventStripped);
   }
   return latestOutput;
 }
@@ -297,11 +327,16 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
 
+  const requirements = deriveSocketOutputRequirements({
+    socket: effectiveResolvedSocketConfig(socket),
+    socketId: socket.id,
+    workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
+  });
   const exposureMode = activeMultiTurn ? "/materia continue finalization" : "single-turn JSON sockets";
   return [
     "Canonical handoff contract context:",
     `Synthetic context exposure policy: include this concise contract summary only for ${exposureMode} that are already expected to produce final JSON. Do not expose it during multi-turn refinement; refinement turns must remain conversational until /materia continue. The authoritative final-output instructions are still injected separately by prompt assembly.`,
-    HANDOFF_CONTRACT_DOC_TEXT,
+    formatHandoffContractDocText({ renderableTextIntent: requirements.renderableTextIntent }),
   ].join("\n\n");
 }
 
@@ -311,6 +346,9 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
  * Per docs/runtime-eventing.md §11, this is injected into synthetic cast
  * context to teach JSON-output materia how to emit optional `event` arrays.
  * Text sockets are never shown this context since they cannot produce JSON.
+ * Field references are scoped to the active socket's renderable-text intent,
+ * so non-text sockets (planner/evaluator/maintainer/chain-context) never see
+ * `text` in the event side-channel wording.
  */
 export function syntheticEventEmissionContext(state: MateriaCastState): string | undefined {
   const socket = activeResolvedSocket(state);
@@ -319,10 +357,88 @@ export function syntheticEventEmissionContext(state: MateriaCastState): string |
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
 
-  return EVENT_EMISSION_CONTEXT_TEXT;
+  const requirements = deriveSocketOutputRequirements({
+    socket: effectiveResolvedSocketConfig(socket),
+    socketId: socket.id,
+    workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
+  });
+  return formatEventEmissionContextText({ renderableTextIntent: requirements.renderableTextIntent });
 }
 
-export function findActiveMateriaPromptIndex(messages: unknown[]): number {
+/** Active socket identity used to anchor prompt discovery on the current turn. */
+export interface ActiveMateriaPromptLookup {
+  /** Current socket id. When set, only prompts with a matching details.socketId are preferred. */
+  socketId?: string;
+  /** Current materia name. When set, only prompts with a matching details.materiaName are preferred. */
+  materiaName?: string;
+}
+
+interface MateriaPromptCandidate {
+  socketId?: string;
+  materiaName?: string;
+  hasMetadata: boolean;
+}
+
+/**
+ * Locate the active socket's hidden materia prompt so buildIsolatedMateriaContext
+ * can anchor isolated agent context on it.
+ *
+ * Discovery prefers metadata-aware matching for the active socket: the latest
+ * pi-materia-prompt custom message whose details.socketId and materiaName match
+ * the current cast state. This excludes prior socket prompts even when they too
+ * contain a <materia-instructions> block, which content-only discovery cannot
+ * distinguish. When a socket-anchored lookup is requested but only a prior
+ * socket's prompt is present, no content fallback occurs: the prior prompt is
+ * excluded rather than leaked, and the caller returns the transcript unchanged.
+ *
+ * The defensive content-only fallback is reached only when metadata cannot
+ * anchor discovery — either the lookup carries no socket id/materia name, or no
+ * candidate pi-materia-prompt message carries socket/materia details at all
+ * (older runtime versions, tests, mocks). In that case the latest message that
+ * contains a <materia-instructions> block is selected, preserving prior behavior.
+ */
+export function findActiveMateriaPromptIndex(messages: unknown[], lookup?: ActiveMateriaPromptLookup): number {
+  const hasLookupCriteria = Boolean(lookup && (lookup.socketId || lookup.materiaName));
+  let sawPromptWithMetadata = false;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const candidate = readMateriaPromptCandidate(messages[i]);
+    if (!candidate) continue;
+    if (candidate.hasMetadata) sawPromptWithMetadata = true;
+    if (hasLookupCriteria && materiaPromptCandidateMatches(candidate, lookup!)) return i;
+  }
+
+  // A socket-anchored lookup was requested and at least one prompt carried
+  // socket/materia metadata, yet none matched the active socket. Do not fall
+  // back to content-only discovery: that could surface a prior socket's prompt.
+  if (hasLookupCriteria && sawPromptWithMetadata) return -1;
+
+  // Defensive fallback: metadata cannot anchor discovery (no lookup criteria, or
+  // no candidate carries socket/materia details). Fall back to content-only
+  // discovery of the latest <materia-instructions> block.
+  return findContentAnchoredPromptIndex(messages);
+}
+
+/** Reads the socket/materia metadata (if any) from a pi-materia-prompt message. */
+function readMateriaPromptCandidate(message: unknown): MateriaPromptCandidate | undefined {
+  if (typeof message !== "object" || message === null) return undefined;
+  const record = message as { customType?: unknown; details?: unknown };
+  if (record.customType !== "pi-materia-prompt") return undefined;
+  const details = typeof record.details === "object" && record.details !== null ? (record.details as Record<string, unknown>) : {};
+  const socketId = typeof details.socketId === "string" ? details.socketId : undefined;
+  const materiaName = typeof details.materiaName === "string" ? details.materiaName : undefined;
+  return { socketId, materiaName, hasMetadata: socketId !== undefined || materiaName !== undefined };
+}
+
+/** A candidate matches when it carries metadata that agrees with the lookup. */
+function materiaPromptCandidateMatches(candidate: MateriaPromptCandidate, lookup: ActiveMateriaPromptLookup): boolean {
+  if (!candidate.hasMetadata) return false;
+  if (lookup.socketId !== undefined && candidate.socketId !== lookup.socketId) return false;
+  if (lookup.materiaName !== undefined && candidate.materiaName !== lookup.materiaName) return false;
+  return true;
+}
+
+function findContentAnchoredPromptIndex(messages: unknown[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i] as { content?: unknown; role?: unknown };
     if (isToolOrAssistantMessage(message)) continue;
@@ -338,14 +454,19 @@ export function isToolOrAssistantMessage(message: { role?: unknown }): boolean {
 
 /**
  * Detects pi-materia orchestration-only custom messages that must never become
- * agent context. Quest runner lifecycle cards (and any card explicitly flagged
- * orchestration) are user-facing display only; they carry no agent input and are
- * filtered from isolated materia context even when the runtime appends them
- * after the hidden pi-materia-prompt. Only `role: "custom"` messages are
- * considered, so the materia prompt, assistant/tool/toolResult turns, and
- * ordinary user refinement messages are always preserved. See sendQuestMessage
- * in src/index.ts, which stamps these cards with details.orchestration === true
- * and details.prefix === "quest".
+ * agent context. Visible during-cast transition/status cards and quest runner
+ * lifecycle cards (plus any card explicitly flagged orchestration) are
+ * user-facing display only; they carry no agent input and are filtered from
+ * isolated materia context even when the runtime appends them after the hidden
+ * pi-materia-prompt. A message is orchestration-only when it is `role: "custom"`
+ * and its details carry `orchestration === true`, `prefix === "materia"`,
+ * `prefix === "quest"`, or `eventType === "materia_prompt"`. The hidden
+ * pi-materia-prompt carries none of these signatures, so it is always preserved.
+ * Only `role: "custom"` messages are considered, so the materia prompt,
+ * assistant/tool/toolResult turns, and ordinary user refinement messages are
+ * always preserved. See sendMateriaTurn in src/runtime/nativeLifecycle.ts
+ * (prefix "materia" / eventType "materia_prompt" transition cards) and
+ * sendQuestMessage in src/index.ts (prefix "quest" lifecycle cards).
  */
 export function isOrchestrationOnlyMessage(message: unknown): boolean {
   if (typeof message !== "object" || message === null) return false;
@@ -353,11 +474,19 @@ export function isOrchestrationOnlyMessage(message: unknown): boolean {
   if (record.role !== "custom") return false;
   const details = record.details;
   if (typeof details !== "object" || details === null) return false;
-  const detailRecord = details as { orchestration?: unknown; prefix?: unknown };
+  const detailRecord = details as { orchestration?: unknown; prefix?: unknown; eventType?: unknown };
   if (detailRecord.orchestration === true) return true;
-  // Defense-in-depth: quest-prefix cards are orchestration display messages
-  // even if the explicit flag is missing on a runner lifecycle path.
-  return detailRecord.prefix === "quest";
+  // Defense-in-depth: transition/status cards are orchestration display messages
+  // even when the explicit flag is missing. During casts the runtime emits a
+  // visible "◆ Materia" / "Casting <name>" card (prefix "materia", eventType
+  // "materia_prompt") right before the hidden pi-materia-prompt, and the quest
+  // runner emits prefix "quest" lifecycle cards. The hidden pi-materia-prompt
+  // itself carries none of these signatures (no orchestration/prefix/eventType
+  // in its details), so it is always preserved as agent context. Only
+  // role:"custom" messages are considered, so user/assistant/tool/toolResult
+  // turns and ordinary user refinement messages are never filtered.
+  if (detailRecord.prefix === "materia" || detailRecord.prefix === "quest") return true;
+  return detailRecord.eventType === "materia_prompt";
 }
 
 export function createUserMessage(content: string): unknown {

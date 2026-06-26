@@ -603,4 +603,21 @@ describe('LoadoutListPanel', () => {
     expect(onSetDefaultLoadout).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Active loadout is now Gamma'));
   });
+
+  it('disables the active runtime loadout controls when runtimeActiveLoadoutControlsEnabled is false (central mode)', () => {
+    const onSetRuntimeActiveLoadout = vi.fn(async (name: string) => name);
+    renderPanel({ runtimeActiveLoadoutControlsEnabled: false, onSetRuntimeActiveLoadout });
+
+    const activeSelect = screen.getByLabelText('Configured active loadout') as HTMLSelectElement;
+    expect(activeSelect.disabled).toBe(true);
+    expect(activeSelect.title).toBe('A local session is required to change the active runtime loadout.');
+
+    // The per-row "Set configured active" action is also guarded off. A real
+    // browser cannot interact with a disabled control; assert the disabled
+    // attribute rather than dispatching an event through it.
+    fireEvent.click(within(cardFor('Beta')).getByLabelText('Loadout actions'));
+    const menu = screen.getByRole('menu', { name: 'Actions for Beta' });
+    expect(within(menu).getByRole('menuitem', { name: 'Set configured active' }).hasAttribute('disabled')).toBe(true);
+    expect(onSetRuntimeActiveLoadout).not.toHaveBeenCalled();
+  });
 });

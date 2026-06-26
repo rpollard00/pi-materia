@@ -7,13 +7,14 @@ import { handleMateriaWebUiRequest } from './routes.js';
 // backend modules next to it.
 export { buildMateriaModelCatalog } from './modelCatalog.js';
 export { DEFAULT_RUNTIME_EVENT_LIMIT, RUNTIME_EVENTS_RELATIVE_PATH, readRuntimeEvents } from './runtimeEventReader.js';
+export { WEBUI_BACKEND_SERVICE, handleBackendModeRoute, isCentralSameOrigin, resolveBackendMode, resolveCentralApiBaseUrl, resolveCentralOrigin, } from './mode.js';
 const defaultStaticDir = resolve(fileURLToPath(new URL('../../../dist/webui/client', import.meta.url)));
 export function createMateriaWebUiServer(options = {}) {
     const host = options.host ?? '127.0.0.1';
     const port = options.port ?? 0;
     const staticDir = resolve(options.staticDir ?? defaultStaticDir);
     const server = createServer(async (req, res) => {
-        await handleMateriaWebUiRequest(req, res, { staticDir, session: options.session });
+        await handleMateriaWebUiRequest(req, res, { staticDir, session: options.session, ...(options.mode !== undefined ? { mode: options.mode } : {}) });
     });
     return { server, host, port, staticDir };
 }

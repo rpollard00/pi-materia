@@ -4,6 +4,47 @@ import type { MateriaConfig, PipelineConfig, PipelineSocket } from '../loadoutMo
 
 export type SaveTarget = 'user' | 'project' | 'explicit';
 
+/**
+ * Operating mode reported by backend mode discovery
+ * (docs/enterprise-control-plane.md §2). Defined locally to keep the frontend
+ * response shape self-contained and decoupled from the backend application
+ * layer.
+ */
+export type BackendControlPlaneMode = 'local-only' | 'central-connected' | 'central-admin';
+
+/** Per-surface capability flags for separate central vs. local rendering. */
+export interface BackendModeCapabilities {
+  catalog?: boolean;
+  modelPolicy?: boolean;
+  telemetry?: boolean;
+  admin?: boolean;
+}
+
+/** Frontend-facing endpoint routing hint returned by backend mode discovery. */
+export interface BackendModeEndpointDescriptor {
+  available?: boolean;
+  sameOrigin?: boolean;
+  baseUrl?: string;
+}
+
+/**
+ * `GET /api/backend-mode` response body. Tells the frontend whether it is
+ * connected to same-origin local session APIs, a configured central control
+ * plane, or both, plus per-surface capability metadata.
+ */
+export interface BackendModeResponse {
+  ok?: boolean;
+  scope?: string;
+  service?: string;
+  mode?: BackendControlPlaneMode;
+  hasLocalSession?: boolean;
+  hasCentral?: boolean;
+  centralApiBaseUrl?: string;
+  capabilities?: BackendModeCapabilities;
+  endpoints?: { local?: BackendModeEndpointDescriptor; central?: BackendModeEndpointDescriptor };
+  label?: string;
+}
+
 export interface MateriaFormState {
   editingSocketId: string;
   name: string;
@@ -35,7 +76,10 @@ export interface SocketPropertyFormState {
   layoutY: string;
 }
 
-export type LoadoutSourceScope = 'default' | 'user' | 'project' | 'explicit';
+// Read-only `central` provenance is included so central-catalog definitions
+// surface distinctly and are treated as non-writable (they are never a save
+// target). See docs/enterprise-control-plane.md §5.
+export type LoadoutSourceScope = 'default' | 'central' | 'user' | 'project' | 'explicit';
 
 export interface LoadedConfigResponse {
   config?: MateriaConfig;
@@ -146,6 +190,90 @@ export interface ModelCatalogResponse {
 }
 
 export type ModelCatalogLoadState = 'idle' | 'loading' | 'ready' | 'error';
+
+// ───────────────────────────────────────────────────────────────────────
+// Central model-policy / model-catalog (docs/enterprise-control-plane.md §11)
+//
+// These mirror the central control-plane `/api/model-policy` and
+// `/api/model-catalog` response shapes but are defined locally here so the
+// frontend stays decoupled from the backend application layer (the same way
+// `BackendModeResponse` is). Central model-policy state is read and rendered
+// **independently** from local Pi model availability: the panel below the local
+// model selector reflects what the central control plane declares, not what
+// the local runtime currently offers.
+// ───────────────────────────────────────────────────────────────────────
+
+/** A model reference declared by a central model-policy document. */
+export interface CentralModelPolicyModelRef {
+  value: string;
+  label?: string;
+}
+
+/** Thinking-level constraint declared by a central model-policy document. */
+export interface CentralModelPolicyThinkingConstraint {
+  allow?: readonly string[];
+  max?: string;
+}
+
+/** Severity the central control plane assigns to unsatisfiable constraints. */
+export type CentralModelPolicySeverity = 'advisory' | 'enforced';
+
+/**
+ * A central model-policy document, served independently of local Pi model
+ * availability. Field semantics follow §11: `deny` is hard; `allow`
+ * constrains the selectable set; `prefer` is advisory; `thinking` constrains
+ * thinking-level selection.
+ */
+export interface CentralModelPolicyDocument {
+  id: string;
+  name?: string;
+  description?: string;
+  allow?: readonly CentralModelPolicyModelRef[];
+  deny?: readonly CentralModelPolicyModelRef[];
+  prefer?: readonly CentralModelPolicyModelRef[];
+  thinking?: CentralModelPolicyThinkingConstraint;
+  severity?: CentralModelPolicySeverity;
+  /** Central version of the policy document (provenance/drift). */
+  version?: string;
+  /** RFC3339 timestamp the policy was last updated centrally. */
+  updatedAt?: string;
+}
+
+/** `GET /api/model-policy` envelope: the active policy, when one is configured. */
+export interface CentralModelPolicyResponse {
+  ok?: boolean;
+  scope?: string;
+  service?: string;
+  activePolicyId?: string;
+  policy?: CentralModelPolicyDocument;
+}
+
+/** A model the central control plane knows about, independent of local runtime availability. */
+export interface CentralModelCatalogEntry {
+  value: string;
+  label?: string;
+  vendor?: string;
+  supportedThinkingLevels?: readonly string[];
+  deprecated?: boolean;
+  notes?: string;
+}
+
+/** Optional central model-catalog metadata served separately from local Pi availability. */
+export interface CentralModelCatalog {
+  entries: readonly CentralModelCatalogEntry[];
+  updatedAt?: string;
+}
+
+/** `GET /api/model-catalog` envelope: optional central catalog metadata. */
+export interface CentralModelCatalogResponse {
+  ok?: boolean;
+  scope?: string;
+  service?: string;
+  catalog?: CentralModelCatalog;
+}
+
+/** Load state for central model-policy/catalog reads. */
+export type CentralModelPolicyLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface OriginalMateriaModelSettings {
   editingSocketId: string;

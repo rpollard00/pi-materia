@@ -2,7 +2,7 @@ import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent
 import type { MateriaAgentConfig, MateriaCastState } from "../types.js";
 import { resolveToolScope, type ResolvedToolScope } from "../domain/toolScope.js";
 import { addUsage, extractMessageModelInfo, extractUsage } from "../telemetry/usage.js";
-import { currentSocketId, currentTaskAttempt } from "./sessionState.js";
+import { currentSocketId, currentSocketVisit, currentTaskAttempt } from "./sessionState.js";
 
 export function findLatestAssistantEntry(entries: SessionEntry[], afterId?: string): { entry: SessionEntry; message: unknown } | undefined {
   const afterIndex = afterId ? entries.findIndex((e) => e.id === afterId) : -1;
@@ -11,6 +11,74 @@ export function findLatestAssistantEntry(entries: SessionEntry[], afterId?: stri
     if (entry.type === "message" && (entry.message as any).role === "assistant") return { entry, message: entry.message };
   }
   return undefined;
+}
+
+export interface StaleCompletionReason {
+  reason: "active_turn_socket_mismatch" | "active_turn_boundary_duplicate";
+  activeTurnSocketId: string;
+  activeTurnVisit: number;
+  activeTurnMateria?: string;
+  activeTurnBoundaryEntryId?: string;
+  currentSocketId?: string;
+  latestEntryId: string;
+}
+
+/**
+ * Classify whether the latest assistant entry is a duplicate or stale
+ * completion that does not belong to the turn currently awaiting an agent
+ * response. Returns undefined when the entry belongs to the active turn, or
+ * when no active-turn provenance is recorded (backward-compatible pass-through
+ * for revived casts that predate this metadata).
+ */
+export function describeStaleCompletion(state: MateriaCastState, latestEntryId: string): StaleCompletionReason | undefined {
+  const activeTurn = state.activeTurn;
+  if (!activeTurn) return undefined;
+  const current = currentSocketId(state);
+  if (activeTurn.socketId !== current) {
+    return {
+      reason: "active_turn_socket_mismatch",
+      activeTurnSocketId: activeTurn.socketId,
+      activeTurnVisit: activeTurn.visit,
+      ...(activeTurn.materia !== undefined ? { activeTurnMateria: activeTurn.materia } : {}),
+      ...(activeTurn.boundaryEntryId !== undefined ? { activeTurnBoundaryEntryId: activeTurn.boundaryEntryId } : {}),
+      ...(current !== undefined ? { currentSocketId: current } : {}),
+      latestEntryId,
+    };
+  }
+  // Defensive boundary guard: the boundary entry itself was already processed
+  // as the prior turn's completion, so a latest entry pinned to it is stale.
+  if (activeTurn.boundaryEntryId !== undefined && latestEntryId === activeTurn.boundaryEntryId) {
+    return {
+      reason: "active_turn_boundary_duplicate",
+      activeTurnSocketId: activeTurn.socketId,
+      activeTurnVisit: activeTurn.visit,
+      ...(activeTurn.materia !== undefined ? { activeTurnMateria: activeTurn.materia } : {}),
+      activeTurnBoundaryEntryId: activeTurn.boundaryEntryId,
+      ...(current !== undefined ? { currentSocketId: current } : {}),
+      latestEntryId,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Record active-turn provenance on cast state at prompt-dispatch time so
+ * handleAgentEnd can reject duplicate or stale completions for other turns.
+ * Captures the current socket id, visit, materia, and the session entry
+ * boundary (lastProcessedEntryId) after which an assistant response is valid.
+ */
+export function recordActiveTurnProvenance(state: MateriaCastState): void {
+  const socketId = currentSocketId(state);
+  if (socketId === undefined) {
+    state.activeTurn = undefined;
+    return;
+  }
+  state.activeTurn = {
+    socketId,
+    visit: currentSocketVisit(state, 0),
+    ...(state.currentMateria !== undefined ? { materia: state.currentMateria } : {}),
+    ...(state.lastProcessedEntryId !== undefined ? { boundaryEntryId: state.lastProcessedEntryId } : {}),
+  };
 }
 
 export function assistantText(message: unknown): string {
