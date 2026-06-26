@@ -364,11 +364,64 @@ export interface EventSink {
   deliver(event: EnrichedEvent): Promise<void>;
   /** Optional flush — called when the bus wants sinks to finalize pending writes. */
   flush?(): Promise<void>;
+  /**
+   * Optional — present on sinks that deliver asynchronously (e.g. webhook).
+   *
+   * When present, the event bus treats the sink as async: {@link deliver}
+   * returns before the actual delivery is known, so the bus records an
+   * initial `queued` result and reconciles it with the real outcome drained
+   * here during {@link EventBus.flush}. Sinks without this method are treated
+   * as synchronous (their {@link deliver} result is final at dispatch time).
+   */
+  drainResults?(): AsyncDispatchResult[];
 }
 
 // ── Dispatch Outcomes ───────────────────────────────────────────────────
 
-/** A single sink delivery failure captured during dispatch. */
+/**
+ * The lifecycle state of a single event's delivery to a single sink.
+ *
+ * Used by {@link DispatchSinkResult} so the dispatch artifact can distinguish
+ * real outcomes for async sinks (webhook) instead of falsely recording a
+ * delivery the moment {@link EventSink.deliver} returns.
+ */
+export type DispatchStatus =
+  /** HTTP/webhook delivery completed successfully (2xx) or a sync sink delivered. */
+  | "delivered"
+  /** Delivery failed after exhausting retries, or hit a non-retryable error. */
+  | "failed"
+  /** The sink intentionally did not deliver (disabled or filtered out by eventFilter). */
+  | "skipped"
+  /** Handed to an async sink but the real outcome is not yet known (pre-flush). */
+  | "queued"
+  /** The sink configuration is unusable (missing/invalid URL, etc.) — not retried. */
+  | "misconfigured";
+
+/**
+ * Machine-readable reason codes for non-delivered statuses.
+ *
+ * These align with the webhook activation diagnostic reasons in
+ * docs/runtime-eventing.md §9.6 where applicable so artifact consumers can
+ * correlate dispatch failures with startup diagnostics.
+ */
+export type DispatchFailureReason =
+  | "disabled"
+  | "filtered_out"
+  | "http_error"
+  | "timeout"
+  | "network_error"
+  | "unknown_error"
+  | "deliver_threw"
+  | "target_url_missing"
+  | "target_url_invalid";
+
+/**
+ * A single sink delivery failure captured during dispatch (legacy shape).
+ *
+ * @deprecated Prefer the richer {@link DispatchSinkResult} on
+ * {@link DispatchOutcome.sinks}. This type is retained for backward-compatible
+ * artifact consumers and is derived from `sinks[]` by the event bus.
+ */
 export interface DispatchFailure {
   /** Sink id that failed. */
   sinkId: string;
@@ -377,18 +430,57 @@ export interface DispatchFailure {
 }
 
 /**
+ * Per-sink result for a single event, the authoritative dispatch detail.
+ *
+ * Aggregated in {@link DispatchOutcome.sinks}. The legacy `deliveredTo` and
+ * `failures` fields are derived from this list.
+ */
+export interface DispatchSinkResult {
+  /** Sink id this result describes. */
+  sinkId: string;
+  /** Final lifecycle status of the delivery. */
+  status: DispatchStatus;
+  /** HTTP response status code when available (webhook sinks). */
+  statusCode?: number;
+  /** Machine-readable reason for non-delivered statuses. */
+  reason?: DispatchFailureReason;
+  /** Redacted error/detail message for failed/misconfigured statuses. */
+  error?: string;
+}
+
+/**
+ * A {@link DispatchSinkResult} tied to a specific event.
+ *
+ * Async sinks (webhook) drain a flat list of these so the event bus can
+ * reconcile each result back to the originating buffered outcome by
+ * {@link DispatchOutcome.eventId}.
+ */
+export interface AsyncDispatchResult extends DispatchSinkResult {
+  /** The event this result applies to. */
+  eventId: string;
+}
+
+/**
  * Per-event dispatch outcome recorded to the dispatch artifact.
  *
- * Tracks which sinks received the event and any failures.
+ * Tracks which sinks received the event and any failures. The authoritative
+ * detail lives in {@link sinks}; {@link deliveredTo} and {@link failures} are
+ * backward-compatible derived views.
  */
 export interface DispatchOutcome {
   /** The event's unique identifier. */
   eventId: string;
-  /** Sink ids that successfully received this event. */
+  /**
+   * Authoritative per-sink results. Always populated by the event bus for
+   * outcomes produced via {@link EventBus.dispatch}; manually-constructed
+   * outcomes (e.g. test fixtures) may omit it.
+   */
+  sinks?: DispatchSinkResult[];
+  /** Sink ids that successfully received this event (derived from `sinks`). */
   deliveredTo: string[];
-  /** Sink failures (if any). */
+  /** Sink failures (if any) — derived from `sinks`. */
   failures: DispatchFailure[];
-  /** ISO 8601 timestamp of dispatch completion. */
+  /** ISO 8601 timestamp of dispatch completion / finalization. */
   occurredAt: string;
 }
 

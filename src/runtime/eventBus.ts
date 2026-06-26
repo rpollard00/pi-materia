@@ -1,8 +1,10 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type {
+  AsyncDispatchResult,
   DispatchFailure,
   DispatchOutcome,
+  DispatchSinkResult,
   EnrichedEvent,
   EventSink,
 } from "../domain/eventing.js";
@@ -44,45 +46,81 @@ export class EventBus {
    * Dispatch a single enriched event to all enabled sinks.
    *
    * Each sink is tried independently. A sink failure is captured as a
-   * {@link DispatchFailure} but does not abort dispatch to other sinks or
-   * cause the dispatch call to throw.
+   * {@link DispatchSinkResult} with status `failed` but does not abort
+   * dispatch to other sinks or cause the dispatch call to throw.
+   *
+   * Synchronous sinks (those without {@link EventSink.drainResults}) resolve
+   * to a final `delivered` / `failed` status immediately. Async sinks (e.g.
+   * webhook) resolve to a provisional `queued` status here; their real outcome
+   * is reconciled from {@link EventSink.drainResults} during {@link flush}.
    *
    * Returns the {@link DispatchOutcome} for this event. The outcome is also
-   * recorded internally and can be flushed to the dispatch artifact.
+   * recorded internally and can be flushed to the dispatch artifact. Its
+   * `deliveredTo` / `failures` legacy fields are derived from `sinks[]`.
    */
   async dispatch(event: EnrichedEvent): Promise<DispatchOutcome> {
-    const deliveredTo: string[] = [];
-    const failures: DispatchFailure[] = [];
+    const sinkResults: DispatchSinkResult[] = [];
 
     for (const sink of this.#sinks) {
-      if (!sink.enabled) continue;
+      if (!sink.enabled) {
+        sinkResults.push({ sinkId: sink.id, status: "skipped", reason: "disabled" });
+        continue;
+      }
+      const isAsync = typeof sink.drainResults === "function";
       try {
         await sink.deliver(event);
-        deliveredTo.push(sink.id);
+        sinkResults.push(
+          isAsync
+            ? { sinkId: sink.id, status: "queued" }
+            : { sinkId: sink.id, status: "delivered" },
+        );
       } catch (error) {
-        failures.push({
+        sinkResults.push({
           sinkId: sink.id,
+          status: "failed",
+          reason: "deliver_threw",
           error: redactErrorMessage(error),
         });
       }
     }
 
-    const outcome: DispatchOutcome = {
-      eventId: event.eventId,
-      deliveredTo,
-      failures,
-      occurredAt: new Date().toISOString(),
-    };
-
+    const outcome: DispatchOutcome = this.#buildOutcome(event.eventId, sinkResults);
     this.#outcomes.push(outcome);
     return outcome;
   }
 
   /**
-   * Call `flush()` on every sink that supports it.
+   * Build a {@link DispatchOutcome} from per-sink results, deriving the
+   * legacy `deliveredTo` / `failures` views.
+   */
+  #buildOutcome(eventId: string, sinks: DispatchSinkResult[]): DispatchOutcome {
+    const deliveredTo: string[] = [];
+    const failures: DispatchFailure[] = [];
+    for (const r of sinks) {
+      if (r.status === "delivered") {
+        deliveredTo.push(r.sinkId);
+      } else if (r.status === "failed" || r.status === "misconfigured") {
+        failures.push({ sinkId: r.sinkId, error: r.error ?? defaultFailureMessage(r) });
+      }
+    }
+    return {
+      eventId,
+      sinks,
+      deliveredTo,
+      failures,
+      occurredAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Call `flush()` on every sink that supports it, then reconcile any
+   * provisional `queued` results with the real async outcomes drained from
+   * each sink.
    *
    * Flush failures are captured per-sink but do not throw. This is best-effort
-   * finalization intended for terminal cast phases.
+   * finalization intended for terminal cast phases. After this resolves,
+   * buffered outcomes reflect actual webhook delivery results (delivered /
+   * failed / skipped / misconfigured) rather than a provisional `queued`.
    */
   async flush(): Promise<void> {
     for (const sink of this.#sinks) {
@@ -94,6 +132,76 @@ export class EventBus {
         // separately via the existing events.jsonl diagnostics path.
       }
     }
+    this.#reconcileAsyncResults();
+  }
+
+  /**
+   * Drain per-event results from every async sink and fold the real outcomes
+   * back into buffered {@link DispatchOutcome}s, replacing provisional
+   * `queued` entries and re-deriving the legacy `deliveredTo` / `failures`.
+   *
+   * This is the bridge that makes the dispatch artifact reflect actual
+   * webhook HTTP outcomes (per docs/runtime-eventing.md §5.2). Results that
+   * do not match a still-buffered outcome (e.g. the outcome was already
+   * drained/written) are dropped — best-effort.
+   */
+  #reconcileAsyncResults(): void {
+    const byEvent = new Map<string, AsyncDispatchResult[]>();
+    for (const sink of this.#sinks) {
+      if (!sink.drainResults) continue;
+      for (const r of sink.drainResults()) {
+        let arr = byEvent.get(r.eventId);
+        if (!arr) {
+          arr = [];
+          byEvent.set(r.eventId, arr);
+        }
+        arr.push(r);
+      }
+    }
+    if (byEvent.size === 0) return;
+
+    for (const outcome of this.#outcomes) {
+      const results = byEvent.get(outcome.eventId);
+      if (!results) continue;
+      const sinks = outcome.sinks;
+      if (!sinks) continue;
+      let changed = false;
+      for (let i = 0; i < sinks.length; i++) {
+        const entry = sinks[i];
+        if (entry.status !== "queued") continue;
+        const match = results.find((r) => r.sinkId === entry.sinkId);
+        if (!match) continue;
+        sinks[i] = {
+          sinkId: match.sinkId,
+          status: match.status,
+          statusCode: match.statusCode,
+          reason: match.reason,
+          error: match.error,
+        };
+        changed = true;
+      }
+      if (changed) {
+        this.#rederiveLegacyFields(outcome);
+        outcome.occurredAt = new Date().toISOString();
+      }
+    }
+  }
+
+  /** Re-derive `deliveredTo` / `failures` from an outcome's `sinks[]`. */
+  #rederiveLegacyFields(outcome: DispatchOutcome): void {
+    const sinks = outcome.sinks;
+    if (!sinks) return;
+    const deliveredTo: string[] = [];
+    const failures: DispatchFailure[] = [];
+    for (const r of sinks) {
+      if (r.status === "delivered") {
+        deliveredTo.push(r.sinkId);
+      } else if (r.status === "failed" || r.status === "misconfigured") {
+        failures.push({ sinkId: r.sinkId, error: r.error ?? defaultFailureMessage(r) });
+      }
+    }
+    outcome.deliveredTo = deliveredTo;
+    outcome.failures = failures;
   }
 
   /**
@@ -220,4 +328,21 @@ function redactErrorMessage(error: unknown): string {
     return trimmed.length > 200 ? `${trimmed.slice(0, 197)}...` : trimmed;
   }
   return "Unknown sink error";
+}
+
+/**
+ * Default redacted message for a failed/misconfigured sink result that lacks
+ * an explicit `error` string, so legacy `failures[]` entries stay informative.
+ */
+function defaultFailureMessage(result: DispatchSinkResult): string {
+  switch (result.status) {
+    case "misconfigured":
+      return result.reason === "target_url_missing"
+        ? `Sink "${result.sinkId}" has no target URL`
+        : `Sink "${result.sinkId}" target URL is invalid`;
+    case "failed":
+      return `Sink "${result.sinkId}" delivery failed`;
+    default:
+      return `Sink "${result.sinkId}" was not delivered`;
+  }
 }

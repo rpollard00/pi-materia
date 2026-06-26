@@ -1074,6 +1074,186 @@ describe("WebhookSink", () => {
   });
 });
 
+// ── drainResults: rich per-event async dispatch outcomes ───────────────
+
+describe("WebhookSink drainResults (real async dispatch outcomes)", () => {
+  test("delivered result carries status and HTTP status code", async () => {
+    const { server, url } = await startRecordingServer(
+      () => new Response("ok", { status: 200 }),
+    );
+    try {
+      const sink = new WebhookSink(webhookConfig({ url }));
+      const event = makeResultEvent();
+      await sink.deliver(event);
+      await sink.flush();
+
+      const results = sink.drainResults();
+      expect(results).toHaveLength(1);
+      expect(results[0].eventId).toBe(event.eventId);
+      expect(results[0].sinkId).toBe("test-webhook");
+      expect(results[0].status).toBe("delivered");
+      expect(results[0].statusCode).toBe(200);
+      expect(results[0].reason).toBeUndefined();
+      expect(results[0].error).toBeUndefined();
+
+      // Draining clears the buffer.
+      expect(sink.drainResults()).toEqual([]);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("5xx failure records failed status, status code, and http_error reason", async () => {
+    const { server, url } = await startRecordingServer(
+      () => new Response("server error", { status: 500 }),
+    );
+    try {
+      const sink = new WebhookSink(webhookConfig({ url, maxRetries: 0 }));
+      await sink.deliver(makeResultEvent());
+      await sink.flush();
+
+      const [result] = sink.drainResults();
+      expect(result.status).toBe("failed");
+      expect(result.statusCode).toBe(500);
+      expect(result.reason).toBe("http_error");
+      expect(result.error).toContain("HTTP 500");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("4xx non-retryable failure is recorded without retrying", async () => {
+    let hits = 0;
+    const { server, url } = await startRecordingServer(
+      () => { hits++; return new Response("bad request", { status: 400 }); },
+    );
+    try {
+      const sink = new WebhookSink(webhookConfig({ url, maxRetries: 3 }));
+      await sink.deliver(makeResultEvent());
+      await sink.flush();
+
+      const [result] = sink.drainResults();
+      expect(result.status).toBe("failed");
+      expect(result.statusCode).toBe(400);
+      expect(result.reason).toBe("http_error");
+      // 4xx must not be retried even with a high maxRetries.
+      expect(hits).toBe(1);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("network error records failed status with network_error reason and no status code", async () => {
+    // Closed localhost port → immediate connection refused (not a timeout race).
+    const sink = new WebhookSink(
+      webhookConfig({ url: "http://localhost:9/webhook", maxRetries: 0, timeoutMs: 5000 }),
+    );
+    await sink.deliver(makeResultEvent());
+    await sink.flush();
+
+    const [result] = sink.drainResults();
+    expect(result.status).toBe("failed");
+    expect(result.reason).toBe("network_error");
+    expect(result.statusCode).toBeUndefined();
+    expect(result.error).not.toContain("at ");
+    expect(result.error).not.toContain("webhookSink.ts");
+  });
+
+  test("timeout records failed status with timeout reason", async () => {
+    const { server, url } = await startRecordingServer(
+      () => new Promise((resolve) => setTimeout(() => resolve(new Response("ok", { status: 200 })), 1000)),
+    );
+    try {
+      const sink = new WebhookSink(webhookConfig({ url, timeoutMs: 50, maxRetries: 0 }));
+      await sink.deliver(makeResultEvent());
+      await sink.flush();
+
+      const [result] = sink.drainResults();
+      expect(result.status).toBe("failed");
+      expect(result.reason).toBe("timeout");
+      expect(result.error).toContain("timed out");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("filtered-out event records skipped status with filtered_out reason (no network call)", async () => {
+    let hits = 0;
+    const { server, url } = await startRecordingServer(
+      () => { hits++; return new Response("ok", { status: 200 }); },
+    );
+    try {
+      const sink = new WebhookSink(
+        webhookConfig({ url, eventFilter: { include: ["result.*"] } }),
+      );
+      const event = makeEvent({ type: "lifecycle.heartbeat" });
+      await sink.deliver(event);
+      await sink.flush();
+
+      const [result] = sink.drainResults();
+      expect(result.eventId).toBe(event.eventId);
+      expect(result.status).toBe("skipped");
+      expect(result.reason).toBe("filtered_out");
+      // The filtered event never reached the server.
+      expect(hits).toBe(0);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("missing URL records misconfigured status with target_url_missing reason", async () => {
+    const sink = new WebhookSink(webhookConfig({ url: "" }));
+    const event = makeResultEvent();
+    await sink.deliver(event);
+    await sink.flush();
+
+    const [result] = sink.drainResults();
+    expect(result.eventId).toBe(event.eventId);
+    expect(result.status).toBe("misconfigured");
+    expect(result.reason).toBe("target_url_missing");
+    expect(result.error).toContain("missing");
+  });
+
+  test("non-http URL records misconfigured status with target_url_invalid reason", async () => {
+    const sink = new WebhookSink(webhookConfig({ url: "ftp://example.com/hook" }));
+    await sink.deliver(makeResultEvent());
+    await sink.flush();
+
+    const [result] = sink.drainResults();
+    expect(result.status).toBe("misconfigured");
+    expect(result.reason).toBe("target_url_invalid");
+    expect(result.error).toContain("http(s)");
+  });
+
+  test("malformed URL records misconfigured status with target_url_invalid reason", async () => {
+    const sink = new WebhookSink(webhookConfig({ url: "not-a-url" }));
+    await sink.deliver(makeResultEvent());
+    await sink.flush();
+
+    const [result] = sink.drainResults();
+    expect(result.status).toBe("misconfigured");
+    expect(result.reason).toBe("target_url_invalid");
+  });
+
+  test("drainOutcomes legacy adapter derives deliveredTo/failures from rich results", async () => {
+    const { server, url } = await startRecordingServer(
+      () => new Response("ok", { status: 201 }),
+    );
+    try {
+      const sink = new WebhookSink(webhookConfig({ url }));
+      await sink.deliver(makeResultEvent());
+      await sink.flush();
+
+      const outcomes = sink.drainOutcomes();
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes[0].deliveredTo).toEqual(["test-webhook"]);
+      expect(outcomes[0].failures).toEqual([]);
+    } finally {
+      server.stop();
+    }
+  });
+});
+
 // ── globMatch through matchesFilter — additional corner cases ───────────
 
 describe("globMatch corner cases", () => {

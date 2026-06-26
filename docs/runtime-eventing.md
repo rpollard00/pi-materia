@@ -261,11 +261,37 @@ A companion artifact records dispatch outcomes per event:
 {runDir}/events/dispatch.jsonl
 ```
 
-Each line records which sinks received the event and any failures:
+Each line records the per-sink outcome for one event. The authoritative detail
+lives in the `sinks` array; `deliveredTo` and `failures` are backward-compatible
+derived views:
 
 ```jsonl
-{"eventId":"evt_abc...","deliveredTo":["local-recording","agent-controller-webhook"],"failures":[],"occurredAt":"2026-06-16T22:00:00.100Z"}
+{"eventId":"evt_abc...","occurredAt":"2026-06-16T22:00:00.100Z","sinks":[{"sinkId":"local-recording","status":"delivered"},{"sinkId":"agent-controller-webhook","status":"delivered","statusCode":200}],"deliveredTo":["local-recording","agent-controller-webhook"],"failures":[]}
 ```
+
+Because webhook delivery is non-blocking (§6.5), the event bus records a
+provisional `queued` status for a webhook sink at dispatch time and reconciles
+the **real** outcome (drained from the sink) during the cast's terminal
+`flush()`. The persisted artifact therefore reflects actual HTTP results rather
+than a falsely-optimistic "delivered" recorded the moment the event was queued.
+This is what makes agent_router integration gaps (wrong URL, 4xx/5xx, filtered
+out, missing/invalid URL) debuggable from cast artifacts.
+
+Per-sink `status` values:
+
+| Status | Meaning |
+|--------|---------|
+| `delivered` | Synchronous sink delivered, or webhook returned 2xx. Includes `statusCode`. |
+| `failed` | Delivery failed after retries, or hit a non-retryable error. Includes `statusCode` (when known), `reason`, and a redacted `error`. |
+| `skipped` | The sink intentionally did not deliver — disabled or excluded by `eventFilter`. Includes `reason` (`disabled` or `filtered_out`). |
+| `queued` | Handed to an async sink but the real outcome is not yet known (pre-flush). |
+| `misconfigured` | The sink configuration is unusable (missing/invalid URL). Not retried. Includes `reason` (`target_url_missing` / `target_url_invalid`). |
+
+`reason` codes align with the webhook activation diagnostics in §9.6
+(`http_error`, `timeout`, `network_error`, `filtered_out`, `disabled`,
+`target_url_missing`, `target_url_invalid`, etc.) so artifact consumers can
+correlate dispatch failures with startup diagnostics. Error/detail strings are
+redacted per §6.6 (no header values, tokens, or query strings).
 
 ### 5.3 Separation from Existing events.jsonl
 
