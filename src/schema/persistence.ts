@@ -35,10 +35,24 @@ export interface CurrentPersistedLoadout {
   source?: LoadoutSource;
   lockState?: LoadoutUserLockState;
   originDefaultId?: string;
+  catalogOrigin?: CurrentPersistedCatalogOrigin;
   entry: string;
   sockets?: Record<string, CurrentPersistedSocket>;
   loops?: Record<string, CurrentPersistedLoop>;
   layout?: MateriaPipelineLayoutConfig;
+}
+
+/**
+ * Persisted catalog origin provenance for a local loadout/materia copy that
+ * originated from a central catalog item (docs/enterprise-control-plane.md §14.1).
+ * Mirrors the domain `CatalogOriginProvenance`; kept structurally loose so schema
+ * handling does not depend on the domain layer.
+ */
+export interface CurrentPersistedCatalogOrigin {
+  catalogItemId: string;
+  catalogVersion: string;
+  catalogContentHash: string;
+  source: "user" | "project" | "explicit";
 }
 
 export interface CurrentPersistedSocket {
@@ -177,10 +191,20 @@ function serializePipelineLoadout(loadout: MateriaPipelineConfig): CurrentPersis
     ...(loadout.source ? { source: loadout.source } : {}),
     ...(loadout.lockState ? { lockState: loadout.lockState } : {}),
     ...(loadout.originDefaultId ? { originDefaultId: loadout.originDefaultId } : {}),
+    ...(loadout.catalogOrigin ? { catalogOrigin: serializeCatalogOrigin(loadout.catalogOrigin) } : {}),
     entry: loadout.entry,
     sockets: serializeCanonicalSockets(loadout.sockets ?? {}) as Record<string, CurrentPersistedSocket>,
     ...(loadout.layout ? { layout: cloneRecord(loadout.layout) } : {}),
     ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, serializePipelineLoop(loop)])) } : {}),
+  };
+}
+
+function serializeCatalogOrigin(origin: NonNullable<MateriaPipelineConfig["catalogOrigin"]>): CurrentPersistedCatalogOrigin {
+  return {
+    catalogItemId: origin.catalogItemId,
+    catalogVersion: origin.catalogVersion,
+    catalogContentHash: origin.catalogContentHash,
+    source: origin.source,
   };
 }
 

@@ -8,11 +8,16 @@ export interface DefaultLoadoutResolution {
   warning?: string;
 }
 
+// Lower rank = higher precedence (first match wins on id ties). Mirrors config
+// precedence: bundled defaults < central catalog < user < project < explicit
+// (docs/enterprise-control-plane.md §5). `central` outranks shipped defaults
+// but is always overridden by a local user/project/explicit definition.
 const SOURCE_RANK: Record<MateriaConfigLayerScope, number> = {
   explicit: 0,
   project: 1,
   user: 2,
-  default: 3,
+  central: 3,
+  default: 4,
 };
 
 export function resolveDefaultLoadout(
@@ -111,7 +116,7 @@ function sourceRank(source: MateriaConfigLayerScope | undefined): number {
 }
 
 function isLoadoutSource(value: string | undefined): value is MateriaConfigLayerScope {
-  return value === "default" || value === "user" || value === "project" || value === "explicit";
+  return value === "default" || value === "central" || value === "user" || value === "project" || value === "explicit";
 }
 
 function synthesizedLoadoutId(source: MateriaConfigLayerScope | undefined, name: string): string {

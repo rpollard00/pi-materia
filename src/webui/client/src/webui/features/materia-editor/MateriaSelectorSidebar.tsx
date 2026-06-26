@@ -33,6 +33,7 @@ interface MateriaSelectorBadge {
 
 function sourceLabel(source: LoadoutSourceScope | undefined): string {
   if (source === 'default') return 'Built-in';
+  if (source === 'central') return 'Central';
   if (source === 'user') return 'User';
   if (source === 'project') return 'Project';
   if (source === 'explicit') return 'Explicit';

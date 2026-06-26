@@ -286,4 +286,64 @@ describe("native JSON prompt handoff contract guidance", () => {
     expect(prompt).toContain("Respond in prose.");
     expectPromptOmitsJsonOnlyHandoffContract(prompt);
   });
+
+  test("non-text JSON sockets suppress generic text guidance in the assembled prompt", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "Check", parse: "json", edges: [{ when: "satisfied", to: "end" }] },
+          },
+        },
+      },
+      materia: {
+        Check: { tools: "readOnly", prompt: "Evaluate the result against acceptance." },
+      },
+    });
+
+    await harness.runCommand("materia", "cast non-text json suppression");
+
+    const [prompt] = promptMessages(harness);
+    // Required JSON instructions present.
+    expect(prompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(prompt).toContain("Emit only the fields relevant to this socket's configured placement, routing, and assignments");
+    expect(prompt).toContain('"satisfied" at $.satisfied: boolean');
+    // Non-text field list with explicit no-text guidance; no renderable-text prose.
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, and context");
+    expect(prompt).toContain("do not emit a top-level text field");
+    expect(prompt).not.toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
+    expect(prompt).not.toContain('top-level "text" string');
+    expect(prompt).not.toContain("primary user-facing text");
+  });
+
+  test("explicit $.text assignment sockets opt into top-level text guidance in the assembled prompt", async () => {
+    const harness = await makeHarness({
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "Test",
+      loadouts: {
+        Test: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": { materia: "Narrate", parse: "json", assign: { prNotes: "$.text" } },
+          },
+        },
+      },
+      materia: {
+        Narrate: { tools: "readOnly", prompt: "Narrate the result as renderable prose." },
+      },
+    });
+
+    await harness.runCommand("materia", "cast text opt-in");
+
+    const [prompt] = promptMessages(harness);
+    // Text-enabled field list and renderable-prose emit instruction.
+    expect(prompt).toContain("Final output format: Return only one top-level JSON object");
+    expect(prompt).toContain("Agent handoff fields are limited to workItems, satisfied, context, and text");
+    expect(prompt).toContain("$.text for assignment to prNotes");
+    expect(prompt).toContain('top-level "text" string');
+    expect(prompt).toContain("primary user-facing text");
+  });
 });

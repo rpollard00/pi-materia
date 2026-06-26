@@ -68,7 +68,8 @@ describe("Materia role prompt generation service", () => {
   test("builds generator prompts with concise central handoff contract guidance", () => {
     const prompt = buildRoleGenerationPrompt("create an evaluator role", { extraInstructions: "Keep it terse." });
 
-    expect(prompt).toContain("describe only socket-relevant fields from the small contract: workItems, satisfied, context, and text");
+    expect(prompt).toContain("describe only socket-relevant fields from the small contract. The default explanatory handoff fields are workItems, satisfied, and context");
+    expect(prompt).toContain("reserve explanatory notes for context");
     expect(prompt).not.toContain("entire canonical envelope");
     expect(prompt).not.toContain("pi-materia canonical handoff JSON contract:");
     expect(prompt).not.toContain("Legacy names such as \"passed\"");

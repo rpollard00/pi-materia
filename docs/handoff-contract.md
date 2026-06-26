@@ -4,20 +4,32 @@ JSON-parsed agent sockets hand off reusable work context by returning a single J
 
 ## Agent handoff fields
 
-Agent-authored handoff JSON is intentionally small. The only top-level fields in the agent contract are:
+Agent-authored handoff JSON is intentionally small. The agent contract splits into **default handoff fields**, available to every JSON agent socket, and an **opt-in renderable-text payload**, used only by sockets whose primary product is displayable prose.
+
+Default handoff fields (any JSON agent socket):
 
 - `workItems`: an optional array of generated or refined work units.
 - `satisfied`: an optional boolean reserved for `satisfied` / `not_satisfied` graph control.
-- `context`: optional explanatory text for downstream agents.
-- `text`: optional renderable prose — the materia's primary user-facing text output (for example narration, notes, or a description). See [Renderable text payloads](#renderable-text-payloads).
+- `context`: optional explanatory text for downstream agents. This is the default cross-socket field for handoff notes: whenever an evaluator, maintainer, planner, architect, or chain-context socket has explanatory prose to pass along, it goes in `context`.
 
-Shape reference:
+Opt-in renderable text (only renderable-prose sockets):
+
+- `text`: optional renderable prose — the materia's primary user-facing text output (for example narration, notes, or a description). Most sockets do not emit `text`; emit it only when this socket carries explicit renderable-text intent or an assignment consumes `$.text`. See [Renderable text payloads](#renderable-text-payloads).
+
+`context` is the default. A typical evaluator, maintainer, planner, architect, or chain-context socket emits `workItems`, `satisfied`, and/or `context` only — never `text`:
 
 ```json
 {
   "workItems": [],
   "satisfied": true,
-  "context": "plain text handoff context",
+  "context": "plain text handoff context"
+}
+```
+
+A renderable-prose socket additionally emits top-level `text`, and should not duplicate it into `context`:
+
+```json
+{
   "text": "optional renderable prose payload"
 }
 ```
@@ -29,7 +41,7 @@ Do not ask agents to emit a broad envelope. Obsolete broad-envelope fields such 
 `text` is the canonical field for materia whose primary product is displayable prose (for example a Narrate materia producing a cast summary, or a materia that turns a description into branch-name notes). It lets a text-style materia emit JSON-first output while still appearing to the user as clean text.
 
 - The raw JSON `text` value is authoritative. TUI rendering is a one-way presentation layer; rendered text must never replace or mutate the underlying JSON handoff or cast state.
-- Emit `text` only when this socket's main product is renderable prose that downstream materia may consume. Do not duplicate narration into `context`.
+- Emit `text` only when this socket carries explicit renderable-text intent or its assignment consumes `$.text`. Do not duplicate narration into `context`; ordinary evaluator/maintainer/planner explanations belong in `context`, not `text`.
 - `text` is a current-output payload, not automatic shared state. It is not mirrored into `state.data.envelope` or accumulated into any implicit collection, and it is not injected into following prompts unless a socket explicitly asks for it. The authoritative raw value stays in `state.lastJson` (and the `lastJson` artifact) for debugging and replay.
 - Downstream materia consume `text` only through an explicit socket assignment (for example `assign: { "prNotes": "$.text" }`), which persists the value into a named `state.data` slot, or through a prompt template that reads that slot. Consumption is opt-in per graph; narration is never hard-wired to a consumer.
 - Use `context` for accumulating cross-socket handoff notes. Use `text` for the materia's discrete prose payload.
@@ -103,7 +115,7 @@ Graph-control fields remain outside utility state: `workItems` drives loops and 
 
 ## Prompt layering
 
-Prompt assembly should describe only the socket-relevant fields. Generator/planner prompts should ask for `workItems` with `title` and `context`. Evaluator prompts should ask for `satisfied` plus textual `context` when useful. Do not copy a full runtime state schema into role-generation prompts or socket suffixes.
+Prompt assembly should describe only the socket-relevant fields. Generator/planner prompts should ask for `workItems` with `title` and `context`. Evaluator prompts should ask for `satisfied` plus textual `context` when useful. Renderable `text` guidance should appear only for sockets that opt into renderable prose (explicit intent or `$.text` assignment); never add generic `text` guidance to a non-text JSON socket. Do not copy a full runtime state schema into role-generation prompts or socket suffixes.
 
 ## Generator pipeline contract
 

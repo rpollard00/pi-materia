@@ -29,9 +29,66 @@ describe("handoff JSON runtime validation", () => {
   test("accepts renderable text payloads as canonical agent handoff output", () => {
     const value = { text: "## Summary\n\nImplemented the toggle and added tests." };
     expect(validateHandoffJsonOutput(value, { socketId: "Narrate", socket: socket({ assign: { narration: "$.text" } }), agentOutput: true })).toBe(value);
-    // text is optional and may combine with other canonical fields.
+    // A text-enabled socket may combine renderable text with other canonical
+    // fields (here satisfied routing + handoff context).
     const combined = { text: "narration prose", satisfied: true, context: "handoff notes" };
-    expect(validateHandoffJsonOutput(combined, { socketId: "Narrate", socket: socket({ edges: [{ when: "satisfied", to: "Next" }] }), agentOutput: true })).toBe(combined);
+    expect(validateHandoffJsonOutput(combined, { socketId: "Narrate", socket: socket({ assign: { narration: "$.text" }, edges: [{ when: "satisfied", to: "Next" }] }), agentOutput: true })).toBe(combined);
+  });
+
+  test("repairs a duplicate top-level text payload on a non-text Auto-Eval-style socket to context-only", () => {
+    let caught: unknown;
+    try {
+      validateHandoffJsonOutput({ satisfied: true, context: "Verified wiring matches the requested parameters.", text: "The runtime is correctly wired in both configuration and implementation." }, { socketId: "Auto-Eval", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }), agentOutput: true });
+    } catch (error) {
+      caught = error;
+    }
+    const issues = handoffValidationIssues(caught);
+    expect(issues?.map((issue) => issue.path)).toContain("$.text");
+    const textIssue = issues?.find((issue) => issue.path === "$.text");
+    expect(textIssue?.message).toContain("Duplicate");
+    expect(textIssue?.message).toContain("not configured for renderable text output");
+    // Repair guidance tells the model to drop text and keep context.
+    expect(textIssue?.reason).toContain("Drop \"text\"");
+    expect(textIssue?.reason).toContain("keep your explanation in \"context\"");
+  });
+
+  test("repairs a lone top-level text payload on a non-text socket by moving prose into context", () => {
+    let caught: unknown;
+    try {
+      validateHandoffJsonOutput({ satisfied: true, text: "Stray narration prose without context." }, { socketId: "Auto-Eval", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }), agentOutput: true });
+    } catch (error) {
+      caught = error;
+    }
+    const issues = handoffValidationIssues(caught);
+    const textIssue = issues?.find((issue) => issue.path === "$.text");
+    expect(textIssue?.message).toContain("Unexpected");
+    expect(textIssue?.message).toContain("not configured for renderable text output");
+    // Repair guidance tells the model to move prose into context.
+    expect(textIssue?.reason).toContain("Move your explanatory prose into \"context\"");
+  });
+
+  test("does not flag misplaced text when socket requirements are unknown", () => {
+    // Without socket/requirements metadata, intent cannot be derived, so the
+    // misplaced-text repair stays permissive (type checks still apply).
+    const value = { satisfied: true, text: "prose" };
+    expect(validateHandoffJsonOutput(value, { socketId: "Auto-Eval", agentOutput: true })).toBe(value);
+  });
+
+  test("keeps the text type issue and does not double-report misplaced text for non-string text", () => {
+    let caught: unknown;
+    try {
+      validateHandoffJsonOutput({ satisfied: true, text: { prose: true } }, { socketId: "Auto-Eval", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }), agentOutput: true });
+    } catch (error) {
+      caught = error;
+    }
+    const issues = handoffValidationIssues(caught);
+    expect(issues?.filter((issue) => issue.path === "$.text")).toHaveLength(1);
+    expect(issues?.find((issue) => issue.path === "$.text")?.expected).toBe("string");
+  });
+
+  test("does not flag misplaced text for utility (non-agent) JSON outputs", () => {
+    const value = { satisfied: true, context: "ok", text: "renderable prose" };
+    expect(validateHandoffJsonOutput(value, { socketId: "Echo", socket: socket({ edges: [{ when: "satisfied", to: "Maintain" }] }), agentOutput: false })).toBe(value);
   });
 
   test("accepts canonical satisfied booleans for satisfied routing", () => {

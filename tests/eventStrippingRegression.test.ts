@@ -16,6 +16,11 @@ async function makeHarness(config: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
+/** Flush deferred prompt dispatch (setTimeout(0)) so a routed target socket's prompt is sent before its response is simulated. */
+async function flushDeferredDispatch(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 /**
  * Single JSON agent socket that routes to end.
  */
@@ -342,6 +347,11 @@ describe("event stripping regression — downstream context", () => {
     let state = lastState(harness);
     expect(state.currentSocketId).toBe("Socket-2");
     expect(JSON.stringify(state.data)).not.toContain(EVENT_SIDECHANNEL_FIELD);
+
+    // The routed Socket-2 prompt is dispatched on a deferred (setTimeout 0)
+    // boundary; flush it so Socket-2's response arrives after its prompt, as it
+    // would in real Pi (and so active-turn provenance points at Socket-2).
+    await flushDeferredDispatch();
 
     // Socket-2 (Build): emit another event
     harness.appendAssistantMessage(JSON.stringify({

@@ -3,6 +3,7 @@ import { handleGetConfigRoute, handlePostConfigRoute } from './config.js';
 import { handleDefaultLoadoutRoute } from './defaultLoadout.js';
 import { handleHealthRoute } from './health.js';
 import { sendJson } from './http.js';
+import { handleBackendModeRoute } from './mode.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
 import { handleMonitorEventsRoute, handleMonitorSnapshotRoute } from './monitor.js';
 import { handleProfileRoleGenerationRoute } from './profileRoleGeneration.js';
@@ -16,6 +17,17 @@ import { serveStatic } from './static.js';
 export async function handleMateriaWebUiRequest(req, res, deps) {
     if (req.url?.startsWith('/api/health')) {
         handleHealthRoute(res, { sessionKey: deps.session?.key });
+        return;
+    }
+    // Backend mode discovery (docs/enterprise-control-plane.md §8). The prefix
+    // is `/api/backend-mode` (not `/api/mode`) so it cannot collide with
+    // `/api/models` under the dispatcher's `startsWith` matching.
+    if (req.url?.startsWith('/api/backend-mode')) {
+        if (req.method && req.method !== 'GET') {
+            sendJson(res, 405, { ok: false, error: 'Use GET to read backend mode discovery.' });
+            return;
+        }
+        handleBackendModeRoute(res, deps.mode ?? {});
         return;
     }
     if (req.url?.startsWith('/api/models')) {
