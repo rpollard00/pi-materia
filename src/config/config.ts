@@ -23,6 +23,7 @@ import {
 } from "./centralCatalogSource.js";
 import { resolveConfigCatalogDrift } from "./catalogDrift.js";
 import { isValidCatalogOriginProvenance, type CatalogOriginProvenance } from "../domain/catalogProvenance.js";
+import { readEventingEnvOverlay, type EventingEnvSource } from "../eventing/envOverlay.js";
 
 /**
  * Options for {@link loadConfig}.
@@ -77,7 +78,11 @@ export async function loadConfig(cwd: string, configuredPath?: string, options: 
 
   const loadedLayers = layers.filter((layer) => layer.loaded);
   const profile = await loadProfileConfig();
-  const config = await mergeConfigLayers(partials);
+  // Apply the in-memory PI_MATERIA_EVENTING_* overlay AFTER all file-backed
+  // layers are merged so launch-time values (set by agent_router) take
+  // precedence over bundled/user/project/explicit config. The overlay is
+  // never written back to config files (docs/runtime-eventing.md §8.4).
+  const config = applyEventingEnvOverlay(await mergeConfigLayers(partials));
   const loadoutSources = buildLoadoutSources(partials, loadedLayers, new Set(Object.keys(partials[0]?.loadouts ?? {})));
   const materiaSources = buildMateriaSources(partials, loadedLayers);
   const defaultMateriaIds = Object.keys(partials[0]?.materia ?? {});
@@ -731,6 +736,43 @@ function mergeEventing(base: PiMateriaConfig["eventing"], parsed: Partial<PiMate
     presets: parsed.presets !== undefined ? mergePresets(base?.presets, parsed.presets) : base?.presets,
   };
   return merged;
+}
+
+/**
+ * Apply the documented `PI_MATERIA_EVENTING_*` environment overlay on top of a
+ * fully-merged config.
+ *
+ * Called from {@link loadConfig} after `mergeConfigLayers` so launch-time
+ * values supplied by a controller (e.g. agent_router) take precedence over
+ * every file-backed layer (default/central/user/project/explicit). The overlay
+ * only touches the top-level eventing switches (`enabled`, `presets`,
+ * `heartbeatIntervalMs`) parsed by {@link readEventingEnvOverlay}; configured
+ * sinks are preserved untouched and are merged additively for `presets`.
+ *
+ * The overlay is in-memory only: this function never writes to config files.
+ * Invalid documented values are ignored and surfaced as non-fatal warnings
+ * (mirroring the existing profile-config diagnostic pattern) so they never
+ * fail config load or unrelated local runs.
+ *
+ * @param config - The fully-merged config to overlay onto.
+ * @param env - Environment to read (defaults to `process.env`). Injected for
+ *   deterministic testing without mutating the real process environment.
+ * @returns A config with the env overlay applied, or the same `config` when no
+ *   documented variable was present.
+ */
+export function applyEventingEnvOverlay(
+  config: PiMateriaConfig,
+  env: EventingEnvSource = process.env,
+): PiMateriaConfig {
+  const { overlay, present, diagnostics } = readEventingEnvOverlay(env);
+  // Surface non-fatal diagnostics for invalid documented values. These mirror
+  // the warnInvalidProfileConfig pattern and never fail config load.
+  for (const diagnostic of diagnostics) {
+    console.warn(`[pi-materia] ${diagnostic.varName}: ${diagnostic.message}`);
+  }
+  if (!present) return config;
+  const eventing = mergeEventing(config.eventing, overlay);
+  return eventing === config.eventing ? config : { ...config, eventing };
 }
 
 function mergePresets(basePresets: string[] | undefined, parsedPresets: string[]): string[] {
