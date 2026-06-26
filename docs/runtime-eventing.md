@@ -563,6 +563,72 @@ written back to config files (it is persisted for the cast lifetime via the
 resolved config artifact). A diagnostic is surfaced in session logs when
 controller activation engages.
 
+#### 9.1.2 Launch Environment Contract
+
+agent_router and pi-materia communicate the eventing integration entirely
+through process environment variables at launch time. There are two distinct
+variable families; confusing them is the single most common cause of "webhooks
+fire at the wrong location / controller never sees state updates".
+
+**Family A — `CONTROLLER_*` (set by agent_router, read by pi-materia).**
+agent_router sets exactly these when it invokes pi (see agent_router docs
+§13b.5 / `PiMateriaRuntime.cs`):
+
+| Variable | Example value | Purpose |
+|----------|---------------|---------|
+| `CONTROLLER_RUN_ID` | `run_a1b2c3d4` | Controller run identifier; authoritative for event correlation. Primary runId resolution source (§9.3). |
+| `CONTROLLER_EVENT_URL` | `http://localhost:5103/runs/run_a1b2c3d4/events` | The **full POST endpoint** the agent-controller webhook targets. Used verbatim when it contains a path; query/fragment are stripped only for redaction in diagnostics (§6.6). |
+| `CONTROLLER_CONTEXT_DIR` | `/home/.../runs/run_a1b2c3d4/context` | Directory containing `controller-run.json` (written flat — no `.agent/` subdirectory). Fallback runId resolution source (§9.3). |
+
+agent_router does **not** set any `PI_MATERIA_EVENTING_*` variable. The
+controller launch is detected from the presence of any non-empty
+`CONTROLLER_*` var (§9.1.1), which is what auto-activates the preset.
+
+**Family B — `PI_MATERIA_EVENTING_*` (optional, launcher-set overlay).**
+A documented overlay a launcher may set to control the top-level eventing
+switches **without editing config files**. agent_router itself leaves these
+unset (relying on auto-activation), but a wrapper, test harness, or operator
+can set them — for example to force eventing on against a project config that
+disables it, or to opt out under a controller launch:
+
+| Variable | Format | Maps to | Parsing |
+|----------|--------|---------|---------|
+| `PI_MATERIA_EVENTING_ENABLED` | boolean | `eventing.enabled` | Case-insensitive `true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`. Any other value is ignored + warning. |
+| `PI_MATERIA_EVENTING_PRESETS` | list | `eventing.presets` (additive) | Split on commas and/or whitespace; de-duplicated, first-occurrence order preserved. Empty/all-separators → treated as unset (no diagnostic). |
+| `PI_MATERIA_EVENTING_HEARTBEAT_MS` | positive integer (ms) | `eventing.heartbeatIntervalMs` | Digits only (no `+`/`-`/decimals); must be `> 0`. Any other value is ignored + warning. |
+
+Overlay semantics (implemented in `src/eventing/envOverlay.ts`, applied by
+`src/config/config.ts#applyEventingEnvOverlay`):
+
+- **Only the three documented variables above are parsed.** Any other
+  `PI_MATERIA_EVENTING_*` variable (a typo or an invented name) is ignored
+  entirely — pi-materia will not act on or warn about it. If an overlay is
+  silently being ignored, confirm the variable name matches exactly.
+- **Unset / empty / whitespace-only values are ignored**, not treated as
+  "false" or "empty list". To disable eventing explicitly, set
+  `PI_MATERIA_EVENTING_ENABLED=false`.
+- **Invalid values are ignored and reported as a non-fatal warning** via
+  `console.warn` (mirroring profile-config diagnostics). They never fail
+  config load or the cast.
+- **Applied after `mergeConfigLayers`** — i.e. on top of
+  default/central/user/project/explicit config — so launch-time values win.
+  This is what lets an operator turn eventing on at launch even when the
+  project config left it disabled.
+- **In-memory only.** The overlay is never written back to config files. The
+  resolved config (overlay applied) is captured in the cast's
+  `config.resolved.json` artifact for inspection.
+- **Composed with controller auto-activation** per the precedence table in
+  §9.1.1: an explicit overlay value always wins per field; controller
+  activation only fills in fields the overlay left unset. So
+  `PI_MATERIA_EVENTING_ENABLED=false` is a hard opt-out even under a
+  controller launch, while `PI_MATERIA_EVENTING_PRESETS=agent-controller`
+  produces the same preset without relying on controller detection.
+
+The overlay deliberately does **not** expose webhook URL, headers, filters, or
+any sink-level detail — those come from preset expansion (§9.3/§9.4) reading
+the `CONTROLLER_*` family. Exposing only the top-level switches keeps the
+launcher contract small and avoids leaking secrets through env vars.
+
 ### 9.2 Event Mapping
 
 The preset maps pi-materia events to agent controller events:
@@ -663,6 +729,90 @@ instead of warnings, so a successful agent_router integration is positively
 confirmable from the artifact stream. Diagnostics are emitted once per cast
 initialization (at cast start and on recast/revive), reflecting the fully-resolved
 sink after preset expansion.
+
+### 9.7 Webhook Delivery Troubleshooting
+
+The end-to-end delivery path has several stages; a failure at any stage has a
+distinct, observable signature. Map an observed symptom to a root cause using
+the table below. Primary evidence sources:
+
+1. **Session log** (`console.warn`/`console.log` — `logs/pi.stderr.log` /
+   `logs/pi.stdout.log` under agent_router) for startup activation
+   diagnostics (§9.6).
+2. **`{runDir}/events/dispatch.jsonl`** for per-event delivery outcomes (§5.2).
+3. **`{runDir}/config.resolved.json`** to confirm the overlay resolved as
+   expected (§9.1.2).
+
+| Symptom | Evidence | Diagnostic / status reason | Likely cause | Fix |
+|---------|----------|----------------------------|--------------|-----|
+| Controller receives **no events at all** | session log | `eventing_disabled` | `eventing.enabled` is false in resolved config (project config disabled it and nothing re-enabled it). | Set `eventing.enabled=true`, or `PI_MATERIA_EVENTING_ENABLED=true` at launch. |
+| No events; preset missing | session log | `preset_missing` | Eventing on but `agent-controller` not in resolved `presets` and no `agent-controller-webhook` sink. | Add `"agent-controller"` to `eventing.presets`, or rely on auto-activation (ensure a `CONTROLLER_*` var is set). |
+| Manual/local run, no controller env | session log | `controller_environment_missing` | Preset referenced but launched outside agent_router with no `CONTROLLER_*` env. | Set `CONTROLLER_RUN_ID`/`CONTROLLER_EVENT_URL`/`CONTROLLER_CONTEXT_DIR`, or run under agent_router. |
+| Controller env present, sink created **disabled** | session log | `run_id_unresolved` | `CONTROLLER_RUN_ID` empty/unset and no `controller-run.json` in `CONTROLLER_CONTEXT_DIR`. | Set `CONTROLLER_RUN_ID`, or put a `controller-run.json` with a `runId` field in `CONTROLLER_CONTEXT_DIR`. |
+| Events POST to the **wrong location** (404 / not found) | `config.resolved.json` sink `url` | `target_url_missing`, or sink `url` contains literal `{runId}` | `CONTROLLER_EVENT_URL` is a bare origin (no path) **and** runId unresolved → URL becomes `…/runs/{runId}/events` with a placeholder; or `CONTROLLER_EVENT_URL` unset and runId unresolved. | Set `CONTROLLER_EVENT_URL` to the **full** endpoint, and resolve runId (row above). |
+| Sink URL rejected at startup | session log | `target_url_invalid` | `CONTROLLER_EVENT_URL` is relative, non-http(s), or malformed. | Provide an absolute `http://`/`https://` URL. |
+| Sink explicitly off | session log | `sink_disabled` | An explicit `agent-controller-webhook` sink has `enabled: false` (not due to runId). | Remove the override or set `enabled: true`. |
+| `dispatch.jsonl` stuck on `queued` | `dispatch.jsonl` status `queued` | — | The cast never reached a terminal flush path (crash/cancel before `bus.flush()`), so async results weren't reconciled. | Confirm the cast reached `lifecycle.cast.completed`/`failed`/`cancelled`; on crash the `queued` row is the best available evidence. |
+| `dispatch.jsonl` shows `failed` | `statusCode` (4xx) | `http_error` (4xx, not retried) | Controller rejected the body — most often a non-`runtime.*` `eventType` (422) or wrong route (404). | Verify event types map to `runtime.*` (§9.2); verify `CONTROLLER_EVENT_URL` route. |
+| `dispatch.jsonl` shows `failed` | `statusCode` (5xx) / `reason` | `http_error` (5xx, retried then failed) / `timeout` / `network_error` | Controller down, restarting, or unreachable; or request exceeded `timeoutMs`. | Check controller health; raise `timeoutMs`/`maxRetries` if transient. |
+| `dispatch.jsonl` shows `skipped` | `reason` | `filtered_out` / `disabled` | Event type isn't in the preset's `eventFilter.include` (e.g. an unmapped `result.*`), or sink was disabled mid-cast. | Expected for unmapped types (they aggregate into `runtime.completed`); add a sink `include` filter only if you want them delivered. |
+| `dispatch.jsonl` shows `misconfigured` | `reason` | `target_url_missing` / `target_url_invalid` | Sink URL unusable at dispatch (e.g. still the `{runId}` placeholder). Not retried. | Same fix as the `target_url_*` rows above; misconfigured dispatches are not retried. |
+
+The positive path: when everything is wired, the session log contains exactly
+one `info` diagnostic with reason `active` (and the redacted target URL), and
+`dispatch.jsonl` shows `delivered` with a 2xx `statusCode` for the
+`agent-controller-webhook` sink on every lifecycle and result event.
+
+### 9.8 End-to-End Example
+
+A representative agent_router launch sets only `CONTROLLER_*`:
+
+```bash
+# agent_router → pi-materia (set by PiMateriaRuntime.cs)
+CONTROLLER_RUN_ID=run_a1b2c3d4
+CONTROLLER_EVENT_URL=http://localhost:5103/runs/run_a1b2c3d4/events
+CONTROLLER_CONTEXT_DIR=/home/user/.agent-work-controller/runs/run_a1b2c3d4/context
+# controller-run.json exists in CONTROLLER_CONTEXT_DIR with { "runId": "run_a1b2c3d4", ... }
+```
+
+With no `PI_MATERIA_EVENTING_*` set and a project config that leaves eventing
+disabled, `loadConfig` resolves as follows:
+
+1. `mergeConfigLayers` produces `eventing.enabled=false` (project default).
+2. Controller launch is detected (`CONTROLLER_RUN_ID` present) →
+   `applyEventingEnvOverlay` auto-enables eventing and adds
+   `presets=["agent-controller"]` (in-memory; no config file written).
+3. At cast init, `initializeCastEventBus` expands the preset into an
+   `agent-controller-webhook` sink with:
+   - `url` = `CONTROLLER_EVENT_URL` (used verbatim — it already has a path),
+   - `X-Controller-Run-Id: run_a1b2c3d4` header,
+   - body mapping `type` → `runtime.*`, `castId` → `runtimeRunId`,
+     `debug` severity → `info`.
+4. Diagnostics emit one `info`/`active` entry; `config.resolved.json` shows
+   `eventing.enabled=true` and the resolved sink URL.
+
+During the cast, **both event sources flow through the same bus and the same
+sink** (confirming the §9.1.2 guarantee that the overlay affects materia and
+runtime events consistently):
+
+- Runtime emits `lifecycle.cast.started` → POSTed as `runtime.accepted`.
+- Materia emits `result.pr_created` (via the `event` side-channel, §2) →
+  POSTed as `runtime.pr_created`.
+- On completion, accumulated results derive `payload.outcome` (§10) and the
+  terminal `lifecycle.cast.completed` → POSTed as `runtime.completed` with
+  the derived outcome.
+
+Each POST appears in `{runDir}/events/dispatch.jsonl`:
+
+```jsonl
+{"eventId":"evt_...","occurredAt":"2026-06-26T21:30:00.000Z","sinks":[{"sinkId":"local-recording","status":"delivered"},{"sinkId":"agent-controller-webhook","status":"delivered","statusCode":200}],"deliveredTo":["local-recording","agent-controller-webhook"],"failures":[]}
+```
+
+If `CONTROLLER_RUN_ID` had been unset and no `controller-run.json` existed,
+the same launch would instead emit a `run_id_unresolved` warning, the sink
+would be created `enabled:false`, and `dispatch.jsonl` would show **no**
+`agent-controller-webhook` sink — which is exactly the "we never fired
+webhooks" gap this contract exists to make debuggable.
 
 ## 10. Result Accumulation and Final Outcome
 

@@ -116,6 +116,10 @@ The quest board (`/materia quest`) queues up project tasks and runs them back-to
 
 Quest state lives in `.pi/pi-materia/quest-board.json`. See [Quest board](docs/quest-board.md) for storage, autonomy, and restart behavior.
 
+### External controllers (agent_router)
+
+When an external controller (such as [agent_router](https://github.com/)) launches pi-materia autonomously, it sets `CONTROLLER_RUN_ID`, `CONTROLLER_EVENT_URL`, and `CONTROLLER_CONTEXT_DIR`. pi-materia detects the launch and auto-enables the `agent-controller` eventing preset so lifecycle and result events are POSTed back to the controller — no manual config required. A launcher can override the top-level switches with the `PI_MATERIA_EVENTING_*` env vars (e.g. `PI_MATERIA_EVENTING_ENABLED=false` to opt out). See [Runtime Eventing](docs/runtime-eventing.md) for the full env contract, activation diagnostics, and webhook troubleshooting.
+
 ### Use the WebUI
 
 `/materia ui` opens a local browser-based editor for:
