@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { nativeTestInternals } from "../src/castRuntime.js";
 import { applyEventingEnvOverlay } from "../src/config/config.js";
-import { EventBus, LocalEventRecordingSink, createEventBus } from "../src/runtime/eventBus.js";
+import { EventBus, LocalEventRecordingSink, createEventBus, flushBusOutcomes } from "../src/runtime/eventBus.js";
 import {
   ResultAccumulator,
   createSequenceCounter,
@@ -929,5 +929,96 @@ describe("agent-controller preset activation from environment", () => {
     const bus = initializeCastEventBus(config, state);
     expect(bus).toBeUndefined();
     expect(getEventBus(state)).toBeUndefined();
+  });
+
+  test("both materia result and lifecycle events flow through the real preset sink into dispatch.jsonl", async () => {
+    const { server, requests } = await startRecordingServer(
+      () => new Response("ok", { status: 200 }),
+    );
+    const eventUrl = `http://localhost:${server.port}/runs/run-e2e/events`;
+    try {
+      clearControllerEnv();
+      process.env.CONTROLLER_RUN_ID = "run-e2e";
+      process.env.CONTROLLER_EVENT_URL = eventUrl;
+
+      // Default config disabled → overlay activates eventing + preset (agent_router launch).
+      const config = applyEventingEnvOverlay(
+        { eventing: { enabled: false, presets: [], sinks: {}, heartbeatIntervalMs: 30000 } } as never,
+      );
+
+      const runDir = await tempDir();
+      const state = makeCastState({ castId: "test-ac-dispatch-artifact", runDir });
+      const bus = initializeCastEventBus(config, state);
+      expect(bus).toBeDefined();
+
+      try {
+        // The real agent-controller webhook sink is registered and enabled.
+        const acSink = bus!.sinks.find((s) => s.id === "agent-controller-webhook");
+        expect(acSink).toBeDefined();
+        expect(acSink!.enabled).toBe(true);
+
+        // 1. Runtime lifecycle event (lifecycle.cast.started → runtime.accepted).
+        await emitLifecycleEvent(state, "lifecycle.cast.started", {
+          severity: "info",
+          message: "cast started",
+        });
+
+        // 2. Materia-emitted result event (result.pr_created → runtime.pr_created),
+        //    dispatched through the same bus path the materia side-channel uses.
+        const seq = createSequenceCounter();
+        const ctx: EnrichmentContext = {
+          castId: state.castId,
+          socketId: "Socket-E2E",
+          materia: "Blackbelt-GH-PR",
+          visit: 1,
+        };
+        const [resultEvent] = enrichEvents(
+          [{ type: "result.pr_created", message: "PR #9 created", payload: { prUrl: "https://example/pr/9" } }],
+          ctx,
+          seq,
+          () => randomUUID(),
+        );
+        await bus!.dispatch(resultEvent);
+
+        // Flush background webhook delivery, reconcile async outcomes, persist.
+        await bus!.flush();
+        await flushBusOutcomes(bus!, runDir);
+
+        // Both events delivered to the controller with mapped runtime.* types.
+        expect(requests).toHaveLength(2);
+        const types = requests
+          .map((r) => (r.bodyJson as { eventType?: string } | undefined)?.eventType)
+          .sort();
+        expect(types).toEqual(["runtime.accepted", "runtime.pr_created"]);
+
+        // dispatch.jsonl records real reconciled outcomes (not provisional
+        // "queued"): both events delivered via the agent-controller sink with
+        // an HTTP status code, proving async dispatch outcome recording.
+        const dispatchPath = path.join(runDir, "events", "dispatch.jsonl");
+        const content = await readFile(dispatchPath, "utf8");
+        const lines = content.trim().split("\n");
+        expect(lines.length).toBe(2);
+        for (const line of lines) {
+          const outcome = JSON.parse(line);
+          const ac = (outcome.sinks as Array<{ sinkId: string; status: string; statusCode?: number }>)
+            .find((s) => s.sinkId === "agent-controller-webhook");
+          expect(ac).toBeDefined();
+          expect(ac!.status).toBe("delivered");
+          expect(ac!.statusCode).toBe(200);
+          expect(outcome.deliveredTo).toContain("agent-controller-webhook");
+          expect(outcome.failures).toEqual([]);
+        }
+      } finally {
+        removeEventBus(state.castId);
+      }
+    } finally {
+      server.stop();
+      if (originalRunId === undefined) delete process.env.CONTROLLER_RUN_ID;
+      else process.env.CONTROLLER_RUN_ID = originalRunId;
+      if (originalEventUrl === undefined) delete process.env.CONTROLLER_EVENT_URL;
+      else process.env.CONTROLLER_EVENT_URL = originalEventUrl;
+      if (originalContextDir === undefined) delete process.env.CONTROLLER_CONTEXT_DIR;
+      else process.env.CONTROLLER_CONTEXT_DIR = originalContextDir;
+    }
   });
 });

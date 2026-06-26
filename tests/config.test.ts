@@ -1981,4 +1981,31 @@ describe("eventing env overlay merge", () => {
       console.warn = originalWarn;
     }
   });
+
+  test("controller-launch activation is not persisted back to the config file", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-controller-nopersist-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previousProfile = process.env.PI_MATERIA_PROFILE_DIR;
+    const previousRunId = process.env.CONTROLLER_RUN_ID;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    // Simulate an agent_router launch: CONTROLLER_* set, PI_MATERIA_EVENTING_* absent.
+    process.env.CONTROLLER_RUN_ID = "run-controller-1";
+    try {
+      await saveMateriaConfigPatch(cwd, { eventing: { enabled: false } });
+      // loadConfig auto-activates eventing + the agent-controller preset in memory...
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.enabled).toBe(true);
+      expect(loaded.config.eventing?.presets).toEqual(["agent-controller"]);
+      // ...but the controller activation must NOT be written back to config files
+      // (docs/runtime-eventing.md §9.1.1: in-memory only).
+      const raw = JSON.parse(await readFile(getUserMateriaAssetPath(), "utf8"));
+      expect(raw.eventing.enabled).toBe(false);
+      expect(raw.eventing.presets ?? []).not.toContain("agent-controller");
+    } finally {
+      if (previousProfile === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previousProfile;
+      if (previousRunId === undefined) delete process.env.CONTROLLER_RUN_ID;
+      else process.env.CONTROLLER_RUN_ID = previousRunId;
+    }
+  });
 });

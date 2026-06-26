@@ -192,4 +192,29 @@ describe("initializeCastEventBus webhook diagnostics", () => {
     const events = await readEvents(runDir);
     expect(events.filter((e) => e.type === "eventing_webhook_diagnostic")).toEqual([]);
   });
+
+  test("emits controller_environment_missing when preset is referenced but no CONTROLLER_* env", async () => {
+    const runDir = await tempDir();
+    const state = makeState(runDir, "cast-no-controller-env");
+    // Eventing enabled + agent-controller preset referenced, but running outside
+    // a controller launch (manual config). No CONTROLLER_* env is set at all.
+    delete process.env.CONTROLLER_RUN_ID;
+    delete process.env.CONTROLLER_EVENT_URL;
+    delete process.env.CONTROLLER_CONTEXT_DIR;
+
+    const bus = initializeCastEventBus(
+      { eventing: { enabled: true, presets: ["agent-controller"] } },
+      state,
+    );
+    // A bus is created (eventing is enabled) even though the controller env is absent.
+    expect(bus).toBeDefined();
+
+    const events = await waitForDiagnostic(runDir, (ev) =>
+      diagnosticReasons(ev).includes("controller_environment_missing"),
+    );
+    const reasons = diagnosticReasons(events);
+    expect(reasons).toContain("controller_environment_missing");
+    // Must NOT be reported as active — the controller target cannot be resolved.
+    expect(reasons).not.toContain("active");
+  });
 });
