@@ -19,14 +19,12 @@
  * This is an ADDITIONAL sink alongside the existing artifact `events.jsonl`
  * writes (`appendEvent`); it never replaces or mutates them. Emission is
  * best-effort: a broken stdout pipe cannot fail or stall a cast.
- *
- * (cast_end / materia_start / materia_end wiring will be added by their own
- * work items following the same pattern.)
  */
 
 import {
   createStdoutLifecycleEmitter,
   shouldEmitStdoutLifecycle,
+  type StdoutLifecycleEmitter,
   type StdoutLifecycleSocket,
   type StdoutWriter,
 } from "../infrastructure/stdoutLifecycle.js";
@@ -258,5 +256,106 @@ export async function emitCastEndStdout(
     castId: input.castId,
     ok: input.ok,
     ...(input.error !== undefined ? { error: input.error } : {}),
+  });
+}
+
+// ── materia_start / materia_end ─────────────────────────────────────────
+
+/**
+ * Resolved data required to emit an informational materia lifecycle event.
+ *
+ * The controller's contract for `materia_start` / `materia_end` is minimal —
+ * just `type`, `materiaName`, and `socketName`. No cast identity is carried;
+ * these events bracket a single socket's materia execution (one start / one
+ * end per socket), and are informational. The `socketName` mirrors the
+ * `socketName` field of {@link StdoutLifecycleSocket} (i.e. the socket id),
+ * and `materiaName` mirrors `cast_start.sockets[].materiaName` (the resolved
+ * display name) so a controller can correlate the two.
+ */
+export interface StdoutMateriaLifecycleInput {
+  /**
+   * Active pi run mode. When omitted, {@link detectPiRunMode} is consulted so
+   * emission fires only for `pi --mode rpc`. Tests inject this directly to
+   * assert RPC vs non-RPC gating deterministically.
+   */
+  mode?: string;
+  /** Resolved materia display name (mirrors `cast_start.sockets[].materiaName`). */
+  materiaName: string;
+  /** Socket id within the loadout pipeline (mirrors `cast_start.sockets[].socketName`). */
+  socketName: string;
+}
+
+/**
+ * Build a mode-gated {@link StdoutLifecycleEmitter} for the materia lifecycle
+ * events. The two materia events (`materia_start` / `materia_end`) differ only
+ * in their `type`, so this shared helper keeps their wiring DRY. It does not
+ * touch the cast-level ({@link emitCastStartStdout} / {@link emitCastEndStdout})
+ * setup, whose payloads are distinct.
+ */
+function createMateriaStdoutEmitter(
+  mode: string | undefined,
+  options: StdoutLifecycleEmitOptions,
+): StdoutLifecycleEmitter {
+  return createStdoutLifecycleEmitter({
+    enabled: shouldEmitStdoutLifecycle(mode ?? detectPiRunMode()),
+    ...(options.writer ? { writer: options.writer } : {}),
+  });
+}
+
+/**
+ * Emit the informational `materia_start` event to pi's stdout JSONL stream.
+ *
+ * Emits one line per socket at the socket's materia start lifecycle point (the
+ * same point as the artifact `socket_start` write), and only when running under
+ * `pi --mode rpc` (no-op in TUI/interactive/json/print modes). This is an
+ * ADDITIONAL sink — it does NOT replace or alter the artifact `socket_start`
+ * event, which remains the source of truth for the socket record.
+ *
+ * Best-effort: any serialization or write failure is swallowed and reported as
+ * `false`; this method never throws, so a broken stdout pipe cannot fail a
+ * cast or stall the pipeline.
+ *
+ * @returns `true` when a line was written; `false` when skipped (non-RPC mode)
+ *   or when a best-effort failure occurred.
+ */
+export async function emitMateriaStartStdout(
+  input: StdoutMateriaLifecycleInput,
+  options: StdoutLifecycleEmitOptions = {},
+): Promise<boolean> {
+  const emitter = createMateriaStdoutEmitter(input.mode, options);
+  return emitter.emit({
+    type: "materia_start",
+    materiaName: input.materiaName,
+    socketName: input.socketName,
+  });
+}
+
+/**
+ * Emit the informational `materia_end` event to pi's stdout JSONL stream.
+ *
+ * Emits one line per socket at the socket's materia completion lifecycle point
+ * (the same point as the artifact `socket_complete` write), and only when
+ * running under `pi --mode rpc` (no-op in TUI/interactive/json/print modes).
+ * For multi-turn agent sockets this fires once when the socket finalizes, not
+ * once per turn. This is an ADDITIONAL sink — it does NOT replace or alter the
+ * artifact `socket_complete` event, which remains the source of truth for the
+ * socket record.
+ *
+ * Best-effort: any serialization or write failure is swallowed and reported as
+ * `false`; this method never throws, so a broken stdout pipe cannot fail a
+ * cast or stall the pipeline.
+ *
+ * @returns `true` when a line was written; `false` when skipped (non-RPC mode)
+ *   or when a best-effort failure occurred.
+ */
+export async function emitMateriaEndStdout(
+  input: StdoutMateriaLifecycleInput,
+  options: StdoutLifecycleEmitOptions = {},
+): Promise<boolean> {
+  const emitter = createMateriaStdoutEmitter(input.mode, options);
+  return emitter.emit({
+    type: "materia_end",
+    materiaName: input.materiaName,
+    socketName: input.socketName,
   });
 }

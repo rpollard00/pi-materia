@@ -49,7 +49,12 @@ import { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
 import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.js";
 import { castLoadoutIdentity, hashConfig, loadConfigFromState, resolvePersistedCastLoadoutIdentity } from "./configPersistence.js";
-import { emitCastStartStdout, emitCastEndStdout } from "./stdoutLifecycleWiring.js";
+import {
+  emitCastStartStdout,
+  emitCastEndStdout,
+  emitMateriaStartStdout,
+  emitMateriaEndStdout,
+} from "./stdoutLifecycleWiring.js";
 import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, describeStaleCompletion, recordActiveTurnProvenance, updateToolScope, type StaleCompletionReason, type ToolScopeRuntimeWarning } from "./agentTurnState.js";
@@ -1278,6 +1283,20 @@ async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Ma
   const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
   await appendEvent(state.runState, "socket_complete", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), artifact, parsed: effectiveResolvedSocketConfig(socket).parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
 
+  // Forward the informational materia_end to pi's stdout JSONL stream (RPC
+  // mode only; silent in TUI/interactive/json/print). Emitted at the same
+  // lifecycle point as the artifact socket_complete write above. For
+  // multi-turn agent sockets this fires once when the socket finalizes, not
+  // once per turn. materiaName mirrors cast_start.sockets[].materiaName and
+  // socketName mirrors cast_start.sockets[].socketName so the controller can
+  // correlate the two. This is an ADDITIONAL sink — the artifact
+  // socket_complete event is unchanged. Best-effort: a failure here can
+  // never fail the cast.
+  await emitMateriaEndStdout({
+    materiaName: resolvedMateriaDisplayName(socket) ?? socket.id,
+    socketName: socket.id,
+  });
+
   // Emit lifecycle.socket.completed through the event bus.
   await emitLifecycleEvent(state, "lifecycle.socket.completed", {
     severity: "debug",
@@ -1396,6 +1415,18 @@ async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: Mater
   state.runState.lastMessage = socket.id;
   await writeUsage(state.runState);
   await appendEvent(state.runState, "socket_start", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: socketVisit(state, socket.id) });
+
+  // Forward the informational materia_start to pi's stdout JSONL stream (RPC
+  // mode only; silent in TUI/interactive/json/print). Emitted at the same
+  // lifecycle point as the artifact socket_start write above. materiaName
+  // mirrors cast_start.sockets[].materiaName (resolved display name) and
+  // socketName mirrors cast_start.sockets[].socketName so the controller can
+  // correlate the two. This is an ADDITIONAL sink — the artifact socket_start
+  // event is unchanged. Best-effort: a failure here can never fail the cast.
+  await emitMateriaStartStdout({
+    materiaName: resolvedMateriaDisplayName(socket) ?? socket.id,
+    socketName: socket.id,
+  });
 
   // Emit lifecycle.socket.started through the event bus.
   await emitLifecycleEvent(state, "lifecycle.socket.started", {

@@ -4,10 +4,13 @@ import {
   detectPiRunMode,
   emitCastStartStdout,
   emitCastEndStdout,
+  emitMateriaStartStdout,
+  emitMateriaEndStdout,
   mapSocketDetailsToStdout,
   resolveStdoutEventingPreset,
   type StdoutCastStartInput,
   type StdoutCastEndInput,
+  type StdoutMateriaLifecycleInput,
 } from "../src/runtime/stdoutLifecycleWiring.js";
 import type { StdoutLifecycleEvent, StdoutWriter } from "../src/infrastructure/stdoutLifecycle.js";
 import type { PiMateriaConfig } from "../src/types.js";
@@ -386,5 +389,185 @@ describe("cast lifecycle pairing (start + single terminal end)", () => {
     const castStarts = captured.filter((e) => e.type === "cast_start");
     expect(castStarts).toHaveLength(1);
     expect((castStarts[0] as { sockets: unknown[] }).sockets.length).toBeGreaterThan(1);
+  });
+});
+
+// ── materia_start / materia_end ─────────────────────────────────────────
+
+/** Build a materia lifecycle input with sensible RPC defaults. */
+function baseMateriaInput(overrides: Partial<StdoutMateriaLifecycleInput> = {}): StdoutMateriaLifecycleInput {
+  return {
+    mode: "rpc",
+    materiaName: "Buildga",
+    socketName: "Socket-1",
+    ...overrides,
+  };
+}
+
+describe("emitMateriaStartStdout (RPC mode)", () => {
+  test("emits exactly one materia_start with the controller-compatible payload", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const ok = await emitMateriaStartStdout(baseMateriaInput(), { writer: capturingWriter(captured) });
+
+    expect(ok).toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual({
+      type: "materia_start",
+      materiaName: "Buildga",
+      socketName: "Socket-1",
+    });
+    // No extra fields beyond the contract.
+    expect(Object.keys(captured[0]).sort()).toEqual(["materiaName", "socketName", "type"]);
+  });
+
+  test("serializes as strict LF-delimited JSONL (one line, trailing newline)", async () => {
+    const lines: string[] = [];
+    const writer: StdoutWriter = (chunk) => { lines.push(String(chunk)); };
+    await emitMateriaStartStdout(baseMateriaInput(), { writer });
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0].endsWith("\n")).toBe(true);
+    expect(lines[0].includes("\r")).toBe(false);
+    const parsed = JSON.parse(lines[0]) as { type: string };
+    expect(parsed.type).toBe("materia_start");
+  });
+});
+
+describe("emitMateriaEndStdout (RPC mode)", () => {
+  test("emits exactly one materia_end with the controller-compatible payload", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const ok = await emitMateriaEndStdout(baseMateriaInput(), { writer: capturingWriter(captured) });
+
+    expect(ok).toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual({
+      type: "materia_end",
+      materiaName: "Buildga",
+      socketName: "Socket-1",
+    });
+    expect(Object.keys(captured[0]).sort()).toEqual(["materiaName", "socketName", "type"]);
+  });
+
+  test("serializes as strict LF-delimited JSONL (one line, trailing newline)", async () => {
+    const lines: string[] = [];
+    const writer: StdoutWriter = (chunk) => { lines.push(String(chunk)); };
+    await emitMateriaEndStdout(baseMateriaInput(), { writer });
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0].endsWith("\n")).toBe(true);
+    expect(lines[0].includes("\r")).toBe(false);
+    const parsed = JSON.parse(lines[0]) as { type: string };
+    expect(parsed.type).toBe("materia_end");
+  });
+});
+
+// Non-RPC gating is shared (createMateriaStdoutEmitter), so asserting one
+// event for each type is sufficient to cover the gating path for both.
+describe("emitMateriaStartStdout / emitMateriaEndStdout (non-RPC modes are silent)", () => {
+  for (const mode of ["tui", "json", "print"] as const) {
+    test(`materia_start writes nothing in ${mode} mode`, async () => {
+      const captured: StdoutLifecycleEvent[] = [];
+      const ok = await emitMateriaStartStdout(baseMateriaInput({ mode }), { writer: capturingWriter(captured) });
+
+      expect(ok).toBe(false);
+      expect(captured).toHaveLength(0);
+    });
+    test(`materia_end writes nothing in ${mode} mode`, async () => {
+      const captured: StdoutLifecycleEvent[] = [];
+      const ok = await emitMateriaEndStdout(baseMateriaInput({ mode }), { writer: capturingWriter(captured) });
+
+      expect(ok).toBe(false);
+      expect(captured).toHaveLength(0);
+    });
+  }
+});
+
+describe("emitMateriaStartStdout / emitMateriaEndStdout (default mode detection)", () => {
+  test("emit when process.argv carries `--mode rpc` and no explicit mode is given", async () => {
+    const original = process.argv;
+    process.argv = ["node", "pi", "--mode", "rpc"];
+    try {
+      const captured: StdoutLifecycleEvent[] = [];
+      const ok = await emitMateriaStartStdout(
+        { materiaName: "Buildga", socketName: "Socket-1" },
+        { writer: capturingWriter(captured) },
+      );
+      expect(ok).toBe(true);
+      expect(captured).toHaveLength(1);
+    } finally {
+      process.argv = original;
+    }
+  });
+
+  test("stay silent by default in a non-rpc argv (e.g. the test runner)", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const ok = await emitMateriaEndStdout(
+      { materiaName: "Buildga", socketName: "Socket-1" },
+      { writer: capturingWriter(captured) },
+    );
+    expect(ok).toBe(false);
+    expect(captured).toHaveLength(0);
+  });
+});
+
+describe("emitMateriaStartStdout / emitMateriaEndStdout (best-effort)", () => {
+  test("swallow a throwing writer and return false without throwing", async () => {
+    const explodingWriter: StdoutWriter = () => { throw new Error("broken pipe"); };
+    expect(await emitMateriaStartStdout(baseMateriaInput(), { writer: explodingWriter })).toBe(false);
+    expect(await emitMateriaEndStdout(baseMateriaInput(), { writer: explodingWriter })).toBe(false);
+  });
+
+  test("swallow an async-rejecting writer and return false without throwing", async () => {
+    const rejectingWriter: StdoutWriter = () => Promise.reject(new Error("async broken pipe"));
+    expect(await emitMateriaStartStdout(baseMateriaInput(), { writer: rejectingWriter })).toBe(false);
+    expect(await emitMateriaEndStdout(baseMateriaInput(), { writer: rejectingWriter })).toBe(false);
+  });
+});
+
+describe("materia lifecycle emits only materia_* types (no socket_* noise)", () => {
+  test("the materia emit functions never produce socket_start or socket_complete", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const writer = capturingWriter(captured);
+
+    await emitMateriaStartStdout(baseMateriaInput(), { writer });
+    await emitMateriaEndStdout(baseMateriaInput(), { writer });
+
+    expect(captured.map((e) => e.type)).toEqual(["materia_start", "materia_end"]);
+    expect(captured.filter((e) => e.type === "socket_start" || e.type === "socket_complete")).toHaveLength(0);
+  });
+});
+
+describe("materia lifecycle pairing (start + end per socket)", () => {
+  test("a socket emits exactly one materia_start then one materia_end with mirrored materiaName/socketName", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const writer = capturingWriter(captured);
+
+    await emitMateriaStartStdout(baseMateriaInput({ materiaName: "Reviewer", socketName: "Socket-2" }), { writer });
+    await emitMateriaEndStdout(baseMateriaInput({ materiaName: "Reviewer", socketName: "Socket-2" }), { writer });
+
+    expect(captured).toHaveLength(2);
+    expect(captured[0].type).toBe("materia_start");
+    expect(captured[1].type).toBe("materia_end");
+    // materiaName / socketName mirror the cast_start.sockets[] fields so the
+    // controller can correlate materia lifecycle with the socket graph.
+    for (const event of captured) {
+      const e = event as { materiaName: string; socketName: string };
+      expect(e.materiaName).toBe("Reviewer");
+      expect(e.socketName).toBe("Socket-2");
+    }
+  });
+
+  test("a multi-socket cast emits one materia_start/materia_end per socket (socket-scoped, not cast-scoped)", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const writer = capturingWriter(captured);
+
+    // Simulate Socket-1 then Socket-2 each bracketing their materia execution.
+    await emitMateriaStartStdout({ mode: "rpc", materiaName: "Buildga", socketName: "Socket-1" }, { writer });
+    await emitMateriaEndStdout({ mode: "rpc", materiaName: "Buildga", socketName: "Socket-1" }, { writer });
+    await emitMateriaStartStdout({ mode: "rpc", materiaName: "Reviewer", socketName: "Socket-2" }, { writer });
+    await emitMateriaEndStdout({ mode: "rpc", materiaName: "Reviewer", socketName: "Socket-2" }, { writer });
+
+    expect(captured.filter((e) => e.type === "materia_start")).toHaveLength(2);
+    expect(captured.filter((e) => e.type === "materia_end")).toHaveLength(2);
   });
 });
