@@ -3,9 +3,11 @@ import {
   DEFAULT_STDOUT_EVENTING_PRESET,
   detectPiRunMode,
   emitCastStartStdout,
+  emitCastEndStdout,
   mapSocketDetailsToStdout,
   resolveStdoutEventingPreset,
   type StdoutCastStartInput,
+  type StdoutCastEndInput,
 } from "../src/runtime/stdoutLifecycleWiring.js";
 import type { StdoutLifecycleEvent, StdoutWriter } from "../src/infrastructure/stdoutLifecycle.js";
 import type { PiMateriaConfig } from "../src/types.js";
@@ -220,5 +222,169 @@ describe("emitCastStartStdout (best-effort)", () => {
     const ok = await emitCastStartStdout(baseInput(), { writer: rejectingWriter });
 
     expect(ok).toBe(false);
+  });
+});
+
+// ── emitCastEndStdout ───────────────────────────────────────────────────
+
+/** Build a cast_end input with sensible RPC defaults. */
+function baseEndInput(overrides: Partial<StdoutCastEndInput> = {}): StdoutCastEndInput {
+  return {
+    mode: "rpc",
+    castId: "cast-2026",
+    ok: true,
+    ...overrides,
+  };
+}
+
+describe("emitCastEndStdout (RPC mode)", () => {
+  test("emits exactly one cast_end with ok:true and the matching castId", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const ok = await emitCastEndStdout(baseEndInput(), { writer: capturingWriter(captured) });
+
+    expect(ok).toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual({
+      type: "cast_end",
+      castId: "cast-2026",
+      ok: true,
+    });
+    // No error field on the success path.
+    expect("error" in (captured[0] as Record<string, unknown>)).toBe(false);
+  });
+
+  test("emits exactly one cast_end with ok:false and the error message on the failure path", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const ok = await emitCastEndStdout(
+      baseEndInput({ ok: false, error: "multiTurn agent socket under agent-controller" }),
+      { writer: capturingWriter(captured) },
+    );
+
+    expect(ok).toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual({
+      type: "cast_end",
+      castId: "cast-2026",
+      ok: false,
+      error: "multiTurn agent socket under agent-controller",
+    });
+  });
+
+  test("omits the error field on the failure path when none is provided", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    await emitCastEndStdout(baseEndInput({ ok: false }), { writer: capturingWriter(captured) });
+
+    expect(captured[0]).toEqual({
+      type: "cast_end",
+      castId: "cast-2026",
+      ok: false,
+    });
+    expect("error" in (captured[0] as Record<string, unknown>)).toBe(false);
+  });
+
+  test("serializes as strict LF-delimited JSONL (one line, trailing newline)", async () => {
+    const lines: string[] = [];
+    const writer: StdoutWriter = (chunk) => { lines.push(String(chunk)); };
+    await emitCastEndStdout(baseEndInput(), { writer });
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0].endsWith("\n")).toBe(true);
+    expect(lines[0].includes("\r")).toBe(false);
+    const parsed = JSON.parse(lines[0]) as { type: string };
+    expect(parsed.type).toBe("cast_end");
+  });
+});
+
+describe("emitCastEndStdout (non-RPC modes are silent)", () => {
+  for (const mode of ["tui", "json", "print"] as const) {
+    test(`writes nothing in ${mode} mode`, async () => {
+      const captured: StdoutLifecycleEvent[] = [];
+      const ok = await emitCastEndStdout(baseEndInput({ mode }), { writer: capturingWriter(captured) });
+
+      expect(ok).toBe(false);
+      expect(captured).toHaveLength(0);
+    });
+  }
+});
+
+describe("emitCastEndStdout (default mode detection)", () => {
+  test("emits when process.argv carries `--mode rpc` and no explicit mode is given", async () => {
+    const original = process.argv;
+    process.argv = ["node", "pi", "--mode", "rpc"];
+    try {
+      const captured: StdoutLifecycleEvent[] = [];
+      const ok = await emitCastEndStdout(
+        { castId: "cast-detect", ok: true },
+        { writer: capturingWriter(captured) },
+      );
+      expect(ok).toBe(true);
+      expect(captured).toHaveLength(1);
+    } finally {
+      process.argv = original;
+    }
+  });
+
+  test("stays silent by default in a non-rpc argv (e.g. the test runner)", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const ok = await emitCastEndStdout(
+      { castId: "cast-detect", ok: true },
+      { writer: capturingWriter(captured) },
+    );
+    expect(ok).toBe(false);
+    expect(captured).toHaveLength(0);
+  });
+});
+
+describe("emitCastEndStdout (best-effort)", () => {
+  test("swallows a throwing writer and returns false without throwing", async () => {
+    const explodingWriter: StdoutWriter = () => { throw new Error("broken pipe"); };
+    const ok = await emitCastEndStdout(baseEndInput(), { writer: explodingWriter });
+
+    expect(ok).toBe(false);
+  });
+
+  test("swallows an async-rejecting writer and returns false without throwing", async () => {
+    const rejectingWriter: StdoutWriter = () => Promise.reject(new Error("async broken pipe"));
+    const ok = await emitCastEndStdout(baseEndInput(), { writer: rejectingWriter });
+
+    expect(ok).toBe(false);
+  });
+});
+
+// ── cast_start + cast_end pairing (single terminal cast_end per cast) ────
+
+describe("cast lifecycle pairing (start + single terminal end)", () => {
+  test("a cast emits exactly one cast_start then exactly one cast_end on the success path", async () => {
+    const captured: StdoutLifecycleEvent[] = [];
+    const writer = capturingWriter(captured);
+
+    await emitCastStartStdout(baseInput(), { writer });
+    // The three cast_end artifact paths are mutually exclusive; here the
+    // success terminal (finishCast) fires exactly once after the pipeline.
+    await emitCastEndStdout(baseEndInput({ castId: "cast-2026", ok: true }), { writer });
+
+    expect(captured).toHaveLength(2);
+    expect(captured[0].type).toBe("cast_start");
+    expect(captured[1].type).toBe("cast_end");
+    expect((captured[0] as { castId: string }).castId)
+      .toBe((captured[1] as { castId: string }).castId);
+    expect((captured[1] as { ok: boolean }).ok).toBe(true);
+  });
+
+  test("a multi-socket cast still emits exactly one cast_end after the last socket", async () => {
+    // cast_start carries multiple agent sockets, but cast_end is cast-level
+    // (finishCast/failCast/validation are mutually exclusive single terminals),
+    // so exactly one cast_end is emitted regardless of socket count.
+    const captured: StdoutLifecycleEvent[] = [];
+    const writer = capturingWriter(captured);
+
+    await emitCastStartStdout(baseInput(), { writer });
+    await emitCastEndStdout(baseEndInput({ castId: "cast-2026", ok: true }), { writer });
+
+    const castEnds = captured.filter((e) => e.type === "cast_end");
+    expect(castEnds).toHaveLength(1);
+    const castStarts = captured.filter((e) => e.type === "cast_start");
+    expect(castStarts).toHaveLength(1);
+    expect((castStarts[0] as { sockets: unknown[] }).sockets.length).toBeGreaterThan(1);
   });
 });

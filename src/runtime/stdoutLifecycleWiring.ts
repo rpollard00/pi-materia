@@ -196,3 +196,67 @@ export async function emitCastStartStdout(
     ...(input.loadoutId !== undefined ? { loadoutId: input.loadoutId } : {}),
   });
 }
+
+// ── cast_end ────────────────────────────────────────────────────────────
+
+/**
+ * Resolved data required to emit the terminal `cast_end`.
+ *
+ * Only the cast identity and outcome are needed; `cast_end` carries no
+ * pipeline graph. The `castId` MUST echo the matching `cast_start` so the
+ * controller can pair the two.
+ */
+export interface StdoutCastEndInput {
+  /**
+   * Active pi run mode. When omitted, {@link detectPiRunMode} is consulted so
+   * emission fires only for `pi --mode rpc`. Tests inject this directly to
+   * assert RPC vs non-RPC gating deterministically.
+   */
+  mode?: string;
+  /** Cast id; must match the `cast_start` castId. */
+  castId: string;
+  /** Cast outcome — `true` on success, `false` on failure/error. */
+  ok: boolean;
+  /** Optional error message for `ok: false` paths. */
+  error?: string;
+}
+
+/**
+ * Emit the terminal `cast_end` event to pi's stdout JSONL stream.
+ *
+ * Emits exactly one line, and only when running under `pi --mode rpc` (no-op
+ * in TUI/interactive/json/print modes). The `castId` echoes the matching
+ * `cast_start` so the controller can pair the two; `ok` distinguishes success
+ * from failure and is present on both paths so the controller need not infer
+ * it. This is an ADDITIONAL sink alongside the existing artifact `cast_end`
+ * write — the artifact record remains the source of truth.
+ *
+ * Wired into every artifact `cast_end` path (success and all failure/error
+ * paths), so a cast emits exactly one terminal `cast_end`, never one per
+ * socket. The per-socket `agent_end` signal is separate (pi's native
+ * agent_end callback) and is unchanged.
+ *
+ * Best-effort: any serialization or write failure is swallowed and reported as
+ * `false`; this method never throws, so a broken stdout pipe cannot fail a
+ * cast or stall the pipeline.
+ *
+ * @returns `true` when a line was written; `false` when skipped (non-RPC mode)
+ *   or when a best-effort failure occurred.
+ */
+export async function emitCastEndStdout(
+  input: StdoutCastEndInput,
+  options: StdoutLifecycleEmitOptions = {},
+): Promise<boolean> {
+  const mode = input.mode ?? detectPiRunMode();
+  const emitter = createStdoutLifecycleEmitter({
+    enabled: shouldEmitStdoutLifecycle(mode),
+    ...(options.writer ? { writer: options.writer } : {}),
+  });
+
+  return emitter.emit({
+    type: "cast_end",
+    castId: input.castId,
+    ok: input.ok,
+    ...(input.error !== undefined ? { error: input.error } : {}),
+  });
+}

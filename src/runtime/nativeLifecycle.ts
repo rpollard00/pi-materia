@@ -49,7 +49,7 @@ import { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
 import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.js";
 import { castLoadoutIdentity, hashConfig, loadConfigFromState, resolvePersistedCastLoadoutIdentity } from "./configPersistence.js";
-import { emitCastStartStdout } from "./stdoutLifecycleWiring.js";
+import { emitCastStartStdout, emitCastEndStdout } from "./stdoutLifecycleWiring.js";
 import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, describeStaleCompletion, recordActiveTurnProvenance, updateToolScope, type StaleCompletionReason, type ToolScopeRuntimeWarning } from "./agentTurnState.js";
@@ -778,6 +778,10 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
 
     // Record the failure in artifacts.
     await appendEvent(runState, "cast_end", { ok: false, error: validation.errorMessage, socket: pipeline.entry.id });
+    // Forward the terminal cast_end to pi's stdout JSONL stream (RPC mode
+    // only). This validation-fail path is mutually exclusive with
+    // failCast/finishCast, so the cast emits exactly one terminal cast_end.
+    await emitCastEndStdout({ castId, ok: false, error: validation.errorMessage });
     await writeUsage(runState);
     await appendManifest(state, { phase: "failed", socket: pipeline.entry.id, materia: socketMateriaName(pipeline.entry) });
     state.active = false;
@@ -1721,6 +1725,12 @@ async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaC
   }
 
   await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, socket: currentSocketId(state) });
+  // Forward the terminal cast_end to pi's stdout JSONL stream (RPC mode
+  // only). failCast is the single cast-level failure terminal; pairing it
+  // with the success path (finishCast) and the validation-fail path above
+  // guarantees exactly one cast_end per cast, never one per socket. The
+  // per-socket agent_end signal is separate and unchanged.
+  await emitCastEndStdout({ castId: state.castId, ok: false, error: state.failedReason });
   await writeUsage(state.runState);
   await appendManifest(state, { phase: "failed", socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
   saveCastState(pi, state);
@@ -1781,6 +1791,11 @@ async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: Materi
 
   await writeUsage(state.runState);
   await appendEvent(state.runState, "cast_end", { ok: true, usage: state.runState.usage, entryId });
+  // Forward the terminal cast_end to pi's stdout JSONL stream (RPC mode
+  // only). finishCast is the single cast-level success terminal; the cast
+  // therefore emits exactly one ok:true cast_end after the whole pipeline
+  // (including multi-socket pipelines) completes — not one per socket.
+  await emitCastEndStdout({ castId: state.castId, ok: true });
   await appendManifest(state, { phase: "complete", entryId });
   saveCastState(pi, state);
   ctx.ui.setStatus("materia", "done");
