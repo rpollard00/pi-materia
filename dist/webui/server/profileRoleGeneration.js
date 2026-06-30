@@ -1,4 +1,4 @@
-import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel } from '../../thinking.js';
+import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel } from '../../domain/thinking.js';
 import { errorMessage, isPlainObject, readJsonBody, sendJson } from './http.js';
 function sendProfileRoleGenerationError(res, status, code, message) {
     sendJson(res, status, { ok: false, error: { code, message } });
