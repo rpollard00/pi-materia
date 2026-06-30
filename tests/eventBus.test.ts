@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import {
   type EnrichedEvent,
   type EventSink,
+  type AsyncDispatchResult,
   enrichEvents,
   createSequenceCounter,
   type EnrichmentContext,
@@ -407,7 +408,206 @@ describe("EventBus", () => {
   });
 });
 
-// ── LocalEventRecordingSink ─────────────────────────────────────────────
+// ── Async sink reconciliation ─────────────────────────────────────────
+
+describe("EventBus async sink reconciliation", () => {
+  /**
+   * A minimal async sink that mimics WebhookSink's contract: deliver() queues
+   * without blocking, and real per-event results are exposed via drainResults().
+   */
+  function makeAsyncSink(
+    id: string,
+    resolve: (eventId: string) => AsyncDispatchResult,
+  ): EventSink & { drainResults: () => AsyncDispatchResult[] } {
+    const results: AsyncDispatchResult[] = [];
+    let pending: EnrichedEvent[] = [];
+    let flushPromise: Promise<void> | null = null;
+    return {
+      id,
+      enabled: true,
+      async deliver(event: EnrichedEvent) {
+        pending.push(event);
+        if (!flushPromise) {
+          flushPromise = (async () => {
+            await Promise.resolve();
+            for (const e of pending) results.push(resolve(e.eventId));
+            pending = [];
+            flushPromise = null;
+          })();
+        }
+      },
+      async flush() {
+        while (flushPromise) await flushPromise;
+      },
+      drainResults() {
+        const drained = [...results];
+        results.length = 0;
+        return drained;
+      },
+    };
+  }
+
+  test("dispatch records queued status for async sinks (not delivered)", async () => {
+    const bus = new EventBus();
+    bus.register(makeAsyncSink("webhook-1", (eventId) => ({
+      eventId,
+      sinkId: "webhook-1",
+      status: "delivered",
+      statusCode: 200,
+    })));
+
+    const outcome = await bus.dispatch(makeEvent());
+
+    // Immediately after dispatch the async sink is provisional, not delivered.
+    expect(outcome.sinks).toHaveLength(1);
+    expect(outcome.sinks![0]).toEqual({ sinkId: "webhook-1", status: "queued" });
+    // Legacy view must not falsely report delivery before flush.
+    expect(outcome.deliveredTo).toEqual([]);
+    expect(outcome.failures).toEqual([]);
+  });
+
+  test("flush reconciles queued results into delivered with status code", async () => {
+    const bus = new EventBus();
+    bus.register(makeAsyncSink("webhook-1", (eventId) => ({
+      eventId,
+      sinkId: "webhook-1",
+      status: "delivered",
+      statusCode: 200,
+    })));
+
+    const event = makeEvent();
+    await bus.dispatch(event);
+    await bus.flush();
+
+    const outcome = bus.outcomes[0];
+    expect(outcome.sinks![0]).toEqual({
+      sinkId: "webhook-1",
+      status: "delivered",
+      statusCode: 200,
+    });
+    // Legacy view is re-derived from reconciled sinks.
+    expect(outcome.deliveredTo).toEqual(["webhook-1"]);
+    expect(outcome.failures).toEqual([]);
+  });
+
+  test("flush reconciles queued results into failed with reason + status code", async () => {
+    const bus = new EventBus();
+    bus.register(makeAsyncSink("webhook-1", (eventId) => ({
+      eventId,
+      sinkId: "webhook-1",
+      status: "failed",
+      statusCode: 500,
+      reason: "http_error",
+      error: "HTTP 500",
+    })));
+
+    await bus.dispatch(makeEvent());
+    await bus.flush();
+
+    const outcome = bus.outcomes[0];
+    expect(outcome.sinks![0].status).toBe("failed");
+    expect(outcome.sinks![0].statusCode).toBe(500);
+    expect(outcome.sinks![0].reason).toBe("http_error");
+    expect(outcome.deliveredTo).toEqual([]);
+    expect(outcome.failures).toEqual([{ sinkId: "webhook-1", error: "HTTP 500" }]);
+  });
+
+  test("flush reconciles skipped (filtered) results without a failure entry", async () => {
+    const bus = new EventBus();
+    bus.register(makeAsyncSink("webhook-1", (eventId) => ({
+      eventId,
+      sinkId: "webhook-1",
+      status: "skipped",
+      reason: "filtered_out",
+    })));
+
+    await bus.dispatch(makeEvent());
+    await bus.flush();
+
+    const outcome = bus.outcomes[0];
+    expect(outcome.sinks![0].status).toBe("skipped");
+    expect(outcome.sinks![0].reason).toBe("filtered_out");
+    expect(outcome.deliveredTo).toEqual([]);
+    expect(outcome.failures).toEqual([]);
+  });
+
+  test("flush reconciles misconfigured results into the failures legacy view", async () => {
+    const bus = new EventBus();
+    bus.register(makeAsyncSink("webhook-1", (eventId) => ({
+      eventId,
+      sinkId: "webhook-1",
+      status: "misconfigured",
+      reason: "target_url_missing",
+      error: "Webhook sink target URL is missing",
+    })));
+
+    await bus.dispatch(makeEvent());
+    await bus.flush();
+
+    const outcome = bus.outcomes[0];
+    expect(outcome.sinks![0].status).toBe("misconfigured");
+    expect(outcome.sinks![0].reason).toBe("target_url_missing");
+    expect(outcome.deliveredTo).toEqual([]);
+    expect(outcome.failures).toEqual([
+      { sinkId: "webhook-1", error: "Webhook sink target URL is missing" },
+    ]);
+  });
+
+  test("sync + async sinks reconcile independently in one outcome", async () => {
+    const bus = new EventBus();
+    bus.register({ id: "local-recording", enabled: true, deliver: async () => {} });
+    bus.register(makeAsyncSink("webhook-1", (eventId) => ({
+      eventId,
+      sinkId: "webhook-1",
+      status: "delivered",
+      statusCode: 202,
+    })));
+
+    await bus.dispatch(makeEvent());
+    await bus.flush();
+
+    const outcome = bus.outcomes[0];
+    expect(outcome.sinks).toHaveLength(2);
+    expect(outcome.sinks![0]).toEqual({ sinkId: "local-recording", status: "delivered" });
+    expect(outcome.sinks![1]).toEqual({
+      sinkId: "webhook-1",
+      status: "delivered",
+      statusCode: 202,
+    });
+    expect(outcome.deliveredTo).toEqual(["local-recording", "webhook-1"]);
+  });
+
+  test("reconciled outcomes are persisted to dispatch.jsonl with sinks detail", async () => {
+    const dir = await tempDir();
+    const bus = new EventBus();
+    bus.register(makeAsyncSink("webhook-1", (eventId) => ({
+      eventId,
+      sinkId: "webhook-1",
+      status: "failed",
+      statusCode: 503,
+      reason: "http_error",
+      error: "HTTP 503",
+    })));
+
+    const event = makeEvent();
+    await bus.dispatch(event);
+    await bus.flush();
+    await flushBusOutcomes(bus, dir);
+
+    const file = path.join(dir, "events", "dispatch.jsonl");
+    const content = await readFile(file, "utf8");
+    const parsed = JSON.parse(content.trim());
+    expect(parsed.eventId).toBe(event.eventId);
+    expect(parsed.sinks[0].status).toBe("failed");
+    expect(parsed.sinks[0].statusCode).toBe(503);
+    expect(parsed.sinks[0].reason).toBe("http_error");
+    expect(parsed.deliveredTo).toEqual([]);
+    expect(parsed.failures[0].sinkId).toBe("webhook-1");
+    expect(parsed.failures[0].error).toBe("HTTP 503");
+  });
+});
+
+// ── LocalEventRecordingSink ─────────────────────────────────────────────────
 
 describe("LocalEventRecordingSink", () => {
   test("has correct id and is always enabled", async () => {

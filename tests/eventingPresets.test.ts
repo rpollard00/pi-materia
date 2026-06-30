@@ -7,6 +7,8 @@ import {
   KNOWN_PRESETS,
   resolveControllerRunId,
   resolveControllerUrl,
+  detectControllerLaunch,
+  CONTROLLER_LAUNCH_ENV_VARS,
   buildAgentControllerSinkConfig,
   expandPresets,
   CONTROLLER_RUN_ID_ENV,
@@ -222,6 +224,79 @@ describe("resolveControllerUrl", () => {
     clearControllerEnv();
     process.env[CONTROLLER_EVENT_URL_ENV] = "  https://custom-controller.io  ";
     expect(resolveControllerUrl()).toBe("https://custom-controller.io");
+  });
+});
+
+// ── Controller Launch Detection ─────────────────────────────────────────
+
+describe("CONTROLLER_LAUNCH_ENV_VARS", () => {
+  test("contains exactly the documented controller env vars", () => {
+    expect(CONTROLLER_LAUNCH_ENV_VARS).toEqual([
+      CONTROLLER_RUN_ID_ENV,
+      CONTROLLER_EVENT_URL_ENV,
+      CONTROLLER_CONTEXT_DIR_ENV,
+    ]);
+  });
+});
+
+describe("detectControllerLaunch", () => {
+  test("returns not present when no controller env vars are set", () => {
+    clearControllerEnv();
+    const result = detectControllerLaunch({});
+    expect(result.present).toBe(false);
+    expect(result.detected).toEqual([]);
+  });
+
+  test("detects CONTROLLER_RUN_ID", () => {
+    const result = detectControllerLaunch({ [CONTROLLER_RUN_ID_ENV]: "run-1" });
+    expect(result.present).toBe(true);
+    expect(result.detected).toEqual([CONTROLLER_RUN_ID_ENV]);
+  });
+
+  test("detects CONTROLLER_EVENT_URL", () => {
+    const result = detectControllerLaunch({ [CONTROLLER_EVENT_URL_ENV]: "https://ctrl.example/events" });
+    expect(result.present).toBe(true);
+    expect(result.detected).toEqual([CONTROLLER_EVENT_URL_ENV]);
+  });
+
+  test("detects CONTROLLER_CONTEXT_DIR", () => {
+    const result = detectControllerLaunch({ [CONTROLLER_CONTEXT_DIR_ENV]: "/tmp/ctx" });
+    expect(result.present).toBe(true);
+    expect(result.detected).toEqual([CONTROLLER_CONTEXT_DIR_ENV]);
+  });
+
+  test("ignores empty/whitespace-only values", () => {
+    const result = detectControllerLaunch({
+      [CONTROLLER_RUN_ID_ENV]: "   ",
+      [CONTROLLER_EVENT_URL_ENV]: "",
+      [CONTROLLER_CONTEXT_DIR_ENV]: "\t",
+    });
+    expect(result.present).toBe(false);
+    expect(result.detected).toEqual([]);
+  });
+
+  test("reports all detected vars in declared order", () => {
+    const result = detectControllerLaunch({
+      [CONTROLLER_CONTEXT_DIR_ENV]: "/tmp/ctx",
+      [CONTROLLER_RUN_ID_ENV]: "run-1",
+      [CONTROLLER_EVENT_URL_ENV]: "https://ctrl.example/events",
+    });
+    expect(result.present).toBe(true);
+    expect(result.detected).toEqual([
+      CONTROLLER_RUN_ID_ENV,
+      CONTROLLER_EVENT_URL_ENV,
+      CONTROLLER_CONTEXT_DIR_ENV,
+    ]);
+  });
+
+  test("does not read PI_MATERIA_EVENTING_* or other env vars", () => {
+    const result = detectControllerLaunch({
+      PI_MATERIA_EVENTING_ENABLED: "true",
+      PI_MATERIA_EVENTING_PRESETS: "agent-controller",
+      UNRELATED_VAR: "nope",
+    });
+    expect(result.present).toBe(false);
+    expect(result.detected).toEqual([]);
   });
 });
 

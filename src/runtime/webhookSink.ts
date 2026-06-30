@@ -1,8 +1,10 @@
 import type { EventingWebhookSinkConfig, EventBodyFieldMapping, EventFilter } from "../types.js";
 import type {
+  AsyncDispatchResult,
+  DispatchFailureReason,
+  DispatchOutcome,
   EnrichedEvent,
   EventSink,
-  DispatchOutcome,
 } from "../domain/eventing.js";
 
 const timeoutReason = "webhook-timeout";
@@ -36,8 +38,8 @@ export class WebhookSink implements EventSink {
   #queue: EnrichedEvent[] = [];
   /** Promise for the currently-running drain cycle (null when idle). */
   #drainPromise: Promise<void> | null = null;
-  /** Async dispatch outcomes produced by background deliveries. */
-  #asyncOutcomes: DispatchOutcome[] = [];
+  /** Async dispatch results produced by background deliveries and skips. */
+  #asyncResults: AsyncDispatchResult[] = [];
 
   constructor(config: EventingWebhookSinkConfig) {
     this.id = config.id;
@@ -61,13 +63,34 @@ export class WebhookSink implements EventSink {
    *
    * Returns immediately — the HTTP request (with retries, timeouts, and
    * backoff) happens asynchronously. This method never throws; delivery
-   * failures are recorded as async dispatch outcomes.
+   * outcomes are recorded as async dispatch results.
+   *
+   * Disabled and filtered-out events never reach the network: a `skipped`
+   * result (with reason `disabled` or `filtered_out`) is recorded synchronously
+   * so the dispatch artifact still reflects that the sink intentionally did
+   * not deliver.
    */
   async deliver(event: EnrichedEvent): Promise<void> {
-    if (!this.#active) return;
+    if (!this.#active) {
+      this.#asyncResults.push({
+        eventId: event.eventId,
+        sinkId: this.id,
+        status: "skipped",
+        reason: "disabled",
+      });
+      return;
+    }
 
     // Apply event filter synchronously before enqueuing.
-    if (!matchesFilter(this.#config.eventFilter, event.type)) return;
+    if (!matchesFilter(this.#config.eventFilter, event.type)) {
+      this.#asyncResults.push({
+        eventId: event.eventId,
+        sinkId: this.id,
+        status: "skipped",
+        reason: "filtered_out",
+      });
+      return;
+    }
 
     this.#queue.push(event);
     if (!this.#drainPromise) {
@@ -91,13 +114,27 @@ export class WebhookSink implements EventSink {
   }
 
   /**
-   * Return accumulated async dispatch outcomes and clear the internal buffer.
+   * Return accumulated async dispatch results and clear the internal buffer.
    * Call after {@link flush} to collect background delivery results.
+   *
+   * Each result carries the {@link AsyncDispatchResult.eventId} so the event
+   * bus can reconcile it back to the originating dispatch outcome.
+   */
+  drainResults(): AsyncDispatchResult[] {
+    const drained = [...this.#asyncResults];
+    this.#asyncResults = [];
+    return drained;
+  }
+
+  /**
+   * Backward-compatible adapter: return results as legacy {@link DispatchOutcome}s.
+   *
+   * @deprecated Prefer {@link drainResults}, which preserves the rich
+   * `status` / `statusCode` / `reason` detail. This adapter exists for callers
+   * that still expect the original `deliveredTo` / `failures` shape.
    */
   drainOutcomes(): DispatchOutcome[] {
-    const drained = [...this.#asyncOutcomes];
-    this.#asyncOutcomes = [];
-    return drained;
+    return this.drainResults().map((r) => toLegacyOutcome(r));
   }
 
   // ── Background drain loop ──────────────────────────────────────────
@@ -113,8 +150,8 @@ export class WebhookSink implements EventSink {
     try {
       while (this.#queue.length > 0) {
         const event = this.#queue.shift()!;
-        const outcome = await this.#deliverOne(event);
-        this.#asyncOutcomes.push(outcome);
+        const result = await this.#deliverOne(event);
+        this.#asyncResults.push(result);
       }
     } finally {
       // Check if more events were added while we were draining.
@@ -129,12 +166,26 @@ export class WebhookSink implements EventSink {
   /**
    * Deliver a single event to the configured webhook endpoint.
    *
-   * Handles retries, backoff, timeouts, and failure tracking. Returns a
-   * {@link DispatchOutcome} describing the result. Never throws — failures
-   * are reflected in the returned outcome.
+   * Handles retries, backoff, timeouts, and failure tracking. Returns an
+   * {@link AsyncDispatchResult} describing the result. Never throws — failures
+   * are reflected in the returned result.
    */
-  async #deliverOne(event: EnrichedEvent): Promise<DispatchOutcome> {
+  async #deliverOne(event: EnrichedEvent): Promise<AsyncDispatchResult> {
     const url = this.#config.url;
+
+    // Validate the target URL up front. A misconfigured sink never reaches
+    // the network so it is reported as `misconfigured` (not retried).
+    const urlValidation = validateWebhookUrl(url);
+    if (!urlValidation.ok) {
+      return {
+        eventId: event.eventId,
+        sinkId: this.id,
+        status: "misconfigured",
+        reason: urlValidation.reason,
+        error: urlValidation.message,
+      };
+    }
+
     const method = this.#config.method ?? "POST";
     const timeoutMs = this.#config.timeoutMs ?? 10000;
     const maxRetries = this.#config.maxRetries ?? 3;
@@ -151,8 +202,9 @@ export class WebhookSink implements EventSink {
       this.#config.severityMap,
     );
 
+    let lastStatusCode: number | undefined;
     let lastError: unknown;
-    let finalFailure: string | undefined;
+    let lastReason: DispatchFailureReason = "unknown_error";
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -179,48 +231,46 @@ export class WebhookSink implements EventSink {
           this.#consecutiveFailures = 0;
           return {
             eventId: event.eventId,
-            deliveredTo: [this.id],
-            failures: [],
-            occurredAt: new Date().toISOString(),
+            sinkId: this.id,
+            status: "delivered",
+            statusCode: response.status,
           };
         }
+
+        lastStatusCode = response.status;
+        lastError = new Error(
+          `Webhook sink "${this.id}" received HTTP ${response.status} from ${redactUrl(url)}`,
+        );
+        lastReason = "http_error";
 
         // 5xx responses may be transient — retry.
         if (response.status >= 500 && attempt < maxRetries) {
           await response.text().catch(() => {});
-          lastError = new Error(
-            `Webhook sink "${this.id}" received HTTP ${response.status} from ${redactUrl(url)}`,
-          );
-          finalFailure = `HTTP ${response.status}`;
           await backoff(attempt, retryBackoffMs, maxBackoffMs);
           continue;
         }
 
         // 4xx and other non-ok statuses are not retryable.
         await response.text().catch(() => {});
-        lastError = new Error(
-          `Webhook sink "${this.id}" received HTTP ${response.status} from ${redactUrl(url)}`,
-        );
-        finalFailure = `HTTP ${response.status}`;
         break;
       } catch (error) {
         if (isWebhookTimeout(error)) {
           lastError = new Error(
             `Webhook sink "${this.id}" timed out after ${timeoutMs}ms (${redactUrl(url)})`,
           );
-          finalFailure = "timeout";
+          lastReason = "timeout";
         } else if (error instanceof Error) {
           // Redact: never include the original error's full message verbatim
           // since it might contain connection details. Use a safe summary.
           lastError = new Error(
             `Webhook sink "${this.id}" delivery error: ${safeErrorMessage(error.message)}`,
           );
-          finalFailure = safeErrorMessage(error.message);
+          lastReason = "network_error";
         } else {
           lastError = new Error(
             `Webhook sink "${this.id}" unknown delivery error`,
           );
-          finalFailure = "unknown error";
+          lastReason = "unknown_error";
         }
 
         if (attempt < maxRetries) {
@@ -243,9 +293,11 @@ export class WebhookSink implements EventSink {
 
     return {
       eventId: event.eventId,
-      deliveredTo: [],
-      failures: [{ sinkId: this.id, error: safeErrorMessage(errorMsg) }],
-      occurredAt: new Date().toISOString(),
+      sinkId: this.id,
+      status: "failed",
+      statusCode: lastStatusCode,
+      reason: lastReason,
+      error: safeErrorMessage(errorMsg),
     };
   }
 }
@@ -497,6 +549,34 @@ async function backoff(
  * Strips query parameters and fragments that might contain tokens or secrets.
  * Only the origin + pathname are preserved.
  */
+/**
+ * Validate a webhook target URL before any network attempt.
+ *
+ * Mirrors the webhook activation diagnostic reasons (docs/runtime-eventing.md
+ * §9.6): a missing or non-http(s) URL is reported as `misconfigured` rather
+ * than surfacing as an opaque network failure.
+ */
+function validateWebhookUrl(url: string):
+  | { ok: true }
+  | { ok: false; reason: "target_url_missing" | "target_url_invalid"; message: string } {
+  if (typeof url !== "string" || url.trim() === "") {
+    return { ok: false, reason: "target_url_missing", message: `Webhook sink target URL is missing` };
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return {
+        ok: false,
+        reason: "target_url_invalid",
+        message: `Webhook sink target URL must be absolute http(s): ${redactUrl(url)}`,
+      };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "target_url_invalid", message: `Webhook sink target URL is invalid` };
+  }
+}
+
 function redactUrl(url: string): string {
   try {
     const parsed = new URL(url);
@@ -524,6 +604,34 @@ function safeErrorMessage(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.length > 200) return `${trimmed.slice(0, 197)}...`;
   return trimmed;
+}
+
+/**
+ * Convert a rich {@link AsyncDispatchResult} into the legacy
+ * {@link DispatchOutcome} shape for backward-compatible callers.
+ */
+function toLegacyOutcome(r: AsyncDispatchResult): DispatchOutcome {
+  const deliveredTo = r.status === "delivered" ? [r.sinkId] : [];
+  const failures =
+    r.status === "failed" || r.status === "misconfigured"
+      ? [{ sinkId: r.sinkId, error: r.error ?? legacyDefaultError(r) }]
+      : [];
+  return {
+    eventId: r.eventId,
+    deliveredTo,
+    failures,
+    occurredAt: new Date().toISOString(),
+  };
+}
+
+/** Default redacted error string for a legacy outcome when none was recorded. */
+function legacyDefaultError(r: AsyncDispatchResult): string {
+  if (r.status === "misconfigured") {
+    return r.reason === "target_url_missing"
+      ? `Webhook sink "${r.sinkId}" target URL is missing`
+      : `Webhook sink "${r.sinkId}" target URL is invalid`;
+  }
+  return `Webhook sink "${r.sinkId}" delivery failed`;
 }
 
 

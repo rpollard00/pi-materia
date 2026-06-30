@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import { clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference, saveRoleGenerationPreference } from "../src/config/config.js";
+import { applyEventingEnvOverlay, clearStaleQuestDefaultLoadoutPreference, getUserMateriaAssetPath, getUserProfileConfigPath, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationModelPreference, saveRoleGenerationPreference } from "../src/config/config.js";
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
@@ -1758,6 +1758,254 @@ describe("eventing config", () => {
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+});
+
+describe("eventing env overlay merge", () => {
+  // Unit-level coverage for applyEventingEnvOverlay using an injected env so
+  // the real process.env is never mutated. The overlay must take precedence
+  // over the fully-merged config without touching configured sinks.
+  test("returns the same config reference when no documented env var is present", () => {
+    const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    expect(applyEventingEnvOverlay(config, {})).toBe(config);
+    expect(applyEventingEnvOverlay(config, { PI_MATERIA_EVENTING_ENABLED: "" })).toBe(config);
+    expect(applyEventingEnvOverlay(config, { PI_MATERIA_EVENTING_PRESETS: "   " })).toBe(config);
+  });
+
+  test("enables eventing on top of a disabled merged config", () => {
+    const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { PI_MATERIA_EVENTING_ENABLED: "true" });
+    expect(result).not.toBe(config);
+    expect(result.eventing?.enabled).toBe(true);
+    // Untouched fields are preserved.
+    expect(result.eventing?.heartbeatIntervalMs).toBe(30000);
+    expect(result.eventing?.sinks).toEqual({});
+  });
+
+  test("enables eventing and adds the agent-controller preset when eventing is absent", () => {
+    const config = {} as never;
+    const result = applyEventingEnvOverlay(config, {
+      PI_MATERIA_EVENTING_ENABLED: "1",
+      PI_MATERIA_EVENTING_PRESETS: "agent-controller",
+    });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+  });
+
+  test("env presets are additive on top of config-defined presets", () => {
+    const config = { eventing: { enabled: true, presets: ["custom-monitor"], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { PI_MATERIA_EVENTING_PRESETS: "agent-controller, custom-monitor" });
+    // agent-controller is added; custom-monitor is de-duplicated.
+    expect(result.eventing?.presets).toEqual(["custom-monitor", "agent-controller"]);
+  });
+
+  test("env heartbeat override wins over config heartbeat", () => {
+    const config = { eventing: { enabled: true, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { PI_MATERIA_EVENTING_HEARTBEAT_MS: "5000" });
+    expect(result.eventing?.heartbeatIntervalMs).toBe(5000);
+  });
+
+  test("preserves explicitly configured sinks (does not break existing sinks)", () => {
+    const config = {
+      eventing: {
+        enabled: false,
+        heartbeatIntervalMs: 30000,
+        presets: [],
+        sinks: { "my-webhook": { id: "my-webhook", url: "https://example.com/events" } },
+      },
+    } as never;
+    const result = applyEventingEnvOverlay(config, {
+      PI_MATERIA_EVENTING_ENABLED: "true",
+      PI_MATERIA_EVENTING_PRESETS: "agent-controller",
+    });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.sinks).toHaveProperty("my-webhook");
+    expect((result.eventing!.sinks!["my-webhook"] as Record<string, unknown>).url).toBe("https://example.com/events");
+  });
+
+  test("ignores invalid documented values and warns without failing", () => {
+    const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: string) => { warnings.push(message); };
+    try {
+      const result = applyEventingEnvOverlay(config, { PI_MATERIA_EVENTING_ENABLED: "maybe", PI_MATERIA_EVENTING_HEARTBEAT_MS: "not-a-number" });
+      // Invalid values are ignored: overlay is effectively absent.
+      expect(result).toBe(config);
+      expect(warnings).toHaveLength(2);
+      expect(warnings.some((w) => w.includes("PI_MATERIA_EVENTING_ENABLED"))).toBe(true);
+      expect(warnings.some((w) => w.includes("PI_MATERIA_EVENTING_HEARTBEAT_MS"))).toBe(true);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test("overlay takes precedence over user/project config through loadConfig", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-env-prec-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previousProfile = process.env.PI_MATERIA_PROFILE_DIR;
+    const previousEnabled = process.env.PI_MATERIA_EVENTING_ENABLED;
+    const previousPresets = process.env.PI_MATERIA_EVENTING_PRESETS;
+    const previousHeartbeat = process.env.PI_MATERIA_EVENTING_HEARTBEAT_MS;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    process.env.PI_MATERIA_EVENTING_ENABLED = "true";
+    process.env.PI_MATERIA_EVENTING_PRESETS = "agent-controller";
+    process.env.PI_MATERIA_EVENTING_HEARTBEAT_MS = "7000";
+    try {
+      // Project config leaves eventing disabled with a different heartbeat.
+      await saveMateriaConfigPatch(cwd, { eventing: { enabled: false, heartbeatIntervalMs: 60000 } });
+
+      const loaded = await loadConfig(cwd);
+      // Env overlay wins over the file-backed config.
+      expect(loaded.config.eventing?.enabled).toBe(true);
+      expect(loaded.config.eventing?.heartbeatIntervalMs).toBe(7000);
+      expect(loaded.config.eventing?.presets).toEqual(["agent-controller"]);
+    } finally {
+      if (previousProfile === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previousProfile;
+      if (previousEnabled === undefined) delete process.env.PI_MATERIA_EVENTING_ENABLED;
+      else process.env.PI_MATERIA_EVENTING_ENABLED = previousEnabled;
+      if (previousPresets === undefined) delete process.env.PI_MATERIA_EVENTING_PRESETS;
+      else process.env.PI_MATERIA_EVENTING_PRESETS = previousPresets;
+      if (previousHeartbeat === undefined) delete process.env.PI_MATERIA_EVENTING_HEARTBEAT_MS;
+      else process.env.PI_MATERIA_EVENTING_HEARTBEAT_MS = previousHeartbeat;
+    }
+  });
+
+  test("overlay is not persisted back to the config file", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-eventing-env-nopersist-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previousProfile = process.env.PI_MATERIA_PROFILE_DIR;
+    const previousEnabled = process.env.PI_MATERIA_EVENTING_ENABLED;
+    const previousPresets = process.env.PI_MATERIA_EVENTING_PRESETS;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    process.env.PI_MATERIA_EVENTING_ENABLED = "true";
+    process.env.PI_MATERIA_EVENTING_PRESETS = "agent-controller";
+    try {
+      await saveMateriaConfigPatch(cwd, { eventing: { enabled: false } });
+      // loadConfig applies the overlay in memory...
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.enabled).toBe(true);
+      expect(loaded.config.eventing?.presets).toEqual(["agent-controller"]);
+      // ...but the written user config file must NOT contain the overlay.
+      const raw = JSON.parse(await readFile(getUserMateriaAssetPath(), "utf8"));
+      expect(raw.eventing.enabled).toBe(false);
+      expect(raw.eventing.presets ?? []).not.toContain("agent-controller");
+    } finally {
+      if (previousProfile === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previousProfile;
+      if (previousEnabled === undefined) delete process.env.PI_MATERIA_EVENTING_ENABLED;
+      else process.env.PI_MATERIA_EVENTING_ENABLED = previousEnabled;
+      if (previousPresets === undefined) delete process.env.PI_MATERIA_EVENTING_PRESETS;
+      else process.env.PI_MATERIA_EVENTING_PRESETS = previousPresets;
+    }
+  });
+
+  // ── Controller-launch auto-activation ───────────────────────────
+  // agent_router sets CONTROLLER_* env vars (but NOT PI_MATERIA_EVENTING_*).
+  // Their presence must auto-enable eventing + the agent-controller preset so
+  // state updates reach the controller without manual config.
+  test("controller launch (CONTROLLER_* env) auto-enables eventing + agent-controller preset", () => {
+    const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1" });
+    expect(result).not.toBe(config);
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+    // Untouched config fields are preserved.
+    expect(result.eventing?.heartbeatIntervalMs).toBe(30000);
+    expect(result.eventing?.sinks).toEqual({});
+  });
+
+  test("controller activation works via CONTROLLER_EVENT_URL alone", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_EVENT_URL: "https://ctrl.example/runs/r1/events" });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+  });
+
+  test("returns the same config when neither overlay nor controller vars are present", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    expect(applyEventingEnvOverlay(config, {})).toBe(config);
+    // Whitespace-only controller vars are ignored (treated as unset).
+    expect(applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "   ", CONTROLLER_EVENT_URL: "" })).toBe(config);
+  });
+
+  test("explicit PI_MATERIA_EVENTING_ENABLED=false opts out under a controller launch", () => {
+    const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1", PI_MATERIA_EVENTING_ENABLED: "false" });
+    expect(result.eventing?.enabled).toBe(false);
+    // Presets were not explicitly disabled, so controller activation still adds agent-controller.
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+  });
+
+  test("explicit PI_MATERIA_EVENTING_PRESETS takes precedence over controller activation", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1", PI_MATERIA_EVENTING_PRESETS: "custom-monitor" });
+    // enabled not set explicitly → controller activation enables it.
+    expect(result.eventing?.enabled).toBe(true);
+    // Explicit presets win — agent-controller is NOT added.
+    expect(result.eventing?.presets).toEqual(["custom-monitor"]);
+  });
+
+  test("controller activation merges agent-controller additively onto config-defined presets", () => {
+    const config = { eventing: { enabled: false, presets: ["custom-monitor"], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1" });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.presets).toEqual(["custom-monitor", "agent-controller"]);
+  });
+
+  test("explicit overlay + controller vars compose (explicit wins per field)", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const result = applyEventingEnvOverlay(config, {
+      CONTROLLER_RUN_ID: "run-1",
+      PI_MATERIA_EVENTING_ENABLED: "true",
+      PI_MATERIA_EVENTING_HEARTBEAT_MS: "7000",
+    });
+    expect(result.eventing?.enabled).toBe(true);
+    expect(result.eventing?.heartbeatIntervalMs).toBe(7000);
+    // presets not set explicitly → controller activation supplies agent-controller.
+    expect(result.eventing?.presets).toEqual(["agent-controller"]);
+  });
+
+  test("controller activation surfaces an informational diagnostic warning", () => {
+    const config = { eventing: { enabled: false, presets: [], sinks: {} } } as never;
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: string) => { warnings.push(message); };
+    try {
+      applyEventingEnvOverlay(config, { CONTROLLER_RUN_ID: "run-1" });
+      expect(warnings.some((w) => w.includes("Controller launch detected"))).toBe(true);
+      expect(warnings.some((w) => w.includes("CONTROLLER_RUN_ID"))).toBe(true);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test("controller-launch activation is not persisted back to the config file", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-controller-nopersist-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previousProfile = process.env.PI_MATERIA_PROFILE_DIR;
+    const previousRunId = process.env.CONTROLLER_RUN_ID;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    // Simulate an agent_router launch: CONTROLLER_* set, PI_MATERIA_EVENTING_* absent.
+    process.env.CONTROLLER_RUN_ID = "run-controller-1";
+    try {
+      await saveMateriaConfigPatch(cwd, { eventing: { enabled: false } });
+      // loadConfig auto-activates eventing + the agent-controller preset in memory...
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.eventing?.enabled).toBe(true);
+      expect(loaded.config.eventing?.presets).toEqual(["agent-controller"]);
+      // ...but the controller activation must NOT be written back to config files
+      // (docs/runtime-eventing.md §9.1.1: in-memory only).
+      const raw = JSON.parse(await readFile(getUserMateriaAssetPath(), "utf8"));
+      expect(raw.eventing.enabled).toBe(false);
+      expect(raw.eventing.presets ?? []).not.toContain("agent-controller");
+    } finally {
+      if (previousProfile === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previousProfile;
+      if (previousRunId === undefined) delete process.env.CONTROLLER_RUN_ID;
+      else process.env.CONTROLLER_RUN_ID = previousRunId;
     }
   });
 });

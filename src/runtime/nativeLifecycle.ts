@@ -21,7 +21,8 @@ import {
 } from "../domain/eventing.js";
 import { createEventBus, EventBus, flushBusOutcomes } from "./eventBus.js";
 import { WebhookSink } from "./webhookSink.js";
-import { expandPresets } from "../eventing/presets.js";
+import { detectControllerLaunch, expandPresets, resolveControllerRunId } from "../eventing/presets.js";
+import { evaluateAgentControllerWebhookStatus, isWebhookSinkConfig } from "../eventing/diagnostics.js";
 import type { EventingConfig, EventingWebhookSinkConfig, EventSinkConfig } from "../types.js";
 import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
@@ -403,7 +404,26 @@ export async function cancelNativeCast(
  */
 function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState): EventBus | undefined {
   const eventing = config.eventing;
-  if (!eventing?.enabled) return undefined;
+
+  // Controller launch context, resolved once for both diagnostics and preset
+  // expansion. CONTROLLER_CONTEXT_DIR is set by the agent_router (docs §13b.5).
+  const controllerContextDir = process.env["CONTROLLER_CONTEXT_DIR"]?.trim();
+  const controller = detectControllerLaunch();
+  const runIdResolved = Boolean(resolveControllerRunId(controllerContextDir));
+
+  if (!eventing?.enabled) {
+    // Even when eventing is disabled, surface why controller delivery won't
+    // happen when there's an expectation of it (controller launch / preset /
+    // explicit sink). Non-fatal: never blocks the cast, and a no-op when no
+    // delivery was expected (leaves unrelated local runs untouched).
+    surfaceAgentControllerDiagnostics(state, {
+      eventing,
+      agentControllerSink: pickAgentControllerSink(eventing?.sinks),
+      controller,
+      runIdResolved,
+    });
+    return undefined;
+  }
 
   const bus = createEventBus(state.runDir);
   const seq = createSequenceCounter();
@@ -414,11 +434,6 @@ function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState
   // take precedence (per docs/runtime-eventing.md §8.4).
   const resolvedSinks: Record<string, EventSinkConfig> = { ...eventing.sinks };
   if (eventing.presets && eventing.presets.length > 0) {
-    // Resolve the controller context directory from the CONTROLLER_CONTEXT_DIR
-    // env var (set by the agent_router per docs §13b.5). The preset resolver
-    // also checks this env var internally, but we pass it explicitly so the
-    // context file lookup is always available.
-    const controllerContextDir = process.env["CONTROLLER_CONTEXT_DIR"]?.trim();
     const expanded = expandPresets(
       eventing.presets,
       eventing.sinks,
@@ -436,6 +451,16 @@ function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState
       appendEvent(state.runState, "eventing_preset_warning", { warning }).catch(() => {});
     }
   }
+
+  // Surface diagnostics now that the agent-controller sink has been fully
+  // resolved (post preset expansion), so URL/enabled checks reflect the sink
+  // that will actually be registered. Emitted once per cast initialization.
+  surfaceAgentControllerDiagnostics(state, {
+    eventing,
+    agentControllerSink: pickAgentControllerSink(resolvedSinks),
+    controller,
+    runIdResolved,
+  });
 
   // Register configured webhook sinks (both explicit and preset-expanded).
   for (const [sinkId, sinkConfig] of Object.entries(resolvedSinks)) {
@@ -462,6 +487,56 @@ function isEnabledWebhookSinkConfig(
   if (c.enabled === false) return false;
   // Must have a URL to be a webhook sink.
   return typeof c.url === "string" && c.url.trim().length > 0;
+}
+
+/**
+ * Pick the agent-controller webhook sink (by reserved id) from a sink map.
+ *
+ * Returns the raw union member; callers narrow to the webhook shape via
+ * {@link isWebhookSinkConfig}. Used so diagnostics inspect the same sink the
+ * bus will register.
+ */
+function pickAgentControllerSink(
+  sinks: Record<string, EventSinkConfig> | undefined,
+): EventSinkConfig | undefined {
+  return sinks?.["agent-controller-webhook"];
+}
+
+/**
+ * Surface agent-controller webhook activation diagnostics to session logs and
+ * cast artifacts.
+ *
+ * Wraps {@link evaluateAgentControllerWebhookStatus}: when controller delivery
+ * is expected but not active (or positively active), each diagnostic is written
+ * to `events.jsonl` as an `eventing_webhook_diagnostic` entry and echoed to
+ * `console.warn`/`console.log`. All artifact writes are fire-and-forget and
+ * never fail the cast. No-op when no delivery was expected.
+ */
+function surfaceAgentControllerDiagnostics(
+  state: MateriaCastState,
+  input: {
+    eventing?: EventingConfig;
+    agentControllerSink?: EventSinkConfig;
+    controller?: ReturnType<typeof detectControllerLaunch>;
+    runIdResolved?: boolean;
+  },
+): void {
+  const status = evaluateAgentControllerWebhookStatus(input);
+  if (!status.expected) return;
+
+  for (const diagnostic of status.diagnostics) {
+    // Route to console.warn so the diagnostic is captured in the autonomous
+    // session log stream (stderr) regardless of severity. The artifact entry
+    // carries the structured severity for tooling.
+    console.warn(`[pi-materia] agent-controller webhook: ${diagnostic.message}`);
+    appendEvent(state.runState, "eventing_webhook_diagnostic", {
+      severity: diagnostic.severity,
+      reason: diagnostic.reason,
+      message: diagnostic.message,
+      active: status.active,
+      ...(status.targetUrl ? { targetUrl: status.targetUrl } : {}),
+    }).catch(() => {});
+  }
 }
 
 /**

@@ -1,13 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "bun:test";
+import type { Server } from "bun";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { nativeTestInternals } from "../src/castRuntime.js";
-import { EventBus, LocalEventRecordingSink, createEventBus } from "../src/runtime/eventBus.js";
+import { applyEventingEnvOverlay } from "../src/config/config.js";
+import { EventBus, LocalEventRecordingSink, createEventBus, flushBusOutcomes } from "../src/runtime/eventBus.js";
 import {
   ResultAccumulator,
   createSequenceCounter,
+  enrichEvents,
+  type EnrichmentContext,
   type MateriaCastState,
 } from "../src/domain/eventing.js";
 
@@ -787,5 +791,234 @@ describe("lifecycle event emission", () => {
 
     // Bus should not be registered.
     expect(getEventBus(state)).toBeUndefined();
+  });
+});
+
+// ── Agent-Controller Preset Activation from Environment ─────────────────
+//
+// agent_router launches pi-materia with CONTROLLER_* env vars (run id, event
+// URL, context dir) but NOT PI_MATERIA_EVENTING_*. The env overlay must
+// auto-enable eventing and the agent-controller preset so state updates reach
+// the controller without manual config. These tests confirm the full path:
+// controller env → applyEventingEnvOverlay → initializeCastEventBus →
+// agent-controller webhook sink registered, targeting the controller URL, and
+// receiving BOTH materia-emitted (result.*) and runtime lifecycle events.
+
+describe("agent-controller preset activation from environment", () => {
+  const originalRunId = process.env.CONTROLLER_RUN_ID;
+  const originalEventUrl = process.env.CONTROLLER_EVENT_URL;
+  const originalContextDir = process.env.CONTROLLER_CONTEXT_DIR;
+
+  function clearControllerEnv(): void {
+    delete process.env.CONTROLLER_RUN_ID;
+    delete process.env.CONTROLLER_EVENT_URL;
+    delete process.env.CONTROLLER_CONTEXT_DIR;
+  }
+
+  interface RecordedRequest {
+    method: string;
+    bodyJson?: unknown;
+  }
+
+  /** Start a Bun HTTP server that records every request body before responding. */
+  function startRecordingServer(
+    handler: () => Response | Promise<Response>,
+  ): Promise<{ server: Server; requests: RecordedRequest[] }> {
+    const requests: RecordedRequest[] = [];
+    return new Promise((resolve) => {
+      const server = Bun.serve({
+        port: 0,
+        async fetch(req) {
+          const bodyText = await req.text().catch(() => "");
+          let bodyJson: unknown;
+          try {
+            bodyJson = bodyText ? JSON.parse(bodyText) : undefined;
+          } catch {
+            bodyJson = undefined;
+          }
+          requests.push({ method: req.method, bodyJson });
+          return handler();
+        },
+      });
+      resolve({ server, requests });
+    });
+  }
+
+  test("controller env activates preset, targets controller URL, delivers materia + lifecycle events", async () => {
+    const { server, requests } = await startRecordingServer(
+      () => new Response("ok", { status: 200 }),
+    );
+    const eventUrl = `http://localhost:${server.port}/runs/run-int/events`;
+    try {
+      // Simulate agent_router launch: CONTROLLER_* set, PI_MATERIA_EVENTING_* absent.
+      clearControllerEnv();
+      process.env.CONTROLLER_RUN_ID = "run-int";
+      process.env.CONTROLLER_EVENT_URL = eventUrl;
+
+      // Default config has eventing disabled; the overlay must activate it.
+      const config = applyEventingEnvOverlay(
+        { eventing: { enabled: false, presets: [], sinks: {}, heartbeatIntervalMs: 30000 } } as never,
+      );
+      expect(config.eventing?.enabled).toBe(true);
+      expect(config.eventing?.presets).toEqual(["agent-controller"]);
+
+      const runDir = await tempDir();
+      const state = makeCastState({ castId: "test-ac-activate", runDir });
+      const bus = initializeCastEventBus(config, state);
+      expect(bus).toBeDefined();
+
+      try {
+        // The agent-controller webhook sink must be registered and enabled.
+        const acSink = bus!.sinks.find((s) => s.id === "agent-controller-webhook");
+        expect(acSink).toBeDefined();
+        expect(acSink!.enabled).toBe(true);
+
+        // 1. Runtime lifecycle event flows through the same bus as materia events.
+        await emitLifecycleEvent(state, "lifecycle.cast.started", {
+          severity: "info",
+          message: "cast started",
+        });
+
+        // 2. Materia-emitted result event flows through the bus (same path as
+        //    processSocketEvents uses internally).
+        const seq = createSequenceCounter();
+        const ctx: EnrichmentContext = {
+          castId: state.castId,
+          socketId: "Socket-9",
+          materia: "Blackbelt-GH-PR",
+          visit: 1,
+        };
+        const [resultEvent] = enrichEvents(
+          [{ type: "result.pr_created", message: "PR #7 created", payload: { prUrl: "https://example/pr/7" } }],
+          ctx,
+          seq,
+          () => randomUUID(),
+        );
+        await bus!.dispatch(resultEvent);
+
+        // Flush background webhook deliveries to the recording server.
+        await bus!.flush();
+
+        // Both events were delivered, with correctly mapped runtime.* types.
+        expect(requests).toHaveLength(2);
+        const types = requests
+          .map((r) => (r.bodyJson as { eventType?: string } | undefined)?.eventType)
+          .sort();
+        expect(types).toEqual(["runtime.accepted", "runtime.pr_created"]);
+        // POSTed to the controller event endpoint.
+        expect(requests.every((r) => r.method === "POST")).toBe(true);
+      } finally {
+        removeEventBus(state.castId);
+      }
+    } finally {
+      server.stop();
+      if (originalRunId === undefined) delete process.env.CONTROLLER_RUN_ID;
+      else process.env.CONTROLLER_RUN_ID = originalRunId;
+      if (originalEventUrl === undefined) delete process.env.CONTROLLER_EVENT_URL;
+      else process.env.CONTROLLER_EVENT_URL = originalEventUrl;
+      if (originalContextDir === undefined) delete process.env.CONTROLLER_CONTEXT_DIR;
+      else process.env.CONTROLLER_CONTEXT_DIR = originalContextDir;
+    }
+  });
+
+  test("no controller env and no overlay leaves eventing disabled (no bus registered)", async () => {
+    clearControllerEnv();
+    const runDir = await tempDir();
+    const state = makeCastState({ castId: "test-ac-inactive", runDir });
+    const config = { eventing: { enabled: false, presets: [], sinks: {}, heartbeatIntervalMs: 30000 } } as never;
+    const bus = initializeCastEventBus(config, state);
+    expect(bus).toBeUndefined();
+    expect(getEventBus(state)).toBeUndefined();
+  });
+
+  test("both materia result and lifecycle events flow through the real preset sink into dispatch.jsonl", async () => {
+    const { server, requests } = await startRecordingServer(
+      () => new Response("ok", { status: 200 }),
+    );
+    const eventUrl = `http://localhost:${server.port}/runs/run-e2e/events`;
+    try {
+      clearControllerEnv();
+      process.env.CONTROLLER_RUN_ID = "run-e2e";
+      process.env.CONTROLLER_EVENT_URL = eventUrl;
+
+      // Default config disabled → overlay activates eventing + preset (agent_router launch).
+      const config = applyEventingEnvOverlay(
+        { eventing: { enabled: false, presets: [], sinks: {}, heartbeatIntervalMs: 30000 } } as never,
+      );
+
+      const runDir = await tempDir();
+      const state = makeCastState({ castId: "test-ac-dispatch-artifact", runDir });
+      const bus = initializeCastEventBus(config, state);
+      expect(bus).toBeDefined();
+
+      try {
+        // The real agent-controller webhook sink is registered and enabled.
+        const acSink = bus!.sinks.find((s) => s.id === "agent-controller-webhook");
+        expect(acSink).toBeDefined();
+        expect(acSink!.enabled).toBe(true);
+
+        // 1. Runtime lifecycle event (lifecycle.cast.started → runtime.accepted).
+        await emitLifecycleEvent(state, "lifecycle.cast.started", {
+          severity: "info",
+          message: "cast started",
+        });
+
+        // 2. Materia-emitted result event (result.pr_created → runtime.pr_created),
+        //    dispatched through the same bus path the materia side-channel uses.
+        const seq = createSequenceCounter();
+        const ctx: EnrichmentContext = {
+          castId: state.castId,
+          socketId: "Socket-E2E",
+          materia: "Blackbelt-GH-PR",
+          visit: 1,
+        };
+        const [resultEvent] = enrichEvents(
+          [{ type: "result.pr_created", message: "PR #9 created", payload: { prUrl: "https://example/pr/9" } }],
+          ctx,
+          seq,
+          () => randomUUID(),
+        );
+        await bus!.dispatch(resultEvent);
+
+        // Flush background webhook delivery, reconcile async outcomes, persist.
+        await bus!.flush();
+        await flushBusOutcomes(bus!, runDir);
+
+        // Both events delivered to the controller with mapped runtime.* types.
+        expect(requests).toHaveLength(2);
+        const types = requests
+          .map((r) => (r.bodyJson as { eventType?: string } | undefined)?.eventType)
+          .sort();
+        expect(types).toEqual(["runtime.accepted", "runtime.pr_created"]);
+
+        // dispatch.jsonl records real reconciled outcomes (not provisional
+        // "queued"): both events delivered via the agent-controller sink with
+        // an HTTP status code, proving async dispatch outcome recording.
+        const dispatchPath = path.join(runDir, "events", "dispatch.jsonl");
+        const content = await readFile(dispatchPath, "utf8");
+        const lines = content.trim().split("\n");
+        expect(lines.length).toBe(2);
+        for (const line of lines) {
+          const outcome = JSON.parse(line);
+          const ac = (outcome.sinks as Array<{ sinkId: string; status: string; statusCode?: number }>)
+            .find((s) => s.sinkId === "agent-controller-webhook");
+          expect(ac).toBeDefined();
+          expect(ac!.status).toBe("delivered");
+          expect(ac!.statusCode).toBe(200);
+          expect(outcome.deliveredTo).toContain("agent-controller-webhook");
+          expect(outcome.failures).toEqual([]);
+        }
+      } finally {
+        removeEventBus(state.castId);
+      }
+    } finally {
+      server.stop();
+      if (originalRunId === undefined) delete process.env.CONTROLLER_RUN_ID;
+      else process.env.CONTROLLER_RUN_ID = originalRunId;
+      if (originalEventUrl === undefined) delete process.env.CONTROLLER_EVENT_URL;
+      else process.env.CONTROLLER_EVENT_URL = originalEventUrl;
+      if (originalContextDir === undefined) delete process.env.CONTROLLER_CONTEXT_DIR;
+      else process.env.CONTROLLER_CONTEXT_DIR = originalContextDir;
+    }
   });
 });
