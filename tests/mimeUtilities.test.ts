@@ -522,7 +522,7 @@ describe("Mime-Maintain utility script", () => {
     expect(result.json.state.mimeMaintain.message).toContain("working tree clean");
   });
 
-  test("fails with clear error when git is not available", async () => {
+  test("reports clear git-missing error as routable satisfied:false JSON", async () => {
     const emptyDir = await mkdtemp(path.join(tmpdir(), "pi-materia-no-git-maintain-"));
     try {
       const result = await runUtility(
@@ -531,7 +531,10 @@ describe("Mime-Maintain utility script", () => {
         { PATH: emptyDir },
       );
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(0);
+      expect(result.json.satisfied).toBe(false);
+      expect(typeof result.json.context).toBe("string");
+      expect(result.json.context).toContain("git is required");
       expect(result.json.state.mimeMaintain.ok).toBe(false);
       expect(result.json.state.mimeMaintain.error).toContain("git is required");
       expect(result.json.state.mimeMaintain.available?.git).toBe(false);
@@ -540,7 +543,7 @@ describe("Mime-Maintain utility script", () => {
     }
   });
 
-  test("fails with clear error outside a git repo", async () => {
+  test("reports clear no-repo error as routable satisfied:false JSON", async () => {
     const fake = await makeFakeGitForMaintain();
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-non-repo-"));
     const result = await runUtility(
@@ -549,26 +552,52 @@ describe("Mime-Maintain utility script", () => {
       { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, GIT_NO_REPO: "1" },
     );
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("no git repository");
     expect(result.json.state.mimeMaintain.ok).toBe(false);
     expect(result.json.state.mimeMaintain.error).toContain("no git repository");
     expect(result.json.state.mimeMaintain.hasGitRepo).toBe(false);
   });
 
-  test("fails with clear error when no item title is available", async () => {
+  test("reports clear missing-title error as routable satisfied:false JSON", async () => {
     const { result } = await runMaintain({});
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("no item title");
     expect(result.json.state.mimeMaintain.ok).toBe(false);
     expect(result.json.state.mimeMaintain.error).toContain("no item title");
   });
 
-  test("fails with clear error when item.title is empty string", async () => {
+  test("reports clear empty-title error as routable satisfied:false JSON", async () => {
     const { result } = await runMaintain({ item: { title: "" } });
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("no item title");
     expect(result.json.state.mimeMaintain.ok).toBe(false);
     expect(result.json.state.mimeMaintain.error).toContain("no item title");
+  });
+
+  test("normalizes commit failure as routable satisfied:false JSON with exit 0", async () => {
+    const { result } = await runMaintain(
+      { item: { title: "feat: will not commit" } },
+      { GIT_DIRTY: "1", GIT_COMMIT_FAIL: "1" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("git command failed");
+    expect(result.json.state.mimeMaintain.ok).toBe(false);
+    expect(result.json.state.mimeMaintain.error).toContain("git command failed");
+    expect(typeof result.json.state.mimeMaintain.gitError).toBe("string");
+    expect(result.json.state.mimeMaintain.gitError).toContain("commit failed");
+    expect(result.json.state.mimeMaintain.hasGitRepo).toBe(true);
   });
 
   test("reads branchName from state.mimeBootstrap for status reference", async () => {

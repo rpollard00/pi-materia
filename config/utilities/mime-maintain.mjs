@@ -21,9 +21,14 @@
  * message so the output is accepted by sockets using satisfied routing, while
  * deterministic utility details remain under `state.mimeMaintain`.
  * Stderr is reserved for diagnostics.
- * All known failure modes return `state.mimeMaintain.ok: false` with a
- * descriptive error string.  A clean working tree produces `ok: true`
- * with a deterministic no-op message rather than failing.
+ * Known/recoverable failure modes (missing git, missing repo, missing title,
+ * commit failure) emit `satisfied: false` plus a plain-text `context` with
+ * `state.mimeMaintain.ok: false` and exit 0 so satisfied-routing sockets can
+ * still consume the structured result. Unexpected parser/runtime crashes
+ * that prevent handled output formation are preserved as true process
+ * failures (no satisfied/context fields, non-zero exit).
+ * A clean working tree produces `ok: true` with a deterministic no-op message
+ * rather than failing.
  */
 import { execFile } from "node:child_process";
 
@@ -119,18 +124,40 @@ try {
 } catch (error) {
   const rawMessage = error instanceof Error ? error.message : String(error);
   const message = rawMessage.startsWith("Mime-Maintain:") ? rawMessage : `Mime-Maintain: ${rawMessage}`;
-  const details = error instanceof UtilityError ? error.details : {};
   console.error(message);
-  writeStdoutJson({
-    state: {
-      mimeMaintain: {
-        ok: false,
-        error: message,
-        ...details,
+
+  if (error instanceof UtilityError) {
+    // Known/recoverable failures (missing git, missing repo, missing title,
+    // commit failure) normalize into routable handoff JSON: top-level
+    // satisfied:false plus a plain-text context so satisfied-routing sockets
+    // accept the structured result, with deterministic details preserved under
+    // state.mimeMaintain.ok:false. Exit 0 so the loop consumes the result.
+    writeStdoutJson({
+      satisfied: false,
+      context: message,
+      state: {
+        mimeMaintain: {
+          ok: false,
+          error: message,
+          ...error.details,
+        },
       },
-    },
-  });
-  process.exitCode = 1;
+    });
+    process.exitCode = 0;
+  } else {
+    // Unexpected parser/runtime crashes that prevent handled output formation
+    // are preserved as true process failures: emit the structured error state
+    // for diagnostics but keep a non-zero exit so the failure is observable.
+    writeStdoutJson({
+      state: {
+        mimeMaintain: {
+          ok: false,
+          error: message,
+        },
+      },
+    });
+    process.exitCode = 1;
+  }
 }
 
 // ---------------------------------------------------------------------------
