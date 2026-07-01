@@ -1804,7 +1804,9 @@ describe("Mime-ADO-PR utility script", () => {
       expect(result.json.event).toHaveLength(1);
       expect(result.json.event[0].type).toBe("result.pr_created");
       expect(result.json.event[0].message).toContain("PR #99");
-      expect(result.json.event[0].payload.prUrl).toContain("pullrequest/99");
+      expect(result.json.event[0].payload.prUrl).toBe("https://dev.azure.com/test-org/test-project/_git/test-repo/pullrequest/99");
+      // Strengthen: prUrl must parse as an absolute http(s) URL, not merely match a string.
+      expectAbsoluteHttpUrl(result.json.event[0].payload.prUrl);
       expect(result.json.event[0].payload.prNumber).toBe(99);
       expect(result.json.event[0].payload.branchName).toBe("mime/test-branch");
       expect(result.json.event[0].payload.organization).toBe("test-org");
