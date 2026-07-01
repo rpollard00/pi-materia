@@ -16,7 +16,10 @@
  *   - Artifact scanning or manifest entries
  *   - jj or blackbelt code
  *
- * Output contract: stdout JSON with top-level `state.mimeMaintain`.
+ * Output contract: stdout JSON. Successful and clean no-op paths emit the
+ * reserved graph-control field `satisfied: true` plus a plain-text `context`
+ * message so the output is accepted by sockets using satisfied routing, while
+ * deterministic utility details remain under `state.mimeMaintain`.
  * Stderr is reserved for diagnostics.
  * All known failure modes return `state.mimeMaintain.ok: false` with a
  * descriptive error string.  A clean working tree produces `ok: true`
@@ -68,14 +71,17 @@ try {
   const isClean = await isWorkingTreeClean(cwd);
 
   if (isClean) {
+    const message = "Mime-Maintain: working tree clean — nothing to commit.";
     writeStdoutJson({
+      satisfied: true,
+      context: message,
       state: {
         mimeMaintain: {
           ok: true,
           committed: false,
           noop: true,
           branchName: branchName ?? null,
-          message: "Mime-Maintain: working tree clean — nothing to commit.",
+          message,
         },
       },
     });
@@ -86,14 +92,20 @@ try {
   try {
     await execFileText("git", ["add", "-A"], cwd);
     await execFileText("git", ["commit", "-m", title.trim()], cwd);
+    const commitMessage = title.trim();
+    const context = branchName
+      ? `Mime-Maintain: committed "${commitMessage}" to ${branchName}.`
+      : `Mime-Maintain: committed "${commitMessage}".`;
     writeStdoutJson({
+      satisfied: true,
+      context,
       state: {
         mimeMaintain: {
           ok: true,
           committed: true,
           noop: false,
           branchName: branchName ?? null,
-          message: title.trim(),
+          message: commitMessage,
         },
       },
     });
