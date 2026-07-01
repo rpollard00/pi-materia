@@ -499,6 +499,14 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    // Canonical handoff contract for satisfied routing: boolean satisfied +
+    // plain-text context at top level, deterministic details under state.
+    expect(result.json.satisfied).toBe(true);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context.length).toBeGreaterThan(0);
+    expect(result.json.context).toContain("feat: add mime support");
+    // stdout must be a single valid JSON document the handoff validator parses.
+    expect(JSON.parse(result.stdout)).toEqual(result.json);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.committed).toBe(true);
     expect(result.json.state.mimeMaintain.noop).toBe(false);
@@ -516,6 +524,13 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    // Clean no-op still emits the canonical satisfied handoff fields so
+    // satisfied-routing sockets accept the structured result.
+    expect(result.json.satisfied).toBe(true);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context.length).toBeGreaterThan(0);
+    expect(result.json.context).toContain("working tree clean");
+    expect(JSON.parse(result.stdout)).toEqual(result.json);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.committed).toBe(false);
     expect(result.json.state.mimeMaintain.noop).toBe(true);
@@ -610,6 +625,7 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.branchName).toBe("mime/crystal-casts-abc123def0");
   });
@@ -621,6 +637,7 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.branchName).toBeNull();
   });
@@ -635,6 +652,7 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.noop).toBe(true);
     expect(result.json.state.mimeMaintain.branchName).toBe("mime/ribbon-guards-bdf5a27220");
