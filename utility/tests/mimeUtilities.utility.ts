@@ -3,6 +3,15 @@ import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+function expectAbsoluteHttpUrl(value: unknown): URL {
+  expect(typeof value).toBe("string");
+  expect((value as string).length).toBeGreaterThan(0);
+  const parsed = new URL(value as string);
+  expect(parsed.protocol === "http:" || parsed.protocol === "https:").toBe(true);
+  expect(parsed.host.length).toBeGreaterThan(0);
+  return parsed;
+}
+
 // ---------------------------------------------------------------------------
 // Utility registration / naming tests — load default config directly
 // ---------------------------------------------------------------------------
@@ -374,6 +383,8 @@ describe("Mime-GH-PR mocked behavior", () => {
       expect(result.json.event[0].type).toBe("result.pr_created");
       expect(result.json.event[0].message).toContain("PR #42");
       expect(result.json.event[0].payload.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
+      // Strengthen: prUrl must parse as an absolute http(s) URL, not merely match a string.
+      expectAbsoluteHttpUrl(result.json.event[0].payload.prUrl);
       expect(result.json.event[0].payload.prNumber).toBe(42);
       expect(result.json.event[0].payload.branchName).toBe("mime/test-branch");
       expect(result.json.event[0].payload.baseBranch).toBe("main");
