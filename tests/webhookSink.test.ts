@@ -12,6 +12,11 @@ import {
   createSequenceCounter,
 } from "../src/domain/eventing.js";
 import type { EventingWebhookSinkConfig, EventFilter } from "../src/types.js";
+import {
+  buildAgentControllerSinkConfig,
+  CONTROLLER_RUN_ID_ENV,
+  CONTROLLER_EVENT_URL_ENV,
+} from "../src/eventing/presets.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -1255,6 +1260,76 @@ describe("WebhookSink drainResults (real async dispatch outcomes)", () => {
 });
 
 // ── globMatch through matchesFilter — additional corner cases ───────────
+
+// ── Agent-Controller Preset Event Sink (regression) ─────────────────────
+//
+// Regression for the real agent-controller preset event sink path: a
+// result.pr_created event dispatched through the ACTUAL preset config
+// (buildAgentControllerSinkConfig) must reach the controller as a
+// runtime.pr_created POST whose body preserves eventType:"runtime.pr_created"
+// and payload.prUrl, where prUrl parses as an absolute http(s) URL. This
+// exercises the preset body mapping + type map end-to-end against a recording
+// HTTP server, so a dropped or malformed PR URL would fail here. The earlier
+// lifecycle/preset coverage asserts the eventType mapping but not prUrl
+// preservation, which is what this test pins down.
+describe("agent-controller preset event sink forwards PR URLs", () => {
+  const originalRunId = process.env[CONTROLLER_RUN_ID_ENV];
+  const originalEventUrl = process.env[CONTROLLER_EVENT_URL_ENV];
+
+  test("runtime.pr_created POST body preserves eventType and an absolute prUrl", async () => {
+    const knownPrUrl = "https://github.com/acme/widgets/pull/4242";
+    const { server, url, requests } = await startRecordingServer(
+      () => new Response("ok", { status: 200 }),
+    );
+    try {
+      // Simulate an agent_router launch: the controller sets the run id (so
+      // the preset sink is enabled) and the event ingestion endpoint (the
+      // recording server). buildAgentControllerSinkConfig resolves both into
+      // a concrete webhook sink using the real preset body/type mapping.
+      process.env[CONTROLLER_RUN_ID_ENV] = "run-ac-pr";
+      process.env[CONTROLLER_EVENT_URL_ENV] = url;
+
+      const config = buildAgentControllerSinkConfig();
+      // Sanity: preset produced an enabled webhook sink targeting the server.
+      expect(config.enabled).toBe(true);
+      expect(config.url).toBe(url);
+
+      const sink = new WebhookSink(config);
+      const event = makeEvent({
+        type: "result.pr_created",
+        message: "PR #4242 created",
+        payload: { prUrl: knownPrUrl, branchName: "agent/4242" },
+        severity: "info",
+      });
+      await sink.deliver(event);
+      await sink.flush();
+
+      // Exactly one event delivered, via POST.
+      expect(requests).toHaveLength(1);
+      expect(requests[0].method).toBe("POST");
+
+      const body = requests[0].bodyJson as Record<string, unknown>;
+      // Type mapping preserved: result.pr_created -> runtime.pr_created.
+      expect(body.eventType).toBe("runtime.pr_created");
+
+      // Payload + prUrl preserved end-to-end through the preset body mapping.
+      const payload = body.payload as Record<string, unknown> | undefined;
+      expect(payload).toBeDefined();
+      expect(payload!.prUrl).toBe(knownPrUrl);
+
+      // The recorded prUrl must parse as an absolute http: or https: URL.
+      expect(typeof payload!.prUrl).toBe("string");
+      const parsed = new URL(payload!.prUrl as string);
+      expect(parsed.protocol === "http:" || parsed.protocol === "https:").toBe(true);
+    } finally {
+      server.stop();
+      if (originalRunId === undefined) delete process.env[CONTROLLER_RUN_ID_ENV];
+      else process.env[CONTROLLER_RUN_ID_ENV] = originalRunId;
+      if (originalEventUrl === undefined) delete process.env[CONTROLLER_EVENT_URL_ENV];
+      else process.env[CONTROLLER_EVENT_URL_ENV] = originalEventUrl;
+    }
+  });
+});
 
 describe("globMatch corner cases", () => {
   test("pattern with multiple ** segments", () => {
