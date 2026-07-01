@@ -230,6 +230,15 @@ async function runMaintain(
   };
 }
 
+function expectAbsoluteHttpUrl(value: unknown): URL {
+  expect(typeof value).toBe("string");
+  expect((value as string).length).toBeGreaterThan(0);
+  const parsed = new URL(value as string);
+  expect(parsed.protocol === "http:" || parsed.protocol === "https:").toBe(true);
+  expect(parsed.host.length).toBeGreaterThan(0);
+  return parsed;
+}
+
 // ---------------------------------------------------------------------------
 // Fake GitHub API server for PR tests (shared with blackbelt-gh-pr pattern)
 // ---------------------------------------------------------------------------
@@ -490,6 +499,14 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    // Canonical handoff contract for satisfied routing: boolean satisfied +
+    // plain-text context at top level, deterministic details under state.
+    expect(result.json.satisfied).toBe(true);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context.length).toBeGreaterThan(0);
+    expect(result.json.context).toContain("feat: add mime support");
+    // stdout must be a single valid JSON document the handoff validator parses.
+    expect(JSON.parse(result.stdout)).toEqual(result.json);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.committed).toBe(true);
     expect(result.json.state.mimeMaintain.noop).toBe(false);
@@ -507,13 +524,20 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    // Clean no-op still emits the canonical satisfied handoff fields so
+    // satisfied-routing sockets accept the structured result.
+    expect(result.json.satisfied).toBe(true);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context.length).toBeGreaterThan(0);
+    expect(result.json.context).toContain("working tree clean");
+    expect(JSON.parse(result.stdout)).toEqual(result.json);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.committed).toBe(false);
     expect(result.json.state.mimeMaintain.noop).toBe(true);
     expect(result.json.state.mimeMaintain.message).toContain("working tree clean");
   });
 
-  test("fails with clear error when git is not available", async () => {
+  test("reports clear git-missing error as routable satisfied:false JSON", async () => {
     const emptyDir = await mkdtemp(path.join(tmpdir(), "pi-materia-no-git-maintain-"));
     try {
       const result = await runUtility(
@@ -522,7 +546,10 @@ describe("Mime-Maintain utility script", () => {
         { PATH: emptyDir },
       );
 
-      expect(result.exitCode).toBe(1);
+      expect(result.exitCode).toBe(0);
+      expect(result.json.satisfied).toBe(false);
+      expect(typeof result.json.context).toBe("string");
+      expect(result.json.context).toContain("git is required");
       expect(result.json.state.mimeMaintain.ok).toBe(false);
       expect(result.json.state.mimeMaintain.error).toContain("git is required");
       expect(result.json.state.mimeMaintain.available?.git).toBe(false);
@@ -531,7 +558,7 @@ describe("Mime-Maintain utility script", () => {
     }
   });
 
-  test("fails with clear error outside a git repo", async () => {
+  test("reports clear no-repo error as routable satisfied:false JSON", async () => {
     const fake = await makeFakeGitForMaintain();
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-non-repo-"));
     const result = await runUtility(
@@ -540,26 +567,52 @@ describe("Mime-Maintain utility script", () => {
       { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, GIT_NO_REPO: "1" },
     );
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("no git repository");
     expect(result.json.state.mimeMaintain.ok).toBe(false);
     expect(result.json.state.mimeMaintain.error).toContain("no git repository");
     expect(result.json.state.mimeMaintain.hasGitRepo).toBe(false);
   });
 
-  test("fails with clear error when no item title is available", async () => {
+  test("reports clear missing-title error as routable satisfied:false JSON", async () => {
     const { result } = await runMaintain({});
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("no item title");
     expect(result.json.state.mimeMaintain.ok).toBe(false);
     expect(result.json.state.mimeMaintain.error).toContain("no item title");
   });
 
-  test("fails with clear error when item.title is empty string", async () => {
+  test("reports clear empty-title error as routable satisfied:false JSON", async () => {
     const { result } = await runMaintain({ item: { title: "" } });
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("no item title");
     expect(result.json.state.mimeMaintain.ok).toBe(false);
     expect(result.json.state.mimeMaintain.error).toContain("no item title");
+  });
+
+  test("normalizes commit failure as routable satisfied:false JSON with exit 0", async () => {
+    const { result } = await runMaintain(
+      { item: { title: "feat: will not commit" } },
+      { GIT_DIRTY: "1", GIT_COMMIT_FAIL: "1" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(typeof result.json.context).toBe("string");
+    expect(result.json.context).toContain("git command failed");
+    expect(result.json.state.mimeMaintain.ok).toBe(false);
+    expect(result.json.state.mimeMaintain.error).toContain("git command failed");
+    expect(typeof result.json.state.mimeMaintain.gitError).toBe("string");
+    expect(result.json.state.mimeMaintain.gitError).toContain("commit failed");
+    expect(result.json.state.mimeMaintain.hasGitRepo).toBe(true);
   });
 
   test("reads branchName from state.mimeBootstrap for status reference", async () => {
@@ -572,6 +625,7 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.branchName).toBe("mime/crystal-casts-abc123def0");
   });
@@ -583,6 +637,7 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.branchName).toBeNull();
   });
@@ -597,6 +652,7 @@ describe("Mime-Maintain utility script", () => {
     );
 
     expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
     expect(result.json.state.mimeMaintain.ok).toBe(true);
     expect(result.json.state.mimeMaintain.noop).toBe(true);
     expect(result.json.state.mimeMaintain.branchName).toBe("mime/ribbon-guards-bdf5a27220");
@@ -1097,6 +1153,8 @@ describe("Mime-GH-PR utility script", () => {
       expect(result.json.event[0].type).toBe("result.pr_created");
       expect(result.json.event[0].message).toContain("PR #42");
       expect(result.json.event[0].payload.prUrl).toBe("https://github.com/test-owner/test-repo/pull/42");
+      // Strengthen: prUrl must parse as an absolute http(s) URL, not merely match a string.
+      expectAbsoluteHttpUrl(result.json.event[0].payload.prUrl);
       expect(result.json.event[0].payload.prNumber).toBe(42);
       expect(result.json.event[0].payload.branchName).toBe("mime/test-branch");
       expect(result.json.event[0].payload.baseBranch).toBe("main");
@@ -1793,7 +1851,9 @@ describe("Mime-ADO-PR utility script", () => {
       expect(result.json.event).toHaveLength(1);
       expect(result.json.event[0].type).toBe("result.pr_created");
       expect(result.json.event[0].message).toContain("PR #99");
-      expect(result.json.event[0].payload.prUrl).toContain("pullrequest/99");
+      expect(result.json.event[0].payload.prUrl).toBe("https://dev.azure.com/test-org/test-project/_git/test-repo/pullrequest/99");
+      // Strengthen: prUrl must parse as an absolute http(s) URL, not merely match a string.
+      expectAbsoluteHttpUrl(result.json.event[0].payload.prUrl);
       expect(result.json.event[0].payload.prNumber).toBe(99);
       expect(result.json.event[0].payload.branchName).toBe("mime/test-branch");
       expect(result.json.event[0].payload.organization).toBe("test-org");

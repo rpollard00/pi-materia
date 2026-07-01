@@ -216,4 +216,99 @@ describe("handoff JSON runtime validation", () => {
     expect(issues?.map((issue) => issue.path)).toContain("$.satisfied");
     expect(issues?.some((issue) => issue.message.includes("Legacy field \"passed\" is not canonical"))).toBe(true);
   });
+
+  // Regression for the automated loop-control handoff failure: a JSON-parsing
+  // utility socket (Mime-Maintain) whose loop advancement consumes `satisfied`
+  // via advance.when:"satisfied" rejected the utility's state-only output with
+  // "Missing required reserved field \"satisfied\"". Mime-Maintain now emits
+  // top-level satisfied/context; this test proves the handoff validator accepts
+  // that canonical output for the loop-control case that failed in production.
+  describe("mime-maintain output accepted by advance.when:satisfied loop-control sockets", () => {
+    // Socket shape mirrors the production Socket-6 Mime-Maintain config: a JSON
+    // utility socket that advances the work-item cursor when satisfied. advance
+    // consumes `satisfied` but no `assign` maps payload paths, so only the
+    // reserved satisfied field is required.
+    const loopControlSocket = socket({
+      type: "utility",
+      utility: "mime-maintain",
+      parse: "json",
+      advance: { cursor: "workItemIndex", items: "state.workItems", when: "satisfied", done: "Complete" },
+    });
+
+    test("accepts the canonical mime-maintain commit-success output", () => {
+      const mimeMaintainOutput = {
+        satisfied: true,
+        context: "Mime-Maintain: committed \"feat: add ruby to ThemeId type union\" to mime/crystal-casts-abc123def0.",
+        state: {
+          mimeMaintain: {
+            ok: true,
+            committed: true,
+            noop: false,
+            branchName: "mime/crystal-casts-abc123def0",
+            message: "feat: add ruby to ThemeId type union",
+          },
+        },
+      };
+      expect(validateHandoffJsonOutput(mimeMaintainOutput, { socketId: "Socket-6", socket: loopControlSocket })).toBe(mimeMaintainOutput);
+    });
+
+    test("accepts the canonical mime-maintain clean no-op output", () => {
+      const mimeMaintainOutput = {
+        satisfied: true,
+        context: "Mime-Maintain: working tree clean — nothing to commit.",
+        state: {
+          mimeMaintain: {
+            ok: true,
+            committed: false,
+            noop: true,
+            branchName: "mime/crystal-casts-abc123def0",
+            message: "Mime-Maintain: working tree clean — nothing to commit.",
+          },
+        },
+      };
+      expect(validateHandoffJsonOutput(mimeMaintainOutput, { socketId: "Socket-6", socket: loopControlSocket })).toBe(mimeMaintainOutput);
+    });
+
+    test("accepts the canonical mime-maintain handled-failure output (routable satisfied:false)", () => {
+      const mimeMaintainOutput = {
+        satisfied: false,
+        context: "Mime-Maintain: git command failed: fatal: commit failed (exit: 1)",
+        state: {
+          mimeMaintain: {
+            ok: false,
+            error: "Mime-Maintain: git command failed: fatal: commit failed (exit: 1)",
+            available: { git: true },
+            hasGitRepo: true,
+            gitError: "fatal: commit failed (exit: 1)",
+          },
+        },
+      };
+      expect(validateHandoffJsonOutput(mimeMaintainOutput, { socketId: "Socket-6", socket: loopControlSocket })).toBe(mimeMaintainOutput);
+    });
+
+    test("rejects the pre-fix state-only mime-maintain output with the exact production failure", () => {
+      // Pre-fix Mime-Maintain emitted deterministic details under state only,
+      // omitting the top-level satisfied field consumed by advance.when.
+      const preFixOutput = {
+        state: {
+          mimeMaintain: {
+            ok: true,
+            committed: true,
+            noop: false,
+            message: "feat: add ruby to ThemeId type union",
+          },
+        },
+      };
+      let caught: unknown;
+      try {
+        validateHandoffJsonOutput(preFixOutput, { socketId: "Socket-6", socket: loopControlSocket });
+      } catch (error) {
+        caught = error;
+      }
+      const issues = handoffValidationIssues(caught);
+      expect(issues?.map((issue) => issue.path)).toContain("$.satisfied");
+      expect(issues?.find((issue) => issue.path === "$.satisfied")?.message).toContain("Missing required reserved field \"satisfied\"");
+      expect(issues?.find((issue) => issue.path === "$.satisfied")?.expected).toBe("boolean");
+    });
+  });
 });
