@@ -12,7 +12,7 @@ import {
   type EnrichmentContext,
 } from "../domain/eventing.js";
 import { flushBusOutcomes } from "./eventBus.js";
-import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
@@ -20,16 +20,15 @@ export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameS
 import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
 import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, MateriaEdgeTraversalExhaustionError, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
-import { classifyTurnFailure, errorMessage, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError, recoveryDiagnosticLabel, recoveryIdentityKey, recoveryTurnMode, type TurnFailureClassification } from "../application/recoveryPolicy.js";
-import { assessContextPressureForCompaction, maybeRunProactiveCompactionWorkflow, runSameSocketRecoveryCompaction, type ContextProjectionInput } from "../application/compactionWorkflow.js";
-import { handleSameSocketRecoverableTurnFailureWorkflow, runSameSocketRecoveryActionWorkflow, type SameSocketRecoveryActionOptions } from "../application/recoveryWorkflow.js";
+import { classifyTurnFailure, errorMessage, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError } from "../application/recoveryPolicy.js";
+import { maybeRunProactiveCompactionWorkflow, type ContextProjectionInput } from "../application/compactionWorkflow.js";
 import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
 import { canonicalGeneratorConfigFor } from "../graph/generator.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { resolveActiveModelPolicy } from "./modelPolicyResolver.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
 import { buildMateriaTextOutputMessage } from "../presentation/textOutput.js";
-import type { LoadedConfig, MateriaCastState, MateriaJsonOutputValidationKind, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
+import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
 import { createRunState, recordUsageModelSelection } from "../telemetry/usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility } from "../utilities/utilityRegistry.js";
@@ -45,6 +44,7 @@ import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSoc
 import { effectiveResolvedSocketConfig, resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
 import { nativeEventing } from "./nativeEventing.js";
 import { createCastTermination } from "./castTermination.js";
+import { createTurnRecovery } from "./turnRecovery.js";
 import {
   buildPipelineSocketDetails,
   findMultiTurnAgentSockets,
@@ -99,6 +99,42 @@ const castTermination = createCastTermination({
   },
 });
 const { failCastAtStart, failCast, finishCast } = castTermination;
+
+const turnRecovery = createTurnRecovery({
+  artifacts: {
+    appendEvent,
+    writeUsage,
+  },
+  state: {
+    saveCastState,
+    setCurrentSocketState,
+    currentSocketId,
+    currentSocketVisit,
+    currentSocketOrThrow,
+    currentMateria,
+    shortMetadataLabel,
+    loadConfigFromState,
+  },
+  lifecycle: {
+    emitLifecycleEvent,
+    failCast,
+    sendMateriaTurn,
+  },
+  tools: {
+    updateToolScope,
+  },
+  ui: {
+    updateWidget,
+    notifyWarning: (ctx, message) => ctx.ui.notify(message, "warning"),
+  },
+});
+const {
+  preserveAwaitingAfterTransientTransportFailure,
+  handleSameSocketRecoverableTurnFailure,
+  buildJsonOutputRepairContext,
+  classifyJsonOutputValidationKind,
+  shouldRetryGenericTurnFailure,
+} = turnRecovery;
 
 /**
  * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
@@ -1153,75 +1189,6 @@ async function executeUtilitySocket(state: MateriaCastState, socket: ResolvedMat
   });
 }
 
-async function preserveAwaitingAfterTransientTransportFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string } = {}): Promise<void> {
-  state.active = true;
-  state.awaitingResponse = true;
-  setCurrentSocketState(state, "awaiting_agent_response");
-  state.updatedAt = Date.now();
-  state.runState.lastMessage = `Transient transport failure while awaiting ${recoveryDiagnosticLabel(state)}; preserving active Pi turn: ${errorMessage(error)}`;
-  await appendEvent(state.runState, "transient_transport_turn_failure", { warning: true, error: errorMessage(error), entryId: options.entryId, socket: currentSocketId(state), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), mode: recoveryTurnMode(state) });
-  await writeUsage(state.runState);
-  saveCastState(pi, state);
-  updateWidget(ctx, state);
-  ctx.ui.notify(`pi-materia warning: ${state.runState.lastMessage}`, "warning");
-}
-
-function shouldRetryGenericTurnFailure(error: unknown): boolean {
-  const message = errorMessage(error);
-  return /\b(?:auth|invalid[_ -]?request|provider rejected|different provider failure)\b/i.test(message);
-}
-
-async function handleSameSocketRecoverableTurnFailure(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, options: { entryId?: string; allowGenericTurnFailure?: boolean } = {}): Promise<boolean> {
-  return handleSameSocketRecoverableTurnFailureWorkflow(state, error, {
-    appendEvent,
-    writeUsage,
-    saveState: (nextState) => saveCastState(pi, nextState),
-    failCast: async (nextState, nextError, entryId, failOptions) => {
-      // Emit lifecycle.socket.failed before the cast-level failure event.
-      // This covers agent socket failures where same-socket recovery is
-      // exhausted and the workflow calls failCast internally.
-      await emitLifecycleEvent(nextState, "lifecycle.socket.failed", {
-        severity: "error",
-        socketId: currentSocketId(nextState),
-        materia: nextState.currentMateria,
-        visit: currentSocketVisit(nextState, undefined),
-        ...(nextState.currentItemKey !== undefined ? { itemKey: nextState.currentItemKey } : {}),
-        ...(nextState.currentItemLabel !== undefined ? { itemLabel: nextState.currentItemLabel } : {}),
-        payload: { error: nextError instanceof Error ? nextError.message : String(nextError) },
-      });
-      await failCast(pi, ctx, nextState, nextError, entryId, failOptions);
-    },
-    updateToolScope: async (materia) => {
-      const emittedWarnings: ToolScopeRuntimeWarning[] = [];
-      updateToolScope(pi, materia, { context: { socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, visit: currentSocketVisit(state, undefined) }, onWarning: (warning) => { emittedWarnings.push(warning); } });
-      for (const warning of emittedWarnings) {
-        await appendToolScopeWarningEvent(state, warning);
-        ctx.ui.notify(warning.message, "warning");
-      }
-    },
-    sendMateriaTurn: (nextState, prompt, turnOptions) => sendMateriaTurn(pi, ctx, nextState, prompt, turnOptions),
-    buildRecoveryPrompt: buildSameSocketRecoveryPrompt,
-    updateWidget: (nextState) => updateWidget(ctx, nextState),
-    notifyWarning: (message) => ctx.ui.notify(message, "warning"),
-    setCurrentSocketState,
-    currentSocketId,
-    currentSocketVisit,
-    shortMetadataLabel,
-    currentMateria,
-    runRecoveryAction: (nextState, actionOptions) => runSameSocketRecoveryAction(pi, ctx, nextState, actionOptions),
-    assessContextPressure: (nextState) => assessContextPressureForCompaction(ctx, nextState, { loadConfigFromState }),
-  }, options);
-}
-
-async function runSameSocketRecoveryAction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, options: SameSocketRecoveryActionOptions): Promise<void> {
-  return runSameSocketRecoveryActionWorkflow(state, options, {
-    appendEvent,
-    saveState: (nextState) => saveCastState(pi, nextState),
-    runCompaction: (nextState) => runSameSocketRecoveryCompaction(ctx, nextState),
-    currentSocketId,
-  });
-}
-
 async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
   let projection: ContextProjectionInput | undefined;
   try {
@@ -1245,45 +1212,6 @@ async function maybeRunProactiveCompaction(pi: ExtensionAPI, ctx: ExtensionConte
     currentSocketVisit,
     shortMetadataLabel,
   }, projection);
-}
-
-function buildSameSocketRecoveryPrompt(state: MateriaCastState): string {
-  const socket = currentSocketOrThrow(state);
-  const jsonRepairPrompt = buildJsonOutputRepairRetryPrompt(state, socket);
-  if (jsonRepairPrompt) return jsonRepairPrompt;
-  const recoveryKey = recoveryIdentityKey(state);
-  const timeoutHint = buildTimeoutRecoveryHint(state, recoveryKey);
-  if (state.activeTurnPrompt) return appendRecoveryHint(state.activeTurnPrompt, timeoutHint);
-  if (recoveryTurnMode(state) === "finalization") return appendRecoveryHint(buildMultiTurnFinalizationPrompt(state, socket), timeoutHint);
-  return appendRecoveryHint(buildSocketPrompt(state, socket), timeoutHint);
-}
-
-function appendRecoveryHint(prompt: string, hint: string | undefined): string {
-  if (!hint) return prompt;
-  return `${prompt}\n\n${hint}`;
-}
-
-const JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS = 600;
-
-function buildJsonOutputRepairContext(text: string, error: Error, validationKind: MateriaJsonOutputValidationKind, validationIssues?: NonNullable<MateriaCastState["jsonOutputRepair"]>["validationIssues"]): NonNullable<MateriaCastState["jsonOutputRepair"]> {
-  const invalidOutputExcerpt = boundedInvalidOutputExcerpt(text, JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS);
-  return {
-    validationKind,
-    errorMessage: error.message,
-    validationIssues,
-    invalidOutputExcerpt,
-    excerptLength: invalidOutputExcerpt.length,
-    truncated: text.length > invalidOutputExcerpt.length,
-  };
-}
-
-function boundedInvalidOutputExcerpt(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars)}\n…[truncated ${text.length - maxChars} character(s)]`;
-}
-
-function classifyJsonOutputValidationKind(error: unknown): MateriaJsonOutputValidationKind {
-  return errorMessage(error).startsWith("Invalid JSON output") ? "json_parse" : "handoff_validation";
 }
 
 function enforceSocketVisitLimit(state: MateriaCastState, socket: ResolvedMateriaSocket, config: PiMateriaConfig): void {
