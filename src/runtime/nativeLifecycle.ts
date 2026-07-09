@@ -44,6 +44,7 @@ import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUs
 import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, nextRefinementTurn, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit, startTaskAttempt } from "./sessionState.js";
 import { effectiveResolvedSocketConfig, resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
 import { nativeEventing } from "./nativeEventing.js";
+import { createCastTermination } from "./castTermination.js";
 import {
   buildPipelineSocketDetails,
   findMultiTurnAgentSockets,
@@ -71,6 +72,34 @@ const removeEventBus = nativeEventing.removeEventBus.bind(nativeEventing);
 const startHeartbeat = nativeEventing.startHeartbeat.bind(nativeEventing);
 const stopHeartbeat = nativeEventing.stopHeartbeat.bind(nativeEventing);
 
+const castTermination = createCastTermination({
+  eventing: {
+    stopHeartbeat,
+    emitLifecycleEvent,
+    getEventBus,
+    getResultAccumulator,
+    flushBusOutcomes,
+    removeEventBus,
+  },
+  artifacts: {
+    appendEvent,
+    appendManifest,
+    writeUsage,
+  },
+  state: {
+    clearCastState,
+    saveCastState,
+    currentSocketId,
+    setCurrentSocketState,
+  },
+  ui: {
+    updateWidget,
+    showUsageSummary,
+    formatUsage,
+  },
+});
+const { failCastAtStart, failCast, finishCast } = castTermination;
+
 /**
  * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
  * the event bus before clearing the cast state.
@@ -86,30 +115,7 @@ export async function cancelNativeCast(
   state: MateriaCastState,
   reason = "aborted by user",
 ): Promise<MateriaCastState> {
-  // Stop heartbeat before emitting the terminal event so no heartbeat
-  // fires after cancellation (docs/runtime-eventing.md §7.4).
-  stopHeartbeat(state.castId);
-
-  // Emit lifecycle.cast.cancelled before flushing/cleanup.
-  await emitLifecycleEvent(state, "lifecycle.cast.cancelled", {
-    severity: "warning",
-    message: reason,
-    payload: { reason },
-  });
-
-  // Flush event bus before terminal artifacts.
-  const bus = getEventBus(state);
-  if (bus) {
-    try { await bus.flush(); } catch { /* best-effort */ }
-    try { await flushBusOutcomes(bus, state.runDir); } catch { /* best-effort */ }
-  }
-
-  // Mark the run ended so clearCastState doesn't set endedAt again.
-  state.runState.endedAt ??= Date.now();
-
-  const cleared = clearCastState(pi, state, reason);
-  removeEventBus(state.castId);
-  return cleared;
+  return castTermination.cancelNativeCast(pi, state, reason);
 }
 
 /**
@@ -372,37 +378,17 @@ export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, l
   // is a guaranteed stall (controller never sends /materia continue).
   const validation = validateAgentControllerMultiTurnSockets(config, pipeline);
   if (!validation.ok) {
-    // Emit lifecycle.cast.failed through the event bus before throwing.
-    await emitLifecycleEvent(state, "lifecycle.cast.failed", {
-      severity: "error",
-      message: validation.errorMessage,
-      payload: {
+    await failCastAtStart(pi, ctx, state, eventBus, {
+      errorMessage: validation.errorMessage,
+      entryId: pipeline.entry.id,
+      entryMateria: socketMateriaName(pipeline.entry),
+      lifecyclePayload: {
         error: validation.errorMessage,
         reason: "multiTurn_agent_socket_under_agent_controller",
         offendingSockets: validation.offendingSockets,
         socketDetails,
       },
     });
-
-    // Flush event bus so the controller receives the failure event.
-    if (eventBus) {
-      try { await eventBus.flush(); } catch { /* best-effort */ }
-      try { await flushBusOutcomes(eventBus, state.runDir); } catch { /* best-effort */ }
-      removeEventBus(state.castId);
-    }
-
-    // Record the failure in artifacts.
-    await appendEvent(runState, "cast_end", { ok: false, error: validation.errorMessage, socket: pipeline.entry.id });
-    await writeUsage(runState);
-    await appendManifest(state, { phase: "failed", socket: pipeline.entry.id, materia: socketMateriaName(pipeline.entry) });
-    state.active = false;
-    state.phase = "failed";
-    state.failedReason = validation.errorMessage;
-    state.runState.endedAt = Date.now();
-    saveCastState(pi, state);
-    ctx.ui.setStatus("materia", "failed");
-    updateWidget(ctx, state);
-    ctx.ui.notify(`pi-materia cast failed: ${validation.errorMessage}`, "error");
     return state;
   }
 
@@ -1300,108 +1286,11 @@ function classifyJsonOutputValidationKind(error: unknown): MateriaJsonOutputVali
   return errorMessage(error).startsWith("Invalid JSON output") ? "json_parse" : "handoff_validation";
 }
 
-async function failCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId?: string, options: { preserveRecoveryExhaustion?: boolean } = {}): Promise<void> {
-  if (!options.preserveRecoveryExhaustion) state.recoveryExhaustion = undefined;
-  state.active = false;
-  state.awaitingResponse = false;
-  state.multiTurnFinalizing = false;
-  setCurrentSocketState(state, "failed");
-  state.phase = "failed";
-  state.failedReason = error instanceof Error ? error.message : String(error);
-  state.runState.lastMessage = state.failedReason;
-  markRunEnded(state);
-
-  // Stop heartbeat before emitting the terminal event so no heartbeat
-  // fires after failure (docs/runtime-eventing.md §7.4).
-  stopHeartbeat(state.castId);
-
-  // Emit lifecycle.cast.failed before flushing the event bus.
-  await emitLifecycleEvent(state, "lifecycle.cast.failed", {
-    severity: "error",
-    message: state.failedReason,
-    payload: {
-      error: state.failedReason,
-      socketId: currentSocketId(state),
-      materia: state.currentMateria,
-      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-    },
-  });
-
-  // Flush event bus before terminal artifacts.
-  const bus = getEventBus(state);
-  if (bus) {
-    try { await bus.flush(); } catch { /* best-effort */ }
-    try { await flushBusOutcomes(bus, state.runDir); } catch { /* best-effort */ }
-    removeEventBus(state.castId);
-  }
-
-  await appendEvent(state.runState, "cast_end", { ok: false, error: state.failedReason, entryId, socket: currentSocketId(state) });
-  await writeUsage(state.runState);
-  await appendManifest(state, { phase: "failed", socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, entryId });
-  saveCastState(pi, state);
-  ctx.ui.setStatus("materia", "failed");
-  updateWidget(ctx, state);
-  ctx.ui.notify(`pi-materia cast failed: ${state.failedReason}`, "error");
-}
-
-function markRunEnded(state: MateriaCastState): void {
-  state.runState.endedAt ??= Date.now();
-}
-
 function enforceSocketVisitLimit(state: MateriaCastState, socket: ResolvedMateriaSocket, config: PiMateriaConfig): void {
   const count = (state.visits[socket.id] ?? 0) + 1;
   const limit = resolvedSocketConfig(socket).limits?.maxVisits ?? config.limits?.maxSocketVisits ?? DEFAULT_MAX_SOCKET_VISITS;
   if (count > limit) throw new Error(`Materia socket visit limit exceeded for ${socket.id} (${count}/${limit}).`);
   state.visits[socket.id] = count;
-}
-
-async function finishCast(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, entryId: string, message: string): Promise<void> {
-  state.active = false;
-  state.phase = "complete";
-  state.awaitingResponse = false;
-  state.multiTurnFinalizing = false;
-  setCurrentSocketState(state, "complete");
-  state.recoveryExhaustion = undefined;
-  state.failedReason = undefined;
-  state.updatedAt = Date.now();
-  state.runState.lastMessage = message;
-  markRunEnded(state);
-
-  // Stop heartbeat before emitting the terminal event so no heartbeat
-  // fires after completion (docs/runtime-eventing.md §7.4).
-  stopHeartbeat(state.castId);
-
-  // Derive final outcome from accumulated result events and emit
-  // lifecycle.cast.completed before flushing the event bus.
-  const accumulator = getResultAccumulator(state);
-  const outcome = accumulator?.deriveOutcome() ?? "patch_created";
-  const resultEvents = accumulator?.getResultEvents() ?? [];
-  await emitLifecycleEvent(state, "lifecycle.cast.completed", {
-    severity: "info",
-    message,
-    payload: {
-      outcome,
-      resultCount: resultEvents.length,
-      resultTypes: resultEvents.map((e) => e.type),
-    },
-  });
-
-  // Flush event bus before terminal artifacts.
-  const bus = getEventBus(state);
-  if (bus) {
-    try { await bus.flush(); } catch { /* best-effort */ }
-    try { await flushBusOutcomes(bus, state.runDir); } catch { /* best-effort */ }
-    removeEventBus(state.castId);
-  }
-
-  await writeUsage(state.runState);
-  await appendEvent(state.runState, "cast_end", { ok: true, usage: state.runState.usage, entryId });
-  await appendManifest(state, { phase: "complete", entryId });
-  saveCastState(pi, state);
-  ctx.ui.setStatus("materia", "done");
-  updateWidget(ctx, state);
-  showUsageSummary(ctx, state.runState);
-  ctx.ui.notify(`pi-materia cast complete. ${formatUsage(state.runState.usage, state.runState.usage.costKind)}`, "info");
 }
 
 async function sendMateriaTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, prompt: string, options: { skipProactiveCompaction?: boolean; diagnostics?: AdvancementLifecycleDiagnostics } = {}): Promise<void> {
