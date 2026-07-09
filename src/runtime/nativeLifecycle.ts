@@ -6,11 +6,6 @@ import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
-import {
-  EVENT_SIDECHANNEL_FIELD,
-  validateMateriaEventArray,
-  type EnrichmentContext,
-} from "../domain/eventing.js";
 import { flushBusOutcomes } from "./eventBus.js";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
@@ -45,6 +40,7 @@ import { effectiveResolvedSocketConfig, resolvedMateriaDisplayName, resolvedMate
 import { nativeEventing } from "./nativeEventing.js";
 import { createCastTermination } from "./castTermination.js";
 import { createTurnRecovery } from "./turnRecovery.js";
+import { createSocketEventProcessing } from "./socketEventProcessing.js";
 import {
   buildPipelineSocketDetails,
   findMultiTurnAgentSockets,
@@ -136,6 +132,11 @@ const {
   shouldRetryGenericTurnFailure,
 } = turnRecovery;
 
+const { processSocketEvents } = createSocketEventProcessing({
+  eventing: nativeEventing,
+  repair: { buildJsonOutputRepairContext },
+});
+
 /**
  * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
  * the event bus before clearing the cast state.
@@ -152,82 +153,6 @@ export async function cancelNativeCast(
   reason = "aborted by user",
 ): Promise<MateriaCastState> {
   return castTermination.cancelNativeCast(pi, state, reason);
-}
-
-/**
- * Process the `event` side-channel from parsed JSON output.
- *
- * Per docs/runtime-eventing.md §3, events are extracted immediately after JSON
- * parse, validated, enriched (when eventing enabled), dispatched, and then
- * stripped from the parsed object before handoff semantics run.
- *
- * Extraction, validation, and stripping always occur when the `event` field is
- * present, regardless of whether eventing is enabled. Dispatch is skipped when
- * eventing is disabled or no EventBus is registered.
- *
- * - Agent sockets: invalid event shape triggers existing JSON repair/retry
- *   flow (same as any other invalid JSON output field).
- * - Utility sockets: invalid event shape is a hard failure — the utility
- *   produced invalid structured output.
- */
-async function processSocketEvents(
-  state: MateriaCastState,
-  parsed: unknown,
-  rawText: string,
-  socket: ResolvedMateriaSocket,
-): Promise<void> {
-  if (!isPlainObject(parsed)) return;
-  const parsedObj = parsed as Record<string, unknown>;
-
-  // Only process if the event field is present.
-  if (!Object.prototype.hasOwnProperty.call(parsedObj, EVENT_SIDECHANNEL_FIELD)) return;
-
-  const rawEvent = parsedObj[EVENT_SIDECHANNEL_FIELD];
-
-  // Validate the event side-channel (always, regardless of eventing enabled/disabled).
-  const validation = validateMateriaEventArray(rawEvent);
-
-  if (!validation.ok) {
-    const validationError = new Error(
-      `Invalid event side-channel for socket "${socket.id}": ${validation.issues.map((i) => `${i.path}: ${i.message}`).join("; ")}`,
-    );
-
-    if (isAgentResolvedSocket(socket)) {
-      // Agent sockets: trigger JSON repair/retry flow.
-      // Use the raw text so the repair prompt shows the original agent output.
-      state.jsonOutputRepair = buildJsonOutputRepairContext(
-        rawText,
-        validationError,
-        "handoff_validation",
-        validation.issues.map((i) => ({ path: i.path, message: i.message })),
-      );
-      // The event field is left in parsed so the repair context captures it.
-      // The caller (completeSocket) will detect jsonOutputRepair and retry.
-      throw validationError;
-    }
-
-    // Utility sockets: hard failure.
-    throw validationError;
-  }
-
-  const events = validation.value;
-
-  // Dispatch enriched events only when eventing is enabled and bus is available.
-  if (events.length > 0) {
-    await nativeEventing.dispatchMateriaEvents(state, events, (): EnrichmentContext => ({
-      castId: state.castId,
-      socketId: socket.id,
-      materia: resolvedMateriaId(socket) ?? socket.id,
-      materiaLabel: resolvedMateriaDisplayName(socket),
-      visit: socketVisit(state, socket.id),
-      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-      ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-    }));
-  }
-
-  // Always strip the event field before handoff semantics (docs/runtime-eventing.md §3.5).
-  // This happens regardless of whether eventing is enabled or dispatch occurred.
-  delete parsedObj[EVENT_SIDECHANNEL_FIELD];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
