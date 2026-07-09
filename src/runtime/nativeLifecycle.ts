@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import path from "node:path";
 import { safeTimestamp } from "../utilities/artifacts.js";
 import { resolveArtifactRoot } from "../config/config.js";
-import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
+import { getEffectivePipelineConfig } from "./pipeline.js";
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { flushBusOutcomes } from "./eventBus.js";
@@ -11,12 +11,11 @@ import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
-import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
-import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
+import { applyAdvance, applyAssignments, evaluateCondition, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { resolveActiveModelPolicy } from "./modelPolicyResolver.js";
-import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
+import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
 import { createRunState, recordUsageModelSelection } from "../telemetry/usage.js";
 import { executeBuiltInUtility, hasBuiltInUtility } from "../utilities/utilityRegistry.js";
@@ -28,14 +27,15 @@ import { castLoadoutIdentity, hashConfig, loadConfigFromState, resolvePersistedC
 import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, describeStaleCompletion, recordActiveTurnProvenance, updateToolScope, type StaleCompletionReason } from "./agentTurnState.js";
-import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, nextRefinementTurn, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit, startTaskAttempt } from "./sessionState.js";
+import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit } from "./sessionState.js";
 import { resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
 import { nativeEventing } from "./nativeEventing.js";
 import { createCastTermination } from "./castTermination.js";
 import { createTurnRecovery } from "./turnRecovery.js";
 import { createSocketEventProcessing } from "./socketEventProcessing.js";
-import { createAgentPromptDispatch, type AdvancementLifecycleDiagnostics } from "./agentPromptDispatch.js";
-import { createSocketOutputCommit, type SocketOutputCommitOptions } from "./socketOutputCommit.js";
+import { createAgentPromptDispatch } from "./agentPromptDispatch.js";
+import { createSocketOutputCommit } from "./socketOutputCommit.js";
+import { createSocketExecution } from "./socketExecution.js";
 import {
   buildPipelineSocketDetails,
   findMultiTurnAgentSockets,
@@ -52,7 +52,6 @@ export type { AgentControllerValidationResult, PipelineSocketDetail } from "./ag
 export { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 
 
-const DEFAULT_MAX_SOCKET_VISITS = 25;
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
 const emitLifecycleEvent = nativeEventing.emitLifecycleEvent.bind(nativeEventing);
@@ -191,6 +190,48 @@ const { commitSocketOutput } = createSocketOutputCommit({
   },
   budget: {
     assertBudget,
+  },
+});
+
+const { completeSocket, startSocket } = createSocketExecution({
+  artifacts: {
+    appendEvent,
+    recordUtilityInput: recordUtilityInputFile,
+    shortMetadataLabel,
+    writeUsage,
+  },
+  state: {
+    loadConfigFromState,
+    saveCastState,
+  },
+  eventing: {
+    emitLifecycleEvent,
+  },
+  models: {
+    applyMateriaModelSettings,
+    resolveActiveModelPolicy,
+    materiaModelSelection,
+    recordUsageModelSelection,
+  },
+  utility: {
+    executeCommand: executeCommandUtility,
+    executeBuiltInUtility,
+    hasBuiltInUtility,
+  },
+  prompts: {
+    appendAdvancementDiagnostic,
+    dispatchSocketPrompt,
+    updateSocketToolScope,
+  },
+  output: {
+    commitSocketOutput,
+  },
+  lifecycle: {
+    failCast,
+    finishCast,
+  },
+  ui: {
+    updateWidget,
   },
 });
 
@@ -677,141 +718,6 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
     });
     await failCast(pi, ctx, state, error, latest.entry.id);
   }
-}
-
-async function completeSocket(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  state: MateriaCastState,
-  text: string,
-  entryId: string,
-  options: SocketOutputCommitOptions = {},
-): Promise<void> {
-  const outcome = await commitSocketOutput(pi, ctx, state, text, entryId, options);
-  if (outcome.kind === "route") {
-    await advanceToSocket(pi, ctx, state, outcome.targetId, entryId, outcome.diagnostics);
-  }
-}
-
-async function advanceToSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string, diagnostics?: AdvancementLifecycleDiagnostics): Promise<void> {
-  const target = targetId ?? "end";
-  const nextDiagnostics = diagnostics ? { ...diagnostics, nextSocketTarget: target } : undefined;
-  await appendAdvancementDiagnostic(ctx, state, "socket_advancement_entry", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
-  if (target === "end") {
-    await finishCast(pi, ctx, state, entryId, "Cast complete.");
-    await appendAdvancementDiagnostic(ctx, state, "socket_advancement_exit", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
-    return;
-  }
-  const socket = getResolvedPipelineSocket(state.pipeline, target);
-  if (!socket) throw new Error(`Unknown graph target "${target}"`);
-  await startSocket(pi, ctx, state, socket, nextDiagnostics);
-  await appendAdvancementDiagnostic(ctx, state, "socket_advancement_exit", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
-}
-
-async function startSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, socket: ResolvedMateriaSocket, diagnostics?: AdvancementLifecycleDiagnostics): Promise<void> {
-  const config = await loadConfigFromState(state);
-  const nextDiagnostics = diagnostics ? { ...diagnostics, nextSocketTarget: socket.id } : undefined;
-  await appendAdvancementDiagnostic(ctx, state, "next_socket_start_entry", nextDiagnostics, { boundary: "sync_state_advancement", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket) });
-  const hasItem = setCurrentItem(state, socket);
-  const loop = loopIteratorForSocket(state.pipeline, socket.id);
-  if (loop && !hasItem) return await advanceToSocket(pi, ctx, state, resolveEmptyLoopExhaustionTarget(state, socket, loop.done), "foreach-empty", nextDiagnostics);
-  enforceSocketVisitLimit(state, socket, config);
-  const attempt = startTaskAttempt(state, socket.id);
-
-  state.phase = socket.id;
-  setCurrentSocketId(state, socket.id);
-  state.currentMateria = socketMateriaName(socket);
-  state.currentMateriaModel = undefined;
-  state.awaitingResponse = isAgentResolvedSocket(socket);
-  setCurrentSocketState(state, isAgentResolvedSocket(socket) ? "awaiting_agent_response" : "running_utility");
-  state.multiTurnFinalizing = false;
-  state.updatedAt = Date.now();
-  state.runState.currentSocketId = socket.id;
-  state.runState.currentMateria = socketMateriaName(socket);
-  state.runState.currentMateriaModel = undefined;
-  state.runState.currentTask = state.currentItemLabel;
-  state.runState.attempt = attempt;
-  state.runState.lastMessage = socket.id;
-  await writeUsage(state.runState);
-  await appendEvent(state.runState, "socket_start", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit: socketVisit(state, socket.id) });
-
-  // Emit lifecycle.socket.started through the event bus.
-  await emitLifecycleEvent(state, "lifecycle.socket.started", {
-    severity: "debug",
-    socketId: socket.id,
-    materia: resolvedMateriaId(socket) ?? socket.id,
-    materiaLabel: resolvedMateriaDisplayName(socket),
-    visit: socketVisit(state, socket.id),
-    ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-    ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-  });
-
-  saveCastState(pi, state);
-  updateWidget(ctx, state);
-  ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-  await appendAdvancementDiagnostic(ctx, state, "next_socket_start_exit", nextDiagnostics, { boundary: "sync_state_advancement", targetSocketId: socket.id, targetMateriaName: socketMateriaName(socket), agentSocket: isAgentResolvedSocket(socket) });
-
-  if (!isAgentResolvedSocket(socket)) {
-    state.awaitingResponse = false;
-    setCurrentSocketState(state, "running_utility");
-    state.currentMateria = socketMateriaName(socket);
-    state.currentMateriaModel = undefined;
-    state.runState.currentMateria = socketMateriaName(socket);
-    state.runState.currentMateriaModel = undefined;
-    saveCastState(pi, state);
-    try {
-      const result = await executeUtilitySocket(state, socket);
-      await completeSocket(pi, ctx, state, result.output, result.entryId, { diagnostics: nextDiagnostics });
-    } catch (error) {
-      // Emit lifecycle.socket.failed before the cast-level failure event.
-      await emitLifecycleEvent(state, "lifecycle.socket.failed", {
-        severity: "error",
-        socketId: socket.id,
-        materia: resolvedMateriaId(socket) ?? socket.id,
-        materiaLabel: resolvedMateriaDisplayName(socket),
-        visit: socketVisit(state, socket.id),
-        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-        payload: { error: error instanceof Error ? error.message : String(error) },
-      });
-      await failCast(pi, ctx, state, error, `utility:${socket.id}:${socketVisit(state, socket.id)}`);
-    }
-    return;
-  }
-
-  state.awaitingResponse = true;
-  setCurrentSocketState(state, "awaiting_agent_response");
-  saveCastState(pi, state);
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking, policy: await resolveActiveModelPolicy(pi, ctx) });
-  const materiaModel = materiaModelSelection(appliedModel);
-  state.currentMateriaModel = materiaModel;
-  state.runState.currentMateriaModel = materiaModel;
-  recordUsageModelSelection(state.runState.usage, { socket: socket.id, materia: resolvedSocketConfig(socket).materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
-  await writeUsage(state.runState);
-  await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
-  saveCastState(pi, state);
-  await updateSocketToolScope(pi, ctx, state, socket);
-  await dispatchSocketPrompt(pi, ctx, state, socket, {
-    diagnostics: nextDiagnostics,
-    skipProactiveCompaction: appliedModel.modelSwitched === true,
-  });
-}
-
-async function executeUtilitySocket(state: MateriaCastState, socket: ResolvedMateriaUtilitySocket): Promise<{ output: string; entryId: string }> {
-  return executeUtilitySocketWithDeps(state, socket, {
-    executeCommand: executeCommandUtility,
-    executeBuiltInUtility,
-    hasBuiltInUtility,
-    recordUtilityInput: (input) => recordUtilityInputFile({ state, socketId: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), visit: socketVisit(state, socket.id), input }),
-    appendUtilityInputEvent: (artifact, visit) => appendEvent(state.runState, "utility_input", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), artifact, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), visit }),
-  });
-}
-
-function enforceSocketVisitLimit(state: MateriaCastState, socket: ResolvedMateriaSocket, config: PiMateriaConfig): void {
-  const count = (state.visits[socket.id] ?? 0) + 1;
-  const limit = resolvedSocketConfig(socket).limits?.maxVisits ?? config.limits?.maxSocketVisits ?? DEFAULT_MAX_SOCKET_VISITS;
-  if (count > limit) throw new Error(`Materia socket visit limit exceeded for ${socket.id} (${count}/${limit}).`);
-  state.visits[socket.id] = count;
 }
 
 export async function prepareAgentStartSystemPrompt(input: { pi: ExtensionAPI; session: ExtensionContext; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined> {
