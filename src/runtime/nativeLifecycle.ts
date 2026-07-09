@@ -4,7 +4,6 @@ import { safeTimestamp } from "../utilities/artifacts.js";
 import { resolveArtifactRoot } from "../config/config.js";
 import { getEffectivePipelineConfig, loopIteratorForSocket } from "./pipeline.js";
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
-import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { flushBusOutcomes } from "./eventBus.js";
 import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
@@ -12,16 +11,11 @@ import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
-import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
-import { applyAdvance, applyAssignments, currentItem, enforceEdgeLimit, evaluateCondition, getPath, MateriaEdgeTraversalExhaustionError, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextEdge, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
+import { applyAdvance, applyAssignments, currentItem, evaluateCondition, getPath, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { executeUtilitySocketWithDeps } from "../application/utilityExecution.js";
-import { classifyTurnFailure, errorMessage, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive, nonRecoverableTurnError } from "../application/recoveryPolicy.js";
-import { handoffValidationIssues, validateHandoffJsonOutput } from "../handoff/handoffValidation.js";
-import { canonicalGeneratorConfigFor } from "../graph/generator.js";
+import { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { resolveActiveModelPolicy } from "./modelPolicyResolver.js";
-import { formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
-import { buildMateriaTextOutputMessage } from "../presentation/textOutput.js";
 import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaSocket, ResolvedMateriaPipeline, ResolvedMateriaUtilitySocket } from "../types.js";
 import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
 import { createRunState, recordUsageModelSelection } from "../telemetry/usage.js";
@@ -35,12 +29,13 @@ import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, describeStaleCompletion, recordActiveTurnProvenance, updateToolScope, type StaleCompletionReason } from "./agentTurnState.js";
 import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, nextRefinementTurn, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit, startTaskAttempt } from "./sessionState.js";
-import { effectiveResolvedSocketConfig, resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
+import { resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
 import { nativeEventing } from "./nativeEventing.js";
 import { createCastTermination } from "./castTermination.js";
 import { createTurnRecovery } from "./turnRecovery.js";
 import { createSocketEventProcessing } from "./socketEventProcessing.js";
 import { createAgentPromptDispatch, type AdvancementLifecycleDiagnostics } from "./agentPromptDispatch.js";
+import { createSocketOutputCommit, type SocketOutputCommitOptions } from "./socketOutputCommit.js";
 import {
   buildPipelineSocketDetails,
   findMultiTurnAgentSockets,
@@ -168,6 +163,37 @@ const { processSocketEvents } = createSocketEventProcessing({
   repair: { buildJsonOutputRepairContext },
 });
 
+const { commitSocketOutput } = createSocketOutputCommit({
+  artifacts: {
+    appendEvent,
+    recordSocketOutput,
+    recordSocketParsedJson,
+    shortMetadataLabel,
+  },
+  state: {
+    loadConfigFromState,
+  },
+  eventing: {
+    processSocketEvents,
+    emitLifecycleEvent,
+  },
+  recovery: {
+    buildJsonOutputRepairContext,
+    classifyJsonOutputValidationKind,
+    handleSameSocketRecoverableTurnFailure,
+  },
+  lifecycle: {
+    failCast,
+  },
+  diagnostics: {
+    agentEndAdvancementDiagnostics,
+    appendAdvancementDiagnostic,
+  },
+  budget: {
+    assertBudget,
+  },
+});
+
 /**
  * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
  * the event bus before clearing the cast state.
@@ -184,10 +210,6 @@ export async function cancelNativeCast(
   reason = "aborted by user",
 ): Promise<MateriaCastState> {
   return castTermination.cancelNativeCast(pi, state, reason);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function startNativeCast(pi: ExtensionAPI, ctx: ExtensionContext, loaded: LoadedConfig, pipeline: ResolvedMateriaPipeline, request: string, options?: CastStartOptions): Promise<MateriaCastState> {
@@ -657,170 +679,18 @@ export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknow
   }
 }
 
-async function completeSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, text: string, entryId: string, options: { finalizedMultiTurn?: boolean; diagnostics?: AdvancementLifecycleDiagnostics } = {}): Promise<void> {
-  const config = await loadConfigFromState(state);
-  const socket = currentSocketOrThrow(state);
-  const diagnostics = options.diagnostics ?? (options.finalizedMultiTurn ? agentEndAdvancementDiagnostics(state, socket, { finalizedMultiTurn: true }) : undefined);
-  await appendAdvancementDiagnostic(ctx, state, "socket_completion_entry", diagnostics, { boundary: "sync_state_advancement", entryId });
-  if (isMultiTurnResolvedAgentSocket(socket) && !options.finalizedMultiTurn) {
-    throw new Error(`Internal multi-turn state error for socket "${socket.id}": completion requires explicit /materia continue finalization.`);
+async function completeSocket(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: MateriaCastState,
+  text: string,
+  entryId: string,
+  options: SocketOutputCommitOptions = {},
+): Promise<void> {
+  const outcome = await commitSocketOutput(pi, ctx, state, text, entryId, options);
+  if (outcome.kind === "route") {
+    await advanceToSocket(pi, ctx, state, outcome.targetId, entryId, outcome.diagnostics);
   }
-  const artifact = await recordSocketOutput(state, socket, text, entryId);
-  state.lastOutput = text;
-
-  let parsed: unknown = text;
-  if (effectiveResolvedSocketConfig(socket).parse === "json") {
-    // ── Phase 1: Parse JSON ───────────────────────────────────────
-    try {
-      parsed = parseSocketJson<unknown>(socket.id, text);
-    } catch (error) {
-      const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
-      if (isAgentResolvedSocket(socket)) {
-        if (options.finalizedMultiTurn) state.multiTurnFinalizing = true;
-        state.jsonOutputRepair = buildJsonOutputRepairContext(text, validationError, classifyJsonOutputValidationKind(error), handoffValidationIssues(error));
-        const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
-        if (recovered) return;
-        throw nonRecoverableTurnError(state, validationError);
-      }
-      throw validationError;
-    }
-
-    // ── Phase 2: Process event side-channel (docs/runtime-eventing.md §3)
-    //    Extracted, validated, enriched, dispatched, and stripped BEFORE
-    //    handoff validation so event never leaks into state or prompts.
-    try {
-      await processSocketEvents(state, parsed, text, socket);
-    } catch (eventError) {
-      // Agent sockets: invalid event shape triggers JSON repair/retry
-      // (same as any other invalid JSON output field).
-      // processSocketEvents already sets jsonOutputRepair for agents.
-      if (isAgentResolvedSocket(socket)) {
-        const validationError = eventError instanceof Error ? eventError : new Error(String(eventError));
-        if (options.finalizedMultiTurn) state.multiTurnFinalizing = true;
-        const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
-        if (recovered) return;
-        throw nonRecoverableTurnError(state, validationError);
-      }
-      // Utility sockets: hard failure propagates.
-      throw eventError;
-    }
-
-    // Strip event from raw text stored in state so it cannot leak into
-    // downstream synthetic context via lastOutput/lastAssistantText
-    // (docs/runtime-eventing.md §3.5). parsed already has event removed
-    // by processSocketEvents; re-stringify it to get clean text.
-    if (isPlainObject(parsed)) {
-      text = JSON.stringify(parsed);
-      state.lastOutput = text;
-      if (state.lastAssistantText) state.lastAssistantText = text;
-    }
-
-    // ── Phase 3: Validate handoff output (event already stripped) ─
-    try {
-      parsed = validateHandoffJsonOutput(parsed, { socketId: socket.id, socket: effectiveResolvedSocketConfig(socket), agentOutput: isAgentResolvedSocket(socket), workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)) });
-    } catch (error) {
-      const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);
-      if (isAgentResolvedSocket(socket)) {
-        if (options.finalizedMultiTurn) state.multiTurnFinalizing = true;
-        state.jsonOutputRepair = buildJsonOutputRepairContext(text, validationError, classifyJsonOutputValidationKind(error), handoffValidationIssues(error));
-        const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, validationError, { entryId, allowGenericTurnFailure: true });
-        if (recovered) return;
-        throw nonRecoverableTurnError(state, validationError);
-      }
-      throw validationError;
-    }
-
-    // ── Phase 4: Record clean parsed output (event already stripped) ──
-    state.jsonOutputRepair = undefined;
-    state.lastJson = parsed;
-    await recordSocketParsedJson({ state, socketId: socket.id, visit: socketVisit(state, socket.id), parsed });
-  }
-
-  applyGenericHandoffEnvelope(state, parsed, socket);
-  // Surface the canonical renderable text payload as clean TUI prose. This is a
-  // one-way presentation layer: it never mutates cast state or the authoritative
-  // JSON envelope, which remains consumable by downstream materia.
-  emitMateriaTextOutput(pi, state, socket, parsed);
-  applyAssignments(state, socket, parsed);
-  const advanceTarget = applyAdvance(state, socket, parsed);
-  const finalizedRefinement = isMultiTurnResolvedAgentSocket(socket);
-  await appendEvent(state.runState, "socket_complete", { socket: socket.id, materia: socketMateriaName(socket), materiaLabel: resolvedMateriaDisplayName(socket), artifact, parsed: effectiveResolvedSocketConfig(socket).parse === "json", entryId, finalizedRefinement: finalizedRefinement || undefined, refinementTurn: finalizedRefinement ? currentRefinementTurn(state, socket.id) : undefined, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
-
-  // Emit lifecycle.socket.completed through the event bus.
-  await emitLifecycleEvent(state, "lifecycle.socket.completed", {
-    severity: "debug",
-    socketId: socket.id,
-    materia: resolvedMateriaId(socket) ?? socket.id,
-    materiaLabel: resolvedMateriaDisplayName(socket),
-    visit: socketVisit(state, socket.id),
-    ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-    ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-    payload: { finalizedRefinement: finalizedRefinement || undefined },
-  });
-
-  // Emit lifecycle.status for progress visibility (runtime-owned status emission).
-  await emitLifecycleEvent(state, "lifecycle.status", {
-    severity: "info",
-    message: `Socket ${socket.id} completed`,
-    socketId: socket.id,
-    materia: resolvedMateriaId(socket) ?? socket.id,
-    materiaLabel: resolvedMateriaDisplayName(socket),
-    visit: socketVisit(state, socket.id),
-    ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-    ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-    payload: { phase: state.phase },
-  });
-
-  await assertBudget(config, state.runState, ctx);
-
-  let nextTarget = advanceTarget;
-  if (!nextTarget) {
-    const nextEdge = selectNextEdge(state, socket, parsed);
-    if (nextEdge) {
-      try {
-        enforceEdgeLimit(state, socket.id, nextEdge, config);
-      } catch (error) {
-        if (error instanceof MateriaEdgeTraversalExhaustionError) {
-          const allowance = state.edgeAllowances?.[error.key];
-          state.recoveryExhaustion = {
-            kind: "edge_traversal_exhausted",
-            from: error.from,
-            to: error.to,
-            key: error.key,
-            count: error.count,
-            originalLimit: error.originalLimit,
-            effectiveLimit: error.effectiveLimit,
-            reviveCount: allowance?.reviveCount ?? 0,
-            failedReason: error.message,
-            exhaustedAt: Date.now(),
-          };
-          await appendEvent(state.runState, "edge_traversal_exhausted", {
-            from: error.from,
-            to: error.to,
-            key: error.key,
-            count: error.count,
-            originalLimit: error.originalLimit,
-            effectiveLimit: error.effectiveLimit,
-            reviveCount: allowance?.reviveCount ?? 0,
-            socket: socket.id,
-            materia: socketMateriaName(socket),
-            itemKey: state.currentItemKey,
-          });
-          await failCast(pi, ctx, state, error, entryId, { preserveRecoveryExhaustion: true });
-          return;
-        }
-        throw error;
-      }
-      nextTarget = nextEdge.to;
-      captureReworkFeedbackForRoute(state, { sourceSocket: socket, targetSocketId: nextEdge.to, edge: nextEdge, parsed, rawOutput: text });
-    } else {
-      nextTarget = "end";
-    }
-  }
-  if (diagnostics) diagnostics.nextSocketTarget = nextTarget ?? "end";
-  const nextDiagnostics = diagnostics ? { ...diagnostics } : undefined;
-  await appendAdvancementDiagnostic(ctx, state, "socket_completion_exit", nextDiagnostics, { boundary: "sync_state_advancement", entryId });
-  await advanceToSocket(pi, ctx, state, nextTarget, entryId, nextDiagnostics);
 }
 
 async function advanceToSocket(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, targetId: string | undefined, entryId: string, diagnostics?: AdvancementLifecycleDiagnostics): Promise<void> {
@@ -942,26 +812,6 @@ function enforceSocketVisitLimit(state: MateriaCastState, socket: ResolvedMateri
   const limit = resolvedSocketConfig(socket).limits?.maxVisits ?? config.limits?.maxSocketVisits ?? DEFAULT_MAX_SOCKET_VISITS;
   if (count > limit) throw new Error(`Materia socket visit limit exceeded for ${socket.id} (${count}/${limit}).`);
   state.visits[socket.id] = count;
-}
-
-/**
- * Surface a materia's canonical renderable text payload as clean TUI prose.
- * Pure presentation: only emits a display message when the parsed handoff
- * carries a non-empty `text` field, and never mutates cast state or the
- * authoritative JSON envelope.
- */
-function emitMateriaTextOutput(pi: ExtensionAPI, state: MateriaCastState, socket: ResolvedMateriaSocket, parsed: unknown): void {
-  const notificationMateria = resolvedMateriaDisplayName(socket) ?? socketMateriaName(socket);
-  const display = formatMateriaNotificationDisplay(notificationMateria, socket.id);
-  const message = buildMateriaTextOutputMessage({
-    parsed,
-    materiaName: display.materiaName,
-    socketId: socket.id,
-    socketOrdinal: display.socketOrdinal,
-    itemKey: state.currentItemKey,
-    itemLabel: state.currentItemLabel,
-  });
-  if (message) pi.sendMessage(message);
 }
 
 export async function prepareAgentStartSystemPrompt(input: { pi: ExtensionAPI; session: ExtensionContext; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined> {
