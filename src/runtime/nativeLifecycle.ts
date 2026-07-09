@@ -1,5 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { safeTimestamp } from "../utilities/artifacts.js";
 import { resolveArtifactRoot } from "../config/config.js";
@@ -9,21 +8,10 @@ import { parseSocketJson } from "../utilities/json.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import {
   EVENT_SIDECHANNEL_FIELD,
-  ResultAccumulator,
-  SequenceCounter,
-  createSequenceCounter,
-  enrichEvents,
   validateMateriaEventArray,
-  type EnrichedEvent,
   type EnrichmentContext,
-  type EventSeverity,
-  type MateriaEventObject,
 } from "../domain/eventing.js";
-import { createEventBus, EventBus, flushBusOutcomes } from "./eventBus.js";
-import { WebhookSink } from "./webhookSink.js";
-import { detectControllerLaunch, expandPresets, resolveControllerRunId } from "../eventing/presets.js";
-import { evaluateAgentControllerWebhookStatus, isWebhookSinkConfig } from "../eventing/diagnostics.js";
-import type { EventingConfig, EventingWebhookSinkConfig, EventSinkConfig } from "../types.js";
+import { flushBusOutcomes } from "./eventBus.js";
 import { activeMateriaSystemPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
@@ -55,6 +43,7 @@ import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } f
 import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, describeStaleCompletion, recordActiveTurnProvenance, updateToolScope, type StaleCompletionReason, type ToolScopeRuntimeWarning } from "./agentTurnState.js";
 import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, nextRefinementTurn, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit, startTaskAttempt } from "./sessionState.js";
 import { effectiveResolvedSocketConfig, resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
+import { nativeEventing } from "./nativeEventing.js";
 import {
   buildPipelineSocketDetails,
   findMultiTurnAgentSockets,
@@ -74,171 +63,13 @@ export { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 const DEFAULT_MAX_SOCKET_VISITS = 25;
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 
-// ── Event Bus Registry ──────────────────────────────────────────────────
-
-/** Per-cast event bus instances keyed by castId. */
-const castEventBuses = new Map<string, EventBus>();
-
-/** Per-cast sequence counter keyed by castId. */
-const castSequenceCounters = new Map<string, ReturnType<typeof createSequenceCounter>>();
-
-/** Per-cast result accumulators keyed by castId. */
-const castResultAccumulators = new Map<string, ResultAccumulator>();
-
-/** Per-cast heartbeat interval timers keyed by castId. */
-const castHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
-
-function getEventBus(state: MateriaCastState): EventBus | undefined {
-  return castEventBuses.get(state.castId);
-}
-
-/**
- * Get the result accumulator for a cast, if eventing is enabled.
- *
- * Returns undefined when eventing is disabled. Callers should handle
- * that gracefully (e.g., skip outcome derivation for lifecycle events).
- */
-function getResultAccumulator(state: MateriaCastState): ResultAccumulator | undefined {
-  return castResultAccumulators.get(state.castId);
-}
-
-// ── Heartbeat ──────────────────────────────────────────────────────────
-
-/**
- * Start a configurable heartbeat interval for a cast.
- *
- * Emits `lifecycle.heartbeat` events at the configured interval while
- * the cast is active. The heartbeat stops automatically when the cast
- * reaches a terminal state via {@link stopHeartbeat} or when the event
- * bus is removed.
- *
- * Per docs/runtime-eventing.md §7.3–7.4: heartbeat is configurable and
- * opt-in (default off). It stops on terminal states and exactly one
- * terminal event is guaranteed.
- */
-function startHeartbeat(state: MateriaCastState, config: PiMateriaConfig): void {
-  // Only start heartbeat when eventing is explicitly enabled and a bus is
-  // registered (docs/runtime-eventing.md §7.3–7.4: opt-in, default off).
-  if (!config.eventing?.enabled) return;
-  const intervalMs = config.eventing?.heartbeatIntervalMs;
-  if (!intervalMs || intervalMs <= 0) return;
-  // Defensive: don't start if the bus isn't available.
-  if (!castEventBuses.has(state.castId)) return;
-
-  // Clear any existing heartbeat for this cast (resume/revive safety).
-  stopHeartbeat(state.castId);
-
-  const startedAt = state.startedAt;
-  const castId = state.castId;
-
-  const interval = setInterval(() => {
-    // Check that the event bus is still registered before emitting.
-    // The bus is removed by removeEventBus after terminal events are
-    // dispatched, so this check prevents heartbeats after shutdown.
-    if (!castEventBuses.has(castId)) {
-      stopHeartbeat(castId);
-      return;
-    }
-
-    // Fire-and-forget: heartbeat delivery is best-effort. Failures are
-    // captured as diagnostics but do not affect cast progress.
-    void emitLifecycleEvent(state, "lifecycle.heartbeat", {
-      severity: "debug",
-      payload: {
-        phase: state.phase,
-        elapsedMs: Date.now() - startedAt,
-        socketId: state.currentSocketId,
-      },
-    });
-  }, intervalMs);
-
-  // Allow the event loop to exit cleanly (no ref prevents the timer from
-  // keeping the process alive when there is no other work).
-  interval.unref();
-
-  castHeartbeats.set(castId, interval);
-}
-
-/**
- * Stop the heartbeat interval for a cast.
- *
- * Clears the interval timer and removes it from the registry.
- * Safe to call multiple times or when no heartbeat is active.
- */
-function stopHeartbeat(castId: string): void {
-  const interval = castHeartbeats.get(castId);
-  if (interval !== undefined) {
-    clearInterval(interval);
-    castHeartbeats.delete(castId);
-  }
-}
-
-// ── Lifecycle Event Emission ────────────────────────────────────────────
-
-/**
- * Emit a runtime-owned lifecycle event through the event bus.
- *
- * Lifecycle events use a `lifecycle.` prefix (docs/runtime-eventing.md §7)
- * and flow through the same bus, filters, artifacts, and sinks as
- * materia-emitted events. If eventing is disabled (no bus), the call is a
- * silent no-op.
- *
- * Each lifecycle event is enriched with runtime metadata (eventId,
- * occurredAt, monotonic sequence, castId, and available socket/materia/item
- * context) before dispatch.
- */
-async function emitLifecycleEvent(
-  state: MateriaCastState,
-  type: string,
-  overrides: {
-    severity?: EventSeverity;
-    message?: string;
-    payload?: Record<string, unknown>;
-    socketId?: string;
-    materia?: string;
-    materiaLabel?: string;
-    visit?: number;
-    itemKey?: string;
-    itemLabel?: string;
-  } = {},
-): Promise<void> {
-  const bus = getEventBus(state);
-  if (!bus) return; // eventing disabled — silent no-op
-
-  const seq = castSequenceCounters.get(state.castId);
-  if (!seq) return;
-
-  const materiaEvent: MateriaEventObject = {
-    type,
-    severity: overrides.severity ?? "info",
-    ...(overrides.message !== undefined ? { message: overrides.message } : {}),
-    ...(overrides.payload !== undefined ? { payload: overrides.payload } : {}),
-  };
-
-  // Build enrichment context using caller-supplied overrides, falling back
-  // to generic lifecycle placeholders for cast-level events.
-  const enrichmentCtx: EnrichmentContext = {
-    castId: state.castId,
-    socketId: overrides.socketId ?? "lifecycle",
-    materia: overrides.materia ?? "pi-materia",
-    ...(overrides.materiaLabel !== undefined ? { materiaLabel: overrides.materiaLabel } : {}),
-    visit: overrides.visit ?? 0,
-    ...(overrides.itemKey !== undefined ? { itemKey: overrides.itemKey } : {}),
-    ...(overrides.itemLabel !== undefined ? { itemLabel: overrides.itemLabel } : {}),
-  };
-
-  const enrichedEvents = enrichEvents([materiaEvent], enrichmentCtx, seq, () => randomUUID());
-  for (const event of enrichedEvents) {
-    await bus.dispatch(event);
-  }
-}
-
-function removeEventBus(castId: string): void {
-  stopHeartbeat(castId);
-  castEventBuses.delete(castId);
-  castSequenceCounters.delete(castId);
-  castResultAccumulators.delete(castId);
-}
+const emitLifecycleEvent = nativeEventing.emitLifecycleEvent.bind(nativeEventing);
+const getEventBus = nativeEventing.getEventBus.bind(nativeEventing);
+const getResultAccumulator = nativeEventing.getResultAccumulator.bind(nativeEventing);
+const initializeCastEventBus = nativeEventing.initializeCastEventBus.bind(nativeEventing);
+const removeEventBus = nativeEventing.removeEventBus.bind(nativeEventing);
+const startHeartbeat = nativeEventing.startHeartbeat.bind(nativeEventing);
+const stopHeartbeat = nativeEventing.stopHeartbeat.bind(nativeEventing);
 
 /**
  * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
@@ -279,149 +110,6 @@ export async function cancelNativeCast(
   const cleared = clearCastState(pi, state, reason);
   removeEventBus(state.castId);
   return cleared;
-}
-
-/**
- * Create and register the event bus for a cast when eventing is enabled.
- *
- * Registers the built-in local recording sink and any configured webhook sinks.
- * The bus is stored in the module-level registry keyed by castId.
- */
-function initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState): EventBus | undefined {
-  const eventing = config.eventing;
-
-  // Controller launch context, resolved once for both diagnostics and preset
-  // expansion. CONTROLLER_CONTEXT_DIR is set by the agent_router (docs §13b.5).
-  const controllerContextDir = process.env["CONTROLLER_CONTEXT_DIR"]?.trim();
-  const controller = detectControllerLaunch();
-  const runIdResolved = Boolean(resolveControllerRunId(controllerContextDir));
-
-  if (!eventing?.enabled) {
-    // Even when eventing is disabled, surface why controller delivery won't
-    // happen when there's an expectation of it (controller launch / preset /
-    // explicit sink). Non-fatal: never blocks the cast, and a no-op when no
-    // delivery was expected (leaves unrelated local runs untouched).
-    surfaceAgentControllerDiagnostics(state, {
-      eventing,
-      agentControllerSink: pickAgentControllerSink(eventing?.sinks),
-      controller,
-      runIdResolved,
-    });
-    return undefined;
-  }
-
-  const bus = createEventBus(state.runDir);
-  const seq = createSequenceCounter();
-  const accumulator = new ResultAccumulator();
-
-  // Resolve presets into sink configurations before registering.
-  // Preset sinks are defaults — explicitly configured sinks with the same id
-  // take precedence (per docs/runtime-eventing.md §8.4).
-  const resolvedSinks: Record<string, EventSinkConfig> = { ...eventing.sinks };
-  if (eventing.presets && eventing.presets.length > 0) {
-    const expanded = expandPresets(
-      eventing.presets,
-      eventing.sinks,
-      controllerContextDir,
-    );
-    // Preset sinks are added only when no existing sink with the same id exists.
-    for (const [sinkId, sinkConfig] of Object.entries(expanded.sinks)) {
-      if (!(sinkId in resolvedSinks)) {
-        resolvedSinks[sinkId] = sinkConfig;
-      }
-    }
-    // Log preset expansion warnings to the existing events.jsonl diagnostic path.
-    // Fire-and-forget is acceptable here — these are non-critical diagnostics.
-    for (const warning of expanded.warnings) {
-      appendEvent(state.runState, "eventing_preset_warning", { warning }).catch(() => {});
-    }
-  }
-
-  // Surface diagnostics now that the agent-controller sink has been fully
-  // resolved (post preset expansion), so URL/enabled checks reflect the sink
-  // that will actually be registered. Emitted once per cast initialization.
-  surfaceAgentControllerDiagnostics(state, {
-    eventing,
-    agentControllerSink: pickAgentControllerSink(resolvedSinks),
-    controller,
-    runIdResolved,
-  });
-
-  // Register configured webhook sinks (both explicit and preset-expanded).
-  for (const [sinkId, sinkConfig] of Object.entries(resolvedSinks)) {
-    if (!isEnabledWebhookSinkConfig(sinkConfig)) continue;
-    try {
-      bus.register(new WebhookSink(sinkConfig));
-    } catch {
-      // Sink creation failures are non-fatal — they are logged and skipped.
-      // The cast continues without this sink.
-    }
-  }
-
-  castEventBuses.set(state.castId, bus);
-  castSequenceCounters.set(state.castId, seq);
-  castResultAccumulators.set(state.castId, accumulator);
-  return bus;
-}
-
-function isEnabledWebhookSinkConfig(
-  config: unknown,
-): config is EventingWebhookSinkConfig {
-  if (typeof config !== "object" || config === null) return false;
-  const c = config as Record<string, unknown>;
-  if (c.enabled === false) return false;
-  // Must have a URL to be a webhook sink.
-  return typeof c.url === "string" && c.url.trim().length > 0;
-}
-
-/**
- * Pick the agent-controller webhook sink (by reserved id) from a sink map.
- *
- * Returns the raw union member; callers narrow to the webhook shape via
- * {@link isWebhookSinkConfig}. Used so diagnostics inspect the same sink the
- * bus will register.
- */
-function pickAgentControllerSink(
-  sinks: Record<string, EventSinkConfig> | undefined,
-): EventSinkConfig | undefined {
-  return sinks?.["agent-controller-webhook"];
-}
-
-/**
- * Surface agent-controller webhook activation diagnostics to session logs and
- * cast artifacts.
- *
- * Wraps {@link evaluateAgentControllerWebhookStatus}: when controller delivery
- * is expected but not active (or positively active), each diagnostic is written
- * to `events.jsonl` as an `eventing_webhook_diagnostic` entry and echoed to
- * `console.warn`/`console.log`. All artifact writes are fire-and-forget and
- * never fail the cast. No-op when no delivery was expected.
- */
-function surfaceAgentControllerDiagnostics(
-  state: MateriaCastState,
-  input: {
-    eventing?: EventingConfig;
-    agentControllerSink?: EventSinkConfig;
-    controller?: ReturnType<typeof detectControllerLaunch>;
-    runIdResolved?: boolean;
-  },
-): void {
-  const status = evaluateAgentControllerWebhookStatus(input);
-  if (!status.expected) return;
-
-  for (const diagnostic of status.diagnostics) {
-    // Route to console.warn so the diagnostic is captured in the autonomous
-    // session log stream (stderr) regardless of severity. The artifact entry
-    // carries the structured severity for tooling.
-    console.warn(`[pi-materia] agent-controller webhook: ${diagnostic.message}`);
-    appendEvent(state.runState, "eventing_webhook_diagnostic", {
-      severity: diagnostic.severity,
-      reason: diagnostic.reason,
-      message: diagnostic.message,
-      active: status.active,
-      ...(status.targetUrl ? { targetUrl: status.targetUrl } : {}),
-    }).catch(() => {});
-  }
 }
 
 /**
@@ -484,33 +172,15 @@ async function processSocketEvents(
 
   // Dispatch enriched events only when eventing is enabled and bus is available.
   if (events.length > 0) {
-    const bus = getEventBus(state);
-    const seq = castSequenceCounters.get(state.castId);
-    if (bus && seq) {
-      const enrichmentCtx: EnrichmentContext = {
-        castId: state.castId,
-        socketId: socket.id,
-        materia: resolvedMateriaId(socket) ?? socket.id,
-        materiaLabel: resolvedMateriaDisplayName(socket),
-        visit: socketVisit(state, socket.id),
-        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-      };
-
-      const enrichedEvents = enrichEvents(events, enrichmentCtx, seq, () => randomUUID());
-
-      // Feed result.* events into the cast accumulator before dispatch.
-      const accumulator = getResultAccumulator(state);
-      if (accumulator) {
-        for (const enriched of enrichedEvents) {
-          accumulator.record(enriched);
-        }
-      }
-
-      for (const enriched of enrichedEvents) {
-        await bus.dispatch(enriched);
-      }
-    }
+    await nativeEventing.dispatchMateriaEvents(state, events, (): EnrichmentContext => ({
+      castId: state.castId,
+      socketId: socket.id,
+      materia: resolvedMateriaId(socket) ?? socket.id,
+      materiaLabel: resolvedMateriaDisplayName(socket),
+      visit: socketVisit(state, socket.id),
+      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+      ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+    }));
   }
 
   // Always strip the event field before handoff semantics (docs/runtime-eventing.md §3.5).
@@ -1852,8 +1522,8 @@ export const nativeTestInternals = {
   findMultiTurnAgentSockets,
   isAgentControllerPresetActive,
   validateAgentControllerMultiTurnSockets,
-  get castHeartbeats() { return castHeartbeats; },
-  get castEventBuses() { return castEventBuses; },
+  get castHeartbeats() { return nativeEventing.castHeartbeats; },
+  get castEventBuses() { return nativeEventing.castEventBuses; },
 };
 
 
