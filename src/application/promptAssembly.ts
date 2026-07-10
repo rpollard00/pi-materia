@@ -464,7 +464,7 @@ export function isToolOrAssistantMessage(message: { role?: unknown }): boolean {
  * pi-materia-prompt carries none of these signatures, so it is always preserved.
  * Only `role: "custom"` messages are considered, so the materia prompt,
  * assistant/tool/toolResult turns, and ordinary user refinement messages are
- * always preserved. See sendMateriaTurn in src/runtime/nativeLifecycle.ts
+ * always preserved. See sendMateriaTurn in src/runtime/agentPromptDispatch.ts
  * (prefix "materia" / eventType "materia_prompt" transition cards) and
  * sendQuestMessage in src/index.ts (prefix "quest" lifecycle cards).
  */
