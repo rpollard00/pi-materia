@@ -6,13 +6,13 @@ import { getEffectivePipelineConfig } from "./pipeline.js";
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { flushBusOutcomes } from "./eventBus.js";
-import { activeMateriaSystemPrompt, buildMultiTurnFinalizationPrompt, buildSyntheticCastContext, isPausedMultiTurnRefinement, materiaPrompt, multiTurnRefinementGuidance, renderTemplate } from "../application/promptAssembly.js";
+import { renderTemplate } from "../application/promptAssembly.js";
 import type { CastStartOptions } from "../application/ports.js";
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "../application/promptAssembly.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
 import { applyAdvance, applyAssignments, evaluateCondition, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
-import { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
+import { extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "../application/recoveryPolicy.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { resolveActiveModelPolicy } from "./modelPolicyResolver.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
@@ -26,9 +26,8 @@ import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.
 import { castLoadoutIdentity, hashConfig, loadConfigFromState, resolvePersistedCastLoadoutIdentity } from "./configPersistence.js";
 import { materiaModelSelection } from "./modelSelection.js";
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
-import { assistantErrorMessage, assistantText, agentEndFailureMessage, captureUsage, findLatestAssistantEntry, describeStaleCompletion, recordActiveTurnProvenance, updateToolScope, type StaleCompletionReason } from "./agentTurnState.js";
-import { activeResolvedSocket, currentMateria, currentRefinementTurn, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, isMultiTurnResolvedAgentSocket, materiaStatusLabel, resolvedSocketConfig, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit } from "./sessionState.js";
-import { resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
+import { recordActiveTurnProvenance, updateToolScope } from "./agentTurnState.js";
+import { currentMateria, currentSocketId, currentSocketOrThrow, currentSocketState, currentSocketVisit, isAgentResolvedSocket, materiaStatusLabel, setCurrentSocketId, setCurrentSocketState, socketMateriaName, socketVisit } from "./sessionState.js";
 import { nativeEventing } from "./nativeEventing.js";
 import { createCastTermination } from "./castTermination.js";
 import { createTurnRecovery } from "./turnRecovery.js";
@@ -36,6 +35,7 @@ import { createSocketEventProcessing } from "./socketEventProcessing.js";
 import { createAgentPromptDispatch } from "./agentPromptDispatch.js";
 import { createSocketOutputCommit } from "./socketOutputCommit.js";
 import { createSocketExecution } from "./socketExecution.js";
+import { createAgentLifecycle } from "./agentLifecycle.js";
 import {
   buildPipelineSocketDetails,
   findMultiTurnAgentSockets,
@@ -235,6 +235,56 @@ const { completeSocket, startSocket } = createSocketExecution({
   },
 });
 
+const agentLifecycle = createAgentLifecycle({
+  artifacts: {
+    appendEvent,
+    appendManifest,
+    recordMultiTurnRefinement,
+    writeContextArtifact,
+    writeUsage,
+    shortMetadataLabel,
+  },
+  state: {
+    loadActiveCastState,
+    saveCastState,
+    recordActiveTurnProvenance,
+  },
+  models: {
+    applyMateriaModelSettings,
+    resolveActiveModelPolicy,
+    materiaModelSelection,
+    recordUsageModelSelection,
+  },
+  eventing: {
+    emitLifecycleEvent,
+  },
+  recovery: {
+    preserveAwaitingAfterTransientTransportFailure,
+    handleSameSocketRecoverableTurnFailure,
+    shouldRetryGenericTurnFailure,
+  },
+  dispatch: {
+    agentEndAdvancementDiagnostics,
+    appendAdvancementDiagnostic,
+    sendMateriaTurn,
+    updateSocketToolScope,
+  },
+  completion: {
+    completeSocket,
+  },
+  termination: {
+    failCast,
+  },
+  ui: {
+    updateWidget,
+  },
+});
+
+const { startMultiTurnFinalizationTurn } = agentLifecycle;
+export const handleAgentEnd = agentLifecycle.handleAgentEnd;
+export const prepareAgentStartSystemPrompt = agentLifecycle.prepareAgentStartSystemPrompt;
+export const prepareMultiTurnRefinementTurn = agentLifecycle.prepareMultiTurnRefinementTurn;
+
 /**
  * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
  * the event bus before clearing the cast state.
@@ -352,9 +402,6 @@ export async function continueNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   if (state.awaitingResponse) throw new Error("Materia is already awaiting a Pi agent response.");
 
   if (currentSocketState(state) === "awaiting_user_refinement") {
-    if (!isPausedMultiTurnRefinement(state)) {
-      throw new Error("Materia is awaiting user refinement, but the current socket's resolved materia is not multi-turn.");
-    }
     await startMultiTurnFinalizationTurn(pi, ctx, state);
     return;
   }
@@ -500,263 +547,6 @@ async function resumeValidatedNativeCast(pi: ExtensionAPI, ctx: ExtensionContext
   }
   ctx.ui.notify(`pi-materia cast ${state.castId} recast from socket "${socket.id}".`, "info");
   return state;
-}
-
-function isActiveMultiTurnFinalizationTurn(state: MateriaCastState): boolean {
-  const socket = activeResolvedSocket(state);
-  return state.multiTurnFinalizing === true
-    && state.active === true
-    && state.awaitingResponse === true
-    && currentSocketState(state) === "awaiting_agent_response"
-    && Boolean(socket && isMultiTurnResolvedAgentSocket(socket));
-}
-
-function clearStaleMultiTurnFinalizing(state: MateriaCastState): boolean {
-  if (state.multiTurnFinalizing !== true || isActiveMultiTurnFinalizationTurn(state)) return false;
-  state.multiTurnFinalizing = false;
-  state.updatedAt = Date.now();
-  return true;
-}
-
-async function startMultiTurnFinalizationTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
-  const socket = currentSocketOrThrow(state);
-  if (!isMultiTurnResolvedAgentSocket(socket)) {
-    state.multiTurnFinalizing = false;
-    throw new Error(`Cannot finalize refinement for socket "${socket.id}" because its resolved materia is not multi-turn.`);
-  }
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking, policy: await resolveActiveModelPolicy(pi, ctx) });
-  const materiaModel = materiaModelSelection(appliedModel);
-  state.currentMateria = socketMateriaName(socket);
-  state.currentMateriaModel = materiaModel;
-  state.runState.currentMateria = socketMateriaName(socket);
-  state.runState.currentMateriaModel = materiaModel;
-  state.awaitingResponse = true;
-  setCurrentSocketState(state, "awaiting_agent_response");
-  state.multiTurnFinalizing = true;
-  state.updatedAt = Date.now();
-  const refinementTurn = currentRefinementTurn(state, socket.id) + 1;
-  recordUsageModelSelection(state.runState.usage, { socket: socket.id, materia: resolvedSocketConfig(socket).materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
-  await writeUsage(state.runState);
-  await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn, finalization: true });
-  await updateSocketToolScope(pi, ctx, state, socket);
-  saveCastState(pi, state);
-  ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-  updateWidget(ctx, state);
-  await sendMateriaTurn(pi, ctx, state, buildMultiTurnFinalizationPrompt(state, socket), { skipProactiveCompaction: appliedModel.modelSwitched });
-}
-
-/**
- * Record a diagnostic event (and lifecycle event) for an agent_end callback
- * whose latest assistant entry was ignored because it did not belong to the
- * turn currently awaiting a response. Does not mutate cast state.
- */
-async function recordIgnoredStaleCompletion(state: MateriaCastState, reason: StaleCompletionReason): Promise<void> {
-  await appendEvent(state.runState, "stale_agent_end_ignored", {
-    diagnostic: true,
-    castId: state.castId,
-    reason: reason.reason,
-    latestEntryId: reason.latestEntryId,
-    activeTurnSocketId: reason.activeTurnSocketId,
-    activeTurnVisit: reason.activeTurnVisit,
-    ...(reason.activeTurnMateria !== undefined ? { activeTurnMateria: reason.activeTurnMateria } : {}),
-    ...(reason.activeTurnBoundaryEntryId !== undefined ? { activeTurnBoundaryEntryId: reason.activeTurnBoundaryEntryId } : {}),
-    ...(reason.currentSocketId !== undefined ? { currentSocketId: reason.currentSocketId } : {}),
-    currentMateria: state.currentMateria,
-    currentSocketId: currentSocketId(state),
-    visit: currentSocketVisit(state, undefined),
-  });
-  await emitLifecycleEvent(state, "lifecycle.socket.stale_completion_ignored", {
-    severity: "warning",
-    socketId: reason.currentSocketId,
-    materia: state.currentMateria,
-    ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-    ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-    payload: {
-      reason: reason.reason,
-      latestEntryId: reason.latestEntryId,
-      activeTurnSocketId: reason.activeTurnSocketId,
-      activeTurnVisit: reason.activeTurnVisit,
-      ...(reason.activeTurnBoundaryEntryId !== undefined ? { activeTurnBoundaryEntryId: reason.activeTurnBoundaryEntryId } : {}),
-      ...(reason.currentSocketId !== undefined ? { currentSocketId: reason.currentSocketId } : {}),
-    },
-  });
-}
-
-export async function handleAgentEnd(pi: ExtensionAPI, event: { messages: unknown[] }, ctx: ExtensionContext): Promise<void> {
-  const state = loadActiveCastState(ctx);
-  if (!state?.active) return;
-  const socketAtEnd = currentSocketOrThrow(state);
-  const clearedStaleFinalizing = clearStaleMultiTurnFinalizing(state);
-  if (clearedStaleFinalizing) saveCastState(pi, state);
-  const acceptingRefinement = !state.awaitingResponse && currentSocketState(state) === "awaiting_user_refinement" && isMultiTurnResolvedAgentSocket(socketAtEnd);
-  if (!state.awaitingResponse && !acceptingRefinement) return;
-
-  const latest = findLatestAssistantEntry(ctx.sessionManager.getEntries(), state.lastProcessedEntryId);
-  if (!latest || latest.entry.id === state.lastProcessedEntryId) {
-    const eventFailure = agentEndFailureMessage(event);
-    if (!eventFailure) return;
-    const error = new Error(`Pi agent turn failed before producing an assistant response for socket "${currentSocketId(state) ?? state.phase}": ${eventFailure}`);
-    if (classifyTurnFailure(error) === "transient_transport") {
-      await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error);
-      return;
-    }
-    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { allowGenericTurnFailure: shouldRetryGenericTurnFailure(error) });
-    if (!recovered) {
-      // Emit lifecycle.socket.failed before the cast-level failure event.
-      await emitLifecycleEvent(state, "lifecycle.socket.failed", {
-        severity: "error",
-        socketId: currentSocketId(state),
-        materia: state.currentMateria,
-        visit: currentSocketVisit(state, undefined),
-        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-        payload: { error: error instanceof Error ? error.message : String(error) },
-      });
-      await failCast(pi, ctx, state, error);
-    }
-    return;
-  }
-
-  // Active-turn provenance: ignore duplicate or stale agent_end callbacks whose
-  // latest assistant entry does not belong to the turn currently awaiting a
-  // response (e.g. a duplicate source-socket agent_end arriving after routing
-  // has advanced to the target socket). Record a diagnostic and leave the
-  // active turn awaiting its own response; do not advance lastProcessedEntryId.
-  const staleCompletion = describeStaleCompletion(state, latest.entry.id);
-  if (staleCompletion) {
-    await recordIgnoredStaleCompletion(state, staleCompletion);
-    return;
-  }
-
-  const text = assistantText(latest.message);
-  const agentError = assistantErrorMessage(latest.message);
-  const wasAwaitingFinalization = isActiveMultiTurnFinalizationTurn(state);
-  state.lastProcessedEntryId = latest.entry.id;
-  state.lastAssistantText = text;
-  captureUsage(state, latest.message);
-
-  if (agentError) {
-    const error = new Error(`Pi agent turn failed for socket "${currentSocketId(state) ?? state.phase}": ${agentError}`);
-    if (classifyTurnFailure(error) === "transient_transport") {
-      await preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error, { entryId: latest.entry.id });
-      return;
-    }
-    const recovered = await handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, { entryId: latest.entry.id, allowGenericTurnFailure: shouldRetryGenericTurnFailure(error) });
-    if (!recovered) {
-      // Emit lifecycle.socket.failed before the cast-level failure event.
-      await emitLifecycleEvent(state, "lifecycle.socket.failed", {
-        severity: "error",
-        socketId: currentSocketId(state),
-        materia: state.currentMateria,
-        visit: currentSocketVisit(state, undefined),
-        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-        payload: { error: error instanceof Error ? error.message : String(error) },
-      });
-      await failCast(pi, ctx, state, error, latest.entry.id);
-    }
-    return;
-  }
-
-  state.awaitingResponse = false;
-  setCurrentSocketState(state, "idle");
-  state.updatedAt = Date.now();
-
-  try {
-    const socket = currentSocketOrThrow(state);
-    // Runtime contract: non-multiTurn agent sockets complete on agent_end and
-    // immediately parse/assign/route into the next socket. Only resolved
-    // multiTurn agent sockets pause here, and they complete only after the
-    // explicit /materia continue finalization turn below.
-    if (isMultiTurnResolvedAgentSocket(socket)) {
-      if (wasAwaitingFinalization) {
-        const diagnostics = agentEndAdvancementDiagnostics(state, socket, { finalizedMultiTurn: true });
-        await appendAdvancementDiagnostic(ctx, state, "finalized_multi_turn_handle_entry", diagnostics, { boundary: "sync_state_advancement" });
-        state.multiTurnFinalizing = false;
-        setCurrentSocketState(state, "idle");
-        saveCastState(pi, state);
-        await completeSocket(pi, ctx, state, text, latest.entry.id, { finalizedMultiTurn: true, diagnostics });
-        await appendAdvancementDiagnostic(ctx, state, "finalized_multi_turn_handle_exit", diagnostics, { boundary: "sync_state_advancement" });
-        return;
-      }
-      state.multiTurnFinalizing = false;
-      const refinement = await recordMultiTurnRefinement(state, socket, text, latest.entry.id);
-      setCurrentSocketState(state, "awaiting_user_refinement");
-      state.runState.lastMessage = `Multi-turn socket ${socket.id} waiting for refinement; run /materia continue to finalize.`;
-      await writeUsage(state.runState);
-      await appendEvent(state.runState, "socket_refinement", { socket: socket.id, materia: socketMateriaName(socket), artifact: refinement.artifact, entryId: latest.entry.id, refinementTurn: refinement.turn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel: state.currentMateriaModel });
-
-      // Emit lifecycle.refinement.waiting through the event bus.
-      await emitLifecycleEvent(state, "lifecycle.refinement.waiting", {
-        severity: "info",
-        socketId: socket.id,
-        materia: resolvedMateriaId(socket) ?? socket.id,
-        materiaLabel: resolvedMateriaDisplayName(socket),
-        visit: socketVisit(state, socket.id),
-        ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-        ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-        payload: { refinementTurn: refinement.turn },
-      });
-
-      saveCastState(pi, state);
-      ctx.ui.setStatus("materia", materiaStatusLabel(state, socket, { suffix: "refine", includeItem: false }));
-      updateWidget(ctx, state);
-      ctx.ui.notify(`pi-materia multi-turn socket "${socket.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
-      return;
-    }
-    await completeSocket(pi, ctx, state, text, latest.entry.id, { diagnostics: agentEndAdvancementDiagnostics(state, socket) });
-  } catch (error) {
-    // Emit lifecycle.socket.failed before the cast-level failure event.
-    await emitLifecycleEvent(state, "lifecycle.socket.failed", {
-      severity: "error",
-      socketId: currentSocketId(state),
-      materia: state.currentMateria,
-      visit: currentSocketVisit(state, undefined),
-      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
-      ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
-      payload: { error: error instanceof Error ? error.message : String(error) },
-    });
-    await failCast(pi, ctx, state, error, latest.entry.id);
-  }
-}
-
-export async function prepareAgentStartSystemPrompt(input: { pi: ExtensionAPI; session: ExtensionContext; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined> {
-  const { pi, session: ctx, state, systemPrompt } = input;
-  if (currentSocketState(state) === "awaiting_user_refinement") await prepareMultiTurnRefinementTurn(pi, ctx, state);
-  if (!state.awaitingResponse) return undefined;
-  const materia = currentMateria(state);
-  if (!materia) return undefined;
-  return `${systemPrompt}\n\nMateria active materia (${currentSocketId(state) ?? state.phase}):\n${activeMateriaSystemPrompt(state, materia)}`;
-}
-
-export async function prepareMultiTurnRefinementTurn(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState): Promise<void> {
-  if (!isPausedMultiTurnRefinement(state)) return;
-  const socket = currentSocketOrThrow(state);
-  if (!isAgentResolvedSocket(socket)) return;
-
-  const appliedModel = await applyMateriaModelSettings(pi, ctx, { materiaName: resolvedSocketConfig(socket).materia, model: socket.materia.model, thinking: socket.materia.thinking, policy: await resolveActiveModelPolicy(pi, ctx) });
-  const materiaModel = materiaModelSelection(appliedModel);
-  state.currentMateria = socketMateriaName(socket);
-  state.currentMateriaModel = materiaModel;
-  state.runState.currentMateria = socketMateriaName(socket);
-  state.runState.currentMateriaModel = materiaModel;
-  state.awaitingResponse = true;
-  setCurrentSocketState(state, "awaiting_agent_response");
-  state.multiTurnFinalizing = false;
-  state.activeTurnPrompt = materiaPrompt(socket.materia, state, [buildSyntheticCastContext(state), multiTurnRefinementGuidance()]);
-  recordActiveTurnProvenance(state);
-  state.updatedAt = Date.now();
-  const refinementTurn = currentRefinementTurn(state, socket.id) + 1;
-  recordUsageModelSelection(state.runState.usage, { socket: socket.id, materia: resolvedSocketConfig(socket).materia, taskId: state.currentItemKey, attempt: state.runState.attempt, materiaModel });
-  await writeUsage(state.runState);
-  await appendEvent(state.runState, "materia_model_settings", { socket: socket.id, materia: resolvedSocketConfig(socket).materia, visit: socketVisit(state, socket.id), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel, refinementTurn });
-  const contextArtifact = await writeContextArtifact(pi, state, buildSyntheticCastContext(state), `refinement-${refinementTurn}-${safeTimestamp()}`);
-  await appendManifest(state, { phase: state.phase, socket: currentSocketId(state), materia: state.currentMateria, itemKey: state.currentItemKey, visit: socketVisit(state, socket.id), artifact: contextArtifact, kind: "context_refinement", refinementTurn, materiaModel: state.currentMateriaModel });
-  await appendEvent(state.runState, "context_refinement", { socket: socket.id, materia: socketMateriaName(socket), artifact: contextArtifact, refinementTurn, itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: shortMetadataLabel(state.currentItemLabel), materiaModel });
-  await updateSocketToolScope(pi, ctx, state, socket);
-  saveCastState(pi, state);
-  ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-  updateWidget(ctx, state);
 }
 
 export const nativeTestInternals = {
