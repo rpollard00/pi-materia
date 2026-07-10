@@ -61,7 +61,7 @@
   "devDependencies": {
     "@earendil-works/pi-agent-core": "^0.75.4",
     "@earendil-works/pi-ai": "^0.75.4",
-    "@earendil-works/pi-coding-agent": "^0.75.4",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
     "@earendil-works/pi-tui": "^0.75.4",
     "@tailwindcss/postcss": "latest",
     "@testing-library/react": "latest",
@@ -80,5 +80,11 @@
     "extensions": [
       "./src/index.ts"
     ]
+  },
+  "allowScripts": {
+    "@google/genai@1.52.0": true,
+    "esbuild@0.28.1": true,
+    "koffi@2.16.2": true,
+    "protobufjs@7.6.5": true
   }
 }
