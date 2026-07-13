@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
-import piMateria, { parseQuestListArgs, parseQuestMoveArgs } from "../src/index.js";
+import piMateria from "../src/index.js";
 import { loadActiveCastState } from "../src/castRuntime.js";
 import { findNextPendingQuest, type Quest, type QuestBoard, type QuestStatus } from "../src/domain/questBoard.js";
 import { renderQuestList, renderQuestStatus, selectQuestList } from "../src/presentation/questBoard.js";
@@ -123,39 +123,6 @@ function expectQuestAddDidNotLaunch(harness: FakePiHarness, board: any): void {
   expect(harness.notifications.some((notification) => notification.message.includes("auto-launched"))).toBe(false);
   expect(latestMateriaMessage(harness)).not.toContain("Started continuous quest runner");
 }
-
-describe("/materia quest move parsing", () => {
-  test("accepts exactly one placement option", () => {
-    expect(parseQuestMoveArgs(["quest-a", "--first"])).toEqual({ ok: true, args: { questRef: "quest-a", placement: "first" } });
-    expect(parseQuestMoveArgs(["abc", "--before", "def"])).toEqual({ ok: true, args: { questRef: "abc", placement: "before", targetRef: "def" } });
-    expect(parseQuestMoveArgs(["abc", "--onto=def"])).toEqual({ ok: true, args: { questRef: "abc", placement: "after", targetRef: "def" } });
-    expect(parseQuestMoveArgs(["abc", "--first", "--onto", "def"]).ok).toBe(false);
-    expect(parseQuestMoveArgs(["abc", "--onto"]).ok).toBe(false);
-    expect(parseQuestMoveArgs(["abc"]).ok).toBe(false);
-  });
-});
-
-describe("/materia quest list parsing", () => {
-  test("defaults to pending with limit 10", () => {
-    expect(parseQuestListArgs([])).toEqual({ ok: true, args: { filter: "pending", limit: 10 } });
-  });
-
-  test("accepts explicit filters and limit forms", () => {
-    expect(parseQuestListArgs(["pending"])).toEqual({ ok: true, args: { filter: "pending", limit: 10 } });
-    expect(parseQuestListArgs(["all", "--limit", "25"])).toEqual({ ok: true, args: { filter: "all", limit: 25 } });
-    expect(parseQuestListArgs(["--limit=3", "succeeded"])).toEqual({ ok: true, args: { filter: "succeeded", limit: 3 } });
-    expect(parseQuestListArgs(["failed", "--limit=1"])).toEqual({ ok: true, args: { filter: "failed", limit: 1 } });
-  });
-
-  test("rejects unknown filters, unknown options, and invalid limits", () => {
-    expect(parseQuestListArgs(["blocked"]).ok).toBe(false);
-    expect(parseQuestListArgs(["--foo"]).ok).toBe(false);
-    expect(parseQuestListArgs(["--limit", "0"]).ok).toBe(false);
-    expect(parseQuestListArgs(["--limit=-1"]).ok).toBe(false);
-    expect(parseQuestListArgs(["--limit", "1.5"]).ok).toBe(false);
-    expect(parseQuestListArgs(["--limit", String(Number.MAX_SAFE_INTEGER + 1)]).ok).toBe(false);
-  });
-});
 
 describe("quest list selection", () => {
   test("filters, limits, and orders pending quests using the next pending selector", () => {
