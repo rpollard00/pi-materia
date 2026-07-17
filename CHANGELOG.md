@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.1.10](https://github.com/rpollard00/pi-materia/compare/v0.1.9...v0.1.10) (2026-07-17)
+
+
+### Features
+
+* add catalog provenance and drift detection ([30c70f2](https://github.com/rpollard00/pi-materia/commit/30c70f20be82aa1f7768564d0a6b9f306cfc02c9))
+* add central catalog in-memory repository ([8c4c4ae](https://github.com/rpollard00/pi-materia/commit/8c4c4ae098825ee0edf2f5f273c1d7352d1f4d18))
+* add central catalog source to config layering ([84ee7a1](https://github.com/rpollard00/pi-materia/commit/84ee7a1959145f45ee9fa27f97f2ff6a450b8697))
+* add central monitoring read APIs ([5a3ebcf](https://github.com/rpollard00/pi-materia/commit/5a3ebcfa42160dd2e0dd66e395ea4b143d944a8a))
+* add central server skeleton ([6262b42](https://github.com/rpollard00/pi-materia/commit/6262b42e9c52b7c02d00a97bdfa1c71dee6a7e60))
+* add central telemetry ingestion ([69dbd7a](https://github.com/rpollard00/pi-materia/commit/69dbd7ac2b1334b45adfb4c67d697fd8bb150c6f))
+* add control-plane DTO and port contracts ([c80b9bf](https://github.com/rpollard00/pi-materia/commit/c80b9bf14032eaf9e4f91112ace6510ee54e5061))
+* add dev-token auth and RBAC middleware ([a775f52](https://github.com/rpollard00/pi-materia/commit/a775f52336a7ad5146631cb2d8bf46d17be9ded8))
+* add enterprise scope and principal domain contracts ([dff6a73](https://github.com/rpollard00/pi-materia/commit/dff6a73a6088d4276c6e363cb0c8dc41bcea39c9))
+* add explicit central-to-local catalog actions ([899f8fe](https://github.com/rpollard00/pi-materia/commit/899f8feaeedcfc4992fa721c85214bbf098a309a))
+* add model policy contracts ([546fd70](https://github.com/rpollard00/pi-materia/commit/546fd70e8a3b9208d60ad6a83d9104d3852008c1))
+* add WebUI backend mode discovery ([88244bd](https://github.com/rpollard00/pi-materia/commit/88244bd8c16d43c5d42e4633b70758e91ca5d598))
+* enforce model policy during local model selection ([244c80d](https://github.com/rpollard00/pi-materia/commit/244c80d4b31c8fba256e7525a35ff65405ef0a07))
+* expose central model catalog and policy APIs ([bc096ef](https://github.com/rpollard00/pi-materia/commit/bc096efb10d2e79df85d711c05e82862d5814c38))
+* guard WebUI local-only controls in central mode ([1f835d3](https://github.com/rpollard00/pi-materia/commit/1f835d350c0d0695311b1a8dc6f6a62f0b8c5abb))
+* implement local control-plane adapter ([84a3f58](https://github.com/rpollard00/pi-materia/commit/84a3f58a5a2aa8bb7bdd164dffcab5e57589b0a5))
+
+
+### Bug Fixes
+
+* add eventing environment overlay ([e71225d](https://github.com/rpollard00/pi-materia/commit/e71225d339c8dd6035d866e54bccf1f116c7551b))
+* add webhook activation diagnostics ([c73b765](https://github.com/rpollard00/pi-materia/commit/c73b765e2ffd365d059bbc943df73616ae7e7b3f))
+* anchor context isolation to the current hidden materia prompt ([ac770d0](https://github.com/rpollard00/pi-materia/commit/ac770d054b9f7215ab833f82ec238c5c8190c796))
+* constrain previous-output exposure to canonical handoff payloads ([1d99dce](https://github.com/rpollard00/pi-materia/commit/1d99dce591bbd5bf1b907f45db24b7010bcba06c))
+* emit satisfied handoff fields from mime-maintain success outputs ([348efdd](https://github.com/rpollard00/pi-materia/commit/348efdda69757a9ce61a475155cff48c2f9336dc))
+* enable agent-controller preset from environment ([0c07152](https://github.com/rpollard00/pi-materia/commit/0c07152a2c213936d51ec61aa728a6b279fdd96f))
+* filter materia transition cards from isolated agent context ([0ae6144](https://github.com/rpollard00/pi-materia/commit/0ae614451ecc811eac488d9d15ee8cf8984bd4d0))
+* generate socket-scoped handoff contract prose ([a371cc8](https://github.com/rpollard00/pi-materia/commit/a371cc84e230e4d61211ec1b769a21557b5d0ca8))
+* guard agent_end handling with active-turn provenance ([3b971ee](https://github.com/rpollard00/pi-materia/commit/3b971eedc313350f76fef3c07f40d7414727fc6d))
+* harden bundled JSON materia prompts against text leakage ([ca0ddae](https://github.com/rpollard00/pi-materia/commit/ca0ddae09f11f8655be99407fed2f8badcb0c0f1))
+* make renderable text opt-in in socket requirements ([5ffebf9](https://github.com/rpollard00/pi-materia/commit/5ffebf975fd916634f244e7f59922e4b93b5de02))
+* merge eventing overlay after normal config load ([4bea3fb](https://github.com/rpollard00/pi-materia/commit/4bea3fb2447c331073b1c95d8dcdfc8a890e7597))
+* normalize handled mime-maintain failures as routable JSON ([ebdfd49](https://github.com/rpollard00/pi-materia/commit/ebdfd492fadc3fe955dd379417e67c4af4dc7d4a))
+* record real async webhook dispatch outcomes ([ebf97e3](https://github.com/rpollard00/pi-materia/commit/ebf97e3b337d00c0b379ed37e06ef2a22494f47c))
+* repair misplaced text payloads on non-text JSON sockets ([55f7f4b](https://github.com/rpollard00/pi-materia/commit/55f7f4b57f7b46fb7f7903874683eedc27d91dbb))
+* scope event side-channel examples to socket fields ([661859b](https://github.com/rpollard00/pi-materia/commit/661859b8ca6c7f18dacf18c259eb08ae2174aee5))
+* tag materia transition display messages as orchestration-only ([fe5d941](https://github.com/rpollard00/pi-materia/commit/fe5d941610efb37a39e62c5045f826b7aa7179eb))
+* test failures ([53ef8f5](https://github.com/rpollard00/pi-materia/commit/53ef8f53a9ff3ea899999a2a6b68f9ccd299a013))
+* test failures ([5fb1276](https://github.com/rpollard00/pi-materia/commit/5fb12768a6050f5f61e7948fbcea98a6842266ba))
+
 ## [0.1.9](https://github.com/rpollard00/pi-materia/compare/v0.1.8...v0.1.9) (2026-06-18)
 
 
