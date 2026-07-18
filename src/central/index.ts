@@ -16,6 +16,7 @@ export {
 } from "./server/index.js";
 
 export {
+  createCentralCatalogConfigSourceLoader,
   createCentralHttpControlPlaneClient,
   createCentralHttpControlPlanePorts,
   DEFAULT_CENTRAL_HTTP_READ_RETRIES,
@@ -36,6 +37,8 @@ export {
   CentralForbiddenError,
   CentralNotFoundError,
   CentralConflictError,
+  type CentralCatalogConfigSourceLoader,
+  type CentralCatalogConfigSourceLoaderOptions,
   type CentralHttpClientMode,
   type CentralHttpControlPlaneClient,
   type CentralHttpControlPlaneClientOptions,

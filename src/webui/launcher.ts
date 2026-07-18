@@ -7,7 +7,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMateriaWebUiServer, readRuntimeEvents, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaDeleteQuestInput, type MateriaDeleteQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
-import { clearStaleDefaultLoadoutPreference, getRoleGenerationPreference, loadConfig, loadProfileConfig, saveActiveLoadout, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationPreference } from "../config/config.js";
+import { loadRuntimeConfig, saveRuntimeActiveLoadout } from "../infrastructure/adapters.js";
+import { clearStaleDefaultLoadoutPreference, getRoleGenerationPreference, loadProfileConfig, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
@@ -157,7 +158,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       sessionId,
       startedAt,
       getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt, configuredPath, pi),
-      getConfig: () => loadConfig(cwd, configuredPath),
+      getConfig: () => loadRuntimeConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
       setDefaultLoadout: createDefaultLoadoutSetter(ctx, configuredPath),
@@ -192,7 +193,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
 
 export async function initializeDefaultLoadoutPreference(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<void> {
   try {
-    const loaded = await loadConfig(ctx.cwd, configuredPath);
+    const loaded = await loadRuntimeConfig(ctx.cwd, configuredPath);
     const defaultLoadoutId = loaded.defaultLoadoutId;
     if (!defaultLoadoutId) {
       if (loaded.defaultLoadoutWarning) ctx.ui.notify(loaded.defaultLoadoutWarning, "warning");
@@ -200,8 +201,8 @@ export async function initializeDefaultLoadoutPreference(ctx: ExtensionContext, 
       return;
     }
     if (loaded.config.activeLoadoutId === defaultLoadoutId) return;
-    const written = await saveActiveLoadout(ctx.cwd, defaultLoadoutId, configuredPath);
-    const reloaded = await loadConfig(ctx.cwd, configuredPath);
+    const written = await saveRuntimeActiveLoadout(ctx.cwd, defaultLoadoutId, configuredPath);
+    const reloaded = await loadRuntimeConfig(ctx.cwd, configuredPath);
     if (pi) {
       publishActiveLoadoutChange(pi, ctx, {
         source: "webui",
@@ -278,7 +279,7 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
     }
 
     try {
-      let loaded = await loadConfig(ctx.cwd, configuredPath);
+      let loaded = await loadRuntimeConfig(ctx.cwd, configuredPath);
       const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
       const loadoutKnown = resolveLoadoutReference(name, loaded.config.loadouts, loaded.loadoutSources);
       if (!loadoutKnown) {
@@ -293,8 +294,8 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
         };
       }
 
-      const written = await saveActiveLoadout(ctx.cwd, name, configuredPath);
-      loaded = await loadConfig(ctx.cwd, configuredPath);
+      const written = await saveRuntimeActiveLoadout(ctx.cwd, name, configuredPath);
+      loaded = await loadRuntimeConfig(ctx.cwd, configuredPath);
       const activeLoadout = loaded.config.activeLoadout ?? name;
       publishActiveLoadoutChange(pi, ctx, {
         source: "webui",
@@ -325,7 +326,7 @@ async function addWebUiQuest(cwd: string, configuredPath: string | undefined, in
 
     const loadoutOverride = input.loadoutOverride?.trim();
     if (loadoutOverride) {
-      const loaded = await loadConfig(cwd, configuredPath);
+      const loaded = await loadRuntimeConfig(cwd, configuredPath);
       const resolved = resolveLoadoutReference(loadoutOverride, loaded.config.loadouts, loaded.loadoutSources);
       if (!resolved) {
         const names = Object.keys(loaded.config.loadouts ?? {});
@@ -366,7 +367,7 @@ async function updateWebUiQuest(cwd: string, configuredPath: string | undefined,
 
     const loadoutOverride = input.loadoutOverride?.trim();
     if (loadoutOverride) {
-      const loaded = await loadConfig(cwd, configuredPath);
+      const loaded = await loadRuntimeConfig(cwd, configuredPath);
       const resolved = resolveLoadoutReference(loadoutOverride, loaded.config.loadouts, loaded.loadoutSources);
       if (!resolved) {
         const names = Object.keys(loaded.config.loadouts ?? {});
@@ -609,7 +610,7 @@ function readPiToolRegistry(pi?: ExtensionAPI): MateriaToolRegistrySnapshot {
 
 async function readActiveLoadoutSnapshot(cwd: string, configuredPath?: string): Promise<Pick<MateriaWebUiSessionSnapshot, "activeLoadoutId" | "activeLoadout">> {
   try {
-    const loaded = await loadConfig(cwd, configuredPath);
+    const loaded = await loadRuntimeConfig(cwd, configuredPath);
     return {
       activeLoadout: loaded.config.activeLoadout,
       activeLoadoutId: loaded.config.activeLoadoutId,

@@ -1,4 +1,9 @@
-import type { MateriaConfig, MateriaPipelineConfig, PiMateriaConfig } from "../types.js";
+import type {
+  CentralCatalogSnapshotMetadata,
+  MateriaConfig,
+  MateriaPipelineConfig,
+  PiMateriaConfig,
+} from "../types.js";
 
 /**
  * Central-catalog definitions fed into config layering as the read-only
@@ -33,6 +38,8 @@ export interface CentralCatalogConfigSource {
    * space as local definition digests (see `computeDefinitionDigest`).
    */
   readonly summaries?: Readonly<Record<string, CentralCatalogItemSummary>>;
+  /** Freshness of this process-local central snapshot. */
+  readonly snapshot?: CentralCatalogSnapshotMetadata;
 }
 
 /**
@@ -53,6 +60,12 @@ export interface CentralCatalogItemSummary {
 /** Label surfaced for the central layer where file-backed layers show a path. */
 export const CENTRAL_CATALOG_LAYER_LABEL = "central";
 
+/** Human-readable source label that makes stale execution input unambiguous. */
+export function centralCatalogLayerLabel(source: CentralCatalogConfigSource): string {
+  if (source.snapshot?.status !== "last-known") return CENTRAL_CATALOG_LAYER_LABEL;
+  return `${CENTRAL_CATALOG_LAYER_LABEL} (last-known snapshot from ${source.snapshot.fetchedAt})`;
+}
+
 /** True when a central source carries no loadout or materia definitions. */
 export function isCentralCatalogSourceEmpty(source: CentralCatalogConfigSource | undefined): boolean {
   if (!source) return true;
@@ -67,7 +80,10 @@ export function isCentralCatalogSourceEmpty(source: CentralCatalogConfigSource |
  * (docs/enterprise-control-plane.md §14.3).
  */
 export function hasCentralCatalogSummaries(source: CentralCatalogConfigSource | undefined): boolean {
-  return source?.summaries !== undefined && Object.keys(source.summaries).length > 0;
+  // An empty, present record is meaningful: central was reached and every
+  // previously tracked origin is now orphaned. Absence means comparison was
+  // unavailable.
+  return source?.summaries !== undefined;
 }
 
 /** Composite key for {@link CentralCatalogConfigSource.summaries}, disambiguating

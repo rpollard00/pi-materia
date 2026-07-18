@@ -7,6 +7,12 @@ export {
 } from "./controlPlaneClient.js";
 
 export {
+  createCentralCatalogConfigSourceLoader,
+  type CentralCatalogConfigSourceLoader,
+  type CentralCatalogConfigSourceLoaderOptions,
+} from "./catalogConfigSource.js";
+
+export {
   DEFAULT_CENTRAL_HTTP_READ_RETRIES,
   DEFAULT_CENTRAL_HTTP_RETRY_DELAY_MS,
   MAX_CENTRAL_HTTP_READ_RETRIES,

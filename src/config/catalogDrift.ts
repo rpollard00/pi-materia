@@ -53,15 +53,36 @@ export function resolveConfigCatalogDrift(input: {
 }): ResolvedConfigCatalogDrift | undefined {
   if (!hasCentralCatalogSummaries(input.centralSource)) return undefined;
   const summaries = input.centralSource!.summaries!;
+  const staleSnapshot = input.centralSource!.snapshot?.status === "last-known"
+    ? input.centralSource!.snapshot
+    : undefined;
 
-  const loadoutDrift = resolveLoadoutDrift(input.config.loadouts, input.loadoutSources, summaries);
-  const materiaDrift = resolveMateriaDrift(input.config.materia, input.materiaSources, summaries);
+  const loadoutDrift = markSnapshotDriftStale(
+    resolveLoadoutDrift(input.config.loadouts, input.loadoutSources, summaries),
+    staleSnapshot?.fetchedAt,
+  );
+  const materiaDrift = markSnapshotDriftStale(
+    resolveMateriaDrift(input.config.materia, input.materiaSources, summaries),
+    staleSnapshot?.fetchedAt,
+  );
 
   if (loadoutDrift === undefined && materiaDrift === undefined) return undefined;
   const result: ResolvedConfigCatalogDrift = {};
   if (loadoutDrift) result.loadouts = loadoutDrift;
   if (materiaDrift) result.materia = materiaDrift;
   return result;
+}
+
+function markSnapshotDriftStale(
+  drift: Record<string, CatalogDriftInfo> | undefined,
+  lastFetchedAt: string | undefined,
+): Record<string, CatalogDriftInfo> | undefined {
+  if (!drift || lastFetchedAt === undefined) return drift;
+  return Object.fromEntries(Object.entries(drift).map(([key, value]) => [key, {
+    ...value,
+    stale: true,
+    reason: `Central catalog is unavailable; compared with the last-known snapshot from ${lastFetchedAt}.`,
+  }]));
 }
 
 function resolveLoadoutDrift(

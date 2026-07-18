@@ -21,10 +21,28 @@ export interface PiMateriaConfig {
   eventing?: EventingConfig;
 }
 
+export type CentralCatalogSnapshotStatus = "fresh" | "last-known";
+
+/**
+ * Freshness metadata for the optional connected-runtime catalog layer. The
+ * last-known snapshot is process-local and is never persisted by a read.
+ */
+export interface CentralCatalogSnapshotMetadata {
+  status: CentralCatalogSnapshotStatus;
+  /** When the definitions in this snapshot were fetched successfully. */
+  fetchedAt: string;
+  /** When the most recent refresh was attempted. */
+  attemptedAt: string;
+  /** Secret-free explanation shown when a last-known snapshot is in use. */
+  reason?: string;
+}
+
 export interface LoadedConfig {
   config: PiMateriaConfig;
   source: string;
   layers?: MateriaConfigLayer[];
+  /** Freshness of the connected central layer, including empty snapshots. */
+  centralCatalogSnapshot?: CentralCatalogSnapshotMetadata;
   loadoutSources?: Record<string, MateriaConfigLayerScope>;
   materiaSources?: Record<string, MateriaConfigLayerScope>;
   /**
@@ -78,6 +96,8 @@ export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia" | "eve
 
 export interface MateriaConfigLayer {
   scope: MateriaConfigLayerScope;
+  /** Freshness metadata carried only by the read-only central layer. */
+  centralCatalogSnapshot?: CentralCatalogSnapshotMetadata;
   /**
    * Filesystem path backing the layer. Absent for non-file layers such as the
    * read-only `central` catalog layer, which has no local backing file

@@ -228,4 +228,28 @@ describe("central catalog config layer", () => {
       restore();
     }
   });
+
+  test("clearly marks a last-known central layer in loaded source metadata", async () => {
+    const { cwd, restore } = await freshProject();
+    try {
+      const centralSource: CentralCatalogConfigSource = {
+        materia: { "Central-Build": agentMateria("cached") as never },
+        summaries: {},
+        snapshot: {
+          status: "last-known",
+          fetchedAt: "2026-07-18T01:00:00.000Z",
+          attemptedAt: "2026-07-18T02:00:00.000Z",
+          reason: "Central catalog refresh failed; using the last-known in-memory snapshot.",
+        },
+      };
+      const loaded = await loadConfig(cwd, undefined, { centralSource });
+
+      expect(loaded.source).toContain("central (last-known snapshot from 2026-07-18T01:00:00.000Z)");
+      expect(loaded.centralCatalogSnapshot?.status).toBe("last-known");
+      expect(loaded.layers?.find((layer) => layer.scope === "central")?.centralCatalogSnapshot?.status).toBe("last-known");
+      expect(loaded.materiaSources?.["Central-Build"]).toBe("central");
+    } finally {
+      restore();
+    }
+  });
 });

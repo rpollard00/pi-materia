@@ -1,13 +1,26 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveArtifactRoot, saveActiveLoadout } from "../config/config.js";
+import { resolveArtifactRoot } from "../config/config.js";
 import { renderLoadoutCatalog, renderLoadoutList } from "../loadout/loadouts.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState } from "./castStateRepository.js";
 import { renderGrid, resolvePipeline } from "../runtime/pipeline.js";
 import type { ArtifactCatalog, CastStateRepository, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
 import { renderCastList } from "./castCatalog.js";
+import { createCentralConnectedConfigRepository } from "./centralConnectedConfigRepository.js";
+
+// One process-local source manager lets every runtime surface share the same
+// last-known central snapshot without persisting central reads to disk.
+const runtimeConfigs = createCentralConnectedConfigRepository();
+
+export function loadRuntimeConfig(cwd: string, configuredPath?: string) {
+  return runtimeConfigs.load(cwd, configuredPath);
+}
+
+export function saveRuntimeActiveLoadout(cwd: string, loadoutName: string, configuredPath?: string) {
+  return runtimeConfigs.saveActiveLoadout(cwd, loadoutName, configuredPath);
+}
 
 export function createConfigRepository(): ConfigRepository {
-  return { load: loadConfig, saveActiveLoadout, resolveArtifactRoot };
+  return { load: loadRuntimeConfig, saveActiveLoadout: saveRuntimeActiveLoadout, resolveArtifactRoot };
 }
 
 export function createPipelinePresenter(): PipelinePresenter {

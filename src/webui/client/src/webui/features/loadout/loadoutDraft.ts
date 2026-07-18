@@ -154,13 +154,16 @@ export function buildConfigToSave(
   normalizedDraft: MateriaConfig,
   deletedLoadoutNames: string[],
   loadoutSources: Record<string, LoadoutSourceScope> = {},
+  materiaSources: Record<string, LoadoutSourceScope> = {},
 ) {
   const preparedDraft = canonicalizeUtilitySocketReferences(normalizeMateriaConfigEdges(normalizedDraft));
   assertValidLoadoutSaveSemantics(preparedDraft);
-  // Shipped defaults and read-only central-catalog definitions are never
-  // written through a normal save: central must not silently overwrite local
-  // files (docs/enterprise-control-plane.md §5, §10). Promoting central content
-  // into a local scope is an explicit copy/update/replace action (§12).
+  // Shipped defaults and read-only central-catalog loadouts are never written
+  // through a normal save. Central materia are likewise omitted using their
+  // layer provenance, and a process-local central active identity is omitted,
+  // so an unrelated loadout edit cannot silently materialize remotely read
+  // state in a local file. Promotion remains an explicit copy/update/replace
+  // action (docs/enterprise-control-plane.md §5, §10, §12).
   const isReadOnlySource = (source: LoadoutSourceScope | undefined) => source === 'default' || source === 'central';
   const loadouts: Record<string, PipelineConfig | null> = Object.fromEntries(
     Object.entries(preparedDraft.loadouts ?? {}).filter(([name, loadout]) => !isReadOnlySource(resolvedLoadoutSource(name, loadout, loadoutSources))),
@@ -169,7 +172,19 @@ export function buildConfigToSave(
     if (isReadOnlySource(loadoutSources[name])) continue;
     loadouts[name] = null;
   }
-  return fromWebUiConfigDto({ ...preparedDraft, loadouts } as never) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
+  const materia = preparedDraft.materia === undefined
+    ? undefined
+    : Object.fromEntries(Object.entries(preparedDraft.materia).filter(([id]) => materiaSources[id] !== 'central'));
+  const activeSource = preparedDraft.activeLoadout
+    ? resolvedLoadoutSource(preparedDraft.activeLoadout, preparedDraft.loadouts?.[preparedDraft.activeLoadout], loadoutSources)
+    : undefined;
+  const { activeLoadout: _centralActiveName, activeLoadoutId: _centralActiveId, ...draftWithoutActive } = preparedDraft;
+  const writableDraft = activeSource === 'central' ? draftWithoutActive : preparedDraft;
+  return fromWebUiConfigDto({
+    ...writableDraft,
+    loadouts,
+    ...(materia !== undefined ? { materia } : {}),
+  } as never) as Omit<MateriaConfig, 'loadouts'> & { loadouts?: Record<string, PipelineConfig | null> };
 }
 
 export function saveTargetForSource(current: SaveTarget, sourceScope: LoadoutSourceScope | undefined) {

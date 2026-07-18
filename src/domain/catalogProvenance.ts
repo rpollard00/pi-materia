@@ -60,7 +60,7 @@ export interface CatalogDriftInfo {
   centralVersion?: string;
   /** Current central content hash (resolved at load), when central was reachable. */
   centralContentHash?: string;
-  /** True when central was reachable but the origin item could not be compared. */
+  /** True when comparison used a last-known snapshot rather than a fresh central read. */
   stale?: boolean;
   reason?: string;
 }

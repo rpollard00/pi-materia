@@ -109,6 +109,24 @@ describe("catalog drift detection in config layering", () => {
         centralContentHash: "sha256:central-new",
       });
 
+      const staleBehind = await loadConfig(cwd, undefined, {
+        centralSource: {
+          ...behindCentral,
+          snapshot: {
+            status: "last-known",
+            fetchedAt: "2026-07-18T01:00:00.000Z",
+            attemptedAt: "2026-07-18T02:00:00.000Z",
+          },
+        },
+      });
+      expect(staleBehind.catalogDrift?.materia?.["Central-Build"]).toEqual({
+        status: "behind",
+        centralVersion: "5",
+        centralContentHash: "sha256:central-new",
+        stale: true,
+        reason: "Central catalog is unavailable; compared with the last-known snapshot from 2026-07-18T01:00:00.000Z.",
+      });
+
       // Central moved and local edited → diverged.
       await writeUserConfig({
         materia: {
@@ -124,9 +142,7 @@ describe("catalog drift detection in config layering", () => {
 
       // Origin item gone from central summaries → orphaned. Drift detection
       // must NOT mutate the local file across this load.
-      const orphanCentral: CentralCatalogConfigSource = {
-        summaries: { [centralCatalogSummaryKey("materia", "other-item")]: { version: "3", contentHash: digest } },
-      };
+      const orphanCentral: CentralCatalogConfigSource = { summaries: {} };
       const before = await readFile(getUserMateriaAssetPath(), "utf8");
       const loadedOrphan = await loadConfig(cwd, undefined, { centralSource: orphanCentral });
       expect(loadedOrphan.catalogDrift?.materia?.["Central-Build"]).toEqual({ status: "orphaned" });

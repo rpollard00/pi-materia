@@ -6,13 +6,13 @@ import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
 import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference, type MateriaWebUiQuestControlCallbacks } from "./webui/launcher.js";
-import { loadConfig, saveQuestDefaultLoadoutPreference } from "./config/config.js";
+import { saveQuestDefaultLoadoutPreference } from "./config/config.js";
 import { loadoutPickerCandidates } from "./loadout/loadoutPickerCandidates.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
-import { FileQuestBoardRepository, QuestBoardPersistenceError } from "./infrastructure/index.js";
+import { FileQuestBoardRepository, QuestBoardPersistenceError, loadRuntimeConfig } from "./infrastructure/index.js";
 import { renderQuestAdded, renderQuestDefaultLoadoutStatus, renderQuestList, renderQuestRequeued, renderQuestStarted, renderQuestStatus, renderQuestStopped } from "./presentation/questBoard.js";
 import { parseQuestAddArgs, parseQuestListArgs, parseQuestMoveArgs, tokenizeCommandArgs, type QuestListArgs } from "./plugin/quest/commandParsing.js";
 export { renderCastList } from "./infrastructure/index.js";
@@ -544,7 +544,7 @@ async function handleQuestCommand(input: QuestCommandInput): Promise<void> {
 async function handleQuestDefaultLoadoutCommand(input: QuestCommandInput, tokens: string[]): Promise<void> {
   if (tokens.length === 0) {
     try {
-      const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+      const loaded = await loadRuntimeConfig(input.ctx.cwd, input.configuredPath);
       sendQuestMessage(input.pi, renderQuestDefaultLoadoutStatus(loaded), "default-loadout");
     } catch (error) {
       notifyQuestError(input.ctx, "default-loadout", error);
@@ -555,7 +555,7 @@ async function handleQuestDefaultLoadoutCommand(input: QuestCommandInput, tokens
   if (tokens.length === 1 && tokens[0] === "--clear") {
     try {
       await saveQuestDefaultLoadoutPreference(input.ctx.cwd, null, input.configuredPath);
-      const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+      const loaded = await loadRuntimeConfig(input.ctx.cwd, input.configuredPath);
       sendQuestMessage(input.pi, renderQuestDefaultLoadoutStatus(loaded), "default-loadout");
       input.ctx.ui.notify("pi-materia quest default loadout cleared.", "info");
     } catch (error) {
@@ -577,7 +577,7 @@ async function handleQuestDefaultLoadoutCommand(input: QuestCommandInput, tokens
 
   try {
     const questDefaultLoadoutId = await saveQuestDefaultLoadoutPreference(input.ctx.cwd, requestedLoadout, input.configuredPath);
-    const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+    const loaded = await loadRuntimeConfig(input.ctx.cwd, input.configuredPath);
     sendQuestMessage(input.pi, renderQuestDefaultLoadoutStatus(loaded), "default-loadout");
     input.ctx.ui.notify(`pi-materia quest default loadout set to ${questDefaultLoadoutId ?? requestedLoadout}.`, "info");
   } catch (error) {
@@ -588,7 +588,7 @@ async function handleQuestDefaultLoadoutCommand(input: QuestCommandInput, tokens
 async function showQuestStatus(input: QuestCommandInput): Promise<void> {
   try {
     const status = await input.useCases.getStatus(input.ctx);
-    const loaded = await loadConfig(input.ctx.cwd, input.configuredPath);
+    const loaded = await loadRuntimeConfig(input.ctx.cwd, input.configuredPath);
     sendQuestMessage(input.pi, renderQuestStatus({
       ...status,
       activeLoadoutName: loaded.config.activeLoadout,
@@ -747,7 +747,7 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
     if (!ctx || !getConfigPath) return null;
     const query = prefix.replace(/^loadout\s*/, "").trim();
     const configuredPath = getConfigPath();
-    return loadConfig(ctx.cwd, configuredPath).then((loaded) => {
+    return loadRuntimeConfig(ctx.cwd, configuredPath).then((loaded) => {
       const candidates = loadoutPickerCandidates({
         config: loaded.config,
         loadoutSources: loaded.loadoutSources,

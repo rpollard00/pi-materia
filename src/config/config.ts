@@ -16,8 +16,8 @@ import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../d
 import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 import type { EventingConfig, EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaFinalizationConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 import {
-  CENTRAL_CATALOG_LAYER_LABEL,
   type CentralCatalogConfigSource,
+  centralCatalogLayerLabel,
   centralCatalogSourceToPartial,
   isCentralCatalogSourceEmpty,
 } from "./centralCatalogSource.js";
@@ -53,7 +53,11 @@ export async function loadConfig(cwd: string, configuredPath?: string, options: 
   // definitions are supplied. Sits above bundled defaults and below user config
   // so local definitions always win (docs/enterprise-control-plane.md §5, §10).
   if (!isCentralCatalogSourceEmpty(options.centralSource)) {
-    layers.push({ scope: "central", loaded: true });
+    layers.push({
+      scope: "central",
+      loaded: true,
+      ...(options.centralSource!.snapshot ? { centralCatalogSnapshot: options.centralSource!.snapshot } : {}),
+    });
     partials.push(centralCatalogSourceToPartial(options.centralSource!));
   }
 
@@ -102,8 +106,9 @@ export async function loadConfig(cwd: string, configuredPath?: string, options: 
   });
   return {
     config,
-    source: loadedLayers.map((layer) => layer.path ?? (layer.scope === "central" ? CENTRAL_CATALOG_LAYER_LABEL : layer.scope)).join(" < "),
+    source: loadedLayers.map((layer) => layer.path ?? (layer.scope === "central" ? centralCatalogLayerLabel(options.centralSource!) : layer.scope)).join(" < "),
     layers,
+    ...(options.centralSource?.snapshot ? { centralCatalogSnapshot: options.centralSource.snapshot } : {}),
     loadoutSources,
     materiaSources,
     ...(catalogDrift ? { catalogDrift } : {}),
@@ -273,8 +278,13 @@ export async function saveMateriaConfigPatch(cwd: string, patch: MateriaConfigPa
   return file;
 }
 
-export async function saveActiveLoadout(cwd: string, loadoutName: string, configuredPath?: string): Promise<string> {
-  const loaded = await loadConfig(cwd, configuredPath);
+export async function saveActiveLoadout(
+  cwd: string,
+  loadoutName: string,
+  configuredPath?: string,
+  options: LoadConfigOptions = {},
+): Promise<string> {
+  const loaded = await loadConfig(cwd, configuredPath, options);
   const loadoutNames = Object.keys(loaded.config.loadouts ?? {});
   if (loadoutNames.length === 0) {
     throw new Error(`Cannot change Materia loadout because this config does not define any loadouts.`);
