@@ -44,6 +44,12 @@ export interface LoadedConfig {
   layers?: MateriaConfigLayer[];
   /** Freshness of the connected central layer, including empty snapshots. */
   centralCatalogSnapshot?: CentralCatalogSnapshotMetadata;
+  /**
+   * Secret-free identity and version metadata for definitions in the connected
+   * central snapshot. `localKey` is the key used by the merged config and may
+   * differ from a loadout's stable central catalog id.
+   */
+  centralCatalogItems?: readonly ConnectedCatalogItemMetadata[];
   loadoutSources?: Record<string, MateriaConfigLayerScope>;
   materiaSources?: Record<string, MateriaConfigLayerScope>;
   /**
@@ -72,6 +78,21 @@ export interface LoadedConfig {
 export interface ResolvedConfigCatalogDrift {
   loadouts?: Record<string, CatalogDriftInfo>;
   materia?: Record<string, CatalogDriftInfo>;
+}
+
+/** Metadata needed by a connected local UI to identify a central definition. */
+export interface ConnectedCatalogItemMetadata {
+  /** Stable central catalog id used by explicit promotion requests. */
+  id: string;
+  kind: "loadout" | "materia";
+  /** Key occupied by the definition in the merged local config view. */
+  localKey: string;
+  name?: string;
+  description?: string;
+  version: string;
+  updatedAt: string;
+  contentHash: string;
+  provenance?: Readonly<Record<string, unknown>>;
 }
 
 /**

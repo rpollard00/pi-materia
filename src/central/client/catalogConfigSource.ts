@@ -10,6 +10,7 @@ import {
 } from "../../config/centralCatalogSource.js";
 import type {
   CentralCatalogSnapshotMetadata,
+  ConnectedCatalogItemMetadata,
   MateriaConfig,
   MateriaPipelineConfig,
 } from "../../types.js";
@@ -100,6 +101,7 @@ async function fetchCentralCatalogSource(
   const loadouts: Record<string, MateriaPipelineConfig> = {};
   const materia: Record<string, MateriaConfig> = {};
   const sourceSummaries: Record<string, CentralCatalogItemSummary> = {};
+  const sourceItems: ConnectedCatalogItemMetadata[] = [];
 
   for (const item of items) {
     // Use metadata from the full item so a concurrent metadata/content update
@@ -124,6 +126,17 @@ async function fetchCentralCatalogSource(
       contentHash: item.contentHash,
       updatedAt: item.updatedAt,
     };
+    sourceItems.push({
+      id: item.id,
+      kind: item.kind,
+      localKey: key,
+      ...(item.name !== undefined ? { name: item.name } : {}),
+      ...(item.description !== undefined ? { description: item.description } : {}),
+      version: item.version,
+      updatedAt: item.updatedAt,
+      contentHash: item.contentHash,
+      ...(item.provenance !== undefined ? { provenance: cloneRecord(item.provenance) } : {}),
+    });
   }
 
   const snapshot: CentralCatalogSnapshotMetadata = {
@@ -134,6 +147,9 @@ async function fetchCentralCatalogSource(
   return {
     ...(Object.keys(loadouts).length > 0 ? { loadouts } : {}),
     ...(Object.keys(materia).length > 0 ? { materia } : {}),
+    // Presence (including an empty list) means this snapshot authoritatively
+    // describes the connected catalog for local promotion controls.
+    items: sourceItems,
     // Presence (including an empty record) means the list was read
     // successfully, allowing drift to resolve deleted origins as orphaned.
     summaries: sourceSummaries,
@@ -166,6 +182,7 @@ function cloneCentralSource(
   return {
     ...(source.loadouts ? { loadouts: cloneRecordMap(source.loadouts) } : {}),
     ...(source.materia ? { materia: cloneRecordMap(source.materia) } : {}),
+    ...(source.items ? { items: source.items.map((item) => cloneValue(item) as ConnectedCatalogItemMetadata) } : {}),
     ...(source.summaries ? {
       summaries: Object.fromEntries(Object.entries(source.summaries).map(([key, value]) => [key, { ...value }])),
     } : {}),

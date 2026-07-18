@@ -110,6 +110,10 @@ export async function loadConfig(cwd: string, configuredPath?: string, options: 
     source: loadedLayers.map((layer) => layer.path ?? (layer.scope === "central" ? centralCatalogLayerLabel(options.centralSource!) : layer.scope)).join(" < "),
     layers,
     ...(options.centralSource?.snapshot ? { centralCatalogSnapshot: options.centralSource.snapshot } : {}),
+    ...(options.centralSource?.items ? { centralCatalogItems: options.centralSource.items.map((item) => ({
+      ...item,
+      ...(item.provenance ? { provenance: { ...item.provenance } } : {}),
+    })) } : {}),
     loadoutSources,
     materiaSources,
     ...(catalogDrift ? { catalogDrift } : {}),

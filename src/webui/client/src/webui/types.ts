@@ -81,9 +81,57 @@ export interface SocketPropertyFormState {
 // target). See docs/enterprise-control-plane.md §5.
 export type LoadoutSourceScope = 'default' | 'central' | 'user' | 'project' | 'explicit';
 
+export type CatalogDefinitionKind = 'loadout' | 'materia';
+export type CatalogLocalAction = 'copy' | 'update' | 'replace';
+export type CatalogLocalTargetScope = SaveTarget;
+export type CatalogDriftStatus = 'current' | 'behind' | 'diverged' | 'orphaned';
+
+export interface CatalogOriginProvenance {
+  catalogItemId: string;
+  catalogVersion: string;
+  catalogContentHash: string;
+  source: CatalogLocalTargetScope;
+}
+
+export interface CatalogDriftInfo {
+  status: CatalogDriftStatus;
+  centralVersion?: string;
+  centralContentHash?: string;
+  stale?: boolean;
+  reason?: string;
+}
+
+export interface ResolvedConfigCatalogDrift {
+  loadouts?: Record<string, CatalogDriftInfo>;
+  materia?: Record<string, CatalogDriftInfo>;
+}
+
+/** Secret-free connected-catalog metadata surfaced by the local config API. */
+export interface ConnectedCatalogItemMetadata {
+  id: string;
+  kind: CatalogDefinitionKind;
+  localKey: string;
+  name?: string;
+  description?: string;
+  version: string;
+  updatedAt: string;
+  contentHash: string;
+  provenance?: Readonly<Record<string, unknown>>;
+}
+
+export interface CentralCatalogSnapshotMetadata {
+  status: 'fresh' | 'last-known';
+  fetchedAt: string;
+  attemptedAt: string;
+  reason?: string;
+}
+
 export interface LoadedConfigResponse {
   config?: MateriaConfig;
   source?: string;
+  centralCatalogItems?: readonly ConnectedCatalogItemMetadata[];
+  centralCatalogSnapshot?: CentralCatalogSnapshotMetadata;
+  catalogDrift?: ResolvedConfigCatalogDrift;
   loadoutSources?: Record<string, LoadoutSourceScope>;
   materiaSources?: Record<string, LoadoutSourceScope>;
   defaultMateriaIds?: string[];
@@ -97,6 +145,9 @@ export interface ConfigResponse {
   ok?: boolean;
   config?: MateriaConfig | LoadedConfigResponse;
   source?: string;
+  centralCatalogItems?: readonly ConnectedCatalogItemMetadata[];
+  centralCatalogSnapshot?: CentralCatalogSnapshotMetadata;
+  catalogDrift?: ResolvedConfigCatalogDrift;
   loadoutSources?: Record<string, LoadoutSourceScope>;
   materiaSources?: Record<string, LoadoutSourceScope>;
   defaultMateriaIds?: string[];
@@ -112,6 +163,9 @@ export interface ActiveLoadoutResponse {
   activeLoadoutId?: string;
   config?: MateriaConfig | LoadedConfigResponse;
   source?: string;
+  centralCatalogItems?: readonly ConnectedCatalogItemMetadata[];
+  centralCatalogSnapshot?: CentralCatalogSnapshotMetadata;
+  catalogDrift?: ResolvedConfigCatalogDrift;
   loadoutSources?: Record<string, LoadoutSourceScope>;
   materiaSources?: Record<string, LoadoutSourceScope>;
   defaultMateriaIds?: string[];
@@ -121,6 +175,50 @@ export interface ActiveLoadoutResponse {
   questDefaultLoadoutWarning?: string;
   message?: string;
   error?: string | { code?: string; message?: string };
+}
+
+export interface CatalogPromotionRequest {
+  action: CatalogLocalAction;
+  kind: CatalogDefinitionKind;
+  catalogItemId: string;
+  localKey: string;
+  target: CatalogLocalTargetScope;
+  confirmOverwrite?: boolean;
+}
+
+export interface CatalogPromotionResult {
+  status: 'applied' | 'needs_confirmation' | 'rejected';
+  action: CatalogLocalAction;
+  kind: CatalogDefinitionKind;
+  localKey: string;
+  target: CatalogLocalTargetScope;
+  path?: string;
+  overwrite?: boolean;
+  contentChanged?: boolean;
+  reason?: string;
+  code?: string;
+  origin?: CatalogOriginProvenance;
+  previousOrigin?: CatalogOriginProvenance;
+}
+
+export interface CatalogPromotionResponse {
+  ok?: boolean;
+  result?: CatalogPromotionResult;
+  error?: string | { code?: string; message?: string };
+  conflict?: {
+    code?: string;
+    confirmOverwriteRequired?: boolean;
+    currentOrigin?: CatalogOriginProvenance;
+    proposedOrigin?: CatalogOriginProvenance;
+    currentVersion?: string;
+  };
+  provenance?: {
+    origin?: CatalogOriginProvenance;
+    previousOrigin?: CatalogOriginProvenance;
+  };
+  config?: ConfigResponse | LoadedConfigResponse;
+  drift?: CatalogDriftInfo;
+  configRefresh?: { ok?: boolean; error?: string };
 }
 
 export interface DefaultLoadoutResponse {

@@ -4,6 +4,8 @@ import type {
   AddQuestRequest,
   AddQuestResponse,
   BackendModeResponse,
+  CatalogPromotionRequest,
+  CatalogPromotionResponse,
   CentralModelCatalogResponse,
   CentralModelPolicyResponse,
   ConfigResponse,
@@ -57,6 +59,15 @@ export async function saveConfig(target: SaveTarget, config: SaveConfigPayload):
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ target, config }),
+  });
+}
+
+/** Execute an explicit central-to-local action through the local session only. */
+export async function promoteCentralCatalog(request: CatalogPromotionRequest): Promise<ApiResponse<CatalogPromotionResponse>> {
+  return fetchJson<CatalogPromotionResponse>(`/api/catalog/promotions/${request.action}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
   });
 }
 

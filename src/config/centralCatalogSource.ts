@@ -1,5 +1,6 @@
 import type {
   CentralCatalogSnapshotMetadata,
+  ConnectedCatalogItemMetadata,
   MateriaConfig,
   MateriaPipelineConfig,
   PiMateriaConfig,
@@ -31,6 +32,12 @@ export interface CentralCatalogConfigSource {
   readonly loadouts?: Readonly<Record<string, MateriaPipelineConfig>>;
   /** Central materia definitions keyed by materia id. */
   readonly materia?: Readonly<Record<string, MateriaConfig>>;
+  /**
+   * Secret-free catalog identity metadata for connected local UI actions.
+   * This preserves the stable catalog id when a loadout's merged key is its
+   * display name rather than that id.
+   */
+  readonly items?: readonly ConnectedCatalogItemMetadata[];
   /**
    * Current central catalog item summaries keyed by catalog item id, used to
    * resolve drift against local copies. Populated by the control-plane adapter
