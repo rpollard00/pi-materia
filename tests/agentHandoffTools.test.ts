@@ -154,6 +154,24 @@ describe("ergonomic agent handoff tools", () => {
     await expect(invoke(toolSet.tools.commit)).rejects.toThrow(/\$\.workItems/);
   });
 
+  test("omits untouched optional fields and rejects duplicate tool commits", async () => {
+    const commits: AgentHandoffCommit[] = [];
+    const toolSet = createAgentHandoffTools({
+      builder: new AgentHandoffBuilder(builderOptions()),
+      onCommit: (commit) => commits.push(commit),
+    });
+
+    const result = await invoke(toolSet.tools.commit);
+
+    expect(result.terminate).toBe(true);
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.output).toEqual({});
+    expect(commits[0]?.json).toBe("{}");
+    await expect(invoke(toolSet.tools.commit)).rejects.toThrow(/protocol violation/);
+    await expect(invoke(toolSet.tools.setContext, { context: "too late" })).rejects.toThrow(/protocol violation/);
+    expect(commits).toHaveLength(1);
+  });
+
   test("accumulates ordered values and commits runtime-owned escaping and event serialization", async () => {
     const commits: AgentHandoffCommit[] = [];
     const toolSet = createAgentHandoffTools({
