@@ -17,6 +17,7 @@ import {
   isAgentControllerPresetActive,
   validateAgentControllerMultiTurnSockets,
 } from "./agentControllerCompatibility.js";
+import { createAgentFinalizationRuntime } from "./agentFinalizationRuntime.js";
 import { createAgentLifecycle } from "./agentLifecycle.js";
 import { createAgentPromptDispatch } from "./agentPromptDispatch.js";
 import { recordActiveTurnProvenance, updateToolScope } from "./agentTurnState.js";
@@ -47,6 +48,7 @@ export type { AgentControllerValidationResult, PipelineSocketDetail } from "./ag
 export { defaultProactiveCompactionThresholdPercent } from "./compaction.js";
 export { currentMateria, materiaStatusLabel } from "./sessionState.js";
 
+const agentFinalization = createAgentFinalizationRuntime<object>();
 const emitLifecycleEvent = nativeEventing.emitLifecycleEvent.bind(nativeEventing);
 const getEventBus = nativeEventing.getEventBus.bind(nativeEventing);
 const getResultAccumulator = nativeEventing.getResultAccumulator.bind(nativeEventing);
@@ -75,6 +77,9 @@ const castTermination = createCastTermination({
     currentSocketId,
     setCurrentSocketState,
   },
+  finalization: {
+    deactivate: (pi) => agentFinalization.deactivate(pi),
+  },
   ui: {
     updateWidget,
     showUsageSummary,
@@ -99,6 +104,8 @@ const agentPromptDispatch = createAgentPromptDispatch({
   },
   tools: {
     updateToolScope,
+    configureAgentFinalization: (pi, session, state, socket, config) =>
+      agentFinalization.configure(pi, session, state, socket, config),
   },
   lifecycle: {
     emitLifecycleEvent,
@@ -264,6 +271,11 @@ const agentLifecycle = createAgentLifecycle({
   },
   completion: {
     completeSocket,
+  },
+  finalization: {
+    completion: (session, state, text) => agentFinalization.completion(session, state, text),
+    fallbackToDirect: (pi, session, state) => agentFinalization.fallbackToDirect(pi, session, state),
+    release: (pi, session, state) => agentFinalization.release(pi, session, state),
   },
   termination: {
     failCast,

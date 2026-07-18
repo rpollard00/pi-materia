@@ -53,6 +53,9 @@ export interface CastTerminationDependencies {
       socketState: MateriaCastState["socketState"],
     ): void;
   };
+  finalization?: {
+    deactivate(pi: ExtensionAPI): void;
+  };
   ui: {
     updateWidget(ctx: ExtensionContext, state: MateriaCastState): unknown;
     showUsageSummary(ctx: ExtensionContext, state: MateriaRunState): void;
@@ -97,6 +100,7 @@ export function createCastTermination(deps: CastTerminationDependencies) {
     state: MateriaCastState,
     reason = "aborted by user",
   ): Promise<MateriaCastState> {
+    deps.finalization?.deactivate(pi);
     // Stop heartbeat before emitting the terminal event so no heartbeat fires
     // after cancellation (docs/runtime-eventing.md §7.4).
     deps.eventing.stopHeartbeat(state.castId);
@@ -166,6 +170,7 @@ export function createCastTermination(deps: CastTerminationDependencies) {
     entryId?: string,
     options: FailCastOptions = {},
   ): Promise<void> {
+    deps.finalization?.deactivate(pi);
     if (!options.preserveRecoveryExhaustion) state.recoveryExhaustion = undefined;
     state.active = false;
     state.awaitingResponse = false;
@@ -220,6 +225,7 @@ export function createCastTermination(deps: CastTerminationDependencies) {
     entryId: string,
     message: string,
   ): Promise<void> {
+    deps.finalization?.deactivate(pi);
     state.active = false;
     state.phase = "complete";
     state.awaitingResponse = false;

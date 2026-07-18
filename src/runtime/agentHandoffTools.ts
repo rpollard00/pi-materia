@@ -248,7 +248,9 @@ export function exposeAgentHandoffTools(
 
 /** Remove all materia handoff tools from the active set without affecting other tools. */
 export function hideAgentHandoffTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
-  pi.setActiveTools(pi.getActiveTools().filter((name) => !isAgentHandoffToolName(name)));
+  const active = pi.getActiveTools();
+  const filtered = active.filter((name) => !isAgentHandoffToolName(name));
+  if (filtered.length !== active.length) pi.setActiveTools(filtered);
 }
 
 export function isAgentHandoffToolName(name: string): name is AgentHandoffToolName {

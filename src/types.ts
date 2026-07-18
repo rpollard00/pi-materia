@@ -7,6 +7,8 @@ export interface PiMateriaConfig {
   budget?: MateriaBudgetConfig;
   limits?: MateriaLimitsConfig;
   compaction?: MateriaCompactionConfig;
+  /** Producer-aware finalization rollout policy. Omitted keeps validated direct JSON. */
+  finalization?: MateriaFinalizationConfig;
   /** Named graph configs that share the top-level materia, limits, budget, and artifactDir. */
   loadouts?: Record<string, MateriaPipelineConfig>;
   /** Stable id of the loadout to use. Current-format runtime/UI identity must compare against loadout.id only. */
@@ -66,9 +68,12 @@ export type MateriaConfigLayerScope = "default" | "central" | "user" | "project"
 export type LoadoutSource = MateriaConfigLayerScope;
 export type LoadoutUserLockState = "locked" | "unlocked";
 export type MateriaUserLockState = "locked" | "unlocked";
-export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia" | "eventing"> & {
+export type MateriaConfigPatch = Omit<Partial<PiMateriaConfig>, "materia" | "eventing" | "finalization"> & {
   materia?: Record<string, Partial<MateriaConfig> | null>;
   eventing?: Partial<EventingConfig> | null;
+  finalization?: {
+    agentJson?: Partial<MateriaAgentJsonFinalizationConfig>;
+  } | null;
 };
 
 export interface MateriaConfigLayer {
@@ -151,6 +156,52 @@ export interface MateriaCompactionThresholdTierConfig {
   minContextWindow?: number;
   maxContextWindow?: number;
   thresholdPercent: number;
+}
+
+/** Runtime protocols that can produce the canonical agent handoff value. */
+export type MateriaAgentFinalizationStrategy = "direct_json" | "tool_backed";
+
+/** Explicitly qualified model/provider/socket cohort for tool-backed finalization. */
+export interface MateriaToolBackedModelQualification {
+  /** Effective model id, provider-qualified id, or "*" for an explicit operator wildcard. */
+  model: string;
+  provider?: string;
+  api?: string;
+  socketIds?: string[];
+  materiaIds?: string[];
+}
+
+export interface MateriaAgentJsonFinalizationConfig {
+  /** Defaults to direct_json. tool_backed still requires a matching qualifiedModels entry. */
+  strategy?: MateriaAgentFinalizationStrategy;
+  qualifiedModels?: MateriaToolBackedModelQualification[];
+}
+
+export interface MateriaFinalizationConfig {
+  agentJson?: MateriaAgentJsonFinalizationConfig;
+}
+
+export type MateriaAgentFinalizationReason =
+  | "default_direct_json"
+  | "configured_direct_json"
+  | "deterministic_producer"
+  | "non_json_socket"
+  | "not_finalization_turn"
+  | "unqualified_model"
+  | "unsupported_socket"
+  | "qualified_tool_model"
+  | "direct_json_fallback";
+
+/** Persisted, content-free provenance for the active agent finalization attempt. */
+export interface MateriaAgentFinalizationState {
+  strategy: MateriaAgentFinalizationStrategy;
+  configuredStrategy: MateriaAgentFinalizationStrategy;
+  reason: MateriaAgentFinalizationReason;
+  phase: "active" | "committed" | "fallback";
+  socketId: string;
+  socketVisit: number;
+  finalizationAttempt: number;
+  fallbackFrom?: "tool_backed";
 }
 
 export interface UsageTokens {
@@ -318,6 +369,8 @@ export interface MateriaCastState {
   recoveryHintSuppressed?: boolean;
   /** Bounded metadata for the next same-socket retry after invalid final JSON output. */
   jsonOutputRepair?: MateriaJsonOutputRepairContext;
+  /** Content-free strategy provenance for the current agent finalization attempt. */
+  agentFinalization?: MateriaAgentFinalizationState;
   /** Bounded runtime-owned provenance rendered into follow-up prompts after not_satisfied routing. */
   reworkFeedback?: MateriaReworkFeedbackEntry[];
   /** Same recovery keys that have already retried a strong context-window failure without compaction. */

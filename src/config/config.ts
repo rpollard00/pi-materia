@@ -14,7 +14,7 @@ import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoad
 import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
-import type { EventingConfig, EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
+import type { EventingConfig, EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaFinalizationConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 import {
   CENTRAL_CATALOG_LAYER_LABEL,
   type CentralCatalogConfigSource,
@@ -570,6 +570,7 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
+  validateFinalizationConfig(config.finalization);
   config = normalizeConfigRuntimeSockets(config);
   config = normalizeConfigLoadoutsForLoad(config);
   config = prepareConfigLoadoutsForSave(config);
@@ -593,6 +594,7 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: MateriaConfigPa
     budget: patch.budget ? { ...(base.budget ?? {}), ...patch.budget } : base.budget,
     limits: patch.limits ? { ...(base.limits ?? {}), ...patch.limits } : base.limits,
     compaction: patch.compaction ? { ...(base.compaction ?? {}), ...patch.compaction } : base.compaction,
+    finalization: patch.finalization === null ? undefined : mergeFinalization(base.finalization, patch.finalization),
     loadouts: mergeLoadouts(base.loadouts, patch.loadouts, new Set<string>(), true),
     activeLoadout: patch.activeLoadout ?? base.activeLoadout,
     activeLoadoutId: patch.activeLoadoutId ?? base.activeLoadoutId,
@@ -690,6 +692,7 @@ function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>, pr
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
     limits: { ...base.limits, ...(parsed.limits ?? {}) },
     compaction: { ...base.compaction, ...(parsed.compaction ?? {}) },
+    finalization: mergeFinalization(base.finalization, parsed.finalization),
     loadouts: mergeLoadouts(base.loadouts, parsed.loadouts, protectedLoadoutNames),
     activeLoadout: parsed.activeLoadout ?? base.activeLoadout,
     activeLoadoutId: parsed.activeLoadoutId ?? base.activeLoadoutId,
@@ -725,6 +728,24 @@ function mergeLoadouts(baseLoadouts: PiMateriaConfig["loadouts"], parsedLoadouts
 
 function hasLoadoutSocketMap(loadout: Record<string, unknown>): boolean {
   return loadout.sockets !== undefined;
+}
+
+function mergeFinalization(
+  base: PiMateriaConfig["finalization"],
+  parsed: Partial<MateriaFinalizationConfig> | undefined,
+): PiMateriaConfig["finalization"] {
+  if (parsed === undefined) return base;
+  if (!isPlainObject(parsed)) return parsed as MateriaFinalizationConfig;
+  const parsedAgentJson = parsed.agentJson;
+  return {
+    ...(base ?? {}),
+    ...parsed,
+    agentJson: parsedAgentJson === undefined
+      ? base?.agentJson
+      : isPlainObject(parsedAgentJson)
+        ? { ...(base?.agentJson ?? {}), ...parsedAgentJson }
+        : parsedAgentJson,
+  } as MateriaFinalizationConfig;
 }
 
 function mergeEventing(base: PiMateriaConfig["eventing"], parsed: Partial<PiMateriaConfig>["eventing"]): PiMateriaConfig["eventing"] {
@@ -961,6 +982,39 @@ function validateConfigMateriaReferences(config: Pick<PiMateriaConfig, "materia"
     const validation = validateLoadoutMateriaReferences(loadout as unknown as Parameters<typeof validateLoadoutMateriaReferences>[0], catalog.value, `loadouts.${name}`);
     if (!validation.ok) {
       throw new Error(`Materia loadout "${name}" has invalid materia references: ${validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+    }
+  }
+}
+
+function validateFinalizationConfig(value: MateriaFinalizationConfig | undefined): void {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) throw new Error(`Materia config has invalid finalization. Expected an object.`);
+  const agentJson = value.agentJson;
+  if (agentJson === undefined) return;
+  if (!isPlainObject(agentJson)) throw new Error(`Materia config has invalid finalization.agentJson. Expected an object.`);
+  if (agentJson.strategy !== undefined && agentJson.strategy !== "direct_json" && agentJson.strategy !== "tool_backed") {
+    throw new Error(`Materia config has invalid finalization.agentJson.strategy. Expected "direct_json" or "tool_backed".`);
+  }
+  if (agentJson.qualifiedModels === undefined) return;
+  if (!Array.isArray(agentJson.qualifiedModels)) {
+    throw new Error(`Materia config has invalid finalization.agentJson.qualifiedModels. Expected an array.`);
+  }
+  for (const [index, qualification] of agentJson.qualifiedModels.entries()) {
+    const path = `finalization.agentJson.qualifiedModels.${index}`;
+    if (!isPlainObject(qualification)) throw new Error(`Materia config has invalid ${path}. Expected an object.`);
+    if (typeof qualification.model !== "string" || qualification.model.trim().length === 0) {
+      throw new Error(`Materia config has invalid ${path}.model. Expected a non-empty string.`);
+    }
+    for (const field of ["provider", "api"] as const) {
+      if (qualification[field] !== undefined && (typeof qualification[field] !== "string" || qualification[field].trim().length === 0)) {
+        throw new Error(`Materia config has invalid ${path}.${field}. Expected a non-empty string when configured.`);
+      }
+    }
+    for (const field of ["socketIds", "materiaIds"] as const) {
+      const entries = qualification[field];
+      if (entries !== undefined && (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string" || entry.trim().length === 0))) {
+        throw new Error(`Materia config has invalid ${path}.${field}. Expected non-empty string entries.`);
+      }
     }
   }
 }

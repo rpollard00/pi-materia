@@ -1,6 +1,6 @@
 import path from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 export type FakeEventName = Parameters<ExtensionAPI["on"]>[0];
 
@@ -102,6 +102,7 @@ export class FakePiHarness {
   readonly notifications: FakeUiNotification[] = [];
   readonly statuses = new Map<string, string | undefined>();
   readonly registeredRenderers = new Map<string, unknown>();
+  readonly registeredTools = new Map<string, ToolDefinition>();
   readonly setModelCalls: unknown[] = [];
   readonly setThinkingLevelCalls: string[] = [];
   readonly operationLog: string[] = [];
@@ -163,7 +164,10 @@ export class FakePiHarness {
       getAllTools: () => [...this.allTools],
       setActiveTools: (toolNames: string[]) => { this.operationLog.push("setActiveTools"); this.activeTools = [...toolNames]; },
       getCommands: () => [],
-      registerTool: () => undefined,
+      registerTool: (tool: ToolDefinition) => {
+        this.registeredTools.set(tool.name, tool);
+        if (!this.allTools.some((candidate) => candidate.name === tool.name)) this.allTools.push({ name: tool.name });
+      },
       registerShortcut: () => undefined,
       setModel: async (model: unknown) => { this.operationLog.push("setModel"); this.setModelCalls.push(model); this.activeModel = model; if (this.ctx) (this.ctx as unknown as { model: unknown }).model = model; return true; },
       getThinkingLevel: () => this.thinkingLevel,

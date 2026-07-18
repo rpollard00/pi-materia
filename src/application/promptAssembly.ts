@@ -6,6 +6,8 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
+import { isToolBackedFinalizationActive } from "../runtime/finalizationStrategy.js";
+import { AGENT_HANDOFF_TOOL_NAMES } from "../runtime/agentHandoffTools.js";
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { renderReworkFeedbackPromptContext } from "./reworkFeedback.js";
@@ -19,7 +21,7 @@ import { currentItem, getPath, isPlainObject, readObjectField } from "./workflow
 // - plain-text agent sockets receive no JSON-only handoff contract unless their local prompt asks for one.
 export function buildSocketPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
   if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
-  return materiaPrompt(socket.materia, state, [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)]);
+  return materiaPrompt(socket.materia, state, [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket, state)]);
 }
 
 export function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
@@ -29,22 +31,23 @@ export function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket
     renderReworkFeedbackPromptContext(state, socket.id),
     socketAdapterContextInstruction(state, socket),
     "Command-triggered finalization: the user ran /materia continue for this multi-turn socket. This is the only finalization mechanism and this is the finalization turn.",
-    finalFormatInstruction(socket),
+    finalFormatInstruction(socket, state),
   ]);
 }
 
 export function multiTurnTurnInstruction(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {
   if (!isMultiTurnResolvedAgentSocket(socket)) return undefined;
-  return state.multiTurnFinalizing ? finalFormatInstruction(socket) : multiTurnRefinementGuidance();
+  return state.multiTurnFinalizing ? finalFormatInstruction(socket, state) : multiTurnRefinementGuidance();
 }
 
 export function multiTurnRefinementGuidance(): string {
   return "Current multi-turn mode: refinement conversation. /materia continue is the only way to finalize this multi-turn socket. Until the user runs /materia continue, respond conversationally, incorporate refinement feedback, and do not emit final JSON, final structured output, or other final machine-parseable output. If the refinement appears complete or the conversation is stalling, prompt the user to run /materia continue when they are ready for the final output.";
 }
 
-export function singleTurnJsonFormatInstruction(socket: ResolvedMateriaSocket): string | undefined {
+export function singleTurnJsonFormatInstruction(socket: ResolvedMateriaSocket, state?: MateriaCastState): string | undefined {
   if (!isAgentResolvedSocket(socket)) return undefined;
   if (socket.materia.multiTurn === true) return undefined;
+  if (state && isToolBackedFinalizationActive(state, socket)) return toolBackedFinalizationInstruction();
   return jsonHandoffContractInstruction(socket);
 }
 
@@ -59,9 +62,18 @@ export function jsonHandoffContractInstruction(socket: ResolvedMateriaSocket): s
   return formatHandoffJsonFinalInstruction(requirements);
 }
 
-export function finalFormatInstruction(socket: ResolvedMateriaSocket): string {
+export function finalFormatInstruction(socket: ResolvedMateriaSocket, state?: MateriaCastState): string {
   if (!isAgentResolvedSocket(socket)) return "";
+  if (state && isToolBackedFinalizationActive(state, socket)) return toolBackedFinalizationInstruction();
   return jsonHandoffContractInstruction(socket) ?? "Final output format: return the final plain-text implementation summary for this socket. Do not emit routing JSON or evaluator control fields unless the local socket prompt explicitly asks for them.";
+}
+
+export function toolBackedFinalizationInstruction(): string {
+  return [
+    "Final output protocol: tool-backed materia handoff submission is active for this socket.",
+    `Submit each applicable value with the active materia_handoff setter tools, then call ${AGENT_HANDOFF_TOOL_NAMES.commit} as the sole final tool call.`,
+    "Do not emit the handoff as textual JSON, do not mix a textual envelope with tool submissions, and do not continue after commit. Runtime code validates and serializes the canonical envelope.",
+  ].join("\n");
 }
 
 export interface JsonOutputRepairPromptInput {
@@ -106,7 +118,7 @@ export function buildJsonOutputRepairRetryPrompt(state: MateriaCastState, socket
       errorMessage: state.jsonOutputRepair.errorMessage,
       validationIssues: state.jsonOutputRepair.validationIssues,
       invalidOutputExcerpt: state.jsonOutputRepair.invalidOutputExcerpt,
-      originalFinalOutputInstructions: finalFormatInstruction(socket),
+      originalFinalOutputInstructions: finalFormatInstruction(socket, state),
     }),
   ]);
 }
@@ -143,10 +155,15 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
   if (!generator) return undefined;
   if (isMultiTurnResolvedAgentSocket(socket) && state.multiTurnFinalizing !== true) return undefined;
   const upstreamWorkItems = getPath(state.data, HANDOFF_WORK_ITEMS_FIELD);
+  const toolBacked = isToolBackedFinalizationActive(state, socket);
   return [
-    "Generator socket adapter context: generated-output stage. Return JSON only and expose generated output as workItems.",
+    toolBacked
+      ? "Generator socket adapter context: generated-output stage. Submit generated workItems through the active materia handoff tools; runtime code owns the JSON envelope."
+      : "Generator socket adapter context: generated-output stage. Return JSON only and expose generated output as workItems.",
     `Generated output assignment: ${JSON.stringify(generator.output)} must come from $.${HANDOFF_WORK_ITEMS_FIELD}.`,
-    `Emit top-level ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not place generated units in other fields.`,
+    toolBacked
+      ? `Call ${AGENT_HANDOFF_TOOL_NAMES.addWorkItem} once per final work item in order; do not place generated units in textual JSON or other fields.`
+      : `Emit top-level ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not place generated units in other fields.`,
     "Each generated work item must contain only title:string and context:string; put all item-specific guidance in the workItem.context text string.",
     Array.isArray(upstreamWorkItems) ? `Upstream generated workItems JSON for this generator stage:\n${JSON.stringify(upstreamWorkItems, null, 2)}` : undefined,
     "If upstream workItems are present, consume them as input context and transform/refine them into a new top-level workItems array.",
@@ -174,7 +191,7 @@ export function buildTimeoutRecoveryHint(state: MateriaCastState, recoveryKey: s
 
 export function activeMateriaSystemPrompt(state: MateriaCastState, materia: MateriaAgentConfig): string {
   const socket = activeResolvedSocket(state);
-  const suffixes = socket && isAgentResolvedSocket(socket) ? [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket)] : [];
+  const suffixes = socket && isAgentResolvedSocket(socket) ? [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket, state)] : [];
   return [renderTemplate(materia.prompt, state), ...suffixes].filter(Boolean).join("\n\n");
 }
 
@@ -326,6 +343,12 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
 
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
+  if (isToolBackedFinalizationActive(state, socket)) {
+    return [
+      "Canonical handoff contract context:",
+      "The active materia_handoff tools expose only fields consumed by this socket. Submit exact semantic values through those tools and finish with materia_handoff_commit; runtime validation remains authoritative.",
+    ].join("\n\n");
+  }
 
   const requirements = deriveSocketOutputRequirements({
     socket: effectiveResolvedSocketConfig(socket),
@@ -356,6 +379,9 @@ export function syntheticEventEmissionContext(state: MateriaCastState): string |
 
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
+  if (isToolBackedFinalizationActive(state, socket)) {
+    return `Optional event side-channel data must be submitted one event at a time with ${AGENT_HANDOFF_TOOL_NAMES.emitEvent} when that tool is active; do not author an event JSON array.`;
+  }
 
   const requirements = deriveSocketOutputRequirements({
     socket: effectiveResolvedSocketConfig(socket),
