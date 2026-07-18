@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "kind": "local-cast-artifacts",
+    "capturedOn": "2026-07-17",
+    "agentFinalizationSampleSize": 3,
+    "deterministicUtilitySampleSize": 3,
+    "limitations": [
+      "All sampled agent finalizations used openai-codex/gpt-5.6-sol with xhigh thinking; no smaller model is represented.",
+      "The only observed JSON parse failure had an empty assistant output, so this sample contains no observed escaping-attributed model failure.",
+      "Elapsed times are wall-clock artifact deltas, not controlled provider benchmarks.",
+      "Reported costs have costKind subscription and are token-value estimates, not evidence of billed per-token charges."
+    ]
+  },
+  "agentFinalizations": [
+    {
+      "castId": "2026-07-09T22-54-39-003Z",
+      "socketId": "Socket-3",
+      "model": "openai-codex/gpt-5.6-sol",
+      "thinking": "xhigh",
+      "submissions": 1,
+      "jsonRepairRetries": 0,
+      "firstSubmissionOutcome": "accepted",
+      "eventualOutcome": "accepted",
+      "failureCategory": null,
+      "finalizationLatencyMs": 126017,
+      "retryLatencyMs": null,
+      "reportedUsage": {
+        "inputTokens": 2987,
+        "outputTokens": 3396,
+        "cacheReadTokens": 52736,
+        "totalTokens": 59119,
+        "cost": 0.143183,
+        "costKind": "subscription"
+      }
+    },
+    {
+      "castId": "2026-07-10T02-53-33-302Z",
+      "socketId": "Socket-3",
+      "model": "openai-codex/gpt-5.6-sol",
+      "thinking": "xhigh",
+      "submissions": 1,
+      "jsonRepairRetries": 0,
+      "firstSubmissionOutcome": "accepted",
+      "eventualOutcome": "accepted",
+      "failureCategory": null,
+      "finalizationLatencyMs": 137648,
+      "retryLatencyMs": null,
+      "reportedUsage": {
+        "inputTokens": 19796,
+        "outputTokens": 5995,
+        "cacheReadTokens": 20992,
+        "totalTokens": 46783,
+        "cost": 0.289326,
+        "costKind": "subscription"
+      }
+    },
+    {
+      "castId": "2026-07-17T23-53-10-806Z",
+      "socketId": "Socket-3",
+      "model": "openai-codex/gpt-5.6-sol",
+      "thinking": "xhigh",
+      "submissions": 2,
+      "jsonRepairRetries": 1,
+      "firstSubmissionOutcome": "rejected",
+      "eventualOutcome": "accepted",
+      "failureCategory": "json_parse_empty_output",
+      "finalizationLatencyMs": 238842,
+      "retryLatencyMs": 83414,
+      "reportedUsage": {
+        "inputTokens": 4489,
+        "outputTokens": 2367,
+        "cacheReadTokens": 0,
+        "totalTokens": 6856,
+        "cost": 0.093455,
+        "costKind": "subscription"
+      },
+      "retryReportedUsage": {
+        "inputTokens": 4489,
+        "outputTokens": 2367,
+        "cacheReadTokens": 0,
+        "totalTokens": 6856,
+        "cost": 0.093455,
+        "costKind": "subscription"
+      }
+    }
+  ],
+  "deterministicUtilityFinalizations": [
+    {
+      "castId": "2026-07-09T22-54-39-003Z",
+      "socketId": "Socket-8",
+      "producer": "Commit-Sigil command utility",
+      "submissions": 1,
+      "retries": 0,
+      "eventualOutcome": "accepted",
+      "socketLatencyMs": 47,
+      "modelTokens": 0
+    },
+    {
+      "castId": "2026-07-10T02-53-33-302Z",
+      "socketId": "Socket-8",
+      "producer": "Commit-Sigil command utility",
+      "submissions": 1,
+      "retries": 0,
+      "eventualOutcome": "accepted",
+      "socketLatencyMs": 37,
+      "modelTokens": 0
+    },
+    {
+      "castId": "2026-07-17T23-53-10-806Z",
+      "socketId": "Socket-8",
+      "producer": "Commit-Sigil command utility",
+      "submissions": 1,
+      "retries": 0,
+      "eventualOutcome": "accepted",
+      "socketLatencyMs": 59,
+      "modelTokens": 0
+    }
+  ]
+}

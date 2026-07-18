@@ -1,0 +1,46 @@
+{
+  "workItems": [
+    {
+      "title": "feat: preserve quoted commands",
+      "context": "Keep quoted shell and JSON fragments exact: run \"npm test -- --filter 'handoff'\", compare {\"satisfied\":true}, and do not turn the embedded double quotes into prose delimiters. The apostrophe in the maintainer's note must also survive serialization."
+    },
+    {
+      "title": "fix: preserve multiline guidance",
+      "context": "Apply the change in three phases:\n1. Parse without mutating handoff state.\n2. Validate every consumed path.\r\n3. Commit only after validation succeeds.\n\nThe blank line, CRLF boundary, and final tab marker\tremain part of this context."
+    },
+    {
+      "title": "test: preserve backslash-heavy paths",
+      "context": "Exercise Windows path C:\\Users\\materia\\repo\\src\\handoff.ts, UNC path \\\\server\\share\\casts, and regular expression ^workItems\\[\\d+\\]\\.context$. The two-character escape example \\n must not become a physical newline."
+    },
+    {
+      "title": "docs: preserve unicode handoff text",
+      "context": "Retain Unicode without ASCII-only rewriting: café, naïve, 東京, Ελληνικά, مرحبا, हिंदी, emoji 🧪🚀, and combining é. JSON permits these code points directly, and parsing followed by serialization must preserve their string values."
+    },
+    {
+      "title": "chore: carry a larger parser context",
+      "context": "Trace the complete direct-output path from the assistant session entry through assistantText, completeSocket, parseSocketJson, event side-channel stripping, validateHandoffJsonOutput, applyGenericHandoffEnvelope, assignment, routing, and artifact recording. Record that parsing accepts a fenced or prose-prefixed balanced object even though prompts request one bare object, while canonical validation still requires a top-level object and socket-specific fields. Distinguish syntax failures from contract failures so future comparisons do not combine unescaped quotes with missing fields or invalid types."
+    },
+    {
+      "title": "chore: carry a larger recovery context",
+      "context": "Trace recovery independently from normal graph advancement. An agent parse or handoff validation error stores a bounded repair excerpt, classifies the failure, and invokes same-socket recovery. The recovery identity includes turn mode, socket, item, visit, and refinement information; the default JSON repair allowance is bounded. A successful retry must not increment the socket visit or start downstream sockets before the corrected envelope commits. Exhaustion must fail the cast with structured metadata rather than silently accepting damaged state."
+    },
+    {
+      "title": "test: keep deterministic utility output separate",
+      "context": "Use the same semantic values for a configured utility object, but let runtime JSON.stringify own escaping. Utilities execute without an agent turn, are parsed and validated by the commit pipeline, and fail fast rather than requesting a model repair. This baseline must remain separate from agent first-pass and retry rates because utility latency and token usage do not measure model formatting behavior."
+    },
+    {
+      "title": "chore: define evidence limitations",
+      "context": "Report sample size, producer type, provider and model, first-submission outcome, eventual outcome, retries, elapsed time, and reported usage. Do not infer an escaping failure when the invalid excerpt is empty, do not call subscription-equivalent cost a billed charge, and do not generalize a small local sample to smaller models that were not represented. Historical artifacts are observational evidence rather than a controlled benchmark."
+    },
+    {
+      "title": "test: preserve mixed punctuation at scale",
+      "context": "Round-trip punctuation-heavy prose: `code`, **markdown**, URL https://example.test/a?x=\"one\"&y=two, JSONPath $.workItems.0.context, arrows -> and =>, braces {}, brackets [], parentheses (), semicolon; colon: comma, slash /, backslash \\, and quote \". Repeat the invariant in plain language: the value after JSON.parse must equal the fixture value before runtime applies any handoff semantics."
+    },
+    {
+      "title": "docs: preserve final explanatory context",
+      "context": "Summarize the baseline without proposing the later architecture prematurely. The fixture intentionally combines difficult escaping with ten ordered work items and long contexts so a valid direct JSON submission proves the current parser and validator can carry the data losslessly. Malformed companion fixtures isolate unescaped quotes, literal newlines, and invalid backslash escapes, while model-run evidence records only failures actually observed."
+    }
+  ],
+  "satisfied": true,
+  "context": "Baseline payload: \"quotes\", physical newlines\ninside decoded strings, C:\\repo\\materia, Unicode 雪 and 🧪, plus a literal backslash-n sequence \\n."
+}
