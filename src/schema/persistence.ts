@@ -25,6 +25,7 @@ export interface CurrentPersistedConfig {
 
 export interface CurrentPersistedProfileConfig {
   webui?: MateriaProfileConfig["webui"];
+  central?: MateriaProfileConfig["central"];
   defaultLoadoutId?: string | null;
   questDefaultLoadoutId?: string | null;
   defaultSaveTarget?: MateriaProfileConfig["defaultSaveTarget"];
@@ -171,6 +172,7 @@ export function serializeCurrentPersistedConfig(config: Partial<PiMateriaConfig>
 export function serializeCurrentProfileConfig(profile: MateriaProfileConfig): CurrentPersistedProfileConfig {
   return {
     ...(profile.webui !== undefined ? { webui: cloneRecord(profile.webui) } : {}),
+    ...(profile.central !== undefined ? { central: cloneRecord(profile.central) } : {}),
     ...(profile.defaultLoadoutId !== undefined ? { defaultLoadoutId: profile.defaultLoadoutId } : {}),
     ...(profile.questDefaultLoadoutId !== undefined ? { questDefaultLoadoutId: profile.questDefaultLoadoutId } : {}),
     ...(profile.defaultSaveTarget !== undefined ? { defaultSaveTarget: profile.defaultSaveTarget } : {}),

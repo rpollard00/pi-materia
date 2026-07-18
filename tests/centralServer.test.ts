@@ -19,8 +19,13 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
 });
 
-async function startTestServer(options: { label?: string; ports?: ControlPlanePorts } = {}): Promise<string> {
-  const created = createMateriaCentralServer({ port: 0, ...(options.label !== undefined ? { label: options.label } : {}), ...(options.ports ? { ports: options.ports } : {}) });
+async function startTestServer(options: { label?: string; ports?: ControlPlanePorts; corsOrigin?: string } = {}): Promise<string> {
+  const created = createMateriaCentralServer({
+    port: 0,
+    ...(options.label !== undefined ? { label: options.label } : {}),
+    ...(options.ports ? { ports: options.ports } : {}),
+    ...(options.corsOrigin !== undefined ? { corsOrigin: options.corsOrigin } : {}),
+  });
   await new Promise<void>((resolve, reject) => {
     created.server.once("error", reject);
     created.server.listen(0, "127.0.0.1", () => resolve());
@@ -249,5 +254,12 @@ describe("central server — CORS for cross-origin WebUI reads", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(response.headers.get("access-control-allow-headers")).toBeTruthy();
+  });
+
+  test("uses the server instance's resolved CORS origin", async () => {
+    const baseUrl = await startTestServer({ corsOrigin: "https://admin.example.test" });
+    const response = await fetch(`${baseUrl}/api/health`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://admin.example.test");
   });
 });

@@ -422,10 +422,13 @@ function normalizeProfileConfig(parsed: Record<string, unknown>, file: string): 
   // (docs/enterprise-control-plane.md §2, §8). The launcher revalidates at the
   // server boundary via the WebUI mode helper.
   if (profile.webui) {
-    const validCentralUrl = normalizeCentralApiBaseUrl(profile.webui.centralApiBaseUrl, file);
+    const validCentralUrl = normalizeCentralApiBaseUrl(profile.webui.centralApiBaseUrl, file, "webui.centralApiBaseUrl");
     if (validCentralUrl === undefined) delete profile.webui.centralApiBaseUrl;
     else profile.webui.centralApiBaseUrl = validCentralUrl;
   }
+
+  profile.central = normalizeCentralRuntimeProfileConfig(parsed.central, file);
+  if (profile.central === undefined) delete profile.central;
 
   if (parsed.defaultLoadoutId !== undefined) {
     if (parsed.defaultLoadoutId === null) profile.defaultLoadoutId = null;
@@ -499,15 +502,36 @@ function warnInvalidProfileConfig(file: string, message: string): void {
 }
 
 /**
- * Normalize an optional central control-plane base URL for the WebUI profile.
- * Returns a trimmed http(s) URL, or `undefined` when unset/invalid (after
- * warning). Unset/invalid means purely local and changes no default behavior
- * (docs/enterprise-control-plane.md §2, §8).
+ * Normalize the optional typed central-connected profile section. Invalid
+ * values are ignored with a warning so legacy/local-only profile loading keeps
+ * its established non-fatal behavior.
  */
-function normalizeCentralApiBaseUrl(value: unknown, file: string): string | undefined {
+function normalizeCentralRuntimeProfileConfig(value: unknown, file: string): MateriaProfileConfig["central"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isPlainObject(value)) {
+    warnInvalidProfileConfig(file, "Ignoring invalid central profile config. Expected an object.");
+    return undefined;
+  }
+  const apiUrl = normalizeCentralApiBaseUrl(value.apiUrl, file, "central.apiUrl");
+  let requestTimeoutMs: number | undefined;
+  if (value.requestTimeoutMs !== undefined) {
+    if (Number.isSafeInteger(value.requestTimeoutMs) && (value.requestTimeoutMs as number) > 0) {
+      requestTimeoutMs = value.requestTimeoutMs as number;
+    } else {
+      warnInvalidProfileConfig(file, "Ignoring invalid central.requestTimeoutMs. Expected a positive integer.");
+    }
+  }
+  if (apiUrl === undefined && requestTimeoutMs === undefined) return undefined;
+  return {
+    ...(apiUrl !== undefined ? { apiUrl } : {}),
+    ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
+  };
+}
+
+function normalizeCentralApiBaseUrl(value: unknown, file: string, field: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") {
-    warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected a string.");
+    warnInvalidProfileConfig(file, `Ignoring invalid ${field}. Expected a string.`);
     return undefined;
   }
   const trimmed = value.trim();
@@ -515,12 +539,12 @@ function normalizeCentralApiBaseUrl(value: unknown, file: string): string | unde
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected an http(s) URL.");
+      warnInvalidProfileConfig(file, `Ignoring invalid ${field}. Expected an http(s) URL.`);
       return undefined;
     }
     return trimmed;
   } catch {
-    warnInvalidProfileConfig(file, "Ignoring invalid webui.centralApiBaseUrl. Expected an http(s) URL.");
+    warnInvalidProfileConfig(file, `Ignoring invalid ${field}. Expected an http(s) URL.`);
     return undefined;
   }
 }

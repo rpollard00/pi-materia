@@ -354,6 +354,39 @@ describe("layered config loading and persistence", () => {
     }
   });
 
+  test("normalizes typed central runtime profile settings independently of legacy WebUI config", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    const previousWarn = console.warn;
+    const warnings: string[] = [];
+    process.env.PI_MATERIA_PROFILE_DIR = dir;
+    console.warn = (message?: unknown) => warnings.push(String(message));
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        webui: { preferredPort: 4321, centralApiBaseUrl: "https://legacy.example.test" },
+        central: { apiUrl: "  https://central.example.test/api  ", requestTimeoutMs: 4500 },
+      }), "utf8");
+
+      const profile = await loadProfileConfig();
+      expect(profile.central).toEqual({ apiUrl: "https://central.example.test/api", requestTimeoutMs: 4500 });
+      expect(profile.webui?.centralApiBaseUrl).toBe("https://legacy.example.test");
+      expect(warnings).toEqual([]);
+
+      await writeFile(getUserProfileConfigPath(), JSON.stringify({
+        central: { apiUrl: "ftp://nope", requestTimeoutMs: 0 },
+      }), "utf8");
+      const invalid = await loadProfileConfig();
+      expect(invalid.central).toBeUndefined();
+      expect(warnings.join("\n")).toContain("central.apiUrl");
+      expect(warnings.join("\n")).toContain("central.requestTimeoutMs");
+    } finally {
+      console.warn = previousWarn;
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("saves nullable role-generation thinking preference without replacing sibling fields", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;

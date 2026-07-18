@@ -69,11 +69,13 @@ const CENTRAL_CORS_ALLOW_HEADERS = "authorization, content-type";
 const CENTRAL_CORS_ALLOW_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
 
 /** Write the central CORS response headers. Idempotent and side-effect free beyond headers. */
-export function applyCentralCorsHeaders(res: ServerResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", CENTRAL_CORS_ALLOW_ORIGIN);
-  res.setHeader("Access-Control-Allow-Headers", CENTRAL_CORS_ALLOW_HEADERS);
-  res.setHeader("Access-Control-Allow-Methods", CENTRAL_CORS_ALLOW_METHODS);
-  res.setHeader("Access-Control-Max-Age", "600");
+export function applyCentralCorsHeaders(res: ServerResponse, allowOrigin = CENTRAL_CORS_ALLOW_ORIGIN): void {
+  // A server instance may have applied its resolved configuration before route
+  // dispatch. Do not replace that value when sendJson applies fallback headers.
+  if (!res.hasHeader("Access-Control-Allow-Origin")) res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  if (!res.hasHeader("Access-Control-Allow-Headers")) res.setHeader("Access-Control-Allow-Headers", CENTRAL_CORS_ALLOW_HEADERS);
+  if (!res.hasHeader("Access-Control-Allow-Methods")) res.setHeader("Access-Control-Allow-Methods", CENTRAL_CORS_ALLOW_METHODS);
+  if (!res.hasHeader("Access-Control-Max-Age")) res.setHeader("Access-Control-Max-Age", "600");
 }
 
 /**
@@ -81,9 +83,9 @@ export function applyCentralCorsHeaders(res: ServerResponse): void {
  * was a preflight that has been answered (and the caller should stop
  * processing); `false` otherwise. Answers `204 No Content` with CORS headers.
  */
-export function handleCentralCorsPreflight(req: IncomingMessage, res: ServerResponse): boolean {
+export function handleCentralCorsPreflight(req: IncomingMessage, res: ServerResponse, allowOrigin = CENTRAL_CORS_ALLOW_ORIGIN): boolean {
   if (req.method !== "OPTIONS") return false;
-  applyCentralCorsHeaders(res);
+  applyCentralCorsHeaders(res, allowOrigin);
   res.writeHead(204);
   res.end();
   return true;

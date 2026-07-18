@@ -202,6 +202,33 @@ bundled defaults  <  central catalog  <  user  <  project  <  explicit
 Central definitions are surfaced read-only in the merged config; persisting central
 content into a local scope requires an explicit action ([§12](#12-explicit-central-to-local-catalog-actions)).
 
+### 5.1 Connection and server settings
+
+A connected runtime is enabled only by an absolute HTTP(S) API URL. Resolution order is
+`MATERIA_CENTRAL_API_URL`, profile `central.apiUrl`, then the compatible legacy profile
+field `webui.centralApiBaseUrl`. `central.requestTimeoutMs` configures the client timeout
+(default 5000 ms); `MATERIA_CENTRAL_REQUEST_TIMEOUT_MS` overrides it. If no API URL is
+resolved, the runtime remains `local-only` and does not read secret files or perform
+central network I/O.
+
+The standalone server reads the following deployment settings:
+
+| Variable | Meaning | Default |
+|----------|---------|---------|
+| `MATERIA_CENTRAL_HOST` / `MATERIA_CENTRAL_PORT` | HTTP bind host and port | `127.0.0.1` / `0` |
+| `MATERIA_CENTRAL_DATABASE_PATH` | SQLite database path (relative to startup cwd when not absolute) | `data/pi-materia-central.sqlite` |
+| `MATERIA_CENTRAL_RETENTION_DAYS` | Telemetry retention in days | `30` |
+| `MATERIA_CENTRAL_CORS_ORIGIN` | CORS allow-origin response value | `*` (development compatibility) |
+| `MATERIA_CENTRAL_LABEL` | Optional non-secret server label | unset |
+
+Read, admin, and telemetry credentials are separate values:
+`MATERIA_CENTRAL_READ_TOKEN`, `MATERIA_CENTRAL_ADMIN_TOKEN`, and
+`MATERIA_CENTRAL_TELEMETRY_TOKEN`. Each supports a mutually exclusive `_FILE` companion
+(for example `MATERIA_CENTRAL_ADMIN_TOKEN_FILE`) for Docker/Kubernetes secrets. Secret
+contents are trimmed, never included in diagnostics, and never persisted in the profile.
+Production credential requirements and development-token gating are applied by the auth
+composition stage; these configuration contracts do not weaken route RBAC.
+
 ## 6. agent_router integration boundary
 
 The enterprise control plane does **not** become a peer of `agent_router`, and

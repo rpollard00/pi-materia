@@ -14,6 +14,7 @@ import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
 import { addQuest as addQuestToBoard, deleteQuest as deleteQuestFromBoard, generateUniqueQuestId, movePendingQuest, requeueQuest, updatePendingQuest } from "../domain/questBoard.js";
 import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
 import { issuesToMessage } from "../domain/result.js";
+import { loadCentralConnectedRuntimeConfig } from "../central/config/index.js";
 
 export interface MateriaWebUiLaunchResult {
   url: string;
@@ -134,10 +135,11 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   const host = profile.webui?.host?.trim() || "127.0.0.1";
   const port = profile.webui?.preferredPort ?? profile.webui?.port ?? 0;
   const autoOpenBrowser = profile.webui?.autoOpenBrowser ?? profile.webui?.openBrowser ?? false;
-  // Central control-plane base URL is optional. When unset/invalid the WebUI
-  // stays in the default local-only workflow; the server revalidates it via
-  // resolveCentralApiBaseUrl (docs/enterprise-control-plane.md §2, §8).
-  const centralApiBaseUrl = profile.webui?.centralApiBaseUrl;
+  // Central configuration is optional and its loader performs no secret-file
+  // reads when no API URL is configured. The legacy WebUI URL remains a
+  // compatibility fallback behind profile.central.apiUrl and the environment.
+  const centralRuntime = await loadCentralConnectedRuntimeConfig({ profile });
+  const centralApiBaseUrl = centralRuntime?.apiUrl;
   const sessionFile = ctx.sessionManager.getSessionFile() ?? "";
   const sessionId = ctx.sessionManager.getSessionId() ?? "";
   const cwd = ctx.cwd;

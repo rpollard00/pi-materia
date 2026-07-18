@@ -106,6 +106,17 @@ export interface MateriaProfileConfig {
      */
     centralApiBaseUrl?: string;
   };
+  /**
+   * Optional central-connected runtime settings. Credentials are deliberately
+   * not persisted here; role-specific bearer values come from environment or
+   * `*_FILE` deployment secrets.
+   */
+  central?: {
+    /** Absolute URL of the central control-plane API. */
+    apiUrl?: string;
+    /** Per-request HTTP timeout. Defaults to the central client default. */
+    requestTimeoutMs?: number;
+  };
   /** Durable user preference used only to initialize the runtime active loadout. */
   defaultLoadoutId?: string | null;
   /** Durable profile preference used for autonomous quest launches; null means explicitly cleared. */

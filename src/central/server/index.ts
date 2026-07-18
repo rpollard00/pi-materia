@@ -2,7 +2,8 @@ import { createServer } from "node:http";
 import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
-import { errorMessage, handleCentralCorsPreflight, sendJson } from "./http.js";
+import { loadCentralServerConfig } from "../config/index.js";
+import { applyCentralCorsHeaders, errorMessage, handleCentralCorsPreflight, sendJson } from "./http.js";
 import { handleMateriaCentralRequest } from "./routes.js";
 import type { ControlPlanePorts } from "../../application/controlPlane.js";
 
@@ -44,6 +45,8 @@ export interface MateriaCentralServerOptions {
   auth?: CentralAuth;
   /** Human-readable label surfaced on health/status envelopes. */
   label?: string;
+  /** Resolved CORS allow-origin value for this server instance. */
+  corsOrigin?: string;
 }
 
 export interface MateriaCentralServer {
@@ -79,7 +82,8 @@ export function createMateriaCentralServer(options: MateriaCentralServerOptions 
 
   const server = createServer(async (req, res) => {
     try {
-      if (handleCentralCorsPreflight(req, res)) return;
+      if (options.corsOrigin !== undefined) applyCentralCorsHeaders(res, options.corsOrigin);
+      if (handleCentralCorsPreflight(req, res, options.corsOrigin)) return;
       await handleMateriaCentralRequest(req, res, { ports, auth, ...(options.label !== undefined ? { label: options.label } : {}) });
     } catch (error) {
       sendJson(res, 500, { ok: false, scope: "control-plane", service: CENTRAL_SERVICE_ID, error: errorMessage(error) });
@@ -90,13 +94,12 @@ export function createMateriaCentralServer(options: MateriaCentralServerOptions 
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number.parseInt(process.env.MATERIA_CENTRAL_PORT ?? "0", 10);
-  const host = process.env.MATERIA_CENTRAL_HOST ?? "127.0.0.1";
-  const label = process.env.MATERIA_CENTRAL_LABEL;
+  const config = await loadCentralServerConfig();
   const created = createMateriaCentralServer({
-    host,
-    port: Number.isFinite(port) ? port : 0,
-    ...(label !== undefined ? { label } : {}),
+    host: config.host,
+    port: config.port,
+    corsOrigin: config.corsOrigin,
+    ...(config.label !== undefined ? { label: config.label } : {}),
   });
   created.server.listen(created.port, created.host, () => {
     const address = created.server.address();
