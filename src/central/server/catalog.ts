@@ -22,7 +22,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 /**
  * Central catalog HTTP routes.
  *
- * The HTTP surface for the in-memory central catalog repository
+ * The HTTP surface for the configured central catalog repository
  * (docs/enterprise-control-plane.md §3.3, §10, §16.6). Reads go through the
  * {@link CatalogAccessPort}; admin writes go through the {@link AdminMetadataPort}
  * — the only path that may write central catalog data. Central catalog data is

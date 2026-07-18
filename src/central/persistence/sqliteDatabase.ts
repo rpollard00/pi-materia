@@ -97,7 +97,12 @@ export class CentralSqliteDatabase {
     const statement = this.#native.prepare(sql);
     return {
       run: (...parameters) => statement.run(...parameters),
-      get: <T>(...parameters: CentralSqliteBindParameter[]) => statement.get(...parameters) as T | undefined,
+      get: <T>(...parameters: CentralSqliteBindParameter[]) => {
+        const value = statement.get(...parameters);
+        // bun:sqlite returns null for no row while node:sqlite returns
+        // undefined. Normalize the runtime difference at the adapter boundary.
+        return value == null ? undefined : value as T;
+      },
       all: <T>(...parameters: CentralSqliteBindParameter[]) => statement.all(...parameters) as T[],
     };
   }

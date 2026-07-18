@@ -30,9 +30,9 @@ import {
   type CentralCatalogRepository,
   type InMemoryCentralCatalogRepositoryOptions,
 } from "./centralCatalogRepository.js";
+import type { CentralModelPolicyRepository } from "./centralModelPolicyRepository.js";
 import {
   createInMemoryModelPolicyRepository,
-  type CentralModelPolicyRepository,
   type InMemoryModelPolicyRepositoryOptions,
 } from "./inMemoryModelPolicyRepository.js";
 import {
@@ -41,19 +41,19 @@ import {
 } from "./shared.js";
 
 /**
- * Minimal in-memory central control-plane ports.
+ * Central control-plane port composition with in-memory defaults.
  *
- * Backs the central server skeleton (docs/enterprise-control-plane.md §16.4)
- * with in-memory adapters that report `central-admin` topology and serve the
- * status surface. The implementations are intentionally minimal placeholders
- * except where a work item has landed:
+ * Backs the central server (docs/enterprise-control-plane.md §16.4), reports
+ * `central-admin` topology, and serves the status surface. Catalog and policy
+ * repositories are injectable; production startup supplies their SQLite
+ * implementations while tests may retain these lightweight defaults:
  *
- * - **Catalog**: backed by the in-memory central catalog repository
+ * - **Catalog**: backed by the configured central catalog repository
  *   (§16.6). Read APIs serve loadout/materia definitions with stable ids,
  *   monotonic versions, timestamps, provenance, and content hashes; admin
  *   writes go through the admin port below. Central catalog data is **not**
  *   writable through normal local/project editing paths.
- * - **Model policy**: backed by the in-memory model-policy repository
+ * - **Model policy**: backed by the configured model-policy repository
  *   (§16.13). Read APIs serve policy documents with monotonic versions,
  *   timestamps, and an active designation; admin writes go through the admin
  *   port below. Optional central model-catalog metadata is seeded and served
@@ -151,7 +151,7 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
 
   const catalog: CatalogAccessPort = {
     mode: () => modeMetadata,
-    // Backed by the in-memory central catalog repository (§16.6). Read-only
+    // Backed by the configured central catalog repository (§16.6). Read-only
     // here; admin writes go through the admin port below.
     async list(query?): Promise<CatalogItemSummary[]> {
       return catalogRepository.list(query);
@@ -166,7 +166,7 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
 
   const modelPolicy: ModelPolicyPort = {
     mode: () => modeMetadata,
-    // Backed by the in-memory model-policy repository (§16.13). Read-only here;
+    // Backed by the configured model-policy repository (§16.13). Read-only here;
     // admin writes go through the admin port below. Optional model-catalog
     // metadata is served separately from local Pi model availability (§11).
     async getActivePolicy(): Promise<ModelPolicyDocument | undefined> {
@@ -239,7 +239,7 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
       };
     },
     // Central catalog admin writes: the only path that may write central
-    // catalog data (§16.6). Routed through the in-memory repository.
+    // catalog data (§16.6). Routed through the configured repository.
     async createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItemWriteResult> {
       return catalogRepository.create(input);
     },
@@ -250,7 +250,7 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
       return catalogRepository.delete(input);
     },
     // Central model-policy admin writes: the only path that may write central
-    // model-policy data (§16.13). Routed through the in-memory repository.
+    // model-policy data (§16.13). Routed through the configured repository.
     async createModelPolicy(input: CreateModelPolicyInput): Promise<ModelPolicyWriteResult> {
       return policyRepository.create(input);
     },

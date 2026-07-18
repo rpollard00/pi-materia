@@ -8,7 +8,21 @@ import {
   isValidModelPolicyDocument,
 } from "../../application/controlPlane.js";
 import { createAuditMetadata, type AuditMetadata } from "../../domain/audit.js";
+import {
+  ModelPolicyConflictError,
+  ModelPolicyNotFoundError,
+  ModelPolicyVersionMismatchError,
+  type CentralModelPolicyRepository,
+} from "./centralModelPolicyRepository.js";
 import { nowIso } from "./shared.js";
+
+export {
+  CentralModelPolicyWriteError,
+  ModelPolicyConflictError,
+  ModelPolicyNotFoundError,
+  ModelPolicyVersionMismatchError,
+  type CentralModelPolicyRepository,
+} from "./centralModelPolicyRepository.js";
 
 /**
  * In-memory central model-policy repository.
@@ -22,50 +36,11 @@ import { nowIso } from "./shared.js";
  * the local control-plane admin port rejects central policy writes
  * (`src/infrastructure/localControlPlane/adminPort.ts`).
  *
- * In-memory only at this stage; no persistence. A future persistent store should
- * keep this interface. Document validation reuses the pure domain guard
- * `isValidModelPolicyDocument`; an invalid document is rejected rather than
- * partially stored.
+ * This remains the lightweight test/development implementation of the shared
+ * repository contract; production startup uses the SQLite implementation.
+ * Document validation reuses the pure domain guard `isValidModelPolicyDocument`;
+ * an invalid document is rejected rather than partially stored.
  */
-
-// ───────────────────────────────────────────────────────────────────────
-// Write errors
-// ───────────────────────────────────────────────────────────────────────
-
-/** Base class for central model-policy repository write errors. */
-export abstract class CentralModelPolicyWriteError extends Error {
-  /** HTTP status a route layer may map this to. */
-  abstract readonly statusCode: number;
-}
-
-/** Thrown when a create targets an id that already exists. */
-export class ModelPolicyConflictError extends CentralModelPolicyWriteError {
-  readonly statusCode = 409;
-  constructor(message: string) {
-    super(message);
-    this.name = "ModelPolicyConflictError";
-  }
-}
-
-/** Thrown when an update/delete/activate targets an id that does not exist. */
-export class ModelPolicyNotFoundError extends CentralModelPolicyWriteError {
-  readonly statusCode = 404;
-  constructor(message: string) {
-    super(message);
-    this.name = "ModelPolicyNotFoundError";
-  }
-}
-
-/** Thrown when optimistic concurrency (expectedVersion) does not match. */
-export class ModelPolicyVersionMismatchError extends CentralModelPolicyWriteError {
-  readonly statusCode = 409;
-  readonly currentVersion: string;
-  constructor(message: string, currentVersion: string) {
-    super(message);
-    this.name = "ModelPolicyVersionMismatchError";
-    this.currentVersion = currentVersion;
-  }
-}
 
 // ───────────────────────────────────────────────────────────────────────
 // Internal storage record
@@ -79,32 +54,6 @@ interface StoredModelPolicy {
   versionCounter: number;
   /** RFC3339 timestamp of the last central update. */
   updatedAt: string;
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// Repository interface
-// ───────────────────────────────────────────────────────────────────────
-
-/**
- * Central model-policy repository: the read surface for the central
- * {@link ModelPolicyPort} and the admin write surface for the central
- * {@link AdminMetadataPort}. Methods are async so the same interface can back a
- * future persistent store.
- */
-export interface CentralModelPolicyRepository {
-  /** Number of policy documents currently stored. */
-  size(): number;
-  // Reads (back ModelPolicyPort)
-  list(): Promise<ModelPolicyDocument[]>;
-  get(id: string): Promise<ModelPolicyDocument | undefined>;
-  getActivePolicyId(): Promise<string | undefined>;
-  /** Read the active policy document, or undefined when none is active. */
-  getActive(): Promise<ModelPolicyDocument | undefined>;
-  // Admin writes (back AdminMetadataPort — the only central model-policy write path)
-  create(input: CreateModelPolicyInput): Promise<ModelPolicyWriteResult>;
-  update(input: UpdateModelPolicyInput): Promise<ModelPolicyWriteResult>;
-  remove(input: DeleteModelPolicyInput): Promise<ModelPolicyWriteResult>;
-  setActive(input: SetActiveModelPolicyInput): Promise<ModelPolicyWriteResult>;
 }
 
 export interface InMemoryModelPolicyRepositoryOptions {

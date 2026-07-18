@@ -1,7 +1,7 @@
 /**
  * Central control-plane module.
  *
- * Hosts the central server and its in-memory control-plane adapters, separate
+ * Hosts the central server and its control-plane adapters, separate
  * from the local session WebUI server (src/webui) and from the local
  * control-plane adapter (src/infrastructure/localControlPlane). The central
  * server never couples to a local repository session
@@ -45,6 +45,8 @@ export {
   CentralMigrationError,
   CentralSqliteDatabase,
   CentralSqliteOpenError,
+  createSqliteCentralCatalogRepository,
+  createSqliteModelPolicyRepository,
   initializeCentralSqliteDatabase,
   openCentralSqliteDatabase,
   readCentralSchemaMigrations,
@@ -62,6 +64,8 @@ export {
   type InitializeCentralSqliteDatabaseOptions,
   type OpenCentralSqliteDatabaseOptions,
   type RunCentralSchemaMigrationsOptions,
+  type SqliteCentralCatalogRepositoryOptions,
+  type SqliteModelPolicyRepositoryOptions,
 } from "./persistence/index.js";
 
 export {
@@ -76,13 +80,16 @@ export {
 } from "./controlPlane/centralCatalogRepository.js";
 
 export {
-  createInMemoryModelPolicyRepository,
-  type CentralModelPolicyRepository,
-  type InMemoryModelPolicyRepositoryOptions,
   CentralModelPolicyWriteError,
   ModelPolicyConflictError,
   ModelPolicyNotFoundError,
   ModelPolicyVersionMismatchError,
+  type CentralModelPolicyRepository,
+} from "./controlPlane/centralModelPolicyRepository.js";
+
+export {
+  createInMemoryModelPolicyRepository,
+  type InMemoryModelPolicyRepositoryOptions,
 } from "./controlPlane/inMemoryModelPolicyRepository.js";
 
 export {

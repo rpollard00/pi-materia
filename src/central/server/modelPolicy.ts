@@ -14,7 +14,7 @@ import {
   ModelPolicyConflictError,
   ModelPolicyNotFoundError,
   ModelPolicyVersionMismatchError,
-} from "../controlPlane/inMemoryModelPolicyRepository.js";
+} from "../controlPlane/centralModelPolicyRepository.js";
 import type { AdminMetadataPort } from "../../application/controlPlane.js";
 import { CENTRAL_CONTROL_PLANE_SCOPE, CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { errorMessage, isPlainObject, readJsonBody, sendJson } from "./http.js";
@@ -23,7 +23,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 /**
  * Central model-policy HTTP routes.
  *
- * The HTTP surface for the in-memory central model-policy repository
+ * The HTTP surface for the configured central model-policy repository
  * (docs/enterprise-control-plane.md §11, §16.13). Policy documents are served
  * independently from local Pi model availability so the WebUI can render central
  * policy state as a separate surface. Reads go through the {@link ModelPolicyPort};

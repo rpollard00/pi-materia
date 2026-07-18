@@ -27,10 +27,11 @@ import { nowIso } from "./shared.js";
  * local config save path, and the local control-plane admin port rejects central
  * catalog writes (see `src/infrastructure/localControlPlane/adminPort.ts`).
  *
- * In-memory only at this stage; no persistence. A future persistent store should
- * keep this interface. Content validation here is structural (id/kind/content
- * shape); full materia/loadout domain-shape normalization is layered above when
- * central definitions are promoted into local scopes (§12, §14).
+ * This remains the lightweight test/development implementation of the shared
+ * repository contract; production startup uses the SQLite implementation.
+ * Content validation here is structural (id/kind/content shape); full
+ * materia/loadout domain-shape normalization is layered above when central
+ * definitions are promoted into local scopes (§12, §14).
  */
 
 // ───────────────────────────────────────────────────────────────────────
@@ -97,7 +98,7 @@ interface CentralCatalogItemRecord {
 /**
  * Central catalog repository: the read surface for {@link CatalogAccessPort}
  * and the admin write surface for the central {@link AdminMetadataPort}.
- * Methods are async so the same interface can back a future persistent store.
+ * Methods are async so the same interface backs both in-memory and durable stores.
  */
 export interface CentralCatalogRepository {
   /** Number of catalog items currently stored. */

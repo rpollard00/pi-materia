@@ -3,7 +3,12 @@ import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { loadCentralServerConfig } from "../config/index.js";
-import { initializeCentralSqliteDatabase } from "../persistence/index.js";
+import {
+  createSqliteCentralCatalogRepository,
+  createSqliteModelPolicyRepository,
+  initializeCentralSqliteDatabase,
+  type CentralSqliteDatabase,
+} from "../persistence/index.js";
 import { applyCentralCorsHeaders, errorMessage, handleCentralCorsPreflight, sendJson } from "./http.js";
 import { handleMateriaCentralRequest } from "./routes.js";
 import type { ControlPlanePorts } from "../../application/controlPlane.js";
@@ -31,11 +36,16 @@ export interface MateriaCentralServerOptions {
   host?: string;
   port?: number;
   /**
-   * Control-plane ports backing the server. Defaults to a fresh in-memory
-   * central-admin port set. Callers may inject ports for testing or for a
-   * future central-connected client adapter.
+   * Control-plane ports backing the server. Explicit ports take the place of
+   * database-backed composition. When neither ports nor a database is supplied,
+   * the server retains its in-memory development/test fallback.
    */
   ports?: ControlPlanePorts;
+  /**
+   * Initialized central database used for durable catalog and model-policy
+   * repositories when `ports` is omitted. The caller owns its lifecycle.
+   */
+  database?: CentralSqliteDatabase;
   /**
    * Auth configuration for the route guards. Defaults to a dev-token adapter
    * with the documented development-only token set and the default central role
@@ -69,16 +79,26 @@ export interface MateriaCentralServer {
  * Separate from the local-session WebUI server (src/webui/server/index.ts):
  * startup does not open a local repository session, does not read
  * `.pi/pi-materia/quest-board.json`, and does not expose local-session routes.
- * Backed by in-memory adapters only at this stage
- * (docs/enterprise-control-plane.md §3.3, §8, §16.4).
+ * Catalog and model-policy state use SQLite when an initialized `database` is
+ * supplied. Tests and embedded callers may still inject ports explicitly; the
+ * fallback remains in-memory for backwards compatibility.
  */
 export function createMateriaCentralServer(options: MateriaCentralServerOptions = {}): MateriaCentralServer {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 0;
   const auth = options.auth ?? createDefaultCentralAuth();
+  if (options.ports !== undefined && options.database !== undefined) {
+    throw new TypeError("Materia central server accepts either explicit ports or a database, not both");
+  }
   const ports = options.ports ?? createInMemoryCentralPorts({
     ...(options.label !== undefined ? { label: options.label } : {}),
     authMethods: [auth.methodKind],
+    ...(options.database !== undefined
+      ? {
+          catalogRepository: createSqliteCentralCatalogRepository(options.database),
+          policyRepository: createSqliteModelPolicyRepository(options.database),
+        }
+      : {}),
   });
 
   const server = createServer(async (req, res) => {
@@ -103,6 +123,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     host: config.host,
     port: config.port,
     corsOrigin: config.corsOrigin,
+    database: initialized.database,
     ...(config.label !== undefined ? { label: config.label } : {}),
   });
   created.server.once("close", () => initialized.database.close());

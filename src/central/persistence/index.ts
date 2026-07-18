@@ -28,3 +28,13 @@ export {
   CENTRAL_SCHEMA_MIGRATIONS,
   CENTRAL_SCHEMA_VERSION,
 } from "./schemaMigrations.js";
+
+export {
+  createSqliteCentralCatalogRepository,
+  type SqliteCentralCatalogRepositoryOptions,
+} from "./sqliteCatalogRepository.js";
+
+export {
+  createSqliteModelPolicyRepository,
+  type SqliteModelPolicyRepositoryOptions,
+} from "./sqliteModelPolicyRepository.js";
