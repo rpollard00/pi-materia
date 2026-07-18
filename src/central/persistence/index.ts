@@ -38,3 +38,10 @@ export {
   createSqliteModelPolicyRepository,
   type SqliteModelPolicyRepositoryOptions,
 } from "./sqliteModelPolicyRepository.js";
+
+export {
+  createSqliteCentralTelemetryPort,
+  type CentralTelemetryRetentionScheduler,
+  type SqliteCentralTelemetryPort,
+  type SqliteCentralTelemetryPortOptions,
+} from "./sqliteTelemetryPort.js";

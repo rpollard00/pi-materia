@@ -44,9 +44,10 @@ import {
  * Central control-plane port composition with in-memory defaults.
  *
  * Backs the central server (docs/enterprise-control-plane.md §16.4), reports
- * `central-admin` topology, and serves the status surface. Catalog and policy
- * repositories are injectable; production startup supplies their SQLite
- * implementations while tests may retain these lightweight defaults:
+ * `central-admin` topology, and serves the status surface. Catalog/policy
+ * repositories and the telemetry port are injectable; production startup
+ * supplies their SQLite implementations while tests may retain these
+ * lightweight defaults:
  *
  * - **Catalog**: backed by the configured central catalog repository
  *   (§16.6). Read APIs serve loadout/materia definitions with stable ids,
@@ -58,14 +59,12 @@ import {
  *   timestamps, and an active designation; admin writes go through the admin
  *   port below. Optional central model-catalog metadata is seeded and served
  *   separately from local Pi model availability (§11).
- * - **Telemetry**: a small bounded in-memory event store so `status()` reports
- *   real counts. Normalized ingestion is exposed through the central HTTP route
- *   `POST /api/telemetry/ingest` (§16.15), which normalizes inbound webhook/
- *   passthrough payloads into the canonical enriched-event shape before calling
- *   `ingest()`; the store therefore only ever holds normalized events. The
- *   monitoring read APIs (`GET /api/status`, `GET /api/telemetry/events`)
- *   expose that in-memory store and the status snapshot for central monitoring
- *   views (§15, §16.16).
+ * - **Telemetry**: production composition injects the durable SQLite telemetry
+ *   port. The bounded in-memory store remains only as an explicit lightweight
+ *   test/development fallback. Normalized ingestion is exposed through the
+ *   central HTTP route `POST /api/telemetry/ingest` (§16.15), and monitoring
+ *   reads remain available at `GET /api/status` and
+ *   `GET /api/telemetry/events` (§15, §16.16).
  * - **Admin**: server metadata plus the central catalog admin write surface
  *   (§16.6). Auth methods default to `["dev-token"]` and are configurable;
  *   dev-token auth + RBAC guards central routes (§16.5).
@@ -104,6 +103,11 @@ export interface InMemoryCentralPortsOptions {
   policySeed?: InMemoryModelPolicyRepositoryOptions["seed"];
   /** Stable clock for model-policy timestamps (tests); defaults to nowIso(). */
   policyClock?: InMemoryModelPolicyRepositoryOptions["clock"];
+  /**
+   * Inject a telemetry/status adapter. Production server composition supplies
+   * the SQLite implementation; omit for the bounded in-memory fallback.
+   */
+  telemetryPort?: TelemetryStatusPort;
   /**
    * Optional central model-catalog metadata, served read-only and independently
    * from local Pi model availability (§11). Omit when no central catalog is
@@ -186,7 +190,7 @@ export function createInMemoryCentralPorts(options: InMemoryCentralPortsOptions 
     },
   };
 
-  const telemetry: TelemetryStatusPort = {
+  const telemetry: TelemetryStatusPort = options.telemetryPort ?? {
     mode: () => modeMetadata,
     async ingest(input: TelemetryIngestInput): Promise<TelemetryIngestResult> {
       const accepted = pushEvents(input);

@@ -440,11 +440,12 @@ equal to its recorded origin hash.
 ## 15. Telemetry and monitoring
 
 - Central telemetry **ingestion** receives enriched runtime events emitted by local
-  pi-materia runtimes, stored normalized in memory initially. It builds on the existing
-  event bus and webhook **sink** contracts ([Runtime eventing](runtime-eventing.md)),
-  not a new local-state synchronization channel.
-- Central monitoring **read APIs** expose in-memory telemetry/status snapshots for future
-  central monitoring views.
+  pi-materia runtimes and stores normalized batches transactionally in SQLite. It builds
+  on the existing event bus and webhook **sink** contracts
+  ([Runtime eventing](runtime-eventing.md)), not a new local-state synchronization
+  channel. Time-based retention runs separately from ingestion.
+- Central monitoring **read APIs** query durable, retention-bounded telemetry and derive
+  event/runtime status counts from the same stored data.
 - Local artifact monitoring is **unchanged**. Central monitoring aggregates across runtimes
   and is not a replacement for local session monitoring
   ([WebUI architecture](webui-architecture.md)).

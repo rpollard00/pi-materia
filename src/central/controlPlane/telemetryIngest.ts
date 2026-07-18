@@ -24,8 +24,8 @@ import { isScopePath, type ScopePath } from "../../domain/scope.js";
  * dropped), and reports how many candidates were rejected. The HTTP route
  * (src/central/server/telemetry.ts) calls {@link normalizeTelemetryIngestBody}
  * and then hands the normalized {@link TelemetryIngestInput} to the
- * {@link TelemetryStatusPort} port, so the in-memory store only ever holds
- * normalized events.
+ * {@link TelemetryStatusPort} port, so the configured durable or in-memory
+ * adapter only ever receives normalized events.
  */
 
 // ───────────────────────────────────────────────────────────────────────

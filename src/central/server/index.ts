@@ -2,9 +2,10 @@ import { createServer } from "node:http";
 import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
-import { loadCentralServerConfig } from "../config/index.js";
+import { DEFAULT_CENTRAL_RETENTION_DAYS, loadCentralServerConfig } from "../config/index.js";
 import {
   createSqliteCentralCatalogRepository,
+  createSqliteCentralTelemetryPort,
   createSqliteModelPolicyRepository,
   initializeCentralSqliteDatabase,
   type CentralSqliteDatabase,
@@ -42,10 +43,12 @@ export interface MateriaCentralServerOptions {
    */
   ports?: ControlPlanePorts;
   /**
-   * Initialized central database used for durable catalog and model-policy
-   * repositories when `ports` is omitted. The caller owns its lifecycle.
+   * Initialized central database used for durable catalog, model-policy, and
+   * telemetry adapters when `ports` is omitted. The caller owns its lifecycle.
    */
   database?: CentralSqliteDatabase;
+  /** Telemetry retention interval used with `database`. Defaults to 30 days. */
+  retentionDays?: number;
   /**
    * Auth configuration for the route guards. Defaults to a dev-token adapter
    * with the documented development-only token set and the default central role
@@ -79,9 +82,9 @@ export interface MateriaCentralServer {
  * Separate from the local-session WebUI server (src/webui/server/index.ts):
  * startup does not open a local repository session, does not read
  * `.pi/pi-materia/quest-board.json`, and does not expose local-session routes.
- * Catalog and model-policy state use SQLite when an initialized `database` is
- * supplied. Tests and embedded callers may still inject ports explicitly; the
- * fallback remains in-memory for backwards compatibility.
+ * Catalog, model-policy, and telemetry state use SQLite when an initialized
+ * `database` is supplied. Tests and embedded callers may still inject ports
+ * explicitly; the fallback remains in-memory for backwards compatibility.
  */
 export function createMateriaCentralServer(options: MateriaCentralServerOptions = {}): MateriaCentralServer {
   const host = options.host ?? "127.0.0.1";
@@ -97,6 +100,10 @@ export function createMateriaCentralServer(options: MateriaCentralServerOptions 
       ? {
           catalogRepository: createSqliteCentralCatalogRepository(options.database),
           policyRepository: createSqliteModelPolicyRepository(options.database),
+          telemetryPort: createSqliteCentralTelemetryPort(options.database, {
+            retentionDays: options.retentionDays ?? DEFAULT_CENTRAL_RETENTION_DAYS,
+            ...(options.label !== undefined ? { label: options.label } : {}),
+          }),
         }
       : {}),
   });
@@ -124,6 +131,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     port: config.port,
     corsOrigin: config.corsOrigin,
     database: initialized.database,
+    retentionDays: config.retentionDays,
     ...(config.label !== undefined ? { label: config.label } : {}),
   });
   created.server.once("close", () => initialized.database.close());

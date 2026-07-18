@@ -46,6 +46,7 @@ export {
   CentralSqliteDatabase,
   CentralSqliteOpenError,
   createSqliteCentralCatalogRepository,
+  createSqliteCentralTelemetryPort,
   createSqliteModelPolicyRepository,
   initializeCentralSqliteDatabase,
   openCentralSqliteDatabase,
@@ -60,11 +61,14 @@ export {
   type CentralSqliteDriver,
   type CentralSqliteRunResult,
   type CentralSqliteStatement,
+  type CentralTelemetryRetentionScheduler,
   type InitializedCentralSqliteDatabase,
   type InitializeCentralSqliteDatabaseOptions,
   type OpenCentralSqliteDatabaseOptions,
   type RunCentralSchemaMigrationsOptions,
   type SqliteCentralCatalogRepositoryOptions,
+  type SqliteCentralTelemetryPort,
+  type SqliteCentralTelemetryPortOptions,
   type SqliteModelPolicyRepositoryOptions,
 } from "./persistence/index.js";
 
