@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
-import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, materiaStatusLabel, prepareAgentStartSystemPrompt, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
+import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, handleAgentHandoffToolExecutionEnd, materiaStatusLabel, prepareAgentStartSystemPrompt, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
 import { createArtifactCatalog, createCastStateRepository, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../infrastructure/index.js";
 
 export function createCastContextPort(): CastContextPort {
@@ -11,6 +11,7 @@ export function createCastAgentTurnPort(): CastAgentTurnPort<ExtensionContext, E
   return {
     prepareAgentStartSystemPrompt,
     handleAgentEnd: (api, event, ctx) => handleAgentEnd(api, event as Parameters<typeof handleAgentEnd>[1], ctx),
+    handleToolExecutionEnd: (api, event, ctx) => handleAgentHandoffToolExecutionEnd(api, event as Parameters<typeof handleAgentHandoffToolExecutionEnd>[1], ctx),
   };
 }
 

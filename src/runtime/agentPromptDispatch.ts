@@ -26,6 +26,7 @@ import type {
   ToolScopeRuntimeWarning,
   UpdateToolScopeOptions,
 } from "./agentTurnState.js";
+import type { AgentFinalizationActivation } from "./agentFinalizationRuntime.js";
 import type { LifecycleEventOverrides } from "./nativeEventing.js";
 import { resolvedMateriaDisplayName, resolvedMateriaId } from "./resolvedMateria.js";
 import {
@@ -86,6 +87,13 @@ export interface AgentPromptDispatchDependencies {
       materia: MateriaAgentConfig,
       options?: UpdateToolScopeOptions,
     ): unknown;
+    configureAgentFinalization(
+      pi: ExtensionAPI,
+      session: object,
+      state: MateriaCastState,
+      socket: ResolvedMateriaSocket,
+      config: Pick<PiMateriaConfig, "finalization">,
+    ): AgentFinalizationActivation;
   };
   lifecycle: {
     emitLifecycleEvent(
@@ -222,6 +230,27 @@ export function createAgentPromptDispatch(deps: AgentPromptDispatchDependencies)
       });
       ctx.ui.notify(warning.message, "warning");
     }
+
+    const finalization = deps.tools.configureAgentFinalization(
+      pi,
+      ctx.sessionManager,
+      state,
+      socket,
+      await deps.state.loadConfigFromState(state),
+    );
+    await deps.artifacts.appendEvent(state.runState, "agent_finalization_strategy", {
+      strategy: finalization.strategy,
+      configuredStrategy: finalization.configuredStrategy,
+      reason: finalization.reason,
+      socket: socket.id,
+      materia: socketMateriaName(socket),
+      visit: finalization.scope.socketVisit,
+      finalizationAttempt: finalization.scope.finalizationAttempt,
+      toolCount: finalization.toolNames.length,
+      model: state.currentMateriaModel?.model,
+      provider: state.currentMateriaModel?.provider,
+      api: state.currentMateriaModel?.api,
+    });
   }
 
   async function maybeRunProactiveCompaction(

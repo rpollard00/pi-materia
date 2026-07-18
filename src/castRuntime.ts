@@ -6,6 +6,7 @@ export {
   currentMateria,
   findMultiTurnAgentSockets,
   handleAgentEnd,
+  handleAgentHandoffToolExecutionEnd,
   isAgentControllerPresetActive,
   materiaStatusLabel,
   nativeTestInternals,

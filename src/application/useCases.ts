@@ -241,6 +241,10 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     return this.deps.agentTurns.handleAgentEnd(pi, event, session);
   }
 
+  handleToolExecutionEnd(pi: TPi, event: TAgentEvent, session: TSession): Promise<void> | undefined {
+    return this.deps.agentTurns.handleToolExecutionEnd?.(pi, event, session);
+  }
+
   async startCast(input: { pi: TPi; session: TSession; cwd: string; request: string; configuredPath?: string; loadoutOverride?: string; prepared?: PreparedCastLoadout; options?: CastStartOptions }): Promise<{ loaded: LoadedConfig; pipeline: ResolvedMateriaPipeline; effectiveLoadout?: EffectiveCastLoadout; state?: MateriaCastState }> {
     this.assertNoActiveCast(input.session);
     const prepared = input.prepared ?? await this.deps.loadouts.loadForCast(input.cwd, input.configuredPath, input.loadoutOverride);

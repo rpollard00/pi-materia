@@ -68,17 +68,20 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   const key = recoveryIdentityKey(state);
   state.recoveryAttempts ??= {};
   const allowance = ensureRecoveryAllowance(state, key, { reason });
-  // Persist the recovery reason and original error message so prompt assembly can
-  // inject reason-specific hints (e.g. timeout avoidance) across all retry attempts.
+  const jsonRepairMetadata = jsonOutputRepairRecoveryMetadata(state);
+  // Persist raw provider errors only when prompt assembly needs them (for
+  // example timeout duration hints). Invalid handoff content stays out of
+  // recovery diagnostics and error-message state.
   state.recoveryReasons ??= {};
   state.recoveryReasons[key] = reason;
-  state.recoveryErrorMessages ??= {};
-  if (!state.recoveryErrorMessages[key]) {
-    state.recoveryErrorMessages[key] = errorMessage(error);
+  if (!jsonRepairMetadata) {
+    state.recoveryErrorMessages ??= {};
+    if (!state.recoveryErrorMessages[key]) {
+      state.recoveryErrorMessages[key] = errorMessage(error);
+    }
   }
   const previousAttempts = state.recoveryAttempts[key] ?? 0;
   let maxAttempts = allowance.effectiveMaxAttempts;
-  const jsonRepairMetadata = jsonOutputRepairRecoveryMetadata(state);
   if (previousAttempts >= maxAttempts) {
     const exhausted = jsonRepairMetadata
       ? `JSON output repair retry exhausted for ${recoveryDiagnosticLabel(state)} after ${previousAttempts}/${maxAttempts} attempt(s): ${errorMessage(error)}`
@@ -98,7 +101,7 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
       exhaustedAt: Date.now(),
       ...jsonRepairMetadata,
     };
-    await deps.appendEvent(state.runState, "same_socket_recovery_exhausted", { reason, key, attempts: previousAttempts, attempt: previousAttempts, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId: options.entryId, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), ...jsonRepairMetadata });
+    await deps.appendEvent(state.runState, "same_socket_recovery_exhausted", { reason, key, attempts: previousAttempts, attempt: previousAttempts, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, ...recoveryErrorEventData(state, error), entryId: options.entryId, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), ...jsonRepairMetadata });
     await deps.failCast(state, new Error(exhausted), options.entryId, { preserveRecoveryExhaustion: true });
     return true;
   }
@@ -127,7 +130,7 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
     deps.notifyWarning(recoveryWarningMessage(state, reason, attempt, maxAttempts, preparation));
     return true;
   } catch (retryError) {
-    await deps.appendEvent(state.runState, "same_socket_recovery_retry_failed", { reason, key, attempt, maxAttempts, error: errorMessage(retryError), originalError: errorMessage(error), entryId: options.entryId, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), ...jsonRepairMetadata });
+    await deps.appendEvent(state.runState, "same_socket_recovery_retry_failed", { reason, key, attempt, maxAttempts, error: errorMessage(retryError), ...(jsonRepairMetadata ? {} : { originalError: errorMessage(error) }), entryId: options.entryId, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, mode: recoveryTurnMode(state), ...jsonRepairMetadata });
     await deps.failCast(state, new Error(`Same-socket recovery retry failed for ${recoveryDiagnosticLabel(state)}: ${errorMessage(retryError)}. Original failure: ${errorMessage(error)}`), options.entryId);
     return true;
   }
@@ -290,18 +293,26 @@ function recoveryEventData(
   error: unknown,
   entryId: string | undefined,
 ): Record<string, unknown> {
-  return { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, error: errorMessage(error), entryId, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: deps.shortMetadataLabel(state.currentItemLabel), visit: deps.currentSocketVisit(state, undefined), mode: recoveryTurnMode(state), ...jsonOutputRepairRecoveryMetadata(state) };
+  return { reason, key, attempt, originalMaxAttempts: allowance.originalMaxAttempts, effectiveMaxAttempts: allowance.effectiveMaxAttempts, maxAttempts, reviveCount: allowance.reviveCount, ...recoveryErrorEventData(state, error), entryId, socket: deps.currentSocketId(state), itemKey: state.currentItemKey, itemLabel: state.currentItemLabel, itemLabelShort: deps.shortMetadataLabel(state.currentItemLabel), visit: deps.currentSocketVisit(state, undefined), mode: recoveryTurnMode(state), ...jsonOutputRepairRecoveryMetadata(state) };
 }
 
 function jsonOutputRepairRecoveryMetadata(state: MateriaCastState): Record<string, unknown> | undefined {
   const repair = state.jsonOutputRepair;
   if (!repair) return undefined;
+  const finalization = state.agentFinalization;
   return {
     recoveryKind: "json_output_repair",
     validationKind: repair.validationKind,
+    failureCategory: repair.validationKind === "json_parse" ? "malformed_syntax" : "contract_violation",
+    strategy: finalization?.strategy ?? "direct_json",
+    finalizationAttempt: finalization?.finalizationAttempt ?? 1,
     excerptLength: repair.excerptLength,
     excerptTruncated: repair.truncated,
   };
+}
+
+function recoveryErrorEventData(state: MateriaCastState, error: unknown): Record<string, unknown> {
+  return state.jsonOutputRepair ? {} : { error: errorMessage(error) };
 }
 
 function actionEventData(state: MateriaCastState, deps: SameSocketRecoveryActionDeps, options: SameSocketRecoveryActionOptions): Record<string, unknown> {

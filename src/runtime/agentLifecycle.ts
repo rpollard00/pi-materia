@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   activeMateriaSystemPrompt,
   buildMultiTurnFinalizationPrompt,
+  buildSocketPrompt,
   buildSyntheticCastContext,
   isPausedMultiTurnRefinement,
   materiaPrompt,
@@ -35,6 +36,7 @@ import type {
   AdvancementLifecycleDiagnostics,
   SendMateriaTurnOptions,
 } from "./agentPromptDispatch.js";
+import type { AgentFinalizationCompletion } from "./agentFinalizationRuntime.js";
 import type { LifecycleEventOverrides } from "./nativeEventing.js";
 import {
   resolvedMateriaDisplayName,
@@ -168,6 +170,11 @@ export interface AgentLifecycleDependencies {
       entryId: string,
       options?: SocketOutputCommitOptions,
     ): Promise<void>;
+  };
+  finalization: {
+    completion(session: object, state: MateriaCastState, assistantText: string): AgentFinalizationCompletion;
+    fallbackToDirect(pi: ExtensionAPI, session: object, state: MateriaCastState): boolean;
+    release(pi: ExtensionAPI, session: object, state: MateriaCastState): void;
   };
   termination: {
     failCast(
@@ -311,6 +318,49 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
     });
   }
 
+  function prepareDirectFinalizationFallback(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    state: MateriaCastState,
+  ): boolean {
+    if (!deps.finalization.fallbackToDirect(pi, ctx.sessionManager, state)) return false;
+    const socket = currentSocketOrThrow(state);
+    state.lastAssistantText = undefined;
+    state.activeTurnPrompt = isMultiTurnResolvedAgentSocket(socket) && state.multiTurnFinalizing === true
+      ? buildMultiTurnFinalizationPrompt(state, socket)
+      : buildSocketPrompt(state, socket);
+    return true;
+  }
+
+  async function recoverMissingToolCommit(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    state: MateriaCastState,
+    entryId: string,
+  ): Promise<void> {
+    prepareDirectFinalizationFallback(pi, ctx, state);
+    const error = new Error(`Tool-backed finalization for socket "${currentSocketId(state) ?? state.phase}" ended without materia_handoff_commit; partial tool submissions were discarded and the bounded retry will use direct JSON.`);
+    await deps.artifacts.appendEvent(state.runState, "agent_finalization_protocol_failure", {
+      strategy: "tool_backed",
+      failure: "missing_commit",
+      failureCategory: "missing_commit",
+      attempt: state.agentFinalization?.finalizationAttempt ?? 1,
+      finalizationAttempt: state.agentFinalization?.finalizationAttempt ?? 1,
+      fallback: "direct_json",
+      socket: currentSocketId(state),
+      visit: currentSocketVisit(state, undefined),
+      entryId,
+    });
+    const recovered = await deps.recovery.handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, {
+      entryId,
+      allowGenericTurnFailure: true,
+    });
+    if (!recovered) {
+      await emitSocketFailure(state, error);
+      await deps.termination.failCast(pi, ctx, state, error, entryId);
+    }
+  }
+
   async function handleAgentEnd(
     pi: ExtensionAPI,
     event: { messages: unknown[] },
@@ -335,8 +385,9 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
         await deps.recovery.preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error);
         return;
       }
+      const toolFallback = prepareDirectFinalizationFallback(pi, ctx, state);
       const recovered = await deps.recovery.handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, {
-        allowGenericTurnFailure: deps.recovery.shouldRetryGenericTurnFailure(error),
+        allowGenericTurnFailure: toolFallback || deps.recovery.shouldRetryGenericTurnFailure(error),
       });
       if (!recovered) {
         await emitSocketFailure(state, error);
@@ -367,9 +418,10 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
         });
         return;
       }
+      const toolFallback = prepareDirectFinalizationFallback(pi, ctx, state);
       const recovered = await deps.recovery.handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, {
         entryId: latest.entry.id,
-        allowGenericTurnFailure: deps.recovery.shouldRetryGenericTurnFailure(error),
+        allowGenericTurnFailure: toolFallback || deps.recovery.shouldRetryGenericTurnFailure(error),
       });
       if (!recovered) {
         await emitSocketFailure(state, error);
@@ -384,6 +436,27 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
 
     try {
       const socket = currentSocketOrThrow(state);
+      const finalization = deps.finalization.completion(ctx.sessionManager, state, text);
+      if (finalization.kind === "missing_tool_commit") {
+        await recoverMissingToolCommit(pi, ctx, state, latest.entry.id);
+        return;
+      }
+      let completionText = text;
+      if (finalization.kind === "tool_commit") {
+        completionText = finalization.commit.json;
+        state.lastAssistantText = completionText;
+        if (finalization.ignoredText) {
+          await deps.artifacts.appendEvent(state.runState, "agent_finalization_protocol_conflict", {
+            strategy: "tool_backed",
+            resolution: "tool_commit_authoritative_text_ignored",
+            ignoredTextBytes: finalization.ignoredTextBytes,
+            socket: socket.id,
+            visit: socketVisit(state, socket.id),
+            entryId: latest.entry.id,
+          });
+        }
+        deps.finalization.release(pi, ctx.sessionManager, state);
+      }
       if (isMultiTurnResolvedAgentSocket(socket)) {
         if (wasAwaitingFinalization) {
           const diagnostics = deps.dispatch.agentEndAdvancementDiagnostics(state, socket, {
@@ -399,7 +472,7 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
           state.multiTurnFinalizing = false;
           setCurrentSocketState(state, "idle");
           deps.state.saveCastState(pi, state);
-          await deps.completion.completeSocket(pi, ctx, state, text, latest.entry.id, {
+          await deps.completion.completeSocket(pi, ctx, state, completionText, latest.entry.id, {
             finalizedMultiTurn: true,
             diagnostics,
           });
@@ -453,7 +526,7 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
         ctx.ui.notify(`pi-materia multi-turn socket "${socket.id}" is waiting for refinement; run /materia continue to finalize.`, "info");
         return;
       }
-      await deps.completion.completeSocket(pi, ctx, state, text, latest.entry.id, {
+      await deps.completion.completeSocket(pi, ctx, state, completionText, latest.entry.id, {
         diagnostics: deps.dispatch.agentEndAdvancementDiagnostics(state, socket),
       });
     } catch (error) {

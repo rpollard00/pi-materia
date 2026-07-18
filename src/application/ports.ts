@@ -32,6 +32,7 @@ export interface CastContextPort {
 export interface CastAgentTurnPort<TSession = unknown, TPi = unknown, TAgentEvent = unknown> {
   prepareAgentStartSystemPrompt(input: { pi: TPi; session: TSession; state: MateriaCastState; systemPrompt: string }): Promise<string | undefined>;
   handleAgentEnd(pi: TPi, event: TAgentEvent, session: TSession): Promise<void>;
+  handleToolExecutionEnd?(pi: TPi, event: TAgentEvent, session: TSession): Promise<void>;
 }
 
 export type InitialPromptDispatchPolicy = "immediate" | "defer-agent-trigger";

@@ -153,6 +153,7 @@ pi-materia automatically retries safe failures (context-window limits, tool time
 Loadout and materia configuration is layered JSON (defaults → user profile → project file → env/cli overrides). Full customization details live in the docs:
 
 - [Handoff contract](docs/handoff-contract.md) — the JSON contract agent sockets use to pass work items between materia
+- [Finalization configuration and migration](docs/finalization-configuration.md) — direct JSON, qualified tool-backed submission, fallback, and rollout guidance
 - [Graph semantics](docs/graph-semantics.md) — edge conditions, branching, loops, and structured iteration
 - [Loop semantics](docs/loop-semantics.md) — generator-driven loop configuration and exit routing
 - [Utility materia](docs/utility-materia.md) — deterministic pre/post-processing sockets (no LLM turn)

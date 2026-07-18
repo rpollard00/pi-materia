@@ -1,0 +1,2 @@
+{"context":"First line
+Second line must be escaped in JSON."}

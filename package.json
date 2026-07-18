@@ -41,6 +41,7 @@
     "test:watch": "bun test --watch",
     "test:utilities": "bun test ./utility/tests/blackbeltUtilities.utility.ts ./utility/tests/mimeUtilities.utility.ts",
     "test:webui": "vitest run --config src/webui/client/vitest.config.ts",
+    "experiment:tool-handoff": "tsx src/prototype/runToolBackedHandoffExperiment.ts",
     "typecheck": "tsc --noEmit && tsc -p src/webui/client/tsconfig.json --noEmit && tsc -p src/webui/server/tsconfig.json --noEmit",
     "pack:dry-run": "npm pack --dry-run",
     "prepublishOnly": "npm run typecheck && npm run pack:dry-run"

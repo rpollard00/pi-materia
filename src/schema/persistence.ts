@@ -1,7 +1,7 @@
 import { validateReservedHandoffFields, type HandoffObject } from "../domain/handoff.js";
 import { validateLoadout, type Loadout, type LoadoutLoop, type LoadoutSocket, type SocketId } from "../domain/loadout.js";
 import type { DomainIssue, DomainResult } from "../domain/result.js";
-import type { EventingConfig, LoadoutSource, LoadoutUserLockState, MateriaConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, PiMateriaConfig, MateriaProfileConfig } from "../types.js";
+import type { EventingConfig, LoadoutSource, LoadoutUserLockState, MateriaConfig, MateriaFinalizationConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, PiMateriaConfig, MateriaProfileConfig } from "../types.js";
 
 /**
  * Persistence/schema anti-corruption adapters.
@@ -15,6 +15,7 @@ export interface CurrentPersistedConfig {
   budget?: PiMateriaConfig["budget"];
   limits?: PiMateriaConfig["limits"];
   compaction?: PiMateriaConfig["compaction"];
+  finalization?: MateriaFinalizationConfig | null;
   loadouts?: Record<string, CurrentPersistedLoadout | null>;
   activeLoadoutId?: string;
   activeLoadout?: string;
@@ -143,6 +144,7 @@ export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Par
     ...(config.budget !== undefined ? { budget: cloneRecord(config.budget) } : {}),
     ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
     ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
+    ...(config.finalization !== undefined ? { finalization: config.finalization === null ? undefined : cloneRecord(config.finalization) as MateriaFinalizationConfig } : {}),
     ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
     ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
     ...(materia !== undefined ? { materia: cloneRecord(materia) } : {}),
@@ -157,6 +159,7 @@ export function serializeCurrentPersistedConfig(config: Partial<PiMateriaConfig>
     ...(config.budget !== undefined ? { budget: cloneRecord(config.budget) } : {}),
     ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
     ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
+    ...(config.finalization !== undefined ? { finalization: cloneRecord(config.finalization) as MateriaFinalizationConfig } : {}),
     ...(config.loadouts !== undefined ? { loadouts: Object.fromEntries(Object.entries(config.loadouts as Record<string, MateriaPipelineConfig | null>).map(([name, loadout]) => [name, loadout === null ? null : serializePipelineLoadout(loadout)])) } : {}),
     ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
     ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
