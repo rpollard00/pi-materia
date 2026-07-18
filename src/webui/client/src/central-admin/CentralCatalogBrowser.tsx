@@ -1,5 +1,9 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import type { CentralAdminRequester, CentralAdminRequestFailure } from './api.js';
+import {
+  CentralCatalogDeleteConfirmation,
+  CentralCatalogEditor,
+} from './CentralCatalogPublishing.js';
 import type {
   CentralCatalogFilters,
   CentralCatalogItem,
@@ -249,10 +253,17 @@ function DetailFailure({ status, error, onRetry }: { status: CentralCatalogLoadS
   return <CatalogFailure kind={kind} error={error} onRetry={onRetry} />;
 }
 
-/** Read-only central catalog list and definition inspector. */
-export function CentralCatalogBrowser({ request }: { request: CentralAdminRequester }) {
+type CatalogEditorSelection =
+  | { readonly mode: 'create' }
+  | { readonly mode: 'edit'; readonly item: CentralCatalogItem };
+
+/** Central catalog browser with permission-gated publishing controls. */
+export function CentralCatalogBrowser({ request, canWrite = false }: { request: CentralAdminRequester; canWrite?: boolean }) {
   const [filters, setFilters] = useState<CentralCatalogFilters>({ kind: 'all', search: '' });
   const [selectedKey, setSelectedKey] = useState<string | undefined>();
+  const [editor, setEditor] = useState<CatalogEditorSelection>();
+  const [deleteTarget, setDeleteTarget] = useState<CentralCatalogItem>();
+  const [publishNotice, setPublishNotice] = useState<string>();
   const collection = useCentralCatalogCollection(request, filters);
   const selected = useMemo(() => (
     collection.items.find((item) => centralCatalogItemKey(item) === selectedKey) ?? collection.items[0]
@@ -274,22 +285,42 @@ export function CentralCatalogBrowser({ request }: { request: CentralAdminReques
     if (selected) detail.refresh();
   };
 
+  const published = (action: 'created' | 'updated', summary: CentralCatalogItemSummary) => {
+    setEditor(undefined);
+    setPublishNotice(`${kindLabel(summary.kind)} “${summary.name || summary.id}” was ${action}.`);
+    setSelectedKey(centralCatalogItemKey(summary));
+    collection.refresh();
+    if (action === 'updated') detail.refresh();
+  };
+
+  const deleted = (summary: CentralCatalogItemSummary) => {
+    setDeleteTarget(undefined);
+    setPublishNotice(`${kindLabel(summary.kind)} “${summary.name || summary.id}” was deleted.`);
+    setSelectedKey(undefined);
+    collection.refresh();
+  };
+
   return (
     <section className="fantasy-panel p-5 md:p-7" data-testid="central-admin-catalog" aria-busy={loading || refreshing}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.35em] text-cyan-200">Central catalog</p>
           <h2 className="mt-3 text-3xl font-black text-white">Catalog</h2>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">Browse centrally managed loadout and materia definitions. This surface is read-only and never writes local configuration.</p>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">Browse centrally managed loadout and materia definitions. Central publishing never writes local configuration.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="rounded-full border border-emerald-300/20 bg-emerald-950/35 px-3 py-1.5 text-xs font-bold text-emerald-100" data-testid="central-catalog-read-only">Read-only browsing</span>
+          {canWrite ? (
+            <button type="button" className={refreshButtonClass} onClick={() => setEditor({ mode: 'create' })}>Create definition</button>
+          ) : (
+            <span className="rounded-full border border-emerald-300/20 bg-emerald-950/35 px-3 py-1.5 text-xs font-bold text-emerald-100" data-testid="central-catalog-read-only">Read-only browsing</span>
+          )}
           <button type="button" className={refreshButtonClass} onClick={refreshAll} disabled={loading || refreshing}>{loading || refreshing ? 'Refreshing…' : 'Refresh catalog'}</button>
         </div>
       </div>
 
       <CatalogFilters filters={filters} onChange={setFilters} />
 
+      {publishNotice ? <div className="mt-4 rounded-xl border border-emerald-300/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-100" role="status" data-testid="central-catalog-publish-success">{publishNotice}</div> : null}
       {collection.status === 'stale' ? <div className="mt-4"><StaleNotice kind={collection.errorKind} error={collection.error} /></div> : null}
       {loading ? (
         <div className="mt-6 rounded-2xl border border-white/10 bg-slate-950/45 p-8 text-center text-sm text-slate-300" role="status" data-testid="central-catalog-loading">Loading central catalog…</div>
@@ -316,7 +347,13 @@ export function CentralCatalogBrowser({ request }: { request: CentralAdminReques
           </aside>
 
           <article className="min-w-0 rounded-2xl border border-white/10 bg-slate-950/35 p-4 md:p-6" aria-busy={detailStatus === 'loading' || detailStatus === 'refreshing'}>
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 flex flex-wrap justify-end gap-2">
+              {canWrite && item ? (
+                <>
+                  <button type="button" className={refreshButtonClass} onClick={() => setEditor({ mode: 'edit', item })}>Edit definition</button>
+                  <button type="button" className="rounded-full border border-rose-300/30 bg-rose-950/50 px-4 py-2 text-xs font-black text-rose-100 transition hover:border-rose-200/70 hover:bg-rose-900/60" onClick={() => setDeleteTarget(item)}>Delete definition</button>
+                </>
+              ) : null}
               <button type="button" className={refreshButtonClass} onClick={detail.refresh} disabled={detailStatus === 'loading' || detailStatus === 'refreshing'}>{detailStatus === 'loading' || detailStatus === 'refreshing' ? 'Loading definition…' : 'Refresh definition'}</button>
             </div>
             {detailStatus === 'stale' ? <div className="mb-4"><StaleNotice noun="definition" kind={detail.errorKind} error={detail.error} /></div> : null}
@@ -327,6 +364,26 @@ export function CentralCatalogBrowser({ request }: { request: CentralAdminReques
             {item ? <CatalogDefinition item={item} /> : null}
           </article>
         </div>
+      ) : null}
+
+      {canWrite && editor ? (
+        <CentralCatalogEditor
+          key={editor.mode === 'create' ? 'create' : `${editor.item.kind}:${editor.item.id}:${editor.item.version}`}
+          mode={editor.mode}
+          {...(editor.mode === 'edit' ? { item: editor.item } : {})}
+          request={request}
+          onCancel={() => setEditor(undefined)}
+          onSucceeded={(summary) => published(editor.mode === 'create' ? 'created' : 'updated', summary)}
+        />
+      ) : null}
+      {canWrite && deleteTarget ? (
+        <CentralCatalogDeleteConfirmation
+          key={`${deleteTarget.kind}:${deleteTarget.id}:${deleteTarget.version}`}
+          item={deleteTarget}
+          request={request}
+          onCancel={() => setDeleteTarget(undefined)}
+          onSucceeded={deleted}
+        />
       ) : null}
     </section>
   );

@@ -44,10 +44,18 @@ export interface CentralAdminPrincipalSummary {
   roleIds: readonly string[];
 }
 
+export interface CentralAdminAccessSummary {
+  principalId: string;
+  roleIds: readonly string[];
+  permissions: readonly string[];
+}
+
 export interface CentralAdminMetadata {
   server: CentralAdminServerMetadata;
   roles: readonly CentralAdminRoleSummary[];
   principals?: readonly CentralAdminPrincipalSummary[];
+  /** Effective permissions for the credential used to establish this session. */
+  access?: CentralAdminAccessSummary;
 }
 
 export interface CentralAdminMetadataEnvelope {

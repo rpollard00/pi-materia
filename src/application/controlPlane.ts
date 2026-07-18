@@ -404,11 +404,20 @@ export interface AdminRoleSummary {
   permissions: readonly Permission[];
 }
 
-/** Admin metadata snapshot: server info plus optional principal/role summaries. */
+/** Effective, secret-free access granted to the principal reading admin metadata. */
+export interface AdminAccessSummary {
+  principalId: string;
+  roleIds: readonly string[];
+  permissions: readonly Permission[];
+}
+
+/** Admin metadata snapshot: server info, principal/role summaries, and optional caller access. */
 export interface AdminMetadataSnapshot {
   server: ControlPlaneServerInfo;
   principals?: readonly AdminPrincipalSummary[];
   roles?: readonly AdminRoleSummary[];
+  /** Request-principal access, when metadata came from an authenticated server route. */
+  access?: AdminAccessSummary;
 }
 
 // Catalog admin write DTOs. Only admin APIs may write central catalog data

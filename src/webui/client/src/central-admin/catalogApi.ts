@@ -87,3 +87,104 @@ export async function getCentralCatalogItem(
     content: { definition: body.item.content.definition },
   };
 }
+
+export interface CentralCatalogItemDraft {
+  readonly id: string;
+  readonly kind: CentralCatalogItemKind;
+  readonly name?: string;
+  readonly description?: string;
+  readonly definition: Readonly<Record<string, unknown>>;
+  readonly provenance?: CentralCatalogProvenance;
+}
+
+export class CentralCatalogConflictError extends Error {
+  readonly status = 409;
+  readonly currentVersion?: string;
+
+  constructor(message: string, currentVersion?: string) {
+    super(message);
+    this.name = 'CentralCatalogConflictError';
+    if (currentVersion !== undefined) this.currentVersion = currentVersion;
+  }
+}
+
+function mutationBody(draft: CentralCatalogItemDraft, includeIdentity: boolean): Record<string, unknown> {
+  return {
+    ...(includeIdentity ? { id: draft.id, kind: draft.kind } : {}),
+    ...(draft.name !== undefined ? { name: draft.name } : {}),
+    ...(draft.description !== undefined ? { description: draft.description } : {}),
+    content: { definition: draft.definition },
+    ...(draft.provenance !== undefined ? { provenance: draft.provenance } : {}),
+  };
+}
+
+function mutationInit(method: 'POST' | 'PATCH', body: Record<string, unknown>): RequestInit {
+  return {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+function readWriteSummary(value: unknown, action: 'created' | 'updated' | 'deleted'): CentralCatalogItemSummary {
+  if (!isRecord(value) || value.ok !== true || !isRecord(value.result) || value.result.action !== action) {
+    invalidResponse(`the write envelope must contain action ${action}.`);
+  }
+  return readSummary(value.result.summary, 'result.summary');
+}
+
+function rethrowMutationFailure(error: unknown): never {
+  if (error instanceof CentralAdminRequestError && error.status === 409) {
+    const response = isRecord(error.responseBody) ? error.responseBody : undefined;
+    const message = response && typeof response.error === 'string'
+      ? response.error
+      : 'The central catalog changed before this operation completed.';
+    const currentVersion = response && typeof response.currentVersion === 'string'
+      ? response.currentVersion
+      : undefined;
+    throw new CentralCatalogConflictError(message, currentVersion);
+  }
+  throw error;
+}
+
+/** Create a central definition through the catalog.write route. */
+export async function createCentralCatalogItem(
+  request: CentralAdminRequester,
+  draft: CentralCatalogItemDraft,
+): Promise<CentralCatalogItemSummary> {
+  try {
+    const body = await request<unknown>('/api/catalog', mutationInit('POST', mutationBody(draft, true)));
+    return readWriteSummary(body, 'created');
+  } catch (error) {
+    rethrowMutationFailure(error);
+  }
+}
+
+/** Update a central definition with optimistic concurrency. */
+export async function updateCentralCatalogItem(
+  request: CentralAdminRequester,
+  draft: CentralCatalogItemDraft,
+  expectedVersion: string,
+): Promise<CentralCatalogItemSummary> {
+  const path = `/api/catalog/${draft.kind}/${encodeURIComponent(draft.id)}?expectedVersion=${encodeURIComponent(expectedVersion)}` as const;
+  try {
+    const body = await request<unknown>(path, mutationInit('PATCH', mutationBody(draft, false)));
+    return readWriteSummary(body, 'updated');
+  } catch (error) {
+    rethrowMutationFailure(error);
+  }
+}
+
+/** Delete a central definition with optimistic concurrency. */
+export async function deleteCentralCatalogItem(
+  request: CentralAdminRequester,
+  item: Pick<CentralCatalogItemSummary, 'id' | 'kind' | 'version'>,
+): Promise<CentralCatalogItemSummary> {
+  const path = `/api/catalog/${item.kind}/${encodeURIComponent(item.id)}?expectedVersion=${encodeURIComponent(item.version)}` as const;
+  try {
+    const body = await request<unknown>(path, { method: 'DELETE' });
+    return readWriteSummary(body, 'deleted');
+  } catch (error) {
+    rethrowMutationFailure(error);
+  }
+}

@@ -3,6 +3,8 @@ import type {
   AdminMetadataSnapshot,
   AdminRoleSummary,
 } from "../../application/controlPlane.js";
+import type { AuthContext } from "../../domain/auth.js";
+import { resolveEffectivePermissions } from "../../domain/identity.js";
 import { requirePermission, type CentralAuth } from "../auth/index.js";
 import { CENTRAL_CONTROL_PLANE_SCOPE, CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { CENTRAL_BUILD_SCHEMA_VERSION, CENTRAL_BUILD_VERSION } from "./buildMetadata.js";
@@ -26,8 +28,9 @@ const SERVICE = CENTRAL_SERVICE_ID;
  * Central administrative metadata route.
  *
  * `GET /api/admin` returns central server identity, build/schema information,
- * configured authentication methods, role definitions, and secret-free static
- * principal summaries. The route is read-only and requires `admin.read`;
+ * configured authentication methods, role definitions, secret-free static
+ * principal summaries, and the caller's effective permissions. The route is
+ * read-only and requires `admin.read`;
  * `admin.write` is intentionally reserved for future mutation endpoints.
  *
  * Route and method matching happen before authentication. Unknown admin
@@ -50,20 +53,22 @@ export async function handleCentralAdminRoute(
     sendMethodNotAllowed(res);
     return;
   }
-  if (requirePermission({ auth: deps.auth, req, res, permission: "admin.read" }) === undefined) return;
+  const context = requirePermission({ auth: deps.auth, req, res, permission: "admin.read" });
+  if (context === undefined) return;
 
   const metadata = await deps.admin.getMetadata();
   sendJson(res, 200, {
     ok: true,
     scope: SCOPE,
     service: SERVICE,
-    metadata: composeAdminMetadata(metadata, deps),
+    metadata: composeAdminMetadata(metadata, deps, context),
   });
 }
 
 function composeAdminMetadata(
   metadata: AdminMetadataSnapshot,
   deps: CentralAdminRouteDeps,
+  context: AuthContext,
 ): AdminMetadataSnapshot {
   const roles: AdminRoleSummary[] = [...deps.auth.roleRegistry.roles.values()]
     .map((role) => ({
@@ -73,6 +78,9 @@ function composeAdminMetadata(
     }))
     .sort((left, right) => left.roleId.localeCompare(right.roleId));
   const principals = deps.auth.principalSummaries ?? metadata.principals;
+  const access = resolveEffectivePermissions(context.principal, {
+    resolveRole: deps.auth.roleRegistry.resolve,
+  });
 
   return {
     ...metadata,
@@ -87,6 +95,11 @@ function composeAdminMetadata(
     },
     ...(principals !== undefined ? { principals } : {}),
     roles,
+    access: {
+      principalId: context.principal.id,
+      roleIds: [...access.roleIds].sort(),
+      permissions: [...access.permissions].sort(),
+    },
   };
 }
 

@@ -22,7 +22,7 @@ function modeEnvelope() {
   };
 }
 
-function metadataEnvelope() {
+function metadataEnvelope(canWrite = false) {
   return {
     ok: true,
     metadata: {
@@ -34,8 +34,13 @@ function metadataEnvelope() {
         authMethods: ['static-bearer'],
         label: 'test-central',
       },
-      roles: [{ roleId: 'central-reader', name: 'Central Reader', permissions: ['catalog.read', 'model-policy.read', 'telemetry.read', 'admin.read'] }],
-      principals: [{ principalId: 'reader', tenantId: 'default', roleIds: ['central-reader'] }],
+      roles: [{ roleId: canWrite ? 'central-admin' : 'central-reader', name: canWrite ? 'Central Admin' : 'Central Reader', permissions: canWrite ? ['*'] : ['catalog.read', 'model-policy.read', 'telemetry.read', 'admin.read'] }],
+      principals: [{ principalId: canWrite ? 'admin' : 'reader', tenantId: 'default', roleIds: [canWrite ? 'central-admin' : 'central-reader'] }],
+      access: {
+        principalId: canWrite ? 'admin' : 'reader',
+        roleIds: [canWrite ? 'central-admin' : 'central-reader'],
+        permissions: canWrite ? ['*'] : ['catalog.read', 'model-policy.read', 'telemetry.read', 'admin.read'],
+      },
     },
   };
 }
@@ -94,7 +99,24 @@ describe('CentralAdminApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Server information' }));
     expect(screen.getByTestId('central-admin-server')).toBeTruthy();
 
+    expect(screen.queryByRole('button', { name: 'Create definition' })).toBeNull();
     expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(['/api/backend-mode', '/api/admin', '/api/catalog']);
+  });
+
+  it('shows catalog publishing controls only when the authenticated access grants catalog.write', async () => {
+    writeCentralDevToken('admin-secret');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/backend-mode') return jsonResponse(modeEnvelope());
+      if (path === '/api/admin') return jsonResponse(metadataEnvelope(true));
+      if (path === '/api/catalog') return jsonResponse({ ok: true, items: [] });
+      throw new Error(`unexpected request: ${path}`);
+    }));
+
+    render(<CentralAdminApp />);
+
+    expect(await screen.findByRole('button', { name: 'Create definition' })).toBeTruthy();
+    expect(screen.queryByTestId('central-catalog-read-only')).toBeNull();
   });
 
   it.each([

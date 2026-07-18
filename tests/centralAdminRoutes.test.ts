@@ -37,6 +37,11 @@ interface AdminResponse {
       readonly roleId: string;
       readonly permissions: readonly string[];
     }[];
+    readonly access: {
+      readonly principalId: string;
+      readonly roleIds: readonly string[];
+      readonly permissions: readonly string[];
+    };
   };
 }
 
@@ -91,6 +96,20 @@ describe("central server — admin metadata", () => {
       "central-telemetry-sink",
     ]);
     expect(body.metadata.roles.find((role) => role.roleId === "central-reader")?.permissions).toContain("admin.read");
+    expect(body.metadata.access).toEqual({
+      principalId: "dev-reader",
+      roleIds: ["central-reader"],
+      permissions: ["admin.read", "catalog.read", "model-policy.read", "telemetry.read"],
+    });
+
+    const adminResponse = await fetch(`${baseUrl}/api/admin`, { headers: bearer(DEFAULT_DEV_TOKEN_ADMIN) });
+    const adminBody = (await adminResponse.json()) as AdminResponse;
+    expect(adminBody.metadata.access).toEqual({
+      principalId: "dev-admin",
+      roleIds: ["central-admin"],
+      permissions: ["*"],
+    });
+
     for (const secret of [DEFAULT_DEV_TOKEN_ADMIN, DEFAULT_DEV_TOKEN_READER, DEFAULT_DEV_TOKEN_SINK]) {
       expect(text).not.toContain(secret);
     }

@@ -29,12 +29,14 @@ export type CentralAdminRequester = <T>(path: CentralAdminApiPath, init?: Reques
 export class CentralAdminRequestError extends Error {
   readonly kind: CentralAdminRequestFailure;
   readonly status?: number;
+  readonly responseBody?: unknown;
 
-  constructor(kind: CentralAdminRequestFailure, message: string, status?: number) {
+  constructor(kind: CentralAdminRequestFailure, message: string, status?: number, responseBody?: unknown) {
     super(message);
     this.name = 'CentralAdminRequestError';
     this.kind = kind;
     if (status !== undefined) this.status = status;
+    if (responseBody !== undefined) this.responseBody = responseBody;
   }
 }
 
@@ -49,6 +51,14 @@ async function readJson(response: Response): Promise<unknown> {
     return await response.json();
   } catch {
     throw new CentralAdminRequestError('unreachable', 'The central server returned an invalid response.', response.status);
+  }
+}
+
+async function readOptionalErrorBody(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
   }
 }
 
@@ -83,7 +93,8 @@ export async function requestCentralAdminJson<T>(
       : response.status === 403
         ? 'forbidden'
         : 'unreachable';
-    throw new CentralAdminRequestError(kind, messageForStatus(response.status), response.status);
+    const responseBody = await readOptionalErrorBody(response);
+    throw new CentralAdminRequestError(kind, messageForStatus(response.status), response.status, responseBody);
   }
   return (await readJson(response)) as T;
 }
@@ -128,6 +139,10 @@ function isCentralAdminMetadata(value: unknown): value is CentralAdminMetadata {
     && (role.name === undefined || typeof role.name === 'string')
     && isStringArray(role.permissions))) return false;
   if (value.principals !== undefined && !Array.isArray(value.principals)) return false;
+  if (value.access !== undefined && (!isRecord(value.access)
+    || typeof value.access.principalId !== 'string'
+    || !isStringArray(value.access.roleIds)
+    || !isStringArray(value.access.permissions))) return false;
   return true;
 }
 

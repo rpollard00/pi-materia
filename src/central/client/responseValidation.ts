@@ -132,6 +132,7 @@ export function readAdminMetadataResponse(value: unknown): AdminMetadataSnapshot
     if (!Array.isArray(metadata.roles)) fail("metadata.roles must be an array when provided");
     metadata.roles.forEach((role, index) => validateRoleSummary(role, `metadata.roles[${index}]`));
   }
+  if (metadata.access !== undefined) validateAccessSummary(metadata.access, "metadata.access");
   return metadata as unknown as AdminMetadataSnapshot;
 }
 
@@ -253,6 +254,13 @@ function validateRoleSummary(value: unknown, path: string): void {
   nonEmptyString(role.roleId, `${path}.roleId`);
   if (role.name !== undefined) string(role.name, `${path}.name`);
   stringArray(role.permissions, `${path}.permissions`);
+}
+
+function validateAccessSummary(value: unknown, path: string): void {
+  const access = object(value, path);
+  nonEmptyString(access.principalId, `${path}.principalId`);
+  stringArray(access.roleIds, `${path}.roleIds`);
+  stringArray(access.permissions, `${path}.permissions`);
 }
 
 function validateOptionalAudit(value: unknown, path: string): void {

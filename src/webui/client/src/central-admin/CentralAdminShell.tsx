@@ -48,6 +48,14 @@ function useCentralAdminNavigation() {
   return { section, select };
 }
 
+function hasPermission(metadata: CentralAdminMetadata, requested: string): boolean {
+  return metadata.access?.permissions.some((granted) => (
+    granted === '*'
+    || granted === requested
+    || (granted.endsWith('.*') && requested.startsWith(`${granted.slice(0, -1)}`))
+  )) ?? false;
+}
+
 function FeatureLanding({ section }: { section: FeatureLandingSection }) {
   const content = SECTION_CONTENT[section];
   return (
@@ -138,7 +146,7 @@ export function CentralAdminShell() {
         </nav>
 
         {section === 'catalog'
-          ? <CentralCatalogBrowser request={auth.request} />
+          ? <CentralCatalogBrowser request={auth.request} canWrite={hasPermission(auth.metadata, 'catalog.write')} />
           : section === 'server'
             ? <ServerInformation metadata={auth.metadata} />
             : <FeatureLanding section={section} />}

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CentralCatalogBrowser } from './CentralCatalogBrowser.js';
 import { CentralAdminRequestError, type CentralAdminApiPath, type CentralAdminRequester } from './api.js';
+import type { CentralCatalogItemSummary } from './catalogTypes.js';
 
 const summaries = [
   {
@@ -140,5 +141,137 @@ describe('CentralCatalogBrowser', () => {
     const alert = await screen.findByTestId('central-catalog-permission-error');
     expect(alert.textContent).toContain('catalog.read');
     expect(screen.queryByTestId('central-catalog-empty')).toBeNull();
+  });
+
+  it('validates and publishes a structured create draft, then refreshes summaries', async () => {
+    let catalogItems: CentralCatalogItemSummary[] = [...summaries];
+    let postedBody: Record<string, unknown> | undefined;
+    let listReads = 0;
+    const created = {
+      id: 'reviewja',
+      kind: 'materia' as const,
+      name: 'Reviewja',
+      description: 'Reviews a change.',
+      version: '1',
+      updatedAt: '2026-07-18T00:00:00.000Z',
+      contentHash: `sha256:${'c'.repeat(64)}`,
+      provenance: { source: 'admin-ui', author: 'operator', repositoryId: 'catalog-repo' },
+    };
+    const base = successfulRequester();
+    const request = vi.fn(asRequester(async (path, init) => {
+      if (path === '/api/catalog' && init?.method === 'POST') {
+        postedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        catalogItems = [...catalogItems, created];
+        return { ok: true, result: { action: 'created', summary: created } };
+      }
+      if (path === '/api/catalog') {
+        listReads += 1;
+        return { ok: true, items: catalogItems };
+      }
+      if (path === '/api/catalog/materia/reviewja') {
+        return { ok: true, item: { ...created, content: { definition: { type: 'agent', prompt: 'Review this.' } } } };
+      }
+      return base(path, init);
+    }));
+
+    render(<CentralCatalogBrowser request={request as unknown as CentralAdminRequester} canWrite />);
+    await screen.findByTestId('central-catalog-definition');
+    fireEvent.click(screen.getByRole('button', { name: 'Create definition' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Create catalog definition' });
+    fireEvent.change(within(dialog).getByLabelText('Central id'), { target: { value: 'reviewja' } });
+    fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'Reviewja' } });
+    fireEvent.change(within(dialog).getByLabelText('Description'), { target: { value: 'Reviews a change.' } });
+    fireEvent.change(within(dialog).getByLabelText('Provenance source'), { target: { value: 'admin-ui' } });
+    fireEvent.change(within(dialog).getByLabelText('Provenance author'), { target: { value: 'operator' } });
+    fireEvent.change(within(dialog).getByLabelText('Provenance repository id'), { target: { value: 'catalog-repo' } });
+    fireEvent.change(within(dialog).getByLabelText('Definition JSON'), { target: { value: '{bad json' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create definition' }));
+
+    expect((await within(dialog).findByTestId('central-catalog-validation-error')).textContent).toContain('invalid');
+    expect(request.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+
+    fireEvent.change(within(dialog).getByLabelText('Definition JSON'), { target: { value: '{"type":"agent","prompt":"Review this."}' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create definition' }));
+
+    expect((await screen.findByTestId('central-catalog-publish-success')).textContent).toContain('was created');
+    expect(postedBody).toEqual({
+      id: 'reviewja',
+      kind: 'materia',
+      name: 'Reviewja',
+      description: 'Reviews a change.',
+      content: { definition: { type: 'agent', prompt: 'Review this.' } },
+      provenance: { source: 'admin-ui', author: 'operator', repositoryId: 'catalog-repo' },
+    });
+    await waitFor(() => expect(listReads).toBeGreaterThan(1));
+  });
+
+  it('sends expectedVersion on edit and preserves the draft when the server reports a 409', async () => {
+    let patchPath = '';
+    let patchBody: Record<string, unknown> | undefined;
+    const base = successfulRequester();
+    const request = asRequester(async (path, init) => {
+      if (init?.method === 'PATCH') {
+        patchPath = path;
+        patchBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        throw new CentralAdminRequestError('unreachable', 'HTTP 409', 409, {
+          error: 'version mismatch',
+          code: 'version_mismatch',
+          currentVersion: '5',
+        });
+      }
+      return base(path, init);
+    });
+
+    render(<CentralCatalogBrowser request={request} canWrite />);
+    await screen.findByTestId('central-catalog-definition');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit definition' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Edit loadout definition' });
+    const nameInput = within(dialog).getByLabelText('Display name') as HTMLInputElement;
+    const definitionInput = within(dialog).getByLabelText('Definition JSON') as HTMLTextAreaElement;
+    fireEvent.change(nameInput, { target: { value: 'My unresolved edit' } });
+    fireEvent.change(definitionInput, { target: { value: '{"sockets":[{"id":"changed"}]}' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Publish update' }));
+
+    const conflict = await within(dialog).findByTestId('central-catalog-conflict');
+    expect(conflict.textContent).toContain('409 publishing conflict');
+    expect(conflict.textContent).toContain('version 5');
+    expect(nameInput.value).toBe('My unresolved edit');
+    expect(definitionInput.value).toContain('changed');
+    expect(patchPath).toBe('/api/catalog/loadout/full-auto?expectedVersion=4');
+    expect(patchBody).toMatchObject({ name: 'My unresolved edit', content: { definition: { sockets: [{ id: 'changed' }] } } });
+  });
+
+  it('requires destructive confirmation, sends delete expectedVersion, and refreshes summaries', async () => {
+    let deletePath = '';
+    let listReads = 0;
+    let catalogItems = [...summaries];
+    const base = successfulRequester();
+    const request = asRequester(async (path, init) => {
+      if (init?.method === 'DELETE') {
+        deletePath = path;
+        catalogItems = catalogItems.filter((entry) => entry.id !== 'full-auto');
+        return { ok: true, result: { action: 'deleted', summary: summaries[0] } };
+      }
+      if (path === '/api/catalog') {
+        listReads += 1;
+        return { ok: true, items: catalogItems };
+      }
+      return base(path, init);
+    });
+
+    render(<CentralCatalogBrowser request={request} canWrite />);
+    await screen.findByTestId('central-catalog-definition');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete definition' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Delete loadout full-auto' });
+    expect(deletePath).toBe('');
+    expect(dialog.textContent).toContain('cannot be undone');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm delete full-auto' }));
+
+    expect((await screen.findByTestId('central-catalog-publish-success')).textContent).toContain('was deleted');
+    expect(deletePath).toBe('/api/catalog/loadout/full-auto?expectedVersion=4');
+    await waitFor(() => expect(listReads).toBeGreaterThan(1));
   });
 });
