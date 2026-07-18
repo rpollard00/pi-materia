@@ -28,6 +28,8 @@ export { handleCentralHealthRoute } from "./health.js";
 export type { CentralHealthRouteDeps } from "./health.js";
 export { handleCentralAdminRoute } from "./admin.js";
 export type { CentralAdminRouteDeps } from "./admin.js";
+export { handleCentralBackendModeRoute, resolveCentralBackendMode } from "./backendMode.js";
+export type { CentralBackendModeRouteDeps } from "./backendMode.js";
 export { CENTRAL_BUILD_SCHEMA_VERSION, CENTRAL_BUILD_VERSION } from "./buildMetadata.js";
 export { handleCentralStatusRoute } from "./status.js";
 export type { CentralStatusRouteDeps } from "./status.js";

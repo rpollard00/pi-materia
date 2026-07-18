@@ -150,6 +150,12 @@ export {
 } from "./server/admin.js";
 
 export {
+  handleCentralBackendModeRoute,
+  resolveCentralBackendMode,
+  type CentralBackendModeRouteDeps,
+} from "./server/backendMode.js";
+
+export {
   CENTRAL_BUILD_SCHEMA_VERSION,
   CENTRAL_BUILD_VERSION,
 } from "./server/buildMetadata.js";

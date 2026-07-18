@@ -1,6 +1,7 @@
 import { requirePermission, type CentralAuth } from "../auth/index.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { handleCentralAdminRoute } from "./admin.js";
+import { handleCentralBackendModeRoute } from "./backendMode.js";
 import { handleCentralCatalogRoute } from "./catalog.js";
 import { handleCentralHealthRoute } from "./health.js";
 import { handleCentralModelCatalogRoute } from "./modelCatalog.js";
@@ -32,8 +33,9 @@ export interface MateriaCentralRouteDeps {
  * route groups are gated by the domain principal/permission contracts. Health
  * is intentionally public (liveness). Other central routes require a permission
  * resolved through the static bearer adapter today (future OAuth adapter produces
- * the same contracts). Route matching precedes auth, so unknown routes still
- * return 404 rather than leaking existence through a 401.
+ * the same contracts). Health and backend-mode discovery are intentionally
+ * public. Route matching precedes auth, so unknown routes still return 404
+ * rather than leaking existence through a 401.
  *
  * Catalog read/admin-write routes are wired below (§16.6), guarded with
  * `catalog.read` / `catalog.write`. Model-policy read/admin-write routes and
@@ -58,6 +60,15 @@ export async function handleMateriaCentralRequest(
     return;
   }
 
+  const pathname = new URL(req.url ?? "", "http://localhost").pathname;
+
+  // Public browser topology discovery. The standalone central server always
+  // reports central-admin mode and never advertises a local repository session.
+  if (pathname === "/api/backend-mode" || pathname === "/api/backend-mode/") {
+    handleCentralBackendModeRoute(req, res, deps.label === undefined ? {} : { label: deps.label });
+    return;
+  }
+
   // Central monitoring/status read surface (§15, §16.16). Requires telemetry.read.
   if (req.url?.startsWith("/api/status")) {
     if (requirePermission({ auth: deps.auth, req, res, permission: "telemetry.read" }) === undefined) return;
@@ -71,7 +82,6 @@ export async function handleMateriaCentralRequest(
   // require telemetry.read. Sub-path and method routing (and 404/405
   // precedence over auth) live in the handler. The status read surface
   // (/api/status) is handled above.
-  const pathname = new URL(req.url ?? "", "http://localhost").pathname;
   if (pathname === "/api/telemetry" || pathname.startsWith("/api/telemetry/")) {
     await handleCentralTelemetryRoute(req, res, { telemetry: deps.ports.telemetry, auth: deps.auth });
     return;

@@ -1,18 +1,12 @@
 /**
- * Development-token resolver for central control-plane reads
+ * Browser storage helpers for central static-bearer authentication
  * (docs/enterprise-control-plane.md §13).
  *
- * The central server guards `/api/model-policy` and `/api/model-catalog` with
- * the `model-policy.read` permission, resolved today through the documented
- * **development-only** bearer token adapter. The WebUI client therefore needs
- * to present a dev-token to read central policy state. This module isolates
- * that dev-stage credential plumbing so the rest of the client stays
- * transport/auth-agnostic.
- *
- * OAuth/OIDC is a documented **future** auth adapter boundary that produces the
- * same principal/permission contracts; when it lands this resolver is replaced
- * by that adapter without touching the central client API surface. No OAuth
- * library is imported here.
+ * The original exported names mention development tokens and remain for API
+ * compatibility. The standalone admin shell also uses the neutral bearer-token
+ * aliases below with deployment-provided reader/admin credentials. A future
+ * OAuth/OIDC adapter can replace this storage boundary without changing central
+ * feature clients.
  */
 
 const STORAGE_KEY = 'pi-materia.central-dev-token';
@@ -60,3 +54,7 @@ export function centralAuthorizationHeader(token: string | undefined): string | 
   if (!token || !token.trim()) return undefined;
   return `Bearer ${token.trim()}`;
 }
+
+/** Neutral aliases used by the standalone central-admin authentication state. */
+export const readCentralBearerToken = readCentralDevToken;
+export const writeCentralBearerToken = writeCentralDevToken;

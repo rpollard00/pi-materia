@@ -156,6 +156,39 @@ describe("central server skeleton — HTTP routes", () => {
     expect(body.label).toBe("skeleton");
   });
 
+  test("GET /api/backend-mode publicly reports standalone central-admin topology", async () => {
+    const baseUrl = await startTestServer({ label: "admin-shell" });
+    const response = await fetch(`${baseUrl}/api/backend-mode`);
+    const body = (await response.json()) as {
+      mode: string;
+      hasLocalSession: boolean;
+      hasCentral: boolean;
+      label?: string;
+      capabilities: Record<string, boolean>;
+      endpoints: { local: { available: boolean }; central: { available: boolean; sameOrigin: boolean; baseUrl: string } };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      mode: "central-admin",
+      hasLocalSession: false,
+      hasCentral: true,
+      label: "admin-shell",
+      capabilities: { catalog: true, modelPolicy: true, telemetry: true, admin: true },
+      endpoints: {
+        local: { available: false },
+        central: { available: true, sameOrigin: true, baseUrl: "" },
+      },
+    });
+  });
+
+  test("backend-mode discovery rejects unsupported methods without requiring auth", async () => {
+    const baseUrl = await startTestServer();
+    const response = await fetch(`${baseUrl}/api/backend-mode`, { method: "POST" });
+    expect(response.status).toBe(405);
+    expect((await response.json()) as object).toMatchObject({ error: "Method not allowed" });
+  });
+
   test("GET /api/status returns a central-admin status snapshot", async () => {
     const baseUrl = await startTestServer();
     const response = await fetch(`${baseUrl}/api/status`, { headers: READER_AUTH });
