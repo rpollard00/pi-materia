@@ -83,4 +83,4 @@ Run the baseline with:
 bun test tests/finalizationBaseline.test.ts
 ```
 
-The isolated custom-tool experiment and its bounded evidence are documented in [Tool-backed handoff submission prototype](tool-backed-handoff-prototype.md).
+The isolated custom-tool experiment and its bounded evidence are documented in [Tool-backed handoff submission prototype](tool-backed-handoff-prototype.md). The broader portability, cost, recovery, and socket-compatibility trade-offs are compared in [Agent finalization: structured-output alternatives](structured-output-alternatives.md).
