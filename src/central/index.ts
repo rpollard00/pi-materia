@@ -40,6 +40,31 @@ export {
 } from "./controlPlane/inMemoryCentralPorts.js";
 
 export {
+  CENTRAL_SCHEMA_MIGRATIONS,
+  CENTRAL_SCHEMA_VERSION,
+  CentralMigrationError,
+  CentralSqliteDatabase,
+  CentralSqliteOpenError,
+  initializeCentralSqliteDatabase,
+  openCentralSqliteDatabase,
+  readCentralSchemaMigrations,
+  runCentralSchemaMigrations,
+  type CentralMigrationFailureStage,
+  type CentralMigrationResult,
+  type CentralSchemaMigration,
+  type CentralSchemaMigrationRecord,
+  type CentralSqliteBindParameter,
+  type CentralSqliteBindValue,
+  type CentralSqliteDriver,
+  type CentralSqliteRunResult,
+  type CentralSqliteStatement,
+  type InitializedCentralSqliteDatabase,
+  type InitializeCentralSqliteDatabaseOptions,
+  type OpenCentralSqliteDatabaseOptions,
+  type RunCentralSchemaMigrationsOptions,
+} from "./persistence/index.js";
+
+export {
   createInMemoryCentralCatalogRepository,
   hashCentralContent,
   type CentralCatalogRepository,

@@ -3,6 +3,7 @@ import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
 import { loadCentralServerConfig } from "../config/index.js";
+import { initializeCentralSqliteDatabase } from "../persistence/index.js";
 import { applyCentralCorsHeaders, errorMessage, handleCentralCorsPreflight, sendJson } from "./http.js";
 import { handleMateriaCentralRequest } from "./routes.js";
 import type { ControlPlanePorts } from "../../application/controlPlane.js";
@@ -95,16 +96,23 @@ export function createMateriaCentralServer(options: MateriaCentralServerOptions 
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const config = await loadCentralServerConfig();
+  // Migrate before binding the HTTP socket so an incompatible or partially
+  // writable database cannot produce a falsely ready central server.
+  const initialized = await initializeCentralSqliteDatabase({ path: config.databasePath });
   const created = createMateriaCentralServer({
     host: config.host,
     port: config.port,
     corsOrigin: config.corsOrigin,
     ...(config.label !== undefined ? { label: config.label } : {}),
   });
+  created.server.once("close", () => initialized.database.close());
+  created.server.once("error", () => initialized.database.close());
   created.server.listen(created.port, created.host, () => {
     const address = created.server.address();
     const actualPort = typeof address === "object" && address ? address.port : created.port;
     const mode = created.ports.telemetry.mode().mode;
-    console.log(`${CENTRAL_SERVICE_ID} (central control plane, mode=${mode}) listening at http://${created.host}:${actualPort}`);
+    console.log(
+      `${CENTRAL_SERVICE_ID} (central control plane, mode=${mode}, schema=${initialized.migrationResult.currentVersion}) listening at http://${created.host}:${actualPort}`,
+    );
   });
 }
