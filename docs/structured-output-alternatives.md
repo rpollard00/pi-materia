@@ -116,10 +116,11 @@ The evidence supports an incremental hierarchy rather than a universal migration
 4. **Use tool-backed finalization selectively** only where paired evidence shows a net improvement in first-pass or eventual acceptance after accounting for total turns, tokens, and latency. The current `gpt-5.4-mini` sample does not meet that bar.
 5. **Do not silently commit aggressively repaired JSON**, and do not route deterministic utility or script output through agent tools.
 
-A future architecture decision should select strategies by producer and verified model/provider capability, while keeping one canonical runtime validator and commit path. Comparisons must use matched payloads and record syntax, contract, semantic, refusal/truncation, tool-selection/commit, retry, turn, latency, and token outcomes separately.
+The accepted [agent finalization architecture decision](finalization-architecture-decision.md) selects strategies by producer and verified model/provider capability while keeping one canonical runtime validator and commit path. Comparisons must use matched payloads and record syntax, contract, semantic, refusal/truncation, tool-selection/commit, retry, turn, latency, and token outcomes separately.
 
-## Related evidence
+## Related evidence and decision
 
+- [Agent finalization architecture decision](finalization-architecture-decision.md)
 - [Agent JSON finalization baseline](agent-finalization-baseline.md)
 - [Tool-backed handoff submission prototype](tool-backed-handoff-prototype.md)
 - [Materia handoff JSON contract](handoff-contract.md)
