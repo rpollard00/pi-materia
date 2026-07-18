@@ -16,6 +16,36 @@ export {
 } from "./server/index.js";
 
 export {
+  createCentralHttpControlPlaneClient,
+  createCentralHttpControlPlanePorts,
+  DEFAULT_CENTRAL_HTTP_READ_RETRIES,
+  DEFAULT_CENTRAL_HTTP_RETRY_DELAY_MS,
+  MAX_CENTRAL_HTTP_READ_RETRIES,
+  CentralHttpTransport,
+  CentralHttpClientError,
+  CentralHttpUnauthorizedError,
+  CentralHttpForbiddenError,
+  CentralHttpNotFoundError,
+  CentralHttpConflictError,
+  CentralHttpStatusError,
+  CentralHttpResponseValidationError,
+  CentralHttpTimeoutError,
+  CentralHttpAbortError,
+  CentralHttpNetworkError,
+  CentralUnauthorizedError,
+  CentralForbiddenError,
+  CentralNotFoundError,
+  CentralConflictError,
+  type CentralHttpClientMode,
+  type CentralHttpControlPlaneClient,
+  type CentralHttpControlPlaneClientOptions,
+  type CentralHttpErrorContext,
+  type CentralHttpFetch,
+  type CentralHttpRequest,
+  type CentralHttpTransportOptions,
+} from "./client/index.js";
+
+export {
   CENTRAL_CONFIG_ENV,
   DEFAULT_CENTRAL_AUTH_MODE,
   DEFAULT_CENTRAL_CORS_ORIGIN,
