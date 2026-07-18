@@ -85,8 +85,10 @@ describe("application prompt assembly", () => {
     });
 
     expect(prompt).toContain("socket JSON payload validation");
-    expect(prompt).toContain("Structured validation issues for the current socket requirements");
+    expect(prompt).toContain("Failure category: handoff contract violation");
+    expect(prompt).toContain("Correct these fields for the current socket requirements");
     expect(prompt).toContain("$.satisfied");
+    expect(prompt).not.toContain("Current socket control flow uses satisfied/not_satisfied routing");
     expect(prompt).not.toContain("canonical handoff envelope validation");
     expect(prompt).not.toContain("full canonical handoff envelope");
   });

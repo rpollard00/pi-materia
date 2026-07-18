@@ -161,6 +161,15 @@ export interface MateriaCompactionThresholdTierConfig {
 /** Runtime protocols that can produce the canonical agent handoff value. */
 export type MateriaAgentFinalizationStrategy = "direct_json" | "tool_backed";
 
+/** Content-free categories used by finalization recovery diagnostics. */
+export type MateriaFinalizationFailureCategory =
+  | "malformed_syntax"
+  | "contract_violation"
+  | "tool_argument_validation"
+  | "tool_protocol_violation"
+  | "tool_execution_failure"
+  | "missing_commit";
+
 /** Explicitly qualified model/provider/socket cohort for tool-backed finalization. */
 export interface MateriaToolBackedModelQualification {
   /** Effective model id, provider-qualified id, or "*" for an explicit operator wildcard. */
@@ -201,6 +210,8 @@ export interface MateriaAgentFinalizationState {
   socketId: string;
   socketVisit: number;
   finalizationAttempt: number;
+  /** Number of failed handoff tool calls observed within this finalization attempt. */
+  toolFailureCount?: number;
   fallbackFrom?: "tool_backed";
 }
 

@@ -266,7 +266,7 @@ export function buildJsonOutputRepairContext(
   const invalidOutputExcerpt = boundedInvalidOutputExcerpt(text, JSON_OUTPUT_REPAIR_EXCERPT_MAX_CHARS);
   return {
     validationKind,
-    errorMessage: error.message,
+    errorMessage: conciseJsonOutputRepairError(validationKind, validationIssues, error),
     validationIssues,
     invalidOutputExcerpt,
     excerptLength: invalidOutputExcerpt.length,
@@ -282,6 +282,17 @@ export function boundedInvalidOutputExcerpt(text: string, maxChars: number): str
 
 export function classifyJsonOutputValidationKind(error: unknown): MateriaJsonOutputValidationKind {
   return errorMessage(error).startsWith("Invalid JSON output") ? "json_parse" : "handoff_validation";
+}
+
+function conciseJsonOutputRepairError(
+  validationKind: MateriaJsonOutputValidationKind,
+  validationIssues: MateriaJsonOutputRepairContext["validationIssues"],
+  error: Error,
+): string {
+  if (validationKind === "json_parse") return "Malformed JSON syntax at $.";
+  if (validationIssues?.length) return "The handoff does not meet the active socket contract.";
+  const message = error.message.replace(/\s+/g, " ").trim();
+  return message.length <= 240 ? message : `${message.slice(0, 239).trimEnd()}…`;
 }
 
 export function shouldRetryGenericTurnFailure(error: unknown): boolean {

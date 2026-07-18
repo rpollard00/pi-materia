@@ -343,6 +343,9 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
     await deps.artifacts.appendEvent(state.runState, "agent_finalization_protocol_failure", {
       strategy: "tool_backed",
       failure: "missing_commit",
+      failureCategory: "missing_commit",
+      attempt: state.agentFinalization?.finalizationAttempt ?? 1,
+      finalizationAttempt: state.agentFinalization?.finalizationAttempt ?? 1,
       fallback: "direct_json",
       socket: currentSocketId(state),
       visit: currentSocketVisit(state, undefined),

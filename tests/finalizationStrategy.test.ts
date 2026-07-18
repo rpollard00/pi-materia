@@ -191,6 +191,14 @@ describe("native tool-backed finalization routing", () => {
     expect(latestPrompt(harness)).toContain("Return only one top-level JSON object");
     expect(latestPrompt(harness)).not.toContain("tool-backed materia handoff submission is active");
     expect(latestPrompt(harness)).not.toContain("textual conflict");
+    const fallbackEvents = await readRunEvents(retry);
+    expect(fallbackEvents.find((event) => event.type === "agent_finalization_protocol_failure")?.data).toMatchObject({
+      strategy: "tool_backed",
+      failureCategory: "missing_commit",
+      attempt: 1,
+      finalizationAttempt: 1,
+      fallback: "direct_json",
+    });
 
     const corrected = {
       workItems: [{ title: "feat: corrected direct value", context: "Accepted on the clean fallback attempt." }],
@@ -203,6 +211,73 @@ describe("native tool-backed finalization routing", () => {
     expect(completed.active).toBe(false);
     expect(completed.lastJson).toEqual(corrected);
     expect(completed.data.workItems).toEqual(corrected.workItems);
+  });
+
+  test("redacts failed tool arguments while returning field-level feedback and content-free diagnostics", async () => {
+    const harness = await makeHarness();
+    await harness.runCommand("materia", "cast diagnose a handoff tool failure");
+    const secret = "sensitive handoff value that must not be logged";
+
+    const tool = harness.registeredTools.get(AGENT_HANDOFF_TOOL_NAMES.addWorkItem);
+    if (!tool?.prepareArguments) throw new Error("Handoff tool argument preparation is unavailable");
+    let feedback = "";
+    try {
+      tool.prepareArguments({ title: secret, unexpected: secret });
+    } catch (error) {
+      feedback = error instanceof Error ? error.message : String(error);
+    }
+    expect(feedback).toContain("Materia handoff argument validation failed");
+    expect(feedback).toContain("$.context");
+    expect(feedback).toContain("required properties context");
+    expect(feedback).not.toContain(secret);
+
+    await harness.emit("tool_execution_end", {
+      type: "tool_execution_end",
+      toolCallId: "call-invalid-work-item",
+      toolName: AGENT_HANDOFF_TOOL_NAMES.addWorkItem,
+      result: { content: [{ type: "text", text: feedback }], details: {} },
+      isError: true,
+    });
+
+    let contractFeedback = "";
+    try {
+      await invoke(harness, AGENT_HANDOFF_TOOL_NAMES.commit, {});
+    } catch (error) {
+      contractFeedback = error instanceof Error ? error.message : String(error);
+    }
+    expect(contractFeedback).toContain("Materia handoff contract violation");
+    expect(contractFeedback).toContain("$.workItems");
+    await harness.emit("tool_execution_end", {
+      type: "tool_execution_end",
+      toolCallId: "call-invalid-commit",
+      toolName: AGENT_HANDOFF_TOOL_NAMES.commit,
+      result: { content: [{ type: "text", text: contractFeedback }], details: {} },
+      isError: true,
+    });
+
+    const state = latestState(harness);
+    expect(state.agentFinalization?.toolFailureCount).toBe(2);
+    const events = await readRunEvents(state);
+    const diagnostics = events.filter((event) => event.type === "agent_finalization_failure");
+    expect(diagnostics[0]?.data).toMatchObject({
+      strategy: "tool_backed",
+      failureCategory: "tool_argument_validation",
+      attempt: 1,
+      finalizationAttempt: 1,
+      tool: AGENT_HANDOFF_TOOL_NAMES.addWorkItem,
+      issuePaths: ["$.context", "$"],
+      retryable: true,
+    });
+    expect(diagnostics[1]?.data).toMatchObject({
+      strategy: "tool_backed",
+      failureCategory: "contract_violation",
+      attempt: 2,
+      finalizationAttempt: 1,
+      tool: AGENT_HANDOFF_TOOL_NAMES.commit,
+      issuePaths: ["$.workItems"],
+      retryable: true,
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain(secret);
   });
 
   test("uses direct JSON without exposing handoff tools when the effective model is unqualified", async () => {

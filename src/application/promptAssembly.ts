@@ -6,6 +6,7 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../handoff/handoffContract.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
+import { formatConciseValidationIssues } from "../handoff/validationFeedback.js";
 import { isToolBackedFinalizationActive } from "../runtime/finalizationStrategy.js";
 import { AGENT_HANDOFF_TOOL_NAMES } from "../runtime/agentHandoffTools.js";
 import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
@@ -85,11 +86,13 @@ export interface JsonOutputRepairPromptInput {
 }
 
 export function buildJsonOutputRepairPrompt(input: JsonOutputRepairPromptInput): string {
-  const label = input.validationKind === "json_parse" ? "JSON parse" : "socket JSON payload validation";
+  const malformedSyntax = input.validationKind === "json_parse";
+  const label = malformedSyntax ? "JSON parse" : "socket JSON payload validation";
+  const issueFeedback = formatValidationIssuesForRepair(input.validationIssues);
   return [
     `Your previous final JSON response was invalid (${label} failed). Regenerate the final response now.`,
-    `Validation error: ${input.errorMessage}`,
-    formatValidationIssuesForRepair(input.validationIssues),
+    `Failure category: ${malformedSyntax ? "malformed JSON syntax" : "handoff contract violation"}.`,
+    issueFeedback ?? `Validation error: ${input.errorMessage}`,
     "Bounded excerpt of your invalid output:",
     "```text",
     input.invalidOutputExcerpt,
@@ -101,10 +104,11 @@ export function buildJsonOutputRepairPrompt(input: JsonOutputRepairPromptInput):
 }
 
 function formatValidationIssuesForRepair(issues: JsonOutputRepairPromptInput["validationIssues"]): string | undefined {
-  if (!issues?.length) return undefined;
+  const lines = formatConciseValidationIssues(issues);
+  if (lines.length === 0) return undefined;
   return [
-    "Structured validation issues for the current socket requirements:",
-    ...issues.map((issue) => `- ${issue.path}: ${issue.message}${issue.reason ? ` (${issue.reason})` : ""}`),
+    "Correct these fields for the current socket requirements:",
+    ...lines,
   ].join("\n");
 }
 

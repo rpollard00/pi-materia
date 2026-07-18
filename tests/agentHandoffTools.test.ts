@@ -138,6 +138,22 @@ describe("ergonomic agent handoff tools", () => {
     expect(toolSet.builder.snapshot()).toEqual({});
   });
 
+  test("returns concise field-level contract feedback when commit is incomplete", async () => {
+    const toolSet = createAgentHandoffTools({
+      builder: new AgentHandoffBuilder(builderOptions({
+        socket: {
+          parse: "json",
+          assign: { workItems: "$.workItems" },
+          edges: [{ when: "satisfied", to: "done" }],
+        },
+        workItemsProducer: true,
+      })),
+    });
+
+    await expect(invoke(toolSet.tools.commit)).rejects.toThrow(/Materia handoff contract violation/);
+    await expect(invoke(toolSet.tools.commit)).rejects.toThrow(/\$\.workItems/);
+  });
+
   test("accumulates ordered values and commits runtime-owned escaping and event serialization", async () => {
     const commits: AgentHandoffCommit[] = [];
     const toolSet = createAgentHandoffTools({

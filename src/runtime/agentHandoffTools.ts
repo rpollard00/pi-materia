@@ -1,7 +1,11 @@
 import {
   StringEnum,
   Type,
+  validateToolArguments,
   type Static,
+  type Tool,
+  type ToolCall,
+  type TSchema,
 } from "@earendil-works/pi-ai";
 import {
   defineTool,
@@ -9,8 +13,11 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { EVENT_SEVERITY_LEVELS } from "../domain/eventing.js";
+import { HandoffJsonValidationError, type HandoffValidationIssue } from "../handoff/handoffValidation.js";
+import { formatConciseValidationIssues } from "../handoff/validationFeedback.js";
 import {
   AgentHandoffBuilder,
+  AgentHandoffBuilderError,
   type AgentHandoffCapabilities,
   type AgentHandoffCommit,
 } from "./agentHandoffBuilder.js";
@@ -120,10 +127,13 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
       label: "Begin Materia Handoff Work Items",
       description: "Include an explicitly empty canonical workItems array. Adding a work item includes the array automatically.",
       parameters: BEGIN_AGENT_HANDOFF_WORK_ITEMS_PARAMETERS,
+      prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.beginWorkItems, BEGIN_AGENT_HANDOFF_WORK_ITEMS_PARAMETERS),
       executionMode: "sequential",
       async execute() {
-        builder.beginWorkItems();
-        return handoffToolResult(builder, "The handoff will include workItems.", "begin_work_items", "workItems");
+        return runHandoffToolAction(() => {
+          builder.beginWorkItems();
+          return handoffToolResult(builder, "The handoff will include workItems.", "begin_work_items", "workItems");
+        });
       },
     });
     const addWorkItem = defineTool({
@@ -131,10 +141,13 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
       label: "Add Materia Handoff Work Item",
       description: "Append one canonical work item in final order. Pass quotes, newlines, backslashes, and Unicode as ordinary strings; runtime code serializes them.",
       parameters: ADD_AGENT_HANDOFF_WORK_ITEM_PARAMETERS,
+      prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.addWorkItem, ADD_AGENT_HANDOFF_WORK_ITEM_PARAMETERS),
       executionMode: "sequential",
       async execute(_toolCallId, params) {
-        builder.addWorkItem(params);
-        return handoffToolResult(builder, "Added one handoff work item.", "add_work_item", "workItems");
+        return runHandoffToolAction(() => {
+          builder.addWorkItem(params);
+          return handoffToolResult(builder, "Added one handoff work item.", "add_work_item", "workItems");
+        });
       },
     });
     tools.beginWorkItems = beginWorkItems;
@@ -148,10 +161,13 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
       label: "Set Materia Handoff Satisfaction",
       description: "Set the canonical satisfied boolean used by this socket's satisfied/not_satisfied graph control.",
       parameters: SET_AGENT_HANDOFF_SATISFIED_PARAMETERS,
+      prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.setSatisfied, SET_AGENT_HANDOFF_SATISFIED_PARAMETERS),
       executionMode: "sequential",
       async execute(_toolCallId, params) {
-        builder.setSatisfied(params.satisfied);
-        return handoffToolResult(builder, "Set handoff satisfaction.", "set_satisfied", "satisfied");
+        return runHandoffToolAction(() => {
+          builder.setSatisfied(params.satisfied);
+          return handoffToolResult(builder, "Set handoff satisfaction.", "set_satisfied", "satisfied");
+        });
       },
     });
     tools.setSatisfied = setSatisfied;
@@ -163,10 +179,13 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
     label: "Set Materia Handoff Context",
     description: "Set optional canonical explanatory context for downstream agents. Runtime code owns JSON string escaping.",
     parameters: SET_AGENT_HANDOFF_CONTEXT_PARAMETERS,
+    prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.setContext, SET_AGENT_HANDOFF_CONTEXT_PARAMETERS),
     executionMode: "sequential",
     async execute(_toolCallId, params) {
-      builder.setContext(params.context);
-      return handoffToolResult(builder, "Set handoff context.", "set_context", "context");
+      return runHandoffToolAction(() => {
+        builder.setContext(params.context);
+        return handoffToolResult(builder, "Set handoff context.", "set_context", "context");
+      });
     },
   });
   tools.setContext = setContext;
@@ -178,10 +197,13 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
       label: "Emit Materia Handoff Event",
       description: "Append one optional event side-channel object. Call once per event in dispatch order; do not include runtime-enriched ids, timestamps, or sequence fields.",
       parameters: EMIT_AGENT_HANDOFF_EVENT_PARAMETERS,
+      prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.emitEvent, EMIT_AGENT_HANDOFF_EVENT_PARAMETERS),
       executionMode: "sequential",
       async execute(_toolCallId, params) {
-        builder.addEvent(params);
-        return handoffToolResult(builder, "Added one handoff event.", "emit_event", "event");
+        return runHandoffToolAction(() => {
+          builder.addEvent(params);
+          return handoffToolResult(builder, "Added one handoff event.", "emit_event", "event");
+        });
       },
     });
     tools.emitEvent = emitEvent;
@@ -195,26 +217,29 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
     promptSnippet: "Commit a runtime-serialized materia handoff without authoring a JSON envelope",
     promptGuidelines: capabilityGuidelines(capabilities),
     parameters: COMMIT_AGENT_HANDOFF_PARAMETERS,
+    prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.commit, COMMIT_AGENT_HANDOFF_PARAMETERS),
     executionMode: "sequential",
     async execute() {
-      const committed = await builder.commit(options.onCommit);
-      const fields = Object.freeze(Object.keys(committed.output));
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Committed canonical handoff fields: ${fields.join(", ") || "(none)"}.`,
-        }],
-        details: {
-          action: "commit" as const,
-          scope: cloneAgentHandoffBuilderScope(builder.scope),
-          workItemCount: committed.envelope.workItems?.length ?? 0,
-          eventCount: committed.output.event?.length ?? 0,
-          committed: true,
-          fields,
-          jsonBytes: new TextEncoder().encode(committed.json).byteLength,
-        } satisfies AgentHandoffToolDetails,
-        terminate: true,
-      };
+      return runHandoffToolAction(async () => {
+        const committed = await builder.commit(options.onCommit);
+        const fields = Object.freeze(Object.keys(committed.output));
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Committed canonical handoff fields: ${fields.join(", ") || "(none)"}.`,
+          }],
+          details: {
+            action: "commit" as const,
+            scope: cloneAgentHandoffBuilderScope(builder.scope),
+            workItemCount: committed.envelope.workItems?.length ?? 0,
+            eventCount: committed.output.event?.length ?? 0,
+            committed: true,
+            fields,
+            jsonBytes: new TextEncoder().encode(committed.json).byteLength,
+          } satisfies AgentHandoffToolDetails,
+          terminate: true,
+        };
+      });
     },
   });
   tools.commit = commit;
@@ -272,6 +297,71 @@ function capabilityGuidelines(capabilities: AgentHandoffCapabilities): string[] 
   }
   guidelines.push(`Call ${AGENT_HANDOFF_TOOL_NAMES.commit} as the sole final tool call after all applicable handoff values are submitted.`);
   return guidelines;
+}
+
+function handoffArgumentPreparer<TParameters extends TSchema>(
+  name: AgentHandoffToolName,
+  parameters: TParameters,
+): (args: unknown) => Static<TParameters> {
+  return (args) => {
+    try {
+      return validateToolArguments(
+        { name, description: "Materia handoff tool", parameters } as Tool<TParameters>,
+        { type: "toolCall", id: `prepare-${name}`, name, arguments: args as Record<string, unknown> } satisfies ToolCall,
+      ) as Static<TParameters>;
+    } catch (error) {
+      throw new Error(formatHandoffToolArgumentFailure(error));
+    }
+  };
+}
+
+function formatHandoffToolArgumentFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const safeSection = message.split(/\n\s*Received arguments:/i, 1)[0] ?? "";
+  const issues: HandoffValidationIssue[] = [];
+  for (const line of safeSection.split("\n")) {
+    const match = line.match(/^\s*-\s+([^:]+):\s*(.+?)\s*$/);
+    if (!match) continue;
+    issues.push({ path: normalizeToolValidationPath(match[1]!), message: match[2]! });
+  }
+  const feedback = formatConciseValidationIssues(issues);
+  return [
+    "Materia handoff argument validation failed.",
+    ...(feedback.length > 0 ? feedback : ["- $: Invalid tool arguments."]),
+    "Correct the listed fields and retry the failed handoff tool call.",
+  ].join("\n");
+}
+
+function normalizeToolValidationPath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed || trimmed === "root" || trimmed === "$" || trimmed === "/") return "$";
+  if (trimmed.startsWith("$.")) return trimmed;
+  if (trimmed.startsWith("/")) return `$.${trimmed.slice(1).replaceAll("/", ".")}`;
+  if (trimmed.startsWith("root.")) return `$.${trimmed.slice("root.".length)}`;
+  return `$.${trimmed}`;
+}
+
+async function runHandoffToolAction<T>(action: () => T | Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    throw new Error(formatHandoffToolFailure(error));
+  }
+}
+
+function formatHandoffToolFailure(error: unknown): string {
+  if (error instanceof AgentHandoffBuilderError || error instanceof HandoffJsonValidationError) {
+    const category = error instanceof AgentHandoffBuilderError && error.code === "closed"
+      ? "protocol"
+      : "contract";
+    const lines = formatConciseValidationIssues(error.issues as readonly HandoffValidationIssue[]);
+    return [
+      `Materia handoff ${category} violation.`,
+      ...lines,
+      "Correct the listed fields and retry the failed handoff tool call.",
+    ].join("\n");
+  }
+  return "Materia handoff tool execution failed. Retry the failed handoff tool call.";
 }
 
 function handoffToolResult(

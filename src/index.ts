@@ -113,6 +113,11 @@ export default function piMateria(pi: ExtensionAPI) {
     return { systemPrompt };
   });
 
+  pi.on("tool_execution_end", async (event, ctx) => {
+    activeContext = ctx;
+    await castExecutionUseCases.handleToolExecutionEnd(pi, event, ctx);
+  });
+
   pi.on("agent_end", async (event, ctx) => {
     activeContext = ctx;
     const before = adapters.states.loadActive(ctx);

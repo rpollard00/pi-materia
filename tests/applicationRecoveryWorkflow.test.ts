@@ -210,9 +210,10 @@ describe("same-socket recovery workflow", () => {
     expect(recovered).toBe(true);
     expect(state.runState.lastMessage).toContain("previous JSON output was invalid");
     expect(events.map((event) => event.type)).toEqual(["same_socket_recovery_start", "same_socket_recovery_retry"]);
-    expect(events[0].data).toMatchObject({ reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "json_parse", excerptLength: 12, excerptTruncated: true, attempt: 1, maxAttempts: 1, socket: "Socket-1" });
+    expect(events[0].data).toMatchObject({ reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "json_parse", failureCategory: "malformed_syntax", strategy: "direct_json", finalizationAttempt: 1, excerptLength: 12, excerptTruncated: true, attempt: 1, maxAttempts: 1, socket: "Socket-1" });
     expect(events[0].data).not.toHaveProperty("invalidOutputExcerpt");
-    expect(events[1].data).toMatchObject({ reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "json_parse", excerptLength: 12, excerptTruncated: true, attempt: 1, maxAttempts: 1, socket: "Socket-1" });
+    expect(events[0].data).not.toHaveProperty("error");
+    expect(events[1].data).toMatchObject({ reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "json_parse", failureCategory: "malformed_syntax", strategy: "direct_json", finalizationAttempt: 1, excerptLength: 12, excerptTruncated: true, attempt: 1, maxAttempts: 1, socket: "Socket-1" });
     expect(calls.some((call) => call.startsWith("notify:") && call.includes("previous JSON output was invalid"))).toBe(true);
   });
 
@@ -269,8 +270,9 @@ describe("same-socket recovery workflow", () => {
     expect(state.failedReason).toContain("JSON output repair retry exhausted");
     expect(state.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "handoff_validation", excerptLength: 19, socket: "Socket-1" });
     expect(state.recoveryExhaustion?.failedReason).toBe(state.failedReason);
-    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "handoff_validation", excerptLength: 19, entryId: "entry-json-2" } });
+    expect(events.at(-1)).toMatchObject({ type: "same_socket_recovery_exhausted", data: { reason: "turn_failure", recoveryKind: "json_output_repair", validationKind: "handoff_validation", failureCategory: "contract_violation", strategy: "direct_json", finalizationAttempt: 1, excerptLength: 19, entryId: "entry-json-2" } });
     expect(events.at(-1)?.data).not.toHaveProperty("invalidOutputExcerpt");
+    expect(events.at(-1)?.data).not.toHaveProperty("error");
     expect(calls).toContain("failCast:true");
   });
 

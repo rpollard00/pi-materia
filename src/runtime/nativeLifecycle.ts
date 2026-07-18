@@ -1,4 +1,7 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { renderTemplate } from "../application/promptAssembly.js";
 import { applyAdvance, applyAssignments, evaluateCondition, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
@@ -18,6 +21,7 @@ import {
   validateAgentControllerMultiTurnSockets,
 } from "./agentControllerCompatibility.js";
 import { createAgentFinalizationRuntime } from "./agentFinalizationRuntime.js";
+import { handleFinalizationToolExecutionEnd, type HandoffToolExecutionEndEvent } from "./finalizationDiagnostics.js";
 import { createAgentLifecycle } from "./agentLifecycle.js";
 import { createAgentPromptDispatch } from "./agentPromptDispatch.js";
 import { recordActiveTurnProvenance, updateToolScope } from "./agentTurnState.js";
@@ -330,6 +334,17 @@ const castLifecycle = createCastLifecycle({
 export const continueNativeCast = castLifecycle.continueNativeCast;
 export const handleAgentEnd = agentLifecycle.handleAgentEnd;
 export const prepareAgentStartSystemPrompt = agentLifecycle.prepareAgentStartSystemPrompt;
+
+export async function handleAgentHandoffToolExecutionEnd(
+  pi: ExtensionAPI,
+  event: HandoffToolExecutionEndEvent,
+  ctx: ExtensionContext,
+): Promise<void> {
+  await handleFinalizationToolExecutionEnd(loadActiveCastState(ctx), event, {
+    appendEvent,
+    saveState: (state) => saveCastState(pi, state),
+  });
+}
 export const prepareMultiTurnRefinementTurn = agentLifecycle.prepareMultiTurnRefinementTurn;
 export const resumeNativeCast = castLifecycle.resumeNativeCast;
 export const reviveNativeCast = castLifecycle.reviveNativeCast;

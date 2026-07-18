@@ -19,9 +19,10 @@ export function parseJson<T>(text: string): T {
 export function parseSocketJson<T>(socketId: string, text: string): T {
   try {
     return parseJson<T>(text);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid JSON output for socket "${socketId}": ${reason}`);
+  } catch {
+    // The raw output is already captured by the bounded repair context. Keep
+    // thrown errors content-free so lifecycle diagnostics cannot echo handoff data.
+    throw new Error(`Invalid JSON output for socket "${socketId}": malformed JSON syntax.`);
   }
 }
 
