@@ -34,7 +34,7 @@ function metadataEnvelope() {
         authMethods: ['static-bearer'],
         label: 'test-central',
       },
-      roles: [{ roleId: 'central-reader', name: 'Central Reader', permissions: ['admin.read'] }],
+      roles: [{ roleId: 'central-reader', name: 'Central Reader', permissions: ['catalog.read', 'model-policy.read', 'telemetry.read', 'admin.read'] }],
       principals: [{ principalId: 'reader', tenantId: 'default', roleIds: ['central-reader'] }],
     },
   };
@@ -75,6 +75,10 @@ describe('CentralAdminApp', () => {
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer reader-secret');
         return jsonResponse(metadataEnvelope());
       }
+      if (path === '/api/catalog') {
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer reader-secret');
+        return jsonResponse({ ok: true, items: [] });
+      }
       throw new Error(`local-session endpoint must not be called: ${path}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -90,7 +94,7 @@ describe('CentralAdminApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Server information' }));
     expect(screen.getByTestId('central-admin-server')).toBeTruthy();
 
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(['/api/backend-mode', '/api/admin']);
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual(['/api/backend-mode', '/api/admin', '/api/catalog']);
   });
 
   it.each([

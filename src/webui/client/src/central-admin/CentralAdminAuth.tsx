@@ -14,6 +14,7 @@ import {
   requestCentralAdminJson,
   type CentralAdminApiPath,
   type CentralAdminRequestFailure,
+  type CentralAdminRequester,
 } from './api.js';
 import type { CentralAdminMetadata } from './types.js';
 
@@ -31,7 +32,7 @@ export interface CentralAdminAuthState {
   retry: () => void;
   signOut: () => void;
   /** Shared authenticated transport for all central-admin feature surfaces. */
-  request: <T>(path: CentralAdminApiPath, init?: RequestInit) => Promise<T>;
+  request: CentralAdminRequester;
 }
 
 const CentralAdminAuthContext = createContext<CentralAdminAuthState | undefined>(undefined);

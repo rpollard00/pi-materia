@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useCentralAdminAuth } from './CentralAdminAuth.js';
+import { CentralCatalogBrowser } from './CentralCatalogBrowser.js';
 import { centralAdminSecondaryButtonClass } from './CentralAdminStatePanel.js';
 import { CENTRAL_ADMIN_SECTIONS, type CentralAdminMetadata, type CentralAdminSection } from './types.js';
 
-const SECTION_CONTENT: Record<Exclude<CentralAdminSection, 'server'>, { eyebrow: string; title: string; description: string }> = {
-  catalog: {
-    eyebrow: 'Central catalog',
-    title: 'Catalog',
-    description: 'Browse centrally managed loadout and materia definitions from this control plane.',
-  },
+type FeatureLandingSection = Exclude<CentralAdminSection, 'catalog' | 'server'>;
+
+const SECTION_CONTENT: Record<FeatureLandingSection, { eyebrow: string; title: string; description: string }> = {
   policy: {
     eyebrow: 'Model governance',
     title: 'Model policy',
@@ -50,7 +48,7 @@ function useCentralAdminNavigation() {
   return { section, select };
 }
 
-function FeatureLanding({ section }: { section: Exclude<CentralAdminSection, 'server'> }) {
+function FeatureLanding({ section }: { section: FeatureLandingSection }) {
   const content = SECTION_CONTENT[section];
   return (
     <section className="fantasy-panel p-7" data-testid={`central-admin-${section}`}>
@@ -139,9 +137,11 @@ export function CentralAdminShell() {
           ))}
         </nav>
 
-        {section === 'server'
-          ? <ServerInformation metadata={auth.metadata} />
-          : <FeatureLanding section={section} />}
+        {section === 'catalog'
+          ? <CentralCatalogBrowser request={auth.request} />
+          : section === 'server'
+            ? <ServerInformation metadata={auth.metadata} />
+            : <FeatureLanding section={section} />}
       </section>
     </main>
   );

@@ -12,6 +12,7 @@ export type CentralAdminApiPath =
   | '/api/admin'
   | `/api/admin/${string}`
   | '/api/catalog'
+  | `/api/catalog?${string}`
   | `/api/catalog/${string}`
   | '/api/model-policy'
   | `/api/model-policy/${string}`
@@ -20,6 +21,9 @@ export type CentralAdminApiPath =
   | '/api/telemetry'
   | `/api/telemetry/${string}`
   | '/api/status';
+
+/** Authenticated request function shared with isolated central-admin features. */
+export type CentralAdminRequester = <T>(path: CentralAdminApiPath, init?: RequestInit) => Promise<T>;
 
 /** A presentation-safe central API failure shared by every admin surface. */
 export class CentralAdminRequestError extends Error {
