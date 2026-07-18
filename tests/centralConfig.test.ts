@@ -55,6 +55,8 @@ describe("central-connected runtime configuration", () => {
       env: env({
         [CENTRAL_CONFIG_ENV.apiUrl]: " https://env.example.test/control ",
         [CENTRAL_CONFIG_ENV.requestTimeoutMs]: "7500",
+        [CENTRAL_CONFIG_ENV.runtimeId]: " runtime-west-1 ",
+        [CENTRAL_CONFIG_ENV.scope]: JSON.stringify({ tenantId: "tenant-a", repositoryId: "repo-a" }),
         [CENTRAL_CONFIG_ENV.readToken]: " reader-secret ",
         [CENTRAL_CONFIG_ENV.adminToken]: "admin-secret",
         [CENTRAL_CONFIG_ENV.telemetryToken]: "telemetry-secret",
@@ -70,6 +72,8 @@ describe("central-connected runtime configuration", () => {
         adminToken: "admin-secret",
         telemetryToken: "telemetry-secret",
       },
+      runtimeId: "runtime-west-1",
+      scope: { tenantId: "tenant-a", repositoryId: "repo-a" },
     });
   });
 
@@ -115,6 +119,13 @@ describe("central-connected runtime configuration", () => {
         [CENTRAL_CONFIG_ENV.adminTokenFile]: "/run/secrets/admin",
       }),
     })).rejects.toThrow(/cannot set both.*ADMIN_TOKEN.*ADMIN_TOKEN_FILE/i);
+
+    await expect(loadCentralConnectedRuntimeConfig({
+      env: env({
+        [CENTRAL_CONFIG_ENV.apiUrl]: "https://central.example.test",
+        [CENTRAL_CONFIG_ENV.scope]: JSON.stringify({ workspaceId: "missing-tenant" }),
+      }),
+    })).rejects.toThrow(CENTRAL_CONFIG_ENV.scope);
   });
 });
 

@@ -45,7 +45,7 @@ const {
   getResultAccumulator: (state: MateriaCastState) => ResultAccumulator | undefined;
   startHeartbeat: (state: MateriaCastState, config: { eventing?: { enabled?: boolean; heartbeatIntervalMs?: number } }) => void;
   stopHeartbeat: (castId: string) => void;
-  initializeCastEventBus: (config: { eventing?: { enabled?: boolean; sinks?: Record<string, unknown> } }, state: MateriaCastState) => EventBus | undefined;
+  initializeCastEventBus: (config: { eventing?: { enabled?: boolean; sinks?: Record<string, unknown> } }, state: MateriaCastState) => Promise<EventBus | undefined>;
   castHeartbeats: Map<string, ReturnType<typeof setInterval>>;
   castEventBuses: Map<string, EventBus>;
 };
@@ -520,7 +520,7 @@ describe("lifecycle event emission", () => {
 
     // Simulates what startNativeCast does: init bus, conditionally start heartbeat.
     const config = { eventing: { enabled: true, heartbeatIntervalMs: 500 } };
-    const bus = initializeCastEventBus(config, state);
+    const bus = await initializeCastEventBus(config, state);
     expect(bus).toBeDefined();
     expect(getEventBus(state)).toBeDefined();
 
@@ -544,7 +544,7 @@ describe("lifecycle event emission", () => {
 
     // Simulates the disabled path: eventing.enabled is false.
     const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000 } };
-    const bus = initializeCastEventBus(config, state);
+    const bus = await initializeCastEventBus(config, state);
     expect(bus).toBeUndefined();
     expect(getEventBus(state)).toBeUndefined();
 
@@ -748,7 +748,7 @@ describe("lifecycle event emission", () => {
 
     // Simulate the resume flow: re-init bus, restart heartbeat.
     const config = { eventing: { enabled: true, heartbeatIntervalMs: 300 } };
-    const bus = initializeCastEventBus(config, state);
+    const bus = await initializeCastEventBus(config, state);
     expect(bus).toBeDefined();
 
     try {
@@ -781,7 +781,7 @@ describe("lifecycle event emission", () => {
 
     // Simulate resume with eventing disabled — bus is undefined, heartbeat skipped.
     const config = { eventing: { enabled: false, heartbeatIntervalMs: 30000 } };
-    const bus = initializeCastEventBus(config, state);
+    const bus = await initializeCastEventBus(config, state);
     expect(bus).toBeUndefined();
 
     if (bus) {
@@ -864,7 +864,7 @@ describe("agent-controller preset activation from environment", () => {
 
       const runDir = await tempDir();
       const state = makeCastState({ castId: "test-ac-activate", runDir });
-      const bus = initializeCastEventBus(config, state);
+      const bus = await initializeCastEventBus(config, state);
       expect(bus).toBeDefined();
 
       try {
@@ -926,7 +926,7 @@ describe("agent-controller preset activation from environment", () => {
     const runDir = await tempDir();
     const state = makeCastState({ castId: "test-ac-inactive", runDir });
     const config = { eventing: { enabled: false, presets: [], sinks: {}, heartbeatIntervalMs: 30000 } } as never;
-    const bus = initializeCastEventBus(config, state);
+    const bus = await initializeCastEventBus(config, state);
     expect(bus).toBeUndefined();
     expect(getEventBus(state)).toBeUndefined();
   });
@@ -948,7 +948,7 @@ describe("agent-controller preset activation from environment", () => {
 
       const runDir = await tempDir();
       const state = makeCastState({ castId: "test-ac-dispatch-artifact", runDir });
-      const bus = initializeCastEventBus(config, state);
+      const bus = await initializeCastEventBus(config, state);
       expect(bus).toBeDefined();
 
       try {

@@ -9,7 +9,7 @@ const { initializeCastEventBus } = nativeTestInternals as unknown as {
   initializeCastEventBus: (
     config: { eventing?: { enabled?: boolean; presets?: string[]; sinks?: Record<string, unknown> } },
     state: MateriaCastState,
-  ) => unknown;
+  ) => Promise<unknown>;
 };
 
 const originalEnv = { ...process.env };
@@ -117,7 +117,7 @@ describe("initializeCastEventBus webhook diagnostics", () => {
     delete process.env.CONTROLLER_RUN_ID;
     delete process.env.CONTROLLER_CONTEXT_DIR;
 
-    initializeCastEventBus(
+    await initializeCastEventBus(
       { eventing: { enabled: true, presets: ["agent-controller"] } },
       state,
     );
@@ -135,7 +135,7 @@ describe("initializeCastEventBus webhook diagnostics", () => {
     process.env.CONTROLLER_EVENT_URL = "https://controller.example.com/runs/run-42/events";
     delete process.env.CONTROLLER_CONTEXT_DIR;
 
-    initializeCastEventBus(
+    await initializeCastEventBus(
       { eventing: { enabled: true, presets: ["agent-controller"] } },
       state,
     );
@@ -164,7 +164,7 @@ describe("initializeCastEventBus webhook diagnostics", () => {
     delete process.env.CONTROLLER_EVENT_URL;
     delete process.env.CONTROLLER_CONTEXT_DIR;
 
-    const bus = initializeCastEventBus(
+    const bus = await initializeCastEventBus(
       { eventing: { enabled: false, presets: ["agent-controller"] } },
       state,
     );
@@ -185,7 +185,7 @@ describe("initializeCastEventBus webhook diagnostics", () => {
     delete process.env.CONTROLLER_EVENT_URL;
     delete process.env.CONTROLLER_CONTEXT_DIR;
 
-    initializeCastEventBus({ eventing: { enabled: false } }, state);
+    await initializeCastEventBus({ eventing: { enabled: false } }, state);
 
     // Give async artifact writes a chance to flush, then assert silence.
     await new Promise((r) => setTimeout(r, 30));
@@ -202,7 +202,7 @@ describe("initializeCastEventBus webhook diagnostics", () => {
     delete process.env.CONTROLLER_EVENT_URL;
     delete process.env.CONTROLLER_CONTEXT_DIR;
 
-    const bus = initializeCastEventBus(
+    const bus = await initializeCastEventBus(
       { eventing: { enabled: true, presets: ["agent-controller"] } },
       state,
     );

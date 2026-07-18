@@ -8,6 +8,7 @@ import type {
 } from "../domain/eventing.js";
 
 const timeoutReason = "webhook-timeout";
+export const DEFAULT_WEBHOOK_MAX_QUEUE_SIZE = 256;
 
 // ── Webhook Sink ────────────────────────────────────────────────────────
 
@@ -33,6 +34,9 @@ export class WebhookSink implements EventSink {
   readonly #config: EventingWebhookSinkConfig;
   #active: boolean;
   #consecutiveFailures = 0;
+  #pendingDeliveries = 0;
+  #droppedEvents = 0;
+  readonly #maxQueueSize: number;
 
   /** Internal serial queue — events are processed one at a time in FIFO order. */
   #queue: EnrichedEvent[] = [];
@@ -45,6 +49,7 @@ export class WebhookSink implements EventSink {
     this.id = config.id;
     this.#config = config;
     this.#active = config.enabled !== false;
+    this.#maxQueueSize = positiveQueueSize(config.maxQueueSize ?? DEFAULT_WEBHOOK_MAX_QUEUE_SIZE);
   }
 
   get enabled(): boolean {
@@ -54,6 +59,16 @@ export class WebhookSink implements EventSink {
   /** Exposed for tests — return the number of consecutive delivery failures. */
   get consecutiveFailures(): number {
     return this.#consecutiveFailures;
+  }
+
+  /** In-flight plus queued deliveries, exposed for operational tests/diagnostics. */
+  get pendingDeliveries(): number {
+    return this.#pendingDeliveries;
+  }
+
+  /** Events rejected because the bounded queue was full. */
+  get droppedEvents(): number {
+    return this.#droppedEvents;
   }
 
   // ── EventSink contract ─────────────────────────────────────────────
@@ -92,6 +107,20 @@ export class WebhookSink implements EventSink {
       return;
     }
 
+    if (this.#pendingDeliveries >= this.#maxQueueSize) {
+      this.#droppedEvents++;
+      this.#asyncResults.push({
+        eventId: event.eventId,
+        sinkId: this.id,
+        status: "failed",
+        reason: "queue_full",
+        attempts: 0,
+        error: `Webhook sink "${this.id}" queue is full; event dropped`,
+      });
+      return;
+    }
+
+    this.#pendingDeliveries++;
     this.#queue.push(event);
     if (!this.#drainPromise) {
       this.#drainPromise = this.#drain();
@@ -107,9 +136,7 @@ export class WebhookSink implements EventSink {
    */
   async flush(): Promise<void> {
     while (this.#drainPromise) {
-      const p = this.#drainPromise;
-      this.#drainPromise = null;
-      await p;
+      await this.#drainPromise;
     }
   }
 
@@ -142,24 +169,22 @@ export class WebhookSink implements EventSink {
   /**
    * Process the queue sequentially until it is empty.
    *
-   * When the queue drains, `#drainPromise` is reset to `null`. If more
-   * events were enqueued during the drain, a new drain cycle is started
-   * before resetting.
+   * When the queue drains, `#drainPromise` is reset to `null`. Events queued
+   * while a request is in flight are consumed by the same serial loop.
    */
   async #drain(): Promise<void> {
     try {
       while (this.#queue.length > 0) {
         const event = this.#queue.shift()!;
-        const result = await this.#deliverOne(event);
-        this.#asyncResults.push(result);
+        try {
+          const result = await this.#deliverOne(event);
+          this.#asyncResults.push(result);
+        } finally {
+          this.#pendingDeliveries--;
+        }
       }
     } finally {
-      // Check if more events were added while we were draining.
-      if (this.#queue.length > 0) {
-        this.#drainPromise = this.#drain();
-      } else {
-        this.#drainPromise = null;
-      }
+      this.#drainPromise = null;
     }
   }
 
@@ -205,17 +230,19 @@ export class WebhookSink implements EventSink {
     let lastStatusCode: number | undefined;
     let lastError: unknown;
     let lastReason: DispatchFailureReason = "unknown_error";
+    let attempts = 0;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(
-          () => controller.abort(new DOMException(timeoutReason, "TimeoutError")),
-          timeoutMs,
-        );
-        // Don't keep the process alive waiting for a webhook timeout.
-        timeout.unref();
+      attempts++;
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(new DOMException(timeoutReason, "TimeoutError")),
+        timeoutMs,
+      );
+      // Don't keep the process alive waiting for a webhook timeout.
+      timeout.unref();
 
+      try {
         const response = await fetch(url, {
           method,
           headers,
@@ -234,6 +261,7 @@ export class WebhookSink implements EventSink {
             sinkId: this.id,
             status: "delivered",
             statusCode: response.status,
+            attempts,
           };
         }
 
@@ -278,6 +306,8 @@ export class WebhookSink implements EventSink {
           continue;
         }
         break;
+      } finally {
+        clearTimeout(timeout);
       }
     }
 
@@ -297,6 +327,7 @@ export class WebhookSink implements EventSink {
       status: "failed",
       statusCode: lastStatusCode,
       reason: lastReason,
+      attempts,
       error: safeErrorMessage(errorMsg),
     };
   }
@@ -416,7 +447,7 @@ export function matchesFilter(
 // ── Body Construction ───────────────────────────────────────────────────
 
 function buildBody(
-  template: "passthrough" | "mapped" | "none",
+  template: "passthrough" | "mapped" | "envelope" | "none",
   mapping: EventBodyFieldMapping | undefined,
   event: EnrichedEvent,
   typeMap?: Record<string, string>,
@@ -427,6 +458,8 @@ function buildBody(
       return event;
     case "none":
       return {};
+    case "envelope":
+      return { ...(mapping?.static ?? {}), events: [event] };
     case "mapped":
       return buildMappedBody(mapping, event, typeMap, severityMap);
   }
@@ -588,6 +621,13 @@ function redactUrl(url: string): string {
 }
 
 // ── Error Helpers ───────────────────────────────────────────────────────
+
+function positiveQueueSize(value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError("Webhook sink maxQueueSize must be a positive safe integer.");
+  }
+  return value;
+}
 
 function isWebhookTimeout(error: unknown): boolean {
   return (

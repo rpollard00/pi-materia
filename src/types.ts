@@ -1,6 +1,7 @@
 import type { ToolScopeSpec } from "./domain/toolScope.js";
 import type { CatalogDriftInfo, CatalogOriginProvenance } from "./domain/catalogProvenance.js";
 import type { MateriaThinkingLevel } from "./domain/thinking.js";
+import type { ScopePath } from "./domain/scope.js";
 
 export interface PiMateriaConfig {
   artifactDir?: string;
@@ -136,6 +137,10 @@ export interface MateriaProfileConfig {
     apiUrl?: string;
     /** Per-request HTTP timeout. Defaults to the central client default. */
     requestTimeoutMs?: number;
+    /** Stable deployment-provided runtime identity for central telemetry. */
+    runtimeId?: string;
+    /** Enterprise scope attached to central telemetry emitted by this runtime. */
+    scope?: ScopePath;
   };
   /** Durable user preference used only to initialize the runtime active loadout. */
   defaultLoadoutId?: string | null;
@@ -819,9 +824,9 @@ export interface EventingWebhookSinkConfig {
   method?: "POST" | "PUT";
   /** Static headers added to every delivery request. Secret values are redacted in logs/artifacts. */
   headers?: Record<string, string>;
-  /** Body construction strategy. "mapped" (default) uses bodyMapping; "passthrough" sends the entire enriched event; "none" sends an empty object. */
-  bodyTemplate?: "passthrough" | "mapped" | "none";
-  /** Field mapping used when bodyTemplate is "mapped". */
+  /** Body construction strategy. "mapped" (default) uses bodyMapping; "passthrough" sends the event; "envelope" sends `{ events: [event], ...static }`; "none" sends an empty object. */
+  bodyTemplate?: "passthrough" | "mapped" | "envelope" | "none";
+  /** Field mapping for "mapped" bodies; `static` also supplies metadata for "envelope" bodies. */
   bodyMapping?: EventBodyFieldMapping;
   /** Optional pi-materia → controller event type mapping. Keys are pi-materia event types; values are the mapped type to send. */
   typeMap?: Record<string, string>;
@@ -839,6 +844,8 @@ export interface EventingWebhookSinkConfig {
   maxBackoffMs?: number;
   /** Drop sink after this many consecutive failures (default 10). */
   discardingAfter?: number;
+  /** Maximum in-flight plus queued deliveries before new events are dropped with a diagnostic (default 256). */
+  maxQueueSize?: number;
 }
 
 /** A disabled sink entry preserved in config but skipped during dispatch. */

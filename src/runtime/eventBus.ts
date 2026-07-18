@@ -176,6 +176,7 @@ export class EventBus {
           status: match.status,
           statusCode: match.statusCode,
           reason: match.reason,
+          attempts: match.attempts,
           error: match.error,
         };
         changed = true;

@@ -412,6 +412,7 @@ export type DispatchFailureReason =
   | "network_error"
   | "unknown_error"
   | "deliver_threw"
+  | "queue_full"
   | "target_url_missing"
   | "target_url_invalid";
 
@@ -444,6 +445,8 @@ export interface DispatchSinkResult {
   statusCode?: number;
   /** Machine-readable reason for non-delivered statuses. */
   reason?: DispatchFailureReason;
+  /** Number of HTTP attempts made; greater than one makes retries observable. */
+  attempts?: number;
   /** Redacted error/detail message for failed/misconfigured statuses. */
   error?: string;
 }

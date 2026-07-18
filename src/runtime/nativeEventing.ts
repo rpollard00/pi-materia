@@ -20,6 +20,26 @@ import type {
 import { createEventBus, type EventBus } from "./eventBus.js";
 import { WebhookSink } from "./webhookSink.js";
 
+export interface CentralTelemetryDiagnostic {
+  readonly severity: "info" | "warning";
+  readonly reason: "active" | "telemetry_credential_missing" | "configuration_unavailable" | "sink_invalid";
+  readonly message: string;
+}
+
+export interface CentralTelemetrySinkResolution {
+  readonly sink?: EventingWebhookSinkConfig;
+  readonly diagnostic?: CentralTelemetryDiagnostic;
+}
+
+/** Adapter boundary that turns opt-in central configuration into a webhook sink. */
+export interface CentralTelemetrySinkResolver {
+  resolve(state: MateriaCastState): Promise<CentralTelemetrySinkResolution | undefined>;
+}
+
+const localOnlyCentralTelemetryResolver: CentralTelemetrySinkResolver = {
+  resolve: async () => undefined,
+};
+
 export interface LifecycleEventOverrides {
   severity?: EventSeverity;
   message?: string;
@@ -37,11 +57,20 @@ export interface LifecycleEventOverrides {
  * A single instance is exported so starts, resumes, socket events, and terminal
  * transitions all observe the same per-cast registries.
  */
-class NativeEventingRuntime {
+export class NativeEventingRuntime {
   private readonly eventBuses = new Map<string, EventBus>();
   private readonly sequenceCounters = new Map<string, ReturnType<typeof createSequenceCounter>>();
   private readonly resultAccumulators = new Map<string, ResultAccumulator>();
   private readonly heartbeats = new Map<string, ReturnType<typeof setInterval>>();
+  private centralTelemetryResolver: CentralTelemetrySinkResolver;
+
+  constructor(centralTelemetryResolver: CentralTelemetrySinkResolver = localOnlyCentralTelemetryResolver) {
+    this.centralTelemetryResolver = centralTelemetryResolver;
+  }
+
+  setCentralTelemetrySinkResolver(resolver: CentralTelemetrySinkResolver): void {
+    this.centralTelemetryResolver = resolver;
+  }
 
   /** Compatibility access for nativeTestInternals; returns the shared registry. */
   get castEventBuses(): Map<string, EventBus> {
@@ -173,14 +202,28 @@ class NativeEventingRuntime {
     this.resultAccumulators.delete(castId);
   }
 
-  /** Create and register the event bus and configured sinks for a cast. */
-  initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState): EventBus | undefined {
+  /** Create and register the event bus and configured/central sinks for a cast. */
+  async initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState): Promise<EventBus | undefined> {
     const eventing = config.eventing;
     const controllerContextDir = process.env["CONTROLLER_CONTEXT_DIR"]?.trim();
     const controller = detectControllerLaunch();
     const runIdResolved = Boolean(resolveControllerRunId(controllerContextDir));
+    let centralResolution: CentralTelemetrySinkResolution | undefined;
 
-    if (!eventing?.enabled) {
+    try {
+      centralResolution = await this.centralTelemetryResolver.resolve(state);
+    } catch {
+      centralResolution = {
+        diagnostic: {
+          severity: "warning",
+          reason: "configuration_unavailable",
+          message: "Central telemetry configuration could not be resolved; the local cast will continue without central delivery.",
+        },
+      };
+    }
+    this.surfaceCentralTelemetryDiagnostic(state, centralResolution?.diagnostic);
+
+    if (!eventing?.enabled && !centralResolution?.sink) {
       this.surfaceAgentControllerDiagnostics(state, {
         eventing,
         agentControllerSink: this.pickAgentControllerSink(eventing?.sinks),
@@ -193,21 +236,27 @@ class NativeEventingRuntime {
     const bus = createEventBus(state.runDir);
     const sequence = createSequenceCounter();
     const accumulator = new ResultAccumulator();
+    const resolvedSinks: Record<string, EventSinkConfig> = {};
 
-    const resolvedSinks: Record<string, EventSinkConfig> = { ...eventing.sinks };
-    if (eventing.presets && eventing.presets.length > 0) {
-      const expanded = expandPresets(
-        eventing.presets,
-        eventing.sinks,
-        controllerContextDir,
-      );
-      for (const [sinkId, sinkConfig] of Object.entries(expanded.sinks)) {
-        if (!(sinkId in resolvedSinks)) {
-          resolvedSinks[sinkId] = sinkConfig;
+    // Explicit eventing remains independently opt-in. A central connection can
+    // create the shared bus without accidentally activating configured controller
+    // sinks or heartbeat behavior.
+    if (eventing?.enabled) {
+      Object.assign(resolvedSinks, eventing.sinks);
+      if (eventing.presets && eventing.presets.length > 0) {
+        const expanded = expandPresets(
+          eventing.presets,
+          eventing.sinks,
+          controllerContextDir,
+        );
+        for (const [sinkId, sinkConfig] of Object.entries(expanded.sinks)) {
+          if (!(sinkId in resolvedSinks)) {
+            resolvedSinks[sinkId] = sinkConfig;
+          }
         }
-      }
-      for (const warning of expanded.warnings) {
-        appendEvent(state.runState, "eventing_preset_warning", { warning }).catch(() => {});
+        for (const warning of expanded.warnings) {
+          appendEvent(state.runState, "eventing_preset_warning", { warning }).catch(() => {});
+        }
       }
     }
 
@@ -219,11 +268,24 @@ class NativeEventingRuntime {
     });
 
     for (const sinkConfig of Object.values(resolvedSinks)) {
+      if (sinkConfig.id === centralResolution?.sink?.id) continue;
       if (!this.isEnabledWebhookSinkConfig(sinkConfig)) continue;
       try {
         bus.register(new WebhookSink(sinkConfig));
       } catch {
         // Sink creation is non-fatal; the cast continues without this sink.
+      }
+    }
+
+    if (centralResolution?.sink) {
+      try {
+        bus.register(new WebhookSink(centralResolution.sink));
+      } catch {
+        this.surfaceCentralTelemetryDiagnostic(state, {
+          severity: "warning",
+          reason: "sink_invalid",
+          message: "Central telemetry sink configuration is invalid; the local cast will continue without central delivery.",
+        });
       }
     }
 
@@ -244,6 +306,22 @@ class NativeEventingRuntime {
     sinks: Record<string, EventSinkConfig> | undefined,
   ): EventSinkConfig | undefined {
     return sinks?.["agent-controller-webhook"];
+  }
+
+  private surfaceCentralTelemetryDiagnostic(
+    state: MateriaCastState,
+    diagnostic: CentralTelemetryDiagnostic | undefined,
+  ): void {
+    if (!diagnostic) return;
+    if (diagnostic.severity === "warning") {
+      console.warn(`[pi-materia] central telemetry: ${diagnostic.message}`);
+    }
+    appendEvent(state.runState, "central_telemetry_diagnostic", {
+      severity: diagnostic.severity,
+      reason: diagnostic.reason,
+      message: diagnostic.message,
+      active: diagnostic.reason === "active",
+    }).catch(() => {});
   }
 
   /** Surface webhook activation diagnostics without affecting cast progress. */
@@ -273,3 +351,8 @@ class NativeEventingRuntime {
 }
 
 export const nativeEventing = new NativeEventingRuntime();
+
+/** Register the connected-runtime adapter during plugin composition. */
+export function setCentralTelemetrySinkResolver(resolver: CentralTelemetrySinkResolver): void {
+  nativeEventing.setCentralTelemetrySinkResolver(resolver);
+}

@@ -58,7 +58,7 @@ export interface CastLifecycleDependencies {
     ): Promise<PersistedCastLoadoutIdentity | undefined>;
   };
   eventing: {
-    initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState): EventBus | undefined;
+    initializeCastEventBus(config: PiMateriaConfig, state: MateriaCastState): Promise<EventBus | undefined>;
     startHeartbeat(state: MateriaCastState, config: PiMateriaConfig): void;
     emitLifecycleEvent(
       state: MateriaCastState,
@@ -184,8 +184,9 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       pipeline,
     };
 
-    // Initialize the event bus if eventing is enabled.
-    const eventBus = deps.eventing.initializeCastEventBus(config, state);
+    // Initialize the shared event bus for explicit eventing and/or central telemetry.
+    // Central configuration and sink failures are contained by the eventing adapter.
+    const eventBus = await deps.eventing.initializeCastEventBus(config, state);
 
     // Start heartbeat only when eventing is enabled and the bus is registered.
     // (docs/runtime-eventing.md §7.3: heartbeat is opt-in, default off).
@@ -388,7 +389,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     // Restart heartbeat when eventing is enabled (docs/runtime-eventing.md §7.3).
     try {
       const config = await deps.state.loadConfigFromState(state);
-      const eventBus = deps.eventing.initializeCastEventBus(config, state);
+      const eventBus = await deps.eventing.initializeCastEventBus(config, state);
       if (eventBus) {
         deps.eventing.startHeartbeat(state, config);
       }

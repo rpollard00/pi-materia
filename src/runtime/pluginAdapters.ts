@@ -1,7 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
 import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, handleAgentHandoffToolExecutionEnd, materiaStatusLabel, prepareAgentStartSystemPrompt, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
-import { createArtifactCatalog, createCastStateRepository, createCentralConnectedModelPolicyResolver, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../infrastructure/index.js";
+import { createArtifactCatalog, createCastStateRepository, createCentralConnectedModelPolicyResolver, createCentralConnectedTelemetrySinkResolver, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../infrastructure/index.js";
+import type { CentralTelemetrySinkResolver } from "./nativeEventing.js";
 import type { ModelPolicyResolver } from "./modelPolicyResolver.js";
 
 export function createCastContextPort(): CastContextPort {
@@ -42,6 +43,7 @@ export interface MateriaPluginAdapters {
   environment: EnvironmentLookup;
   logger: Logger;
   modelPolicies: ModelPolicyResolver;
+  centralTelemetry: CentralTelemetrySinkResolver;
 }
 
 export function createMateriaPluginAdapters(env?: NodeJS.ProcessEnv): MateriaPluginAdapters {
@@ -57,5 +59,6 @@ export function createMateriaPluginAdapters(env?: NodeJS.ProcessEnv): MateriaPlu
     environment: createProcessEnvironmentLookup(env),
     logger: createConsoleLogger(),
     modelPolicies: createCentralConnectedModelPolicyResolver(),
+    centralTelemetry: createCentralConnectedTelemetrySinkResolver(),
   };
 }

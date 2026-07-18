@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isScopePath, type ScopePath } from "../../domain/scope.js";
 import type { MateriaProfileConfig } from "../../types.js";
 import {
   readCentralSecret,
@@ -10,6 +11,8 @@ import {
 export const CENTRAL_CONFIG_ENV = {
   apiUrl: "MATERIA_CENTRAL_API_URL",
   requestTimeoutMs: "MATERIA_CENTRAL_REQUEST_TIMEOUT_MS",
+  runtimeId: "MATERIA_CENTRAL_RUNTIME_ID",
+  scope: "MATERIA_CENTRAL_SCOPE",
   databasePath: "MATERIA_CENTRAL_DATABASE_PATH",
   retentionDays: "MATERIA_CENTRAL_RETENTION_DAYS",
   host: "MATERIA_CENTRAL_HOST",
@@ -51,6 +54,10 @@ export interface CentralConnectedRuntimeConfig {
   readonly apiUrl: string;
   readonly requestTimeoutMs: number;
   readonly credentials: CentralCredentialConfig;
+  /** Optional stable identity; otherwise the telemetry adapter creates a process identity. */
+  readonly runtimeId?: string;
+  /** Optional enterprise scope included in central telemetry envelopes. */
+  readonly scope?: ScopePath;
 }
 
 /** Configuration for the standalone central HTTP server process. */
@@ -109,7 +116,19 @@ export async function loadCentralConnectedRuntimeConfig(
     ? positiveIntegerOrDefault(options.profile?.central?.requestTimeoutMs, DEFAULT_CENTRAL_REQUEST_TIMEOUT_MS)
     : parsePositiveInteger(envTimeout, CENTRAL_CONFIG_ENV.requestTimeoutMs);
   const credentials = await loadCentralCredentials(env, options.readSecretFile);
-  return { apiUrl, requestTimeoutMs, credentials };
+  const runtimeId = nonEmpty(env[CENTRAL_CONFIG_ENV.runtimeId])
+    ?? nonEmpty(options.profile?.central?.runtimeId);
+  const scope = parseRuntimeScope(
+    nonEmpty(env[CENTRAL_CONFIG_ENV.scope]),
+    options.profile?.central?.scope,
+  );
+  return {
+    apiUrl,
+    requestTimeoutMs,
+    credentials,
+    ...(runtimeId !== undefined ? { runtimeId } : {}),
+    ...(scope !== undefined ? { scope } : {}),
+  };
 }
 
 /** Load and validate standalone server configuration without starting a server. */
@@ -209,6 +228,25 @@ function parseHttpUrl(value: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function parseRuntimeScope(
+  environmentValue: string | undefined,
+  profileValue: ScopePath | undefined,
+): ScopePath | undefined {
+  if (environmentValue !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(environmentValue);
+    } catch {
+      throw new Error(`${CENTRAL_CONFIG_ENV.scope} must be a JSON scope path object.`);
+    }
+    if (!isScopePath(parsed)) {
+      throw new Error(`${CENTRAL_CONFIG_ENV.scope} must contain a valid scope path with tenantId.`);
+    }
+    return { ...parsed };
+  }
+  return isScopePath(profileValue) ? { ...profileValue } : undefined;
 }
 
 function positiveIntegerOrDefault(value: number | undefined, fallback: number): number {

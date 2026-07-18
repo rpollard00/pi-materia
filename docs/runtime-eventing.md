@@ -288,8 +288,8 @@ Per-sink `status` values:
 | `misconfigured` | The sink configuration is unusable (missing/invalid URL). Not retried. Includes `reason` (`target_url_missing` / `target_url_invalid`). |
 
 `reason` codes align with the webhook activation diagnostics in §9.6
-(`http_error`, `timeout`, `network_error`, `filtered_out`, `disabled`,
-`target_url_missing`, `target_url_invalid`, etc.) so artifact consumers can
+(`http_error`, `timeout`, `network_error`, `queue_full`, `filtered_out`,
+`disabled`, `target_url_missing`, `target_url_invalid`, etc.) so artifact consumers can
 correlate dispatch failures with startup diagnostics. Error/detail strings are
 redacted per §6.6 (no header values, tokens, or query strings).
 
@@ -321,14 +321,15 @@ interface EventingWebhookSinkConfig {
   url: string;                 // POST endpoint URL
   method?: "POST" | "PUT";     // default "POST"
   headers?: Record<string, string>; // static headers
-  bodyTemplate?: "passthrough" | "mapped" | "none"; // default "mapped"
-  bodyMapping?: EventBodyFieldMapping; // used when bodyTemplate is "mapped"
+  bodyTemplate?: "passthrough" | "mapped" | "envelope" | "none"; // default "mapped"
+  bodyMapping?: EventBodyFieldMapping; // mapping, plus envelope static metadata
   eventFilter?: EventFilter;   // which event types to deliver
   timeoutMs?: number;          // request timeout (default 10000)
   maxRetries?: number;         // retries on network/5xx (default 3)
   retryBackoffMs?: number;     // initial backoff (default 1000, exponential)
   maxBackoffMs?: number;       // max backoff cap (default 30000)
   discardingAfter?: number;    // drop after this many consecutive failures (default 10)
+  maxQueueSize?: number;       // in-flight + queued delivery bound (default 256)
 }
 ```
 
@@ -355,7 +356,8 @@ like `"eventId"` mean "use the enriched event's `eventId` field verbatim." Stati
 fields are merged into every delivery body.
 
 When `bodyTemplate` is `"passthrough"`, the complete enriched event object is sent
-as the request body.
+as the request body. `"envelope"` sends `{ events: [event], ...static }`, which lets
+telemetry sinks attach runtime and scope metadata without changing the enriched event.
 
 When `bodyTemplate` is `"none"`, the body is an empty object `{}` (for webhooks that
 only need headers or the URL itself to convey intent).
@@ -383,8 +385,13 @@ matching where `*` matches any sequence of characters in a dot-separated segment
   dropped for that sink.
 - **Timeout**: Each delivery attempt has a configurable timeout. Timeouts count as
   retryable failures.
-- **Ordering**: Events are delivered in dispatch order per sink. A slow delivery does
-  not block subsequent event dispatches to the same or other sinks.
+- **Bounded queue**: Each sink accepts at most `maxQueueSize` in-flight plus queued
+  deliveries. New events over the bound are dropped with a `queue_full` dispatch
+  diagnostic instead of adding memory or backpressure to cast execution.
+- **Ordering**: Events are delivered in dispatch order per sink. A slow delivery may
+  hold later events in that sink's queue, but does not block event dispatch or other sinks.
+- **Retry diagnostics**: Final dispatch results include the number of HTTP attempts,
+  so successful retries and exhausted retry paths remain observable in artifacts.
 - **Response handling**: 2xx responses are treated as success. Non-2xx responses
   (except 5xx which may be retried) are recorded as failures.
 

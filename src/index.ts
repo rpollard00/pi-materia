@@ -13,6 +13,7 @@ import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./web
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { setActiveModelPolicyResolver } from "./runtime/modelPolicyResolver.js";
+import { setCentralTelemetrySinkResolver } from "./runtime/nativeEventing.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError, loadRuntimeConfig } from "./infrastructure/index.js";
 import { renderQuestAdded, renderQuestDefaultLoadoutStatus, renderQuestList, renderQuestRequeued, renderQuestStarted, renderQuestStatus, renderQuestStopped } from "./presentation/questBoard.js";
 import { parseQuestAddArgs, parseQuestListArgs, parseQuestMoveArgs, tokenizeCommandArgs, type QuestListArgs } from "./plugin/quest/commandParsing.js";
@@ -25,6 +26,7 @@ export default function piMateria(pi: ExtensionAPI) {
   let activeContext: ExtensionContext | undefined;
   const adapters = createMateriaPluginAdapters();
   setActiveModelPolicyResolver(adapters.modelPolicies);
+  setCentralTelemetrySinkResolver(adapters.centralTelemetry);
   const getConfiguredConfigPath = () => configuredConfigPath(pi, adapters.environment);
   const loadoutUseCases = new LoadoutUseCases({ configs: adapters.configs, pipeline: adapters.pipeline, logger: adapters.logger });
   const castCatalogUseCases = new CastCatalogUseCases({ configs: adapters.configs, states: adapters.states, artifacts: adapters.artifacts });

@@ -207,9 +207,12 @@ content into a local scope requires an explicit action ([§12](#12-explicit-cent
 A connected runtime is enabled only by an absolute HTTP(S) API URL. Resolution order is
 `MATERIA_CENTRAL_API_URL`, profile `central.apiUrl`, then the compatible legacy profile
 field `webui.centralApiBaseUrl`. `central.requestTimeoutMs` configures the client timeout
-(default 5000 ms); `MATERIA_CENTRAL_REQUEST_TIMEOUT_MS` overrides it. If no API URL is
-resolved, the runtime remains `local-only` and does not read secret files or perform
-central network I/O.
+(default 5000 ms); `MATERIA_CENTRAL_REQUEST_TIMEOUT_MS` overrides it. Connected runtimes
+may set a stable telemetry identity with `central.runtimeId` or
+`MATERIA_CENTRAL_RUNTIME_ID`, and an enterprise `ScopePath` with `central.scope` or the
+JSON-valued `MATERIA_CENTRAL_SCOPE`. When omitted, telemetry uses a process identity and
+a non-reversible local project-path scope. If no API URL is resolved, the runtime remains
+`local-only` and does not read secret files or perform central network I/O.
 
 The standalone server reads the following deployment settings:
 
@@ -454,7 +457,11 @@ equal to its recorded origin hash.
   pi-materia runtimes and stores normalized batches transactionally in SQLite. It builds
   on the existing event bus and webhook **sink** contracts
   ([Runtime eventing](runtime-eventing.md)), not a new local-state synchronization
-  channel. Time-based retention runs separately from ingestion.
+  channel. The runtime adds a `central-telemetry` sink that posts one-event envelopes
+  with runtime/scope metadata and the telemetry-only bearer credential. Its bounded
+  queue, retries, and dispatch diagnostics are best-effort; credential, configuration,
+  queue, timeout, and ingestion failures never fail local cast execution. Time-based
+  retention runs separately from ingestion.
 - Central monitoring **read APIs** query durable, retention-bounded telemetry and derive
   event/runtime status counts from the same stored data.
 - Local artifact monitoring is **unchanged**. Central monitoring aggregates across runtimes

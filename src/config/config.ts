@@ -23,6 +23,7 @@ import {
 } from "./centralCatalogSource.js";
 import { resolveConfigCatalogDrift } from "./catalogDrift.js";
 import { isValidCatalogOriginProvenance, type CatalogOriginProvenance } from "../domain/catalogProvenance.js";
+import { isScopePath } from "../domain/scope.js";
 import { readEventingEnvOverlay, type EventingEnvSource } from "../eventing/envOverlay.js";
 import { detectControllerLaunch } from "../eventing/presets.js";
 
@@ -531,10 +532,22 @@ function normalizeCentralRuntimeProfileConfig(value: unknown, file: string): Mat
       warnInvalidProfileConfig(file, "Ignoring invalid central.requestTimeoutMs. Expected a positive integer.");
     }
   }
-  if (apiUrl === undefined && requestTimeoutMs === undefined) return undefined;
+  const runtimeId = typeof value.runtimeId === "string" && value.runtimeId.trim().length > 0
+    ? value.runtimeId.trim()
+    : undefined;
+  if (value.runtimeId !== undefined && runtimeId === undefined) {
+    warnInvalidProfileConfig(file, "Ignoring invalid central.runtimeId. Expected a non-empty string.");
+  }
+  const scope = isScopePath(value.scope) ? { ...value.scope } : undefined;
+  if (value.scope !== undefined && scope === undefined) {
+    warnInvalidProfileConfig(file, "Ignoring invalid central.scope. Expected a scope path with tenantId.");
+  }
+  if (apiUrl === undefined && requestTimeoutMs === undefined && runtimeId === undefined && scope === undefined) return undefined;
   return {
     ...(apiUrl !== undefined ? { apiUrl } : {}),
     ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
+    ...(runtimeId !== undefined ? { runtimeId } : {}),
+    ...(scope !== undefined ? { scope } : {}),
   };
 }
 
