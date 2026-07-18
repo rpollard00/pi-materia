@@ -9,15 +9,15 @@ import type { ModelPolicyDocument } from "../domain/modelPolicy.js";
  * resolver to obtain the active model-policy document before enforcing it. The
  * default {@link createLocalModelPolicyResolver} returns `undefined`, which
  * preserves existing local-only selection behavior exactly: no policy is
- * applied and casts behave as before. A central-connected runtime registers a
- * resolver that fetches the active central policy (future work); until then the
- * local default is used.
+ * applied and casts behave as before. At extension composition time the
+ * central-connected adapter is registered here; it lazily resolves opt-in
+ * runtime configuration and fetches the active policy through `ModelPolicyPort`.
  *
  * This is intentionally a thin runtime configuration seam, not a control-plane
  * port: the application `ModelPolicyPort` (`src/application/controlPlane.ts`)
- * remains the stable abstraction. A future central-client adapter will
- * implement this resolver against that port, keeping the enforcement logic in
- * `applyMateriaModelSettings` decoupled from any concrete transport.
+ * remains the stable abstraction. The connected adapter implements this
+ * resolver against that port, keeping enforcement in `applyMateriaModelSettings`
+ * decoupled from its concrete HTTP transport.
  */
 
 export interface ModelPolicyResolutionContext {

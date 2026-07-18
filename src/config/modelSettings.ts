@@ -151,6 +151,7 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
   let modelPolicyEvaluated = false;
   let modelPolicyDenied: { reason: ModelPolicyDenialReason; message: string } | undefined;
   let preferredSuggestion: ModelPolicyPreferredSuggestion | undefined;
+  let preferredGuidance: string | undefined;
   let policyThinkingClamp: ThinkingLevel | undefined;
   let skipModelApplication = false;
 
@@ -185,6 +186,9 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
       }
       if (evaluation.preferredSuggestion !== undefined) {
         preferredSuggestion = evaluation.preferredSuggestion;
+        if (evaluation.preferredSuggestion.modelValue !== candidateModelValue) {
+          preferredGuidance = `Model policy "${policy!.id}" prefers "${evaluation.preferredSuggestion.modelValue}" for Materia "${settings.materiaName}"; the preference is advisory and was not auto-applied (candidate: "${candidateModelValue}").`;
+        }
       }
       for (const policyWarning of evaluation.warnings) warnings.push(policyWarning);
     }
@@ -256,6 +260,7 @@ export async function applyMateriaModelSettings(pi: ExtensionAPI, ctx: Extension
   const thinkingPolicyClamped = policyThinkingClamp !== undefined && appliedThinking === policyThinkingClamp;
 
   for (const warning of warnings) ctx.ui.notify(warning, "warning");
+  if (preferredGuidance !== undefined) ctx.ui.notify(preferredGuidance, "info");
 
   const active = getActiveModelInfo(pi, ctx);
   const model = appliedModel ?? active.model ?? initialActive.model;

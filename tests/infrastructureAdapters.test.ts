@@ -16,6 +16,7 @@ describe("infrastructure adapters", () => {
     expect(Object.keys(adapters.statusPresenter)).toEqual(["statusLabel"]);
     expect(adapters.environment.get("MATERIA_CONFIG")).toBe("custom.json");
     expect(adapters.logger.info).toBeFunction();
+    expect(adapters.modelPolicies.resolveActivePolicy).toBeFunction();
   });
 
   test("exposes focused standalone adapters", () => {

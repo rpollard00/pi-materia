@@ -150,6 +150,10 @@ describe("applyMateriaModelSettings — model policy enforcement", () => {
     expect(harness.setModelCalls).toEqual([GPT]);
     expect(result.preferredSuggestion).toEqual({ modelValue: "anthropic/claude-test" });
     expect(result.modelPolicyDenied).toBeUndefined();
+    expect(harness.notifications).toContainEqual({
+      type: "info",
+      message: expect.stringContaining('prefers "anthropic/claude-test"'),
+    });
   });
 
   test("preferred model unavailable locally produces a warning and no suggestion", async () => {
