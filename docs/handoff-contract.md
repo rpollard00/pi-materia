@@ -1,6 +1,6 @@
 # Materia handoff JSON contract
 
-JSON-parsed agent sockets hand off reusable work context by returning a single JSON object. Sockets are placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units.
+JSON-parsed agent sockets hand off reusable work context as a single canonical JSON object. Sockets are placement adapters: they decide parse mode, assignment, routing, and iteration. Materia should stay reusable behavior/skill units. Agents may reach this boundary through direct JSON or an explicitly qualified runtime-owned tool protocol; see [Finalization configuration and migration](finalization-configuration.md). The protocol never changes the fields or validator described here.
 
 ## Agent handoff fields
 

@@ -71,7 +71,7 @@ The command writes its result to stdout. With `parse: "json"`, stdout must be va
 { "state": { "hello": { "ok": true, "message": "HELLO WORLD" } } }
 ```
 
-Utility JSON is deterministic script output, not an agent handoff. Scripts may return structured data for explicit `assign` paths, and when a utility is configured to patch shared runtime state directly that structured patch belongs under a top-level `state` object. Do not model utility output as a broad agent envelope; agent-authored handoffs are limited to `workItems`, `satisfied`, and `context`.
+Utility JSON is deterministic script output, not an agent handoff. Scripts may return structured data for explicit `assign` paths, and when a utility is configured to patch shared runtime state directly that structured patch belongs under a top-level `state` object. Do not model utility output as a broad agent envelope; agent-authored handoffs are limited to `workItems`, `satisfied`, and `context`. Agent [finalization strategy](finalization-configuration.md#deterministic-utility-example) never routes utilities through handoff tools, even when `tool_backed` is configured globally.
 
 Utility JSON output may also include an optional `event` array for structured runtime event emission. The `event` field is a side-channel processed and stripped before state extraction — it does not affect `state.*` patches, routing, or handoff semantics. See [Runtime Eventing Contract](runtime-eventing.md).
 

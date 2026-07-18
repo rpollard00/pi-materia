@@ -108,7 +108,7 @@ This exemption does not weaken the canonical handoff contract. It preserves the 
 
 ## Consequences and follow-up
 
-The accepted architecture allows a runtime-owned agent handoff builder and narrow finalization tools to be developed without changing the default producer path. Production integration must add scoped state, socket-derived schemas, exactly-once commit behavior, explicit strategy/fallback configuration, and content-safe diagnostics before the isolated prototype can be enabled.
+The production integration uses a runtime-owned agent handoff builder and narrow finalization tools without changing the default producer path. It provides cast/session-, socket-visit-, and attempt-scoped state, socket-derived tool schemas, exactly-once commit behavior, explicit strategy/direct-fallback configuration, and content-safe diagnostics. Tool-backed submission remains disabled unless the configured effective model and socket cohort qualify; the isolated experiment remains evidence rather than runtime code.
 
 The trade-off is additional implementation and test surface for an optional strategy. That cost is justified only as infrastructure for cohorts where direct serialization is demonstrably unreliable; it is not justified as mandatory overhead for reliable agents or deterministic utilities. Rollout data should be segmented by strategy and model/provider, and should record failure categories and costs without retaining sensitive handoff values.
 
@@ -120,4 +120,5 @@ Revisit the default only after larger paired samples include the smaller models 
 - [Tool-backed handoff submission prototype](tool-backed-handoff-prototype.md)
 - [Agent finalization: structured-output alternatives](structured-output-alternatives.md)
 - [Materia handoff JSON contract](handoff-contract.md)
+- [Finalization configuration and migration](finalization-configuration.md)
 - [`tool-backed-provider-evidence.json`](../tests/fixtures/finalization/tool-backed-provider-evidence.json)
