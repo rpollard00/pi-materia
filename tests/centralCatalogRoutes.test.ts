@@ -86,7 +86,7 @@ describe("central catalog HTTP routes — RBAC", () => {
     expect(body.permission).toBe("catalog.write");
   });
 
-  test("unknown sub-paths return 404 without leaking through a 401", async () => {
+  test("unknown and local-session promotion sub-paths return 404 without leaking through a 401", async () => {
     const { baseUrl } = await startCatalogServer();
     // Unknown action under a valid item path → 404 (no auth requested).
     const res = await fetch(`${baseUrl}/api/catalog/materia/x/unknown-action`);
@@ -94,6 +94,21 @@ describe("central catalog HTTP routes — RBAC", () => {
     const body = (await res.json()) as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
     expect(body.error).toBe("Not found");
+
+    // Promotion writes require a local repository session and are composed only
+    // by the local WebUI dispatcher, never by the standalone central server.
+    const promotion = await fetch(`${baseUrl}/api/catalog/promotions/copy`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "materia",
+        catalogItemId: "x",
+        localKey: "X",
+        target: "project",
+      }),
+    });
+    expect(promotion.status).toBe(404);
+    expect(await promotion.json()).toMatchObject({ ok: false, error: "Not found" });
   });
 });
 

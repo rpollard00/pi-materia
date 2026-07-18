@@ -5,7 +5,7 @@ import { access, readFile } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMateriaWebUiServer, readRuntimeEvents, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaDeleteQuestInput, type MateriaDeleteQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
+import { createMateriaWebUiServer, readRuntimeEvents, type MateriaAddQuestInput, type MateriaAddQuestResult, type MateriaDeleteQuestInput, type MateriaDeleteQuestResult, type MateriaModelCatalogSource, type MateriaMonitorArtifactEntry, type MateriaMonitorEventEntry, type MateriaPromoteCatalogCallback, type MateriaQuestBoardSource, type MateriaQuestControlInput, type MateriaQuestControlResult, type MateriaReorderQuestInput, type MateriaReorderQuestResult, type MateriaRequeueQuestInput, type MateriaRequeueQuestResult, type MateriaSetActiveLoadoutCallback, type MateriaSetActiveLoadoutResult, type MateriaSetDefaultLoadoutCallback, type MateriaSetDefaultLoadoutResult, type MateriaSetQuestDefaultLoadoutCallback, type MateriaSetQuestDefaultLoadoutResult, type MateriaToolRegistrySnapshot, type MateriaUpdateQuestInput, type MateriaUpdateQuestResult, type MateriaWebUiSessionSnapshot } from "./server/index.js";
 import { loadActiveCastState } from "../infrastructure/castStateRepository.js";
 import { loadRuntimeConfig, saveRuntimeActiveLoadout } from "../infrastructure/adapters.js";
 import { clearStaleDefaultLoadoutPreference, getRoleGenerationPreference, loadProfileConfig, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationPreference } from "../config/config.js";
@@ -15,7 +15,10 @@ import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
 import { addQuest as addQuestToBoard, deleteQuest as deleteQuestFromBoard, generateUniqueQuestId, movePendingQuest, requeueQuest, updatePendingQuest } from "../domain/questBoard.js";
 import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
 import { issuesToMessage } from "../domain/result.js";
-import { loadCentralConnectedRuntimeConfig } from "../central/config/index.js";
+import { applyCatalogToLocalAction } from "../application/catalogActions.js";
+import { createCentralHttpControlPlaneClient } from "../central/client/index.js";
+import { loadCentralConnectedRuntimeConfig, type CentralConnectedRuntimeConfig } from "../central/config/index.js";
+import { createLocalConfigCatalogStore } from "../infrastructure/localControlPlane/catalogStore.js";
 
 export interface MateriaWebUiLaunchResult {
   url: string;
@@ -146,6 +149,9 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
   const cwd = ctx.cwd;
   const startedAt = Date.now();
   if (options.initializeDefaultLoadout === true) await initializeDefaultLoadoutPreference(ctx, configuredPath, pi);
+  const promoteCatalog = centralRuntime
+    ? createCatalogPromotionCallback(centralRuntime, cwd, configuredPath)
+    : undefined;
 
   const { server } = createMateriaWebUiServer({
     host,
@@ -160,6 +166,7 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
       getSnapshot: () => currentSessionSnapshot(ctx, sessionKey, startedAt, configuredPath, pi),
       getConfig: () => loadRuntimeConfig(cwd, configuredPath),
       saveConfig: (patch, target) => saveMateriaConfigPatch(cwd, patch, { target, configuredPath }),
+      ...(promoteCatalog !== undefined ? { promoteCatalog } : {}),
       setActiveLoadout: createActiveLoadoutSetter(ctx, configuredPath, pi),
       setDefaultLoadout: createDefaultLoadoutSetter(ctx, configuredPath),
       setQuestDefaultLoadout: createQuestDefaultLoadoutSetter(ctx, configuredPath),
@@ -189,6 +196,29 @@ async function startServer(ctx: ExtensionContext, sessionKey: string, configured
 
   if (autoOpenBrowser) openBrowser(url);
   return { url, reused: false, autoOpenBrowser, sessionKey };
+}
+
+/**
+ * Compose the local-session promotion use case only when central-connected
+ * runtime configuration exists. The central HTTP adapter remains the read
+ * source while all writes pass through the normal local config store.
+ */
+function createCatalogPromotionCallback(
+  central: CentralConnectedRuntimeConfig,
+  cwd: string,
+  configuredPath?: string,
+): MateriaPromoteCatalogCallback {
+  const catalog = createCentralHttpControlPlaneClient({
+    apiUrl: central.apiUrl,
+    requestTimeoutMs: central.requestTimeoutMs,
+    credentials: central.credentials,
+    mode: "central-connected",
+  }).catalog;
+  const localStore = createLocalConfigCatalogStore({
+    cwd,
+    ...(configuredPath !== undefined ? { configuredPath } : {}),
+  });
+  return (request) => applyCatalogToLocalAction(request, { catalog, localStore });
 }
 
 export async function initializeDefaultLoadoutPreference(ctx: ExtensionContext, configuredPath?: string, pi?: ExtensionAPI): Promise<void> {
@@ -795,6 +825,7 @@ export const webUiLauncherTestInternals = {
   ensureMateriaWebUiBuilt,
   resetMateriaWebUiBuildPromise,
   createActiveLoadoutSetter,
+  createCatalogPromotionCallback,
   currentSessionSnapshot,
   normalizeArtifactEvents,
   deriveEventMessage,

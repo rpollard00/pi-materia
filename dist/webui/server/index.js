@@ -7,6 +7,7 @@ import { handleMateriaWebUiRequest } from './routes.js';
 // backend modules next to it.
 export { buildMateriaModelCatalog } from './modelCatalog.js';
 export { DEFAULT_RUNTIME_EVENT_LIMIT, RUNTIME_EVENTS_RELATIVE_PATH, readRuntimeEvents } from './runtimeEventReader.js';
+export { CATALOG_PROMOTION_PATH_PREFIX, handleCatalogPromotionRoute, } from './catalogPromotion.js';
 export { WEBUI_BACKEND_SERVICE, handleBackendModeRoute, isCentralSameOrigin, resolveBackendMode, resolveCentralApiBaseUrl, resolveCentralOrigin, } from './mode.js';
 const defaultStaticDir = resolve(fileURLToPath(new URL('../../../dist/webui/client', import.meta.url)));
 export function createMateriaWebUiServer(options = {}) {

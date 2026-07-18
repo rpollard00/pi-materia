@@ -136,6 +136,9 @@ describe("catalog action use case — update", () => {
     const result = await applyCatalogToLocalAction(req({ action: "update" }), deps);
 
     expect(result.status).toBe("needs_confirmation");
+    if (result.status !== "needs_confirmation") return;
+    expect(result.origin).toEqual(origin("team-build", "sha256:central", "3", "user"));
+    expect(result.previousOrigin).toEqual(origin("team-build", "sha256:older", "2"));
     expect(store.writes).toHaveLength(0);
   });
 
@@ -170,6 +173,7 @@ describe("catalog action use case — update", () => {
     expect(result.status).toBe("rejected");
     if (result.status !== "rejected") return;
     expect(result.code).toBe("origin_mismatch");
+    expect(result.previousOrigin).toEqual(origin("other-item", "h"));
     expect(store.writes).toHaveLength(0);
   });
 });

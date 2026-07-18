@@ -4,6 +4,7 @@ import { handleDefaultLoadoutRoute } from './defaultLoadout.js';
 import { handleHealthRoute } from './health.js';
 import { sendJson } from './http.js';
 import { handleBackendModeRoute } from './mode.js';
+import { CATALOG_PROMOTION_PATH_PREFIX, handleCatalogPromotionRoute } from './catalogPromotion.js';
 import { buildMateriaModelCatalog } from './modelCatalog.js';
 import { handleMonitorEventsRoute, handleMonitorSnapshotRoute } from './monitor.js';
 import { handleProfileRoleGenerationRoute } from './profileRoleGeneration.js';
@@ -52,6 +53,15 @@ export async function handleMateriaWebUiRequest(req, res, deps) {
     }
     if (req.url?.startsWith('/api/config') && req.method === 'POST') {
         await handlePostConfigRoute(req, res, { saveConfig: deps.session?.saveConfig });
+        return;
+    }
+    // Local-session-only central-to-local writes. The standalone central server
+    // has a separate dispatcher and never composes this route or a local store.
+    if (req.url?.startsWith(CATALOG_PROMOTION_PATH_PREFIX)) {
+        await handleCatalogPromotionRoute(req, res, {
+            promoteCatalog: deps.session?.promoteCatalog,
+            getConfig: deps.session?.getConfig,
+        });
         return;
     }
     if (req.url?.startsWith('/api/loadout/active')) {

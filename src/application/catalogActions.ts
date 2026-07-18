@@ -102,6 +102,10 @@ export type CatalogLocalActionResult =
       localKey: string;
       target: CatalogLocalTargetScope;
       reason: string;
+      /** Provenance the confirmed overwrite would record. */
+      origin: CatalogOriginProvenance;
+      /** Provenance currently recorded on the local definition, when any. */
+      previousOrigin?: CatalogOriginProvenance;
     }
   | {
       status: "rejected";
@@ -112,6 +116,8 @@ export type CatalogLocalActionResult =
       reason: string;
       /** Rejection reason code from the domain decision, or `not_found`. */
       code: string;
+      /** Provenance currently recorded on the conflicting local definition. */
+      previousOrigin?: CatalogOriginProvenance;
     };
 
 /**
@@ -153,7 +159,7 @@ export async function applyCatalogToLocalAction(
   });
 
   if (decision.status === "rejected") {
-    return rejectedResult(request, decision.code, decision.reason);
+    return rejectedResult(request, decision.code, decision.reason, previousOrigin);
   }
   if (decision.status === "needs_confirmation") {
     return {
@@ -163,6 +169,8 @@ export async function applyCatalogToLocalAction(
       localKey: request.localKey,
       target: request.target,
       reason: decision.reason,
+      origin: decision.origin,
+      ...(previousOrigin !== undefined ? { previousOrigin } : {}),
     };
   }
 
@@ -198,6 +206,7 @@ function rejectedResult(
   request: CatalogLocalActionRequest,
   code: string,
   reason: string,
+  previousOrigin?: CatalogOriginProvenance,
 ): CatalogLocalActionResult {
   return {
     status: "rejected",
@@ -207,6 +216,7 @@ function rejectedResult(
     target: request.target,
     reason,
     code,
+    ...(previousOrigin !== undefined ? { previousOrigin } : {}),
   };
 }
 

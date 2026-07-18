@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleMateriaWebUiRequest } from './routes.js';
 import type { MateriaSetActiveLoadoutCallback } from './activeLoadout.js';
+import type { MateriaPromoteCatalogCallback } from './catalogPromotion.js';
 import type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
 import type { MateriaSetDefaultLoadoutCallback } from './defaultLoadout.js';
 import type { MateriaModelCatalogSource } from './modelCatalog.js';
@@ -20,6 +21,12 @@ export { buildMateriaModelCatalog } from './modelCatalog.js';
 export { DEFAULT_RUNTIME_EVENT_LIMIT, RUNTIME_EVENTS_RELATIVE_PATH, readRuntimeEvents } from './runtimeEventReader.js';
 export type { RuntimeEventReaderOptions } from './runtimeEventReader.js';
 export type { MateriaConfigPatch, MateriaSaveTarget } from './config.js';
+export {
+  CATALOG_PROMOTION_PATH_PREFIX,
+  handleCatalogPromotionRoute,
+  type CatalogPromotionRouteDeps,
+  type MateriaPromoteCatalogCallback,
+} from './catalogPromotion.js';
 export type { MateriaModelCatalogModel, MateriaModelCatalogResponse, MateriaModelCatalogSource } from './modelCatalog.js';
 export type { MateriaGetRoleGenerationPreferenceCallback, MateriaRoleGenerationPreference, MateriaSetRoleGenerationPreferenceCallback } from './profileRoleGeneration.js';
 export type { MateriaAddQuestInput, MateriaAddQuestResponse, MateriaAddQuestResult, MateriaDeleteQuestInput, MateriaDeleteQuestResponse, MateriaDeleteQuestResult, MateriaQuestBoardResponse, MateriaQuestBoardSource, MateriaQuestControlAction, MateriaQuestControlInput, MateriaQuestControlResponse, MateriaQuestControlResult, MateriaQuestCounts, MateriaQuestSummary, MateriaQuestNoStartReason, MateriaQuestReorderPlacement, MateriaReorderQuestInput, MateriaReorderQuestResult, MateriaRequeueQuestInput, MateriaRequeueQuestResult, MateriaUpdateQuestInput, MateriaUpdateQuestResponse, MateriaUpdateQuestResult } from './quests.js';
@@ -60,6 +67,8 @@ export interface MateriaWebUiServerOptions {
     getSnapshot: () => MateriaWebUiSessionSnapshot | Promise<MateriaWebUiSessionSnapshot>;
     getConfig?: () => Promise<unknown>;
     saveConfig?: (patch: MateriaConfigPatch, target: MateriaSaveTarget) => Promise<string>;
+    /** Explicit central-to-local copy/update/replace action; absent in local-only mode. */
+    promoteCatalog?: MateriaPromoteCatalogCallback;
     /** Authoritative backend/session callback for active-loadout changes from the WebUI. */
     setActiveLoadout?: MateriaSetActiveLoadoutCallback;
     /** User preference callback for the durable default loadout. */
