@@ -145,6 +145,16 @@ export {
 } from "./server/routes.js";
 
 export {
+  handleCentralAdminRoute,
+  type CentralAdminRouteDeps,
+} from "./server/admin.js";
+
+export {
+  CENTRAL_BUILD_SCHEMA_VERSION,
+  CENTRAL_BUILD_VERSION,
+} from "./server/buildMetadata.js";
+
+export {
   handleCentralCatalogRoute,
   type CentralCatalogRouteDeps,
 } from "./server/catalog.js";
@@ -211,6 +221,7 @@ export {
   sendUnauthorized,
   type CentralAuth,
   type CentralAuthOptions,
+  type CentralAuthPrincipalSummary,
   type RequirePermissionInput,
   type RequirePermissionResult,
   createDefaultCentralAuth,

@@ -1,5 +1,6 @@
 import { requirePermission, type CentralAuth } from "../auth/index.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
+import { handleCentralAdminRoute } from "./admin.js";
 import { handleCentralCatalogRoute } from "./catalog.js";
 import { handleCentralHealthRoute } from "./health.js";
 import { handleCentralModelCatalogRoute } from "./modelCatalog.js";
@@ -40,9 +41,9 @@ export interface MateriaCentralRouteDeps {
  * `model-policy.read` / `model-policy.write`. Telemetry ingestion is wired
  * below (§16.15), guarded with `telemetry.ingest`, and the central monitoring
  * read surface (`GET /api/telemetry/events`) is wired below (§16.16), guarded
- * with `telemetry.read`. The broader admin route handlers arrive in later work
- * items; add them as ordered branches, each calling {@link requirePermission}
- * with the matching permission (`admin.read`/`write`).
+ * with `telemetry.read`. Administrative metadata is exposed read-only under
+ * `/api/admin` with `admin.read`; `admin.write` remains reserved for future
+ * mutation routes.
  */
 export async function handleMateriaCentralRequest(
   req: IncomingMessage,
@@ -105,8 +106,12 @@ export async function handleMateriaCentralRequest(
     return;
   }
 
-  // Future route groups (each guarded with requirePermission):
-  //   /api/admin/*            → admin.read / admin.write   (§16.6)
+  // Central server/auth metadata. The handler performs sub-path and method
+  // matching before requiring admin.read, preserving 404/405 precedence.
+  if (pathname === "/api/admin" || pathname.startsWith("/api/admin/")) {
+    await handleCentralAdminRoute(req, res, { admin: deps.ports.admin, auth: deps.auth });
+    return;
+  }
 
   sendJson(res, 404, {
     ok: false,

@@ -375,7 +375,13 @@ export interface ControlPlaneStatusSnapshot {
 /** Server identity and configured auth surface (admin metadata). */
 export interface ControlPlaneServerInfo {
   mode: ControlPlaneMode;
+  /** Stable service identity, when the adapter represents a standalone server. */
+  service?: string;
   label?: string;
+  /** Package/build version currently serving the API. */
+  buildVersion?: string;
+  /** Current central persistence schema version understood by the server build. */
+  schemaVersion?: number;
   /** Auth methods currently configured (e.g. `["dev-token"]`). */
   authMethods: readonly AuthMethodKind[];
   /** RFC3339 server start time, when known. */

@@ -26,6 +26,9 @@ export { CENTRAL_SERVICE_ID, CENTRAL_CONTROL_PLANE_SCOPE } from "../controlPlane
 export { sendJson, readJsonBody, isPlainObject, errorMessage, applyCentralCorsHeaders, handleCentralCorsPreflight, CENTRAL_CORS_ALLOW_ORIGIN } from "./http.js";
 export { handleCentralHealthRoute } from "./health.js";
 export type { CentralHealthRouteDeps } from "./health.js";
+export { handleCentralAdminRoute } from "./admin.js";
+export type { CentralAdminRouteDeps } from "./admin.js";
+export { CENTRAL_BUILD_SCHEMA_VERSION, CENTRAL_BUILD_VERSION } from "./buildMetadata.js";
 export { handleCentralStatusRoute } from "./status.js";
 export type { CentralStatusRouteDeps } from "./status.js";
 export { handleCentralCatalogRoute } from "./catalog.js";

@@ -24,6 +24,14 @@ import { type RoleRegistry } from "./roles.js";
  * unchanged (docs/enterprise-control-plane.md §13).
  */
 
+/** Secret-free summary of a statically configured authentication principal. */
+export interface CentralAuthPrincipalSummary {
+  readonly principalId: string;
+  readonly subject?: string;
+  readonly tenantId: string;
+  readonly roleIds: readonly string[];
+}
+
 /** Bundled auth configuration handed to route handlers and the dispatcher. */
 export interface CentralAuth {
   /** Credential → principal resolver (static bearer adapter today; future OAuth adapter). */
@@ -32,6 +40,12 @@ export interface CentralAuth {
   readonly roleRegistry: RoleRegistry;
   /** Auth method kind the server reports in admin metadata and audit records. */
   readonly methodKind: AuthMethodKind;
+  /**
+   * Statically configured principals safe to expose through admin metadata.
+   * Dynamic adapters may omit this when they cannot enumerate principals.
+   * Credentials and adapter claims must never be stored here.
+   */
+  readonly principalSummaries?: readonly CentralAuthPrincipalSummary[];
 }
 
 export interface RequirePermissionInput {

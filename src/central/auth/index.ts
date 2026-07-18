@@ -51,6 +51,7 @@ export {
   sendForbidden,
   sendUnauthorized,
   type CentralAuth,
+  type CentralAuthPrincipalSummary,
   type RequirePermissionInput,
   type RequirePermissionResult,
 } from "./rbac.js";

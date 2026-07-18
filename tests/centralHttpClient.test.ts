@@ -193,9 +193,17 @@ describe("central HTTP control-plane client", () => {
       content: { definition: {} },
     })).rejects.toBeInstanceOf(CentralHttpConflictError);
 
-    // The admin metadata route is deliberately a later server work item. The
-    // client already targets it and surfaces its current 404 as a typed failure.
-    await expect(admin.admin.getMetadata()).rejects.toBeInstanceOf(CentralHttpNotFoundError);
+    const metadata = await admin.admin.getMetadata();
+    expect(metadata.server).toMatchObject({
+      service: "pi-materia-central",
+      mode: "central-admin",
+      authMethods: ["dev-token"],
+    });
+    expect(metadata.principals?.map((principal) => principal.principalId)).toEqual([
+      "dev-admin",
+      "dev-reader",
+      "dev-sink",
+    ]);
   });
 
   test("validates admin and DTO envelopes from a fake server and sends the reader bearer", async () => {

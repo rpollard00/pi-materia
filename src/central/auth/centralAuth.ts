@@ -15,7 +15,7 @@ import {
   type CentralServerAuthMode,
 } from "../config/index.js";
 import type { Role } from "../../domain/identity.js";
-import type { CentralAuth } from "./rbac.js";
+import type { CentralAuth, CentralAuthPrincipalSummary } from "./rbac.js";
 
 /**
  * Composition helpers for the central server's static bearer authentication.
@@ -92,6 +92,7 @@ export function createDefaultCentralAuth(options: CentralAuthOptions): CentralAu
     adapter: createDevTokenAuthAdapter({ tokens }),
     roleRegistry,
     methodKind: DEV_TOKEN_METHOD_KIND,
+    principalSummaries: summarizeConfiguredPrincipals(tokens),
   };
 }
 
@@ -129,6 +130,23 @@ function validatePrincipalRoleBindings(tokens: DevTokenPrincipalConfig, registry
       }
     }
   }
+}
+
+/**
+ * Project static token bindings into metadata without retaining token values,
+ * names, scopes, or adapter claims. Sorting keeps API responses deterministic.
+ */
+function summarizeConfiguredPrincipals(tokens: DevTokenPrincipalConfig): readonly CentralAuthPrincipalSummary[] {
+  return Object.freeze(
+    Object.values(tokens)
+      .map((principal): CentralAuthPrincipalSummary => Object.freeze({
+        principalId: principal.principalId,
+        ...(principal.subject !== undefined ? { subject: principal.subject } : {}),
+        tenantId: principal.tenantId,
+        roleIds: Object.freeze([...new Set(principal.roleBindings.map((binding) => binding.roleId))].sort()),
+      }))
+      .sort((left, right) => left.principalId.localeCompare(right.principalId)),
+  );
 }
 
 function hasConfiguredCredentials(credentials: CentralCredentialConfig): boolean {

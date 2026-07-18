@@ -117,7 +117,10 @@ export function readAdminMetadataResponse(value: unknown): AdminMetadataSnapshot
   if (!Array.isArray(server.authMethods) || !server.authMethods.every(isAuthMethodKind)) {
     fail("metadata.server.authMethods must contain known auth method kinds");
   }
+  if (server.service !== undefined) nonEmptyString(server.service, "metadata.server.service");
   if (server.label !== undefined) string(server.label, "metadata.server.label");
+  if (server.buildVersion !== undefined) nonEmptyString(server.buildVersion, "metadata.server.buildVersion");
+  if (server.schemaVersion !== undefined) nonNegativeInteger(server.schemaVersion, "metadata.server.schemaVersion");
   if (server.startedAt !== undefined) nonEmptyString(server.startedAt, "metadata.server.startedAt");
   if (server.capabilities !== undefined) validateCapabilities(server.capabilities, "metadata.server.capabilities");
 
