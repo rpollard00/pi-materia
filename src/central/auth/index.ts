@@ -1,8 +1,9 @@
 /**
  * Central control-plane auth and RBAC.
  *
- * Development-token principal resolution plus permission checks for central
- * catalog/model-policy/admin/telemetry routes. OAuth/OIDC is a documented future
+ * Static bearer-token principal resolution plus permission checks for central
+ * catalog/model-policy/admin/telemetry routes. Built-in tokens are development-
+ * only; deployment values come from environment or secret files. OAuth/OIDC is a documented future
  * auth adapter boundary (`authAdapter.ts`) — not an implementation here
  * (docs/enterprise-control-plane.md §13).
  */
@@ -26,7 +27,7 @@ export {
   type RoleRegistry,
 } from "./roles.js";
 
-// Development-token adapter.
+// Static bearer-token adapter (historical dev-token type names retained).
 export {
   DEFAULT_DEV_TOKEN_ADMIN,
   DEFAULT_DEV_TOKEN_READER,
@@ -54,7 +55,7 @@ export {
   type RequirePermissionResult,
 } from "./rbac.js";
 
-// Composition helper for the default CentralAuth.
+// Mode-aware composition helper for static bearer CentralAuth.
 export {
   createDefaultCentralAuth,
   type CentralAuthOptions,

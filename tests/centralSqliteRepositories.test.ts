@@ -174,7 +174,7 @@ describe("SQLite central model-policy repository", () => {
   test("the central server composes durable repositories behind the existing ports", async () => {
     const databasePath = await temporaryDatabasePath();
     const initialized = await initializeCentralSqliteDatabase({ path: databasePath });
-    const created = createMateriaCentralServer({ database: initialized.database });
+    const created = createMateriaCentralServer({ database: initialized.database, authMode: "development" });
     try {
       await created.ports.admin.createCatalogItem({
         id: "through-port",
@@ -194,7 +194,7 @@ describe("SQLite central model-policy repository", () => {
 
     const restarted = await initializeCentralSqliteDatabase({ path: databasePath });
     try {
-      const createdAgain = createMateriaCentralServer({ database: restarted.database });
+      const createdAgain = createMateriaCentralServer({ database: restarted.database, authMode: "development" });
       expect((await createdAgain.ports.catalog.get("through-port", "loadout"))?.version).toBe("1");
       expect((await createdAgain.ports.modelPolicy.getActivePolicy())?.id).toBe("through-port");
     } finally {

@@ -34,7 +34,7 @@ function policyDocument(overrides: Partial<ModelPolicyDocument> = {}): ModelPoli
 
 async function startPolicyServer(ports?: ControlPlanePorts): Promise<{ baseUrl: string; ports: ControlPlanePorts }> {
   const resolvedPorts = ports ?? createInMemoryCentralPorts();
-  const created = createMateriaCentralServer({ port: 0, ports: resolvedPorts });
+  const created = createMateriaCentralServer({ port: 0, ports: resolvedPorts, authMode: "development" });
   await new Promise<void>((resolve, reject) => {
     created.server.once("error", reject);
     created.server.listen(0, "127.0.0.1", () => resolve());

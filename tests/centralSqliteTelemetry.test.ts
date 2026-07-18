@@ -79,7 +79,7 @@ describe("SQLite central telemetry port", () => {
 
     const second = await initializeCentralSqliteDatabase({ path: databasePath });
     try {
-      const restartedServer = createMateriaCentralServer({ database: second.database, retentionDays: 30 });
+      const restartedServer = createMateriaCentralServer({ database: second.database, retentionDays: 30, authMode: "development" });
       expect((await restartedServer.ports.telemetry.queryEvents({ sinceSequence: 3 })).map((entry) => entry.eventId))
         .toEqual(["a-other-cast", "b-5"]);
       expect(await restartedServer.ports.telemetry.status()).toMatchObject({

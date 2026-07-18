@@ -26,7 +26,7 @@ import { type RoleRegistry } from "./roles.js";
 
 /** Bundled auth configuration handed to route handlers and the dispatcher. */
 export interface CentralAuth {
-  /** Credential → principal resolver (dev-token adapter today; future OAuth adapter). */
+  /** Credential → principal resolver (static bearer adapter today; future OAuth adapter). */
   readonly adapter: AuthAdapter;
   /** Role id → role lookup used to evaluate role bindings. */
   readonly roleRegistry: RoleRegistry;

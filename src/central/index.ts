@@ -6,8 +6,8 @@
  * control-plane adapter (src/infrastructure/localControlPlane). The central
  * server never couples to a local repository session
  * (docs/enterprise-control-plane.md §3.3, §4, §16.4). Auth + RBAC for central
- * routes lives in `./auth` (dev-token adapter today; OAuth/OIDC is a future
- * adapter boundary — §13).
+ * routes lives in `./auth` (deployment static-bearer adapter today;
+ * OAuth/OIDC is a future adapter boundary — §13).
  */
 export {
   createMateriaCentralServer,
@@ -17,6 +17,7 @@ export {
 
 export {
   CENTRAL_CONFIG_ENV,
+  DEFAULT_CENTRAL_AUTH_MODE,
   DEFAULT_CENTRAL_CORS_ORIGIN,
   DEFAULT_CENTRAL_DATABASE_PATH,
   DEFAULT_CENTRAL_HOST,
@@ -25,10 +26,12 @@ export {
   DEFAULT_CENTRAL_RETENTION_DAYS,
   loadCentralConnectedRuntimeConfig,
   loadCentralServerConfig,
+  validateCentralServerCredentials,
   type CentralConfigEnv,
   type CentralConnectedRuntimeConfig,
   type CentralCredentialConfig,
   type CentralSecretFileReader,
+  type CentralServerAuthMode,
   type CentralServerConfig,
   type LoadCentralConnectedRuntimeConfigOptions,
   type LoadCentralServerConfigOptions,

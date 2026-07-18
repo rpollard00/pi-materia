@@ -220,14 +220,25 @@ The standalone server reads the following deployment settings:
 | `MATERIA_CENTRAL_RETENTION_DAYS` | Telemetry retention in days | `30` |
 | `MATERIA_CENTRAL_CORS_ORIGIN` | CORS allow-origin response value | `*` (development compatibility) |
 | `MATERIA_CENTRAL_LABEL` | Optional non-secret server label | unset |
+| `MATERIA_CENTRAL_AUTH_MODE` | Static bearer security posture: `production` or `development` | `production` |
 
 Read, admin, and telemetry credentials are separate values:
 `MATERIA_CENTRAL_READ_TOKEN`, `MATERIA_CENTRAL_ADMIN_TOKEN`, and
 `MATERIA_CENTRAL_TELEMETRY_TOKEN`. Each supports a mutually exclusive `_FILE` companion
 (for example `MATERIA_CENTRAL_ADMIN_TOKEN_FILE`) for Docker/Kubernetes secrets. Secret
 contents are trimmed, never included in diagnostics, and never persisted in the profile.
-Production credential requirements and development-token gating are applied by the auth
-composition stage; these configuration contracts do not weaken route RBAC.
+Production mode requires all three credentials, requires their values to be distinct, and
+binds them to separate `central-reader`, `central-admin`, and
+`central-telemetry-sink` roles. Startup fails before database initialization or socket
+binding when that configuration is incomplete. The documented built-in tokens are loaded
+only when `MATERIA_CENTRAL_AUTH_MODE=development` is explicit and no deployment
+credentials are supplied; known built-in values are rejected in production. The
+`dev:central:server` script opts into development mode by name.
+
+Bearer values are hashed during auth composition and are not retained on the public auth
+object. Every presented token is hashed to the same fixed width and compared against the
+complete configured digest set with a constant-time primitive. Authentication failures,
+startup diagnostics, metadata, and HTTP envelopes never contain token values.
 
 ## 6. agent_router integration boundary
 

@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 async function startServer(): Promise<string> {
-  const created = createMateriaCentralServer({ port: 0 });
+  const created = createMateriaCentralServer({ port: 0, authMode: "development" });
   await new Promise<void>((resolve, reject) => {
     created.server.once("error", reject);
     created.server.listen(0, "127.0.0.1", () => resolve());
@@ -99,7 +99,7 @@ describe("central auth — role registry", () => {
 
 describe("central auth — dev-token adapter", () => {
   test("default dev tokens resolve to scoped principals with dev-token method", () => {
-    const adapter = createDevTokenAuthAdapter();
+    const adapter = createDevTokenAuthAdapter({ tokens: defaultDevTokenPrincipals() });
     expect(adapter.adapterId).toBe("dev-token");
 
     const admin = adapter.resolve(req(bearer(DEFAULT_DEV_TOKEN_ADMIN)));
@@ -116,7 +116,7 @@ describe("central auth — dev-token adapter", () => {
   });
 
   test("reports coarse failure reasons for missing, malformed, and unknown tokens", () => {
-    const adapter = createDevTokenAuthAdapter();
+    const adapter = createDevTokenAuthAdapter({ tokens: defaultDevTokenPrincipals() });
     expect(adapter.resolve(req({}))).toEqual({ status: "unauthenticated", reason: "missing" });
     expect(adapter.resolve(req({ Authorization: "Bearer not-a-real-token" }))).toEqual({ status: "unauthenticated", reason: "unknown" });
     expect(adapter.resolve(req({ Authorization: "Basic xyz" }))).toEqual({ status: "unauthenticated", reason: "malformed" });
@@ -139,9 +139,23 @@ describe("central auth — dev-token adapter", () => {
     if (result.status !== "authenticated") return;
     expect(result.context.principal.tenantId).toBe("tenant-a");
     expect(result.context.scope).toEqual({ tenantId: "tenant-a", workspaceId: "ws-1" });
+    expect(JSON.stringify(adapter)).not.toContain("team-token");
   });
 
-  test("rejects invalid token config up front", () => {
+  test("rejects invalid token config up front without exposing its credential", () => {
+    const secret = "should-never-appear-in-diagnostics";
+    let message = "";
+    try {
+      createDevTokenAuthAdapter({
+        tokens: { [secret]: { principalId: "", tenantId: "t", roleBindings: [] } },
+      });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain("invalid principal");
+    expect(message).not.toContain(secret);
+
+
     expect(() =>
       createDevTokenAuthAdapter({
         tokens: { "bad": { principalId: "", tenantId: "t", roleBindings: [] } },
@@ -163,7 +177,57 @@ describe("central auth — dev-token adapter", () => {
 });
 
 describe("central auth — RBAC permission decisions", () => {
-  const auth = createDefaultCentralAuth();
+  const auth = createDefaultCentralAuth({ mode: "development" });
+
+  test("production binds deployment credentials to distinct principals and roles", () => {
+    const production = createDefaultCentralAuth({
+      mode: "production",
+      credentials: {
+        adminToken: "production-admin-secret",
+        readToken: "production-reader-secret",
+        telemetryToken: "production-telemetry-secret",
+      },
+    });
+
+    const reader = production.adapter.resolve(req(bearer("production-reader-secret")));
+    expect(reader.status).toBe("authenticated");
+    if (reader.status === "authenticated") {
+      expect(reader.context.principal.id).toBe("central-reader");
+      expect(reader.context.principal.roleBindings).toEqual([{ roleId: "central-reader" }]);
+    }
+    expect(checkPermission({
+      auth: production,
+      req: req(bearer("production-telemetry-secret")),
+      permission: "telemetry.ingest",
+    }).ok).toBe(true);
+    expect(checkPermission({
+      auth: production,
+      req: req(bearer("production-admin-secret")),
+      permission: "catalog.write",
+    }).ok).toBe(true);
+    expect(production.adapter.resolve(req(bearer(DEFAULT_DEV_TOKEN_ADMIN)))).toEqual({
+      status: "unauthenticated",
+      reason: "unknown",
+    });
+    expect(JSON.stringify(production)).not.toContain("production-admin-secret");
+  });
+
+  test("fails closed unless development mode or complete production credentials are explicit", () => {
+    expect(() => createMateriaCentralServer()).toThrow(/production authentication.*missing/i);
+    expect(() => createDefaultCentralAuth({
+      mode: "production",
+      credentials: {
+        adminToken: DEFAULT_DEV_TOKEN_ADMIN,
+        readToken: "reader-secret",
+        telemetryToken: "telemetry-secret",
+      },
+    })).toThrow(/built-in development credential/i);
+    expect(() => createDefaultCentralAuth({
+      mode: "development",
+      credentials: { readToken: "reader-secret" },
+      roles: [],
+    })).toThrow(/unknown role "central-reader"/i);
+  });
 
   test("default central auth is wired with the dev-token method kind", () => {
     expect(auth.methodKind).toBe(DEV_TOKEN_METHOD_KIND);

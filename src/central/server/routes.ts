@@ -12,7 +12,7 @@ import type { ControlPlanePorts } from "../../application/controlPlane.js";
 
 export interface MateriaCentralRouteDeps {
   ports: ControlPlanePorts;
-  /** Auth configuration used by route guards (dev-token adapter today). */
+  /** Auth configuration used by route guards (static bearer adapter today). */
   auth: CentralAuth;
   /** Mode reported on health envelopes; defaults to the ports' reported mode. */
   label?: string;
@@ -30,7 +30,7 @@ export interface MateriaCentralRouteDeps {
  * Route authorization follows docs/enterprise-control-plane.md §13: central
  * route groups are gated by the domain principal/permission contracts. Health
  * is intentionally public (liveness). Other central routes require a permission
- * resolved through the dev-token adapter today (future OAuth adapter produces
+ * resolved through the static bearer adapter today (future OAuth adapter produces
  * the same contracts). Route matching precedes auth, so unknown routes still
  * return 404 rather than leaking existence through a 401.
  *

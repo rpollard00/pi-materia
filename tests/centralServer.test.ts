@@ -22,6 +22,7 @@ afterEach(async () => {
 async function startTestServer(options: { label?: string; ports?: ControlPlanePorts; corsOrigin?: string } = {}): Promise<string> {
   const created = createMateriaCentralServer({
     port: 0,
+    authMode: "development",
     ...(options.label !== undefined ? { label: options.label } : {}),
     ...(options.ports ? { ports: options.ports } : {}),
     ...(options.corsOrigin !== undefined ? { corsOrigin: options.corsOrigin } : {}),

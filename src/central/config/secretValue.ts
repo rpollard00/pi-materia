@@ -28,9 +28,10 @@ export async function readCentralSecret(
   let contents: string;
   try {
     contents = await readSecretFile(file);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Central configuration could not read ${names.file} (${file}): ${message}`);
+  } catch {
+    // Do not propagate an arbitrary secret-provider error: custom readers may
+    // include sensitive response details in their message.
+    throw new Error(`Central configuration could not read ${names.file} (${file}).`);
   }
   const secret = contents.trim();
   if (!secret) throw new Error(`Central configuration ${names.file} (${file}) is empty.`);

@@ -2,7 +2,13 @@ import { createServer } from "node:http";
 import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
-import { DEFAULT_CENTRAL_RETENTION_DAYS, loadCentralServerConfig } from "../config/index.js";
+import {
+  DEFAULT_CENTRAL_AUTH_MODE,
+  DEFAULT_CENTRAL_RETENTION_DAYS,
+  loadCentralServerConfig,
+  type CentralCredentialConfig,
+  type CentralServerAuthMode,
+} from "../config/index.js";
 import {
   createSqliteCentralCatalogRepository,
   createSqliteCentralTelemetryPort,
@@ -50,13 +56,14 @@ export interface MateriaCentralServerOptions {
   /** Telemetry retention interval used with `database`. Defaults to 30 days. */
   retentionDays?: number;
   /**
-   * Auth configuration for the route guards. Defaults to a dev-token adapter
-   * with the documented development-only token set and the default central role
-   * registry. Supply a custom {@link CentralAuth} (future OAuth/OIDC adapter +
-   * custom roles) for non-local deployments (docs/enterprise-control-plane.md
-   * §13).
+   * Fully composed auth configuration for route guards. Mutually exclusive with
+   * `authMode`/`credentials`.
    */
   auth?: CentralAuth;
+  /** Static bearer authentication mode. Defaults securely to production. */
+  authMode?: CentralServerAuthMode;
+  /** Role-specific static bearer credentials, normally loaded from deployment secrets. */
+  credentials?: CentralCredentialConfig;
   /** Human-readable label surfaced on health/status envelopes. */
   label?: string;
   /** Resolved CORS allow-origin value for this server instance. */
@@ -89,7 +96,13 @@ export interface MateriaCentralServer {
 export function createMateriaCentralServer(options: MateriaCentralServerOptions = {}): MateriaCentralServer {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 0;
-  const auth = options.auth ?? createDefaultCentralAuth();
+  if (options.auth !== undefined && (options.authMode !== undefined || options.credentials !== undefined)) {
+    throw new TypeError("Materia central server accepts either explicit auth or bearer credential options, not both");
+  }
+  const auth = options.auth ?? createDefaultCentralAuth({
+    mode: options.authMode ?? DEFAULT_CENTRAL_AUTH_MODE,
+    ...(options.credentials !== undefined ? { credentials: options.credentials } : {}),
+  });
   if (options.ports !== undefined && options.database !== undefined) {
     throw new TypeError("Materia central server accepts either explicit ports or a database, not both");
   }
@@ -123,6 +136,9 @@ export function createMateriaCentralServer(options: MateriaCentralServerOptions 
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const config = await loadCentralServerConfig();
+  // Compose and validate auth before opening the database or binding a socket.
+  // This ensures insecure production configuration fails without side effects.
+  const auth = createDefaultCentralAuth({ mode: config.authMode, credentials: config.credentials });
   // Migrate before binding the HTTP socket so an incompatible or partially
   // writable database cannot produce a falsely ready central server.
   const initialized = await initializeCentralSqliteDatabase({ path: config.databasePath });
@@ -130,6 +146,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     host: config.host,
     port: config.port,
     corsOrigin: config.corsOrigin,
+    auth,
     database: initialized.database,
     retentionDays: config.retentionDays,
     ...(config.label !== undefined ? { label: config.label } : {}),

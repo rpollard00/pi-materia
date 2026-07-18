@@ -119,14 +119,18 @@ describe("central-connected runtime configuration", () => {
 });
 
 describe("central standalone server configuration", () => {
-  test("provides typed local-development defaults", async () => {
-    const config = await loadCentralServerConfig({ env: env(), cwd: "/srv/materia" });
+  test("provides typed local-development defaults only when explicitly enabled", async () => {
+    const config = await loadCentralServerConfig({
+      env: env({ [CENTRAL_CONFIG_ENV.authMode]: "development" }),
+      cwd: "/srv/materia",
+    });
 
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(0);
     expect(config.databasePath).toBe(path.resolve("/srv/materia", "data/pi-materia-central.sqlite"));
     expect(config.retentionDays).toBe(DEFAULT_CENTRAL_RETENTION_DAYS);
     expect(config.corsOrigin).toBe(DEFAULT_CENTRAL_CORS_ORIGIN);
+    expect(config.authMode).toBe("development");
     expect(config.credentials).toEqual({});
   });
 
@@ -141,6 +145,8 @@ describe("central standalone server configuration", () => {
         [CENTRAL_CONFIG_ENV.corsOrigin]: "https://admin.example.test",
         [CENTRAL_CONFIG_ENV.label]: "production-a",
         [CENTRAL_CONFIG_ENV.readTokenFile]: "/run/secrets/read",
+        [CENTRAL_CONFIG_ENV.adminToken]: "admin-from-env",
+        [CENTRAL_CONFIG_ENV.telemetryToken]: "telemetry-from-env",
       }),
       readSecretFile: async () => "reader-from-file\n",
     });
@@ -151,17 +157,55 @@ describe("central standalone server configuration", () => {
       databasePath: path.resolve("/srv/materia", "state/control.sqlite"),
       retentionDays: 90,
       corsOrigin: "https://admin.example.test",
-      credentials: { readToken: "reader-from-file" },
+      authMode: "production",
+      credentials: {
+        readToken: "reader-from-file",
+        adminToken: "admin-from-env",
+        telemetryToken: "telemetry-from-env",
+      },
       label: "production-a",
     });
   });
 
-  test("rejects invalid ports and retention", async () => {
+  test("rejects insecure or invalid production authentication settings", async () => {
+    await expect(loadCentralServerConfig({ env: env() })).rejects.toThrow(/production authentication.*missing/i);
     await expect(loadCentralServerConfig({
-      env: env({ [CENTRAL_CONFIG_ENV.port]: "70000" }),
+      env: env({ [CENTRAL_CONFIG_ENV.authMode]: "preview" }),
+    })).rejects.toThrow(CENTRAL_CONFIG_ENV.authMode);
+    await expect(loadCentralServerConfig({
+      env: env({
+        [CENTRAL_CONFIG_ENV.readToken]: "same-token",
+        [CENTRAL_CONFIG_ENV.adminToken]: "same-token",
+        [CENTRAL_CONFIG_ENV.telemetryToken]: "telemetry-token",
+      }),
+    })).rejects.toThrow(/distinct bearer token/i);
+  });
+
+  test("does not include secret-provider details in file-read diagnostics", async () => {
+    const providerDetail = "provider accidentally returned secret-value";
+    let message = "";
+    try {
+      await loadCentralServerConfig({
+        env: env({
+          [CENTRAL_CONFIG_ENV.authMode]: "development",
+          [CENTRAL_CONFIG_ENV.readTokenFile]: "/run/secrets/read",
+        }),
+        readSecretFile: async () => { throw new Error(providerDetail); },
+      });
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain(CENTRAL_CONFIG_ENV.readTokenFile);
+    expect(message).not.toContain(providerDetail);
+  });
+
+  test("rejects invalid ports and retention", async () => {
+    const development = { [CENTRAL_CONFIG_ENV.authMode]: "development" };
+    await expect(loadCentralServerConfig({
+      env: env({ ...development, [CENTRAL_CONFIG_ENV.port]: "70000" }),
     })).rejects.toThrow(CENTRAL_CONFIG_ENV.port);
     await expect(loadCentralServerConfig({
-      env: env({ [CENTRAL_CONFIG_ENV.retentionDays]: "forever" }),
+      env: env({ ...development, [CENTRAL_CONFIG_ENV.retentionDays]: "forever" }),
     })).rejects.toThrow(CENTRAL_CONFIG_ENV.retentionDays);
   });
 });
