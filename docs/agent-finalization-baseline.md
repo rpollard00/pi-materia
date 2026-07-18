@@ -82,3 +82,5 @@ Run the baseline with:
 ```bash
 bun test tests/finalizationBaseline.test.ts
 ```
+
+The isolated custom-tool experiment and its bounded evidence are documented in [Tool-backed handoff submission prototype](tool-backed-handoff-prototype.md).

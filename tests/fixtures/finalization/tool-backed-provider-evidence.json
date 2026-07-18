@@ -1,0 +1,385 @@
+{
+  "schemaVersion": 1,
+  "kind": "paired-pi-agent-session-provider-experiment",
+  "capturedAt": "2026-07-18T00:42:00.790Z",
+  "configuration": {
+    "caseId": "escaping-heavy-v1",
+    "semanticPayloadSha256": "283c138c0d8f2e282b4444f4cf14d123d4a10b52a9d15111b832b6f739da94d9",
+    "provider": "openai-codex",
+    "model": "gpt-5.4-mini",
+    "api": "openai-codex-responses",
+    "thinking": "minimal",
+    "repetitions": 3,
+    "maxRecoveryPrompts": 1,
+    "transport": "sse",
+    "piAgentLoop": "createAgentSession",
+    "providerToolArgumentsObserved": "streamed toolcall_delta events before Pi schema validation",
+    "schemaValidation": "Pi validateToolArguments before tool execution",
+    "providerStrictSchemaGuarantee": false,
+    "costInterpretation": "provider-reported token value; subscription providers may not bill this amount per call"
+  },
+  "runs": [
+    {
+      "strategy": "direct_json",
+      "repetition": 1,
+      "firstSubmissionOutcome": "accepted",
+      "eventualOutcome": "accepted",
+      "recoveryPrompts": 0,
+      "providerTurns": 1,
+      "providerAutoRetries": 0,
+      "latencyMs": 7074,
+      "usage": {
+        "tokens": {
+          "input": 527,
+          "output": 432,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 959
+        },
+        "reportedCost": 0.00233925
+      },
+      "bareJsonOnAcceptedSubmission": true
+    },
+    {
+      "strategy": "tool_backed",
+      "repetition": 1,
+      "firstPromptOutcome": "accepted",
+      "firstProviderTurnCommitted": false,
+      "eventualOutcome": "accepted",
+      "recoveryPrompts": 0,
+      "commitProviderTurn": 2,
+      "providerTurns": 2,
+      "latencyMs": 12058,
+      "usage": {
+        "tokens": {
+          "input": 1055,
+          "output": 489,
+          "cacheRead": 1024,
+          "cacheWrite": 0,
+          "total": 2568
+        },
+        "reportedCost": 0.0030685499999999998
+      },
+      "diagnostics": {
+        "toolCalls": 5,
+        "commitCalls": 1,
+        "successfulCommitCalls": 1,
+        "schemaRejections": 0,
+        "commitRejections": 0,
+        "duplicateCommit": 0,
+        "unknownToolCalls": 0,
+        "executionRejections": 0,
+        "assistantTextResponses": 0,
+        "assistantErrorResponses": 0,
+        "providerAutoRetries": 0,
+        "malformedRawArguments": 0,
+        "uncapturedRawArguments": 0,
+        "missingCommit": 0,
+        "argumentTraces": [
+          {
+            "providerTurn": 1,
+            "toolName": "materia_handoff_add_work_item",
+            "rawBytes": 614,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 1,
+            "toolName": "materia_handoff_add_work_item",
+            "rawBytes": 597,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 1,
+            "toolName": "materia_handoff_set_satisfied",
+            "rawBytes": 18,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 1,
+            "toolName": "materia_handoff_set_context",
+            "rawBytes": 151,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 2,
+            "toolName": "materia_handoff_commit",
+            "rawBytes": 2,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "strategy": "tool_backed",
+      "repetition": 2,
+      "firstPromptOutcome": "accepted",
+      "firstProviderTurnCommitted": false,
+      "eventualOutcome": "accepted",
+      "recoveryPrompts": 0,
+      "commitProviderTurn": 3,
+      "providerTurns": 3,
+      "latencyMs": 9778,
+      "usage": {
+        "tokens": {
+          "input": 1255,
+          "output": 507,
+          "cacheRead": 2048,
+          "cacheWrite": 0,
+          "total": 3810
+        },
+        "reportedCost": 0.00337635
+      },
+      "diagnostics": {
+        "toolCalls": 5,
+        "commitCalls": 1,
+        "successfulCommitCalls": 1,
+        "schemaRejections": 0,
+        "commitRejections": 0,
+        "duplicateCommit": 0,
+        "unknownToolCalls": 0,
+        "executionRejections": 0,
+        "assistantTextResponses": 0,
+        "assistantErrorResponses": 0,
+        "providerAutoRetries": 0,
+        "malformedRawArguments": 0,
+        "uncapturedRawArguments": 0,
+        "missingCommit": 0,
+        "argumentTraces": [
+          {
+            "providerTurn": 1,
+            "toolName": "materia_handoff_add_work_item",
+            "rawBytes": 614,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 1,
+            "toolName": "materia_handoff_add_work_item",
+            "rawBytes": 597,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 2,
+            "toolName": "materia_handoff_set_satisfied",
+            "rawBytes": 18,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 2,
+            "toolName": "materia_handoff_set_context",
+            "rawBytes": 151,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 3,
+            "toolName": "materia_handoff_commit",
+            "rawBytes": 2,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "strategy": "direct_json",
+      "repetition": 2,
+      "firstSubmissionOutcome": "accepted",
+      "eventualOutcome": "accepted",
+      "recoveryPrompts": 0,
+      "providerTurns": 1,
+      "providerAutoRetries": 0,
+      "latencyMs": 6330,
+      "usage": {
+        "tokens": {
+          "input": 527,
+          "output": 393,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 920
+        },
+        "reportedCost": 0.00216375
+      },
+      "bareJsonOnAcceptedSubmission": true
+    },
+    {
+      "strategy": "direct_json",
+      "repetition": 3,
+      "firstSubmissionOutcome": "accepted",
+      "eventualOutcome": "accepted",
+      "recoveryPrompts": 0,
+      "providerTurns": 1,
+      "providerAutoRetries": 0,
+      "latencyMs": 6371,
+      "usage": {
+        "tokens": {
+          "input": 527,
+          "output": 403,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 930
+        },
+        "reportedCost": 0.0022087499999999998
+      },
+      "bareJsonOnAcceptedSubmission": true
+    },
+    {
+      "strategy": "tool_backed",
+      "repetition": 3,
+      "firstPromptOutcome": "accepted",
+      "firstProviderTurnCommitted": false,
+      "eventualOutcome": "accepted",
+      "recoveryPrompts": 0,
+      "commitProviderTurn": 5,
+      "providerTurns": 5,
+      "latencyMs": 13918,
+      "usage": {
+        "tokens": {
+          "input": 2575,
+          "output": 513,
+          "cacheRead": 3072,
+          "cacheWrite": 0,
+          "total": 6160
+        },
+        "reportedCost": 0.00447015
+      },
+      "diagnostics": {
+        "toolCalls": 5,
+        "commitCalls": 1,
+        "successfulCommitCalls": 1,
+        "schemaRejections": 0,
+        "commitRejections": 0,
+        "duplicateCommit": 0,
+        "unknownToolCalls": 0,
+        "executionRejections": 0,
+        "assistantTextResponses": 0,
+        "assistantErrorResponses": 0,
+        "providerAutoRetries": 0,
+        "malformedRawArguments": 0,
+        "uncapturedRawArguments": 0,
+        "missingCommit": 0,
+        "argumentTraces": [
+          {
+            "providerTurn": 1,
+            "toolName": "materia_handoff_add_work_item",
+            "rawBytes": 614,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 2,
+            "toolName": "materia_handoff_add_work_item",
+            "rawBytes": 597,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 3,
+            "toolName": "materia_handoff_set_satisfied",
+            "rawBytes": 18,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 4,
+            "toolName": "materia_handoff_set_context",
+            "rawBytes": 151,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          },
+          {
+            "providerTurn": 5,
+            "toolName": "materia_handoff_commit",
+            "rawBytes": 2,
+            "rawSyntax": "valid_json",
+            "piParsedArgumentType": "object",
+            "execution": "succeeded"
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "directJson": {
+      "runs": 3,
+      "eventualAccepted": 3,
+      "recoveryPrompts": 0,
+      "providerTurns": 3,
+      "totalLatencyMs": 19775,
+      "meanLatencyMs": 6592,
+      "usage": {
+        "tokens": {
+          "input": 1581,
+          "output": 1228,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 2809
+        },
+        "reportedCost": 0.00671175
+      },
+      "firstSubmissionAccepted": 3,
+      "emptyOutputs": 0,
+      "providerErrors": 0,
+      "jsonSyntaxFailures": 0,
+      "contractRejections": 0,
+      "semanticMismatches": 0
+    },
+    "toolBacked": {
+      "runs": 3,
+      "eventualAccepted": 3,
+      "recoveryPrompts": 0,
+      "providerTurns": 10,
+      "totalLatencyMs": 35754,
+      "meanLatencyMs": 11918,
+      "usage": {
+        "tokens": {
+          "input": 4885,
+          "output": 1509,
+          "cacheRead": 6144,
+          "cacheWrite": 0,
+          "total": 12538
+        },
+        "reportedCost": 0.010915049999999999
+      },
+      "firstPromptAccepted": 3,
+      "firstProviderTurnCommitted": 0,
+      "malformedRawArguments": 0,
+      "uncapturedRawArguments": 0,
+      "schemaRejections": 0,
+      "commitRejections": 0,
+      "missingCommit": 0,
+      "duplicateCommit": 0,
+      "unknownToolCalls": 0,
+      "executionRejections": 0
+    }
+  },
+  "limitations": [
+    "This controlled sample measures one available model/provider and one escaping-heavy semantic payload; it is not a general tool-calling success rate.",
+    "The selected provider receives tool schemas, but this experiment does not claim native strict/constrained JSON-schema decoding. Pi performs local validation after provider argument parsing.",
+    "Raw argument syntax is observable only when the provider adapter emits complete toolcall_delta text. Calls without complete deltas are categorized as not_captured rather than assumed valid.",
+    "Pi's provider adapter can repair some malformed JSON string controls or backslashes while assembling streamed arguments; malformedRawArguments reports the pre-validation streamed text, while schemaRejections reports the later local validation boundary.",
+    "Tool-backed submission still depends on the model choosing tools, supplying semantically correct values, and committing. Missing/duplicate commit and weak or emulated tool support remain separate failure classes.",
+    "Tool-backed runs normally require more provider turns than direct JSON because the narrow accumulator calls are intentionally sequential."
+  ]
+}
