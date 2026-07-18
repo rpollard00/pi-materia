@@ -23,6 +23,18 @@ export interface AgentHandoffBuilderOptions {
   readonly allowEventSideChannel?: boolean;
 }
 
+/** Socket-scoped fields that ergonomic agent tools may expose. */
+export interface AgentHandoffCapabilities {
+  /** Include tools for beginning and appending to the canonical workItems array. */
+  readonly workItems: boolean;
+  /** Include the satisfied graph-control setter. */
+  readonly satisfied: boolean;
+  /** Context is the canonical cross-socket explanatory handoff field. */
+  readonly context: true;
+  /** Include the optional event side-channel emitter. */
+  readonly events: boolean;
+}
+
 export type AgentHandoffEnvelope = Partial<
   Pick<HandoffEnvelope, "workItems" | "satisfied" | "context">
 >;
@@ -94,5 +106,14 @@ export function cloneAgentHandoffBuilderScope(value: AgentHandoffBuilderScope): 
     socketId: value.socketId,
     socketVisit: value.socketVisit,
     finalizationAttempt: value.finalizationAttempt,
+  };
+}
+
+export function cloneAgentHandoffCapabilities(value: AgentHandoffCapabilities): AgentHandoffCapabilities {
+  return {
+    workItems: value.workItems,
+    satisfied: value.satisfied,
+    context: true,
+    events: value.events,
   };
 }

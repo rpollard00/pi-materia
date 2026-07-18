@@ -27,6 +27,7 @@ import {
   AgentHandoffBuilderError,
   cloneAgentHandoffBuilderScope,
   validateAgentHandoffBuilderScope,
+  type AgentHandoffCapabilities,
   type AgentHandoffBuilderErrorCode,
   type AgentHandoffBuilderOptions,
   type AgentHandoffBuilderScope,
@@ -37,6 +38,7 @@ import {
 
 export {
   AgentHandoffBuilderError,
+  type AgentHandoffCapabilities,
   type AgentHandoffBuilderErrorCode,
   type AgentHandoffBuilderOptions,
   type AgentHandoffBuilderScope,
@@ -67,6 +69,7 @@ const OBSOLETE_AGENT_HANDOFF_FIELDS = new Set<string>([
  */
 export class AgentHandoffBuilder {
   readonly scope: AgentHandoffBuilderScope;
+  readonly capabilities: AgentHandoffCapabilities;
 
   private includeWorkItems = false;
   private readonly workItems: HandoffWorkItem[] = [];
@@ -80,6 +83,12 @@ export class AgentHandoffBuilder {
   constructor(private readonly options: AgentHandoffBuilderOptions) {
     this.scope = validateAgentHandoffBuilderScope(options.scope);
     this.assertSupportedSocket();
+    this.capabilities = Object.freeze({
+      workItems: this.allowsWorkItems(),
+      satisfied: this.allowsSatisfied(),
+      context: true,
+      events: options.allowEventSideChannel !== false,
+    });
   }
 
   /** Include an explicitly empty workItems array. */
@@ -294,11 +303,11 @@ export class AgentHandoffBuilder {
   private assertFieldPlacement(field: string): void {
     if (field === HANDOFF_CONTEXT_FIELD) return;
     if (field === EVENT_SIDECHANNEL_FIELD) {
-      if (this.options.allowEventSideChannel !== false) return;
+      if (this.capabilities.events) return;
       throw this.failure("misplaced_field", `$.${field}`, "event side-channel data is not permitted for this finalization strategy");
     }
-    if (field === HANDOFF_WORK_ITEMS_FIELD && this.allowsWorkItems()) return;
-    if (field === HANDOFF_SATISFIED_FIELD && this.allowsSatisfied()) return;
+    if (field === HANDOFF_WORK_ITEMS_FIELD && this.capabilities.workItems) return;
+    if (field === HANDOFF_SATISFIED_FIELD && this.capabilities.satisfied) return;
     throw this.failure("misplaced_field", `$.${field}`, `handoff field ${JSON.stringify(field)} is not consumed or required by this socket placement`);
   }
 
