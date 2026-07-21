@@ -8,6 +8,16 @@ describe("turn failure classification", () => {
     expect(classifyTurnFailure(new Error('Pi agent turn failed for socket "Build": WebSocket error'))).toBe("transient_transport");
   });
 
+  test("classifies bare terminated connection drops as transient_transport", () => {
+    expect(classifyTurnFailure(new Error("terminated"))).toBe("transient_transport");
+    expect(classifyTurnFailure(new Error('Pi agent turn failed for socket "Build": terminated'))).toBe("transient_transport");
+  });
+
+  test("terminated classification does not mask structured provider errors", () => {
+    const error = new Error('Codex error: {"type":"error","error":{"type":"server_error","message":"connection terminated"}}: terminated');
+    expect(classifyTurnFailure(error)).toBeUndefined();
+  });
+
   test("classifies stream-ended-without-finish-reason as transient_transport", () => {
     expect(classifyTurnFailure(new Error("Stream ended without finish_reason"))).toBe("transient_transport");
     expect(classifyTurnFailure(new Error('Pi agent turn failed for socket "Build": Stream ended without finish_reason'))).toBe("transient_transport");
