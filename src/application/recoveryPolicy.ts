@@ -36,10 +36,11 @@ export function classifyTurnFailure(error: unknown, options: TurnFailureClassifi
   const message = errorMessage(error);
   if (evaluateContextErrorRecovery(error).action === "compact") return "context_window";
   if (isToolTimeoutFailure(message)) return "tool_timeout";
-  // Order matters: check stream-ended first (more specific signal), then
-  // generic websocket failures. Both return transient_transport so the cast
+  // Order matters: check the specific stream/connection-drop signals before
+  // generic websocket failures. All return transient_transport so the cast
   // stays active and awaiting—no failed state or cast_end ok:false.
   if (isStreamEndedTransportFailure(message)) return "transient_transport";
+  if (isTerminatedTransportFailure(message)) return "transient_transport";
   if (isPlainWebSocketTransportFailure(message)) return "transient_transport";
   if (options.allowGenericTurnFailure === true) return "turn_failure";
   return undefined;
@@ -202,6 +203,17 @@ function isStreamEndedTransportFailure(message: string): boolean {
   // text happens to appear at the end of the wrapper.
   if (/\b(?:codex|anthropic|openai|provider)\s+error\s*:\s*\{|\{"type"\s*:\s*"error"/i.test(normalized)) return false;
   return /stream\s+ended\s+without\s+finish[_-]?reason\s*\.?$/i.test(normalized);
+}
+
+/**
+ * Detect the bare `terminated` connection-drop message emitted by undici and
+ * llama.cpp-compatible providers. Keep this anchored and reject structured
+ * provider payloads so unrelated provider failures are not masked.
+ */
+function isTerminatedTransportFailure(message: string): boolean {
+  const normalized = message.trim();
+  if (/\b(?:codex|anthropic|openai|provider)\s+error\s*:\s*\{|\{"type"\s*:\s*"error"/i.test(normalized)) return false;
+  return /(?:^|:\s*)(?:error:\s*)?terminated\.?$/i.test(normalized);
 }
 
 function isToolTimeoutFailure(message: string): boolean {
