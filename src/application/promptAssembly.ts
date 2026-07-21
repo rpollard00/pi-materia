@@ -219,11 +219,12 @@ export function resolveTemplateValue(key: string, state: MateriaCastState): unkn
 
 export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaCastState): unknown[] {
   if (!shouldUseIsolatedMateriaContext(state)) return messages;
-  // Anchor on the active socket's own hidden materia prompt: match the latest
+  // Anchor on the current socket's own hidden materia prompt: match the latest
   // pi-materia-prompt custom message whose details.socketId and materiaName
-  // agree with the current cast state. This excludes prior socket prompts that
-  // also carry a <materia-instructions> block, which content-only discovery
-  // cannot distinguish from the current socket's prompt.
+  // agree with the current cast state. The persisted identity remains available
+  // after a failed/aborted cast, so Pi retries cannot fall through to the full
+  // transcript. This also excludes prior socket prompts that carry their own
+  // <materia-instructions> block.
   const materiaStart = findActiveMateriaPromptIndex(messages, {
     socketId: currentSocketId(state),
     materiaName: state.currentMateria,
@@ -237,11 +238,29 @@ export function buildIsolatedMateriaContext(messages: unknown[], state: MateriaC
   // assistant/tool/toolResult turns, and genuine user refinement messages are
   // preserved because they are not display-only orchestration custom messages.
   const preserved = messages.slice(materiaStart).filter((message) => !isOrchestrationOnlyMessage(message));
-  return [createUserMessage(buildSyntheticCastContext(state)), ...preserved];
+  const syntheticContext = state.active ? buildSyntheticCastContext(state) : isolatedContextGuardPreamble();
+  return [createUserMessage(syntheticContext), ...preserved];
 }
 
 export function shouldUseIsolatedMateriaContext(state: MateriaCastState): boolean {
-  return state.active && (state.awaitingResponse || isPausedMultiTurnRefinement(state));
+  if (isCompletedMateriaCast(state)) return false;
+  if (!state.active) return isFailedOrAbortedMateriaCast(state);
+  return state.awaitingResponse || isPausedMultiTurnRefinement(state);
+}
+
+function isCompletedMateriaCast(state: MateriaCastState): boolean {
+  return state.phase === "complete" || state.socketState === "complete";
+}
+
+function isFailedOrAbortedMateriaCast(state: MateriaCastState): boolean {
+  return state.phase === "failed" || state.socketState === "failed" || state.failedReason !== undefined;
+}
+
+function isolatedContextGuardPreamble(): string {
+  return [
+    "Materia isolated context.",
+    "Use only this cast context, the current materia prompt, and any tool results from this materia turn. Do not rely on unrelated earlier visible transcript messages.",
+  ].join("\n");
 }
 
 export function isPausedMultiTurnRefinement(state: MateriaCastState): boolean {
@@ -262,8 +281,7 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
     ? `multi-turn refinement (${state.multiTurnFinalizing === true ? "/materia continue finalization" : currentSocketState(state) === "awaiting_user_refinement" ? "awaiting user refinement or /materia continue" : currentSocketState(state) ?? "active"})`
     : currentSocketState(state) ?? "active";
   return [
-    "Materia isolated context.",
-    "Use only this cast context, the current materia prompt, and any tool results from this materia turn. Do not rely on unrelated earlier visible transcript messages.",
+    isolatedContextGuardPreamble(),
     multiTurnRefining ? multiTurnRefinementGuidance() : undefined,
     syntheticHandoffContractContext(state),
     syntheticEventEmissionContext(state),

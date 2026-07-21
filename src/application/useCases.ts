@@ -227,8 +227,9 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
 
   buildIsolatedContext(messages: unknown, session: TSession): unknown | undefined {
     const state = this.deps.states.loadActive(session);
-    if (!state?.active) return undefined;
-    return this.deps.context.buildIsolatedContext(messages, state);
+    if (!state) return undefined;
+    const isolated = this.deps.context.buildIsolatedContext(messages, state);
+    return isolated === messages ? undefined : isolated;
   }
 
   async prepareAgentStart(input: { pi: TPi; session: TSession; systemPrompt: string }): Promise<string | undefined> {
