@@ -357,6 +357,7 @@ export function createAgentPromptDispatch(deps: AgentPromptDispatchDependencies)
         itemKey: state.currentItemKey,
         itemLabel: state.currentItemLabel,
         materiaModel: state.currentMateriaModel,
+        finalization: state.multiTurnFinalizing === true,
       },
     }, { triggerTurn: true });
     await appendAdvancementDiagnostic(ctx, state, "dispatch_execution_exit", diagnostics, {
