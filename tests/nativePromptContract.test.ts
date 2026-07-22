@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
+import { buildSyntheticCastContext } from "../src/application/promptAssembly.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
@@ -255,12 +256,20 @@ describe("native JSON prompt handoff contract guidance", () => {
 
     const finalizationPrompt = promptMessages(harness).at(-1) ?? "";
     expect(finalizationPrompt).toContain("Command-triggered finalization");
-    expect(finalizationPrompt).toContain("Canonical handoff contract context:");
-    expect(finalizationPrompt).toContain("Synthetic context exposure policy");
-    expect(finalizationPrompt).toContain("Do not expose it during multi-turn refinement");
     expectPromptIncludesConciseJsonFinalInstruction(finalizationPrompt);
     expect(finalizationPrompt).toContain("Final output format: Return only one top-level JSON object");
-    expect(finalizationPrompt).toContain("Generated units use workItems, not tasks");
+
+    // The synthetic cast context (Canonical handoff contract context, Synthetic
+    // context exposure policy, etc.) is prepended by buildIsolatedMateriaContext
+    // on every isolated turn, not embedded in the raw finalization prompt.
+    const castState = harness.appendedEntries
+      .filter((entry) => entry.customType === "pi-materia-cast-state")
+      .at(-1)?.data as any;
+    const syntheticContext = buildSyntheticCastContext(castState);
+    expect(syntheticContext).toContain("Canonical handoff contract context:");
+    expect(syntheticContext).toContain("Synthetic context exposure policy");
+    expect(syntheticContext).toContain("Do not expose it during multi-turn refinement");
+    expect(syntheticContext).toContain("Generated units use workItems, not tasks");
   });
 
   test("does not append JSON handoff contract guidance to plain-text agent sockets", async () => {

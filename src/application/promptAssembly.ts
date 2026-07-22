@@ -27,8 +27,11 @@ export function buildSocketPrompt(state: MateriaCastState, socket: ResolvedMater
 
 export function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
   if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
+  // The synthetic cast context is NOT embedded here because
+  // buildIsolatedMateriaContext (src/index.ts context event) prepends it on
+  // every isolated turn, including finalization and recovery re-dispatch paths.
+  // Embedding it here would duplicate the ~900-token context block.
   return materiaPrompt(socket.materia, state, [
-    buildSyntheticCastContext(state),
     renderReworkFeedbackPromptContext(state, socket.id),
     socketAdapterContextInstruction(state, socket),
     "Command-triggered finalization: the user ran /materia continue for this multi-turn socket. This is the only finalization mechanism and this is the finalization turn.",
@@ -115,8 +118,11 @@ function formatValidationIssuesForRepair(issues: JsonOutputRepairPromptInput["va
 export function buildJsonOutputRepairRetryPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {
   if (!state.jsonOutputRepair || !isFinalJsonOutputSocket(state, socket)) return undefined;
   const contextState = { ...state, lastAssistantText: undefined, lastOutput: undefined };
-  return materiaPrompt(socket.materia, state, [
-    buildSyntheticCastContext(contextState),
+  // For multi-turn finalization turns, the synthetic cast context is already
+  // prepended by buildIsolatedMateriaContext (src/index.ts context event), so
+  // embedding it here would duplicate it. For single-turn repair paths (cast
+  // not active), isolation does not run, so we keep the embedded copy.
+  const sections: (string | undefined)[] = [
     buildJsonOutputRepairPrompt({
       validationKind: state.jsonOutputRepair.validationKind,
       errorMessage: state.jsonOutputRepair.errorMessage,
@@ -124,7 +130,11 @@ export function buildJsonOutputRepairRetryPrompt(state: MateriaCastState, socket
       invalidOutputExcerpt: state.jsonOutputRepair.invalidOutputExcerpt,
       originalFinalOutputInstructions: finalFormatInstruction(socket, state),
     }),
-  ]);
+  ];
+  if (!state.multiTurnFinalizing) {
+    sections.unshift(buildSyntheticCastContext(contextState));
+  }
+  return materiaPrompt(socket.materia, state, sections);
 }
 
 export function isFinalJsonOutputSocket(state: MateriaCastState, socket: ResolvedMateriaSocket): socket is ResolvedMateriaAgentSocket {

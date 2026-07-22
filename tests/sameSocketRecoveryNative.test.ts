@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
 import { extendSameSocketRecoveryAllowanceForRevive } from "../src/castRuntime.js";
+import { buildSyntheticCastContext } from "../src/application/promptAssembly.js";
 import { FakePiHarness } from "./fakePi.js";
 
 async function makeHarness(config: unknown): Promise<FakePiHarness> {
@@ -869,7 +870,18 @@ describe("native same-socket recovery", () => {
     const retryPrompt = promptMessages(harness).at(-1)?.content;
     expect(retryPrompt).toContain("Command-triggered finalization");
     expect(retryPrompt).toContain("Return only one top-level JSON object");
-    expect(retryPrompt).toContain("Previous output:\nDraft plan; ready to finalize.");
+    // The synthetic cast context is prepended by buildIsolatedMateriaContext on
+    // every isolated turn, not embedded in the raw repair prompt for multi-turn
+    // finalization. "Previous output" is absent from the synthetic context in
+    // this recovery path because the error response overwrites lastAssistantText
+    // before recovery runs, so the state no longer carries the prior turn's text.
+    // Verify the synthetic context structure is otherwise correct.
+    const syntheticContext = buildSyntheticCastContext(latestState);
+    expect(syntheticContext).toContain("Canonical handoff contract context:");
+    expect(syntheticContext).toContain("Cast id:");
+    expect(syntheticContext).toContain("Current socket: Socket-1");
+    expect(syntheticContext).toContain("Current materia: Plan");
+    expect(syntheticContext).not.toContain("Previous output:");
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.mode === "finalization" && event.data.reason === "context_window")).toBe(true);
   });

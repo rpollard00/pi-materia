@@ -326,21 +326,19 @@ describe("application prompt assembly", () => {
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });
 
-  test("/materia continue finalization includes synthetic context and canonical JSON contract", () => {
+  test("/materia continue finalization includes canonical JSON contract (synthetic context is prepended by isolation, not embedded)", () => {
     const socket = agentSocket({
       socket: { materia: "Plan", parse: "json" },
       materia: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
     });
     const prompt = buildMultiTurnFinalizationPrompt(state(socket, { multiTurnFinalizing: true, lastOutput: "previous refinement" }), socket);
 
-    expect(prompt).toContain("Materia isolated context.");
+    // The synthetic cast context is NOT embedded in the finalization prompt;
+    // buildIsolatedMateriaContext prepends it on every isolated turn.
+    expect(prompt).not.toContain("Materia isolated context.");
     expect(prompt).toContain("Command-triggered finalization");
-    expect(prompt).toContain("Canonical handoff contract context:");
-    expect(prompt).toContain("Agent-authored JSON handoffs are limited to top-level workItems, satisfied, and context");
+    // Socket-scoped handoff guidance from finalFormatInstruction is still present:
     expect(prompt).toContain("do not emit a top-level text field");
-    expect(prompt).toContain(HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT);
-    expect(prompt).not.toContain(HANDOFF_CONTRACT_PROMPT_TEXT);
-    expect(prompt).not.toContain("pi-materia canonical handoff JSON contract");
     expect(prompt).toContain("Final output format: Return only one top-level JSON object");
   });
 
@@ -1033,7 +1031,7 @@ describe("syntheticEventEmissionContext", () => {
     expect(synthetic).not.toContain('status.progress');
   });
 
-  test("event emission context is included in multi-turn finalization prompt", () => {
+  test("event emission context is carried by buildSyntheticCastContext for multi-turn finalization, not embedded in finalization prompt", () => {
     const socket = agentSocket({
       id: "Socket-MT",
       socket: { materia: "Plan", parse: "json" },
@@ -1041,11 +1039,17 @@ describe("syntheticEventEmissionContext", () => {
     });
     const castState = state(socket, { multiTurnFinalizing: true });
 
-    const prompt = buildMultiTurnFinalizationPrompt(castState, socket);
+    // The synthetic cast context is prepended by buildIsolatedMateriaContext on
+    // every isolated turn, so it carries the event emission instructions.
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).toContain("## Event Emission (Optional)");
+    expect(synthetic).toContain('result.pr_created');
+    expect(synthetic).toContain('status.progress');
 
-    expect(prompt).toContain("## Event Emission (Optional)");
-    expect(prompt).toContain('result.pr_created');
-    expect(prompt).toContain('status.progress');
+    // But the finalization prompt itself does NOT embed the synthetic context.
+    const prompt = buildMultiTurnFinalizationPrompt(castState, socket);
+    expect(prompt).not.toContain("## Event Emission (Optional)");
+    expect(prompt).not.toContain('result.pr_created');
   });
 
   test("event emission context is NOT included during multi-turn refinement", () => {
