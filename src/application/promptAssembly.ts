@@ -424,6 +424,7 @@ export interface ActiveMateriaPromptLookup {
 interface MateriaPromptCandidate {
   socketId?: string;
   materiaName?: string;
+  finalization?: boolean;
   hasMetadata: boolean;
 }
 
@@ -439,11 +440,20 @@ interface MateriaPromptCandidate {
  * socket's prompt is present, no content fallback occurs: the prior prompt is
  * excluded rather than leaked, and the caller returns the transcript unchanged.
  *
+ * Multi-turn finalization prompts (details.finalization === true) are excluded
+ * from anchor discovery so the anchor resolves to the socket visit's INITIAL
+ * hidden prompt. This preserves the full refinement transcript (refinement
+ * turns plus the finalization prompt) instead of truncating everything before
+ * the finalization prompt. The finalization-marked message itself is still
+ * retained in the returned isolated context since it appears at/after the
+ * anchor index.
+ *
  * The defensive content-only fallback is reached only when metadata cannot
  * anchor discovery — either the lookup carries no socket id/materia name, or no
  * candidate pi-materia-prompt message carries socket/materia details at all
  * (older runtime versions, tests, mocks). In that case the latest message that
- * contains a <materia-instructions> block is selected, preserving prior behavior.
+ * contains a <materia-instructions> block (and is not a finalization-marked
+ * prompt) is selected, preserving prior behavior.
  */
 export function findActiveMateriaPromptIndex(messages: unknown[], lookup?: ActiveMateriaPromptLookup): number {
   const hasLookupCriteria = Boolean(lookup && (lookup.socketId || lookup.materiaName));
@@ -452,6 +462,10 @@ export function findActiveMateriaPromptIndex(messages: unknown[], lookup?: Activ
   for (let i = messages.length - 1; i >= 0; i--) {
     const candidate = readMateriaPromptCandidate(messages[i]);
     if (!candidate) continue;
+    // Finalization-marked prompts are excluded as anchor candidates so the
+    // anchor resolves to the socket visit's initial hidden prompt, preserving
+    // the full refinement transcript through finalization.
+    if (candidate.finalization === true) continue;
     if (candidate.hasMetadata) sawPromptWithMetadata = true;
     if (hasLookupCriteria && materiaPromptCandidateMatches(candidate, lookup!)) return i;
   }
@@ -467,7 +481,7 @@ export function findActiveMateriaPromptIndex(messages: unknown[], lookup?: Activ
   return findContentAnchoredPromptIndex(messages);
 }
 
-/** Reads the socket/materia metadata (if any) from a pi-materia-prompt message. */
+/** Reads the socket/materia metadata and finalization flag from a pi-materia-prompt message. */
 function readMateriaPromptCandidate(message: unknown): MateriaPromptCandidate | undefined {
   if (typeof message !== "object" || message === null) return undefined;
   const record = message as { customType?: unknown; details?: unknown };
@@ -475,7 +489,8 @@ function readMateriaPromptCandidate(message: unknown): MateriaPromptCandidate | 
   const details = typeof record.details === "object" && record.details !== null ? (record.details as Record<string, unknown>) : {};
   const socketId = typeof details.socketId === "string" ? details.socketId : undefined;
   const materiaName = typeof details.materiaName === "string" ? details.materiaName : undefined;
-  return { socketId, materiaName, hasMetadata: socketId !== undefined || materiaName !== undefined };
+  const finalization = details.finalization === true;
+  return { socketId, materiaName, finalization, hasMetadata: socketId !== undefined || materiaName !== undefined };
 }
 
 /** A candidate matches when it carries metadata that agrees with the lookup. */
@@ -488,7 +503,14 @@ function materiaPromptCandidateMatches(candidate: MateriaPromptCandidate, lookup
 
 function findContentAnchoredPromptIndex(messages: unknown[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i] as { content?: unknown; role?: unknown };
+    const message = messages[i] as { content?: unknown; role?: unknown; customType?: unknown; details?: unknown };
+    // Skip pi-materia-prompt custom messages that carry the finalization flag;
+    // finalization-marked prompts must not serve as isolation anchors even in
+    // the content-only fallback path.
+    if (message.customType === "pi-materia-prompt") {
+      const details = typeof message.details === "object" && message.details !== null ? (message.details as Record<string, unknown>) : {};
+      if (details.finalization === true) continue;
+    }
     if (isToolOrAssistantMessage(message)) continue;
     const text = messageContentText(message.content);
     if (text.includes("<materia-instructions>") && text.includes("</materia-instructions>")) return i;
