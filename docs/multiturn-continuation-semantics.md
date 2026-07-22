@@ -54,6 +54,82 @@ If `awaitingResponse` is already true, no refinement preparation runs; the runti
 
 ## Finalization semantics
 
+### Finalization prompt dispatch
+
+When the user runs `/materia continue`, `startMultiTurnFinalizationTurn()`
+(src/runtime/agentLifecycle.ts) sets `state.multiTurnFinalizing = true`, then calls
+`sendMateriaTurn()` with `buildMultiTurnFinalizationPrompt(state, socket)`.
+The hidden prompt message is dispatched with `customType: "pi-materia-prompt"`
+and carries `details.finalization: true` (src/runtime/agentPromptDispatch.ts ~L360).
+This marker is derived from `state.multiTurnFinalizing` and covers every dispatch
+path:
+
+- The initial `/materia continue` dispatch in `startMultiTurnFinalizationTurn`.
+- Recovery/resume re-sends via `turnRecovery.ts` `rebuildPrompt()` when
+  `recoveryTurnMode(state) === "finalization"` — the same
+  `buildMultiTurnFinalizationPrompt` is rebuilt, and `sendMateriaTurn` tags it.
+- Same-socket JSON-repair retries via `socketOutputCommit.ts` — when a
+  `finalizedMultiTurn` validation failure occurs, `state.multiTurnFinalizing` is
+  set to `true` before the repair turn dispatches, so the re-sent prompt also
+  carries the flag.
+
+The display-only `"pi-materia"` orchestration card is not tagged.
+
+### Isolated-context anchor exclusion
+
+`buildIsolatedMateriaContext()` (src/application/promptAssembly.ts ~L220) anchors
+isolated agent context on the active socket's hidden `pi-materia-prompt` via
+`findActiveMateriaPromptIndex()`. Before this fix, every hidden prompt — including
+the finalization prompt sent by `/materia continue` — was a valid anchor candidate.
+Since anchor discovery scans backwards and selects the *latest* matching prompt,
+the finalization prompt would become the anchor, discarding all earlier refinement
+turns (user messages, assistant drafts, tool calls) and leaving only the synthetic
+cast context prepend plus the finalization prompt itself. This caused the
+context-clearing regression.
+
+The fix: `findActiveMateriaPromptIndex()` (~L448) and its candidate reader
+`readMateriaPromptCandidate()` (~L485) skip `pi-materia-prompt` messages whose
+`details.finalization === true`. The anchor therefore resolves to the socket
+visit's INITIAL hidden prompt — the refinement prompt sent by `startSocket()`
+when the socket first became active. The defensive content-only fallback
+`findContentAnchoredPromptIndex()` (~L505) also skips finalization-marked
+prompts, and the metadata-aware socket/materia matching preserves the existing
+prior-socket exclusion.
+
+Crucially, the exclusion is anchor-only: the finalization-marked message itself
+is still retained in the returned isolated context because it appears at or
+after the anchor index in the `messages.slice(materiaStart)` slice.
+
+### Full refinement transcript preserved
+
+With the anchor fixed to the visit's initial prompt, `buildIsolatedMateriaContext`
+preserves every message from that point forward:
+
+1. The initial hidden refinement prompt (the first `pi-materia-prompt`).
+2. All user refinement messages and assistant draft responses.
+3. The finalization hidden prompt (the last `pi-materia-prompt`, carrying
+   `details.finalization: true`).
+4. The prepended synthetic cast context (`buildSyntheticCastContext(state)`)
+   provides the shared handoff context summary.
+
+This ensures the agent sees the full refinement conversation during finalization,
+not just the finalization prompt in isolation.
+
+### Synthetic cast context deduplication
+
+The synthetic cast context is prepended by `buildIsolatedMateriaContext` on
+every isolated turn — including finalization and all recovery re-dispatch paths.
+To avoid duplication, `buildMultiTurnFinalizationPrompt` (src/application/promptAssembly.ts ~L28)
+no longer embeds `buildSyntheticCastContext(state)` directly. Similarly,
+`buildJsonOutputRepairRetryPrompt` (~L115) only embeds the synthetic context
+for single-turn repair paths (`!state.multiTurnFinalizing`); during multi-turn
+finalization isolation already supplies it. Token projection in
+`maybeRunProactiveCompaction` already accounts for `buildSyntheticCastContext`
+separately (src/runtime/agentPromptDispatch.ts ~L262), so no double-counting
+remains.
+
+### Completion path
+
 Command-triggered finalization reuses the same completion path that single-turn sockets use. Until `/materia continue` is run, the assistant output is only a refinement draft: JSON-parsed sockets must not request or emit final structured JSON, and the runtime must not call `completeSocket()` or attempt `parseJson()` for that plaintext refinement output. After `/materia continue`, the paused multi-turn branch asks the agent for the socket's final format and then calls `completeSocket(pi, ctx, state, finalAssistantText, entryId)` so completion and graph advancement remain identical to normal orchestration:
 
 - Text sockets write the normal `socket_output` artifact via `recordSocketOutput()`.
