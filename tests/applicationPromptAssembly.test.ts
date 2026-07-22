@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, findActiveMateriaPromptIndex, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, findActiveMateriaPromptIndex, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -75,6 +75,73 @@ function state(socket: ResolvedMateriaAgentSocket, overrides: Partial<MateriaCas
 }
 
 describe("application prompt assembly", () => {
+  test("buildJsonOutputRepairRetryPrompt for multi-turn finalization omits synthetic cast context (no duplication with isolation prepend)", () => {
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
+    });
+    const castState = state(socket, {
+      currentSocketId: "Socket-MT",
+      currentMateria: "Plan",
+      multiTurnFinalizing: true,
+      jsonOutputRepair: {
+        validationKind: "handoff_validation",
+        errorMessage: "Missing required reserved field \"satisfied\" at $.satisfied; expected a boolean.",
+        validationIssues: [{ path: "$.satisfied", message: "Missing required reserved field \"satisfied\" at $.satisfied; expected a boolean.", reason: "Current socket control flow uses satisfied/not_satisfied routing or advancement." }],
+        invalidOutputExcerpt: '{"satisfied":"yes"}',
+      },
+    });
+
+    const prompt = buildJsonOutputRepairRetryPrompt(castState, socket);
+    expect(prompt).toBeDefined();
+    const promptText = prompt ?? "";
+
+    // The synthetic cast context must NOT be embedded (isolation prepends it).
+    expect(promptText).not.toContain("Materia isolated context.");
+    expect(promptText).not.toContain("Canonical handoff contract context:");
+    expect(promptText).not.toContain("Synthetic context exposure policy");
+
+    // The repair instructions must still be present.
+    expect(promptText).toContain("socket JSON payload validation");
+    expect(promptText).toContain("Failure category: handoff contract violation");
+    expect(promptText).toContain("$.satisfied");
+    // The original final output instructions are still included.
+    expect(promptText).toContain("Final output format: Return only one top-level JSON object");
+    expect(promptText).toContain("do not emit a top-level text field");
+  });
+
+  test("buildJsonOutputRepairRetryPrompt for single-turn repair still embeds synthetic cast context (isolation does not run)", () => {
+    const socket = agentSocket({
+      id: "Socket-1",
+      socket: { materia: "Check", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Evaluate." },
+    });
+    const castState = state(socket, {
+      currentSocketId: "Socket-1",
+      currentMateria: "Check",
+      jsonOutputRepair: {
+        validationKind: "json_parse",
+        errorMessage: "SyntaxError: Unexpected token",
+        validationIssues: [],
+        invalidOutputExcerpt: '{satisfied: true}',
+      },
+    });
+
+    const prompt = buildJsonOutputRepairRetryPrompt(castState, socket);
+    expect(prompt).toBeDefined();
+    const promptText = prompt ?? "";
+
+    // Single-turn repair: isolation does not run, so the synthetic context
+    // is still embedded in the repair prompt.
+    expect(promptText).toContain("Materia isolated context.");
+    expect(promptText).toContain("Cast id: cast-1");
+    expect(promptText).toContain("Original request: original request");
+    // Repair instruction still present.
+    expect(promptText).toContain("malformed JSON syntax");
+    expect(promptText).toContain("Return only corrected JSON");
+  });
+
   test("JSON repair prompts describe socket payload validation without requesting a full envelope", () => {
     const prompt = buildJsonOutputRepairPrompt({
       validationKind: "handoff_validation",
@@ -752,6 +819,115 @@ describe("buildIsolatedMateriaContext", () => {
 
     expect(buildIsolatedMateriaContext(messages, castState)).toBe(messages);
   });
+
+  test("preserves full refinement transcript when a finalization prompt follows refinement turns (regression test for context-clearing bug)", () => {
+    // Core regression: on /materia continue, the finalization prompt was
+    // becoming the isolation anchor, truncating everything before it. With
+    // the finalization exclusion fix, the anchor stays at the initial prompt
+    // and ALL messages from the initial prompt onward are preserved.
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
+    });
+    const castState = state(socket, {
+      currentSocketId: "Socket-MT",
+      currentMateria: "Plan",
+      multiTurnFinalizing: true,
+    });
+    const messages: unknown[] = [
+      // Initial hidden prompt (the anchor)
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nPlan collaboratively.\n</materia-instructions>", display: false, details: { socketId: "Socket-MT", materiaName: "Plan" }, timestamp: 1 },
+      // Refinement turn: user feedback
+      { role: "user", content: [{ type: "text", text: "make the plan more detailed" }], timestamp: 2 },
+      // Refinement turn: assistant response
+      { role: "assistant", content: [{ type: "text", text: "I have expanded the plan." }], timestamp: 3 },
+      // Second refinement turn: user feedback
+      { role: "user", content: [{ type: "text", text: "add a timeline" }], timestamp: 4 },
+      // Finalization hidden prompt (details.finalization === true)
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nFinalize now.\n</materia-instructions>", display: false, details: { socketId: "Socket-MT", materiaName: "Plan", finalization: true }, timestamp: 5 },
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+
+    // Synthetic cast context is prepended.
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    // All messages from the initial hidden prompt onward are preserved:
+    // the initial prompt itself, both refinement user messages, the assistant
+    // message, and the finalization prompt.
+    expect(serialized).toContain("Plan collaboratively.");
+    expect(serialized).toContain("make the plan more detailed");
+    expect(serialized).toContain("I have expanded the plan.");
+    expect(serialized).toContain("add a timeline");
+    expect(serialized).toContain("Finalize now.");
+  });
+
+  test("preserves the finalization-marked prompt in isolated context even though it is not the anchor", () => {
+    // The finalization flag excludes the message from anchor discovery, but
+    // the message itself must still be present in the returned context since
+    // it appears at/after the anchor index.
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
+    });
+    const castState = state(socket, {
+      currentSocketId: "Socket-MT",
+      currentMateria: "Plan",
+      multiTurnFinalizing: true,
+    });
+    const messages: unknown[] = [
+      // Initial prompt — the anchor
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nPlan collaboratively.\n</materia-instructions>", display: false, details: { socketId: "Socket-MT", materiaName: "Plan" }, timestamp: 1 },
+      { role: "user", content: [{ type: "text", text: "refinement" }], timestamp: 2 },
+      // Finalization prompt — excluded from anchor, but must survive isolation
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nFinalize now.\n</materia-instructions>", display: false, details: { socketId: "Socket-MT", materiaName: "Plan", finalization: true }, timestamp: 3 },
+    ];
+
+    const isolated = buildIsolatedMateriaContext(messages, castState);
+    const serialized = JSON.stringify(isolated);
+
+    // Synthetic cast context prepended.
+    expect(isolated[0]).toMatchObject({ role: "user" });
+    expect((isolated[0] as { content: string }).content).toContain("Materia isolated context.");
+    // Initial prompt preserved (the anchor)
+    expect(serialized).toContain("Plan collaboratively.");
+    // Refinement message preserved
+    expect(serialized).toContain("refinement");
+    // Finalization prompt preserved even though it was excluded from anchor discovery
+    expect(serialized).toContain("Finalize now.");
+    // Confirm finalization flag is still on the message
+    const finalizationMsg = isolated.find((m: unknown) => {
+      const record = m as { customType?: unknown; details?: { finalization?: unknown } };
+      return record.customType === "pi-materia-prompt" && record.details?.finalization === true;
+    });
+    expect(finalizationMsg).toBeDefined();
+    expect((finalizationMsg as { content?: string }).content).toContain("Finalize now.");
+  });
+
+  test("returns messages unchanged when only a finalization-marked prompt exists (no earlier anchor)", () => {
+    // When the only pi-materia-prompt is finalization-marked, anchor discovery
+    // returns -1, and buildIsolatedMateriaContext returns the messages unchanged.
+    const socket = agentSocket({
+      id: "Socket-MT",
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan collaboratively.", multiTurn: true },
+    });
+    const castState = state(socket, {
+      currentSocketId: "Socket-MT",
+      currentMateria: "Plan",
+      multiTurnFinalizing: true,
+    });
+    const messages: unknown[] = [
+      // Only a finalization-marked prompt, no initial prompt.
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nFinalize now.\n</materia-instructions>", display: false, details: { socketId: "Socket-MT", materiaName: "Plan", finalization: true }, timestamp: 1 },
+    ];
+
+    // When no anchor is found, the messages are returned unchanged.
+    expect(buildIsolatedMateriaContext(messages, castState)).toBe(messages);
+  });
 });
 
 describe("findActiveMateriaPromptIndex", () => {
@@ -840,6 +1016,60 @@ describe("findActiveMateriaPromptIndex", () => {
 
     expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Buildga" })).toBe(-1);
     expect(findActiveMateriaPromptIndex(messages)).toBe(-1);
+  });
+
+  test("skips a finalization-marked prompt and anchors on the earlier same-socket/same-materia prompt (regression test for context-clearing bug)", () => {
+    // The finalization prompt (details.finalization === true) must be excluded
+    // from anchor discovery so the anchor resolves to the visit's initial
+    // hidden prompt, preserving the full refinement transcript.
+    const messages = [
+      promptMessage("<materia-instructions>\nrefine collaboratively\n</materia-instructions>", "Socket-4", "Plan", { multiTurn: true }),
+      { role: "user", content: [{ type: "text", text: "make it simpler" }] },
+      { role: "assistant", content: [{ type: "text", text: "done" }] },
+      // The finalization prompt carries the finalization flag.
+      promptMessage("<materia-instructions>\nfinalize now\n</materia-instructions>", "Socket-4", "Plan", { multiTurn: true, finalization: true }),
+    ];
+
+    // Anchor must land on the initial prompt, not the finalization prompt.
+    const idx = findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Plan" });
+    expect(idx).toBe(0);
+    expect((messages[idx] as { content: string }).content).toContain("refine collaboratively");
+  });
+
+  test("returns -1 when the only same-socket prompt is finalization-marked (falls back to -1, not content leak)", () => {
+    const messages = [
+      promptMessage("<materia-instructions>\nfinalize now\n</materia-instructions>", "Socket-4", "Plan", { multiTurn: true, finalization: true }),
+    ];
+
+    // With metadata matching, no non-finalization prompt matches, and at least
+    // one prompt carried metadata, so the function returns -1.
+    expect(findActiveMateriaPromptIndex(messages, { socketId: "Socket-4", materiaName: "Plan" })).toBe(-1);
+  });
+
+  test("content-only fallback skips finalization-marked prompts", () => {
+    // When prompts lack metadata (fallback path), finalization-marked
+    // prompts must also be excluded from anchor discovery.
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "noise" }] },
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nrefine\n</materia-instructions>", display: false, details: { finalization: true } },
+    ];
+
+    expect(findActiveMateriaPromptIndex(messages)).toBe(-1);
+  });
+
+  test("content-only fallback selects non-finalization prompt over finalization-marked one", () => {
+    const messages = [
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nrefine\n</materia-instructions>", display: false, details: {} },
+      { role: "user", content: [{ type: "text", text: "feedback" }] },
+      { role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>\nfinalize\n</materia-instructions>", display: false, details: { finalization: true } },
+    ];
+
+    // Even though the non-finalization prompt is earlier, content-only
+    // fallback should skip the finalization-marked prompt and select the
+    // earliest one that has <materia-instructions>.
+    const idx = findActiveMateriaPromptIndex(messages);
+    expect(idx).toBe(0);
+    expect((messages[idx] as { content: string }).content).toContain("refine");
   });
 });
 

@@ -532,6 +532,7 @@ describe("native multi-turn runtime", () => {
     expect(firstPrompt.content).toContain("/materia continue is the only way to finalize this multi-turn socket");
     expect(firstPrompt.content).toContain("do not emit final JSON");
     expect(firstPrompt.content).not.toContain("Return only JSON");
+    expect(firstPrompt.details?.finalization).not.toBe(true);
 
     harness.appendAssistantMessage("I understand the feature. A good first cut is to update the prompt and cover it with tests. Should docs be included too?");
     await harness.emit("agent_end", { messages: [] });
@@ -583,6 +584,7 @@ describe("native multi-turn runtime", () => {
     const finalPrompt = harness.sentMessages.at(-1)?.message as any;
     expect(finalPrompt.content).toContain("Command-triggered finalization");
     expect(finalPrompt.content).toContain("Return only one top-level JSON object");
+    expect(finalPrompt.details?.finalization).toBe(true);
     harness.appendAssistantMessage(finalPlan);
     await harness.emit("agent_end", { messages: [] });
 
@@ -673,6 +675,7 @@ describe("native multi-turn runtime", () => {
     expect((harness.widgets.get("materia")?.content ?? []).join("\n")).toContain("› Plan active");
     expect((harness.widgets.get("materia")?.content ?? []).join("\n")).not.toContain("waiting for refinement");
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only one top-level JSON object");
+    expect((harness.sentMessages.at(-1)?.message as any).details?.finalization).toBe(true);
     harness.appendAssistantMessage("still not json");
     await harness.emit("agent_end", { messages: [] });
     const retryingState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
@@ -726,6 +729,7 @@ describe("native multi-turn runtime", () => {
     expect(finalizingState.awaitingResponse).toBe(true);
     expect(finalizingState.multiTurnFinalizing).toBe(true);
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Command-triggered finalization");
+    expect((harness.sentMessages.at(-1)?.message as any).details?.finalization).toBe(true);
   });
 
   test("/materia continue reports an error instead of interrupting an active agent response", async () => {
@@ -820,6 +824,7 @@ describe("native multi-turn runtime", () => {
     expect(finalizingState.socketState).toBe("awaiting_agent_response");
     expect(finalizingState.multiTurnFinalizing).toBe(true);
     expect((harness.sentMessages.at(-1)?.message as any).content).toContain("Return only one top-level JSON object");
+    expect((harness.sentMessages.at(-1)?.message as any).details?.finalization).toBe(true);
   });
 
   test("stale finalization flag cannot complete a paused refinement turn", async () => {
@@ -932,6 +937,7 @@ describe("native multi-turn runtime", () => {
     expect(harness.setThinkingLevelCalls.at(-1)).toBe("high");
 
     const prompt = harness.sentMessages.find((sent) => (sent.message as any).customType === "pi-materia-prompt")?.message as any;
+    expect(prompt.details?.finalization).not.toBe(true);
     const messages = [
       { role: "user", content: [{ type: "text", text: "unrelated earlier transcript" }] },
       { role: "user", content: [{ type: "text", text: prompt.content }] },
