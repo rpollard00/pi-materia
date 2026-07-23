@@ -38,10 +38,12 @@
  */
 import { execFile } from "node:child_process";
 
+let activeSecrets = secretValuesForToken(process.env.AZURE_DEVOPS_EXT_PAT);
+
 class UtilityError extends Error {
   constructor(message, details = {}) {
-    super(message);
-    this.details = details;
+    super(redactSecrets(message, activeSecrets));
+    this.details = redactSecretValues(details, activeSecrets);
   }
 }
 
@@ -49,6 +51,11 @@ try {
   const input = await readStdinJson();
   const cwd = typeof input.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd();
   const params = isPlainObject(input.params) ? input.params : {};
+  const authEnv = typeof params.authEnv === "string" && params.authEnv.trim().length > 0
+    ? params.authEnv.trim()
+    : "AZURE_DEVOPS_EXT_PAT";
+  const token = process.env[authEnv];
+  activeSecrets = secretValuesForToken(token);
 
   // Require jj — no git fallback.
   if (!(await isCommandAvailable("jj"))) {
@@ -128,11 +135,7 @@ try {
     });
   }
 
-  // Resolve auth token.
-  const authEnv = typeof params.authEnv === "string" && params.authEnv.trim().length > 0
-    ? params.authEnv.trim()
-    : "AZURE_DEVOPS_EXT_PAT";
-  const token = process.env[authEnv];
+  // Validate the auth token resolved above.
   if (typeof token !== "string" || token.trim().length === 0) {
     throw new UtilityError(`Blackbelt-ADO-PR: Azure DevOps token not found in environment variable "${authEnv}". Set ${authEnv} or configure params.authEnv.`, {
       authEnv,
@@ -181,11 +184,17 @@ try {
   // Push the bookmark to Azure DevOps.
   const pushResult = await pushBookmark(bookmarkName, remote, remoteUrl, token, cwd);
   if (!pushResult.ok) {
-    throw new UtilityError(`Blackbelt-ADO-PR: push failed for bookmark "${bookmarkName}" to remote "${remote}": ${pushResult.error}`, {
+    const pushError = pushResult.authenticationFailed
+      ? `git authentication failed for HTTPS push; verify the PAT in "${authEnv}" is valid and has Code (read & write) scope`
+      : pushResult.error;
+    const message = pushResult.authenticationFailed
+      ? `Blackbelt-ADO-PR: ${pushError}`
+      : `Blackbelt-ADO-PR: push failed for bookmark "${bookmarkName}" to remote "${remote}": ${pushError}`;
+    throw new UtilityError(message, {
       bookmarkName,
       remote,
       pushOk: false,
-      pushError: pushResult.error,
+      pushError,
     });
   }
 
@@ -284,10 +293,11 @@ try {
   });
 } catch (error) {
   const rawMessage = error instanceof Error ? error.message : String(error);
-  const message = rawMessage.startsWith("Blackbelt-ADO-PR:") ? rawMessage : `Blackbelt-ADO-PR: ${rawMessage}`;
-  const details = error instanceof UtilityError ? error.details : {};
+  const sanitizedMessage = redactSecrets(rawMessage, activeSecrets);
+  const message = sanitizedMessage.startsWith("Blackbelt-ADO-PR:") ? sanitizedMessage : `Blackbelt-ADO-PR: ${sanitizedMessage}`;
+  const details = error instanceof UtilityError ? redactSecretValues(error.details, activeSecrets) : {};
   console.error(message);
-  writeStdoutJson({
+  writeStdoutJson(redactSecretValues({
     state: {
       blackbeltAdoPr: {
         ok: false,
@@ -295,7 +305,7 @@ try {
         ...details,
       },
     },
-  });
+  }, activeSecrets));
   process.exitCode = 1;
 }
 
@@ -311,11 +321,49 @@ async function readStdinJson() {
 }
 
 function writeStdoutJson(value) {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
+  process.stdout.write(`${JSON.stringify(redactSecretValues(value, activeSecrets))}\n`);
 }
 
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function secretValuesForToken(token) {
+  if (typeof token !== "string" || token.trim().length === 0) return [];
+  const pushEncodedToken = Buffer.from(`x-token-auth:${token}`).toString("base64");
+  const apiEncodedToken = Buffer.from(`:${token}`).toString("base64");
+  return [
+    `Authorization: Basic ${pushEncodedToken}`,
+    `Authorization: Basic ${apiEncodedToken}`,
+    pushEncodedToken,
+    apiEncodedToken,
+    token,
+  ];
+}
+
+function redactSecrets(text, secrets = []) {
+  const values = [...new Set(secrets)]
+    .filter((secret) => typeof secret === "string" && secret.length > 0)
+    .sort((left, right) => right.length - left.length);
+  if (values.length === 0) return String(text);
+  const secretPattern = values
+    .map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  return String(text).replace(
+    new RegExp(`\\[redacted\\]|${secretPattern}`, "g"),
+    "[redacted]",
+  );
+}
+
+function redactSecretValues(value, secrets = []) {
+  if (typeof value === "string") return redactSecrets(value, secrets);
+  if (Array.isArray(value)) return value.map((item) => redactSecretValues(item, secrets));
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactSecretValues(item, secrets)]),
+    );
+  }
+  return value;
 }
 
 async function isCommandAvailable(command) {
@@ -676,8 +724,17 @@ async function pushBookmark(bookmarkName, remote, remoteUrl, token, cwd) {
     await execFileText("jj", ["git", "push", "--bookmark", bookmarkName, "--remote", remote], cwd, env);
     return { ok: true };
   } catch (error) {
-    return { ok: false, error: formatExecError(error) };
+    const pushError = formatExecError(error, activeSecrets);
+    return {
+      ok: false,
+      error: pushError,
+      authenticationFailed: /^https?:\/\//i.test(remoteUrl) && isPushAuthenticationFailure(pushError),
+    };
   }
+}
+
+function isPushAuthenticationFailure(text) {
+  return /authentication failed|could not read username|terminal prompts disabled|invalid credentials|credentials? (?:were )?rejected|http basic: access denied|access denied|permission denied|permission to .* denied|you need the git .* permission|do not have (?:the )?permissions?|requires? authentication|\b(?:401|403)\b|\b(?:unauthorized|forbidden)\b|you are not authorized/i.test(text);
 }
 
 async function resolveDefaultBranch(organization, project, repository, token, apiBaseUrl) {
@@ -735,7 +792,7 @@ async function createPullRequest(adoConfig, title, head, base, token, apiBaseUrl
     if (!response.ok) {
       return {
         ok: false,
-        error: data.message ?? `HTTP ${response.status}`,
+        error: redactSecrets(data.message ?? `HTTP ${response.status}`, activeSecrets),
         status: response.status,
       };
     }
@@ -748,7 +805,7 @@ async function createPullRequest(adoConfig, title, head, base, token, apiBaseUrl
       prNumber: data.pullRequestId,
     };
   } catch (error) {
-    return { ok: false, error: formatExecError(error) };
+    return { ok: false, error: formatExecError(error, activeSecrets) };
   }
 }
 
@@ -760,11 +817,12 @@ function execFileText(command, args, cwd, envOverrides = {}) {
       timeout: 30000,
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
-      if (stderr && stderr.trim().length > 0) {
-        console.error(`[${command}] ${stderr.trim()}`);
+      const sanitizedStderr = redactSecrets(stderr ?? "", activeSecrets);
+      if (sanitizedStderr.trim().length > 0) {
+        console.error(`[${command}] ${sanitizedStderr.trim()}`);
       }
       if (error) {
-        error.stderr = stderr;
+        error.stderr = sanitizedStderr;
         return reject(error);
       }
       resolve(stdout);
@@ -772,14 +830,14 @@ function execFileText(command, args, cwd, envOverrides = {}) {
   });
 }
 
-function formatExecError(error) {
+function formatExecError(error, secrets = activeSecrets) {
   const message = typeof error === "object" && error !== null ? error.message ?? String(error) : String(error);
-  let details = message;
+  let details = redactSecrets(message, secrets);
   if (typeof error === "object" && error !== null && "stderr" in error && error.stderr) {
-    details += ` (stderr: ${String(error.stderr).trim()})`;
+    details += ` (stderr: ${redactSecrets(String(error.stderr).trim(), secrets)})`;
   }
   if (typeof error === "object" && error !== null && "code" in error) {
     details += ` (exit: ${error.code})`;
   }
-  return details;
+  return redactSecrets(details, secrets);
 }
