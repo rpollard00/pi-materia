@@ -472,6 +472,32 @@ async function runAdoPr(input: Record<string, unknown>, env: Record<string, stri
   return { stdout, stderr, exitCode, json: JSON.parse(stdout), fake };
 }
 
+async function readAdoPushInvocation(
+  fake: Awaited<ReturnType<typeof makeFakeJjForAdoPr>>,
+): Promise<{ argv: string; env: string }> {
+  const lines = (await readFile(fake.log, "utf8")).split(/\r?\n/);
+  const argv = lines.find((line) => line.startsWith("git push "));
+  const env = lines.find((line) => line.startsWith("env:"));
+  if (argv === undefined || env === undefined) {
+    throw new Error(`expected a logged jj git push invocation, got:\n${lines.join("\n")}`);
+  }
+  return { argv, env };
+}
+
+function expectHttpsAdoPushAuth(argv: string, env: string, token: string) {
+  const encoded = Buffer.from(`x-token-auth:${token}`).toString("base64");
+  const header = `Authorization: Basic ${encoded}`;
+
+  expect(env).toContain("GIT_CONFIG_COUNT=1");
+  expect(env).toContain("GIT_CONFIG_KEY_0=http.extraHeader");
+  expect(env).toContain(`GIT_CONFIG_VALUE_0=${header}`);
+  expect(env).toContain("GIT_TERMINAL_PROMPT=0");
+  expect(argv).not.toContain(token);
+  expect(argv).not.toContain(encoded);
+  expect(argv).not.toContain(header);
+  expect(argv).not.toContain("x-token-auth");
+}
+
 describe("Blackbelt-ADO-PR mocked behavior", () => {
   test("successfully creates an ADO PR with explicit params", async () => {
     const api = startFakeAdoApi();
@@ -511,6 +537,179 @@ describe("Blackbelt-ADO-PR mocked behavior", () => {
       expect(result.json.event[0].type).toBe("result.pr_created");
       expect(result.json.event[0].payload.prUrl).toContain("pullrequest/99");
       expect(result.json.event[0].payload.prNumber).toBe(99);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("authenticates an HTTPS push through command-scoped Git environment", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const token = "test-token";
+      const result = await runAdoPr(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "test: HTTPS push authentication",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: token },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.event[0].type).toBe("result.pr_created");
+      const push = await readAdoPushInvocation(result.fake);
+      expectHttpsAdoPushAuth(push.argv, push.env, token);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("disables prompts but skips the HTTP header for an SSH push", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const token = "test-token";
+      const result = await runAdoPr(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "test: SSH push authentication",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        {
+          AZURE_DEVOPS_EXT_PAT: token,
+          ADO_REMOTE_URL: "git@ssh.dev.azure.com:v3/test-org/test-project/test-repo",
+        },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      const push = await readAdoPushInvocation(result.fake);
+      expect(push.env).toContain("GIT_TERMINAL_PROMPT=0");
+      expect(push.env).toContain("GIT_CONFIG_COUNT= GIT_CONFIG_KEY_0=");
+      expect(push.env).toContain("GIT_CONFIG_VALUE_0= GIT_TERMINAL_PROMPT=0");
+      expect(push.env).not.toContain("Authorization: Basic");
+      expect(push.env).not.toContain(Buffer.from(`x-token-auth:${token}`).toString("base64"));
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("reports sanitized PAT guidance when HTTPS push authentication fails", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const token = "test-token";
+      const encoded = Buffer.from(`x-token-auth:${token}`).toString("base64");
+      const header = `Authorization: Basic ${encoded}`;
+      const result = await runAdoPr(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "test: rejected PAT",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: token, PR_PUSH_AUTH_FAIL: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      const failure = result.json.state.blackbeltAdoPr;
+      expect(failure.ok).toBe(false);
+      expect(failure.pushOk).toBe(false);
+      expect(failure.error).toContain("authentication failed");
+      expect(failure.error).toContain("PAT");
+      expect(failure.error).toContain("Code (read & write) scope");
+      expect(Object.keys(failure).sort()).toEqual([
+        "bookmarkName",
+        "error",
+        "ok",
+        "pushError",
+        "pushOk",
+        "remote",
+      ]);
+      for (const output of [result.stdout, result.stderr, JSON.stringify(result.json)]) {
+        expect(output).not.toContain(token);
+        expect(output).not.toContain(encoded);
+        expect(output).not.toContain(header);
+      }
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("redacts a PAT-derived header leaked by jj", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const token = "test-token";
+      const encoded = Buffer.from(`x-token-auth:${token}`).toString("base64");
+      const header = `Authorization: Basic ${encoded}`;
+      const result = await runAdoPr(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "test: redact push output",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: token, PR_PUSH_LEAK_SECRET: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
+      expect(result.json.state.blackbeltAdoPr.pushOk).toBe(false);
+      const output = `${result.stdout}\n${result.stderr}`;
+      expect(output).toContain("[redacted]");
+      expect(output).not.toContain(token);
+      expect(output).not.toContain(encoded);
+      expect(output).not.toContain(header);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("pushes with the header when credential.helper is empty or disabled", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const token = "test-token";
+      const result = await runAdoPr(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            title: "test: no credential helper",
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: token, PR_SIMULATE_NO_CREDENTIAL_HELPER: "1" },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.event[0].type).toBe("result.pr_created");
+      const push = await readAdoPushInvocation(result.fake);
+      expectHttpsAdoPushAuth(push.argv, push.env, token);
     } finally {
       api.server.stop();
     }
@@ -668,6 +867,45 @@ describe("Blackbelt-ADO-PR mocked behavior", () => {
       expect(result.exitCode).toBe(1);
       expect(result.json.state.blackbeltAdoPr.ok).toBe(false);
       expect(result.json.state.blackbeltAdoPr.pushOk).toBe(false);
+    } finally {
+      api.server.stop();
+    }
+  });
+
+  test("pushOnly mode emits result.branch_pushed with an authenticated push", async () => {
+    const api = startFakeAdoApi();
+    try {
+      const token = "test-token";
+      const result = await runAdoPr(
+        {
+          params: {
+            bookmark: "blackbelt/test-bookmark",
+            pushOnly: true,
+            organization: "test-org",
+            project: "test-project",
+            repository: "test-repo",
+          },
+          state: {},
+        },
+        { AZURE_DEVOPS_EXT_PAT: token },
+        api.baseUrl,
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json.state.blackbeltAdoPr.ok).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.pushOnly).toBe(true);
+      expect(result.json.state.blackbeltAdoPr.prNumber).toBeUndefined();
+      expect(result.json.state.blackbeltAdoPr.prUrl).toBeUndefined();
+      expect(result.json.event).toHaveLength(1);
+      expect(result.json.event[0].type).toBe("result.branch_pushed");
+      expect(result.json.event[0].message).toContain("blackbelt/test-bookmark");
+      expect(result.json.event[0].payload.branchName).toBe("blackbelt/test-bookmark");
+      expect(result.json.event[0].payload.remote).toBe("origin");
+      expect(result.json.event[0].payload.organization).toBe("test-org");
+      expect(result.json.event[0].payload.project).toBe("test-project");
+      expect(result.json.event[0].payload.repository).toBe("test-repo");
+      const push = await readAdoPushInvocation(result.fake);
+      expectHttpsAdoPushAuth(push.argv, push.env, token);
     } finally {
       api.server.stop();
     }
