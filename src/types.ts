@@ -199,6 +199,8 @@ export interface MateriaLimitsConfig {
   /** Canonical socket visit cap for a cast. */
   maxSocketVisits?: number;
   maxEdgeTraversals?: number;
+  /** Consecutive graph cycles permitted for one work item without cursor advancement. */
+  maxNoAdvanceCycles?: number;
 }
 
 export interface MateriaCompactionConfig {
@@ -445,10 +447,21 @@ export interface MateriaCastState {
   contextWindowRecoveryGuards?: Record<string, number>;
   taskAttempts: Record<string, number>;
   edgeTraversals: Record<string, number>;
+  /** Persisted consecutive-cycle tracker for the current work item. */
+  noAdvanceCycles?: MateriaNoAdvanceCycleTracker;
   lastOutput?: string;
   lastJson?: unknown;
   runState: MateriaRunState;
   pipeline: ResolvedMateriaPipeline;
+}
+
+export interface MateriaNoAdvanceCycleTracker {
+  itemKey: string;
+  count: number;
+  /** Socket path since the most recently completed cycle. */
+  socketPath: string[];
+  /** Closed socket route for the most recently detected cycle. */
+  lastCycleSockets?: string[];
 }
 
 export interface MateriaRecoveryAllowance {

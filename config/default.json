@@ -2,7 +2,8 @@
   "artifactDir": ".pi/pi-materia",
   "limits": {
     "maxSocketVisits": 50,
-    "maxEdgeTraversals": 25
+    "maxEdgeTraversals": 25,
+    "maxNoAdvanceCycles": 3
   },
   "budget": {
     "maxTokens": 10000000,

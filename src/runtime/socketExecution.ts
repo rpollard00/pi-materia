@@ -4,6 +4,11 @@ import {
   type CommandUtilityRequest,
 } from "../application/utilityExecution.js";
 import {
+  DEFAULT_MAX_NO_ADVANCE_CYCLES,
+  MateriaNoAdvanceCycleExhaustionError,
+  recordNoAdvanceSocketStart,
+} from "../application/noAdvanceCycles.js";
+import {
   resolveEmptyLoopExhaustionTarget,
   setCurrentItem,
 } from "../application/workflowTransitions.js";
@@ -239,6 +244,30 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
         "foreach-empty",
         nextDiagnostics,
       );
+    }
+    try {
+      recordNoAdvanceSocketStart(
+        state,
+        socket.id,
+        config.limits?.maxNoAdvanceCycles ?? DEFAULT_MAX_NO_ADVANCE_CYCLES,
+      );
+    } catch (error) {
+      if (!(error instanceof MateriaNoAdvanceCycleExhaustionError)) throw error;
+      await deps.artifacts.appendEvent(state.runState, "no_advance_cycle_exhausted", {
+        itemKey: error.itemKey,
+        count: error.count,
+        limit: error.limit,
+        sockets: error.sockets,
+        targetSocket: socket.id,
+      });
+      await deps.lifecycle.failCast(
+        pi,
+        ctx,
+        state,
+        error,
+        `no-advance:${error.itemKey}:${error.count}`,
+      );
+      return;
     }
     enforceSocketVisitLimit(state, socket, config);
     const attempt = startTaskAttempt(state, socket.id);

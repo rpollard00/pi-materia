@@ -446,6 +446,7 @@ function formatLimits(config: PiMateriaConfig): string {
   return [
     `socket visits ${config.limits?.maxSocketVisits ?? 25}`,
     `edge traversals ${config.limits?.maxEdgeTraversals ?? 25}`,
+    `no-advance cycles ${config.limits?.maxNoAdvanceCycles ?? 3}`,
   ].join(", ");
 }
 

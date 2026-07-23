@@ -4,6 +4,7 @@ import { canonicalOutgoingEdges } from "../graph/graphValidation.js";
 import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 import { loopExitIndexForPipeline, resolveIndexedLoopExhaustionTarget } from "../graph/graphSemantics.js";
 import { effectiveResolvedSocketConfig, resolvedSocketConfig } from "../runtime/resolvedMateria.js";
+import { resetNoAdvanceCycles } from "./noAdvanceCycles.js";
 export { resolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaCastState, MateriaEdgeCondition, MateriaEdgeConfig, PiMateriaConfig, ResolvedMateriaSocket } from "../types.js";
 
@@ -42,6 +43,7 @@ export function applyAdvance(state: MateriaCastState, socket: ResolvedMateriaSoc
   const items = asArray(resolveValue(advance.items, state));
   const next = (state.cursors[advance.cursor] ?? 0) + 1;
   state.cursors[advance.cursor] = next;
+  resetNoAdvanceCycles(state);
   state.currentItemKey = undefined;
   state.currentItemLabel = undefined;
   if (next < items.length) return undefined;
