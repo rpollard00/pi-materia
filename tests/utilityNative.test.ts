@@ -233,6 +233,40 @@ describe("native utility socket execution", () => {
     expect(state.visits?.["Socket-2"]).toBe(1);
   });
 
+  test("structured utility infrastructure failures fail the cast instead of routing not_satisfied", async () => {
+    const message = "Synthetic utility: dependency unavailable.";
+    const output = JSON.stringify({
+      satisfied: false,
+      context: message,
+      state: { arbitraryUtilityNamespace: { ok: false, error: message } },
+    });
+    const harness = await makeHarness(utilityConfig(
+      {
+        command: ["node", "-e", `process.stdout.write(${JSON.stringify(output)})`],
+        parse: "json",
+        edges: [{ when: "not_satisfied", to: "retry" }],
+      },
+      { retry: { utility: "echo", params: { text: "retry" } } },
+    ));
+
+    await harness.runCommand("materia", "cast utility infrastructure failure");
+
+    const state = harness.appendedEntries.at(-1)?.data as {
+      phase?: string;
+      failedReason?: string;
+      visits?: Record<string, number>;
+      edgeTraversals?: Record<string, number>;
+      lastJson?: unknown;
+      data?: Record<string, unknown>;
+    };
+    expect(state.phase).toBe("failed");
+    expect(state.failedReason).toBe(message);
+    expect(state.lastJson).toEqual(JSON.parse(output));
+    expect(state.data?.arbitraryUtilityNamespace).toEqual({ ok: false, error: message });
+    expect(state.visits?.["Socket-2"]).toBeUndefined();
+    expect(state.edgeTraversals?.["Socket-1->Socket-2"]).toBeUndefined();
+  });
+
   test("satisfied edge conditions reject legacy passed JSON without canonical satisfied", async () => {
     const harness = await makeHarness(utilityConfig(
       { utility: "echo", parse: "json", params: { output: { passed: true, feedback: "ok" } }, edges: [{ when: "satisfied", to: "second" }] },

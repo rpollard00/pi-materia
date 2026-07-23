@@ -2,6 +2,10 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
 import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
 import {
+  detectUtilityInfrastructureFailure,
+  UtilityInfrastructureFailureError,
+} from "../application/utilityInfrastructureFailure.js";
+import {
   errorMessage,
   nonRecoverableTurnError,
 } from "../application/recoveryPolicy.js";
@@ -33,6 +37,7 @@ import type { AdvancementLifecycleDiagnostics } from "./agentPromptDispatch.js";
 import type { LifecycleEventOverrides } from "./nativeEventing.js";
 import {
   effectiveResolvedSocketConfig,
+  isUtilityResolvedSocket,
   resolvedMateriaDisplayName,
   resolvedMateriaId,
 } from "./resolvedMateria.js";
@@ -172,6 +177,7 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
     state.lastOutput = text;
 
     let parsed: unknown = text;
+    let utilityInfrastructureFailure: ReturnType<typeof detectUtilityInfrastructureFailure> = undefined;
     if (effectiveResolvedSocketConfig(socket).parse === "json") {
       // Phase 1: parse JSON before mutating authoritative handoff state.
       try {
@@ -269,9 +275,25 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
         visit: socketVisit(state, socket.id),
         parsed,
       });
+
+      if (isUtilityResolvedSocket(socket)) {
+        utilityInfrastructureFailure = detectUtilityInfrastructureFailure(parsed);
+      }
     }
 
     applyGenericHandoffEnvelope(state, parsed, socket);
+
+    // A utility command that exits successfully can still report a handled
+    // infrastructure failure. Preserve its diagnostic state patch, then stop
+    // before assignments, cursor advancement, or edge routing can turn the
+    // result into a silent rework loop.
+    if (utilityInfrastructureFailure) {
+      throw new UtilityInfrastructureFailureError(
+        utilityInfrastructureFailure.namespace,
+        utilityInfrastructureFailure.message,
+      );
+    }
+
     emitMateriaTextOutput(pi, state, socket, parsed);
     applyAssignments(state, socket, parsed);
     const advanceTarget = applyAdvance(state, socket, parsed);
