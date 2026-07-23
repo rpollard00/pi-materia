@@ -488,6 +488,22 @@ case "$1" in
     if [ -n "$ADO_REMOTE_URL" ]; then echo "$ADO_REMOTE_URL"; else echo "https://dev.azure.com/test-org/test-project/_git/test-repo"; fi
     ;;
   push)
+    printf 'env:GIT_CONFIG_COUNT=%s GIT_CONFIG_KEY_0=%s GIT_CONFIG_VALUE_0=%s GIT_TERMINAL_PROMPT=%s\\n' \
+      "$GIT_CONFIG_COUNT" "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_TERMINAL_PROMPT" >> "$GIT_LOG"
+    if [ "$PR_PUSH_AUTH_FAIL" = "1" ]; then
+      echo "fatal: Authentication failed for 'https://dev.azure.com/test-org/test-project/_git/test-repo'" >&2
+      exit 128
+    fi
+    if [ "$PR_PUSH_LEAK_SECRET" = "1" ]; then
+      echo "$GIT_CONFIG_VALUE_0" >&2
+      exit 128
+    fi
+    if [ "$PR_SIMULATE_NO_CREDENTIAL_HELPER" = "1" ] && {
+      [ "$GIT_TERMINAL_PROMPT" != "0" ] || [[ "$GIT_CONFIG_VALUE_0" != *"Authorization: Basic "* ]]
+    }; then
+      echo "fatal: could not read Username for 'https://dev.azure.com': terminal prompts disabled" >&2
+      exit 128
+    fi
     if [ "$PR_PUSH_FAIL" = "1" ]; then echo "fatal: push failed" >&2; exit 1; fi
     ;;
   log)
