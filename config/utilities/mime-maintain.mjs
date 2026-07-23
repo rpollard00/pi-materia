@@ -10,6 +10,13 @@
  *   - item.title          → git commit message
  *   - cwd                 → working directory for git commands
  *   - state.mimeBootstrap.branchName → branch reference for status output
+ *   - params.userName / params.userEmail → fallback commit identity overrides
+ *
+ * When git has no configured user.name or user.email, commits use the
+ * deterministic fallback `pi-materia <pi-materia@localhost>`. The fallback
+ * can also be overridden with PI_MATERIA_GIT_USER_NAME and
+ * PI_MATERIA_GIT_USER_EMAIL. Existing git config and standard Git author
+ * and committer environment variables take precedence.
  *
  * Explicitly NOT coupled to:
  *   - Runtime cast status (phase, active, failedReason, socketState, etc.)
@@ -31,6 +38,9 @@
  * rather than failing.
  */
 import { execFile } from "node:child_process";
+
+const DEFAULT_GIT_USER_NAME = "pi-materia";
+const DEFAULT_GIT_USER_EMAIL = "pi-materia@localhost";
 
 class UtilityError extends Error {
   constructor(message, details = {}) {
@@ -93,10 +103,13 @@ try {
     process.exit(0);
   }
 
-  // Stage and commit.
+  // Stage and commit. Identity environment variables are supplied only when
+  // neither git config nor the corresponding standard git environment
+  // variable provides a value, so repository/global identity still wins.
   try {
     await execFileText("git", ["add", "-A"], cwd);
-    await execFileText("git", ["commit", "-m", title.trim()], cwd);
+    const identityEnv = await resolveCommitIdentityEnvironment(input, cwd);
+    await execFileText("git", ["commit", "-m", title.trim()], cwd, identityEnv);
     const commitMessage = title.trim();
     const context = branchName
       ? `Mime-Maintain: committed "${commitMessage}" to ${branchName}.`
@@ -221,9 +234,68 @@ async function isWorkingTreeClean(cwd) {
   }
 }
 
-function execFileText(command, args, cwd) {
+async function resolveCommitIdentityEnvironment(input, cwd) {
+  const params = isPlainObject(input.params) ? input.params : {};
+  const fallbackName = firstNonEmptyString(
+    params.userName,
+    process.env.PI_MATERIA_GIT_USER_NAME,
+    DEFAULT_GIT_USER_NAME,
+  );
+  const fallbackEmail = firstNonEmptyString(
+    params.userEmail,
+    process.env.PI_MATERIA_GIT_USER_EMAIL,
+    DEFAULT_GIT_USER_EMAIL,
+  );
+  const [configuredName, configuredEmail] = await Promise.all([
+    readGitConfig(cwd, "user.name"),
+    readGitConfig(cwd, "user.email"),
+  ]);
+  const env = {};
+
+  if (configuredName === null) {
+    if (!isNonEmptyString(process.env.GIT_AUTHOR_NAME)) env.GIT_AUTHOR_NAME = fallbackName;
+    if (!isNonEmptyString(process.env.GIT_COMMITTER_NAME)) env.GIT_COMMITTER_NAME = fallbackName;
+  }
+  if (configuredEmail === null) {
+    if (!isNonEmptyString(process.env.GIT_AUTHOR_EMAIL)) env.GIT_AUTHOR_EMAIL = fallbackEmail;
+    if (!isNonEmptyString(process.env.GIT_COMMITTER_EMAIL)) env.GIT_COMMITTER_EMAIL = fallbackEmail;
+  }
+
+  return env;
+}
+
+async function readGitConfig(cwd, key) {
+  try {
+    const stdout = await execFileText("git", ["config", "--get", key], cwd);
+    return isNonEmptyString(stdout) ? stdout.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (isNonEmptyString(value)) return value.trim();
+  }
+  return "";
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function execFileText(command, args, cwd, envOverrides = {}) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd, timeout: 30000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, {
+      cwd,
+      env: { ...process.env, ...envOverrides },
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    }, (error, stdout, stderr) => {
       if (stderr && stderr.trim().length > 0) {
         console.error(`[${command}] ${stderr.trim()}`);
       }
