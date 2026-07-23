@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.1.11](https://github.com/rpollard00/pi-materia/compare/v0.1.10...v0.1.11) (2026-07-23)
+
+
+### Features
+
+* add a runtime-owned agent handoff builder ([913a4e9](https://github.com/rpollard00/pi-materia/commit/913a4e9e7883d3adfb8cfb2ae5b67510d4e73276))
+* add a standalone central-admin WebUI shell ([34f936a](https://github.com/rpollard00/pi-materia/commit/34f936a540b1a9c95fa83109bddb746ae0f18b6a))
+* add central catalog browsing to the admin UI ([dea69b1](https://github.com/rpollard00/pi-materia/commit/dea69b1bb52a3b5be11579c332b0ce569fb934d1))
+* add central catalog publishing controls ([016c8a7](https://github.com/rpollard00/pi-materia/commit/016c8a7a36d9c7fd70010fa83c3a1d213ea97196))
+* add SQLite schema migrations for the central server ([d4ad633](https://github.com/rpollard00/pi-materia/commit/d4ad63303bc8788e94d80d734e741ab6de579f6c))
+* bound consecutive no-advance cycles per work item ([0f9683e](https://github.com/rpollard00/pi-materia/commit/0f9683ec333edd652b92b85fb5c35342a85c7e1e))
+* define central control-plane configuration ([7244d6e](https://github.com/rpollard00/pi-materia/commit/7244d6eb1845078ba5c0a9c813ba89f2ee4f04a8))
+* enforce remote model policy during local casts ([e728b4e](https://github.com/rpollard00/pi-materia/commit/e728b4e414775b1118f819847715f6d003a37f90))
+* expose central admin metadata APIs ([25f650f](https://github.com/rpollard00/pi-materia/commit/25f650f0ce4509dea5328d3e27737e74bc2accbd))
+* expose ergonomic materia finalization tools ([b06079d](https://github.com/rpollard00/pi-materia/commit/b06079ddf2470e9305416cd2c5afef4cd07e7955))
+* expose explicit catalog promotion routes locally ([bdf04c8](https://github.com/rpollard00/pi-materia/commit/bdf04c834d1bfcdb5cf846496a0e9eb63ced8784))
+* fail the cast on utility infrastructure failure results ([d3206b0](https://github.com/rpollard00/pi-materia/commit/d3206b048c540bb77633e0ff45242e8fe5d1b58d))
+* fan out runtime telemetry to the central sink ([50bb40c](https://github.com/rpollard00/pi-materia/commit/50bb40c777385196fcb77cc5e358412f51a5a36d))
+* implement the central HTTP control-plane client ([aa7e2ef](https://github.com/rpollard00/pi-materia/commit/aa7e2efa371dc8f881e60e19a5393dde3dfad8c5))
+* load central bearer credentials from deployment secrets ([b9d5fcc](https://github.com/rpollard00/pi-materia/commit/b9d5fccce32ff3b613b6e0f8e9657ed896716898))
+* merge remote catalog definitions into connected runtimes ([13dbc32](https://github.com/rpollard00/pi-materia/commit/13dbc322907c24a082dd831e085f50e798e208a1))
+* persist central catalog and model-policy state ([b03f19e](https://github.com/rpollard00/pi-materia/commit/b03f19e9904c389582c91629db2e8e779e72189b))
+* persist central telemetry with retention ([62239e7](https://github.com/rpollard00/pi-materia/commit/62239e706001e1c076f7f8d718130c04e2c80572))
+* prototype tool-backed handoff submission ([acd924a](https://github.com/rpollard00/pi-materia/commit/acd924ae7b331248b4f60bf37cd93d863883c6eb))
+* route finalization by producer capability ([abc9c3f](https://github.com/rpollard00/pi-materia/commit/abc9c3f7caba67a79e074892e5879f96eec7f7c4))
+
+
+### Bug Fixes
+
+* add deterministic git identity fallback to mime-maintain commits ([4f4ebe9](https://github.com/rpollard00/pi-materia/commit/4f4ebe96ac69b592255e05e847fb30f1230c9a6f))
+* add regression tests for finalization context preservation ([db90ece](https://github.com/rpollard00/pi-materia/commit/db90ece7a6bccdc0a193931756c7085001480a80))
+* **blackbelt-ado-pr:** authenticate HTTPS jj git push via env-scoped http.extraHeader, disable prompts ([04d8b5d](https://github.com/rpollard00/pi-materia/commit/04d8b5d8984799978af0e2016588bba8d4575e3b))
+* **blackbelt-ado-pr:** redact PAT-derived secrets from push output and fail auth errors promptly ([348ef85](https://github.com/rpollard00/pi-materia/commit/348ef85b75ecc143675edb7912d9086a959c0d85))
+* classify terminated stream errors as transient transport failures ([c14dd11](https://github.com/rpollard00/pi-materia/commit/c14dd1117752562c087c38137e151e1b13494db6))
+* exclude finalization-marked prompts from isolated-context anchor discovery ([bd16576](https://github.com/rpollard00/pi-materia/commit/bd165769a93bc369516009eff7aa6e91b76794e2))
+* improve finalization recovery and diagnostics ([32d2212](https://github.com/rpollard00/pi-materia/commit/32d221241d21a4f432f71795277d00b12b57568d))
+* mark multi-turn finalization hidden prompts as non-anchoring in sendMateriaTurn ([00839f4](https://github.com/rpollard00/pi-materia/commit/00839f4b93e1737e5b76db63b8d120a8041b7e47))
+* **mime-ado-pr:** authenticate HTTPS git push via env-scoped http.extraHeader, disable prompts ([7159d09](https://github.com/rpollard00/pi-materia/commit/7159d091aa637d12a70c9d7a9c6267c24a2d7c3f))
+* **mime-ado-pr:** redact PAT-derived secrets from push output and fail auth errors promptly ([9b6139a](https://github.com/rpollard00/pi-materia/commit/9b6139a03e15a86b3d98d856da6218a6ff42ea12))
+* prevent full-transcript context passthrough after cast failure ([4f5e3f2](https://github.com/rpollard00/pi-materia/commit/4f5e3f2ac25341b8895a20b58c54c5e77d8c5558))
+* remove duplicated synthetic cast context from the multi-turn finalization prompt ([729c2b8](https://github.com/rpollard00/pi-materia/commit/729c2b863283bfbd7d03b3bece09ee482c4c07bd))
+
 ## [0.1.10](https://github.com/rpollard00/pi-materia/compare/v0.1.9...v0.1.10) (2026-07-17)
 
 
