@@ -66,7 +66,34 @@ async function makeFakeGitForMaintain() {
     git,
     `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$GIT_LOG"
-case "$1" in
+
+# Model identity from repository config, with command-level -c options taking
+# precedence just as they do in real Git.
+configured_name="\${FAKE_GIT_CONFIG_USER_NAME:-}"
+configured_email="\${FAKE_GIT_CONFIG_USER_EMAIL:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -c)
+      setting="\${2:-}"
+      shift 2
+      ;;
+    -c*)
+      setting="\${1#-c}"
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+  case "$setting" in
+    user.name=*) configured_name="\${setting#user.name=}" ;;
+    user.email=*) configured_email="\${setting#user.email=}" ;;
+  esac
+done
+
+command="\${1:-}"
+if [ "$#" -gt 0 ]; then shift; fi
+case "$command" in
   rev-parse)
     if [ "$GIT_NO_REPO" = "1" ]; then
       echo "fatal: not a git repository" >&2
@@ -80,6 +107,20 @@ case "$1" in
       echo "A new-file.txt"
     fi
     ;;
+  config)
+    if [ "\${1:-}" = "--get" ]; then
+      case "\${2:-}" in
+        user.name)
+          [ -n "$configured_name" ] || exit 1
+          printf '%s\\n' "$configured_name"
+          ;;
+        user.email)
+          [ -n "$configured_email" ] || exit 1
+          printf '%s\\n' "$configured_email"
+          ;;
+      esac
+    fi
+    ;;
   add)
     # Stage: succeeds
     ;;
@@ -88,7 +129,23 @@ case "$1" in
       echo "fatal: commit failed" >&2
       exit 1
     fi
-    # -m is $3, message is $4
+
+    author_name="\${GIT_AUTHOR_NAME:-$configured_name}"
+    author_email="\${GIT_AUTHOR_EMAIL:-$configured_email}"
+    committer_name="\${GIT_COMMITTER_NAME:-$configured_name}"
+    committer_email="\${GIT_COMMITTER_EMAIL:-$configured_email}"
+    if [ -z "$author_name" ] || [ -z "$author_email" ] || [ -z "$committer_name" ] || [ -z "$committer_email" ]; then
+      cat >&2 <<'EOF'
+Author identity unknown
+
+*** Please tell me who you are.
+
+fatal: unable to auto-detect email address
+EOF
+      exit 128
+    fi
+    printf 'identity author=%s <%s> committer=%s <%s>\\n' \
+      "$author_name" "$author_email" "$committer_name" "$committer_email" >> "$GIT_LOG"
     ;;
 esac
 `,
@@ -492,10 +549,43 @@ describe("Mime-Bootstrap utility script", () => {
 // =========================================================================
 
 describe("Mime-Maintain utility script", () => {
-  test("stages and commits with workItem title as commit message", async () => {
+  test("maintain fake git rejects commits without author identity", async () => {
+    const fake = await makeFakeGitForMaintain();
+    const proc = Bun.spawn([path.join(fake.dir, "git"), "commit", "-m", "test: missing identity"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        GIT_LOG: fake.log,
+        GIT_AUTHOR_NAME: "",
+        GIT_AUTHOR_EMAIL: "",
+        GIT_COMMITTER_NAME: "",
+        GIT_COMMITTER_EMAIL: "",
+        FAKE_GIT_CONFIG_USER_NAME: "",
+        FAKE_GIT_CONFIG_USER_EMAIL: "",
+      },
+    });
+    const [stderr, exitCode] = await Promise.all([
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+
+    expect(exitCode).toBe(128);
+    expect(stderr).toContain("Author identity unknown");
+  });
+
+  test("stages and commits with workItem title and fallback identity", async () => {
     const { result, fake } = await runMaintain(
       { item: { title: "feat: add mime support" } },
-      { GIT_DIRTY: "1" },
+      {
+        GIT_DIRTY: "1",
+        GIT_AUTHOR_NAME: "",
+        GIT_AUTHOR_EMAIL: "",
+        GIT_COMMITTER_NAME: "",
+        GIT_COMMITTER_EMAIL: "",
+        FAKE_GIT_CONFIG_USER_NAME: "",
+        FAKE_GIT_CONFIG_USER_EMAIL: "",
+      },
     );
 
     expect(result.exitCode).toBe(0);
@@ -515,6 +605,9 @@ describe("Mime-Maintain utility script", () => {
     const logContent = await readFile(fake.log, "utf8");
     expect(logContent).toContain("add -A");
     expect(logContent).toContain("commit -m feat: add mime support");
+    expect(logContent).toContain(
+      "identity author=pi-materia <pi-materia@localhost> committer=pi-materia <pi-materia@localhost>",
+    );
   });
 
   test("reports deterministic no-op when working tree is clean", async () => {
