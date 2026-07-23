@@ -117,7 +117,7 @@ try {
     : (process.env.AZURE_DEVOPS_API_URL ?? "https://dev.azure.com").replace(/\/$/, "");
 
   // Push the branch to Azure DevOps.
-  const pushResult = await pushBranch(branchName, remote, cwd);
+  const pushResult = await pushBranch(branchName, remote, remoteUrl, token, cwd);
   if (!pushResult.ok) {
     throw new UtilityError(`Mime-ADO-PR: push failed for branch "${branchName}" to remote "${remote}": ${pushResult.error}`, {
       branchName,
@@ -415,9 +415,16 @@ async function inferPrTitle(branchName, params, cwd) {
   return branchName;
 }
 
-async function pushBranch(branchName, remote, cwd) {
+async function pushBranch(branchName, remote, remoteUrl, token, cwd) {
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (/^https?:\/\//i.test(remoteUrl)) {
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "http.extraHeader";
+    env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(`x-token-auth:${token}`).toString("base64")}`;
+  }
+
   try {
-    await execFileText("git", ["push", "-u", remote, branchName], cwd);
+    await execFileText("git", ["push", "-u", remote, branchName], cwd, env);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: formatExecError(error) };
@@ -496,9 +503,14 @@ async function createPullRequest(adoConfig, title, head, base, token, apiBaseUrl
   }
 }
 
-function execFileText(command, args, cwd) {
+function execFileText(command, args, cwd, envOverrides = {}) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd, timeout: 30000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, {
+      cwd,
+      env: { ...process.env, ...envOverrides },
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    }, (error, stdout, stderr) => {
       if (stderr && stderr.trim().length > 0) {
         console.error(`[${command}] ${stderr.trim()}`);
       }
