@@ -179,7 +179,7 @@ try {
   const pushRevision = preflight.revision;
 
   // Push the bookmark to Azure DevOps.
-  const pushResult = await pushBookmark(bookmarkName, remote, cwd);
+  const pushResult = await pushBookmark(bookmarkName, remote, remoteUrl, token, cwd);
   if (!pushResult.ok) {
     throw new UtilityError(`Blackbelt-ADO-PR: push failed for bookmark "${bookmarkName}" to remote "${remote}": ${pushResult.error}`, {
       bookmarkName,
@@ -664,9 +664,16 @@ async function preflightPushRevision(bookmarkName, revision, cwd) {
   return { pushable: false, reason: "noPushableRevision" };
 }
 
-async function pushBookmark(bookmarkName, remote, cwd) {
+async function pushBookmark(bookmarkName, remote, remoteUrl, token, cwd) {
+  const env = { GIT_TERMINAL_PROMPT: "0" };
+  if (/^https?:\/\//i.test(remoteUrl)) {
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "http.extraHeader";
+    env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(`x-token-auth:${token}`).toString("base64")}`;
+  }
+
   try {
-    await execFileText("jj", ["git", "push", "--bookmark", bookmarkName, "--remote", remote], cwd);
+    await execFileText("jj", ["git", "push", "--bookmark", bookmarkName, "--remote", remote], cwd, env);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: formatExecError(error) };
@@ -745,9 +752,14 @@ async function createPullRequest(adoConfig, title, head, base, token, apiBaseUrl
   }
 }
 
-function execFileText(command, args, cwd) {
+function execFileText(command, args, cwd, envOverrides = {}) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd, timeout: 30000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, {
+      cwd,
+      env: { ...process.env, ...envOverrides },
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    }, (error, stdout, stderr) => {
       if (stderr && stderr.trim().length > 0) {
         console.error(`[${command}] ${stderr.trim()}`);
       }
