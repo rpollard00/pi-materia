@@ -335,6 +335,7 @@ const castLifecycle = createCastLifecycle({
 
 export const continueNativeCast = castLifecycle.continueNativeCast;
 export const handleAgentEnd = agentLifecycle.handleAgentEnd;
+export const handleAgentSettled = agentLifecycle.handleAgentSettled;
 export const prepareAgentStartSystemPrompt = agentLifecycle.prepareAgentStartSystemPrompt;
 
 export async function handleAgentHandoffToolExecutionEnd(

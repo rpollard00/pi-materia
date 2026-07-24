@@ -12,6 +12,7 @@ import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
+import { handleAgentSettled } from "./castRuntime.js";
 import { setActiveModelPolicyResolver } from "./runtime/modelPolicyResolver.js";
 import { setCentralTelemetrySinkResolver } from "./runtime/nativeEventing.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError, loadRuntimeConfig } from "./infrastructure/index.js";
@@ -131,6 +132,22 @@ export default function piMateria(pi: ExtensionAPI) {
       const boards = createQuestBoardRepository(ctx.cwd);
       if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state: after, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds, settlementSource: "agent_end" });
     }
+  });
+
+  /**
+   * Handle agent_settled: when Pi finishes all automatic retry/compaction
+   * and the cast still has an unresolved inference interruption, keep the
+   * cast active and awaiting a user nudge instead of settling the quest.
+   */
+  pi.on("agent_settled", async (_event, ctx) => {
+    activeContext = ctx;
+    const interruptionActive = await handleAgentSettled(pi, ctx);
+    if (interruptionActive) {
+      // Cast is still active with unresolved inference interruption.
+      // Do NOT settle the quest — the cast is awaiting a user nudge.
+    }
+    // Normal settlement path: if the cast just completed or failed,
+    // settle the quest as usual (handled by agent_end flow).
   });
 
   pi.on("session_start", async (_event, ctx) => {

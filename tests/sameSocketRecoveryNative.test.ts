@@ -1297,4 +1297,114 @@ describe("native same-socket recovery", () => {
     expect(state.recoveryAllowances[key]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 3, reviveCount: 2 });
     expect(state.recoveryAllowances.other).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
   });
+
+  test("agent_settled after inference interruption keeps cast active and awaiting user nudge", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast inference settled nudge");
+
+    // Trigger an inference interruption (stopReason error, no assistant message)
+    const entry = harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "server_error: upstream failure" });
+    await harness.emit("agent_end", { messages: [] });
+
+    // Cast should be active/awaiting with inferenceInterruption metadata
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("server_error");
+
+    // Now emit agent_settled (Pi is done retrying; interruption still unresolved)
+    await harness.emit("agent_settled");
+
+    // Cast should remain active/awaiting
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("server_error");
+
+    // Should have emitted an inference_interruption_settled event
+    const events = await readEvents(harness);
+    const settledEvent = events.find((e) => e.type === "inference_interruption_settled");
+    expect(settledEvent).toBeDefined();
+    expect(settledEvent.data.nudgeNeeded).toBe(true);
+    expect(settledEvent.data.error).toContain("server_error");
+
+    // Status should indicate nudge needed
+    expect(harness.statuses.get("materia")?.includes("nudge") || harness.notifications.some((n) => n.message.includes("nudge"))).toBe(true);
+  });
+
+  test("user nudge after agent_settled inference interruption resumes and completes the socket", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast nudge resumes after interruption");
+
+    // Trigger an inference interruption (stopReason error)
+    const failEntry = harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context_length_exceeded: too long" });
+    await harness.emit("agent_end", { messages: [] });
+
+    // Verify interruption recorded
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.lastProcessedEntryId).toBe(failEntry.id);
+
+    // Emit agent_settled (Pi done, interruption still unresolved)
+    await harness.emit("agent_settled");
+
+    // Verify cast remains active/awaiting
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+
+    // Simulate a user nudge: user sends a message, Pi calls before_agent_start,
+    // then a successful assistant response arrives.
+    // The before_agent_start handler in prepareAgentStartSystemPrompt re-applies
+    // tool scope when inferenceInterruption is set (WI-2).
+    const systemPromptResult = await harness.emit("before_agent_start", { systemPrompt: "default system prompt" });
+    expect(systemPromptResult).toBeDefined();
+
+    // Now a successful assistant response (the nudge retry works)
+    const successEntry = harness.appendAssistantMessage("completed after user nudge");
+    await harness.emit("agent_end", { messages: [] });
+
+    // Cast should be complete with inferenceInterruption cleared
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.socketState).toBe("complete");
+    expect(latestState.lastAssistantText).toBe("completed after user nudge");
+    expect(latestState.lastProcessedEntryId).toBe(successEntry.id);
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeUndefined(); // cleared on success
+
+    // No cast_end ok===false events
+    const events = await readEvents(harness);
+    const castEndOkFalse = events.filter((e) => e.type === "cast_end" && e.data.ok === false);
+    expect(castEndOkFalse).toHaveLength(0);
+    expect(events.some((e) => e.type === "cast_end" && e.data.ok === true)).toBe(true);
+  });
+
+  test("agent_settled with no inference interruption returns false and does nothing", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast agent_settled no interruption");
+
+    // Complete the turn normally
+    harness.appendAssistantMessage("normal completion");
+    await harness.emit("agent_end", { messages: [] });
+
+    // Verify cast completed
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.socketState).toBe("complete");
+    expect(latestState.inferenceInterruption).toBeUndefined();
+
+    // agent_settled should do nothing (cast state unchanged)
+    await harness.emit("agent_settled");
+
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(false);
+    expect(latestState.inferenceInterruption).toBeUndefined();
+  });
 });

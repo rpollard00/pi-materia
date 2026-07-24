@@ -364,9 +364,11 @@ function createMateriaCastStatusModel(
         : state.phase);
   const status = state.failedReason
     ? `failed: ${state.failedReason}`
-    : socketState === "awaiting_user_refinement"
-      ? "waiting for refinement; /materia continue to finalize"
-      : `${currentMateria ?? state.phase}${state.active ? " active" : ""}`;
+    : state.inferenceInterruption
+      ? `awaiting nudge after inference interruption: ${state.inferenceInterruption.error}`
+      : socketState === "awaiting_user_refinement"
+        ? "waiting for refinement; /materia continue to finalize"
+        : `${currentMateria ?? state.phase}${state.active ? " active" : ""}`;
   const loop = activeLoopDisplay(state);
   return createMateriaStatusRenderModel({
     cast: state.active ? "active" : state.phase || "done",

@@ -642,8 +642,71 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
     deps.ui.updateWidget(ctx, state);
   }
 
+  /**
+   * Handle Pi's agent_settled event. When Pi settles with an unresolved
+   * inference interruption, retain the cast as active/awaiting so the user
+   * can nudge a retry, update diagnostics and UI accordingly, and do NOT
+   * settle the associated quest. Returns true when the cast should remain
+   * active (interruption unresolved), false when normal settlement can proceed.
+   */
+  async function handleAgentSettled(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+  ): Promise<boolean> {
+    const state = deps.state.loadActiveCastState(ctx);
+    if (!state?.active) return false;
+    if (!state.inferenceInterruption) return false;
+
+    // Pi has settled but the inference interruption is still unresolved.
+    // Keep the cast active and awaiting so a user nudge can retry.
+    state.active = true;
+    state.awaitingResponse = true;
+    setCurrentSocketState(state, "awaiting_agent_response");
+    state.updatedAt = Date.now();
+
+    state.runState.lastMessage = `Inference interruption unresolved after Pi settled; awaiting user nudge: ${state.inferenceInterruption.error}`;
+
+    await deps.artifacts.appendEvent(state.runState, "inference_interruption_settled", {
+      warning: true,
+      nudgeNeeded: true,
+      error: state.inferenceInterruption.error,
+      entryId: state.inferenceInterruption.entryId,
+      socket: state.inferenceInterruption.socket,
+      interruptedAt: state.inferenceInterruption.interruptedAt,
+      itemKey: state.currentItemKey,
+      itemLabel: state.currentItemLabel,
+      itemLabelShort: deps.artifacts.shortMetadataLabel(state.currentItemLabel),
+    });
+
+    await deps.eventing.emitLifecycleEvent(state, "lifecycle.inference.settled_unresolved", {
+      severity: "warning",
+      socketId: currentSocketId(state),
+      materia: state.currentMateria,
+      visit: currentSocketVisit(state, undefined),
+      ...(state.currentItemKey !== undefined ? { itemKey: state.currentItemKey } : {}),
+      ...(state.currentItemLabel !== undefined ? { itemLabel: state.currentItemLabel } : {}),
+      payload: {
+        nudgeNeeded: true,
+        error: state.inferenceInterruption.error,
+        interruptedAt: state.inferenceInterruption.interruptedAt,
+      },
+    });
+
+    await deps.artifacts.writeUsage(state.runState);
+    deps.state.saveCastState(pi, state);
+
+    // Update UI to indicate the cast is awaiting a user nudge.
+    const socket = currentSocketOrThrow(state);
+    ctx.ui.setStatus("materia", materiaStatusLabel(state, socket, { suffix: "nudge" }));
+    deps.ui.updateWidget(ctx, state);
+    ctx.ui.notify(`pi-materia cast ${state.castId} awaiting user nudge after inference interruption.`, "warning");
+
+    return true;
+  }
+
   return {
     handleAgentEnd,
+    handleAgentSettled,
     prepareAgentStartSystemPrompt,
     prepareMultiTurnRefinementTurn,
     startMultiTurnFinalizationTurn,
