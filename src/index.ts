@@ -12,7 +12,7 @@ import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
-import { handleAgentSettled } from "./castRuntime.js";
+import { handleAgentSettled, saveCastState } from "./castRuntime.js";
 import { setActiveModelPolicyResolver } from "./runtime/modelPolicyResolver.js";
 import { setCentralTelemetrySinkResolver } from "./runtime/nativeEventing.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError, loadRuntimeConfig } from "./infrastructure/index.js";
@@ -367,6 +367,32 @@ export default function piMateria(pi: ExtensionAPI) {
       if (subcommand === "revive") {
         try {
           const requestedCastId = rest.join(" ").trim();
+
+          // Check for quest-linked revival: if there's a different active cast
+          // and the target is a quest-linked failed cast, queue the quest instead.
+          const activeState = adapters.states.loadActive(ctx);
+          const targetState = findCastForRevival(adapters.states, ctx, requestedCastId);
+          const questMeta = targetState && activeState?.active && activeState.castId !== targetState.castId
+            ? isQuestLinkedCastState(targetState)
+            : undefined;
+          if (questMeta) {
+            const boards = createQuestBoardRepository(ctx.cwd);
+            const questUseCases = createQuestRunnerUseCases(ctx.cwd, boards);
+            const { quest } = await questUseCases.unfailQuest({ questRef: questMeta.questId, resumeCastId: targetState!.castId });
+
+            // Mark the target cast as dormant so it no longer appears as revivable.
+            targetState!.data.questQueuedResurrection = { questId: questMeta.questId, resumeCastId: targetState!.castId };
+            saveCastState(pi, targetState!);
+
+            const status = await questUseCases.getStatus(ctx);
+            sendQuestMessage(pi, renderQuestRequeued(quest, status.boardPath), "unfail");
+            ctx.ui.notify(`pi-materia quest ${quest.id} queued for cast ${targetState!.castId} resumption. Use /materia quest run to continue when ready.`, "info");
+            if (status.board.runner.enabled) {
+              await drainQuestBoard({ pi, ctx, useCases: questUseCases, configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds });
+            }
+            return;
+          }
+
           const castId = await castExecutionUseCases.reviveLatestOrRequested(pi, ctx, requestedCastId);
           if (!castId) {
             ctx.ui.notify("No failed pi-materia casts exhausted by same-socket recovery or edge traversal are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
@@ -882,5 +908,39 @@ function revivableStatusSocketId(state: MateriaCastState): string | undefined {
 function truncateLine(value: string, max: number): string {
   const singleLine = value.replace(/\s+/g, " ").trim();
   return singleLine.length > max ? `${singleLine.slice(0, Math.max(0, max - 1))}…` : singleLine;
+}
+
+/**
+ * Find a cast for revival by ID, or the latest revivable cast if no ID given.
+ * For a specific requested ID, looks up the cast directly (it may be active or
+ * otherwise non-revivable) so we can check quest-linking before deciding the
+ * revival strategy.
+ */
+function findCastForRevival(states: CastStateRepository<ExtensionContext>, ctx: ExtensionContext, requestedCastId?: string): MateriaCastState | undefined {
+  if (requestedCastId) {
+    return states.listLatest(ctx).find((state) => state.castId === requestedCastId);
+  }
+  return states.listRevivable(ctx)[0];
+}
+
+/**
+ * Check if a cast state is quest-linked and extract quest metadata.
+ * Returns the quest metadata if linked, or undefined if standalone.
+ */
+function isQuestLinkedCastState(state: MateriaCastState): { questId: string; title?: string } | undefined {
+  const questData = state.data?.quest;
+  if (!isRecord(questData)) return undefined;
+  const questId = questData.questId;
+  if (typeof questId !== "string" || !questId.trim()) return undefined;
+  const title = typeof questData.title === "string" && questData.title.trim() ? questData.title.trim() : undefined;
+  return { questId: questId.trim(), title };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 

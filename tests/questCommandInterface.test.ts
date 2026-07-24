@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
-import { loadActiveCastState } from "../src/castRuntime.js";
+import { loadActiveCastState, listLatestCastStates, listRevivableCastStates } from "../src/castRuntime.js";
 import { findNextPendingQuest, type Quest, type QuestBoard, type QuestStatus } from "../src/domain/questBoard.js";
 import { renderQuestList, renderQuestStatus, selectQuestList } from "../src/presentation/questBoard.js";
 import { FakePiHarness, type FakePiHarnessOptions } from "./fakePi.js";
@@ -900,5 +900,172 @@ describe("/materia quest command interface", () => {
     const statusCards = questCardSends(harness, "status");
     expect(statusCards.at(-1)?.message.display).toBe(true);
     expect(statusCards.at(-1)?.message.details.orchestration).toBeUndefined();
+  });
+});
+
+function makeBaseCastState(castId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    version: 2,
+    active: false,
+    castId,
+    request: "test",
+    configSource: ".pi/pi-materia.json",
+    configHash: "test",
+    cwd: process.cwd(),
+    runDir: path.join(process.cwd(), ".pi/pi-materia", castId),
+    artifactRoot: path.join(process.cwd(), ".pi/pi-materia"),
+    phase: "failed",
+    socketState: "failed",
+    awaitingResponse: false,
+    failedReason: "test failure",
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+    data: {},
+    cursors: {},
+    visits: {},
+    multiTurnRefinements: {},
+    taskAttempts: {},
+    edgeTraversals: {},
+    runState: {
+      castId,
+      runDir: path.join(process.cwd(), ".pi/pi-materia", castId),
+      usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} },
+    },
+    pipeline: { entry: { id: "Socket-1", socket: { materia: "Build" }, materia: { tools: "readOnly", prompt: "" } }, sockets: {} },
+    ...extra,
+  };
+}
+
+function makeActiveCastState(castId: string): Record<string, unknown> {
+  return makeBaseCastState(castId, {
+    active: true,
+    phase: "running",
+    socketState: "awaiting_agent_response",
+    awaitingResponse: true,
+    request: "active task",
+    data: {},
+  });
+}
+
+function makeQuestLinkedFailedCastState(castId: string, questId: string): Record<string, unknown> {
+  return makeBaseCastState(castId, {
+    data: { quest: { questId, title: "Linked quest" } },
+  });
+}
+
+describe("/materia revive with quest-linked casts", () => {
+  async function seedQuestBoard(harness: FakePiHarness, quests: Quest[]): Promise<void> {
+    const boardDir = path.join(harness.cwd, ".pi", "pi-materia");
+    await mkdir(boardDir, { recursive: true });
+    await writeFile(path.join(boardDir, "quest-board.json"), JSON.stringify(makeQuestBoard(quests), null, 2));
+  }
+
+  test("quest-linked revive queues quest when a different active cast exists", async () => {
+    const harness = await makeHarness();
+
+    // Seed a failed quest on the board
+    const failedQuest = makeQuest("quest-failed", "failed", "Failed linked quest");
+    failedQuest.lastError = { message: "failure", occurredAt: "2026-06-01T00:00:00.000Z" };
+    failedQuest.lastCastId = "cast-linked-target";
+    await seedQuestBoard(harness, [failedQuest]);
+
+    // Set up an active cast
+    harness.pi.appendEntry("pi-materia-cast-state", makeActiveCastState("cast-active"));
+
+    // Set up a quest-linked failed cast
+    harness.pi.appendEntry("pi-materia-cast-state", makeQuestLinkedFailedCastState("cast-linked-target", "quest-failed"));
+
+    await harness.runCommand("materia", "revive cast-linked-target");
+
+    // Verify the quest was unfailed (now pending) with resumeCastId set
+    const board = await readBoard(harness);
+    const updatedQuest = board.quests.find((q: any) => q.id === "quest-failed");
+    expect(updatedQuest).toBeDefined();
+    expect(updatedQuest.status).toBe("pending");
+    expect(updatedQuest.resumeCastId).toBe("cast-linked-target");
+    expect(Object.hasOwn(updatedQuest, "currentCastId")).toBe(false);
+    expect(Object.hasOwn(updatedQuest, "lastResult")).toBe(false);
+    expect(Object.hasOwn(updatedQuest, "lastError")).toBe(false);
+
+    // Verify the active cast was NOT touched (still active, same cast id)
+    const activeState = loadActiveCastState(harness.ctx);
+    expect(activeState?.castId).toBe("cast-active");
+    expect(activeState?.active).toBe(true);
+
+    // Verify the target cast was NOT revived (still not active)
+    const allStates = listLatestCastStates(harness.ctx);
+    const targetState = allStates.find((s) => s.castId === "cast-linked-target");
+    expect(targetState?.active).toBe(false);
+
+    // Verify the quest-linked cast is marked dormant (non-revivable)
+    const revivableStates = listRevivableCastStates(harness.ctx);
+    expect(revivableStates.find((s) => s.castId === "cast-linked-target")).toBeUndefined();
+
+    // Verify notification about quest queuing
+    expect(harness.notifications.some((n) => n.message.includes("queued for cast cast-linked-target resumption"))).toBe(true);
+
+    // Verify the unfail card was sent
+    const unfailCards = questCardSends(harness, "unfail");
+    expect(unfailCards.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("quest-linked revive falls through to normal revive when no active cast exists", async () => {
+    const harness = await makeHarness();
+
+    // Set up a quest-linked failed cast (but no active cast)
+    harness.pi.appendEntry("pi-materia-cast-state", makeQuestLinkedFailedCastState("cast-standalone", "quest-standalone"));
+
+    await harness.runCommand("materia", "revive cast-standalone");
+
+    // Since there's no active cast, questMeta is undefined (activeState?.active is falsy).
+    // Falls through to reviveLatestOrRequested -> reviveNativeCast, which fails
+    // because the synthesized cast's artifact directory doesn't exist.
+    const lastNotification = harness.notifications.at(-1);
+    expect(lastNotification?.type).toBe("error");
+    expect(lastNotification?.message).toContain("pi-materia revive failed");
+  });
+
+  test("non-quest-linked failed cast with active cast falls through to normal revive which fails due to active cast conflict", async () => {
+    const harness = await makeHarness();
+
+    // Set up active cast
+    harness.pi.appendEntry("pi-materia-cast-state", makeActiveCastState("cast-active"));
+
+    // Set up a failed cast WITHOUT quest data
+    harness.pi.appendEntry("pi-materia-cast-state", makeBaseCastState("cast-non-quest"));
+
+    await harness.runCommand("materia", "revive cast-non-quest");
+
+    // The cast is not quest-linked (no data.quest), so questMeta is undefined.
+    // Falls through to reviveLatestOrRequested -> reviveNativeCast.
+    // assertNoActiveNativeCast rejects revival while a different active cast exists.
+    const lastNotification = harness.notifications.at(-1);
+    expect(lastNotification?.type).toBe("error");
+    expect(lastNotification?.message).toContain("pi-materia revive failed");
+    expect(lastNotification?.message).toContain("already active");
+  });
+
+  test("dormant cast does not appear in revivable completions", async () => {
+    const harness = await makeHarness();
+
+    // Set up active cast
+    harness.pi.appendEntry("pi-materia-cast-state", makeActiveCastState("cast-active"));
+
+    // Set up a quest-linked failed cast
+    harness.pi.appendEntry("pi-materia-cast-state", makeQuestLinkedFailedCastState("cast-dormant-target", "quest-dormant"));
+
+    // Queue it via revive (this will fail because there's no board with quest-dormant, but let's directly set the dormant flag)
+    // Actually, let's simulate what happens: after revive queues the quest,
+    // the cast is marked dormant. Let's directly set up a dormant cast.
+    const dormantCast = makeQuestLinkedFailedCastState("cast-dormant", "quest-already-queued");
+    dormantCast.data = { 
+      ...dormantCast.data as Record<string, unknown>,
+      questQueuedResurrection: { questId: "quest-already-queued", resumeCastId: "cast-dormant" },
+    };
+    harness.pi.appendEntry("pi-materia-cast-state", dormantCast);
+
+    // Should not appear in revivable list
+    const revivableStates = listRevivableCastStates(harness.ctx);
+    expect(revivableStates.find((s) => s.castId === "cast-dormant")).toBeUndefined();
   });
 });

@@ -93,6 +93,10 @@ function isResumableCastState(state: MateriaCastState): boolean {
 
 function isRevivableCastState(state: MateriaCastState): boolean {
   if (!isResumableCastState(state)) return false;
+
+  // Casts with a pending quest resurrection are dormant, not revivable.
+  if (hasQuestQueuedResurrection(state)) return false;
+
   // General revive eligibility: all failed and aborted casts are eligible.
   // When structured exhaustion metadata is present, validate it strictly.
   // When absent, the cast is still eligible for passive revival.
@@ -101,6 +105,15 @@ function isRevivableCastState(state: MateriaCastState): boolean {
   if (exhaustion.kind === "same_socket_recovery_exhausted") return isValidSameSocketRevivableState(state, exhaustion);
   if (exhaustion.kind === "edge_traversal_exhausted") return isValidEdgeTraversalRevivableState(state, exhaustion);
   return false;
+}
+
+/**
+ * Check if a cast state has been marked for quest-linked resurrection,
+ * making it dormant rather than revivable.
+ */
+function hasQuestQueuedResurrection(state: MateriaCastState): boolean {
+  const resurrection = state.data?.questQueuedResurrection;
+  return typeof resurrection === "object" && resurrection !== null && typeof (resurrection as Record<string, unknown>).questId === "string" && typeof (resurrection as Record<string, unknown>).resumeCastId === "string";
 }
 
 function isValidSameSocketRevivableState(state: MateriaCastState, exhaustion: MateriaCastState["recoveryExhaustion"] & { kind: "same_socket_recovery_exhausted" }): boolean {

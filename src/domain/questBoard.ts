@@ -46,6 +46,8 @@ export interface Quest {
   loadoutOverride?: string;
   currentCastId?: string;
   lastCastId?: string;
+  /** Same-cast resumption target: when set, the quest runner should resume this cast instead of starting a new one. */
+  resumeCastId?: string;
   lastResult?: QuestRunResult;
   lastError?: QuestRunError;
 }
@@ -100,6 +102,13 @@ export interface FailRunningQuestInput {
 export interface RequeueQuestInput {
   questId: string;
   now: string;
+}
+
+export interface UnfailQuestInput {
+  questId: string;
+  now: string;
+  /** Same-cast resumption target: when set, the revived cast should be resumed instead of starting a new one. */
+  resumeCastId?: string;
 }
 
 export interface DeleteQuestInput {
@@ -463,6 +472,39 @@ export function requeueQuest(board: QuestBoard, input: RequeueQuestInput): Domai
   return ok(nextBoard);
 }
 
+export function unfailQuest(board: QuestBoard, input: UnfailQuestInput): DomainResult<QuestBoard> {
+  const issues: DomainIssue[] = [];
+  if (!isNonEmptyString(input.now)) issues.push({ path: "quest.now", message: "timestamp is required" });
+
+  const questIndex = board.quests.findIndex((quest) => quest.id === input.questId);
+  const quest = questIndex >= 0 ? board.quests[questIndex] : undefined;
+  if (quest === undefined) {
+    issues.push({ path: "questId", message: `quest '${input.questId}' does not exist` });
+  } else if (quest.status !== "failed" && quest.status !== "blocked") {
+    issues.push({ path: "quest.status", message: `quest '${quest.id}' is ${quest.status}, not failed or blocked` });
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  const { currentCastId, lastResult, lastError, ...rest } = quest!;
+  void currentCastId;
+  void lastResult;
+  void lastError;
+  const nextQuest: Quest = {
+    ...rest,
+    status: "pending",
+    updatedAt: input.now,
+    // Preserve lastCastId for same-cast resumption reference.
+    ...(input.resumeCastId ? { resumeCastId: input.resumeCastId } : {}),
+  };
+  // Place at the back of the queue.
+  const quests = [...board.quests.filter((_, index) => index !== questIndex), nextQuest];
+  const nextBoard: QuestBoard = { ...board, updatedAt: input.now, quests };
+  const validated = validateQuestBoard(nextBoard);
+  if (!validated.ok) return validated;
+  return ok(nextBoard);
+}
+
 export function validateQuestBoard(value: unknown, path = "questBoard"): DomainResult<QuestBoard> {
   const issues: DomainIssue[] = [];
   if (!isPlainObject(value)) return { ok: false, issues: [{ path, message: "quest board must be an object" }] };
@@ -523,6 +565,7 @@ function validateQuest(value: unknown, path: string, issues: DomainIssue[]): voi
   optionalString(value.loadoutOverride, `${path}.loadoutOverride`, issues);
   optionalString(value.currentCastId, `${path}.currentCastId`, issues);
   optionalString(value.lastCastId, `${path}.lastCastId`, issues);
+  optionalString(value.resumeCastId, `${path}.resumeCastId`, issues);
   if (value.status === "running" && typeof value.currentCastId !== "string") issues.push({ path: `${path}.currentCastId`, message: "running quest must have a current cast id" });
   if (value.status !== "running" && value.currentCastId !== undefined) issues.push({ path: `${path}.currentCastId`, message: "only running quests may have a current cast id" });
   if (value.lastResult !== undefined) validateRunResult(value.lastResult, `${path}.lastResult`, issues);

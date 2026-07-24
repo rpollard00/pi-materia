@@ -16,6 +16,7 @@ import {
   resolveQuestRef,
   startQuest,
   stopQuestRunner,
+  unfailQuest,
   updatePendingQuest,
   validateQuestBoard,
   type QuestBoard,
@@ -369,6 +370,130 @@ describe("quest board domain", () => {
     if (!requeuedQuest) return;
     expect(Object.hasOwn(requeuedQuest, "currentCastId")).toBe(false);
     expect(validateQuestBoard(requeued.value).ok).toBe(true);
+  });
+
+  describe("unfailQuest", () => {
+    function failedBoard(): QuestBoard {
+      const board = boardWithTwoQuests();
+      const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      if (!started.ok) throw new Error("start failed");
+      const completed = completeQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, result: { status: "failed", error: "test failure" } });
+      if (!completed.ok) throw new Error("complete failed");
+      return completed.value;
+    }
+
+    test("clears terminal error/result state while preserving lastCastId and sets status to pending", () => {
+      const board = failedBoard();
+      const failedQuest = board.quests[0]!;
+      expect(failedQuest.status).toBe("failed");
+      expect(failedQuest.lastCastId).toBe("cast-1");
+      expect(failedQuest.lastResult).toBeDefined();
+      expect(failedQuest.lastError).toBeDefined();
+      expect(Object.hasOwn(failedQuest, "currentCastId")).toBe(true);
+
+      const result = unfailQuest(board, { questId: "q-1", now: t2 });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const unfailed = result.value.quests.find((q) => q.id === "q-1");
+      expect(unfailed).toBeDefined();
+      if (!unfailed) return;
+      expect(unfailed.status).toBe("pending");
+      expect(Object.hasOwn(unfailed, "currentCastId")).toBe(false);
+      expect(Object.hasOwn(unfailed, "lastResult")).toBe(false);
+      expect(Object.hasOwn(unfailed, "lastError")).toBe(false);
+      expect(unfailed.lastCastId).toBe("cast-1");
+      expect(unfailed.updatedAt).toBe(t2);
+    });
+
+    test("moves failed quest to the back of the queue", () => {
+      const board = failedBoard();
+      expect(board.quests.map((q) => q.id)).toEqual(["q-1", "q-2"]);
+      expect(findNextPendingQuest(board)?.id).toBe("q-2");
+
+      const result = unfailQuest(board, { questId: "q-1", now: t2 });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quests.map((q) => q.id)).toEqual(["q-2", "q-1"]);
+      expect(findNextPendingQuest(result.value)?.id).toBe("q-2");
+      expect(getOrderedQuestView(result.value).map((q) => q.id)).toEqual(["q-2", "q-1"]);
+    });
+
+    test("sets resumeCastId when provided and omits it when absent", () => {
+      const board = failedBoard();
+
+      const withResume = unfailQuest(board, { questId: "q-1", now: t2, resumeCastId: "cast-target" });
+      expect(withResume.ok).toBe(true);
+      if (!withResume.ok) return;
+      const questWith = withResume.value.quests.find((q) => q.id === "q-1");
+      expect(questWith?.resumeCastId).toBe("cast-target");
+
+      const withoutResume = unfailQuest(board, { questId: "q-1", now: t2 });
+      expect(withoutResume.ok).toBe(true);
+      if (!withoutResume.ok) return;
+      const questWithout = withoutResume.value.quests.find((q) => q.id === "q-1");
+      expect(Object.hasOwn(questWithout, "resumeCastId")).toBe(false);
+    });
+
+    test("rejects missing quests, non-terminal statuses, and empty timestamps", () => {
+      const board = boardWithTwoQuests();
+
+      const missing = unfailQuest(board, { questId: "missing", now: t2 });
+      expect(missing.ok).toBe(false);
+      if (!missing.ok) expect(missing.issues[0]?.message).toContain("does not exist");
+
+      const pendingUnfail = unfailQuest(board, { questId: "q-1", now: t2 });
+      expect(pendingUnfail.ok).toBe(false);
+      if (!pendingUnfail.ok) expect(pendingUnfail.issues[0]?.message).toContain("pending, not failed or blocked");
+
+      const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(started.ok).toBe(true);
+      if (!started.ok) return;
+      const runningUnfail = unfailQuest(started.value, { questId: "q-1", now: t3 });
+      expect(runningUnfail.ok).toBe(false);
+      if (!runningUnfail.ok) expect(runningUnfail.issues[0]?.message).toContain("running, not failed or blocked");
+
+      const completed = completeQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, result: { status: "succeeded" } });
+      expect(completed.ok).toBe(true);
+      if (!completed.ok) return;
+      const succeededUnfail = unfailQuest(completed.value, { questId: "q-1", now: t2 });
+      expect(succeededUnfail.ok).toBe(false);
+      if (!succeededUnfail.ok) expect(succeededUnfail.issues[0]?.message).toContain("succeeded, not failed or blocked");
+
+      const emptyTimestamp = unfailQuest(board, { questId: "q-1", now: "" });
+      expect(emptyTimestamp.ok).toBe(false);
+      if (!emptyTimestamp.ok) expect(emptyTimestamp.issues[0]?.message).toContain("timestamp is required");
+    });
+
+    test("passes validateQuestBoard afterward", () => {
+      const board = failedBoard();
+      const result = unfailQuest(board, { questId: "q-1", now: t2 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(validateQuestBoard(result.value).ok).toBe(true);
+    });
+
+    test("unfails blocked quests as well", () => {
+      const board = boardWithTwoQuests();
+      const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(started.ok).toBe(true);
+      if (!started.ok) return;
+      const blocked = failRunningQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, status: "blocked", message: "needs key" });
+      expect(blocked.ok).toBe(true);
+      if (!blocked.ok) return;
+
+      const result = unfailQuest(blocked.value, { questId: "q-1", now: t2 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const unfailed = result.value.quests.find((q) => q.id === "q-1");
+      expect(unfailed?.status).toBe("pending");
+      expect(Object.hasOwn(unfailed, "currentCastId")).toBe(false);
+      expect(Object.hasOwn(unfailed, "lastResult")).toBe(false);
+      expect(Object.hasOwn(unfailed, "lastError")).toBe(false);
+      expect(unfailed?.lastCastId).toBe("cast-1");
+      expect(validateQuestBoard(result.value).ok).toBe(true);
+    });
   });
 
   test("toggles runner state without aborting active quest state", () => {
