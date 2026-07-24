@@ -396,7 +396,7 @@ describe("/materia recast", () => {
     expect(harness.notifications.at(-1)?.message).toContain("Use /materia recast");
   });
 
-  test("revive rejects non-exhaustion failures with recast guidance", async () => {
+  test("revive passively restores ordinary failed casts without dispatching inference", async () => {
     const harness = await makeHarness();
 
     await harness.runCommand("materia", "cast ordinary failure");
@@ -404,26 +404,36 @@ describe("/materia recast", () => {
 
     await harness.runCommand("materia", `revive ${failed.castId}`);
 
-    const notification = harness.notifications.at(-1);
-    expect(notification?.type).toBe("error");
-    expect(notification?.message).toContain("not revivable");
-    expect(notification?.message).toContain("Use /materia recast");
+    // Passive revive normalizes state without dispatching inference.
+    const revived = latestState(harness);
+    expect(revived.castId).toBe(failed.castId);
+    expect(revived.active).toBe(true);
+    expect(revived.socketState).toBe("awaiting_agent_response");
+    expect(revived.failedReason).toBeUndefined();
+    expect(revived.runState.endedAt).toBeUndefined();
+    // No dispatch — cast is active/awaiting, user nudges or recasts.
+    expect(harness.notifications.at(-1)?.message).toContain("revived at socket");
+    expect(harness.notifications.at(-1)?.message).toContain("Use /materia recast to resend");
   });
 
-  test("revive reports when no eligible casts exist and completes only revivable casts", async () => {
+  test("revive activates the latest revivable cast preferring structured exhaustion", async () => {
     const harness = await makeHarness();
 
     await harness.runCommand("materia", "cast ordinary failure");
     const ordinary = await failCurrentCast(harness, "ordinary failure");
 
+    // Ordinary failure is now revivable (passive revive).
+    // No-id revive picks the latest revivable cast.
     await harness.runCommand("materia", "revive");
-    expect(harness.notifications).toContainEqual({
-      message: "No failed pi-materia casts exhausted by same-socket recovery or edge traversal are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.",
-      type: "info",
-    });
+    const revivedOrdinary = latestState(harness);
+    expect(revivedOrdinary.castId).toBe(ordinary.castId);
+    expect(revivedOrdinary.active).toBe(true);
 
-    const noEligibleCompletions = harness.getCommandCompletions("materia", "revive ") ?? [];
-    expect(noEligibleCompletions).toEqual([]);
+    // The revived cast should appear in completions after being consumed.
+    // (It is now active, so listRevivable excludes it.)
+    // Create a fresh ordinary failure and an exhausted failure to test ordering.
+    await harness.runCommand("materia", "cast fresh ordinary");
+    const freshOrdinary = await failCurrentCast(harness, "fresh ordinary");
 
     await harness.runCommand("materia", "cast exhausted failure");
     const failed = await failCurrentCast(harness, "Same-socket recovery exhausted for normal turn");
@@ -431,18 +441,14 @@ describe("/materia recast", () => {
     harness.pi.appendEntry("pi-materia-cast-state", revivable);
 
     const mixedCompletions = harness.getCommandCompletions("materia", "revive ") ?? [];
-    expect(mixedCompletions.map((item) => item.value)).toEqual([`revive ${revivable.castId}`]);
-    expect(mixedCompletions.map((item) => item.value)).not.toContain(`revive ${ordinary.castId}`);
+    // Both exhausted and ordinary failures appear (exhausted is newer)
+    expect(mixedCompletions.map((item) => item.value)).toEqual([`revive ${revivable.castId}`, `revive ${freshOrdinary.castId}`]);
 
     await harness.runCommand("materia", "revive");
     const resumed = latestState(harness);
+    // No-id revive picks the latest revivable (exhausted cast is newer)
     expect(resumed.castId).toBe(revivable.castId);
     expect(resumed.active).toBe(true);
-    const ordinaryLatest = harness.appendedEntries
-      .filter((entry) => entry.customType === "pi-materia-cast-state" && (entry.data as MateriaCastState | undefined)?.castId === ordinary.castId)
-      .at(-1)?.data as MateriaCastState | undefined;
-    expect(ordinaryLatest).toMatchObject({ castId: ordinary.castId, active: false, phase: "failed", request: "ordinary failure" });
-    expect(ordinaryLatest?.failedReason).toContain("ordinary failure");
   });
 
   test("completions include only matching resumable casts newest first", async () => {
@@ -596,7 +602,7 @@ describe("/materia recast", () => {
     expect(ordinaryLatest).toMatchObject({ castId: ordinary.castId, active: false, phase: "failed" });
   });
 
-  test("revive completions filter edge-traversal exhausted casts and show edge-exhausted label", async () => {
+  test("revive completions show all failed casts with appropriate labels", async () => {
     const harness = await makeMultiSocketHarness();
 
     // Edge-traversal exhausted cast
@@ -611,16 +617,19 @@ describe("/materia recast", () => {
     const sameSocketExhausted = makeRevivableState(sameSocketFailed);
     harness.pi.appendEntry("pi-materia-cast-state", sameSocketExhausted);
 
-    // Ordinary failed cast (not revivable)
+    // Ordinary failed cast (now also revivable)
     await harness.runCommand("materia", "cast ordinary failure for filter");
     const ordinary = await failCurrentCast(harness, "ordinary failure");
 
     const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
     const completionValues = completions.map((item) => item.value);
 
-    // Both exhausted casts appear, newest first (same-socket is newer)
-    expect(completionValues).toEqual([`revive ${sameSocketExhausted.castId}`, `revive ${edgeExhausted.castId}`]);
-    expect(completionValues).not.toContain(`revive ${ordinary.castId}`);
+    // All three failed casts appear, newest first (ordinary created last is newest)
+    expect(completionValues).toEqual([
+      `revive ${ordinary.castId}`,
+      `revive ${sameSocketExhausted.castId}`,
+      `revive ${edgeExhausted.castId}`,
+    ]);
 
     // Edge-traversal cast shows edge-exhausted label with target socket
     const edgeCompletion = completions.find((item) => item.value === `revive ${edgeExhausted.castId}`);
@@ -630,6 +639,10 @@ describe("/materia recast", () => {
     // Same-socket cast shows recovery-exhausted label with source socket
     const sameSocketCompletion = completions.find((item) => item.value === `revive ${sameSocketExhausted.castId}`);
     expect(sameSocketCompletion?.label).toContain("recovery-exhausted");
+
+    // Ordinary cast shows revivable label
+    const ordinaryCompletion = completions.find((item) => item.value === `revive ${ordinary.castId}`);
+    expect(ordinaryCompletion?.label).toContain("revivable");
   });
 
   test("revive completions include both same-socket and edge-traversal exhausted casts when both types exist", async () => {
@@ -658,21 +671,26 @@ describe("/materia recast", () => {
     expect(completions.map((item) => item.value)).toEqual([`revive ${olderRevivable.castId}`]);
   });
 
-  test("non-revivable failures still guide users to /materia recast", async () => {
+  test("passive revive activates ordinary failures without dispatching inference", async () => {
     const harness = await makeMultiSocketHarness();
 
-    // Ordinary failure
-    await harness.runCommand("materia", "cast ordinary failure for guidance");
+    // Ordinary failure — now revivable
+    await harness.runCommand("materia", "cast ordinary failure for revive");
     await failCurrentCast(harness, "ordinary failure");
 
-    const mixedCompletions = harness.getCommandCompletions("materia", "revive ") ?? [];
-    expect(mixedCompletions).toEqual([]);
+    // Completions include the ordinary failure with revivable label
+    const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    expect(completions.length).toBe(1);
+    expect(completions[0].label).toContain("revivable");
 
-    // revive without id should show the empty-state message
+    // No-id revive activates the ordinary failure
     await harness.runCommand("materia", "revive");
-    const emptyStateNotify = harness.notifications.find((n) => n.message.includes("No failed pi-materia casts exhausted"));
-    expect(emptyStateNotify?.message).toContain("No failed pi-materia casts exhausted by same-socket recovery or edge traversal are available to revive");
-    expect(emptyStateNotify?.message).toContain("Use /materia recast");
+    const revived = latestState(harness);
+    expect(revived.active).toBe(true);
+    expect(revived.failedReason).toBeUndefined();
+    expect(revived.runState.endedAt).toBeUndefined();
+    expect(harness.notifications.at(-1)?.message).toContain("revived at socket");
+    expect(harness.notifications.at(-1)?.message).toContain("nudge to continue");
   });
 
   test("preserves existing same-socket revive behavior after edge-traversal revive changes", async () => {

@@ -875,7 +875,8 @@ function revivableStatusSocketId(state: MateriaCastState): string | undefined {
   const exhaustion = state.recoveryExhaustion;
   if (exhaustion?.kind === "edge_traversal_exhausted") return exhaustion.to;
   if (exhaustion?.kind === "same_socket_recovery_exhausted") return exhaustion.socket;
-  return undefined;
+  // Passive revive: show the current socket from state.
+  return currentCastSocketId(state) ?? state.phase;
 }
 
 function truncateLine(value: string, max: number): string {

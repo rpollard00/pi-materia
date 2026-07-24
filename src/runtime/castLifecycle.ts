@@ -265,8 +265,59 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     assertNoActiveNativeCast(ctx, state, "reviving");
 
     const exhaustion = state.recoveryExhaustion;
+
+    // Passive revival: no structured exhaustion metadata — normalize state
+    // without dispatching inference. The user can recast for immediate resend.
     if (!exhaustion) {
-      throw new Error(`pi-materia cast ${state.castId} is not revivable: missing structured exhaustion metadata. Use /materia recast instead.`);
+      const socket = currentSocketOrThrow(state);
+      state.active = true;
+      state.phase = socket.id;
+      setCurrentSocketId(state, socket.id);
+      state.currentMateria = socketMateriaName(socket);
+      state.awaitingResponse = isAgentResolvedSocket(socket);
+      setCurrentSocketState(state, isAgentResolvedSocket(socket) ? "awaiting_agent_response" : "running_utility");
+      state.failedReason = undefined;
+      state.runState.endedAt = undefined;
+      const persistedLoadoutIdentity = await deps.state.resolvePersistedCastLoadoutIdentity(state);
+      state.runState.loadoutId ||= persistedLoadoutIdentity?.loadoutId;
+      state.runState.loadoutName ||= persistedLoadoutIdentity?.loadoutName;
+      state.runState.currentSocketId = socket.id;
+      state.runState.currentMateria = socketMateriaName(socket);
+      state.runState.lastMessage = `Reviving cast ${state.castId} at socket ${socket.id}.`;
+
+      await deps.artifacts.appendEvent(state.runState, "cast_revive", {
+        castId: state.castId,
+        kind: "passive",
+        socket: socket.id,
+        materia: socketMateriaName(socket),
+        itemKey: state.currentItemKey,
+        itemLabel: state.currentItemLabel,
+        previousFailure: state.failedReason,
+      });
+
+      // Re-initialize the event bus for the revived cast.
+      try {
+        const config = await deps.state.loadConfigFromState(state);
+        const eventBus = await deps.eventing.initializeCastEventBus(config, state);
+        if (eventBus) {
+          deps.eventing.startHeartbeat(state, config);
+        }
+      } catch {
+        // Config load or bus init failure is non-fatal for revive.
+      }
+
+      await deps.artifacts.writeUsage(state.runState);
+      deps.state.saveCastState(pi, state);
+      ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
+      deps.ui.updateWidget(ctx, state, { replaceOwner: true });
+
+      // Update tool scope so Pi's native agent can operate on the revived cast.
+      if (isAgentResolvedSocket(socket)) {
+        await deps.dispatch.updateSocketToolScope(pi, ctx, state, socket);
+      }
+
+      ctx.ui.notify(`pi-materia cast ${state.castId} revived at socket "${socket.id}". Use /materia recast to resend or nudge to continue.`, "info");
+      return state;
     }
 
     if (exhaustion.kind === "edge_traversal_exhausted") {

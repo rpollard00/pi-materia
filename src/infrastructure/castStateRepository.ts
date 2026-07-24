@@ -93,8 +93,11 @@ function isResumableCastState(state: MateriaCastState): boolean {
 
 function isRevivableCastState(state: MateriaCastState): boolean {
   if (!isResumableCastState(state)) return false;
+  // General revive eligibility: all failed and aborted casts are eligible.
+  // When structured exhaustion metadata is present, validate it strictly.
+  // When absent, the cast is still eligible for passive revival.
   const exhaustion = state.recoveryExhaustion;
-  if (!exhaustion) return false;
+  if (!exhaustion) return true;
   if (exhaustion.kind === "same_socket_recovery_exhausted") return isValidSameSocketRevivableState(state, exhaustion);
   if (exhaustion.kind === "edge_traversal_exhausted") return isValidEdgeTraversalRevivableState(state, exhaustion);
   return false;
