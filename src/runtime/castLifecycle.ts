@@ -391,6 +391,74 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     return resumeValidatedNativeCast(pi, ctx, state);
   }
 
+  /**
+   * Reactivate a dormant queued cast for same-cast quest resumption.
+   * The cast must have questQueuedResurrection metadata set (from WI-6's
+   * revive handler). Clears the resurrection marker, restores runtime
+   * services and awaiting state, updates tool scope for agent sockets,
+   * but does NOT dispatch any prompt — the cast stays active awaiting a
+   * user nudge. The caller (quest runner) owns active-cast conflict checks.
+   */
+  async function reactivateQueuedNativeCast(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    castId: string,
+  ): Promise<MateriaCastState> {
+    const state = deps.state.loadCastStateById(ctx, castId);
+    if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
+
+    // Clear the resurrection marker set by the revive handler.
+    delete state.data.questQueuedResurrection;
+
+    const socket = currentSocketOrThrow(state);
+    state.active = true;
+    state.phase = socket.id;
+    setCurrentSocketId(state, socket.id);
+    state.currentMateria = socketMateriaName(socket);
+    state.awaitingResponse = isAgentResolvedSocket(socket);
+    setCurrentSocketState(state, isAgentResolvedSocket(socket) ? "awaiting_agent_response" : "running_utility");
+    state.failedReason = undefined;
+    state.runState.endedAt = undefined;
+    const persistedLoadoutIdentity = await deps.state.resolvePersistedCastLoadoutIdentity(state);
+    state.runState.loadoutId ||= persistedLoadoutIdentity?.loadoutId;
+    state.runState.loadoutName ||= persistedLoadoutIdentity?.loadoutName;
+    state.runState.currentSocketId = socket.id;
+    state.runState.currentMateria = socketMateriaName(socket);
+    state.runState.lastMessage = `Reactivating queued cast ${state.castId} at socket ${socket.id}.`;
+
+    await deps.artifacts.appendEvent(state.runState, "cast_queued_resume", {
+      castId: state.castId,
+      socket: socket.id,
+      materia: socketMateriaName(socket),
+      itemKey: state.currentItemKey,
+      itemLabel: state.currentItemLabel,
+    });
+
+    // Re-initialize the event bus for the reactivated cast.
+    try {
+      const config = await deps.state.loadConfigFromState(state);
+      const eventBus = await deps.eventing.initializeCastEventBus(config, state);
+      if (eventBus) {
+        deps.eventing.startHeartbeat(state, config);
+      }
+    } catch {
+      // Config load or bus init failure is non-fatal for queued resumption.
+    }
+
+    await deps.artifacts.writeUsage(state.runState);
+    deps.state.saveCastState(pi, state);
+    ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
+    deps.ui.updateWidget(ctx, state, { replaceOwner: true });
+
+    // Update tool scope so Pi's native agent can operate on the reactivated cast.
+    if (isAgentResolvedSocket(socket)) {
+      await deps.dispatch.updateSocketToolScope(pi, ctx, state, socket);
+    }
+
+    ctx.ui.notify(`pi-materia cast ${state.castId} reactivated from queued resumption at socket "${socket.id}". Nudge or use /materia continue to proceed.`, "info");
+    return state;
+  }
+
   function assertNoActiveNativeCast(
     ctx: ExtensionContext,
     state: MateriaCastState,
@@ -464,6 +532,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
 
   return {
     continueNativeCast,
+    reactivateQueuedNativeCast,
     resumeNativeCast,
     reviveNativeCast,
     startNativeCast,

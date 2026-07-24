@@ -347,6 +347,7 @@ export async function handleAgentHandoffToolExecutionEnd(
   });
 }
 export const prepareMultiTurnRefinementTurn = agentLifecycle.prepareMultiTurnRefinementTurn;
+export const reactivateQueuedNativeCast = castLifecycle.reactivateQueuedNativeCast;
 export const resumeNativeCast = castLifecycle.resumeNativeCast;
 export const reviveNativeCast = castLifecycle.reviveNativeCast;
 export const startNativeCast = castLifecycle.startNativeCast;

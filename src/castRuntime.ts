@@ -13,6 +13,7 @@ export {
   nativeTestInternals,
   prepareAgentStartSystemPrompt,
   prepareMultiTurnRefinementTurn,
+  reactivateQueuedNativeCast,
   resumeNativeCast,
   reviveNativeCast,
   startNativeCast,

@@ -7,7 +7,7 @@ import { parseLinkCommandArguments } from "../link/parser.js";
 import { createLinkCastStateData, createLinkPlan, createLinkRuntimeState } from "../link/planner.js";
 import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/resolver.js";
 import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData, type LinkTargetRef, type ResolvedMateriaLinkTarget, type VirtualLoadoutMetadata } from "../link/types.js";
-import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, requeueQuest, resolveQuestRef, startQuest, stopQuestRunner, unfailQuest, updatePendingQuest, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
+import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, requeueQuest, resolveQuestRef, resumeQuest, startQuest, stopQuestRunner, unfailQuest, updatePendingQuest, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
 
 export interface LoadoutUseCasesDeps {
@@ -380,6 +380,10 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     return castId;
   }
 
+  async reactivateQueuedCast(pi: TPi, session: TSession, castId: string): Promise<MateriaCastState> {
+    return this.deps.lifecycle.reactivateQueuedCast(pi, session, castId);
+  }
+
   abortActive(pi: TPi, session: TSession, reason = "aborted by user"): MateriaCastState | undefined {
     const state = this.deps.states.loadActive(session);
     if (!state?.active) return undefined;
@@ -406,7 +410,7 @@ export interface QuestRunnerIdGenerator {
 
 export interface QuestRunnerUseCasesDeps<TSession = unknown, TPi = unknown> {
   boards: QuestBoardRepository;
-  casts: Pick<CastExecutionUseCases<TSession, TPi>, "startCast">;
+  casts: Pick<CastExecutionUseCases<TSession, TPi>, "startCast"> & Partial<Pick<CastExecutionUseCases<TSession, TPi>, "reactivateQueuedCast">>;
   loadouts: Pick<LoadoutUseCases, "loadForCast"> & Partial<Pick<LoadoutUseCases, "loadForQuestCast">>;
   states: Pick<CastStateRepository<TSession>, "loadActive">;
   clock?: QuestRunnerClock;
@@ -639,6 +643,21 @@ export class QuestRunnerUseCases<TSession = unknown, TPi = unknown> {
     const running = input.board.quests.find((quest) => quest.status === "running");
     if (running) throw new ActiveQuestConflictError(running.id);
     if (input.quest.status !== "pending") throw new Error(`Quest ${input.quest.id} is ${input.quest.status}, not pending.`);
+
+    // Same-cast resumption: reactivate the original cast instead of starting a new one.
+    if (input.quest.resumeCastId) {
+      if (!this.deps.casts.reactivateQueuedCast) throw new Error("Quest runner does not support reactivateQueuedCast");
+      const state = await this.deps.casts.reactivateQueuedCast(input.pi, input.session, input.quest.resumeCastId);
+      if (!state) throw new Error(`Quest ${input.quest.id} reactivated cast ${input.quest.resumeCastId} but no cast state was returned.`);
+      let board = input.board;
+      const resumeResult = resumeQuest(board, { questId: input.quest.id, castId: input.quest.resumeCastId, now: this.clock.now() });
+      if (!resumeResult.ok) throw new QuestBoardValidationError(resumeResult.issues);
+      board = resumeResult.value;
+      await this.deps.boards.save(board);
+
+      const quest = board.quests.find((candidate) => candidate.id === input.quest.id)!;
+      return { board, quest, state };
+    }
 
     let selected: QuestLaunchLoadoutSelection;
     try {

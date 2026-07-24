@@ -12,7 +12,7 @@ describe("infrastructure adapters", () => {
     expect(Object.keys(adapters.artifacts)).toEqual(["renderCastList"]);
     expect(Object.keys(adapters.context)).toEqual(["buildIsolatedContext"]);
     expect(Object.keys(adapters.agentTurns).sort()).toEqual(["handleAgentEnd", "handleToolExecutionEnd", "prepareAgentStartSystemPrompt"]);
-    expect(Object.keys(adapters.lifecycle).sort()).toEqual(["clear", "continue", "resume", "revive", "start"]);
+    expect(Object.keys(adapters.lifecycle).sort()).toEqual(["clear", "continue", "reactivateQueuedCast", "resume", "revive", "start"]);
     expect(Object.keys(adapters.statusPresenter)).toEqual(["statusLabel"]);
     expect(adapters.environment.get("MATERIA_CONFIG")).toBe("custom.json");
     expect(adapters.logger.info).toBeFunction();

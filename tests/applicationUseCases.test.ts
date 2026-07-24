@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ActiveCastConflictError, ActiveQuestConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter, type QuestBoardRepository } from "../src/application/index.js";
-import { createEmptyQuestBoard, type QuestBoard } from "../src/domain/questBoard.js";
+import { createEmptyQuestBoard, enableQuestRunner, type QuestBoard } from "../src/domain/questBoard.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../src/types.js";
 
 function loaded(activeLoadout = "default"): LoadedConfig {
@@ -768,6 +768,184 @@ describe("application use cases", () => {
 
     expect(reconciled.reconciled).toHaveLength(1);
     expect(reconciled.reconciled[0]).toMatchObject({ status: "blocked", lastError: { code: "stale_running_quest" } });
+  });
+
+  describe("quest runner with resumeCastId", () => {
+    test("pending quest with resumeCastId reactivates the same cast via reactivateQueuedCast and resumeQuest without incrementing attempts", async () => {
+      let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+      // Manually add a quest with resumeCastId set.
+      board = {
+        ...board,
+        quests: [{
+          id: "q-resume",
+          title: "Resume",
+          prompt: "Resume the work",
+          status: "pending",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          attempts: 0,
+          resumeCastId: "cast-queued-1",
+        }],
+      };
+
+      const boards: QuestBoardRepository = {
+        boardPath: "/repo/.pi/pi-materia/quest-board.json",
+        loadOrCreate: async () => board,
+        save: async (next) => { board = next; },
+      };
+
+      const reactivateCalls: Array<{ pi: string; session: string; castId: string }> = [];
+      const reactivatedState = state({ castId: "cast-queued-1", active: true, phase: "Socket-1", socketState: "awaiting_agent_response", awaitingResponse: true });
+
+      const casts = {
+        startCast: async () => { throw new Error("must not call startCast for resumeCastId quest"); },
+        reactivateQueuedCast: async (pi: string, session: string, castId: string) => {
+          reactivateCalls.push({ pi, session, castId });
+          return reactivatedState;
+        },
+      };
+
+      const runner = new QuestRunnerUseCases({
+        boards,
+        casts,
+        loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) },
+        states: { loadActive: () => undefined },
+        clock: { now: () => "2026-01-01T00:00:01.000Z" },
+        ids: { nextId: () => "q-resume" },
+      });
+
+      // Enable the runner so drainEnabledRunner can process quests.
+      const enabled = enableQuestRunner(board, "2026-01-01T00:00:01.000Z");
+      board = enabled;
+
+      const result = await runner.runOnce({ pi: "pi", session: "session", cwd: "/repo" });
+
+      // Assert reactivateQueuedCast was called with the resumeCastId.
+      expect(reactivateCalls).toHaveLength(1);
+      expect(reactivateCalls[0]!.castId).toBe("cast-queued-1");
+
+      // Assert the quest transitioned to running with the resumed cast id and attempts unchanged.
+      expect(result).toBeDefined();
+      expect(result!.quest.status).toBe("running");
+      expect(result!.quest.currentCastId).toBe("cast-queued-1");
+      expect(result!.quest.attempts).toBe(0); // NOT incremented
+
+      // Assert the cast is active awaiting_agent_response.
+      expect(result!.state.active).toBe(true);
+      expect((result!.state as any).socketState ?? "awaiting_agent_response").toBe("awaiting_agent_response");
+      expect(result!.state.awaitingResponse).toBe(true);
+    });
+
+    test("quest without resumeCastId falls back to normal startCast+startQuest path (attempt increments)", async () => {
+      let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+      board = {
+        ...board,
+        quests: [{
+          id: "q-normal",
+          title: "Normal",
+          prompt: "Do normal work",
+          status: "pending",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          attempts: 0,
+          // No resumeCastId
+        }],
+      };
+
+      const boards: QuestBoardRepository = {
+        boardPath: "/repo/.pi/pi-materia/quest-board.json",
+        loadOrCreate: async () => board,
+        save: async (next) => { board = next; },
+      };
+
+      let startCalls = 0;
+      const casts = {
+        startCast: async () => {
+          startCalls++;
+          return { loaded: loaded(), pipeline: pipeline(), state: state({ castId: `cast-new-${startCalls}` }) };
+        },
+        // No reactivateQueuedCast — should not be needed for normal path.
+      };
+
+      const runner = new QuestRunnerUseCases({
+        boards,
+        casts,
+        loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) },
+        states: { loadActive: () => undefined },
+        clock: { now: () => "2026-01-01T00:00:02.000Z" },
+        ids: { nextId: () => "q-normal" },
+      });
+
+      const result = await runner.runOnce({ pi: "pi", session: "session", cwd: "/repo" });
+
+      expect(startCalls).toBe(1);
+      expect(result).toBeDefined();
+      expect(result!.quest.status).toBe("running");
+      // Attempts SHOULD increment for a normal startCast path.
+      expect(result!.quest.attempts).toBe(1);
+    });
+
+    test("queue ordering: front pending quest with resumeCastId is selected", async () => {
+      let board: QuestBoard = createEmptyQuestBoard({ now: "2026-01-01T00:00:00.000Z" });
+      board = {
+        ...board,
+        quests: [
+          {
+            id: "q-front",
+            title: "Front",
+            prompt: "Front quest",
+            status: "pending",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            attempts: 1,
+            resumeCastId: "cast-queued-front",
+          },
+          {
+            id: "q-back",
+            title: "Back",
+            prompt: "Back quest",
+            status: "pending",
+            createdAt: "2026-01-01T00:00:01.000Z",
+            updatedAt: "2026-01-01T00:00:01.000Z",
+            attempts: 0,
+            // No resumeCastId
+          },
+        ],
+      };
+
+      const boards: QuestBoardRepository = {
+        boardPath: "/repo/.pi/pi-materia/quest-board.json",
+        loadOrCreate: async () => board,
+        save: async (next) => { board = next; },
+      };
+
+      const reactivateCalls: string[] = [];
+      const casts = {
+        startCast: async () => { throw new Error("must not call startCast"); },
+        reactivateQueuedCast: async (_pi: string, _session: string, castId: string) => {
+          reactivateCalls.push(castId);
+          return state({ castId, active: true, phase: "Socket-1", socketState: "awaiting_agent_response", awaitingResponse: true });
+        },
+      };
+
+      const runner = new QuestRunnerUseCases({
+        boards,
+        casts,
+        loadouts: { loadForCast: async () => ({ loaded: loaded(), pipeline: pipeline() }) },
+        states: { loadActive: () => undefined },
+        clock: { now: () => "2026-01-01T00:00:02.000Z" },
+        ids: { nextId: () => "q-front" },
+      });
+
+      const result = await runner.runOnce({ pi: "pi", session: "session", cwd: "/repo" });
+
+      // Front quest (with resumeCastId) should be selected.
+      expect(result).toBeDefined();
+      expect(result!.quest.id).toBe("q-front");
+      expect(reactivateCalls).toHaveLength(1);
+      expect(reactivateCalls[0]).toBe("cast-queued-front");
+      expect(result!.quest.currentCastId).toBe("cast-queued-front");
+    });
   });
 
   test("configuredConfigPath prefers flag over environment", () => {

@@ -14,6 +14,7 @@ import {
   normalizeQuestBoard,
   requeueQuest,
   resolveQuestRef,
+  resumeQuest,
   startQuest,
   stopQuestRunner,
   unfailQuest,
@@ -492,6 +493,96 @@ describe("quest board domain", () => {
       expect(Object.hasOwn(unfailed, "lastResult")).toBe(false);
       expect(Object.hasOwn(unfailed, "lastError")).toBe(false);
       expect(unfailed?.lastCastId).toBe("cast-1");
+      expect(validateQuestBoard(result.value).ok).toBe(true);
+    });
+  });
+
+  describe("resumeQuest", () => {
+    test("transitions a pending quest to running with same castId without incrementing attempts", () => {
+      const board = boardWithTwoQuests();
+      const quest = board.quests.find((q) => q.id === "q-1")!;
+      expect(quest.status).toBe("pending");
+      expect(quest.attempts).toBe(0);
+
+      const result = resumeQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const resumed = result.value.quests.find((q) => q.id === "q-1")!;
+      expect(resumed.status).toBe("running");
+      expect(resumed.currentCastId).toBe("cast-1");
+      expect(resumed.lastCastId).toBe("cast-1");
+      expect(resumed.lastError).toBeUndefined();
+      // Attempts must NOT increment (resumption, not a fresh start).
+      expect(resumed.attempts).toBe(0);
+      expect(result.value.runner.activeQuestId).toBe("q-1");
+      expect(validateQuestBoard(result.value).ok).toBe(true);
+    });
+
+    test("rejects missing quest", () => {
+      const board = boardWithTwoQuests();
+      const result = resumeQuest(board, { questId: "q-missing", castId: "cast-x", now: t2 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.issues[0]?.message).toContain("does not exist");
+    });
+
+    test("rejects already-running quest", () => {
+      const board = boardWithTwoQuests();
+      const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(started.ok).toBe(true);
+      if (!started.ok) return;
+
+      // resumeQuest rejects because q-1 is already running
+      const result = resumeQuest(started.value, { questId: "q-2", castId: "cast-2", now: t2 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.issues[0]?.message).toContain("already running");
+    });
+
+    test("rejects completed (non-pending) quest when no quest is running", () => {
+      const board = boardWithTwoQuests();
+      const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(started.ok).toBe(true);
+      if (!started.ok) return;
+      const completed = completeQuest(started.value, { questId: "q-1", castId: "cast-1", now: t3, result: { status: "succeeded" } });
+      expect(completed.ok).toBe(true);
+      if (!completed.ok) return;
+
+      const result = resumeQuest(completed.value, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.issues[0]?.message).toContain("succeeded, not pending");
+    });
+
+    test("rejects when a different quest is already running", () => {
+      const board = boardWithTwoQuests();
+      const started = startQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(started.ok).toBe(true);
+      if (!started.ok) return;
+
+      const result = resumeQuest(started.value, { questId: "q-2", castId: "cast-2", now: t2 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.issues[0]?.message).toContain("already running");
+      }
+    });
+
+    test("rejects empty cast id", () => {
+      const board = boardWithTwoQuests();
+      const result = resumeQuest(board, { questId: "q-1", castId: "", now: t2 });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.issues[0]?.message).toContain("cast id is required");
+    });
+
+    test("preserves queue ordering: resumes the front pending quest without changing array order", () => {
+      const board = boardWithTwoQuests();
+      expect(board.quests.map((q) => q.id)).toEqual(["q-1", "q-2"]);
+      expect(findNextPendingQuest(board)?.id).toBe("q-1");
+
+      const result = resumeQuest(board, { questId: "q-1", castId: "cast-1", now: t2 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // Running quest should stay in its array position (order preserved).
+      expect(result.value.quests.map((q) => q.id)).toEqual(["q-1", "q-2"]);
+      expect(result.value.quests[0]?.status).toBe("running");
+      expect(result.value.quests[1]?.status).toBe("pending");
       expect(validateQuestBoard(result.value).ok).toBe(true);
     });
   });

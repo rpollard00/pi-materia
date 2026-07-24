@@ -371,6 +371,36 @@ export function startQuest(board: QuestBoard, input: StartQuestInput): DomainRes
   return ok({ ...board, updatedAt: input.now, runner: { ...board.runner, activeQuestId: quest.id }, quests });
 }
 
+/**
+ * Resume a quest for same-cast reactivation. Like startQuest but does NOT
+ * increment the attempt count, because the cast was already counted in its
+ * original run.
+ */
+export function resumeQuest(board: QuestBoard, input: StartQuestInput): DomainResult<QuestBoard> {
+  const questIndex = board.quests.findIndex((quest) => quest.id === input.questId);
+  if (questIndex < 0) return issue("questId", `quest '${input.questId}' does not exist`);
+  const runningQuest = board.quests.find((quest) => quest.status === "running");
+  if (runningQuest !== undefined) return issue("quests", `quest '${runningQuest.id}' is already running`);
+  if (board.runner.activeQuestId !== undefined) return issue("runner.activeQuestId", `runner already has active quest '${board.runner.activeQuestId}'`);
+
+  const quest = board.quests[questIndex];
+  if (quest === undefined) return issue("questId", `quest '${input.questId}' does not exist`);
+  if (quest.status !== "pending") return issue("quest.status", `quest '${quest.id}' is ${quest.status}, not pending`);
+  if (!isNonEmptyString(input.castId)) return issue("castId", "cast id is required");
+
+  // Same as startQuest but WITHOUT incrementing attempts.
+  const nextQuest: Quest = {
+    ...quest,
+    status: "running",
+    updatedAt: input.now,
+    currentCastId: input.castId,
+    lastCastId: input.castId,
+    lastError: undefined,
+  };
+  const quests = replaceAt(board.quests, questIndex, nextQuest);
+  return ok({ ...board, updatedAt: input.now, runner: { ...board.runner, activeQuestId: quest.id }, quests });
+}
+
 export function completeQuest(board: QuestBoard, input: CompleteQuestInput): DomainResult<QuestBoard> {
   const questIndex = board.quests.findIndex((quest) => quest.id === input.questId);
   if (questIndex < 0) return issue("questId", `quest '${input.questId}' does not exist`);

@@ -51,6 +51,12 @@ export interface CastLifecyclePort<TSession = unknown, TPi = unknown> {
   continue(pi: TPi, session: TSession, state: MateriaCastState): Promise<void>;
   resume(pi: TPi, session: TSession, castId: string): Promise<void>;
   revive(pi: TPi, session: TSession, castId: string): Promise<void>;
+  /**
+   * Reactivate a dormant queued cast (marked with questQueuedResurrection)
+   * for same-cast resumption. Restores runtime services and awaiting state
+   * without dispatching any prompt. The cast stays active until the user nudges.
+   */
+  reactivateQueuedCast(pi: TPi, session: TSession, castId: string): Promise<MateriaCastState>;
   clear(pi: TPi, state: MateriaCastState, reason: string): void;
 }
 
