@@ -139,7 +139,6 @@ export interface AgentLifecycleDependencies {
       error: unknown,
       options?: TurnRecoveryOptions,
     ): Promise<boolean>;
-    shouldRetryGenericTurnFailure(error: unknown): boolean;
   };
   dispatch: {
     agentEndAdvancementDiagnostics(

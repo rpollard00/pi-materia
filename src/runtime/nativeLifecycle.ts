@@ -159,7 +159,6 @@ const {
   handleSameSocketRecoverableTurnFailure,
   buildJsonOutputRepairContext,
   classifyJsonOutputValidationKind,
-  shouldRetryGenericTurnFailure,
 } = turnRecovery;
 
 const { processSocketEvents } = createSocketEventProcessing({
@@ -267,7 +266,6 @@ const agentLifecycle = createAgentLifecycle({
     preserveAwaitingAfterInferenceInterruption,
     preserveAwaitingAfterTransientTransportFailure,
     handleSameSocketRecoverableTurnFailure,
-    shouldRetryGenericTurnFailure,
   },
   dispatch: {
     agentEndAdvancementDiagnostics,

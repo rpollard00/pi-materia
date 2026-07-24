@@ -268,7 +268,6 @@ export function createTurnRecovery(deps: TurnRecoveryDependencies) {
     handleSameSocketRecoverableTurnFailure,
     buildJsonOutputRepairContext,
     classifyJsonOutputValidationKind,
-    shouldRetryGenericTurnFailure,
   };
 }
 
@@ -332,7 +331,3 @@ function conciseJsonOutputRepairError(
   return message.length <= 240 ? message : `${message.slice(0, 239).trimEnd()}…`;
 }
 
-export function shouldRetryGenericTurnFailure(error: unknown): boolean {
-  const message = errorMessage(error);
-  return /\b(?:auth|invalid[_ -]?request|provider rejected|different provider failure)\b/i.test(message);
-}
