@@ -1057,6 +1057,60 @@ describe("native same-socket recovery", () => {
     expect(prompt).not.toContain("previous output was invalid");
   });
 
+  test("inference interruption followed by tool-using retry completes without failing", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    await harness.runCommand("materia", "cast tool retry after inference blip");
+
+    // First turn: stopReason error → provisional inference interruption
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "server_error: upstream timeout" });
+    await harness.emit("agent_end", { messages: [] });
+
+    // Cast is preserved active and awaiting — no failure or recovery
+    let state = latestCastState(harness);
+    expect(state.active).toBe(true);
+    expect(state.awaitingResponse).toBe(true);
+    expect(state.socketState).toBe("awaiting_agent_response");
+    expect(state.failedReason).toBeUndefined();
+    expect(state.recoveryExhaustion).toBeUndefined();
+    expect(state.recoveryAttempts).toBeUndefined();
+    expect(state.inferenceInterruption).toBeDefined();
+    expect(state.inferenceInterruption.error).toContain("server_error: upstream timeout");
+
+    // Second turn: Pi retries natively — this retry simulates tool activity
+    // (assistant issues tool calls, results come back, then final response)
+    // The intermediate tool-call assistant message is not the latest entry.    
+    harness.appendAssistantMessage("Let me check the build configuration", {
+      toolCallRequests: [{ id: "call-1", function: { name: "read", arguments: '{"path":"test.txt"}' } }],
+    });
+    harness.sessionManager.appendMessage({
+      role: "tool",
+      content: [{ type: "text", text: "build file contents: OK" }],
+      toolCallId: "call-1",
+    });
+    const finalEntry = harness.appendAssistantMessage("Configuration looks correct; build will proceed.");
+    await harness.emit("agent_end", { messages: [] });
+
+    // Cast completes successfully — never entered failed state
+    state = latestCastState(harness);
+    expect(state.active).toBe(false);
+    expect(state.socketState).toBe("complete");
+    expect(state.phase).toBe("complete");
+    expect(state.lastProcessedEntryId).toBe(finalEntry.id);
+    expect(state.lastAssistantText).toBe("Configuration looks correct; build will proceed.");
+    expect(state.failedReason).toBeUndefined();
+    expect(state.recoveryExhaustion).toBeUndefined();
+    expect(state.recoveryAttempts).toBeUndefined();
+    expect(state.inferenceInterruption).toBeUndefined();
+
+    // Event assertions: no same-socket recovery, no failed cast_end
+    const events = await readEvents(harness);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption")).toBe(true);
+    expect(events.some((event) => event.type === "socket_complete")).toBe(true);
+    expect(events.some((event) => event.type === "cast_end" && event.data.ok === true)).toBe(true);
+    expect(events.filter((event) => event.type === "cast_end" && event.data.ok === false)).toHaveLength(0);
+  });
+
   test("extendSameSocketRecoveryAllowanceForRevive preserves timeout recovery metadata", () => {
     // Direct unit test of the revive function (exhaustion path via stopReason
     // errors is no longer reachable, but revive is still valid for other

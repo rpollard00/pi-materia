@@ -551,6 +551,13 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
     if (!state.awaitingResponse) return undefined;
     const materia = currentMateria(state);
     if (!materia) return undefined;
+    // Re-apply tool scope after an inference interruption so Pi's native
+    // retry, compaction, or follow-up turn has correct tool definitions for
+    // the active socket.
+    if (state.inferenceInterruption) {
+      const socket = currentSocketOrThrow(state);
+      await deps.dispatch.updateSocketToolScope(pi, ctx, state, socket);
+    }
     return `${systemPrompt}\n\nMateria active materia (${currentSocketId(state) ?? state.phase}):\n${activeMateriaSystemPrompt(state, materia)}`;
   }
 
