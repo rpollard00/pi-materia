@@ -107,6 +107,42 @@ export interface TurnRecoveryOptions {
  * supplied by the lifecycle composition root so recovery never imports it.
  */
 export function createTurnRecovery(deps: TurnRecoveryDependencies) {
+  async function preserveAwaitingAfterInferenceInterruption(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    state: MateriaCastState,
+    error: unknown,
+    options: Pick<TurnRecoveryOptions, "entryId"> = {},
+  ): Promise<void> {
+    state.active = true;
+    state.awaitingResponse = true;
+    deps.state.setCurrentSocketState(state, "awaiting_agent_response");
+    state.updatedAt = Date.now();
+    const errorMsg = errorMessage(error);
+    state.inferenceInterruption = {
+      error: errorMsg,
+      entryId: options.entryId,
+      socket: deps.state.currentSocketId(state),
+      materia: state.currentMateria,
+      interruptedAt: Date.now(),
+    };
+    state.runState.lastMessage = `Inference interruption while awaiting ${recoveryDiagnosticLabel(state)}; preserving active Pi turn: ${errorMsg}`;
+    await deps.artifacts.appendEvent(state.runState, "inference_interruption", {
+      warning: true,
+      error: errorMsg,
+      entryId: options.entryId,
+      socket: deps.state.currentSocketId(state),
+      itemKey: state.currentItemKey,
+      itemLabel: state.currentItemLabel,
+      itemLabelShort: deps.state.shortMetadataLabel(state.currentItemLabel),
+      mode: recoveryTurnMode(state),
+    });
+    await deps.artifacts.writeUsage(state.runState);
+    deps.state.saveCastState(pi, state);
+    deps.ui.updateWidget(ctx, state);
+    deps.ui.notifyWarning(ctx, `pi-materia warning: ${state.runState.lastMessage}`);
+  }
+
   async function preserveAwaitingAfterTransientTransportFailure(
     pi: ExtensionAPI,
     ctx: ExtensionContext,
@@ -227,6 +263,7 @@ export function createTurnRecovery(deps: TurnRecoveryDependencies) {
   }
 
   return {
+    preserveAwaitingAfterInferenceInterruption,
     preserveAwaitingAfterTransientTransportFailure,
     handleSameSocketRecoverableTurnFailure,
     buildJsonOutputRepairContext,

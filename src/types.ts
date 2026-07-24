@@ -416,6 +416,19 @@ export interface MateriaCastState {
     boundaryEntryId?: string;
   };
   multiTurnFinalizing?: boolean;
+  /**
+   * Provisional inference interruption metadata. Set when an assistant
+   * stopReason error or event-level provider failure occurs; the cast stays
+   * active and awaiting so Pi can retry natively. Cleared on the next
+   * successful assistant response.
+   */
+  inferenceInterruption?: {
+    error: string;
+    entryId?: string;
+    socket?: string;
+    materia?: string;
+    interruptedAt: number;
+  };
   failedReason?: string;
   startedAt: number;
   updatedAt: number;

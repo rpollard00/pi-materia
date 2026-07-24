@@ -124,9 +124,24 @@ async function readEventTypes(state: MateriaCastState): Promise<string[]> {
 }
 
 async function failCurrentCast(harness: FakePiHarness, message = "provider outage"): Promise<MateriaCastState> {
-  harness.appendAssistantMessage("", { stopReason: "error", errorMessage: message });
-  await harness.emit("agent_end", { messages: [] });
-  return latestState(harness);
+  // Directly create a terminal state that is resumable (recastable).
+  // stopReason errors are now provisional inference interruptions, so we
+  // construct the failure state manually instead of going through the
+  // agent_end flow.
+  const running = latestState(harness);
+  const failed = cloneState(running, {
+    active: false,
+    phase: "failed",
+    socketState: "failed",
+    failedReason: message,
+    awaitingResponse: false,
+    multiTurnFinalizing: false,
+    recoveryExhaustion: undefined,
+    runState: { ...running.runState, lastMessage: message, endedAt: Date.now() },
+  });
+  harness.pi.appendEntry("pi-materia-cast-state", failed);
+  harness.ctx.ui.setStatus("materia", "failed");
+  return failed;
 }
 
 describe("/materia recast", () => {

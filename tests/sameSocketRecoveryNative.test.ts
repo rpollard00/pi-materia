@@ -168,7 +168,7 @@ function expectJsonRepairRetryPrompt(prompt: string | undefined, expected: { err
 }
 
 describe("native same-socket recovery", () => {
-  test("context-window assistant errors retry the same active socket without a new socket start", async () => {
+  test("context-window assistant errors record inference interruption without retry or terminalization", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast recover me");
     const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
@@ -176,82 +176,108 @@ describe("native same-socket recovery", () => {
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
     await harness.emit("agent_end", { messages: [] });
 
+    // No recovery retry — inference interruption preserves the socket
     const triggerTurnsAfter = harness.operationLog.filter((op) => op === "triggerTurn").length;
-    expect(triggerTurnsAfter).toBe(triggerTurnsBefore + 1);
+    expect(triggerTurnsAfter).toBe(triggerTurnsBefore);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
-    expect(latestState.recoveryAttempts).toBeDefined();
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("context window exceeded");
+    expect(latestState.inferenceInterruption.socket).toBe("Socket-1");
 
     const events = await readEvents(harness);
     expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "context_window" && event.data.mode === "normal")).toBe(true);
-    expect(events.some((event) => event.type === "same_socket_recovery_retry")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption" && event.data.error.includes("context window exceeded"))).toBe(true);
   });
 
-  test("Codex context_length_exceeded websocket errors retry the same active socket", async () => {
+  test("Codex context_length_exceeded websocket errors record inference interruption", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast codex websocket context length");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     const errorMessage = CODEX_CONTEXT_LENGTH_SAMPLE;
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    // First error: inference interruption, socket stays alive
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
-
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage });
-    await harness.emit("agent_end", { messages: [] });
-
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 2);
-    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
-    const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
     expect(latestState.currentSocketId).toBe("Socket-1");
-    expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain(errorMessage);
+
+    // Second error overwrites interruption metadata (still not terminal)
+    harness.appendAssistantMessage("", { stopReason: "error", errorMessage });
+    await harness.emit("agent_end", { messages: [] });
+
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
 
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "context_window" && event.data.error.includes(errorMessage))).toBe(true);
-    expect(events.some((event) => event.type === "same_socket_recovery_retry")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type === "inference_interruption")).toHaveLength(2);
   });
 
-  test("Codex server_error assistant errors never trigger compaction or context-window recovery", async () => {
+  test("Codex server_error assistant errors record inference interruption without terminalization", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast codex server error");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: CODEX_SERVER_ERROR_SAMPLE });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore);
+    // No recovery, no terminalization — cast stays active
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = latestCastState(harness);
-    expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("server_error");
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("server_error");
 
     const events = await readEvents(harness);
     expect(events.filter((event) => event.type === "context_window_recovery_decision")).toHaveLength(0);
     expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption" && event.data.error.includes("server_error"))).toBe(true);
   });
 
-  test("agent_end failures without assistant output retry the same active socket", async () => {
+  test("agent_end failures without assistant output record inference interruption without retry", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast no assistant");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     await harness.emit("agent_end", { errorMessage: "maximum tokens exceeded before response" });
 
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    // No recovery retry — inference interruption preserves the socket
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("maximum tokens exceeded before response");
   });
 
   test("plain WebSocket agent_end failures preserve awaiting state without retrying", async () => {
@@ -418,21 +444,27 @@ describe("native same-socket recovery", () => {
     expect(events.filter((event) => event.type === "cast_end" && event.data.ok === false)).toHaveLength(0);
   });
 
-  test("provider-ish assistant errors retry once without compaction and can then succeed", async () => {
+  test("provider-ish assistant errors record inference interruption and later success completes", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast provider blip");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    // Inference interruption — no recovery retry
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("provider auth failed");
 
+    // Later success completes the socket normally
     harness.appendAssistantMessage("done after provider blip");
     await harness.emit("agent_end", { messages: [] });
 
@@ -440,35 +472,46 @@ describe("native same-socket recovery", () => {
     expect(latestState.active).toBe(false);
     expect(latestState.socketState).toBe("complete");
     expect(latestState.lastAssistantText).toBe("done after provider blip");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeUndefined(); // cleared on success
     const events = await readEvents(harness);
     expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure")).toBe(true);
-    expect(events.some((event) => event.type === "same_socket_recovery_retry" && event.data.reason === "turn_failure")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption" && event.data.error.includes("provider auth failed"))).toBe(true);
   });
 
-  test("agent_end failures without assistant output retry once without compaction and can then succeed", async () => {
+  test("agent_end failures without assistant output record inference interruption and later success completes", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast invalid request retry");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     await harness.emit("agent_end", { errorMessage: "invalid_request_error: provider rejected request" });
 
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    // Inference interruption — no recovery retry
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("invalid_request_error");
 
+    // Later success completes the socket normally
     harness.appendAssistantMessage("done after no-output failure");
     await harness.emit("agent_end", { messages: [] });
 
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(false);
     expect(latestState.socketState).toBe("complete");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeUndefined(); // cleared on success
     const events = await readEvents(harness);
     expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "turn_failure")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption" && event.data.error.includes("invalid_request_error"))).toBe(true);
   });
 
   test("invalid JSON from an agent retries before graph advancement and can then succeed", async () => {
@@ -644,32 +687,43 @@ describe("native same-socket recovery", () => {
     expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
   });
 
-  test("forced compaction failure is recorded and fails clearly", async () => {
+  test("forced compaction failure records inference interruption (not recovery attempt)", async () => {
     const harness = await makeHarness(singleAgentConfig());
     harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     harness.compactError = new Error("compaction provider unavailable");
     await harness.runCommand("materia", "cast compact fail");
 
+    // Proactive compaction fires at cast start (high context pressure)
+    const compactionsBefore = harness.operationLog.filter((op) => op === "compact").length;
+    expect(compactionsBefore).toBeGreaterThanOrEqual(1);
+
+    // stopReason error → inference interruption, not recovery
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog).toContain("compact");
+    // No additional compaction from the recovery path (no recovery)
+    expect(harness.operationLog.filter((op) => op === "compact").length).toBe(compactionsBefore);
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("Same-socket recovery action compact failed");
-    expect(latestState.failedReason).toContain("compaction provider unavailable");
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("context window exceeded");
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_action_failed" && event.data.action === "compact")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption")).toBe(true);
   });
 
-  test("proactive compaction failures are warnings and later context-window recovery still retries", async () => {
+  test("proactive compaction warnings fire independently and inference interruption does not retry", async () => {
     const harness = await makeHarness(singleAgentConfig());
     harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     harness.compactError = new Error("proactive summarizer unavailable");
 
     await harness.runCommand("materia", "cast proactive warning");
 
+    // Proactive compaction fires at cast start
     expect(harness.operationLog).toContain("compact");
     expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
@@ -679,45 +733,57 @@ describe("native same-socket recovery", () => {
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
     expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Proactive compaction failed"))).toBe(true);
 
+    // Later stopReason error → inference interruption (not recovery)
     harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     harness.compactError = undefined;
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(2);
-    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
+    // No additional compaction or recovery — just inference interruption
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1); // still 1 (only the proactive one)
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1); // no retry
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
-    expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
 
     const events = await readEvents(harness);
     expect(events.some((event) => event.type === "proactive_compaction_start" && event.data.action === "compact" && event.data.reason === "context_pressure")).toBe(true);
     expect(events.some((event) => event.type === "proactive_compaction_failed" && event.data.warning === true)).toBe(true);
-    expect(events.some((event) => event.type === "same_socket_recovery_action_start" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
-    expect(events.some((event) => event.type === "same_socket_recovery_action_complete" && event.data.action === "compact" && event.data.reason === "context_window")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption")).toBe(true);
   });
 
-  test("generic assistant error recovery exhausts deterministically with structured metadata", async () => {
+  test("multiple stopReason errors record inference interruptions without exhaustion", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast generic exhaust");
 
+    // Two successive provider inference failures
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "provider auth failed" });
     await harness.emit("agent_end", { messages: [] });
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "different provider failure" });
     await harness.emit("agent_end", { messages: [] });
 
+    // No recovery or exhaustion — cast stays active
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
-    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(2);
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("Same-socket recovery exhausted");
-    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "turn_failure", socket: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.recoveryAttempts).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("different provider failure");
     const events = await readEvents(harness);
     expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
-    expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.reason === "turn_failure")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type === "inference_interruption")).toHaveLength(2);
   });
 
-  test("recovery attempts are bounded and exhaustion fails clearly", async () => {
+  test("multiple context-length errors record inference interruptions without exhaustion", async () => {
     const harness = await makeHarness(singleAgentConfig());
     harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     await harness.runCommand("materia", "cast exhaust me");
@@ -727,82 +793,25 @@ describe("native same-socket recovery", () => {
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded again" });
     await harness.emit("agent_end", { messages: [] });
 
+    // No recovery exhaustion — cast stays active
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("Same-socket recovery exhausted");
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
-    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "context_window", socket: "Socket-1", attempts: 1, originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
-    expect(latestState.recoveryAllowances[latestState.recoveryExhaustion.key]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 });
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.recoveryAttempts).toBeUndefined();
+    expect(latestState.recoveryAllowances).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("context length exceeded again");
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.originalMaxAttempts === 1 && event.data.effectiveMaxAttempts === 1)).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type === "inference_interruption")).toHaveLength(2);
   });
 
-  test("revive allowance extension is scoped and grows linearly", async () => {
-    const harness = await makeHarness(singleAgentConfig());
-    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
-    await harness.runCommand("materia", "cast revive math");
-
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
-    await harness.emit("agent_end", { messages: [] });
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded again" });
-    await harness.emit("agent_end", { messages: [] });
-
-    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    const exhaustedKey = state.recoveryExhaustion.key;
-    state.recoveryAllowances.other = { originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 };
-
-    expect(extendSameSocketRecoveryAllowanceForRevive(state)).toMatchObject({ key: exhaustedKey, priorEffectiveMaxAttempts: 1, increment: 1, newEffectiveMaxAttempts: 2, reviveCount: 1 });
-    expect(extendSameSocketRecoveryAllowanceForRevive(state)).toMatchObject({ key: exhaustedKey, priorEffectiveMaxAttempts: 2, increment: 1, newEffectiveMaxAttempts: 3, reviveCount: 2 });
-    expect(state.recoveryAllowances[exhaustedKey]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 3, reviveCount: 2 });
-    expect(state.recoveryAllowances.other).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
-  });
-
-  test("revive allowance extension rejects stale exhaustion metadata after a later non-exhaustion failure", async () => {
-    const harness = await makeHarness(singleAgentConfig());
-    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
-    await harness.runCommand("materia", "cast revive stale guard");
-
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded" });
-    await harness.emit("agent_end", { messages: [] });
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context length exceeded again" });
-    await harness.emit("agent_end", { messages: [] });
-
-    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    const staleExhaustion = { ...state.recoveryExhaustion };
-    expect(extendSameSocketRecoveryAllowanceForRevive(state).newEffectiveMaxAttempts).toBe(2);
-
-    state.recoveryExhaustion = staleExhaustion;
-    state.failedReason = "Non-recoverable turn failure for normal turn for socket \\\"Socket-1\\\": provider auth failed";
-    expect(() => extendSameSocketRecoveryAllowanceForRevive(state)).toThrow(/does not match the current terminal failure/);
-  });
-
-  test("tool timeout revive grants budget-sized increment using originalMaxAttempts", async () => {
-    const harness = await makeHarness(singleAgentConfig());
-    await harness.runCommand("materia", "cast timeout revive budget");
-
-    // Exhaust the 3-attempt timeout budget
-    for (let i = 0; i < 4; i++) {
-      harness.appendAssistantMessage("", { stopReason: "error", errorMessage: `bash command timed out ${i}` });
-      await harness.emit("agent_end", { messages: [] });
-    }
-
-    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(state.active).toBe(false);
-    expect(state.recoveryExhaustion.reason).toBe("tool_timeout");
-    expect(state.recoveryExhaustion.originalMaxAttempts).toBe(3);
-    const exhaustedKey = state.recoveryExhaustion.key;
-
-    // Revive should add originalMaxAttempts (3) more attempts
-    expect(extendSameSocketRecoveryAllowanceForRevive(state)).toMatchObject({
-      key: exhaustedKey,
-      priorEffectiveMaxAttempts: 3,
-      increment: 3,
-      newEffectiveMaxAttempts: 6,
-      reviveCount: 1,
-    });
-    expect(state.recoveryAllowances[exhaustedKey]).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 6, reviveCount: 1 });
-  });
-
+  
+  
   test("revive allowance extension rejects legacy or non-exhaustion failures", async () => {
     const harness = await makeHarness(utilityJsonConfig());
     await harness.runCommand("materia", "cast non exhaustion revive reject");
@@ -815,100 +824,107 @@ describe("native same-socket recovery", () => {
     expect(() => extendSameSocketRecoveryAllowanceForRevive(legacy)).toThrow(/missing structured same-socket recovery exhaustion metadata/);
   });
 
-  test("multi-turn refinement context-window failures compact and regenerate a refinement retry prompt", async () => {
+  test("multi-turn refinement context-window failures record inference interruption", async () => {
     const harness = await makeHarness(multiTurnConfig());
     await harness.runCommand("materia", "cast refine recovery");
     harness.appendAssistantMessage("Draft plan; please clarify scope.");
     await harness.emit("agent_end", { messages: [] });
     harness.appendUserMessage("Include tests and docs.");
     await harness.emit("before_agent_start", { systemPrompt: "Base system" });
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
     harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
 
+    // stopReason error → inference interruption, not recovery
     harness.appendAssistantMessage("partial stale output", { stopReason: "error", errorMessage: "maximum context length exceeded" });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
-    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(triggerTurnsBefore + 1);
+    // No compaction or recovery — just inference interruption
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
     expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.currentSocketId).toBe("Socket-1");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.recoveryAttempts).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("maximum context length exceeded");
+
+    // Multi-turn state is preserved
     expect(latestState.multiTurnFinalizing).toBe(false);
     expect(latestState.multiTurnRefinements).toEqual({ '["Socket-1","__singleton__",1]': 1 });
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
-    const retryPrompt = promptMessages(harness).at(-1)?.content;
-    expect(retryPrompt).toContain("Current multi-turn mode: refinement conversation");
-    expect(retryPrompt).toContain("Previous output:\nDraft plan; please clarify scope.");
-    expect(retryPrompt).not.toContain("partial stale output");
+
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.mode === "refinement" && event.data.reason === "context_window")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption" && event.data.mode === "refinement")).toBe(true);
   });
 
-  test("multi-turn finalization context-window failures compact and retry finalization without advancing", async () => {
+  
+  test("multi-turn finalization context-window failures record inference interruption", async () => {
     const harness = await makeHarness(multiTurnConfig());
     await harness.runCommand("materia", "cast finalize recovery");
     harness.appendAssistantMessage("Draft plan; ready to finalize.");
     await harness.emit("agent_end", { messages: [] });
     await harness.runCommand("materia", "continue");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
     harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
 
+    // stopReason error → inference interruption, not recovery
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded during final JSON" });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
-    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(triggerTurnsBefore + 1);
+    // No compaction or recovery — just inference interruption
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
+    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBeGreaterThanOrEqual(1);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
-    expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.currentSocketId).toBe("Socket-1");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("context window exceeded during final JSON");
+
+    // Finalization state is preserved
     expect(latestState.multiTurnFinalizing).toBe(true);
     expect(latestState.data.tasks).toBeUndefined();
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
-    const retryPrompt = promptMessages(harness).at(-1)?.content;
-    expect(retryPrompt).toContain("Command-triggered finalization");
-    expect(retryPrompt).toContain("Return only one top-level JSON object");
-    // The synthetic cast context is prepended by buildIsolatedMateriaContext on
-    // every isolated turn, not embedded in the raw repair prompt for multi-turn
-    // finalization. "Previous output" is absent from the synthetic context in
-    // this recovery path because the error response overwrites lastAssistantText
-    // before recovery runs, so the state no longer carries the prior turn's text.
-    // Verify the synthetic context structure is otherwise correct.
-    const syntheticContext = buildSyntheticCastContext(latestState);
-    expect(syntheticContext).toContain("Canonical handoff contract context:");
-    expect(syntheticContext).toContain("Cast id:");
-    expect(syntheticContext).toContain("Current socket: Socket-1");
-    expect(syntheticContext).toContain("Current materia: Plan");
-    expect(syntheticContext).not.toContain("Previous output:");
+
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.mode === "finalization" && event.data.reason === "context_window")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption" && event.data.mode === "finalization")).toBe(true);
   });
 
-  test("foreach context-window recovery preserves cursor and avoids duplicate socket start", async () => {
+  test("foreach inference interruption preserves cursor and socket state", async () => {
     const harness = await makeHarness(foreachConfig());
     harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
     await harness.runCommand("materia", "cast foreach recovery");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
+    // stopReason error → inference interruption (no recovery/compaction)
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "token limit exceeded" });
     await harness.emit("agent_end", { messages: [] });
 
+    // No compaction triggered aside from possible proactive compaction at cast start
+    expect(harness.operationLog.filter((op) => op === "compact").length).toBeLessThanOrEqual(1);
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(triggerTurnsBefore + 1);
-    expect(harness.operationLog).toContain("compact");
     expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.currentSocketId).toBe("Socket-2");
     expect(latestState.currentItemKey).toBe("WI-1");
     expect(latestState.currentItemLabel).toBe("Alpha");
     expect(latestState.cursors).toEqual({ itemCursor: 0 });
     expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 1 });
     expect(latestState.taskAttempts).toEqual({ '["Socket-1","__singleton__"]': 1, '["Socket-2","WI-1"]': 1 });
-    expect(latestState.recoveryAttempts).toBeDefined();
-    const socketStartsBeforeCompletion = (await readEvents(harness)).filter((event) => event.type === "socket_start" && event.data.socket === "Socket-2");
-    expect(socketStartsBeforeCompletion).toHaveLength(1);
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.recoveryAttempts).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
 
+    // Later success advances cursor normally
     harness.appendAssistantMessage('{"satisfied":true}');
     await harness.emit("agent_end", { messages: [] });
     latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
@@ -920,48 +936,59 @@ describe("native same-socket recovery", () => {
     expect(latestState.visits).toEqual({ "Socket-1": 1, "Socket-2": 2 });
   });
 
-  test("tool timeout assistant errors retry the same active socket as tool_timeout", async () => {
+  test("tool timeout assistant errors record inference interruption without timeout recovery", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast tool timeout recovery");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out after 120 seconds" });
     await harness.emit("agent_end", { messages: [] });
 
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    // Inference interruption — no timeout recovery
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.currentSocketId).toBe("Socket-1");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
-    expect(latestState.recoveryAttempts).toBeDefined();
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.recoveryAttempts).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("timed out");
 
     const events = await readEvents(harness);
     expect(events.filter((event) => event.type === "socket_start")).toHaveLength(1);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "tool_timeout" && event.data.mode === "normal")).toBe(true);
-    expect(events.some((event) => event.type === "same_socket_recovery_retry" && event.data.reason === "tool_timeout")).toBe(true);
-    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("tool timeout"))).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption")).toBe(true);
+    expect(harness.notifications.some((notification) => notification.type === "warning" && notification.message.includes("Inference interruption"))).toBe(true);
   });
 
-  test("tool timeout agent_end failures retry and can succeed", async () => {
+  test("tool timeout event-level failure records inference interruption and later success completes", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast tool timeout retry");
-    const triggerTurnsBefore = harness.operationLog.filter((op) => op === "triggerTurn").length;
 
     await harness.emit("agent_end", { errorMessage: "Command timed out after 180 seconds" });
 
-    expect(harness.operationLog.filter((op) => op === "triggerTurn").length).toBe(triggerTurnsBefore + 1);
+    // Inference interruption — no timeout recovery retry
+    expect(harness.operationLog.filter((op) => op === "triggerTurn")).toHaveLength(1);
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
     let latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     expect(latestState.active).toBe(true);
     expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
     expect(latestState.visits).toEqual({ "Socket-1": 1 });
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("Command timed out");
 
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_start" && event.data.reason === "tool_timeout")).toBe(true);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.some((event) => event.type === "inference_interruption")).toBe(true);
 
-    // Can succeed on retry
+    // Later success completes the socket normally
     harness.appendAssistantMessage("done after timeout");
     await harness.emit("agent_end", { messages: [] });
 
@@ -969,92 +996,104 @@ describe("native same-socket recovery", () => {
     expect(latestState.active).toBe(false);
     expect(latestState.socketState).toBe("complete");
     expect(latestState.lastAssistantText).toBe("done after timeout");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeUndefined(); // cleared on success
   });
 
-  test("tool timeout recovery exhausts with structured metadata after timeout-specific budget", async () => {
+  test("multiple tool timeout errors record inference interruptions without exhaustion", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast tool timeout exhaust");
 
-    // Budget is 3 for tool_timeout; need 3 retries before exhaustion
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out" });
-    await harness.emit("agent_end", { messages: [] });
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "tool call timed out again" });
-    await harness.emit("agent_end", { messages: [] });
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "command timed out third" });
-    await harness.emit("agent_end", { messages: [] });
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "command timed out fourth" });
-    await harness.emit("agent_end", { messages: [] });
+    // Multiple timeout errors — each records an inference interruption
+    for (let i = 0; i < 4; i++) {
+      harness.appendAssistantMessage("", { stopReason: "error", errorMessage: `bash command timed out ${i}` });
+      await harness.emit("agent_end", { messages: [] });
+    }
 
+    // No recovery exhaustion — cast stays active
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(latestState.active).toBe(false);
-    expect(latestState.failedReason).toContain("Same-socket recovery exhausted");
-    expect(latestState.recoveryExhaustion).toMatchObject({ kind: "same_socket_recovery_exhausted", reason: "tool_timeout", socket: "Socket-1", attempts: 3, originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
+    expect(latestState.active).toBe(true);
+    expect(latestState.awaitingResponse).toBe(true);
+    expect(latestState.socketState).toBe("awaiting_agent_response");
+    expect(latestState.failedReason).toBeUndefined();
+    expect(latestState.recoveryExhaustion).toBeUndefined();
+    expect(latestState.recoveryAttempts).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
+    expect(latestState.inferenceInterruption.error).toContain("bash command timed out 3");
 
     const events = await readEvents(harness);
-    expect(events.some((event) => event.type === "same_socket_recovery_exhausted" && event.data.reason === "tool_timeout" && event.data.originalMaxAttempts === 3 && event.data.effectiveMaxAttempts === 3)).toBe(true);
-    expect(events.filter((event) => event.type === "same_socket_recovery_start" && event.data.reason === "tool_timeout")).toHaveLength(3);
+    expect(events.filter((event) => event.type.startsWith("same_socket_recovery"))).toHaveLength(0);
+    expect(events.filter((event) => event.type === "inference_interruption")).toHaveLength(4);
   });
 
-  test("tool timeout recovery prompt includes persistent timeout hint with duration", async () => {
+  test("tool timeout inference interruption does not generate timeout hint", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast timeout hint persistence");
 
-    // First timeout triggers recovery with hint
+    // stopReason error → inference interruption, no recovery prompt
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out after 180 seconds" });
     await harness.emit("agent_end", { messages: [] });
 
-    let prompt = promptMessages(harness).at(-1)?.content;
-    expect(prompt).toContain("TIMEOUT RECOVERY HINT");
-    expect(prompt).toContain("after 180s");
-    expect(prompt).toContain("Do NOT repeat");
-    expect(prompt).toContain("one-shot commands");
-
-    // Second timeout retry preserves the hint with original duration
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "command timed out again" });
-    await harness.emit("agent_end", { messages: [] });
-
-    prompt = promptMessages(harness).at(-1)?.content;
-    expect(prompt).toContain("TIMEOUT RECOVERY HINT");
-    expect(prompt).toContain("after 180s"); // original duration preserved
-    expect(prompt).toContain("retry #2");
+    const prompt = promptMessages(harness).at(-1)?.content;
+    expect(prompt).not.toContain("TIMEOUT RECOVERY HINT");
+    expect(prompt).not.toContain("after 180s");
 
     const latestState = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    expect(latestState.recoveryReasons).toBeDefined();
-    expect(latestState.recoveryErrorMessages).toBeDefined();
+    expect(latestState.recoveryReasons).toBeUndefined();
+    expect(latestState.recoveryErrorMessages).toBeUndefined();
+    expect(latestState.inferenceInterruption).toBeDefined();
   });
 
-  test("non-timeout recovery prompts do not include timeout hint", async () => {
+  test("inference interruption does not generate any recovery prompt", async () => {
     const harness = await makeHarness(singleAgentConfig());
     await harness.runCommand("materia", "cast context no timeout hint");
 
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded" });
     await harness.emit("agent_end", { messages: [] });
 
+    // No same-socket recovery retry prompt — only inference interruption
     const prompt = promptMessages(harness).at(-1)?.content;
     expect(prompt).not.toContain("TIMEOUT RECOVERY HINT");
+    expect(prompt).not.toContain("previous output was invalid");
   });
 
-  test("timeout revive preserves metadata and injects hint on subsequent retries", async () => {
-    const harness = await makeHarness(singleAgentConfig());
-    await harness.runCommand("materia", "cast timeout revive hint");
-
-    // Exhaust the 3-attempt timeout budget
-    for (let i = 0; i < 4; i++) {
-      harness.appendAssistantMessage("", { stopReason: "error", errorMessage: `bash command timed out after 180 seconds (${i + 1})` });
-      await harness.emit("agent_end", { messages: [] });
-    }
-
-    const exhausted = latestCastState(harness);
-    expect(exhausted.active).toBe(false);
-    expect(exhausted.recoveryExhaustion.reason).toBe("tool_timeout");
-    const key = exhausted.recoveryExhaustion.key;
+  test("extendSameSocketRecoveryAllowanceForRevive preserves timeout recovery metadata", () => {
+    // Direct unit test of the revive function (exhaustion path via stopReason
+    // errors is no longer reachable, but revive is still valid for other
+    // recovery sources such as JSON output repair exhaustion).
+    const key = JSON.stringify(["normal", "Socket-1", "__singleton__", 1, 0]);
+    const state: any = {
+      active: false,
+      phase: "failed",
+      socketState: "failed",
+      castId: "test",
+      failedReason: 'Same-socket recovery exhausted for normal turn for socket "Socket-1": bash command timed out',
+      recoveryExhaustion: {
+        kind: "same_socket_recovery_exhausted",
+        reason: "tool_timeout",
+        key,
+        attempts: 3,
+        originalMaxAttempts: 3,
+        effectiveMaxAttempts: 3,
+        reviveCount: 0,
+        failedReason: 'Same-socket recovery exhausted for normal turn for socket "Socket-1": bash command timed out',
+        socket: "Socket-1",
+        mode: "normal",
+        exhaustedAt: Date.now(),
+      },
+      recoveryReasons: { [key]: "tool_timeout" },
+      recoveryErrorMessages: { [key]: "bash command timed out after 180 seconds" },
+      recoveryAllowances: { [key]: { originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 } },
+      pipeline: { entry: { id: "Socket-1" }, sockets: {} },
+      updatedAt: Date.now(),
+    };
 
     // Verify metadata before revive
-    expect(exhausted.recoveryReasons[key]).toBe("tool_timeout");
-    expect(exhausted.recoveryErrorMessages[key]).toContain("timed out after 180 seconds");
+    expect(state.recoveryReasons[key]).toBe("tool_timeout");
+    expect(state.recoveryErrorMessages[key]).toContain("timed out");
 
-    // Revive
-    const reviveResult = extendSameSocketRecoveryAllowanceForRevive(exhausted);
+    // Revive adds originalMaxAttempts (3) more attempts
+    const reviveResult = extendSameSocketRecoveryAllowanceForRevive(state);
     expect(reviveResult).toMatchObject({
       key,
       priorEffectiveMaxAttempts: 3,
@@ -1064,66 +1103,37 @@ describe("native same-socket recovery", () => {
     });
 
     // Metadata must survive revive
-    expect(exhausted.recoveryReasons[key]).toBe("tool_timeout");
-    expect(exhausted.recoveryErrorMessages[key]).toContain("timed out after 180 seconds");
-    expect(exhausted.recoveryAllowances[key]).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 6, reviveCount: 1 });
+    expect(state.recoveryReasons[key]).toBe("tool_timeout");
+    expect(state.recoveryErrorMessages[key]).toContain("timed out after 180 seconds");
+    expect(state.recoveryAllowances[key]).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 6, reviveCount: 1 });
   });
 
-  test("timeout revive followed by additional timeout failure carries hint with original duration", async () => {
-    const harness = await makeHarness(singleAgentConfig());
-    await harness.runCommand("materia", "cast timeout revive retry flow");
+  test("extendSameSocketRecoveryAllowanceForRevive with context-window uses originalMaxAttempts of 1", () => {
+    const key = JSON.stringify(["normal", "Socket-1", "__singleton__", 1, 0]);
+    const state: any = {
+      active: false,
+      phase: "failed",
+      socketState: "failed",
+      castId: "test-cw",
+      failedReason: 'Same-socket recovery exhausted for normal turn for socket "Socket-1": context length exceeded',
+      recoveryExhaustion: {
+        kind: "same_socket_recovery_exhausted",
+        reason: "context_window",
+        key,
+        attempts: 1,
+        originalMaxAttempts: 1,
+        effectiveMaxAttempts: 1,
+        reviveCount: 0,
+        failedReason: 'Same-socket recovery exhausted for normal turn for socket "Socket-1": context length exceeded',
+        socket: "Socket-1",
+        mode: "normal",
+        exhaustedAt: Date.now(),
+      },
+      recoveryAllowances: { [key]: { originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 } },
+      pipeline: { entry: { id: "Socket-1" }, sockets: {} },
+      updatedAt: Date.now(),
+    };
 
-    // Exhaust the 3-attempt timeout budget
-    for (let i = 0; i < 4; i++) {
-      harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out after 120 seconds" });
-      await harness.emit("agent_end", { messages: [] });
-    }
-
-    const exhausted = latestCastState(harness);
-    expect(exhausted.active).toBe(false);
-    const key = exhausted.recoveryExhaustion.key;
-
-    // Revive to get 3 more attempts
-    extendSameSocketRecoveryAllowanceForRevive(exhausted);
-
-    // Simulate resume: reactivate the cast like resumeValidatedNativeCast does
-    exhausted.recoveryExhaustion = undefined;
-    exhausted.active = true;
-    exhausted.failedReason = undefined;
-    exhausted.awaitingResponse = true;
-    exhausted.socketState = "awaiting_agent_response";
-    harness.pi.appendEntry("pi-materia-cast-state", exhausted);
-
-    // Trigger another timeout failure — should retry with preserved hint
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "bash command timed out again" });
-    await harness.emit("agent_end", { messages: [] });
-
-    const retried = latestCastState(harness);
-    expect(retried.active).toBe(true);
-    expect(retried.recoveryAttempts[key]).toBe(4); // 3 original + 1 new
-    expect(retried.recoveryReasons[key]).toBe("tool_timeout");
-    expect(retried.recoveryErrorMessages[key]).toContain("timed out after 120 seconds"); // original preserved
-
-    const retryPrompt = promptMessages(harness).at(-1)?.content;
-    expect(retryPrompt).toContain("TIMEOUT RECOVERY HINT");
-    expect(retryPrompt).toContain("after 120s"); // original duration preserved
-  });
-
-  test("context-window revive uses originalMaxAttempts of 1 (regression guard)", async () => {
-    const harness = await makeHarness(singleAgentConfig());
-    harness.contextUsage = { tokens: 900, contextWindow: 1000, percent: 90 };
-    await harness.runCommand("materia", "cast context-window revive regression");
-
-    // Exhaust the 1-attempt context-window budget
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "maximum context length exceeded" });
-    await harness.emit("agent_end", { messages: [] });
-    // Compaction triggers but retry still fails
-    harness.appendAssistantMessage("", { stopReason: "error", errorMessage: "context window exceeded again" });
-    await harness.emit("agent_end", { messages: [] });
-
-    const state = latestCastState(harness);
-    expect(state.active).toBe(false);
-    const key = state.recoveryExhaustion.key;
     expect(state.recoveryAllowances[key].originalMaxAttempts).toBe(1);
 
     // Revive adds 1 more for context-window (not 3 like timeout)
@@ -1135,5 +1145,102 @@ describe("native same-socket recovery", () => {
       newEffectiveMaxAttempts: 2,
       reviveCount: 1,
     });
+    expect(state.recoveryAllowances[key]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 2, reviveCount: 1 });
+  });
+
+  test("extendSameSocketRecoveryAllowanceForRevive rejects non-exhaustion failures", () => {
+    const state: any = {
+      active: false,
+      phase: "failed",
+      socketState: "failed",
+      castId: "test-non-exhausted",
+      failedReason: "Pre-commit output validation failed",
+      recoveryExhaustion: undefined,
+      pipeline: { entry: { id: "Socket-1" }, sockets: {} },
+      updatedAt: Date.now(),
+    };
+    expect(() => extendSameSocketRecoveryAllowanceForRevive(state)).toThrow(
+      /missing structured same-socket recovery exhaustion metadata/,
+    );
+
+    const legacy = { ...state, failedReason: "Same-socket recovery exhausted for socket", recoveryExhaustion: undefined };
+    expect(() => extendSameSocketRecoveryAllowanceForRevive(legacy)).toThrow(
+      /missing structured same-socket recovery exhaustion metadata/,
+    );
+  });
+
+  test("extendSameSocketRecoveryAllowanceForRevive rejects stale exhaustion metadata", () => {
+    const key = JSON.stringify(["normal", "Socket-1", "__singleton__", 1, 0]);
+    const state: any = {
+      active: false,
+      phase: "failed",
+      socketState: "failed",
+      castId: "test-stale",
+      failedReason: "Non-recoverable turn failure: provider auth failed",
+      recoveryExhaustion: {
+        kind: "same_socket_recovery_exhausted",
+        reason: "tool_timeout",
+        key,
+        attempts: 3,
+        originalMaxAttempts: 3,
+        effectiveMaxAttempts: 3,
+        reviveCount: 0,
+        failedReason: 'Same-socket recovery exhausted for normal turn for socket "Socket-1": bash timed out',
+        socket: "Socket-1",
+        mode: "normal",
+        exhaustedAt: Date.now(),
+      },
+      recoveryAllowances: { [key]: { originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 } },
+      pipeline: { entry: { id: "Socket-1" }, sockets: {} },
+      updatedAt: Date.now(),
+    };
+    // stale exhaustion metadata does not match current failedReason
+    expect(() => extendSameSocketRecoveryAllowanceForRevive(state)).toThrow(
+      /does not match the current terminal failure/,
+    );
+  });
+
+  test("extendSameSocketRecoveryAllowanceForRevive scales linearly", () => {
+    const key = JSON.stringify(["normal", "Socket-1", "__singleton__", 1, 0]);
+    const state: any = {
+      active: false,
+      phase: "failed",
+      socketState: "failed",
+      castId: "test-linear",
+      failedReason: 'Same-socket recovery exhausted for normal turn for socket "Socket-1": context length exceeded',
+      recoveryExhaustion: {
+        kind: "same_socket_recovery_exhausted",
+        reason: "context_window",
+        key,
+        attempts: 1,
+        originalMaxAttempts: 1,
+        effectiveMaxAttempts: 1,
+        reviveCount: 0,
+        failedReason: 'Same-socket recovery exhausted for normal turn for socket "Socket-1": context length exceeded',
+        socket: "Socket-1",
+        mode: "normal",
+        exhaustedAt: Date.now(),
+      },
+      recoveryAllowances: { [key]: { originalMaxAttempts: 1, effectiveMaxAttempts: 1, reviveCount: 0 }, other: { originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 } },
+      pipeline: { entry: { id: "Socket-1" }, sockets: {} },
+      updatedAt: Date.now(),
+    };
+
+    expect(extendSameSocketRecoveryAllowanceForRevive(state)).toMatchObject({
+      key,
+      priorEffectiveMaxAttempts: 1,
+      increment: 1,
+      newEffectiveMaxAttempts: 2,
+      reviveCount: 1,
+    });
+    expect(extendSameSocketRecoveryAllowanceForRevive(state)).toMatchObject({
+      key,
+      priorEffectiveMaxAttempts: 2,
+      increment: 1,
+      newEffectiveMaxAttempts: 3,
+      reviveCount: 2,
+    });
+    expect(state.recoveryAllowances[key]).toEqual({ originalMaxAttempts: 1, effectiveMaxAttempts: 3, reviveCount: 2 });
+    expect(state.recoveryAllowances.other).toEqual({ originalMaxAttempts: 3, effectiveMaxAttempts: 3, reviveCount: 0 });
   });
 });

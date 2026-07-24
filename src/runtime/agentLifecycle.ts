@@ -118,6 +118,13 @@ export interface AgentLifecycleDependencies {
     ): Promise<void>;
   };
   recovery: {
+    preserveAwaitingAfterInferenceInterruption(
+      pi: ExtensionAPI,
+      ctx: ExtensionContext,
+      state: MateriaCastState,
+      error: unknown,
+      options?: Pick<TurnRecoveryOptions, "entryId">,
+    ): Promise<void>;
     preserveAwaitingAfterTransientTransportFailure(
       pi: ExtensionAPI,
       ctx: ExtensionContext,
@@ -385,14 +392,11 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
         await deps.recovery.preserveAwaitingAfterTransientTransportFailure(pi, ctx, state, error);
         return;
       }
-      const toolFallback = prepareDirectFinalizationFallback(pi, ctx, state);
-      const recovered = await deps.recovery.handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, {
-        allowGenericTurnFailure: toolFallback || deps.recovery.shouldRetryGenericTurnFailure(error),
-      });
-      if (!recovered) {
-        await emitSocketFailure(state, error);
-        await deps.termination.failCast(pi, ctx, state, error);
-      }
+      // Treat event-level provider failures as provisional inference interruptions.
+      // Never immediately terminalize a cast. Keep the socket active and awaiting
+      // so Pi can retry natively, record bounded interruption metadata, and avoid
+      // failed lifecycle events, manifests, cast_end records, or quest settlement.
+      await deps.recovery.preserveAwaitingAfterInferenceInterruption(pi, ctx, state, error);
       return;
     }
 
@@ -418,21 +422,20 @@ export function createAgentLifecycle(deps: AgentLifecycleDependencies) {
         });
         return;
       }
-      const toolFallback = prepareDirectFinalizationFallback(pi, ctx, state);
-      const recovered = await deps.recovery.handleSameSocketRecoverableTurnFailure(pi, ctx, state, error, {
+      // Treat assistant stopReason errors as provisional inference interruptions.
+      // Never immediately terminalize a cast. Keep the socket active and awaiting
+      // so Pi can retry natively, record bounded interruption metadata, and avoid
+      // failed lifecycle events, manifests, cast_end records, or quest settlement.
+      await deps.recovery.preserveAwaitingAfterInferenceInterruption(pi, ctx, state, error, {
         entryId: latest.entry.id,
-        allowGenericTurnFailure: toolFallback || deps.recovery.shouldRetryGenericTurnFailure(error),
       });
-      if (!recovered) {
-        await emitSocketFailure(state, error);
-        await deps.termination.failCast(pi, ctx, state, error, latest.entry.id);
-      }
       return;
     }
 
     state.awaitingResponse = false;
     setCurrentSocketState(state, "idle");
     state.updatedAt = Date.now();
+    state.inferenceInterruption = undefined;
 
     try {
       const socket = currentSocketOrThrow(state);

@@ -154,6 +154,7 @@ const turnRecovery = createTurnRecovery({
   },
 });
 const {
+  preserveAwaitingAfterInferenceInterruption,
   preserveAwaitingAfterTransientTransportFailure,
   handleSameSocketRecoverableTurnFailure,
   buildJsonOutputRepairContext,
@@ -263,6 +264,7 @@ const agentLifecycle = createAgentLifecycle({
     emitLifecycleEvent,
   },
   recovery: {
+    preserveAwaitingAfterInferenceInterruption,
     preserveAwaitingAfterTransientTransportFailure,
     handleSameSocketRecoverableTurnFailure,
     shouldRetryGenericTurnFailure,

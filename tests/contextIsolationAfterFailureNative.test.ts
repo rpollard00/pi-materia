@@ -88,19 +88,22 @@ describe("context isolation after turn failure", () => {
     expect(serialized).toContain("isolated tool result");
   });
 
-  test("failed inactive casts retain prompt-anchored isolation but pass through after anchor compaction", async () => {
+  test("inference-interrupted casts retain prompt-anchored isolation but pass through after anchor compaction", async () => {
     const harness = await makeHarness();
     await harness.runCommand("materia", "cast fail without transcript fanout");
     const prompt = latestMateriaPrompt(harness);
 
+    // stopReason errors are now provisional inference interruptions, not terminal failures
     harness.appendAssistantMessage("", { stopReason: "error", errorMessage: STRUCTURED_PROVIDER_ERROR });
     await harness.emit("agent_end", { messages: [] });
 
     const state = latestState(harness);
-    expect(state.active).toBe(false);
-    expect(state.phase).toBe("failed");
-    expect(state.socketState).toBe("failed");
-    expect(state.failedReason).toContain("server_error");
+    expect(state.active).toBe(true);
+    expect(state.awaitingResponse).toBe(true);
+    expect(state.socketState).toBe("awaiting_agent_response");
+    expect(state.failedReason).toBeUndefined();
+    expect(state.inferenceInterruption).toBeDefined();
+    expect(state.inferenceInterruption.error).toContain("server_error");
 
     const rawMessages = [
       { role: "user", content: [{ type: "text", text: "entire unrelated native session" }] },
@@ -122,7 +125,9 @@ describe("context isolation after turn failure", () => {
     const guard = String((isolated as Array<{ content?: unknown }>)[0]?.content);
     expect(guard).toContain("Materia isolated context.");
     expect(guard).toContain("Do not rely on unrelated earlier visible transcript messages.");
-    expect(guard).not.toContain("Original request:");
+    // Cast is still active (inference interruption), so synthetic context includes request info
+    expect(guard).toContain("Original request:");
+    expect(guard).toContain("fail without transcript fanout");
     expect(serialized).not.toContain("entire unrelated native session");
     expect(serialized).not.toContain("display-only failure card");
     expect(serialized).toContain("pi-materia-prompt");
