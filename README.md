@@ -137,16 +137,59 @@ The WebUI starts automatically with `/materia cast`, `/materia link`, `/materia 
 
 ### Resume and recover
 
+#### Recast vs Revive
+
+pi-materia provides two ways to restart a failed cast:
+
+| Command | Purpose |
+|---|---|
+| `/materia recast [id]` | **Re-send the same prompt.** Use for ordinary failures — reuses the active prompt or re-starts the socket, dispatching a new materia turn immediately. |
+| `/materia revive [id]` | **Restore without necessarily re-sending.** Passive path normalizes state and awaits a nudge without inference. Exhaustion-extending paths extend the recovery budget then resume. For quest-linked casts with active work, queues the quest for later same-cast resumption. |
+
+See [Resilient Inference and Revival](docs/resilient-inference-and-revival.md) for the full design.
+
 ```bash
 /materia recast          # resume the most recent failed/aborted cast
 /materia recast <id>     # resume a specific cast
-/materia revive <id>     # extend the exhausted allowance for same-socket recovery or edge traversal, then recast
+/materia revive <id>     # passive revive if ordinary failure, or extend exhausted recovery allowance
 /materia casts           # list past casts
 /materia status          # show the current cast state
 /materia abort           # stop the active cast
 ```
 
-pi-materia automatically retries safe failures (context-window limits, tool timeouts, and safe generic turn failures) within the same socket before requiring manual intervention. Transient transport errors (WebSocket connection drops, `Stream ended without finish_reason`, and similar provider-stream interruptions) are recorded as warnings but do NOT force cast failure — the cast stays active and the next turn proceeds normally without a `cast_end ok:false` or failed manifest entries.
+#### Automatic resilience
+
+pi-materia handles several classes of failures without requiring manual intervention:
+
+**Provision agent errors** — When the model reports a `stopReason: "error"` or a provider/event-level failure occurs, pi-materia records a bounded `inferenceInterruption` metadata object but keeps the cast active and awaiting a response. The cast stays in `awaiting_agent_response` state with no `cast_end ok:false`, no failed manifest entry, and no quest settlement. Pi's native retry, compaction, and follow-up mechanisms operate normally.
+
+**agent_settled nudge** — If Pi settles while an unresolved inference interruption exists, pi-materia detects this via the `agent_settled` event, keeps the cast active, appends an `inference_interruption_settled` event with `nudgeNeeded: true`, and notifies the user to nudge. A subsequent user turn restores tool scope and completes normally.
+
+**Transient transport errors** — WebSocket connection drops, `Stream ended without finish_reason`, and similar provider-stream interruptions are recorded as `transient_transport_turn_failure` warnings but do NOT force cast failure. The cast stays active and the next turn proceeds normally.
+
+**Same-socket bounded recovery** — JSON parse failures, handoff validation errors, tool timeouts, and context-window limits trigger automatic retries within the same socket visit. Compaction is applied before context-window retries. The default allowance is one retry; exhausted casts can be revived to extend the budget.
+
+#### Queued same-cast quest resumption
+
+When you revive a quest-linked cast while another cast is active, pi-materia does not interrupt the active work. Instead:
+
+1. The quest is unfailed to `pending` at the back of the queue with `resumeCastId` set to the target cast ID.
+2. The target cast is marked dormant (`data.questQueuedResurrection`) so it no longer appears as revivable.
+3. When the quest runner picks it up, it calls `reactivateQueuedCast` to restore the same cast at its preserved socket without dispatching a new prompt and without incrementing the quest's attempt count.
+
+Run `/materia quest run` after reviving to consume the queued quest.
+
+### Quick reference
+
+| Failure class | Behaviour | Recovery |
+|---|---|---|
+| Provider error (stopReason error, event error) | `inferenceInterruption` set, cast stays active/awaiting | Pi native retry, then user nudge on agent_settled |
+| Transient transport (WebSocket drop, stream-ended) | `transient_transport_turn_failure` warning, cast stays active | Next turn proceeds normally |
+| JSON parse / handoff validation error | Same-socket retry (up to allowance) | `/materia revive` if exhausted |
+| Tool timeout | Same-socket retry with timeout hint | `/materia revive` if exhausted |
+| Context window exceeded | Compaction + same-socket retry | `/materia revive` if exhausted |
+| Edge traversal exhausted | Cast failed with exhaustion metadata | `/materia revive` — extends allowance, advances to blocked target |
+| Ordinary failure (no exhaustion) | Cast failed with `failedReason` | `/materia recast` (re-send prompt) or `/materia revive` (passive, no prompt)
 
 ### Customize your pipelines
 
@@ -202,11 +245,11 @@ Save this as `.pi/pi-materia.json` in your project, or pass it with `--materia-c
 | `/materia quest move <id> --first\|--before\|--onto <target>` | Reorder pending quests |
 | `/materia quest requeue <id>` | Return a failed/blocked quest to the queue |
 | `/materia quest default-loadout [name\|--clear]` | Set or clear the quest default loadout |
-| `/materia recast [id]` | Resume a failed/aborted cast |
-| `/materia revive [id]` | Extend allowance for a same-socket or edge-traversal exhausted cast |
+| `/materia recast [id]` | Resume a failed/aborted cast — re-sends the prompt on the same socket immediately |
+| `/materia revive [id]` | Passive revival (no prompt) for failed casts; extends recovery allowance and resumes for exhausted casts; queues quest-linked casts for later same-cast resumption |
 | `/materia casts` | List past casts |
 | `/materia status` | Show active cast state |
-| `/materia continue` | Finalize a paused multi-turn planning socket |
+| `/materia continue` | Finalize a paused multi-turn planning socket; also used to nudge a reactivated cast forward |
 | `/materia abort` | Stop the active cast |
 
 ### Configuration layering

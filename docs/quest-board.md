@@ -24,6 +24,14 @@ Use the WebUI add form to append a pending quest with a prompt and optional load
 
 When a failed or blocked quest is selected in the WebUI, its detail view can requeue it back to pending at the bottom of the queue/list. Like the CLI command, this is only valid for failed/blocked quests and preserves attempts plus historical result/error metadata.
 
+If the revived quest was launched by another cast that is still active, or if
+the `/materia revive` command targets a quest-linked cast while one is already
+running, the system takes the **queued same-cast resumption** path: the quest
+is unfailed to pending with `resumeCastId` set to the original cast ID, and
+the original cast is marked dormant instead of being revived immediately. The
+quest can then be consumed by the quest runner later. See [Queued same-cast
+resumption](#queued-same-cast-resumption) below.
+
 Pending quests can also be reordered directly in the WebUI sidebar by dragging the `⋮⋮` handle next to a pending quest. The active/running quest remains pinned at the top and is not draggable; succeeded, failed, and blocked quests are not part of the pending order. Drop above the first pending quest to make the dragged quest the next pending item, or drop before/after another pending quest to place it relative to that target. The WebUI saves through the same reorder API as the CLI and reconciles from the canonical board response.
 
 The single-writer limitation above still applies when using the WebUI: avoid writing the same project's quest board from multiple Pi sessions at once.
@@ -112,6 +120,81 @@ When the continuous runner is enabled and a quest-launched cast settles, pi-mate
 If `/materia quest stop` was run while a quest cast was active, that cast may still complete or fail and record its result, but no next quest starts. The current cast is not interrupted by `quest stop`.
 
 On Pi session start, pi-materia reconciles stale running quests and warns the user instead of spawning surprise work. Check `/materia quest status` and explicitly run the runner again when ready; `quest start` is still accepted as a compatibility alias for `quest run`.
+
+## Queued same-cast resumption
+
+When a quest-launched cast fails, the quest is marked `failed` and the cast is
+terminal. The `/materia revive` command can restore the cast, but when another
+cast is currently active it must not interrupt active work. Instead,
+pi-materia queues the failed quest for **same-cast resumption**: the quest
+runner reactivates the same cast at its preserved socket rather than launching
+a new one.
+
+### Flow
+
+```
+1. Quest-launched cast fails.
+2. User runs `/materia revive <cast-id>` (or WebUI revive).
+   → Revive handler detects a different active cast + quest-linked target.
+   → Calls unfailQuest with resumeCastId set to the target cast ID.
+   → Quest changes to pending at the back of the queue with resumeCastId.
+   → Target cast marked dormant via data.questQueuedResurrection.
+   → The active cast is untouched; the target cast does NOT revive immediately.
+3. User runs `/materia quest run` (or the runner is already enabled).
+   → Quest runner selects the front pending quest, sees resumeCastId.
+   → Calls reactivateQueuedCast(resumeCastId) — same cast, same socket.
+   → Calls resumeQuest — quest transitions to running (no attempt increment).
+   → The cast becomes active/awaiting; no prompt is dispatched.
+4. User nudges or runs `/materia continue`.
+   → The cast proceeds normally from its preserved socket.
+```
+
+### Quest record with resumeCastId
+
+A pending quest with same-cast resumption metadata carries an additional field:
+
+```json
+{
+  "id": "q-abc123",
+  "status": "pending",
+  "resumeCastId": "2026-07-24T04-10-17-722Z",
+  "prompt": "Add dark mode toggle",
+  "attempts": 1,
+  "lastCastId": "2026-07-24T04-10-17-722Z",
+  ...
+}
+```
+
+- `resumeCastId` — the original cast ID to reactivate instead of starting new.
+- `lastCastId` — preserved from the original run.
+- `currentCastId`, `lastResult`, `lastError` — cleared by unfailQuest.
+- `attempts` — not incremented during the queued reactivation.
+
+### Dormant cast state
+
+Between steps 2 and 3 above, the target cast is **dormant**: it is not active,
+but it is also not revivable — `listRevivableCastStates` returns `false` for
+casts carrying `data.questQueuedResurrection`, so `/materia revive` completions
+exclude it. The cast is invisible to normal revive flows until the quest runner
+activates it via `reactivateQueuedCast`, which clears the resurrection marker.
+
+### Quest runner behavior
+
+The quest runner (`startPendingQuest` in `src/application/useCases.ts`)
+recognises `quest.resumeCastId` and branches:
+
+- **With `resumeCastId`**: calls `reactivateQueuedCast` (same cast, same socket)
+  then `resumeQuest` (no attempt increment). No new cast is started.
+- **Without `resumeCastId`** (ordinary pending quest): calls `startCast` to
+  launch a new cast and `startQuest` (attempts increment to 1).
+
+### WebUI revive behavior
+
+When a failed/blocked quest is revived from the WebUI detail view or the CLI
+`/materia revive` command targets a quest-linked cast while another cast is
+active, the system dispatches through the same queue-and-dormant path rather
+than immediately reactivating the cast. The quest changes to pending, the cast
+becomes dormant, and the active cast is not interrupted.
 
 ## Verification
 
