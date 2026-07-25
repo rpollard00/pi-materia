@@ -395,7 +395,7 @@ export default function piMateria(pi: ExtensionAPI) {
 
           const castId = await castExecutionUseCases.reviveLatestOrRequested(pi, ctx, requestedCastId);
           if (!castId) {
-            ctx.ui.notify("No failed pi-materia casts exhausted by same-socket recovery or edge traversal are available to revive. Use /materia recast [cast-id] for general failed or aborted casts.", "info");
+            ctx.ui.notify("No failed or aborted pi-materia casts are available to revive. Use /materia recast [cast-id] for casts that were recast previously.", "info");
             return;
           }
         } catch (error) {
@@ -405,7 +405,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (after same-socket recovery exhaustion or edge traversal exhaustion; extends the exhausted allowance then recasts), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (passive revive if ordinary failure; extends recovery allowance then recasts if exhaustion metadata present), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 

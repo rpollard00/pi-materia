@@ -697,6 +697,9 @@ describe("agent-controller preset contract", () => {
 
     // Controller minimum contract: accepted, heartbeat, status, completed, failed.
     expect(config.typeMap!["lifecycle.cast.started"]).toBe("runtime.accepted");
+    // Revive and reactivate events also map to runtime.accepted (non-terminal activations).
+    expect(config.typeMap!["lifecycle.cast.revived"]).toBe("runtime.accepted");
+    expect(config.typeMap!["lifecycle.cast.reactivated"]).toBe("runtime.accepted");
     expect(config.typeMap!["lifecycle.heartbeat"]).toBe("runtime.heartbeat");
   });
 
@@ -718,6 +721,8 @@ describe("agent-controller preset contract", () => {
 
     // Controller-mapped lifecycle events.
     expect(include).toContain("lifecycle.cast.started");
+    expect(include).toContain("lifecycle.cast.revived");
+    expect(include).toContain("lifecycle.cast.reactivated");
     expect(include).toContain("lifecycle.heartbeat");
     expect(include).toContain("lifecycle.status");
     expect(include).toContain("lifecycle.cast.completed");

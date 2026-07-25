@@ -212,6 +212,8 @@ const AGENT_CONTROLLER_FILTER: EventFilter = {
   include: [
     // Lifecycle events with explicit controller type mappings.
     "lifecycle.cast.started",
+    "lifecycle.cast.revived",
+    "lifecycle.cast.reactivated",
     "lifecycle.heartbeat",
     "lifecycle.status",
     "lifecycle.cast.completed",
@@ -237,6 +239,8 @@ const AGENT_CONTROLLER_FILTER: EventFilter = {
  */
 const AGENT_CONTROLLER_TYPE_MAP: Record<string, string> = {
   "lifecycle.cast.started": "runtime.accepted",
+  "lifecycle.cast.revived": "runtime.accepted",
+  "lifecycle.cast.reactivated": "runtime.accepted",
   "lifecycle.heartbeat": "runtime.heartbeat",
   "lifecycle.status": "runtime.status",
   "lifecycle.cast.completed": "runtime.completed",

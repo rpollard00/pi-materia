@@ -316,6 +316,19 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
         await deps.dispatch.updateSocketToolScope(pi, ctx, state, socket);
       }
 
+      await deps.eventing.emitLifecycleEvent(state, "lifecycle.cast.revived", {
+        severity: "info",
+        message: `Cast ${state.castId} revived at socket "${socket.id}".`,
+        payload: {
+          kind: "passive",
+          castId: state.castId,
+          socket: socket.id,
+          materia: socketMateriaName(socket),
+          itemKey: state.currentItemKey,
+          itemLabel: state.currentItemLabel,
+        },
+      });
+
       ctx.ui.notify(`pi-materia cast ${state.castId} revived at socket "${socket.id}". Use /materia recast to resend or nudge to continue.`, "info");
       return state;
     }
@@ -354,6 +367,22 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       const targetSocket = getResolvedPipelineSocket(state.pipeline, exhaustion.to);
       if (!targetSocket) throw new Error(`Revive target socket "${exhaustion.to}" is not in the pipeline.`);
       await deps.execution.startSocket(pi, ctx, state, targetSocket);
+      await deps.eventing.emitLifecycleEvent(state, "lifecycle.cast.revived", {
+        severity: "info",
+        message: `Cast ${state.castId} revived to blocked target socket "${exhaustion.to}".`,
+        payload: {
+          kind: "edge_traversal",
+          castId: state.castId,
+          exhaustedRecoveryKey: result.key,
+          from: exhaustion.from,
+          to: exhaustion.to,
+          priorEffectiveLimit: result.priorEffectiveLimit,
+          increment: result.increment,
+          newEffectiveLimit: result.newEffectiveLimit,
+          reviveCount: result.reviveCount,
+        },
+      });
+
       ctx.ui.notify(`pi-materia cast ${state.castId} revived to blocked target socket "${exhaustion.to}".`, "info");
       return state;
     }
@@ -375,6 +404,22 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       newEffectiveMaxAttempts: result.newEffectiveMaxAttempts,
       reviveCount: result.reviveCount,
     });
+    await deps.eventing.emitLifecycleEvent(state, "lifecycle.cast.revived", {
+      severity: "info",
+      message: `Cast ${state.castId} revived from same-socket recovery exhaustion.`,
+      payload: {
+        kind: "same_socket_recovery",
+        castId: state.castId,
+        exhaustedRecoveryKey: result.key,
+        socket: sameSocketExhaustion.socket ?? currentSocketId(state),
+        mode: sameSocketExhaustion.mode,
+        priorEffectiveMaxAttempts: result.priorEffectiveMaxAttempts,
+        increment: result.increment,
+        newEffectiveMaxAttempts: result.newEffectiveMaxAttempts,
+        reviveCount: result.reviveCount,
+      },
+    });
+
     deps.state.saveCastState(pi, state);
     return resumeValidatedNativeCast(pi, ctx, state);
   }
@@ -432,6 +477,18 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       materia: socketMateriaName(socket),
       itemKey: state.currentItemKey,
       itemLabel: state.currentItemLabel,
+    });
+
+    await deps.eventing.emitLifecycleEvent(state, "lifecycle.cast.reactivated", {
+      severity: "info",
+      message: `Cast ${state.castId} reactivated from queued resumption at socket "${socket.id}".`,
+      payload: {
+        castId: state.castId,
+        socket: socket.id,
+        materia: socketMateriaName(socket),
+        itemKey: state.currentItemKey,
+        itemLabel: state.currentItemLabel,
+      },
     });
 
     // Re-initialize the event bus for the reactivated cast.

@@ -931,6 +931,74 @@ describe("agent-controller preset activation from environment", () => {
     expect(getEventBus(state)).toBeUndefined();
   });
 
+  test("lifecycle.cast.revived and lifecycle.cast.reactivated flow through the real preset sink", async () => {
+    const { server, requests } = await startRecordingServer(
+      () => new Response("ok", { status: 200 }),
+    );
+    const eventUrl = `http://localhost:${server.port}/runs/run-ac-revive/events`;
+    try {
+      clearControllerEnv();
+      process.env.CONTROLLER_RUN_ID = "run-ac-revive";
+      process.env.CONTROLLER_EVENT_URL = eventUrl;
+
+      const config = applyEventingEnvOverlay(
+        { eventing: { enabled: false, presets: [], sinks: {}, heartbeatIntervalMs: 30000 } } as never,
+      );
+
+      const runDir = await tempDir();
+      const state = makeCastState({ castId: "test-ac-revive", runDir });
+      const bus = await initializeCastEventBus(config, state);
+      expect(bus).toBeDefined();
+
+      try {
+        // Emit lifecycle.cast.revived (like reviveNativeCast does).
+        await emitLifecycleEvent(state, "lifecycle.cast.revived", {
+          severity: "info",
+          message: "Cast revived",
+          payload: { kind: "passive", castId: state.castId },
+        });
+
+        // Emit lifecycle.cast.reactivated (like reactivateQueuedNativeCast does).
+        await emitLifecycleEvent(state, "lifecycle.cast.reactivated", {
+          severity: "info",
+          message: "Cast reactivated",
+          payload: { castId: state.castId },
+        });
+
+        await bus!.flush();
+
+        // Both events were delivered with mapped runtime.accepted type.
+        expect(requests).toHaveLength(2);
+        const types = requests
+          .map((r) => (r.bodyJson as { eventType?: string } | undefined)?.eventType)
+          .sort();
+        expect(types).toEqual(["runtime.accepted", "runtime.accepted"]);
+
+        // Verify each request body carries expected payload fields.
+        const revivedReq = requests.find((r) => {
+          const body = r.bodyJson as { payload?: { kind?: string } } | undefined;
+          return body?.payload?.kind === "passive";
+        });
+        expect(revivedReq).toBeDefined();
+        const reactivatedReq = requests.find((r) => {
+          const body = r.bodyJson as { payload?: { kind?: string } } | undefined;
+          return body?.payload?.kind === undefined;
+        });
+        expect(reactivatedReq).toBeDefined();
+      } finally {
+        removeEventBus(state.castId);
+      }
+    } finally {
+      server.stop();
+      if (originalRunId === undefined) delete process.env.CONTROLLER_RUN_ID;
+      else process.env.CONTROLLER_RUN_ID = originalRunId;
+      if (originalEventUrl === undefined) delete process.env.CONTROLLER_EVENT_URL;
+      else process.env.CONTROLLER_EVENT_URL = originalEventUrl;
+      if (originalContextDir === undefined) delete process.env.CONTROLLER_CONTEXT_DIR;
+      else process.env.CONTROLLER_CONTEXT_DIR = originalContextDir;
+    }
+  });
+
   test("both materia result and lifecycle events flow through the real preset sink into dispatch.jsonl", async () => {
     const { server, requests } = await startRecordingServer(
       () => new Response("ok", { status: 200 }),
