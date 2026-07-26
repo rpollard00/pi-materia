@@ -39,7 +39,7 @@ function renderPanel(overrides: Partial<Parameters<typeof MateriaPalettePanel>[0
 function rowOrder(container: HTMLElement): string[] {
   const grid = container.querySelector('[data-testid="palette-grid"]');
   if (!grid) return [];
-  return Array.from(grid.querySelectorAll<HTMLButtonElement>('[data-testid^="palette-"]'))
+  return Array.from(grid.querySelectorAll<HTMLButtonElement>('button[data-testid^="palette-"]'))
     .map((button) => button.dataset.testid?.replace('palette-', '') ?? '');
 }
 
@@ -187,5 +187,61 @@ describe('MateriaPalettePanel filtering and sorting', () => {
     fireEvent.click(getByTestId('palette-sort-trigger'));
     expect(getByTestId('palette-sort-option-type').getAttribute('aria-checked')).toBe('true');
     expect(getByTestId('palette-sort-option-name').getAttribute('aria-checked')).toBe('false');
+  });
+});
+
+describe('MateriaPalettePanel model chrome', () => {
+  const modelMateria: Materia = {
+    Build: { prompt: 'build', model: 'zai/glm-4.6', group: 'Core' },
+    Audit: { prompt: 'audit', model: '  anthropic/claude-opus-4  ', group: 'Core' },
+    NoModel: { prompt: 'no model here', group: 'Core' },
+    detectVcs: { type: 'utility', utility: 'vcs.detect', model: 'zai/glm-4.6', label: 'Detect VCS', group: 'Utility' },
+    longModel: { prompt: 'long', model: 'very-long-provider/extra-long-model-identifier-v2', group: 'Core' },
+  };
+
+  function renderModelPanel(overrides: Partial<Parameters<typeof MateriaPalettePanel>[0]> = {}) {
+    return renderPanel({ materia: modelMateria, palette: buildPalette(modelMateria), ...overrides });
+  }
+
+  it('renders the exact configured provider/model value as top-right card chrome', () => {
+    const { getByTestId } = renderModelPanel();
+
+    const buildChrome = getByTestId('palette-model-Build');
+    expect(buildChrome.className).toContain('palette-model-chrome');
+    expect(buildChrome.textContent).toBe('zai/glm-4.6');
+    expect(buildChrome.getAttribute('title')).toBe('zai/glm-4.6');
+
+    // Surrounding whitespace is trimmed and the raw configured value is shown
+    // verbatim — never a model-catalog friendly name.
+    const auditChrome = getByTestId('palette-model-Audit');
+    expect(auditChrome.textContent).toBe('anthropic/claude-opus-4');
+    expect(auditChrome.getAttribute('title')).toBe('anthropic/claude-opus-4');
+  });
+
+  it('keeps the full configured value available via tooltip even for long labels', () => {
+    // jsdom cannot lay out the ellipsis, so the chrome retains the full string
+    // as its text and exposes the untruncated value through its title tooltip.
+    const { getByTestId } = renderModelPanel();
+    const longChrome = getByTestId('palette-model-longModel');
+    const value = 'very-long-provider/extra-long-model-identifier-v2';
+    expect(longChrome.textContent).toBe(value);
+    expect(longChrome.getAttribute('title')).toBe(value);
+  });
+
+  it('suppresses the chrome for deterministic utility materia even when a model is configured', () => {
+    const { queryByTestId } = renderModelPanel();
+    expect(queryByTestId('palette-model-detectVcs')).toBeNull();
+  });
+
+  it('suppresses the chrome for agent materia without a selected model', () => {
+    const { queryByTestId } = renderModelPanel();
+    expect(queryByTestId('palette-model-NoModel')).toBeNull();
+  });
+
+  it('does not interfere with selecting a card that shows a model label', () => {
+    const onSelectMateria = vi.fn();
+    const { getByTestId } = renderModelPanel({ onSelectMateria });
+    fireEvent.click(getByTestId('palette-Build'));
+    expect(onSelectMateria).toHaveBeenCalledWith('Build');
   });
 });

@@ -1080,6 +1080,7 @@
 }
 
 .palette-orb {
+  position: relative;
   display: flex;
   min-height: 4.25rem;
   flex-direction: column;
@@ -1126,6 +1127,30 @@
 .palette-orb-generator.palette-orb-selected {
   border-color: rgb(216 180 254 / 0.78);
   box-shadow: 0 0 28px rgb(168 85 247 / 0.22), 0 0 34px rgb(34 211 238 / 0.12);
+}
+
+.palette-model-chrome {
+  position: absolute;
+  top: 0.28rem;
+  right: 0.32rem;
+  /* Compact, non-interactive card chrome pinned to the top-right of each
+     eligible materia card. Capped so long provider/model strings truncate
+     with an ellipsis while the full value stays available via the title
+     tooltip. It floats over the orb edge without participating in selection,
+     drag, filtering, or the card's intrinsic sizing. */
+  max-width: calc(100% - 0.7rem);
+  padding: 0.04rem 0.3rem;
+  border: 1px solid rgb(148 163 184 / 0.22);
+  border-radius: 0.35rem;
+  background: rgb(2 6 23 / 0.74);
+  color: rgb(165 243 252 / 0.86);
+  font-size: 0.55rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .palette-controls {

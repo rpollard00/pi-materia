@@ -5,6 +5,7 @@ import { Orb } from '../../components/Orb.js';
 import { MateriaPaletteControls, useMateriaPaletteControls } from '../../components/MateriaPaletteControls.js';
 import type { DragPayload } from '../../types.js';
 import { formatIteratorBehavior, hasIteratorBehavior, isGeneratorSocket, iteratorBadgeLabel } from '../../utils/graphLayout.js';
+import { resolveMateriaModelLabel } from '../../utils/materiaModelLabel.js';
 import { selectMateriaPaletteRows } from '../../utils/materiaPaletteFiltering.js';
 
 export interface MateriaPalettePanelProps {
@@ -37,6 +38,7 @@ export function MateriaPalettePanel({ palette, materia, selectedMateriaId, onDra
               const definition = materia[id];
               const group = typeof definition?.group === 'string' ? definition.group : undefined;
               const description = typeof definition?.description === 'string' ? definition.description : undefined;
+              const modelLabel = resolveMateriaModelLabel(definition);
               const isIterator = hasIteratorBehavior(socket, materia);
               const isGenerator = isGeneratorSocket(socket, materia);
               const iteratorDetails = isIterator ? formatIteratorBehavior(socket, materia) : undefined;
@@ -49,6 +51,11 @@ export function MateriaPalettePanel({ palette, materia, selectedMateriaId, onDra
                     {group && <span className="text-[0.62rem] uppercase tracking-[0.2em] text-cyan-200/80">{group}</span>}
                     {isIterator && <span className={`materia-iterator-badge palette-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}
                   </span>
+                  {modelLabel && (
+                    <span aria-hidden className="palette-model-chrome" title={modelLabel} data-testid={`palette-model-${id}`}>
+                      {modelLabel}
+                    </span>
+                  )}
                 </button>
               );
             })}
