@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 import { cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
+import type { MateriaBehaviorConfig, PipelineSocket } from '../../../loadoutModel.js';
 import { LoadoutGraphPanel } from './LoadoutGraphPanel.js';
 
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as { JSDOM: new (html: string) => { window: Window & typeof globalThis } };
@@ -686,6 +687,80 @@ describe('LoadoutGraphPanel replacement modal filtering and sorting', () => {
     fireEvent.change(getByTestId('replacement-filter-input'), { target: { value: 'zzznomatch' } });
     expect(queryByTestId('replacement-materia-Build')).toBeNull();
     expect(getByTestId('replacement-no-results').textContent).toBe('No matching materia.');
+  });
+});
+
+describe('LoadoutGraphPanel replacement modal model labels', () => {
+  function renderReplaceModelPanel(overrides: { materia?: Record<string, MateriaBehaviorConfig>; palette?: Array<[string, PipelineSocket]>; editPolicy?: LoadoutEditPolicy } = {}) {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    const baseSocketModal = base.props.socketModal;
+    base.unmount();
+
+    const materia: Record<string, MateriaBehaviorConfig> = overrides.materia ?? {
+      Build: { prompt: 'build', model: 'zai/glm-4.6', group: 'Core' },
+      Audit: { prompt: 'audit', model: '  anthropic/claude-opus-4  ', group: 'Core' },
+      NoModel: { prompt: 'no model here', group: 'Core' },
+      detectVcs: { type: 'utility', utility: 'vcs.detect', model: 'zai/glm-4.6', label: 'Detect VCS', group: 'Utility' },
+      longModel: { prompt: 'long', model: 'very-long-provider/extra-long-model-identifier-v2', group: 'Core' },
+    };
+    const palette: Array<[string, PipelineSocket]> = overrides.palette ?? Object.keys(materia).map((id) => [id, { materia: id }] as [string, PipelineSocket]);
+
+    return renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        materia: materia as never,
+        palette: palette as never,
+        editPolicy: overrides.editPolicy ?? unlockedUserPolicy,
+      },
+      socketModal: {
+        state: { ...baseSocketModal.state, socketActionMode: 'replace', socketActionId: 'Socket-1' },
+        actions: baseSocketModal.actions,
+      },
+    });
+  }
+
+  it('renders the exact configured provider/model value on its own line below the materia name', () => {
+    const { getByTestId } = renderReplaceModelPanel();
+
+    const buildLabel = getByTestId('replacement-model-Build');
+    expect(buildLabel.textContent).toBe('zai/glm-4.6');
+    expect(buildLabel.getAttribute('title')).toBe('zai/glm-4.6');
+
+    // Surrounding whitespace is trimmed and the raw configured value is shown
+    // verbatim — never a model-catalog friendly name or the active session model.
+    const auditLabel = getByTestId('replacement-model-Audit');
+    expect(auditLabel.textContent).toBe('anthropic/claude-opus-4');
+    expect(auditLabel.getAttribute('title')).toBe('anthropic/claude-opus-4');
+  });
+
+  it('keeps the full configured value available via tooltip even for long labels', () => {
+    // jsdom cannot lay out the ellipsis, so the label retains the full string as
+    // its text and exposes the untruncated value through its title tooltip.
+    const { getByTestId } = renderReplaceModelPanel();
+    const longLabel = getByTestId('replacement-model-longModel');
+    const value = 'very-long-provider/extra-long-model-identifier-v2';
+    expect(longLabel.textContent).toBe(value);
+    expect(longLabel.getAttribute('title')).toBe(value);
+  });
+
+  it('suppresses the label for agent materia without a selected model', () => {
+    const { queryByTestId } = renderReplaceModelPanel();
+    expect(queryByTestId('replacement-model-NoModel')).toBeNull();
+  });
+
+  it('suppresses the label for deterministic utility materia even when a model is configured', () => {
+    const { queryByTestId } = renderReplaceModelPanel();
+    expect(queryByTestId('replacement-model-detectVcs')).toBeNull();
+  });
+
+  it('keeps the row disabled under a readonly policy while still surfacing the model label', () => {
+    const { getByTestId } = renderReplaceModelPanel({ editPolicy: readonlyDefaultPolicy });
+
+    // Replacement action stays disabled for read-only loadouts, but the
+    // configured provider/model label is still displayed as card chrome.
+    expect(getByTestId('replacement-materia-Build')).toHaveProperty('disabled', true);
+    expect(getByTestId('replacement-model-Build').textContent).toBe('zai/glm-4.6');
   });
 });
 
