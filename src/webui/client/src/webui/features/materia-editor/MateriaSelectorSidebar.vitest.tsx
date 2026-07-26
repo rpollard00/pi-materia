@@ -392,3 +392,66 @@ describe('MateriaSelectorSidebar palette-style filtering and sorting', () => {
     expect(onDelete).toHaveBeenCalledWith('ensureGit');
   });
 });
+
+describe('MateriaSelectorSidebar stable filter states and sidebar styling', () => {
+  it('renders the toolbar as a control region with accessible labels above the scrollable list', () => {
+    const { container } = renderSidebar();
+    const sidebar = screen.getByRole('complementary', { name: 'Materia selector' });
+    const toolbar = container.querySelector('.palette-controls');
+    expect(toolbar instanceof Element).toBe(true);
+    expect(sidebar.contains(toolbar as Element)).toBe(true);
+
+    // Every compact control exposes an accessible name.
+    const search = within(toolbar as HTMLElement).getByTestId('catalog-filter-input');
+    expect(search.getAttribute('aria-label')).toBe('Filter materia');
+    const direction = within(toolbar as HTMLElement).getByTestId('catalog-sort-direction');
+    expect(direction.getAttribute('aria-label')).toBe('Sort descending');
+    const sortTrigger = within(toolbar as HTMLElement).getByTestId('catalog-sort-trigger');
+    expect((sortTrigger.getAttribute('aria-label') ?? '').trim()).not.toBe('');
+
+    // The scrollable materia list is a distinct sibling beneath the toolbar.
+    const list = container.querySelector('[data-testid="catalog-list"]');
+    expect(list instanceof Element).toBe(true);
+    expect((list as Element).isSameNode(toolbar)).toBe(false);
+  });
+
+  it('shows the empty-catalog message when no definitions exist and never the no-results message', () => {
+    const { getByTestId, queryByTestId } = renderSidebar({ items: [] });
+    expect(getByTestId('catalog-empty').textContent).toBe('No reusable materia definitions are available.');
+    expect(queryByTestId('catalog-no-results')).toBeNull();
+    // The stable list container still hosts the empty state in place.
+    expect(getByTestId('catalog-list')).toBeTruthy();
+  });
+
+  it('shows a distinct accessible no-results state when a non-empty catalog is filtered to nothing', () => {
+    const { getByTestId, queryByTestId } = renderSidebar();
+    // A non-empty catalog with no query renders rows, not an empty/no-results state.
+    expect(queryByTestId('catalog-empty')).toBeNull();
+    expect(queryByTestId('catalog-no-results')).toBeNull();
+
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zzznomatch' } });
+    expect(getByTestId('catalog-no-results').textContent).toBe('No matching materia.');
+    expect(queryByTestId('catalog-empty')).toBeNull();
+  });
+
+  it('keeps the same list container node across filter changes and restores rows on clear', () => {
+    const { container, getByTestId } = renderSidebar();
+    const listBefore = container.querySelector('[data-testid="catalog-list"]');
+    expect(listBefore?.querySelectorAll('.materia-selector-row-select')).toHaveLength(catalogItems.length);
+    expect(listBefore?.querySelector('[data-testid="catalog-no-results"]')).toBeNull();
+
+    // Filtering to nothing swaps the children but preserves the container node.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zzznomatch' } });
+    const listFiltered = container.querySelector('[data-testid="catalog-list"]');
+    expect(listFiltered?.isSameNode(listBefore)).toBe(true);
+    expect(listFiltered?.querySelectorAll('.materia-selector-row-select')).toHaveLength(0);
+    expect(listFiltered?.querySelector('[data-testid="catalog-no-results"]')).toBeTruthy();
+
+    // Clearing the query restores the rows inside the same container node.
+    fireEvent.click(getByTestId('catalog-filter-clear'));
+    const listCleared = container.querySelector('[data-testid="catalog-list"]');
+    expect(listCleared?.isSameNode(listBefore)).toBe(true);
+    expect(listCleared?.querySelectorAll('.materia-selector-row-select')).toHaveLength(catalogItems.length);
+    expect(listCleared?.querySelector('[data-testid="catalog-no-results"]')).toBeNull();
+  });
+});

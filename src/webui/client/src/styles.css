@@ -1496,6 +1496,18 @@
   box-shadow: 0 0 0 4px rgb(34 211 238 / 0.16);
 }
 
+/*
+  Catalog toolbar stability: pin the shared palette controls as a fixed
+  control region at the top of the sidebar so filtering (which never touches
+  controller state) cannot shrink or scroll the controls out of view. The
+  controls already wrap safely at narrow widths via .palette-controls'
+  flex-wrap; here we only prevent the toolbar from flexing while the materia
+  list below it absorbs the remaining height and scrolls independently.
+*/
+.materia-selector-sidebar .palette-controls {
+  flex: 0 0 auto;
+}
+
 .materia-selector-list {
   display: grid;
   flex: 1 1 auto;

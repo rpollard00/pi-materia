@@ -205,9 +205,20 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
 
       <MateriaPaletteControls state={controls} testIdPrefix="catalog" />
 
-      <div className="materia-selector-list" role="list" aria-label="Available materia">
+      {/* The list container is always the same element so filtering only
+          swaps its children: the structural empty-catalog message when no
+          definitions exist, a distinct no-results message when a non-empty
+          catalog is filtered to nothing, or the (filtered/sorted) rows.
+          Clearing the query therefore restores rows inside this container. */}
+      <div className="materia-selector-list" data-testid="catalog-list" role="list" aria-label="Available materia">
         {items.length === 0 ? (
-          <p className="materia-selector-empty">No reusable materia definitions are available.</p>
+          <p className="materia-selector-empty" data-testid="catalog-empty">
+            No reusable materia definitions are available.
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="materia-selector-empty" data-testid="catalog-no-results">
+            No matching materia.
+          </p>
         ) : (
           rows.map((item) => {
             const selected = item.id === selectedId;
