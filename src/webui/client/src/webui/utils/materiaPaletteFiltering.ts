@@ -1,5 +1,6 @@
 import { getSocketLabel, type MateriaBehaviorConfig, type MateriaConfig, type PipelineSocket } from '../../loadoutModel.js';
 import { hasIteratorBehavior, isGeneratorSocket } from './graphLayout.js';
+import { resolveMateriaModelLabel } from './materiaModelLabel.js';
 
 export type PaletteSortMode = 'name' | 'type' | 'group';
 export type PaletteSortDirection = 'asc' | 'desc';
@@ -56,6 +57,12 @@ export function buildPaletteSearchText(id: string, socket: PipelineSocket, mater
   const group = readGroup(definition);
   if (group) parts.push(group.toLowerCase());
   if (typeof definition?.description === 'string' && definition.description) parts.push(definition.description.toLowerCase());
+  // Index the same explicit provider/model value shown by the model chrome so
+  // palette search and the visible label stay in lockstep. Deterministic
+  // utility materia and missing/blank/malformed models resolve to no label and
+  // therefore contribute no token, matching resolveMateriaModelLabel exactly.
+  const modelLabel = resolveMateriaModelLabel(definition);
+  if (modelLabel) parts.push(modelLabel.toLowerCase());
   parts.push(resolvePaletteMateriaType(definition));
   if (isGeneratorSocket(socket, materia)) parts.push('generator');
   if (hasIteratorBehavior(socket, materia)) parts.push('iterator');

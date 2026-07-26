@@ -136,6 +136,56 @@ describe('filterMateriaPalette and buildPaletteSearchText', () => {
   });
 });
 
+describe('buildPaletteSearchText and filterMateriaPalette model labels', () => {
+  const modelMateria: Materia = {
+    Build: { prompt: 'build', model: 'zai/glm-4.6' },
+    Audit: { prompt: 'audit', model: '  anthropic/claude-opus-4  ' },
+    NoModel: { prompt: 'no model' },
+    detectVcs: { type: 'utility', utility: 'vcs.detect', model: 'zai/glm-4.6', label: 'Detect VCS' },
+  };
+  const rows = entriesOf(modelMateria);
+
+  it('indexes the trimmed provider/model label for agent materia (case-insensitive)', () => {
+    expect(buildPaletteSearchText('Build', { materia: 'Build' }, modelMateria)).toBe('build build zai/glm-4.6 agent');
+    // Surrounding whitespace is trimmed before the raw value is indexed.
+    expect(buildPaletteSearchText('Audit', { materia: 'Audit' }, modelMateria)).toBe('audit audit anthropic/claude-opus-4 agent');
+  });
+
+  it('omits a model token when no agent model is configured', () => {
+    expect(buildPaletteSearchText('NoModel', { materia: 'NoModel' }, modelMateria)).toBe('nomodel nomodel agent');
+  });
+
+  it('omits the model label for deterministic utility materia even when a model is configured', () => {
+    expect(buildPaletteSearchText('detectVcs', { materia: 'detectVcs' }, modelMateria)).toBe('detectvcs detect vcs utility');
+  });
+
+  it('matches provider fragments, model-name fragments, and the full provider/model value', () => {
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'zai'))).toEqual(['Build']);
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'glm'))).toEqual(['Build']);
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'claude'))).toEqual(['Audit']);
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'opus'))).toEqual(['Audit']);
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'anthropic'))).toEqual(['Audit']);
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'zai/glm-4.6'))).toEqual(['Build']);
+  });
+
+  it('combines a model fragment with another token via AND semantics', () => {
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'zai build'))).toEqual(['Build']);
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'anthropic audit'))).toEqual(['Audit']);
+    // No entry combines the Audit provider with the Build id, so AND excludes all.
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'anthropic build'))).toEqual([]);
+  });
+
+  it('never matches the model of deterministic utility materia', () => {
+    // detectVcs carries the same model as Build but is a utility, so it stays excluded.
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'zai'))).toEqual(['Build']);
+    expect(ids(filterMateriaPalette(rows, modelMateria, 'glm'))).not.toContain('detectVcs');
+  });
+
+  it('restores every row when the query is cleared', () => {
+    expect(filterMateriaPalette(rows, modelMateria, '   ')).toHaveLength(rows.length);
+  });
+});
+
 describe('selectMateriaPaletteRows', () => {
   it('combines filtering and sorting with name/asc defaults', () => {
     const palette: Array<[string, MateriaPaletteEntry['socket']]> = Object.keys(materia).map((id, index) => [id, { materia: id }] as [string, MateriaPaletteEntry['socket']]);

@@ -244,4 +244,32 @@ describe('MateriaPalettePanel model chrome', () => {
     fireEvent.click(getByTestId('palette-Build'));
     expect(onSelectMateria).toHaveBeenCalledWith('Build');
   });
+
+  it('filters palette rows by provider/model fragments and clears to restore all rows', () => {
+    const { container, getByTestId } = renderModelPanel();
+
+    // Provider fragment narrows to the single agent using that provider.
+    fireEvent.change(getByTestId('palette-filter-input'), { target: { value: 'zai' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    // Model-name fragment matches independently of the provider.
+    fireEvent.change(getByTestId('palette-filter-input'), { target: { value: 'claude' } });
+    expect(rowOrder(container)).toEqual(['Audit']);
+
+    // The full configured provider/model value also matches.
+    fireEvent.change(getByTestId('palette-filter-input'), { target: { value: 'zai/glm-4.6' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    // A fragment unique to the long model reaches that row only.
+    fireEvent.change(getByTestId('palette-filter-input'), { target: { value: 'provider' } });
+    expect(rowOrder(container)).toEqual(['longModel']);
+
+    // Deterministic utility materia carrying the same model stays excluded.
+    fireEvent.change(getByTestId('palette-filter-input'), { target: { value: 'glm' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    // Clearing restores every row.
+    fireEvent.click(getByTestId('palette-filter-clear'));
+    expect(rowOrder(container)).toEqual(['Audit', 'Build', 'detectVcs', 'longModel', 'NoModel']);
+  });
 });
