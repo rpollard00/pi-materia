@@ -1,7 +1,9 @@
 import { EllipsisVertical, Lock, Plus, Unlock } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { Orb } from '../../components/Orb.js';
+import { MateriaPaletteControls, useMateriaPaletteControls } from '../../components/MateriaPaletteControls.js';
 import type { LoadoutSourceScope } from '../../types.js';
+import { selectMateriaCatalogRows } from './materiaCatalogFiltering.js';
 import type { MateriaLockState, MateriaSelectorItem } from './materiaEditPolicy.js';
 
 export interface MateriaSelectorSidebarProps {
@@ -177,6 +179,17 @@ function MateriaActionsMenu({ item, onDuplicate, onToggleLock, onDelete }: Mater
 }
 
 export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onDuplicate, onToggleLock, onDelete }: MateriaSelectorSidebarProps) {
+  // Local palette-control state mirrors the materia palette: the catalog owns
+  // its query/sort/direction without touching controller state, the active
+  // editor selection, or item identities. The selector returns the same item
+  // references, only filtered and reordered, so row actions keep routing the
+  // original materia id.
+  const controls = useMateriaPaletteControls();
+  const rows = useMemo(
+    () => selectMateriaCatalogRows(items, { query: controls.query, sortMode: controls.sortMode, direction: controls.direction }),
+    [items, controls.query, controls.sortMode, controls.direction],
+  );
+
   return (
     <aside className="fantasy-panel materia-selector-sidebar p-4" aria-label="Materia selector">
       <div className="materia-selector-header">
@@ -190,11 +203,13 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
         </button>
       </div>
 
+      <MateriaPaletteControls state={controls} testIdPrefix="catalog" />
+
       <div className="materia-selector-list" role="list" aria-label="Available materia">
         {items.length === 0 ? (
           <p className="materia-selector-empty">No reusable materia definitions are available.</p>
         ) : (
-          items.map((item) => {
+          rows.map((item) => {
             const selected = item.id === selectedId;
             const LockIcon = item.lockState === 'locked' ? Lock : Unlock;
             const groupBadge = getGroupBadge(item);
