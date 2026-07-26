@@ -544,7 +544,7 @@
     "Blackbelt-Bootstrap": {
       "type": "utility",
       "label": "Blackbelt-Bootstrap",
-      "description": "Deterministically bootstrap jj version control for the current project, ensure an empty working commit for maintenance flows, and create a stable blackbelt/ bookmark for pull-request-driven workflows.",
+      "description": "Deterministically bootstrap jj version control for the current project, move to a verified-empty working commit (preserving any pre-existing non-empty work) only when needed, and create a stable blackbelt/ bookmark for pull-request-driven workflows.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
