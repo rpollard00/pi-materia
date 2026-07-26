@@ -190,7 +190,7 @@ describe('MateriaPalettePanel filtering and sorting', () => {
   });
 });
 
-describe('MateriaPalettePanel model chrome', () => {
+describe('MateriaPalettePanel model footer', () => {
   const modelMateria: Materia = {
     Build: { prompt: 'build', model: 'zai/glm-4.6', group: 'Core' },
     Audit: { prompt: 'audit', model: '  anthropic/claude-opus-4  ', group: 'Core' },
@@ -203,39 +203,65 @@ describe('MateriaPalettePanel model chrome', () => {
     return renderPanel({ materia: modelMateria, palette: buildPalette(modelMateria), ...overrides });
   }
 
-  it('renders the exact configured provider/model value as top-right card chrome', () => {
+  it('renders the eligible provider/model value as the bottom-aligned card footer line', () => {
     const { getByTestId } = renderModelPanel();
 
-    const buildChrome = getByTestId('palette-model-Build');
-    expect(buildChrome.className).toContain('palette-model-chrome');
-    expect(buildChrome.textContent).toBe('zai/glm-4.6');
-    expect(buildChrome.getAttribute('title')).toBe('zai/glm-4.6');
+    const buildCard = getByTestId('palette-Build');
+    const buildFooter = getByTestId('palette-model-Build');
+    // The label uses the subdued inline footer treatment (no floating chip
+    // chrome) and still surfaces the raw configured provider/model value.
+    expect(buildFooter.className).toContain('palette-model-footer');
+    expect(buildFooter.className).not.toContain('palette-model-chrome');
+    expect(buildFooter.textContent).toBe('zai/glm-4.6');
+    expect(buildFooter.getAttribute('title')).toBe('zai/glm-4.6');
+
+    // The footer is the final line of the card: it comes after the orb +
+    // socket-label group (which holds the group/iterator badges) and is the
+    // last child of the card, rather than floating top-right chrome.
+    const cardChildren = Array.from(buildCard.children);
+    const mainGroup = buildCard.querySelector('.palette-orb-main');
+    expect(mainGroup).toBeTruthy();
+    expect(cardChildren.indexOf(mainGroup as Element)).toBeGreaterThanOrEqual(0);
+    expect(cardChildren.at(-1)).toBe(buildFooter);
+    expect(cardChildren.indexOf(buildFooter)).toBeGreaterThan(cardChildren.indexOf(mainGroup as Element));
 
     // Surrounding whitespace is trimmed and the raw configured value is shown
     // verbatim — never a model-catalog friendly name.
-    const auditChrome = getByTestId('palette-model-Audit');
-    expect(auditChrome.textContent).toBe('anthropic/claude-opus-4');
-    expect(auditChrome.getAttribute('title')).toBe('anthropic/claude-opus-4');
+    const auditFooter = getByTestId('palette-model-Audit');
+    expect(auditFooter.textContent).toBe('anthropic/claude-opus-4');
+    expect(auditFooter.getAttribute('title')).toBe('anthropic/claude-opus-4');
   });
 
   it('keeps the full configured value available via tooltip even for long labels', () => {
-    // jsdom cannot lay out the ellipsis, so the chrome retains the full string
+    // jsdom cannot lay out the ellipsis, so the footer retains the full string
     // as its text and exposes the untruncated value through its title tooltip.
     const { getByTestId } = renderModelPanel();
-    const longChrome = getByTestId('palette-model-longModel');
+    const longFooter = getByTestId('palette-model-longModel');
     const value = 'very-long-provider/extra-long-model-identifier-v2';
-    expect(longChrome.textContent).toBe(value);
-    expect(longChrome.getAttribute('title')).toBe(value);
+    expect(longFooter.textContent).toBe(value);
+    expect(longFooter.getAttribute('title')).toBe(value);
+    // The long footer is still the bottom-aligned last line of its card.
+    const longCard = getByTestId('palette-longModel');
+    expect(Array.from(longCard.children).at(-1)).toBe(longFooter);
   });
 
-  it('suppresses the chrome for deterministic utility materia even when a model is configured', () => {
+  it('suppresses the footer for deterministic utility materia even when a model is configured', () => {
     const { queryByTestId } = renderModelPanel();
     expect(queryByTestId('palette-model-detectVcs')).toBeNull();
   });
 
-  it('suppresses the chrome for agent materia without a selected model', () => {
+  it('suppresses the footer for agent materia without a selected model', () => {
     const { queryByTestId } = renderModelPanel();
     expect(queryByTestId('palette-model-NoModel')).toBeNull();
+  });
+
+  it('renders the orb + socket-label group without a model footer for model-less cards', () => {
+    // Cards without an eligible model keep the centered orb/label group and
+    // simply omit the footer line, so the layout stays consistent.
+    const { getByTestId } = renderModelPanel();
+    const noModelCard = getByTestId('palette-NoModel');
+    expect(noModelCard.querySelector('.palette-orb-main')).toBeTruthy();
+    expect(noModelCard.querySelector('.palette-model-footer')).toBeNull();
   });
 
   it('does not interfere with selecting a card that shows a model label', () => {

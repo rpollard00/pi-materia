@@ -1096,6 +1096,18 @@
   transition: 160ms ease;
 }
 
+/* The orb + socket label (plus group/iterator badges) stack fills the card so
+   the model footer can bottom-align beneath them while the visual core stays
+   centered. */
+.palette-orb-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
 .palette-orb:hover,
 .palette-orb-selected {
   border-color: rgb(103 232 249 / 0.62);
@@ -1129,25 +1141,22 @@
   box-shadow: 0 0 28px rgb(168 85 247 / 0.22), 0 0 34px rgb(34 211 238 / 0.12);
 }
 
-.palette-model-chrome {
-  position: absolute;
-  top: 0.28rem;
-  right: 0.32rem;
-  /* Compact, non-interactive card chrome pinned to the top-right of each
-     eligible materia card. Capped so long provider/model strings truncate
-     with an ellipsis while the full value stays available via the title
-     tooltip. It floats over the orb edge without participating in selection,
-     drag, filtering, or the card's intrinsic sizing. */
-  max-width: calc(100% - 0.7rem);
-  padding: 0.04rem 0.3rem;
-  border: 1px solid rgb(148 163 184 / 0.22);
-  border-radius: 0.35rem;
-  background: rgb(2 6 23 / 0.74);
-  color: rgb(165 243 252 / 0.86);
-  font-size: 0.55rem;
-  letter-spacing: 0.02em;
+.palette-model-footer {
+  /* Subdued, inline provider/model line pinned to the bottom of each eligible
+     palette card. Mirrors the replacement modal's readable model treatment
+     (no chip border/background) and lands as the final line below the
+     iterator/generator badges. Stretched to the card width so long
+     provider/model strings truncate with an ellipsis while the full value
+     stays available via the title tooltip; it never participates in
+     selection, drag, filtering, or the card's intrinsic sizing. */
+  align-self: stretch;
+  flex: 0 0 auto;
+  color: rgb(165 243 252 / 0.7);
+  font-size: 0.65rem;
+  letter-spacing: normal;
   text-transform: none;
-  line-height: 1.15;
+  line-height: 1.2;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
