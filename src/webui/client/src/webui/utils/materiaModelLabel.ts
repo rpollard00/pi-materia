@@ -8,9 +8,7 @@ import type { MateriaBehaviorConfig } from '../../loadoutModel.js';
  * materia definition. The helper never substitutes the active-session model or
  * a model-catalog friendly name — it surfaces the raw configured provider/model
  * value so dense, provider-specific labels stay visible even when the same
- * model is offered by multiple providers. See
- * `docs/enterprise-control-plane.md` and the materia selector surfaces for the
- * "configured value, not friendly name" requirement.
+ * model is offered by multiple providers.
  */
 
 /**
