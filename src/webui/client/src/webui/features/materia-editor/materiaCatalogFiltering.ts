@@ -62,15 +62,22 @@ export function catalogOriginStatusLabel(item: MateriaSelectorItem): string {
 
 /**
  * Assembles the lowercase searchable text for a catalog row. Covers id, the
- * displayed label, group, description, the agent/utility type, and the visible
- * origin/lock metadata (origin status badge, source scope label, and locked
- * state). Unlocked rows add no lock token since the sidebar only badges locks.
+ * displayed label, group, description, the projected provider/model label, the
+ * agent/utility type, and the visible origin/lock metadata (origin status
+ * badge, source scope label, and locked state). The model label is normalized
+ * (trimmed and lower-cased) from the value projected by
+ * {@link resolveMateriaModelLabel} so catalog search stays in lockstep with the
+ * visible model chrome; deterministic utility materia and model-less agents
+ * project no label and therefore contribute no token. Unlocked rows add no
+ * lock token since the sidebar only badges locks.
  */
 export function buildCatalogSearchText(item: MateriaSelectorItem): string {
   const parts: string[] = [item.id.toLowerCase(), item.label.toLowerCase()];
   const group = readCatalogGroup(item);
   if (group) parts.push(group.toLowerCase());
   if (item.description) parts.push(item.description.toLowerCase());
+  const modelLabel = item.modelLabel?.trim();
+  if (modelLabel) parts.push(modelLabel.toLowerCase());
   parts.push(resolveCatalogMateriaType(item));
   parts.push(catalogOriginStatusLabel(item).toLowerCase());
   parts.push(catalogSourceLabel(item.source).toLowerCase());

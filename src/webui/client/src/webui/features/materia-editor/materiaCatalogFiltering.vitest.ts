@@ -203,6 +203,65 @@ describe('filterMateriaCatalog and buildCatalogSearchText', () => {
   });
 });
 
+// Catalog rows carry the provider/model label projected by
+// buildMateriaSelectorItems (raw value for eligible agents, omitted for
+// deterministic and model-less materia). These items mirror that projection so
+// model-aware catalog search can be exercised in isolation, matching the
+// palette's model search coverage.
+describe('buildCatalogSearchText and filterMateriaCatalog model labels', () => {
+  const modelItems: MateriaSelectorItem[] = [
+    item({ id: 'Build', label: 'Build', group: 'Core', type: 'agent', description: 'Builds the work', modelLabel: 'zai/glm-4.6' }),
+    item({ id: 'Audit', label: 'Audit', group: 'Core', type: 'agent', description: 'Audits the work', modelLabel: '  anthropic/claude-opus-4  ' }),
+    item({ id: 'NoModel', label: 'No Model', group: 'Core', type: 'agent', description: 'No model here' }),
+    item({ id: 'detectVcs', label: 'Detect VCS', group: 'Utility', type: 'utility', description: 'Detects the vcs provider' }),
+  ];
+
+  it('indexes the trimmed provider/model label for eligible agent materia (case-insensitive)', () => {
+    expect(buildCatalogSearchText(modelItems[0])).toBe('build build core builds the work zai/glm-4.6 agent custom unsaved');
+    // Surrounding whitespace is trimmed before the raw value is indexed.
+    expect(buildCatalogSearchText(modelItems[1])).toBe('audit audit core audits the work anthropic/claude-opus-4 agent custom unsaved');
+  });
+
+  it('omits a model token when no agent model is projected', () => {
+    expect(buildCatalogSearchText(modelItems[2])).toBe('nomodel no model core no model here agent custom unsaved');
+  });
+
+  it('omits the model token for deterministic utility materia', () => {
+    expect(buildCatalogSearchText(modelItems[3])).toBe('detectvcs detect vcs utility detects the vcs provider utility custom unsaved');
+  });
+
+  it('matches provider fragments, model-name fragments, and the full provider/model value', () => {
+    expect(ids(filterMateriaCatalog(modelItems, 'zai'))).toEqual(['Build']);
+    expect(ids(filterMateriaCatalog(modelItems, 'glm'))).toEqual(['Build']);
+    expect(ids(filterMateriaCatalog(modelItems, 'claude'))).toEqual(['Audit']);
+    expect(ids(filterMateriaCatalog(modelItems, 'opus'))).toEqual(['Audit']);
+    expect(ids(filterMateriaCatalog(modelItems, 'anthropic'))).toEqual(['Audit']);
+    expect(ids(filterMateriaCatalog(modelItems, 'zai/glm-4.6'))).toEqual(['Build']);
+  });
+
+  it('combines a model fragment with another token via AND semantics', () => {
+    expect(ids(filterMateriaCatalog(modelItems, 'zai build'))).toEqual(['Build']);
+    expect(ids(filterMateriaCatalog(modelItems, 'anthropic audit'))).toEqual(['Audit']);
+    // No entry combines the Audit provider with the Build id, so AND excludes all.
+    expect(ids(filterMateriaCatalog(modelItems, 'anthropic build'))).toEqual([]);
+  });
+
+  it('never matches model-less or deterministic materia when searching by a model fragment', () => {
+    expect(ids(filterMateriaCatalog(modelItems, 'glm'))).toEqual(['Build']);
+    expect(ids(filterMateriaCatalog(modelItems, 'glm'))).not.toContain('NoModel');
+    expect(ids(filterMateriaCatalog(modelItems, 'glm'))).not.toContain('detectVcs');
+  });
+
+  it('returns an empty list when no projected model matches', () => {
+    expect(filterMateriaCatalog(modelItems, 'gpt')).toEqual([]);
+  });
+
+  it('restores every row when the query is cleared', () => {
+    expect(filterMateriaCatalog(modelItems, '   ')).toHaveLength(modelItems.length);
+    expect(filterMateriaCatalog(modelItems, '')).toHaveLength(modelItems.length);
+  });
+});
+
 describe('selectMateriaCatalogRows', () => {
   it('combines filtering and sorting with name/asc defaults', () => {
     // Reverse the input so the default sort is proven to reorder by name, not by input.

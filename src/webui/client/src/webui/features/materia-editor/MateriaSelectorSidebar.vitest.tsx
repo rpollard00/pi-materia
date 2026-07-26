@@ -609,3 +609,74 @@ describe('MateriaSelectorSidebar model chrome', () => {
     expect(onSelect).toHaveBeenCalledWith('Build');
   });
 });
+
+describe('MateriaSelectorSidebar model-aware filtering', () => {
+  // Name-ascending order of modelChromeItems by displayed label.
+  const allRows = ['Build', 'detectVcs', 'longModel', 'noModel'];
+
+  it('filters rows by provider and model-name fragments of the projected label', () => {
+    const { container, getByTestId } = renderSidebar({ items: modelChromeItems });
+
+    // Provider fragment narrows to the single agent using that provider.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    // Model-name fragment matches independently of the provider.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'glm' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    // The full configured provider/model value also matches.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai/glm-4.6' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    // A fragment unique to the long model reaches that row only.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'extra-long' } });
+    expect(rowOrder(container)).toEqual(['longModel']);
+  });
+
+  it('combines a model fragment with another token via AND semantics', () => {
+    const { container, getByTestId } = renderSidebar({ items: modelChromeItems });
+
+    // 'zai' (model) + 'core' (group) both appear only on Build.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai core' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    // A provider fragment paired with a non-matching id excludes every row.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai detect' } });
+    expect(rowOrder(container)).toEqual([]);
+  });
+
+  it('never matches model-less or deterministic materia when filtering by a model fragment', () => {
+    const { container, getByTestId } = renderSidebar({ items: modelChromeItems });
+
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'glm' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+    expect(rowOrder(container)).not.toContain('detectVcs');
+    expect(rowOrder(container)).not.toContain('noModel');
+
+    // 'provider' is unique to the long model label; the utility and model-less
+    // rows never surface via model fragments.
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'provider' } });
+    expect(rowOrder(container)).toEqual(['longModel']);
+  });
+
+  it('shows the no-results state when no projected model matches', () => {
+    const { container, getByTestId, queryByTestId } = renderSidebar({ items: modelChromeItems });
+
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'gpt' } });
+    expect(rowOrder(container)).toEqual([]);
+    expect(getByTestId('catalog-no-results').textContent).toBe('No matching materia.');
+    expect(queryByTestId('catalog-empty')).toBeNull();
+  });
+
+  it('restores every row when the filter is cleared', () => {
+    const { container, getByTestId, queryByTestId } = renderSidebar({ items: modelChromeItems });
+
+    fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai' } });
+    expect(rowOrder(container)).toEqual(['Build']);
+
+    fireEvent.click(getByTestId('catalog-filter-clear'));
+    expect(queryByTestId('catalog-filter-clear')).toBeNull();
+    expect(rowOrder(container)).toEqual(allRows);
+  });
+});
