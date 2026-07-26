@@ -457,10 +457,11 @@ describe('MateriaSelectorSidebar stable filter states and sidebar styling', () =
 });
 
 // Catalog rows receive the provider/model label projected by
-// buildMateriaSelectorItems as compact top-right chrome. These items mirror that
-// projection (raw value for eligible agents, omitted for deterministic and
-// model-less materia) so the sidebar rendering can be exercised in isolation.
-const modelChromeItems: MateriaSelectorItem[] = [
+// buildMateriaSelectorItems as the bottom metadata footer line of each
+// selectable card. These items mirror that projection (raw value for eligible
+// agents, omitted for deterministic and model-less materia) so the sidebar
+// rendering can be exercised in isolation.
+const modelFooterItems: MateriaSelectorItem[] = [
   {
     id: 'Build',
     label: 'Build',
@@ -543,65 +544,92 @@ const modelChromeItems: MateriaSelectorItem[] = [
   },
 ];
 
-describe('MateriaSelectorSidebar model chrome', () => {
-  it('renders the raw provider/model value as top-right chrome with a full-value tooltip', () => {
-    renderSidebar({ items: modelChromeItems });
+describe('MateriaSelectorSidebar model footer', () => {
+  it('renders the eligible provider/model value as the bottom metadata line of the card content', () => {
+    renderSidebar({ items: modelFooterItems });
 
-    const buildChrome = screen.getByTestId('catalog-model-Build');
-    expect(buildChrome.className).toContain('materia-selector-model-chrome');
-    expect(buildChrome.textContent).toBe('zai/glm-4.6');
-    expect(buildChrome.getAttribute('title')).toBe('zai/glm-4.6');
-    expect(buildChrome.getAttribute('aria-hidden')).toBe('true');
+    const buildFooter = screen.getByTestId('catalog-model-Build');
+    // The label uses the subdued inline footer treatment (no floating chip
+    // chrome) and still surfaces the raw configured provider/model value.
+    expect(buildFooter.className).toContain('materia-selector-model-footer');
+    expect(buildFooter.className).not.toContain('materia-selector-model-chrome');
+    expect(buildFooter.textContent).toBe('zai/glm-4.6');
+    expect(buildFooter.getAttribute('title')).toBe('zai/glm-4.6');
+    expect(buildFooter.getAttribute('aria-hidden')).toBe('true');
+
+    // The footer is the final line of the selectable card content: it is the
+    // last child of .materia-selector-row-content and lands below the
+    // description/badges (.materia-selector-row-meta), rather than floating
+    // beside the lock and actions controls at the row level.
+    const content = buildFooter.closest('.materia-selector-row-content');
+    expect(content).toBeTruthy();
+    const contentChildren = Array.from(content!.children);
+    const meta = content!.querySelector('.materia-selector-row-meta');
+    expect(meta).toBeTruthy();
+    expect(contentChildren.at(-1)).toBe(buildFooter);
+    expect(contentChildren.indexOf(buildFooter)).toBeGreaterThan(contentChildren.indexOf(meta!));
+
+    // The footer never sits at the row level alongside the lock/actions controls.
+    const row = buildFooter.closest('.materia-selector-row');
+    expect(row).toBeTruthy();
+    expect(Array.from(row!.children).includes(buildFooter)).toBe(false);
   });
 
   it('keeps the full configured value available via tooltip even for long labels', () => {
-    // jsdom cannot lay out the ellipsis, so the chrome retains the full string
+    // jsdom cannot lay out the ellipsis, so the footer retains the full string
     // as its text and exposes the untruncated value through its title tooltip.
-    renderSidebar({ items: modelChromeItems });
-    const longChrome = screen.getByTestId('catalog-model-longModel');
+    renderSidebar({ items: modelFooterItems });
+    const longFooter = screen.getByTestId('catalog-model-longModel');
     const value = 'very-long-provider/extra-long-model-identifier-v2';
-    expect(longChrome.textContent).toBe(value);
-    expect(longChrome.getAttribute('title')).toBe(value);
+    expect(longFooter.textContent).toBe(value);
+    expect(longFooter.getAttribute('title')).toBe(value);
+    // The long footer is still the bottom line of its card content.
+    const content = longFooter.closest('.materia-selector-row-content');
+    expect(Array.from(content!.children).at(-1)).toBe(longFooter);
   });
 
-  it('suppresses the chrome for deterministic utility materia', () => {
-    renderSidebar({ items: modelChromeItems });
+  it('suppresses the footer for deterministic utility materia', () => {
+    renderSidebar({ items: modelFooterItems });
     expect(screen.queryByTestId('catalog-model-detectVcs')).toBeNull();
   });
 
-  it('suppresses the chrome for agent materia without a selected model', () => {
-    renderSidebar({ items: modelChromeItems });
+  it('suppresses the footer for agent materia without a selected model', () => {
+    renderSidebar({ items: modelFooterItems });
     expect(screen.queryByTestId('catalog-model-noModel')).toBeNull();
   });
 
-  it('renders exactly one chrome per eligible row and none for ineligible rows', () => {
-    const { container } = renderSidebar({ items: modelChromeItems });
-    const chromes = container.querySelectorAll('.materia-selector-model-chrome');
-    expect(chromes).toHaveLength(2);
+  it('renders exactly one footer per eligible row and none for ineligible rows', () => {
+    const { container } = renderSidebar({ items: modelFooterItems });
+    const footers = container.querySelectorAll('.materia-selector-model-footer');
+    expect(footers).toHaveLength(2);
     expect(screen.getByTestId('catalog-model-Build')).toBeTruthy();
     expect(screen.getByTestId('catalog-model-longModel')).toBeTruthy();
+    // No floating chrome remains at the row level.
+    expect(container.querySelectorAll('.materia-selector-model-chrome')).toHaveLength(0);
   });
 
-  it('keeps the chrome out of the lock and actions controls so they stay accessible', () => {
+  it('keeps the footer inside the card content so lock and actions controls stay interactive', () => {
     const onToggleLock = vi.fn();
-    renderSidebar({ items: modelChromeItems, onToggleLock });
+    renderSidebar({ items: modelFooterItems, onToggleLock });
 
-    // The lock indicator and actions trigger remain interactive despite the
-    // adjacent top-right chrome region (the chrome is pointer-events: none).
+    // The lock indicator and actions trigger are separate row columns that the
+    // in-flow footer can never overlap or intercept.
     fireEvent.click(screen.getByRole('button', { name: 'Lock longModel' }));
     expect(onToggleLock).toHaveBeenCalledWith('longModel', 'locked');
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for longModel' }));
     expect(screen.getByRole('menu', { name: 'Actions for longModel' })).toBeTruthy();
 
-    // The built-in Build lock stays aria-disabled even with chrome present.
+    // The built-in Build lock stays aria-disabled with the footer present.
     expect(screen.getByRole('button', { name: 'Built-in materia cannot be locked. Save an override first.' }).getAttribute('aria-disabled')).toBe('true');
   });
 
-  it('does not interfere with selecting a row that shows a model label', () => {
+  it('participates in row selection without interfering with the select handler', () => {
     const onSelect = vi.fn();
-    const { container } = renderSidebar({ items: modelChromeItems, onSelect });
+    const { container } = renderSidebar({ items: modelFooterItems, onSelect });
 
+    // The footer lives inside the select button, so selecting the row still
+    // routes the original materia id like any other card content.
     const buildRowButton = Array.from(container.querySelectorAll<HTMLButtonElement>('.materia-selector-row-select'))
       .find((button) => button.dataset.materiaId === 'Build');
     if (!buildRowButton) throw new Error('Missing Build selector row');
@@ -611,11 +639,11 @@ describe('MateriaSelectorSidebar model chrome', () => {
 });
 
 describe('MateriaSelectorSidebar model-aware filtering', () => {
-  // Name-ascending order of modelChromeItems by displayed label.
+  // Name-ascending order of modelFooterItems by displayed label.
   const allRows = ['Build', 'detectVcs', 'longModel', 'noModel'];
 
   it('filters rows by provider and model-name fragments of the projected label', () => {
-    const { container, getByTestId } = renderSidebar({ items: modelChromeItems });
+    const { container, getByTestId } = renderSidebar({ items: modelFooterItems });
 
     // Provider fragment narrows to the single agent using that provider.
     fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai' } });
@@ -635,7 +663,7 @@ describe('MateriaSelectorSidebar model-aware filtering', () => {
   });
 
   it('combines a model fragment with another token via AND semantics', () => {
-    const { container, getByTestId } = renderSidebar({ items: modelChromeItems });
+    const { container, getByTestId } = renderSidebar({ items: modelFooterItems });
 
     // 'zai' (model) + 'core' (group) both appear only on Build.
     fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai core' } });
@@ -647,7 +675,7 @@ describe('MateriaSelectorSidebar model-aware filtering', () => {
   });
 
   it('never matches model-less or deterministic materia when filtering by a model fragment', () => {
-    const { container, getByTestId } = renderSidebar({ items: modelChromeItems });
+    const { container, getByTestId } = renderSidebar({ items: modelFooterItems });
 
     fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'glm' } });
     expect(rowOrder(container)).toEqual(['Build']);
@@ -661,7 +689,7 @@ describe('MateriaSelectorSidebar model-aware filtering', () => {
   });
 
   it('shows the no-results state when no projected model matches', () => {
-    const { container, getByTestId, queryByTestId } = renderSidebar({ items: modelChromeItems });
+    const { container, getByTestId, queryByTestId } = renderSidebar({ items: modelFooterItems });
 
     fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'gpt' } });
     expect(rowOrder(container)).toEqual([]);
@@ -670,7 +698,7 @@ describe('MateriaSelectorSidebar model-aware filtering', () => {
   });
 
   it('restores every row when the filter is cleared', () => {
-    const { container, getByTestId, queryByTestId } = renderSidebar({ items: modelChromeItems });
+    const { container, getByTestId, queryByTestId } = renderSidebar({ items: modelFooterItems });
 
     fireEvent.change(getByTestId('catalog-filter-input'), { target: { value: 'zai' } });
     expect(rowOrder(container)).toEqual(['Build']);

@@ -255,6 +255,11 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
                       {renderBadge(originStatusBadge)}
                       {renderBadge(lockedBadge)}
                     </span>
+                    {item.modelLabel && (
+                      <span aria-hidden className="materia-selector-model-footer" title={item.modelLabel} data-testid={`catalog-model-${item.id}`}>
+                        {item.modelLabel}
+                      </span>
+                    )}
                   </span>
                 </button>
                 <button
@@ -271,11 +276,6 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
                   <LockIcon className="materia-selector-icon" aria-hidden="true" focusable="false" />
                 </button>
                 <MateriaActionsMenu item={item} onDuplicate={onDuplicate} onToggleLock={onToggleLock} onDelete={onDelete} />
-                {item.modelLabel && (
-                  <span aria-hidden className="materia-selector-model-chrome" title={item.modelLabel} data-testid={`catalog-model-${item.id}`}>
-                    {item.modelLabel}
-                  </span>
-                )}
               </div>
             );
           })
