@@ -20,10 +20,35 @@ case "$1" in
   root)
     pwd
     ;;
+  log)
+    # Model jj's canonical emptiness inspection (\`jj log -r @ -T empty\`).
+    # @ is empty by default; JJ_DIRTY=1 models a non-empty working commit.
+    # JJ_LOG_FAIL=1 simulates an inspection error (an unverified probe).
+    # Once 'jj new' has run, @ advances onto a fresh empty commit, so all
+    # later emptiness checks report true (modeling jj new's guarantee).
+    if [ "$JJ_LOG_FAIL" = "1" ]; then
+      echo "jj: error: log failed" >&2
+      exit 1
+    fi
+    if grep -qx "new" "$JJ_LOG" 2>/dev/null; then
+      echo "true"
+    elif [ "$JJ_DIRTY" = "1" ]; then
+      echo "false"
+    else
+      echo "true"
+    fi
+    ;;
   diff)
     if [ "$JJ_DIRTY" = "1" ]; then echo 'M file.txt'; fi
     ;;
-  git|bookmark|describe|new)
+  git|bookmark|describe)
+    exit 0
+    ;;
+  new)
+    if [ "$JJ_NEW_FAIL" = "1" ]; then
+      echo "jj: error: cannot create new commit" >&2
+      exit 1
+    fi
     exit 0
     ;;
   *)
@@ -322,6 +347,73 @@ describe("Blackbelt utility scripts", () => {
     expect(lines.some((l) => l.startsWith("bookmark set"))).toBe(true);
     expect(lines.some((l) => l.startsWith("describe"))).toBe(false);
     expect(lines.some((l) => l === "new")).toBe(false);
+  });
+
+  test("bootstrap derives emptyHead from the verified post-new commit (truthful state)", async () => {
+    const castId = "2026-06-06T19-39-18-566Z";
+    const result = await runBootstrap({ castId }, { JJ_DIRTY: "1" });
+
+    expect(result.exitCode).toBe(0);
+    const bb = result.json.state.blackbeltBootstrap;
+    // emptyHead is derived from the postcondition probe (jj log -r @ -T empty)
+    // that runs AFTER jj new — not a hardcoded constant.
+    expect(bb.emptyHead).toBe(true);
+    expect(bb.newWorkingCommit).toBe(true);
+
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    const newIdx = lines.findIndex((l) => l === "new");
+    expect(newIdx).toBeGreaterThan(-1);
+
+    // Two emptiness probes: the initial check and the postcondition.
+    const logIdxs = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.startsWith("log ")).map(({ i }) => i);
+    expect(logIdxs.length).toBeGreaterThanOrEqual(2);
+    // The postcondition probe must come AFTER jj new (verifying the outcome).
+    const postNewLogIdx = logIdxs.find((i) => i > newIdx);
+    expect(postNewLogIdx).toBeGreaterThan(newIdx);
+  });
+
+  test("bootstrap fails the cast when jj new cannot advance @ (transition failure)", async () => {
+    const castId = "2026-06-06T19-39-18-566Z";
+    const result = await runBootstrap({ castId }, { JJ_DIRTY: "1", JJ_NEW_FAIL: "1" });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.json.state.blackbeltBootstrap.ok).toBe(false);
+    // The failure must mention the bootstrap utility and the jj new step.
+    expect(result.json.state.blackbeltBootstrap.error).toMatch(/Blackbelt-Bootstrap/);
+    expect(result.json.state.blackbeltBootstrap.error).toMatch(/cannot create new commit|jj new|new/);
+
+    // The postcondition probe must NOT have run — bootstrap failed at jj new.
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    const newIdx = lines.findIndex((l) => l === "new");
+    expect(newIdx).toBeGreaterThan(-1);
+    expect(lines.some((l, i) => l.startsWith("log ") && i > newIdx)).toBe(false);
+  });
+
+  test("bootstrap fails the cast when the empty-@ postcondition cannot be verified (unverified is not empty success)", async () => {
+    const castId = "2026-06-06T19-39-18-566Z";
+    // jj log -r @ -T empty cannot run.  The initial check conservatively treats
+    // @ as non-empty (describe + new), but the postcondition gate cannot verify
+    // the resulting commit is empty, so the cast must FAIL rather than report
+    // ok:true + emptyHead:true.  An unverified result is never empty success —
+    // this is the truthful empty-@ guarantee downstream materias rely on.
+    const result = await runBootstrap({ castId }, { JJ_LOG_FAIL: "1" });
+
+    expect(result.exitCode).toBe(1);
+    const bb = result.json.state.blackbeltBootstrap;
+    expect(bb.ok).toBe(false);
+    // Must NOT be reported as empty success.
+    expect(bb.emptyHead ?? false).toBe(false);
+    expect(bb.error).toMatch(/Blackbelt-Bootstrap/);
+    expect(bb.error).toMatch(/verify|empty|log/i);
+
+    // The transition attempt ran (describe + new) before the unverified
+    // postcondition failed the cast.
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    expect(lines.some((l) => l.startsWith("describe"))).toBe(true);
+    expect(lines.some((l) => l === "new")).toBe(true);
   });
 
   test("maintain refuses to invent a bookmark when bootstrap state is missing", async () => {

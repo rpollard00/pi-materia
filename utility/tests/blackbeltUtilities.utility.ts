@@ -1146,6 +1146,9 @@ async function makeFakeJjForBootstrap(opts: { diffEmpty?: boolean; diffFail?: bo
   const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-ut-fake-jj-bootstrap-"));
   const log = path.join(dir, "jj.log");
   const jj = path.join(dir, "jj");
+  // Marker touched only on a successful 'jj new' so the canonical emptiness
+  // inspection (jj log -r @ -T empty) models jj new's empty-commit guarantee.
+  const emptyMarker = path.join(dir, "empty.marker");
 
   const diffEmpty = opts.diffEmpty ?? true;
   const diffFail = opts.diffFail ?? false;
@@ -1174,6 +1177,23 @@ case "$1" in
       # Use a unique sentinel so tests don't contaminate each other.
       touch "\${BOOTSTRAP_SENTINEL:-/tmp/pi-materia-bootstrap-did-init-}"
       echo "Initialized git backing repo"
+    fi
+    ;;
+  log)
+    # Canonical emptiness inspection (jj log -r @ -T empty).  JJ_EMPTY=false
+    # models a non-empty working commit; LOG_FAIL simulates an inspection
+    # error.  A successful 'jj new' advances @ onto a fresh empty commit,
+    # modeled by the marker so the postcondition check reports true.
+    if [ "\${LOG_FAIL:-false}" = "true" ]; then
+      echo "jj: error: log failed" >&2
+      exit 1
+    fi
+    if [ -f "\$JJ_EMPTY_MARKER" ]; then
+      echo "true"
+    elif [ "\${JJ_EMPTY:-true}" = "true" ]; then
+      echo "true"
+    else
+      echo "false"
     fi
     ;;
   diff)
@@ -1207,6 +1227,8 @@ case "$1" in
       echo "jj: error: cannot create new commit" >&2
       exit 1
     fi
+    # A successful jj new advances @ onto a fresh empty commit.
+    touch "\$JJ_EMPTY_MARKER"
     ;;
 esac
 `,
@@ -1214,7 +1236,7 @@ esac
   );
   await chmod(jj, 0o755);
   await writeFile(log, "", "utf8");
-  return { dir, log };
+  return { dir, log, emptyMarker };
 }
 
 async function runBootstrap(
@@ -1233,6 +1255,7 @@ async function runBootstrap(
       ...process.env,
       PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`,
       JJ_LOG: fake.log,
+      JJ_EMPTY_MARKER: fake.emptyMarker,
       ...env,
     },
   });
@@ -1252,8 +1275,8 @@ function bootstrapSentinel(): string {
   return `/tmp/pi-materia-bootstrap-did-init-\$\$-${++bootstrapSentinelCount}`;
 }
 
-describe("Blackbelt-Bootstrap oversized-diff and .gitignore resilience", () => {
-  test("succeeds with clean working copy", async () => {
+describe("Blackbelt-Bootstrap working-commit guarantees and .gitignore resilience", () => {
+  test("succeeds with clean (empty) working copy and reports a truthful no-op state", async () => {
     const sentinel = bootstrapSentinel();
     // Clean up any leftover sentinel before the test.
     try { await import("node:fs/promises").then(m => m.unlink(sentinel)); } catch {}
@@ -1263,21 +1286,134 @@ describe("Blackbelt-Bootstrap oversized-diff and .gitignore resilience", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.json.state.blackbeltBootstrap.ok).toBe(true);
-    expect(result.json.state.blackbeltBootstrap.bookmarkName).toMatch(/^blackbelt\//);
+    const bb = result.json.state.blackbeltBootstrap;
+    expect(bb.ok).toBe(true);
+    expect(bb.bookmarkName).toMatch(/^blackbelt\//);
+    // Empty @ → idempotent: no new commit, truthful emptyHead.
+    expect(bb.newWorkingCommit).toBe(false);
+    expect(bb.emptyHead).toBe(true);
+
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    expect(lines.some((l) => l.startsWith("bookmark set"))).toBe(true);
+    expect(lines.some((l) => l === "new")).toBe(false);
   });
 
-  test("handles jj diff --summary failure (oversized output) gracefully", async () => {
-    const sentinel = bootstrapSentinel();
-    try { await import("node:fs/promises").then(m => m.unlink(sentinel)); } catch {}
+  test("existing empty commit is idempotent: no describe, no jj new", async () => {
+    // No BOOTSTRAP_NO_ROOT → jj root succeeds, modeling an EXISTING repo with
+    // an already-empty @.  Bootstrap must not create an unnecessary commit.
+    const result = await runBootstrap({ castId: "test-cast-existing-empty" });
+
+    expect(result.exitCode).toBe(0);
+    const bb = result.json.state.blackbeltBootstrap;
+    expect(bb.ok).toBe(true);
+    expect(bb.initialized).toBe(false);
+    expect(bb.newWorkingCommit).toBe(false);
+    expect(bb.emptyHead).toBe(true);
+
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    expect(lines.some((l) => l.startsWith("bookmark set"))).toBe(true);
+    expect(lines.some((l) => l.startsWith("describe"))).toBe(false);
+    expect(lines.some((l) => l === "new")).toBe(false);
+    expect(lines.some((l) => l.startsWith("git init"))).toBe(false);
+  });
+
+  test("non-empty working commit transitions to a new empty commit in the right order", async () => {
     const result = await runBootstrap(
-      { castId: "test-cast-oversized" },
-      { BOOTSTRAP_NO_ROOT: "1", DIFF_FAIL: "true", BOOTSTRAP_SENTINEL: sentinel },
+      { castId: "test-cast-nonempty" },
+      { JJ_EMPTY: "false" },
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.json.state.blackbeltBootstrap.ok).toBe(true);
-    expect(result.json.state.blackbeltBootstrap.bookmarkName).toMatch(/^blackbelt\//);
+    const bb = result.json.state.blackbeltBootstrap;
+    expect(bb.ok).toBe(true);
+    expect(bb.newWorkingCommit).toBe(true);
+    expect(bb.emptyHead).toBe(true);
+
+    // Command order: describe before bookmark set before new, and the
+    // postcondition emptiness probe runs AFTER new.
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    const describeIdx = lines.findIndex((l) => l.startsWith("describe"));
+    const bookmarkIdx = lines.findIndex((l) => l.startsWith("bookmark set"));
+    const newIdx = lines.findIndex((l) => l === "new");
+    expect(describeIdx).toBeGreaterThan(-1);
+    expect(bookmarkIdx).toBeGreaterThan(-1);
+    expect(newIdx).toBeGreaterThan(-1);
+    expect(describeIdx).toBeLessThan(bookmarkIdx);
+    expect(bookmarkIdx).toBeLessThan(newIdx);
+    const logIdxs = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.startsWith("log ")).map(({ i }) => i);
+    expect(logIdxs.length).toBeGreaterThanOrEqual(2);
+    expect(logIdxs.find((i) => i > newIdx)).toBeGreaterThan(newIdx);
+  });
+
+  test("newly initialized repository ends on an empty @ without an unnecessary commit", async () => {
+    const sentinel = bootstrapSentinel();
+    try { await import("node:fs/promises").then(m => m.unlink(sentinel)); } catch {}
+    const result = await runBootstrap(
+      { castId: "test-cast-init" },
+      { BOOTSTRAP_NO_ROOT: "1", BOOTSTRAP_SENTINEL: sentinel },
+    );
+
+    expect(result.exitCode).toBe(0);
+    const bb = result.json.state.blackbeltBootstrap;
+    expect(bb.ok).toBe(true);
+    expect(bb.initialized).toBe(true);
+    expect(bb.emptyHead).toBe(true);
+
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    // git init ran, root was retried, and no unnecessary jj new was created
+    // (the freshly-initialized @ is already empty in the fake).
+    expect(lines.some((l) => l.startsWith("git init"))).toBe(true);
+    expect(lines.some((l) => l === "new")).toBe(false);
+  });
+
+  test("fails the cast when the postcondition cannot be verified (unverified is not empty success)", async () => {
+    // The canonical emptiness probe (jj log -r @ -T empty) cannot run.  The
+    // initial check conservatively treats @ as non-empty (describe + new), but
+    // the postcondition gate cannot verify the resulting commit is empty, so
+    // the cast must FAIL — an unverified result is never reported as empty
+    // success.  This preserves the truthful empty-@ guarantee downstream
+    // materias rely on.
+    const result = await runBootstrap(
+      { castId: "test-cast-logfail" },
+      { LOG_FAIL: "true" },
+    );
+
+    expect(result.exitCode).toBe(1);
+    const bb = result.json.state.blackbeltBootstrap;
+    expect(bb.ok).toBe(false);
+    // Must NOT be reported as empty success.
+    expect(bb.emptyHead ?? false).toBe(false);
+    expect(bb.error).toMatch(/Blackbelt-Bootstrap/);
+    expect(bb.error).toMatch(/verify|empty|log/i);
+
+    // The transition attempt still ran (describe + new) before the unverified
+    // postcondition failed the cast.
+    const jjLog = await readFile(result.fake.log, "utf8");
+    const lines = jjLog.split(/\r?\n/).filter(Boolean);
+    expect(lines.some((l) => l.startsWith("describe"))).toBe(true);
+    expect(lines.some((l) => l === "new")).toBe(true);
+    // The postcondition probe DID run (and failed to verify) — confirming the
+    // gate was attempted before the cast failed.
+    const newIdx = lines.findIndex((l) => l === "new");
+    const logIdxs = lines.map((l, i) => ({ l, i })).filter(({ l }) => l.startsWith("log ")).map(({ i }) => i);
+    expect(logIdxs.find((i) => i > newIdx)).toBeGreaterThan(newIdx);
+  });
+
+  test("transition failure (jj describe/new) fails the cast instead of continuing from a non-empty @", async () => {
+    const result = await runBootstrap(
+      { castId: "test-cast-transition-fail" },
+      { JJ_EMPTY: "false", CHECKPOINT_FAIL: "true" },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.json.state.blackbeltBootstrap.ok).toBe(false);
+    expect(result.json.state.blackbeltBootstrap.error).toMatch(/Blackbelt-Bootstrap/);
+    // Bootstrap must NOT report a successful empty @ after a failed transition.
+    expect(result.json.state.blackbeltBootstrap.emptyHead ?? false).toBe(false);
   });
 
   test("adds target/ and node_modules/ to .gitignore when directories exist", async () => {

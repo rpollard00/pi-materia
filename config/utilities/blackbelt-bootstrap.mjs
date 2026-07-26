@@ -85,9 +85,13 @@ try {
   // jj new advances @ away from undescribed work).
   const bookmarkName = generateBookmarkName(input, cwd);
 
-  const hadEmptyHead = await isCurrentCommitEmpty(cwd);
+  // Reliably inspect the current working commit.  When non-empty, preserve
+  // the existing revision via the deterministic description + bookmark before
+  // running `jj new` and moving @ onto the resulting empty commit.  When @ is
+  // already empty, bootstrap is idempotent (no describe/new).
+  const initiallyEmpty = (await inspectWorkingCommitEmpty(cwd)).empty;
   let newWorkingCommit = false;
-  if (!hadEmptyHead) {
+  if (!initiallyEmpty) {
     // Describe the dirty working revision BEFORE creating a new empty commit.
     // This prevents an unnamed, undescribed commit from being left behind
     // when jj new advances @.  The description is deterministic (derived from
@@ -97,12 +101,45 @@ try {
     // Place the bookmark on the now-described revision so the bookmark always
     // tracks a pushable, described commit — never an empty or unnamed one.
     await setBookmark(bookmarkName, cwd);
-    // Now create a new empty working commit on top.
+    // Create a new empty working commit on top and move @ onto it.
     await execFileText("jj", ["new"], cwd);
     newWorkingCommit = true;
   } else {
     // Clean working copy — no describe/new needed. Just place the bookmark on @.
     await setBookmark(bookmarkName, cwd);
+  }
+
+  // Verify the empty-commit postcondition before reporting success.  Bootstrap
+  // guarantees casts continue from a VERIFIED empty @, so this gate is
+  // mandatory: only a positively-confirmed empty commit is reported as empty
+  // success.  An unverified probe (`jj log` inspection failure) or a confirmed
+  // non-empty commit fails the cast — truthfulness takes priority over a
+  // lenient trust of `jj new`'s empty-commit contract, because downstream
+  // materias rely on `emptyHead` meaning a verified empty working commit.  An
+  // unverified result must never be reported as empty success.
+  const postcheck = await inspectWorkingCommitEmpty(cwd);
+  if (!postcheck.verified) {
+    throw new UtilityError(
+      "Blackbelt-Bootstrap: could not verify the working commit is empty after bootstrap (jj log inspection failed).",
+      {
+        available: { jj: true },
+        initialized,
+        newWorkingCommit,
+        root,
+        emptyHead: false,
+        bookmarkName,
+      },
+    );
+  }
+  if (!postcheck.empty) {
+    throw new UtilityError("Blackbelt-Bootstrap: working commit is not empty after bootstrap.", {
+      available: { jj: true },
+      initialized,
+      newWorkingCommit,
+      root,
+      emptyHead: false,
+      bookmarkName,
+    });
   }
 
   writeStdoutJson({
@@ -113,6 +150,7 @@ try {
         available: { jj: true },
         initialized,
         newWorkingCommit,
+        // The postcondition was positively verified above, so @ is genuinely empty.
         emptyHead: true,
         bookmarkName,
       },
@@ -172,18 +210,31 @@ async function jjRoot(cwd) {
   }
 }
 
-async function isCurrentCommitEmpty(cwd) {
+/**
+ * Reliably probe whether the current jj working commit (@) is empty.
+ *
+ * Uses `jj log -r @ -T empty`, which reports jj's canonical emptiness (no
+ * changes relative to parents, including working-copy edits) as a tiny,
+ * bounded "true"/"false" stdout — immune to the maxBuffer problems that
+ * plague `jj diff --summary` on repos with many untracked build artifacts.
+ *
+ * Returns `{ empty, verified }`:
+ *   - `verified: true`  → jj answered; `empty` is the authoritative result.
+ *   - `verified: false` → the probe could not run; `empty` defaults to false
+ *                         and MUST be treated as "unknown", never as empty.
+ *                         The initial check treats this conservatively as
+ *                         non-empty (to preserve pre-existing work); the
+ *                         postcondition gate treats this as a hard failure
+ *                         (an unverified result is not reported as empty
+ *                         success).
+ */
+async function inspectWorkingCommitEmpty(cwd) {
   try {
-    const diffSummary = await execFileText("jj", ["diff", "--summary"], cwd);
-    return diffSummary.trim().length === 0;
+    const stdout = await execFileText("jj", ["log", "-r", "@", "--no-graph", "-T", "empty"], cwd);
+    return { empty: stdout.trim().toLowerCase() === "true", verified: true };
   } catch (error) {
-    // If jj diff --summary fails (e.g. maxBuffer exceeded due to build
-    // artifacts not being gitignored), assume the working copy is NOT
-    // empty.  Treating it as dirty triggers a describe+bookmark+new
-    // sequence which is harmless even if the working copy were truly
-    // clean — much better than crashing bootstrap.
-    console.error(`[blackbelt-bootstrap] jj diff --summary failed (assuming dirty): ${formatError(error)}`);
-    return false;
+    console.error(`[blackbelt-bootstrap] jj log -r @ -T empty failed: ${formatError(error)}`);
+    return { empty: false, verified: false };
   }
 }
 
