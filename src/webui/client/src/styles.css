@@ -1666,6 +1666,31 @@
   margin-top: 0.45rem;
 }
 
+.materia-selector-model-chrome {
+  position: absolute;
+  top: 0.32rem;
+  /* Inset to clear the row's lock + actions controls (each 2rem wide, plus
+     the grid gaps between the three row columns) so the compact chrome sits
+     alongside those controls in the top-right of the row without obscuring
+     them or intercepting their clicks. pointer-events:none keeps it pure
+     chrome so selection, lock, and actions keep working underneath. */
+  right: 4.6rem;
+  max-width: calc(100% - 5.4rem);
+  padding: 0.04rem 0.32rem;
+  border: 1px solid rgb(148 163 184 / 0.22);
+  border-radius: 0.35rem;
+  background: rgb(2 6 23 / 0.74);
+  color: rgb(165 243 252 / 0.86);
+  font-size: 0.55rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
 .materia-selector-badge {
   max-width: 100%;
   overflow: hidden;

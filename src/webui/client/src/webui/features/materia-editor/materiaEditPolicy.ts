@@ -1,5 +1,6 @@
 import { resolveMateriaColor, type MateriaBehaviorConfig } from '../../../loadoutModel.js';
 import type { LoadoutSourceScope, SaveTarget } from '../../types.js';
+import { resolveMateriaModelLabel } from '../../utils/materiaModelLabel.js';
 
 export type MateriaLockState = 'locked' | 'unlocked';
 
@@ -31,6 +32,15 @@ export interface MateriaSelectorItem extends MateriaEditPolicy {
   type: 'agent' | 'utility' | 'unknown';
   description: string;
   color: string;
+  /**
+   * Optional provider/model label projected from the materia definition for
+   * compact catalog chrome. Present only for eligible agent materia with an
+   * explicit, non-blank `model`; `undefined` for deterministic materia
+   * (utility/command/script) and agents without a selected model. Carries the
+   * raw configured value (never a model-catalog friendly name) so dense,
+   * provider-specific labels stay distinguishable across providers.
+   */
+  modelLabel?: string;
 }
 
 function writableSource(source: LoadoutSourceScope | undefined): SaveTarget | undefined {
@@ -79,6 +89,7 @@ export function buildMateriaSelectorItems(
         type,
         description: String(definition.description ?? ''),
         color: resolveMateriaColor(id, materia),
+        modelLabel: resolveMateriaModelLabel(definition),
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id));

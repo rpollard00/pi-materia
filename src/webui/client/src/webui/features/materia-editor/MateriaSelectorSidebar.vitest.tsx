@@ -455,3 +455,157 @@ describe('MateriaSelectorSidebar stable filter states and sidebar styling', () =
     expect(listCleared?.querySelector('[data-testid="catalog-no-results"]')).toBeNull();
   });
 });
+
+// Catalog rows receive the provider/model label projected by
+// buildMateriaSelectorItems as compact top-right chrome. These items mirror that
+// projection (raw value for eligible agents, omitted for deterministic and
+// model-less materia) so the sidebar rendering can be exercised in isolation.
+const modelChromeItems: MateriaSelectorItem[] = [
+  {
+    id: 'Build',
+    label: 'Build',
+    group: 'Core',
+    type: 'agent',
+    description: 'Builds the work',
+    color: 'materia-color-green',
+    modelLabel: 'zai/glm-4.6',
+    source: 'default',
+    isBuiltIn: true,
+    isOverriddenBuiltIn: false,
+    lockState: 'unlocked',
+    saveScope: 'user',
+    canSave: true,
+    saveBlockedReason: null,
+    canDelete: false,
+    deleteTitle: 'Built-in materia cannot be deleted.',
+    canToggleLock: false,
+    lockTitle: 'Built-in materia cannot be locked. Save an override first.',
+  },
+  {
+    id: 'longModel',
+    label: 'Long Model',
+    group: 'Core',
+    type: 'agent',
+    description: 'Has a very long provider/model string',
+    color: 'materia-color-amber',
+    modelLabel: 'very-long-provider/extra-long-model-identifier-v2',
+    source: 'user',
+    isBuiltIn: false,
+    isOverriddenBuiltIn: false,
+    lockState: 'unlocked',
+    saveScope: 'user',
+    canSave: true,
+    saveBlockedReason: null,
+    canDelete: true,
+    deleteTitle: 'Delete longModel from user scope',
+    canToggleLock: true,
+    lockTitle: 'Lock longModel',
+  },
+  {
+    id: 'detectVcs',
+    label: 'Detect VCS',
+    group: 'Utility',
+    type: 'utility',
+    description: 'Deterministic utility materia',
+    color: 'materia-color-cyan',
+    // No modelLabel: deterministic materia are never labeled.
+    source: 'user',
+    isBuiltIn: false,
+    isOverriddenBuiltIn: false,
+    lockState: 'unlocked',
+    saveScope: 'user',
+    canSave: true,
+    saveBlockedReason: null,
+    canDelete: true,
+    deleteTitle: 'Delete detectVcs from user scope',
+    canToggleLock: true,
+    lockTitle: 'Lock detectVcs',
+  },
+  {
+    id: 'noModel',
+    label: 'No Model',
+    group: 'Core',
+    type: 'agent',
+    description: 'Agent without a selected model',
+    color: 'materia-color-purple',
+    // No modelLabel: agents without an explicit selection stay unlabeled.
+    source: 'user',
+    isBuiltIn: false,
+    isOverriddenBuiltIn: false,
+    lockState: 'unlocked',
+    saveScope: 'user',
+    canSave: true,
+    saveBlockedReason: null,
+    canDelete: true,
+    deleteTitle: 'Delete noModel from user scope',
+    canToggleLock: true,
+    lockTitle: 'Lock noModel',
+  },
+];
+
+describe('MateriaSelectorSidebar model chrome', () => {
+  it('renders the raw provider/model value as top-right chrome with a full-value tooltip', () => {
+    renderSidebar({ items: modelChromeItems });
+
+    const buildChrome = screen.getByTestId('catalog-model-Build');
+    expect(buildChrome.className).toContain('materia-selector-model-chrome');
+    expect(buildChrome.textContent).toBe('zai/glm-4.6');
+    expect(buildChrome.getAttribute('title')).toBe('zai/glm-4.6');
+    expect(buildChrome.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('keeps the full configured value available via tooltip even for long labels', () => {
+    // jsdom cannot lay out the ellipsis, so the chrome retains the full string
+    // as its text and exposes the untruncated value through its title tooltip.
+    renderSidebar({ items: modelChromeItems });
+    const longChrome = screen.getByTestId('catalog-model-longModel');
+    const value = 'very-long-provider/extra-long-model-identifier-v2';
+    expect(longChrome.textContent).toBe(value);
+    expect(longChrome.getAttribute('title')).toBe(value);
+  });
+
+  it('suppresses the chrome for deterministic utility materia', () => {
+    renderSidebar({ items: modelChromeItems });
+    expect(screen.queryByTestId('catalog-model-detectVcs')).toBeNull();
+  });
+
+  it('suppresses the chrome for agent materia without a selected model', () => {
+    renderSidebar({ items: modelChromeItems });
+    expect(screen.queryByTestId('catalog-model-noModel')).toBeNull();
+  });
+
+  it('renders exactly one chrome per eligible row and none for ineligible rows', () => {
+    const { container } = renderSidebar({ items: modelChromeItems });
+    const chromes = container.querySelectorAll('.materia-selector-model-chrome');
+    expect(chromes).toHaveLength(2);
+    expect(screen.getByTestId('catalog-model-Build')).toBeTruthy();
+    expect(screen.getByTestId('catalog-model-longModel')).toBeTruthy();
+  });
+
+  it('keeps the chrome out of the lock and actions controls so they stay accessible', () => {
+    const onToggleLock = vi.fn();
+    renderSidebar({ items: modelChromeItems, onToggleLock });
+
+    // The lock indicator and actions trigger remain interactive despite the
+    // adjacent top-right chrome region (the chrome is pointer-events: none).
+    fireEvent.click(screen.getByRole('button', { name: 'Lock longModel' }));
+    expect(onToggleLock).toHaveBeenCalledWith('longModel', 'locked');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for longModel' }));
+    expect(screen.getByRole('menu', { name: 'Actions for longModel' })).toBeTruthy();
+
+    // The built-in Build lock stays aria-disabled even with chrome present.
+    expect(screen.getByRole('button', { name: 'Built-in materia cannot be locked. Save an override first.' }).getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('does not interfere with selecting a row that shows a model label', () => {
+    const onSelect = vi.fn();
+    const { container } = renderSidebar({ items: modelChromeItems, onSelect });
+
+    const buildRowButton = Array.from(container.querySelectorAll<HTMLButtonElement>('.materia-selector-row-select'))
+      .find((button) => button.dataset.materiaId === 'Build');
+    if (!buildRowButton) throw new Error('Missing Build selector row');
+    fireEvent.click(buildRowButton);
+    expect(onSelect).toHaveBeenCalledWith('Build');
+  });
+});
