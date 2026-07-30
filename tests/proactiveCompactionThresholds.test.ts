@@ -11,17 +11,6 @@ import { FakePiHarness } from "./fakePi.js";
 /** Pi's fixed reserve, matching the constant in compactionConfig.ts. */
 const PI_RESERVE = 16_384;
 
-/** Compute the diagnostic threshold percent the way compactionConfig does. */
-function budgetPercent(contextWindow: number): number {
-  return ((contextWindow - PI_RESERVE) / contextWindow) * 100;
-}
-
-interface BudgetExpectation {
-  thresholdPercent: number;
-  usableBudget: number;
-  reserve: number;
-}
-
 /** Assert a reserve_budget result matches the expected budget math. */
 function expectBudgetResult(result: ResolvedProactiveCompactionThreshold, contextWindow: number): void {
   const usable = contextWindow - PI_RESERVE;
