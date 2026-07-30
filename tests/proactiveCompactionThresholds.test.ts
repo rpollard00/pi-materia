@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
 import { defaultProactiveCompactionThresholdPercent } from "../src/castRuntime.js";
+import { assessContextPressureForCompaction } from "../src/application/compactionWorkflow.js";
 import { resolveProactiveCompactionThreshold, validateCompactionConfig } from "../src/runtime/compaction.js";
 import type { ResolvedProactiveCompactionThreshold } from "../src/config/compactionConfig.js";
 import { FakePiHarness } from "./fakePi.js";
@@ -19,6 +20,20 @@ function expectBudgetResult(result: ResolvedProactiveCompactionThreshold, contex
   expect(result.thresholdPercent).toBeCloseTo(pct, 10);
   expect(result.usableBudget).toBe(usable);
   expect(result.reserve).toBe(PI_RESERVE);
+}
+
+async function assessPressure(tokens: number, projectedOverheadTokens = 0, compaction?: unknown) {
+  const contextWindow = 272_000;
+  const ctx = {
+    model: { contextWindow },
+    getContextUsage: () => ({ tokens, contextWindow, percent: (tokens / contextWindow) * 100 }),
+  } as any;
+  return assessContextPressureForCompaction(
+    ctx,
+    {} as any,
+    { loadConfigFromState: async () => ({ compaction }) as any },
+    projectedOverheadTokens,
+  );
 }
 
 async function makeHarness(compaction?: unknown): Promise<FakePiHarness> {
@@ -153,6 +168,56 @@ describe("default proactive compaction reserve budget", () => {
   });
 
   describe("Pi's strict greater-than boundary", () => {
+    test("does not compact at the exact 255,616-token usable budget", async () => {
+      const assessment = await assessPressure(255_616);
+
+      expect(assessment).toMatchObject({
+        shouldCompact: false,
+        tokens: 255_616,
+        projectedTokens: 255_616,
+        usableBudget: 255_616,
+        reserve: PI_RESERVE,
+        thresholdMode: "reserve_budget",
+      });
+    });
+
+    test("compacts after the usable budget is exceeded by one token", async () => {
+      const assessment = await assessPressure(255_617);
+
+      expect(assessment).toMatchObject({
+        shouldCompact: true,
+        tokens: 255_617,
+        projectedTokens: 255_617,
+        usableBudget: 255_616,
+      });
+    });
+
+    test("applies the same strict boundary to projected request totals", async () => {
+      const atBudget = await assessPressure(150_000, 105_616);
+      const overBudget = await assessPressure(150_000, 105_617);
+
+      expect(atBudget).toMatchObject({ shouldCompact: false, projectedTokens: 255_616 });
+      expect(overBudget).toMatchObject({ shouldCompact: true, projectedTokens: 255_617 });
+    });
+
+    test("does not compact near the legacy 50–55% tiers unless projection exceeds the reserve budget", async () => {
+      const nearFiftyFivePercent = 149_600;
+
+      expect((await assessPressure(nearFiftyFivePercent)).shouldCompact).toBe(false);
+      expect((await assessPressure(nearFiftyFivePercent, 100_000)).shouldCompact).toBe(false);
+      expect((await assessPressure(nearFiftyFivePercent, 106_017))).toMatchObject({
+        shouldCompact: true,
+        projectedTokens: 255_617,
+      });
+    });
+
+    test("retains inclusive comparisons for explicit percentage and tier overrides", async () => {
+      expect((await assessPressure(136_000, 0, { proactiveThresholdPercent: 50 })).shouldCompact).toBe(true);
+      expect((await assessPressure(136_000, 0, {
+        proactiveThresholdTiers: [{ minContextWindow: 0, thresholdPercent: 50 }],
+      })).shouldCompact).toBe(true);
+    });
+
     test("default budget-derived threshold percent is strictly diagnostic; caller decides overage", () => {
       const contextWindow = 272_000;
       const usable = contextWindow - PI_RESERVE; // 255_616
