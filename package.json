@@ -60,10 +60,10 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "^0.75.4",
-    "@earendil-works/pi-ai": "^0.75.4",
-    "@earendil-works/pi-coding-agent": "^0.80.6",
-    "@earendil-works/pi-tui": "^0.75.4",
+    "@earendil-works/pi-agent-core": "^0.83.0",
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@earendil-works/pi-tui": "^0.83.0",
     "@tailwindcss/postcss": "latest",
     "@testing-library/react": "latest",
     "@types/node": "latest",
@@ -86,6 +86,7 @@
     "@google/genai@1.52.0": true,
     "esbuild@0.28.1": true,
     "koffi@2.16.2": true,
+    "protobufjs@7.6.4": true,
     "protobufjs@7.6.5": true
   }
 }

@@ -242,7 +242,9 @@ function resolveRoleGenerationThinking(
   effectiveModel: string | null,
 ): { thinking?: ThinkingLevel; resolution: MateriaRoleGenerationThinkingResolution } {
   const requestedThinking = typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
-  const effectiveActiveThinking = activeThinking && supportedLevels?.includes(activeThinking) ? activeThinking : undefined;
+  const effectiveActiveThinking = activeThinking && isMateriaThinkingLevel(activeThinking) && supportedLevels?.includes(activeThinking)
+    ? activeThinking
+    : undefined;
   const fallbackResolution = (warnings: string[]): { thinking?: ThinkingLevel; resolution: MateriaRoleGenerationThinkingResolution } => ({
     thinking: effectiveActiveThinking,
     resolution: { requestedThinking, effectiveThinking: effectiveActiveThinking ?? null, fallback: requestedThinking !== null, warnings },

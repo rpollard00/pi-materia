@@ -3,11 +3,10 @@ import { isDeepStrictEqual } from "node:util";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import {
-  AuthStorage,
   createAgentSession,
   createExtensionRuntime,
   getAgentDir,
-  ModelRegistry,
+  ModelRuntime,
   type ResourceLoader,
   SessionManager,
   SettingsManager,
@@ -68,8 +67,7 @@ export interface RunToolHandoffProviderExperimentOptions {
 }
 
 interface ExperimentRuntime {
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
   model: Model<Api>;
   cwd: string;
   agentDir: string;
@@ -93,7 +91,7 @@ const EXPERIMENT_REQUIREMENTS = deriveSocketOutputRequirements({
 export async function runToolHandoffProviderExperiment(
   options: RunToolHandoffProviderExperimentOptions,
 ): Promise<ToolHandoffProviderEvidence> {
-  const runtime = createExperimentRuntime(options);
+  const runtime = await createExperimentRuntime(options);
   const repetitions = positiveInteger(options.repetitions ?? 3, "repetitions");
   const runs: ToolHandoffExperimentRun[] = [];
 
@@ -249,8 +247,7 @@ async function createExperimentSession(
   const result = await createAgentSession({
     cwd: runtime.cwd,
     agentDir: runtime.agentDir,
-    authStorage: runtime.authStorage,
-    modelRegistry: runtime.modelRegistry,
+    modelRuntime: runtime.modelRuntime,
     model: runtime.model,
     thinkingLevel: runtime.thinking,
     noTools: toolNames.length === 0 ? "all" : "builtin",
@@ -263,21 +260,22 @@ async function createExperimentSession(
   return result;
 }
 
-function createExperimentRuntime(options: RunToolHandoffProviderExperimentOptions): ExperimentRuntime {
+async function createExperimentRuntime(options: RunToolHandoffProviderExperimentOptions): Promise<ExperimentRuntime> {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const agentDir = path.resolve(options.agentDir ?? getAgentDir());
-  const authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
-  const modelRegistry = ModelRegistry.create(authStorage, path.join(agentDir, "models.json"));
-  const model = modelRegistry.find(options.provider, options.model);
+  const modelRuntime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+  const model = modelRuntime.getModel(options.provider, options.model);
   if (!model) throw new Error(`Unknown experiment model ${options.provider}/${options.model}.`);
-  if (!modelRegistry.hasConfiguredAuth(model)) {
+  if (!modelRuntime.hasConfiguredAuth(options.provider)) {
     throw new Error(`No configured authentication for experiment model ${options.provider}/${options.model}.`);
   }
   const envelope = cloneExperimentEnvelope(options.envelope ?? TOOL_HANDOFF_EXPERIMENT_ENVELOPE);
   const maxRecoveryPrompts = nonNegativeInteger(options.maxRecoveryPrompts ?? 1, "maxRecoveryPrompts");
   return {
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     model,
     cwd,
     agentDir,
@@ -296,7 +294,9 @@ function isolatedResourceLoader(): ResourceLoader {
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
     getSystemPrompt: () => "You are running one isolated finalization-format experiment. Follow the requested output strategy exactly and copy supplied semantic values without editing them.",
+    getSystemPromptSource: () => undefined,
     getAppendSystemPrompt: () => [],
+    getAppendSystemPromptSources: () => [],
     extendResources: () => {},
     reload: async () => {},
   };
