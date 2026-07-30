@@ -59,6 +59,10 @@ export interface ContextPressureAssessment {
   projectedPercent?: number;
   /** Breakdown of the projected overhead components. */
   projectedOverhead?: ProjectedOverhead;
+  /** Usable token budget (contextWindow - reserve), populated in reserve_budget mode. */
+  usableBudget?: number;
+  /** Fixed reserve (16,384 tokens) subtracted from the context window in reserve_budget mode. */
+  reserve?: number;
 }
 
 export async function assessContextPressureForCompaction(
@@ -81,8 +85,14 @@ export async function assessContextPressureForCompaction(
     ? (projectedTokens / contextWindow) * 100
     : undefined;
 
-  const rawCrossesThreshold = percent != null && percent >= thresholdPercent;
-  const projectedCrossesThreshold = projectedPercent != null && projectedPercent >= thresholdPercent;
+  const rawCrossesThreshold =
+    threshold.mode === "reserve_budget" && threshold.usableBudget != null && usage.tokens != null
+      ? usage.tokens > threshold.usableBudget
+      : percent != null && thresholdPercent != null && percent >= thresholdPercent;
+  const projectedCrossesThreshold =
+    threshold.mode === "reserve_budget" && threshold.usableBudget != null && projectedTokens != null
+      ? projectedTokens > threshold.usableBudget
+      : projectedPercent != null && thresholdPercent != null && projectedPercent >= thresholdPercent;
   const projectedExceedsWindow = projectedTokens != null && contextWindow != null && contextWindow > 0 && projectedTokens > contextWindow;
 
   return {
@@ -95,6 +105,8 @@ export async function assessContextPressureForCompaction(
     percent: percent ?? undefined,
     projectedTokens: projectedTokens ?? undefined,
     projectedPercent,
+    usableBudget: threshold.usableBudget,
+    reserve: threshold.reserve,
   };
 }
 

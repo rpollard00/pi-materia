@@ -1,16 +1,28 @@
 import type { MateriaCompactionConfig, MateriaCompactionThresholdTierConfig } from "../types.js";
 
-const SMALL_CONTEXT_WINDOW_LIMIT = 128_000;
-const LARGE_CONTEXT_WINDOW_LIMIT = 200_000;
-const FALLBACK_PROACTIVE_COMPACTION_THRESHOLD_PERCENT = 55;
+/**
+ * Pi's default usable-context budget: contextWindow minus this reserve.
+ * The reserve (16,384 tokens) is Pi's internal overhead for system prompts,
+ * tool schemas, hidden prompts, and metadata injected into every request.
+ */
+const PI_RESERVE_TOKENS = 16_384;
 
 export interface ResolvedProactiveCompactionThreshold {
-  thresholdPercent: number;
-  mode: "default_tiered" | "configured_tiered" | "single_percent";
+  /** Diagnostics-only percentage, derived from usableBudget / contextWindow.
+   *  `undefined` when context-window metadata is unavailable and no explicit
+   *  threshold was configured. */
+  thresholdPercent: number | undefined;
+  mode: "reserve_budget" | "configured_tiered" | "single_percent";
+  /** Usable token budget = contextWindow - PI_RESERVE_TOKENS, populated in
+   *  reserve_budget mode when context-window metadata is available. */
+  usableBudget?: number;
+  /** Fixed reserve (16,384 tokens) subtracted from the context window,
+   *  populated in reserve_budget mode. */
+  reserve?: number;
   tier?: { id?: string; minContextWindow: number; maxContextWindow?: number };
 }
 
-export function defaultProactiveCompactionThresholdPercent(contextWindow: number | null | undefined): number {
+export function defaultProactiveCompactionThresholdPercent(contextWindow: number | null | undefined): number | undefined {
   return resolveDefaultProactiveCompactionThreshold(contextWindow).thresholdPercent;
 }
 
@@ -68,15 +80,21 @@ export function validateCompactionConfig(config: MateriaCompactionConfig | undef
 }
 
 function resolveDefaultProactiveCompactionThreshold(contextWindow: number | null | undefined): ResolvedProactiveCompactionThreshold {
-  // If model/context-window metadata is unavailable, fall back to the most
-  // conservative default tier so Materia compacts early rather than risking a
-  // provider-side context_length_exceeded failure.
+  // If model/context-window metadata is unavailable, leave the proactive
+  // default unresolved. The caller (compactionWorkflow) will skip proactive
+  // compaction when no budget can be established, preventing premature
+  // compaction at an arbitrary fallback percentage.
   if (!Number.isFinite(contextWindow) || contextWindow == null || contextWindow <= 0) {
-    return { thresholdPercent: FALLBACK_PROACTIVE_COMPACTION_THRESHOLD_PERCENT, mode: "default_tiered" };
+    return { thresholdPercent: undefined, mode: "reserve_budget" };
   }
-  if (contextWindow < SMALL_CONTEXT_WINDOW_LIMIT) return { thresholdPercent: 75, mode: "default_tiered", tier: { id: "lt-128k", minContextWindow: 0, maxContextWindow: SMALL_CONTEXT_WINDOW_LIMIT } };
-  if (contextWindow < LARGE_CONTEXT_WINDOW_LIMIT) return { thresholdPercent: 65, mode: "default_tiered", tier: { id: "128k-to-199999", minContextWindow: SMALL_CONTEXT_WINDOW_LIMIT, maxContextWindow: LARGE_CONTEXT_WINDOW_LIMIT } };
-  return { thresholdPercent: 55, mode: "default_tiered", tier: { id: "gte-200k", minContextWindow: LARGE_CONTEXT_WINDOW_LIMIT } };
+  const usableBudget = contextWindow - PI_RESERVE_TOKENS;
+  const diagPercent = (usableBudget / contextWindow) * 100;
+  return {
+    thresholdPercent: diagPercent,
+    mode: "reserve_budget",
+    usableBudget,
+    reserve: PI_RESERVE_TOKENS,
+  };
 }
 
 function findMatchingTier(tiers: MateriaCompactionThresholdTierConfig[], contextWindow: number | null | undefined): MateriaCompactionThresholdTierConfig | undefined {

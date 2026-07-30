@@ -33,9 +33,10 @@ describe("native compaction request budgeting audit", () => {
       "x".repeat(50_000),
     ].join("\n");
 
-    // Pre-turn usage near the 55% threshold for a 272k window (149,600 tokens).
-    // Projected overhead (~30k tokens) pushes the total over the threshold.
-    harness.contextUsage = { tokens: 130_000, contextWindow: 272_000, percent: (130_000 / 272_000) * 100 };
+    // Pre-turn usage below Pi's usable budget (272k - 16,384 = 255,616 tokens)
+    // but close enough that projected overhead (~12.5k tokens for the hidden
+    // prompt) pushes the total over the usable budget.
+    harness.contextUsage = { tokens: 250_000, contextWindow: 272_000, percent: (250_000 / 272_000) * 100 };
 
     // Set active model so effectiveContextWindow picks it up.
     (harness.ctx as any).model = { provider: "test", id: "large-context", contextWindow: 272_000 };
@@ -90,7 +91,9 @@ describe("native compaction request budgeting audit", () => {
     expect(compactionStart.data.projectedPercent).toBeGreaterThan(compactionStart.data.percent);
 
     // Projected percent should be >= threshold (55% for 272k).
-    expect(compactionStart.data.projectedPercent).toBeGreaterThanOrEqual(55);
+    // Projected percent should exceed the usable budget threshold (~94% for 272k).
+    const usablePct = ((272_000 - 16_384) / 272_000) * 100;
+    expect(compactionStart.data.projectedPercent).toBeGreaterThan(usablePct);
   });
 
   test("context isolation retains large active-turn tool results after a below-threshold usage snapshot", async () => {

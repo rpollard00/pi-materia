@@ -358,15 +358,15 @@ describe("proactive compaction skip on model switch", () => {
     harness.activeModel = harness.models[0];
     (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
 
-    // Set usage high enough to trigger compaction.
-    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+    // Set usage above Pi's usable budget (272k - 16,384 = 255,616 tokens).
+    harness.contextUsage = { tokens: 260_000, contextWindow: 272_000, percent: (260_000 / 272_000) * 100 };
 
     await harness.runCommand("materia", "cast ongoing same model");
 
     // No model switch occurred (same model, no explicit model setting).
     expect(harness.setModelCalls).toHaveLength(0);
 
-    // Proactive compaction should have fired because usage is above the threshold.
+    // Proactive compaction should have fired because usage exceeds the usable budget.
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
 
     // Assert proactive_compaction_start event was emitted.
@@ -388,8 +388,8 @@ describe("proactive compaction skip on model switch", () => {
     harness.activeModel = harness.models[0];
     (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
 
-    // Set usage high enough to trigger compaction.
-    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+    // Set usage above Pi's usable budget (272k - 16,384 = 255,616 tokens).
+    harness.contextUsage = { tokens: 260_000, contextWindow: 272_000, percent: (260_000 / 272_000) * 100 };
 
     await harness.runCommand("materia", "cast same model reapply");
 
@@ -408,8 +408,8 @@ describe("proactive compaction skip on model switch", () => {
     harness.activeModel = harness.models[0];
     (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
 
-    // Set usage high enough to trigger compaction.
-    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+    // Set usage above Pi's usable budget (272k - 16,384 = 255,616 tokens).
+    harness.contextUsage = { tokens: 260_000, contextWindow: 272_000, percent: (260_000 / 272_000) * 100 };
 
     await harness.runCommand("materia", "cast unknown model fallback");
 
@@ -428,8 +428,8 @@ describe("proactive compaction skip on model switch", () => {
     harness.activeModel = harness.models[0];
     (harness.ctx as unknown as { model: unknown }).model = harness.activeModel;
 
-    // Set usage high enough to trigger compaction.
-    harness.contextUsage = { tokens: 200_000, contextWindow: 272_000, percent: (200_000 / 272_000) * 100 };
+    // Set usage above Pi's usable budget (272k - 16,384 = 255,616 tokens).
+    harness.contextUsage = { tokens: 260_000, contextWindow: 272_000, percent: (260_000 / 272_000) * 100 };
 
     await harness.runCommand("materia", "cast thinking only change");
 

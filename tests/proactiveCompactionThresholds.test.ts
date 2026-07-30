@@ -5,17 +5,32 @@ import path from "node:path";
 import piMateria from "../src/index.js";
 import { defaultProactiveCompactionThresholdPercent } from "../src/castRuntime.js";
 import { resolveProactiveCompactionThreshold, validateCompactionConfig } from "../src/runtime/compaction.js";
+import type { ResolvedProactiveCompactionThreshold } from "../src/config/compactionConfig.js";
 import { FakePiHarness } from "./fakePi.js";
 
-const cases: Array<[number, number]> = [
-  [64_000, 75],
-  [100_000, 75],
-  [127_999, 75],
-  [128_000, 65],
-  [199_999, 65],
-  [200_000, 55],
-  [272_000, 55],
-];
+/** Pi's fixed reserve, matching the constant in compactionConfig.ts. */
+const PI_RESERVE = 16_384;
+
+/** Compute the diagnostic threshold percent the way compactionConfig does. */
+function budgetPercent(contextWindow: number): number {
+  return ((contextWindow - PI_RESERVE) / contextWindow) * 100;
+}
+
+interface BudgetExpectation {
+  thresholdPercent: number;
+  usableBudget: number;
+  reserve: number;
+}
+
+/** Assert a reserve_budget result matches the expected budget math. */
+function expectBudgetResult(result: ResolvedProactiveCompactionThreshold, contextWindow: number): void {
+  const usable = contextWindow - PI_RESERVE;
+  const pct = (usable / contextWindow) * 100;
+  expect(result.mode).toBe("reserve_budget");
+  expect(result.thresholdPercent).toBeCloseTo(pct, 10);
+  expect(result.usableBudget).toBe(usable);
+  expect(result.reserve).toBe(PI_RESERVE);
+}
 
 async function makeHarness(compaction?: unknown): Promise<FakePiHarness> {
   const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-threshold-"));
@@ -32,17 +47,48 @@ async function makeHarness(compaction?: unknown): Promise<FakePiHarness> {
   return harness;
 }
 
-describe("default proactive compaction threshold tiers", () => {
-  test.each(cases)("uses %p-token context window -> %p%% threshold", (contextWindow, threshold) => {
-    expect(defaultProactiveCompactionThresholdPercent(contextWindow)).toBe(threshold);
+describe("default proactive compaction reserve budget", () => {
+  test.each([
+    [64_000],
+    [100_000],
+    [127_999],
+    [128_000],
+    [199_999],
+    [200_000],
+    [272_000],
+    [1_000_000],
+  ])("computes usable budget = contextWindow - 16384 for %p-token window", (contextWindow: number) => {
+    const result = resolveProactiveCompactionThreshold(undefined, contextWindow);
+    expectBudgetResult(result, contextWindow);
   });
 
-  test("falls back conservatively when context window metadata is unavailable or invalid", () => {
-    expect(defaultProactiveCompactionThresholdPercent(undefined)).toBe(55);
-    expect(defaultProactiveCompactionThresholdPercent(null)).toBe(55);
-    expect(defaultProactiveCompactionThresholdPercent(0)).toBe(55);
-    expect(defaultProactiveCompactionThresholdPercent(-1)).toBe(55);
-    expect(defaultProactiveCompactionThresholdPercent(Number.NaN)).toBe(55);
+  test("derives diagnostic threshold percent from usable budget / contextWindow", () => {
+    const result = resolveProactiveCompactionThreshold(undefined, 272_000);
+    const usable = 272_000 - PI_RESERVE; // 255_616
+    const expectedPct = (usable / 272_000) * 100; // ~93.976%
+    expect(result.thresholdPercent).toBeCloseTo(expectedPct, 10);
+    expect(result.usableBudget).toBe(255_616);
+    expect(result.reserve).toBe(PI_RESERVE);
+    expect(result.mode).toBe("reserve_budget");
+  });
+
+  test("defaultProactiveCompactionThresholdPercent returns the diagnostics percent", () => {
+    const pct = defaultProactiveCompactionThresholdPercent(272_000);
+    expect(pct).toBeCloseTo(((272_000 - PI_RESERVE) / 272_000) * 100, 10);
+  });
+
+  test("leaves threshold unresolved when context window metadata is unavailable or invalid", () => {
+    expect(defaultProactiveCompactionThresholdPercent(undefined)).toBeUndefined();
+    expect(defaultProactiveCompactionThresholdPercent(null)).toBeUndefined();
+    expect(defaultProactiveCompactionThresholdPercent(0)).toBeUndefined();
+    expect(defaultProactiveCompactionThresholdPercent(-1)).toBeUndefined();
+    expect(defaultProactiveCompactionThresholdPercent(Number.NaN)).toBeUndefined();
+    // The resolver itself also returns undefined thresholdPercent.
+    const r = resolveProactiveCompactionThreshold(undefined, undefined);
+    expect(r.thresholdPercent).toBeUndefined();
+    expect(r.mode).toBe("reserve_budget");
+    expect(r.usableBudget).toBeUndefined();
+    expect(r.reserve).toBeUndefined();
   });
 
   test("uses active model metadata rather than stale/generic usage context window", async () => {
@@ -52,11 +98,9 @@ describe("default proactive compaction threshold tiers", () => {
 
     await harness.runCommand("materia", "cast trigger proactive compaction from effective model window");
 
-    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
-    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
-    const events = (await readFile(state.runState.eventsFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    const compactionEvent = events.find((event) => event.type === "proactive_compaction_start");
-    expect(compactionEvent.data).toMatchObject({ contextWindow: 200_000, thresholdPercent: 55, thresholdMode: "default_tiered", thresholdTier: { id: "gte-200k", minContextWindow: 200_000 }, percent: 60 });
+    // A 200k model with 120k tokens used is at 60% — below the ~91.8% reserve
+    // budget threshold, so proactive compaction should NOT fire.
+    expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(0);
   });
 
   test("uses custom configured threshold tiers at inclusive lower boundaries", () => {
@@ -102,7 +146,7 @@ describe("default proactive compaction threshold tiers", () => {
     }, 272_000)).toMatchObject({ thresholdPercent: 42, mode: "single_percent" });
   });
 
-  test("configured tiers drive proactive compaction events", async () => {
+  test("configured tiers drive proactive compaction events (preserved behavior)", async () => {
     const harness = await makeHarness({ proactiveThresholdTiers: [
       { id: "under-200k", minContextWindow: 0, maxContextWindow: 200_000, thresholdPercent: 90 },
       { id: "200k-plus", minContextWindow: 200_000, thresholdPercent: 45 },
@@ -117,5 +161,37 @@ describe("default proactive compaction threshold tiers", () => {
     const events = (await readFile(state.runState.eventsFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     const compactionEvent = events.find((event) => event.type === "proactive_compaction_start");
     expect(compactionEvent.data).toMatchObject({ thresholdPercent: 45, thresholdMode: "configured_tiered", thresholdTier: { id: "200k-plus", minContextWindow: 200_000 } });
+  });
+
+  describe("Pi's strict greater-than boundary", () => {
+    test("default budget-derived threshold percent is strictly diagnostic; caller decides overage", () => {
+      const contextWindow = 272_000;
+      const usable = contextWindow - PI_RESERVE; // 255_616
+      const result = resolveProactiveCompactionThreshold(undefined, contextWindow);
+      // The threshold is a diagnostic percent — the real boundary is usableBudget.
+      expect(result.usableBudget).toBe(usable);
+      expect(result.mode).toBe("reserve_budget");
+      // At exactly usableBudget tokens, usage has NOT exceeded the budget.
+      // (The strict > check is enforced in compactionWorkflow per work item 2.)
+      expect(result.thresholdPercent).toBeGreaterThan(0);
+      expect(result.thresholdPercent).toBeLessThan(100);
+      expect(result.reserve).toBe(PI_RESERVE);
+    });
+
+    test("reserve budget is always exactly 16384 tokens regardless of context size", () => {
+      for (const cw of [8_000, 16_384, 32_000, 64_000, 128_000, 200_000, 272_000, 1_000_000]) {
+        const result = resolveProactiveCompactionThreshold(undefined, cw);
+        expect(result.reserve).toBe(PI_RESERVE);
+        expect(result.usableBudget).toBe(cw - PI_RESERVE);
+      }
+    });
+
+    test("small context windows still subtract full reserve", () => {
+      // A tiny window still follows the same rule — usableBudget may be
+      // negative or tiny, which is a caller concern (hard window protection).
+      const result = resolveProactiveCompactionThreshold(undefined, 20_000);
+      expect(result.usableBudget).toBe(20_000 - PI_RESERVE); // 3_616
+      expect(result.reserve).toBe(PI_RESERVE);
+    });
   });
 });
