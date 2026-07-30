@@ -132,6 +132,8 @@ describe("same-socket recovery workflow", () => {
     expect(events[0].data).toMatchObject({ action: "retry_without_compaction", reason: "context_window", attempt: 1, maxAttempts: 1, entryId: "entry-1", socket: "Socket-1", mode: "normal", strongContextSignal: true, transientProviderSignal: false, priorGuardedRetries: 0 });
     expect(events[0].data).not.toHaveProperty("error");
     expect(events[0].data).not.toHaveProperty("message");
+    expect(events[0].data).not.toHaveProperty("usableBudget");
+    expect(events[0].data).not.toHaveProperty("reserve");
     expect(events[1].data).toMatchObject({ reason: "context_window", attempt: 1, maxAttempts: 2, entryId: "entry-1", socket: "Socket-1", mode: "normal" });
     expect(calls).not.toContain("runRecoveryAction");
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
@@ -149,6 +151,66 @@ describe("same-socket recovery workflow", () => {
     expect(events[0].data).toMatchObject({ action: "retry_without_compaction", providerCode: "context_length_exceeded", providerParam: "input", contextPercent: 12, thresholdPercent: 90, contextPressureShouldCompact: false, priorGuardedRetries: 0 });
     expect(calls).not.toContain("runRecoveryAction");
     expect(calls).toContain("sendMateriaTurn:retry prompt:true");
+  });
+
+  test("reports reserve-budget metadata while guarding a below-budget recovery", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = {
+      ...makeDeps(events, calls),
+      assessContextPressure: async () => ({
+        shouldCompact: false,
+        tokens: 255616,
+        contextWindow: 272000,
+        percent: 94,
+        thresholdPercent: 94,
+        thresholdMode: "reserve_budget",
+        usableBudget: 255616,
+        reserve: 16384,
+      }),
+    };
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), deps);
+
+    expect(events[0].data).toMatchObject({
+      action: "retry_without_compaction",
+      contextTokens: 255616,
+      contextWindow: 272000,
+      thresholdMode: "reserve_budget",
+      usableBudget: 255616,
+      reserve: 16384,
+      contextPressureShouldCompact: false,
+    });
+    expect(calls).not.toContain("runRecoveryAction");
+  });
+
+  test("uses reserve-budget pressure to compact an over-budget recovery", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = {
+      ...makeDeps(events, calls),
+      assessContextPressure: async () => ({
+        shouldCompact: true,
+        tokens: 255617,
+        contextWindow: 272000,
+        thresholdMode: "reserve_budget",
+        usableBudget: 255616,
+        reserve: 16384,
+      }),
+    };
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), deps);
+
+    expect(events[0].data).toMatchObject({
+      action: "compact",
+      contextTokens: 255617,
+      usableBudget: 255616,
+      reserve: 16384,
+      compactBecausePressure: true,
+    });
+    expect(calls).toContain("runRecoveryAction");
   });
 
   test("Codex server errors are not treated as context-window compaction candidates", async () => {
@@ -178,6 +240,23 @@ describe("same-socket recovery workflow", () => {
     expect(calls).toContain("runRecoveryAction");
   });
 
+  test("explicit threshold pressure still compacts without reserve-budget telemetry", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = {
+      ...makeDeps(events, calls),
+      assessContextPressure: async () => ({ shouldCompact: true, percent: 80, thresholdPercent: 80, thresholdMode: "single_percent" }),
+    };
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(CODEX_CONTEXT_LENGTH_SAMPLE), deps);
+
+    expect(events[0].data).toMatchObject({ action: "compact", thresholdMode: "single_percent", thresholdPercent: 80, compactBecausePressure: true });
+    expect(events[0].data).not.toHaveProperty("usableBudget");
+    expect(events[0].data).not.toHaveProperty("reserve");
+    expect(calls).toContain("runRecoveryAction");
+  });
+
   test("repeated strong context signal for the same recovery key triggers one compact retry", async () => {
     const state = makeState();
     const events: Array<{ type: string; data: Record<string, unknown> }> = [];
@@ -190,6 +269,26 @@ describe("same-socket recovery workflow", () => {
     expect(recovered).toBe(true);
     expect(events.filter((event) => event.type === "same_socket_recovery_start").at(-1)?.data).toMatchObject({ reason: "context_window", attempt: 2, maxAttempts: 2, entryId: "entry-2" });
     expect(calls.filter((call) => call === "runRecoveryAction")).toHaveLength(1);
+    expect(calls.filter((call) => call === "sendMateriaTurn:retry prompt:true")).toHaveLength(2);
+  });
+
+  test("repeated confirmed overflows compact and continue on the same socket", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: Record<string, unknown> }> = [];
+    const calls: string[] = [];
+    const deps = makeDeps(events, calls);
+
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(QWEN_EXPLICIT_OVERFLOW_SAMPLE), deps);
+    await handleSameSocketRecoverableTurnFailureWorkflow(state, new Error(QWEN_EXPLICIT_OVERFLOW_SAMPLE), deps, { entryId: "entry-qwen-2" });
+
+    expect(state.active).toBe(true);
+    expect(state.socketState).toBe("awaiting_agent_response");
+    expect(Object.values(state.recoveryAttempts ?? {})).toEqual([2]);
+    expect(Object.values(state.recoveryAllowances ?? {})[0]?.effectiveMaxAttempts).toBe(2);
+    expect(events.filter((event) => event.type === "context_window_recovery_decision").map((event) => event.data.action)).toEqual(["compact", "compact"]);
+    expect(events.filter((event) => event.type === "same_socket_recovery_start").at(-1)?.data).toMatchObject({ attempt: 2, maxAttempts: 2, socket: "Socket-1" });
+    expect(events.some((event) => event.type === "same_socket_recovery_exhausted")).toBe(false);
+    expect(calls.filter((call) => call === "runRecoveryAction")).toHaveLength(2);
     expect(calls.filter((call) => call === "sendMateriaTurn:retry prompt:true")).toHaveLength(2);
   });
 

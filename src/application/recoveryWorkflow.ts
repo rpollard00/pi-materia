@@ -82,6 +82,18 @@ export async function handleSameSocketRecoverableTurnFailureWorkflow(
   }
   const previousAttempts = state.recoveryAttempts[key] ?? 0;
   let maxAttempts = allowance.effectiveMaxAttempts;
+  // Explicit provider token counts are stronger than a generic context-window
+  // signal. If another confirmed overflow arrives after a compact retry, keep
+  // recovery on this socket and grant exactly the retry needed to compact
+  // again instead of exhausting before pressure can be reassessed.
+  if (
+    reason === "context_window"
+    && previousAttempts >= maxAttempts
+    && evaluateContextErrorRecovery(error).overflowTelemetry !== undefined
+  ) {
+    allowance.effectiveMaxAttempts = previousAttempts + 1;
+    maxAttempts = allowance.effectiveMaxAttempts;
+  }
   if (previousAttempts >= maxAttempts) {
     const exhausted = jsonRepairMetadata
       ? `JSON output repair retry exhausted for ${recoveryDiagnosticLabel(state)} after ${previousAttempts}/${maxAttempts} attempt(s): ${errorMessage(error)}`
@@ -240,6 +252,8 @@ function contextWindowRecoveryDecisionEventData(
     thresholdPercent: options.pressure?.thresholdPercent,
     thresholdMode: options.pressure?.thresholdMode,
     thresholdTier: options.pressure?.thresholdTier,
+    ...(options.pressure?.usableBudget != null ? { usableBudget: options.pressure.usableBudget } : {}),
+    ...(options.pressure?.reserve != null ? { reserve: options.pressure.reserve } : {}),
     contextPressureShouldCompact: options.pressure?.shouldCompact,
     priorGuardedRetries: options.priorGuardedRetries,
     compactBecausePressure: options.compactBecausePressure,
