@@ -133,6 +133,8 @@ export async function maybeRunProactiveCompactionWorkflow(
     percent: assessment.percent,
     ...(assessment.projectedTokens != null ? { projectedTokens: assessment.projectedTokens } : {}),
     ...(assessment.projectedPercent != null ? { projectedPercent: assessment.projectedPercent } : {}),
+    ...(assessment.usableBudget != null ? { usableBudget: assessment.usableBudget } : {}),
+    ...(assessment.reserve != null ? { reserve: assessment.reserve } : {}),
     ...(overhead ? { projectedOverhead: overhead } : {}),
     socket: deps.currentSocketId(state),
     itemKey: state.currentItemKey,

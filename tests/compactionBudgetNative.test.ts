@@ -76,7 +76,13 @@ describe("native compaction request budgeting audit", () => {
     const eventsContent = await readFile(state.runState.eventsFile, "utf8");
     const events = eventsContent.trim().split("\n").map((line: string) => JSON.parse(line));
     const compactionStart = events.find((event: any) => event.type === "proactive_compaction_start");
+    const compactionComplete = events.find((event: any) => event.type === "proactive_compaction_complete");
     expect(compactionStart).toBeDefined();
+    expect(compactionComplete).toBeDefined();
+    for (const event of [compactionStart, compactionComplete]) {
+      expect(event.data.usableBudget).toBe(255_616);
+      expect(event.data.reserve).toBe(16_384);
+    }
     expect(compactionStart.data).toHaveProperty("projectedTokens");
     expect(compactionStart.data).toHaveProperty("projectedPercent");
     expect(compactionStart.data).toHaveProperty("projectedOverhead");
@@ -94,6 +100,30 @@ describe("native compaction request budgeting audit", () => {
     // Projected percent should exceed the usable budget threshold (~94% for 272k).
     const usablePct = ((272_000 - 16_384) / 272_000) * 100;
     expect(compactionStart.data.projectedPercent).toBeGreaterThan(usablePct);
+  });
+
+  test("records reserve-budget telemetry when proactive compaction fails", async () => {
+    const harness = await makeHarness(singleAgentConfig());
+    harness.contextUsage = { tokens: 255_617, contextWindow: 272_000, percent: (255_617 / 272_000) * 100 };
+    (harness.ctx as any).model = { provider: "test", id: "large-context", contextWindow: 272_000 };
+    harness.compactError = new Error("test compaction failure");
+
+    await harness.runCommand("materia", "cast verify failed compaction telemetry");
+
+    const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
+    const eventsContent = await readFile(state.runState.eventsFile, "utf8");
+    const events = eventsContent.trim().split("\n").map((line: string) => JSON.parse(line));
+    const compactionStart = events.find((event: any) => event.type === "proactive_compaction_start");
+    const compactionFailed = events.find((event: any) => event.type === "proactive_compaction_failed");
+
+    expect(compactionStart).toBeDefined();
+    expect(compactionFailed).toBeDefined();
+    for (const event of [compactionStart, compactionFailed]) {
+      expect(event.data.usableBudget).toBe(255_616);
+      expect(event.data.reserve).toBe(16_384);
+    }
+    expect(compactionFailed.data).toMatchObject({ error: "test compaction failure", warning: true });
+    expect(events.some((event: any) => event.type === "proactive_compaction_complete")).toBe(false);
   });
 
   test("context isolation retains large active-turn tool results after a below-threshold usage snapshot", async () => {

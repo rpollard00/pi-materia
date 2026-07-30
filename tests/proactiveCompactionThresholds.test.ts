@@ -163,8 +163,13 @@ describe("default proactive compaction reserve budget", () => {
     expect(harness.operationLog.filter((op) => op === "compact")).toHaveLength(1);
     const state = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-cast-state").at(-1)?.data as any;
     const events = (await readFile(state.runState.eventsFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    const compactionEvent = events.find((event) => event.type === "proactive_compaction_start");
-    expect(compactionEvent.data).toMatchObject({ thresholdPercent: 45, thresholdMode: "configured_tiered", thresholdTier: { id: "200k-plus", minContextWindow: 200_000 } });
+    const compactionEvents = events.filter((event) => ["proactive_compaction_start", "proactive_compaction_complete"].includes(event.type));
+    expect(compactionEvents).toHaveLength(2);
+    for (const event of compactionEvents) {
+      expect(event.data).toMatchObject({ thresholdPercent: 45, thresholdMode: "configured_tiered", thresholdTier: { id: "200k-plus", minContextWindow: 200_000 } });
+      expect(event.data).not.toHaveProperty("usableBudget");
+      expect(event.data).not.toHaveProperty("reserve");
+    }
   });
 
   describe("Pi's strict greater-than boundary", () => {
