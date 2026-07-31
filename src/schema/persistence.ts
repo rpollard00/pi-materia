@@ -1,7 +1,7 @@
 import { validateReservedHandoffFields, type HandoffObject } from "../domain/handoff.js";
 import { validateLoadout, type Loadout, type LoadoutLoop, type LoadoutSocket, type SocketId } from "../domain/loadout.js";
 import type { DomainIssue, DomainResult } from "../domain/result.js";
-import type { EventingConfig, LoadoutSource, LoadoutUserLockState, MateriaConfig, MateriaFinalizationConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, PiMateriaConfig, MateriaProfileConfig } from "../types.js";
+import type { EventingConfig, LoadoutSource, LoadoutUserLockState, MateriaBudgetConfig, MateriaConfig, MateriaFinalizationConfig, MateriaLoopConfig, MateriaPipelineConfig, MateriaPipelineLayoutConfig, MateriaPipelineSocketConfig, PiMateriaConfig, MateriaProfileConfig } from "../types.js";
 
 /**
  * Persistence/schema anti-corruption adapters.
@@ -125,6 +125,15 @@ export function domainLoadoutToPipelineConfig(loadout: Loadout): MateriaPipeline
   };
 }
 
+export function normalizeBudgetConfig(value: unknown): MateriaBudgetConfig | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const { maxTokens, warnAtPercent } = value;
+  return {
+    ...(maxTokens !== undefined ? { maxTokens: maxTokens as number } : {}),
+    ...(warnAtPercent !== undefined ? { warnAtPercent: warnAtPercent as number } : {}),
+  };
+}
+
 export function normalizePersistedConfigForApplication<T extends Partial<PiMateriaConfig>>(config: T): T {
   return parseCurrentPersistedConfig(config as CurrentPersistedConfig) as T;
 }
@@ -140,9 +149,10 @@ export function normalizePersistedLoadoutForApplication(value: unknown, materia:
 
 export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Partial<PiMateriaConfig> {
   const materia = isPlainObject(config.materia) ? config.materia as PiMateriaConfig["materia"] : undefined;
+  const budget = normalizeBudgetConfig(config.budget);
   return {
     ...(config.artifactDir !== undefined ? { artifactDir: config.artifactDir } : {}),
-    ...(config.budget !== undefined ? { budget: cloneRecord(config.budget) } : {}),
+    ...(budget !== undefined ? { budget } : {}),
     ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
     ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
     ...(config.finalization !== undefined ? { finalization: config.finalization === null ? undefined : cloneRecord(config.finalization) as MateriaFinalizationConfig } : {}),
@@ -155,9 +165,10 @@ export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Par
 }
 
 export function serializeCurrentPersistedConfig(config: Partial<PiMateriaConfig>): CurrentPersistedConfig {
+  const budget = normalizeBudgetConfig(config.budget);
   return {
     ...(config.artifactDir !== undefined ? { artifactDir: config.artifactDir } : {}),
-    ...(config.budget !== undefined ? { budget: cloneRecord(config.budget) } : {}),
+    ...(budget !== undefined ? { budget } : {}),
     ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
     ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
     ...(config.finalization !== undefined ? { finalization: cloneRecord(config.finalization) as MateriaFinalizationConfig } : {}),

@@ -454,8 +454,6 @@ function formatBudget(budget?: MateriaBudgetConfig): string {
   if (!budget) return "none";
   return [
     budget.maxTokens === undefined ? undefined : `${budget.maxTokens} tokens`,
-    budget.maxCostUsd === undefined ? undefined : `$${budget.maxCostUsd}`,
     budget.warnAtPercent === undefined ? undefined : `warn ${budget.warnAtPercent}%`,
-    budget.stopAtLimit === false ? "ask at limit" : "stop at limit",
   ].filter(Boolean).join(", ");
 }

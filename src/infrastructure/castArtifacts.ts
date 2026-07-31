@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { normalizeBudgetConfig } from "../schema/persistence.js";
 import { safePathSegment } from "../utilities/artifacts.js";
 import type { MateriaCastState, MateriaManifest, MateriaManifestEntry, MateriaModelSelection, MateriaRunState, PiMateriaConfig } from "../types.js";
 
@@ -37,7 +38,12 @@ export function createFileCastArtifactStore(): CastArtifactStore {
 export async function initializeRun(runDir: string, config: PiMateriaConfig, manifest: MateriaManifest): Promise<void> {
   await mkdir(path.join(runDir, "sockets"), { recursive: true });
   await mkdir(path.join(runDir, "contexts"), { recursive: true });
-  await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(config, null, 2));
+  const budget = normalizeBudgetConfig(config.budget);
+  const resolvedConfig = {
+    ...config,
+    ...(budget !== undefined ? { budget } : {}),
+  };
+  await writeFile(path.join(runDir, "config.resolved.json"), JSON.stringify(resolvedConfig, null, 2));
   await writeManifest(runDir, manifest);
 }
 

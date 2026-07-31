@@ -11,9 +11,7 @@ export async function assertBudget(config: PiMateriaConfig, state: MateriaRunSta
   const budget = config.budget;
   if (!budget) return;
 
-  const tokenPercent = budget.maxTokens ? (state.usage.tokens.total / budget.maxTokens) * 100 : 0;
-  const costPercent = budget.maxCostUsd ? (state.usage.cost.total / budget.maxCostUsd) * 100 : 0;
-  const percent = Math.max(tokenPercent, costPercent);
+  const percent = budget.maxTokens ? (state.usage.tokens.total / budget.maxTokens) * 100 : 0;
   const warnAt = budget.warnAtPercent ?? 75;
 
   if (!state.budgetWarned && percent >= warnAt) {
@@ -23,12 +21,12 @@ export async function assertBudget(config: PiMateriaConfig, state: MateriaRunSta
   }
 
   const overToken = budget.maxTokens !== undefined && state.usage.tokens.total >= budget.maxTokens;
-  const overCost = budget.maxCostUsd !== undefined && state.usage.cost.total >= budget.maxCostUsd;
-  if (!overToken && !overCost) return;
+  if (!overToken) return;
 
-  await appendEvent(state, "budget_limit", { overToken, overCost, usage: state.usage });
-  if (budget.stopAtLimit !== false) throw new Error("pi-materia budget limit reached");
-  if (ctx.hasUI) {
-    ctx.ui.notify("pi-materia budget limit reached.", "error");
-  }
+  await appendEvent(state, "budget_limit", {
+    maxTokens: budget.maxTokens,
+    consumedTokens: state.usage.tokens.total,
+    usage: state.usage,
+  });
+  throw new Error("pi-materia budget limit reached");
 }

@@ -2,10 +2,16 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseJson } from "../utilities/json.js";
 import { getEffectivePipelineConfig } from "./pipeline.js";
+import { normalizeBudgetConfig } from "../schema/persistence.js";
 import type { MateriaCastState, PiMateriaConfig } from "../types.js";
 
 export async function loadConfigFromState(state: MateriaCastState): Promise<PiMateriaConfig> {
-  return JSON.parse(await readFile(path.join(state.runDir, "config.resolved.json"), "utf8")) as PiMateriaConfig;
+  const config = JSON.parse(await readFile(path.join(state.runDir, "config.resolved.json"), "utf8")) as PiMateriaConfig;
+  const budget = normalizeBudgetConfig(config.budget);
+  return {
+    ...config,
+    ...(budget !== undefined ? { budget } : {}),
+  };
 }
 
 export interface PersistedCastLoadoutIdentity {

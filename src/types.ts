@@ -190,9 +190,7 @@ export interface MateriaRoleGenerationProfileConfig {
 
 export interface MateriaBudgetConfig {
   maxTokens?: number;
-  maxCostUsd?: number;
   warnAtPercent?: number;
-  stopAtLimit?: boolean;
 }
 
 export interface MateriaLimitsConfig {
