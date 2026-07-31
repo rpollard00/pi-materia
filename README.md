@@ -137,6 +137,14 @@ The WebUI starts automatically with `/materia cast`, `/materia link`, `/materia 
 
 ### Resume and recover
 
+#### Inspect or update a cast budget
+
+Use `/materia budget` to inspect the selected cast's consumed tokens and current token limit. It targets the active cast first; when no cast is active, it falls back to the latest resumable failed or aborted cast. Completed casts are not selected implicitly.
+
+Use `/materia budget <tokens>` to update that cast's limit. The command is non-blocking, so it can raise the limit of an in-flight cast without recasting. Updates are persisted only in that cast's resolved configuration; global, user, and project configuration remain unchanged. The requested value must be a non-negative safe whole number at least as large as the cast's consumed token count, so equality is allowed but lowering the limit below consumed tokens is rejected.
+
+Budget warnings use only `usage.tokens.total` and `warnAtPercent`. The token limit is an unconditional hard stop when `usage.tokens.total >= maxTokens`. Cost remains available in usage telemetry and displays, but never controls warnings or enforcement.
+
 #### Recast vs Revive
 
 pi-materia provides two ways to restart a failed cast:
@@ -231,6 +239,7 @@ Save this as `.pi/pi-materia.json` in your project, or pass it with `--materia-c
 | Command | Description |
 |---|---|
 | `/materia cast <task>` | Run a cast with the active loadout |
+| `/materia budget [<tokens>]` | Show the selected cast's consumed tokens and token limit, or update its cast-local limit |
 | `/materia autocast <loadout\|materia:name> <prompt>` | Run a cast with a temporary loadout or single-materia virtual loadout |
 | `/materia link [--from <id>] <target> ... -- <prompt>` | Chain materia/loadouts into an ephemeral pipeline |
 | `/materia grid` | Show the resolved pipeline graph |
@@ -262,6 +271,23 @@ Config is merged from lowest to highest precedence:
 4. `MATERIA_CONFIG` environment variable
 5. `--materia-config` CLI flag
 
+### Token budget configuration
+
+Configure the token warning threshold and hard limit with the top-level `budget` object:
+
+```json
+{
+  "budget": {
+    "maxTokens": 200000,
+    "warnAtPercent": 75
+  }
+}
+```
+
+`maxTokens` and `warnAtPercent` are evaluated from the cast's token usage only. A warning is emitted when `usage.tokens.total` reaches the configured percentage, and the cast always hard-stops when `usage.tokens.total` reaches or exceeds `maxTokens`. There are no monetary or soft-stop budget controls; cost values are retained as usage telemetry only.
+
+`/materia budget` reads the active cast, or the latest resumable failed/aborted cast when there is no active cast. `/materia budget <tokens>` persists a cast-local limit without rewriting source configuration or automatically recasting. Values must be non-negative safe whole numbers and cannot be below the selected cast's consumed token count.
+
 ### Artifacts
 
 Each cast writes a timestamped directory:
@@ -270,7 +296,7 @@ Each cast writes a timestamped directory:
 .pi/pi-materia/<cast-id>/
   config.resolved.json
   events.jsonl
-  usage.json              # token/cost totals
+  usage.json              # token totals and cost telemetry
   manifest.json
   sockets/<socket-id>/<visit>.md
   sockets/<socket-id>/<visit>.json

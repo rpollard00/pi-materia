@@ -125,14 +125,14 @@ Implementation notes:
 
 ## Phase 2: Observability, Token Budgeting, and Visual Feedback
 
-### 3. Token and cost reporting for safe testing
+### 3. Token budget enforcement and usage telemetry
 
-Problem: pi-materia runs multiple role turns, so token usage can climb quickly during test loops.
+Problem: pi-materia runs multiple role turns, so token usage can climb quickly during test loops. Cost is retained as usage telemetry for reporting, not as a budget control.
 
 Tasks:
 - [x] Capture usage from Pi assistant messages where Pi exposes it.
   - Current native runtime reads usage from assistant messages after role turns.
-  - Cost totals are normalized as USD from Pi usage metadata, preserving provided totals or summing available input/output/cache components.
+  - Cost totals are normalized as USD from Pi usage metadata, preserving provided totals or summing available input/output/cache components. Cost is displayed and persisted as telemetry only; it does not participate in warnings or enforcement.
   - Needs real-run verification against provider/message shapes.
 - [x] Aggregate per:
   - run
@@ -142,27 +142,28 @@ Tasks:
 - [x] Show live totals in the pi-materia widget.
 - [x] Write incremental totals to `usage.json` after every observed role-turn usage event.
 - [x] Include model/provider/api/thinking level in usage report when available from Pi/model metadata.
-- [x] Add configurable safety limits:
+- [x] Add configurable token safety limits:
   ```json
   {
     "budget": {
       "maxTokens": 200000,
-      "maxCostUsd": 5,
-      "warnAtPercent": 75,
-      "stopAtLimit": true
+      "warnAtPercent": 75
     }
   }
   ```
-- [x] Warn when budget crosses `warnAtPercent`.
-- [x] Stop or ask for confirmation when the limit is reached, depending on config.
-- [ ] Verify token/cost capture with real casts and multiple providers.
+- [x] Warn when `usage.tokens.total` crosses `warnAtPercent` of `maxTokens`.
+- [x] Hard-stop unconditionally when `usage.tokens.total` reaches or exceeds `maxTokens`.
+- [x] Add `/materia budget [<tokens>]` to query the active cast, or the latest resumable failed/aborted cast when no cast is active, and update that cast's local limit without an automatic recast.
+  - Updates persist only to the cast's resolved configuration and leave global, user, and project configuration unchanged.
+  - Requested limits must be non-negative safe whole numbers at least as large as consumed tokens; equality is valid.
+- [ ] Verify token/cost telemetry capture with real casts and multiple providers.
 - [x] Add a richer final usage breakdown display, not just totals notification + `usage.json`.
   - Current implementation renders a `materia-usage` widget with total, by-role, by-socket, and by-task usage.
 
 Acceptance:
 - [x] Live widget shows token/cost totals during a run.
 - [x] End of run reports total tokens and per-role breakdown in the UI.
-- [x] Tests can be bounded by token/cost limits to avoid runaway loops.
+- [x] Tests can be bounded by token limits to avoid runaway loops; cost remains telemetry only.
 
 ### 4. Rich progress feedback
 
@@ -408,7 +409,7 @@ Acceptance:
 - [x] Remove custom external-runner token accounting from the main active-session path.
 - [x] Read totals from Pi assistant message usage for Materia widgets/artifacts.
 - [x] Continue writing `usage.json`, but source it from Pi-native session data.
-- [x] Keep budget enforcement, but check it after each turn using Pi's actual usage totals, with cost limits evaluated against normalized USD totals.
+- [x] Keep token budget enforcement, checking it after each turn using Pi's actual usage totals. Cost remains available as normalized USD telemetry only.
 
 Acceptance:
 - Materia token/cost numbers match Pi footer/session info and Pi usage metadata totals.
@@ -757,7 +758,7 @@ Acceptance:
 ## Proposed Implementation Order
 
 1. Config loading from external path and artifact directory separation. — implemented
-2. Token/cost aggregation with live widget display and budget limits. — implemented, pending broader provider verification
+2. Token/cost telemetry with live widget display and token budget enforcement. — implemented, pending broader provider verification
 3. Structured pipeline config replacing hardcoded roles. — implemented
 4. Status widget and event log. — implemented
 5. `/materia grid` pipeline visualization. — implemented
