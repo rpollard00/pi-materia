@@ -1,6 +1,6 @@
 import type { LoadedConfig, MateriaCastState, MateriaPipelineConfig, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 import { resolveLoadoutSelection } from "../loadout/defaultLoadoutResolver.js";
-import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStartOptions, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter, QuestBoardRepository } from "./ports.js";
+import type { ArtifactCatalog, CastAgentTurnPort, CastBudgetPersistencePort, CastContextPort, CastLifecyclePort, CastStartOptions, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter, QuestBoardRepository } from "./ports.js";
 import { compileLinkPlan, compileVirtualLoadoutFromResolvedTargets, createConfigLinkGraphSource } from "../link/compiler.js";
 import { loadPreviousCastContext } from "../link/contextLoader.js";
 import { parseLinkCommandArguments } from "../link/parser.js";
@@ -208,6 +208,106 @@ export class CastCatalogUseCases<TSession = unknown> {
     const artifactRoot = this.deps.configs.resolveArtifactRoot(input.cwd, loaded.config.artifactDir);
     const lines = await this.deps.artifacts.renderCastList(artifactRoot, this.deps.states.listLatest(input.session));
     return { loaded, artifactRoot, lines };
+  }
+}
+
+export interface CastBudgetSnapshot {
+  castId: string;
+  consumedTokens: number;
+  maxTokens?: number;
+}
+
+export interface CastBudgetUseCasesDeps<TSession = unknown, TPi = unknown> {
+  states: Pick<CastStateRepository<TSession>, "loadActive" | "listResumable">;
+  budget: CastBudgetPersistencePort<TPi>;
+}
+
+/**
+ * Query and update the token budget belonging to the cast a user can act on.
+ *
+ * The active cast takes precedence. Once no cast is active, only a failed or
+ * aborted resumable cast is eligible; completed casts are intentionally not a
+ * fallback target.
+ */
+export class CastBudgetUseCases<TSession = unknown, TPi = unknown> {
+  constructor(private readonly deps: CastBudgetUseCasesDeps<TSession, TPi>) {}
+
+  resolveBudgetTarget(session: TSession): MateriaCastState | undefined {
+    const active = this.deps.states.loadActive(session);
+    if (active?.active) return active;
+    return this.deps.states.listResumable(session)[0];
+  }
+
+  resolveTarget(session: TSession): MateriaCastState | undefined {
+    return this.resolveBudgetTarget(session);
+  }
+
+  async getBudget(session: TSession): Promise<CastBudgetSnapshot> {
+    const state = this.requireTarget(session);
+    const config = await this.deps.budget.loadConfig(state);
+    const configuredMaxTokens = config.budget?.maxTokens;
+    return {
+      castId: state.castId,
+      consumedTokens: consumedTokensFor(state),
+      ...(typeof configuredMaxTokens === "number" ? { maxTokens: configuredMaxTokens } : {}),
+    };
+  }
+
+  async queryBudget(session: TSession): Promise<CastBudgetSnapshot> {
+    return this.getBudget(session);
+  }
+
+  async updateBudget(pi: TPi, session: TSession, requestedMaxTokens: unknown): Promise<CastBudgetSnapshot> {
+    const state = this.requireTarget(session);
+    const maxTokens = parseCastBudgetTokens(requestedMaxTokens);
+    const consumedTokens = consumedTokensFor(state);
+    if (maxTokens < consumedTokens) {
+      throw new CastBudgetValidationError(`Cast budget limit cannot be lower than the ${consumedTokens} consumed tokens.`);
+    }
+
+    await this.deps.budget.persist(pi, state, maxTokens);
+    return { castId: state.castId, consumedTokens, maxTokens };
+  }
+
+  private requireTarget(session: TSession): MateriaCastState {
+    const state = this.resolveBudgetTarget(session);
+    if (!state) throw new CastBudgetTargetError();
+    return state;
+  }
+}
+
+export function parseCastBudgetTokens(value: unknown): number {
+  const candidate = typeof value === "string"
+    ? parseCastBudgetTokenText(value)
+    : value;
+  if (typeof candidate !== "number" || !Number.isSafeInteger(candidate) || candidate < 0) {
+    throw new CastBudgetValidationError("Cast budget must be a non-negative safe whole number.");
+  }
+  return candidate;
+}
+
+function parseCastBudgetTokenText(value: string): number | undefined {
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) return undefined;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function consumedTokensFor(state: MateriaCastState): number {
+  return state.runState.usage.tokens.total;
+}
+
+export class CastBudgetTargetError extends Error {
+  readonly code = "cast_budget_target_not_found";
+  constructor() {
+    super("No active or resumable pi-materia cast is available for a budget operation.");
+  }
+}
+
+export class CastBudgetValidationError extends Error {
+  readonly code = "cast_budget_validation";
+  constructor(message: string) {
+    super(message);
   }
 }
 

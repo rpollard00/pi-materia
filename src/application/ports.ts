@@ -1,5 +1,5 @@
 import type { QuestBoard } from "../domain/questBoard.js";
-import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
+import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 
 export interface ConfigRepository {
   load(cwd: string, configuredPath?: string): Promise<LoadedConfig>;
@@ -23,6 +23,11 @@ export interface CastStateRepository<TSession = unknown> {
 
 export interface ArtifactCatalog {
   renderCastList(artifactRoot: string, sessionStates?: MateriaCastState[]): Promise<string[]>;
+}
+
+export interface CastBudgetPersistencePort<TPi = unknown> {
+  loadConfig(state: MateriaCastState): Promise<Pick<PiMateriaConfig, "budget">>;
+  persist(pi: TPi, state: MateriaCastState, maxTokens: number): Promise<unknown>;
 }
 
 export interface CastContextPort {

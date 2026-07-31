@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ActiveCastConflictError, ActiveQuestConflictError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter, type QuestBoardRepository } from "../src/application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, CastBudgetTargetError, CastBudgetUseCases, CastBudgetValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter, type QuestBoardRepository } from "../src/application/index.js";
 import { createEmptyQuestBoard, enableQuestRunner, type QuestBoard } from "../src/domain/questBoard.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../src/types.js";
 
@@ -295,6 +295,39 @@ describe("application use cases", () => {
     const useCases = new CastCatalogUseCases({ configs: { async load() { return { ...loaded(), config: { ...loaded().config, artifactDir: "artifacts" } }; }, async saveActiveLoadout() { return ""; }, resolveArtifactRoot: (cwd, dir) => `${cwd}/${dir}` }, states, artifacts });
 
     await expect(useCases.listCasts({ cwd: "/repo", session: "session" })).resolves.toMatchObject({ artifactRoot: "/repo/artifacts", lines: ["/repo/artifacts:latest"] });
+  });
+
+  test("cast budget use cases target active casts before resumable failures and validate updates", async () => {
+    const baseUsage = state().usage;
+    const active = state({ castId: "active", active: true, runState: { usage: { ...baseUsage, tokens: { ...baseUsage.tokens, total: 40 } } } as MateriaCastState["runState"] });
+    const completed = state({ castId: "completed", active: false, phase: "complete", socketState: "complete", updatedAt: 30 });
+    const resumable = state({ castId: "resumable", active: false, phase: "failed", socketState: "failed", updatedAt: 20, runState: { usage: { ...baseUsage, tokens: { ...baseUsage.tokens, total: 25 } } } as MateriaCastState["runState"] });
+    const persisted: Array<{ castId: string; maxTokens: number }> = [];
+    let available: MateriaCastState[] = [completed, resumable];
+    const useCases = new CastBudgetUseCases({
+      states: {
+        loadActive: () => active,
+        listResumable: () => available.filter((candidate) => candidate.phase === "failed"),
+      },
+      budget: {
+        loadConfig: async (cast) => ({ budget: { maxTokens: cast.castId === "active" ? 100 : 50 } }),
+        persist: async (_pi, cast, maxTokens) => { persisted.push({ castId: cast.castId, maxTokens }); },
+      },
+    });
+
+    await expect(useCases.getBudget("session")).resolves.toEqual({ castId: "active", consumedTokens: 40, maxTokens: 100 });
+    active.active = false;
+    await expect(useCases.getBudget("session")).resolves.toEqual({ castId: "resumable", consumedTokens: 25, maxTokens: 50 });
+    await expect(useCases.updateBudget("pi", "session", 25)).resolves.toEqual({ castId: "resumable", consumedTokens: 25, maxTokens: 25 });
+    expect(persisted).toEqual([{ castId: "resumable", maxTokens: 25 }]);
+
+    await expect(useCases.updateBudget("pi", "session", 24)).rejects.toBeInstanceOf(CastBudgetValidationError);
+    await expect(useCases.updateBudget("pi", "session", 24.5)).rejects.toBeInstanceOf(CastBudgetValidationError);
+    await expect(useCases.updateBudget("pi", "session", "not-a-number")).rejects.toBeInstanceOf(CastBudgetValidationError);
+    expect(persisted).toEqual([{ castId: "resumable", maxTokens: 25 }]);
+
+    available = [completed];
+    await expect(useCases.getBudget("session")).rejects.toBeInstanceOf(CastBudgetTargetError);
   });
 
   test("cast execution use case prepares prompts and delegates lifecycle actions", async () => {
