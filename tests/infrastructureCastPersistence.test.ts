@@ -107,13 +107,92 @@ describe("cast persistence infrastructure", () => {
     state.runState.usage.tokens.total = 75;
     await writeUsage(state.runState);
     await appendEvent(state.runState, "custom_event", { ok: true });
-    await assertBudget({ materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxTokens: 100, warnAtPercent: 50, stopAtLimit: false } } as any, state.runState, { ui: { notify: () => undefined }, hasUI: true } as any);
+    await assertBudget({ materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxTokens: 100, warnAtPercent: 50 } } as any, state.runState, { ui: { notify: () => undefined }, hasUI: true } as any);
 
     const usage = JSON.parse(await readFile(path.join(root, "usage.json"), "utf8"));
     expect(usage.tokens.total).toBe(75);
     const eventLines = (await readFile(path.join(root, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(eventLines.map((event) => event.type)).toEqual(["custom_event", "budget_warning"]);
+    expect(eventLines[1].data).toMatchObject({ maxTokens: 100, consumedTokens: 75, percent: 75 });
     expect(state.runState.budgetWarned).toBe(true);
+  });
+
+  test("warns at the configured token percentage and not before it", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-budget-warning-"));
+    const state = castState(root);
+    const config = { materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxTokens: 100, warnAtPercent: 50 } } as any;
+    const ctx = { ui: { notify: () => undefined }, hasUI: true } as any;
+
+    state.runState.usage.tokens.total = 49;
+    await assertBudget(config, state.runState, ctx);
+    expect(state.runState.budgetWarned).toBe(false);
+
+    state.runState.usage.tokens.total = 50;
+    await assertBudget(config, state.runState, ctx);
+    expect(state.runState.budgetWarned).toBe(true);
+    const events = (await readFile(path.join(root, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "budget_warning", data: { maxTokens: 100, consumedTokens: 50, percent: 50 } });
+  });
+
+  test("hard-stops at the exact token limit", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-budget-exact-"));
+    const state = castState(root);
+    state.runState.usage.tokens.total = 100;
+
+    await expect(assertBudget(
+      { materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxTokens: 100 } } as any,
+      state.runState,
+      { ui: { notify: () => undefined }, hasUI: true } as any,
+    )).rejects.toThrow("pi-materia budget limit reached");
+
+    const events = (await readFile(path.join(root, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.map((event) => event.type)).toEqual(["budget_warning", "budget_limit"]);
+    expect(events[1].data).toMatchObject({ maxTokens: 100, consumedTokens: 100, percent: 100 });
+  });
+
+  test("hard-stops when token usage exceeds the limit", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-budget-over-"));
+    const state = castState(root);
+    state.runState.usage.tokens.total = 101;
+
+    await expect(assertBudget(
+      { materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxTokens: 100, warnAtPercent: 200 } } as any,
+      state.runState,
+      { ui: { notify: () => undefined }, hasUI: true } as any,
+    )).rejects.toThrow("pi-materia budget limit reached");
+
+    const events = (await readFile(path.join(root, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "budget_limit", data: { maxTokens: 100, consumedTokens: 101, percent: 101 } });
+  });
+
+  test("ignores legacy monetary-only budget settings", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-budget-legacy-"));
+    const state = castState(root);
+    state.runState.usage.tokens.total = 1;
+    state.runState.usage.cost.total = 10;
+
+    await assertBudget(
+      { materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxCostUsd: 0.01, warnAtPercent: 0 } } as any,
+      state.runState,
+      { ui: { notify: () => undefined }, hasUI: true } as any,
+    );
+
+    expect(state.runState.budgetWarned).toBe(false);
+    expect(await readFile(path.join(root, "events.jsonl"), "utf8").catch(() => "")).toBe("");
+  });
+
+  test("ignores the legacy soft-stop flag when the token limit is reached", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-budget-hard-stop-"));
+    const state = castState(root);
+    state.runState.usage.tokens.total = 100;
+
+    await expect(assertBudget(
+      { materias: {}, loadouts: { default: { sockets: [] } }, budget: { maxTokens: 100, stopAtLimit: false, warnAtPercent: 200 } } as any,
+      state.runState,
+      { ui: { notify: () => undefined }, hasUI: true } as any,
+    )).rejects.toThrow("pi-materia budget limit reached");
   });
 
   test("context artifact writer keeps isolated context layout", async () => {
