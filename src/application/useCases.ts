@@ -326,10 +326,11 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   constructor(private readonly deps: CastExecutionUseCasesDeps<TSession, TPi, TAgentEvent>) {}
 
   buildIsolatedContext(messages: unknown, session: TSession): unknown | undefined {
+    // The context boundary owns the global legacy-card filter, so it must run
+    // even when this session has no cast state or its latest cast is complete.
     const state = this.deps.states.loadActive(session);
-    if (!state) return undefined;
-    const isolated = this.deps.context.buildIsolatedContext(messages, state);
-    return isolated === messages ? undefined : isolated;
+    const projected = this.deps.context.buildIsolatedContext(messages, state);
+    return projected === messages ? undefined : projected;
   }
 
   async prepareAgentStart(input: { pi: TPi; session: TSession; systemPrompt: string }): Promise<string | undefined> {

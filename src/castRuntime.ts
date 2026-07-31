@@ -23,7 +23,7 @@ export {
 
 export type { AgentControllerValidationResult, PipelineSocketDetail } from "./runtime/nativeLifecycle.js";
 
-export { activeMateriaSystemPrompt, buildIsolatedMateriaContext } from "./application/promptAssembly.js";
+export { activeMateriaSystemPrompt, buildIsolatedMateriaContext, projectMateriaContext } from "./application/promptAssembly.js";
 export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "./application/recoveryPolicy.js";
 export { defaultProactiveCompactionThresholdPercent } from "./runtime/compaction.js";
 export {

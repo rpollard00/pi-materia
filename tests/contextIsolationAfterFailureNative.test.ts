@@ -53,6 +53,22 @@ async function isolatedContext(harness: FakePiHarness, messages: unknown[]): Pro
 }
 
 describe("context isolation after turn failure", () => {
+  test("the sole context hook filters legacy cards without an active cast", async () => {
+    const harness = await makeHarness();
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "ordinary conversation" }] },
+      { role: "custom", customType: "pi-materia", content: "legacy card from an older command", details: { prefix: "status" } },
+      { role: "custom", customType: "pi-materia-prompt", content: "intentional hidden prompt", display: false },
+    ];
+
+    const projected = await isolatedContext(harness, messages);
+    expect(projected).toBeDefined();
+    const serialized = JSON.stringify(projected);
+    expect(serialized).toContain("ordinary conversation");
+    expect(serialized).toContain("intentional hidden prompt");
+    expect(serialized).not.toContain("legacy card from an older command");
+  });
+
   test("terminated mid-Builda-turn preserves awaiting state and isolates Pi's retry", async () => {
     const harness = await makeHarness();
     await harness.runCommand("materia", "cast reproduce transport drop");

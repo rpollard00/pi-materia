@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, findActiveMateriaPromptIndex, isOrchestrationOnlyMessage, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
+import { activeMateriaSystemPrompt, buildIsolatedMateriaContext, buildJsonOutputRepairPrompt, buildJsonOutputRepairRetryPrompt, buildMultiTurnFinalizationPrompt, buildSocketPrompt, buildSyntheticCastContext, buildTimeoutRecoveryHint, findActiveMateriaPromptIndex, isLegacyMateriaDisplayMessage, projectMateriaContext, sanitizePreviousOutput, syntheticEventEmissionContext } from "../src/application/promptAssembly.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT, HANDOFF_RESERVED_FIELD_TYPE_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import type { MateriaCastState, ResolvedMateriaAgentSocket } from "../src/types.js";
 
@@ -632,6 +632,40 @@ describe("buildIsolatedMateriaContext", () => {
     "Loadout: Rude (user:reno-copy:b73f1393-eaec-45b1-9b4a-d7deb2048920)",
   ].join("\n");
 
+  test("globally filters legacy cards without cast state while preserving inference and turn messages", () => {
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "genuine refinement" }] },
+      { role: "custom", customType: "pi-materia", content: "legacy status card", details: { prefix: "status" } },
+      { role: "custom", customType: "pi-materia-prompt", content: "hidden materia prompt", display: false },
+      { role: "assistant", content: [{ type: "text", text: "assistant turn" }] },
+      { role: "toolResult", content: [{ type: "text", text: "tool result" }] },
+      // Defensive coverage for an adapter that incorrectly replayed an entry as
+      // a message: presentation cards must not be reconstructed into context.
+      { role: "custom", customType: "pi-materia-presentation", content: "presentation card" },
+    ];
+
+    const projected = projectMateriaContext(messages);
+    const serialized = JSON.stringify(projected);
+    expect(serialized).not.toContain("legacy status card");
+    expect(serialized).not.toContain("presentation card");
+    expect(serialized).toContain("genuine refinement");
+    expect(serialized).toContain("hidden materia prompt");
+    expect(serialized).toContain("assistant turn");
+    expect(serialized).toContain("tool result");
+  });
+
+  test("filters legacy cards for a completed cast as well as an idle session", () => {
+    const socket = agentSocket();
+    const completed = state(socket, { active: false, phase: "complete", socketState: "complete", awaitingResponse: false });
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "native conversation" }] },
+      { role: "custom", customType: "pi-materia", content: "completed cast card", details: { prefix: "status" } },
+    ];
+
+    expect(JSON.stringify(projectMateriaContext(messages, completed))).not.toContain("completed cast card");
+    expect(JSON.stringify(projectMateriaContext(messages))).not.toContain("completed cast card");
+  });
+
   test("filters quest runner orchestration cards appended after the hidden materia prompt", () => {
     const socket = agentSocket();
     const castState = state(socket);
@@ -703,8 +737,9 @@ describe("buildIsolatedMateriaContext", () => {
     expect(serialized).toContain("I will read the file.");
     expect(serialized).toContain("file contents");
     expect(serialized).toContain("please focus on the palette filter");
-    // Non-quest custom display cards are out of scope and remain untouched.
-    expect(serialized).toContain("status card");
+    // Legacy pi-materia custom display cards are filtered by the central
+    // projection regardless of their card-specific details.
+    expect(serialized).not.toContain("status card");
   });
 
   test("filters displayed materia transition cards that follow the hidden prompt (Narrata)", () => {
@@ -809,7 +844,7 @@ describe("buildIsolatedMateriaContext", () => {
     expect(serialized).toContain("Build it.");
   });
 
-  test("returns messages unchanged when no active materia prompt is present", () => {
+  test("filters legacy cards even when no active materia prompt is present", () => {
     const socket = agentSocket();
     const castState = state(socket);
     const messages = [
@@ -817,7 +852,10 @@ describe("buildIsolatedMateriaContext", () => {
       questOrchestrationCard(QUEST_RUNNER_CARD),
     ];
 
-    expect(buildIsolatedMateriaContext(messages, castState)).toBe(messages);
+    const projected = buildIsolatedMateriaContext(messages, castState);
+    expect(projected).not.toBe(messages);
+    expect(JSON.stringify(projected)).toContain("plain conversation");
+    expect(JSON.stringify(projected)).not.toContain("Started continuous quest runner");
   });
 
   test("preserves full refinement transcript when a finalization prompt follows refinement turns (regression test for context-clearing bug)", () => {
@@ -1073,42 +1111,26 @@ describe("findActiveMateriaPromptIndex", () => {
   });
 });
 
-describe("isOrchestrationOnlyMessage", () => {
-  test("flags custom messages marked orchestration or with a quest/materia transition signature", () => {
-    // Explicit orchestration flag (covers quest runner and materia cards alike).
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest", orchestration: true } })).toBe(true);
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { orchestration: true } })).toBe(true);
-    // Defense-in-depth: quest-prefix cards without the explicit flag.
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "x", details: { prefix: "quest" } })).toBe(true);
-    // Defense-in-depth: materia transition cards (prefix "materia" and/or
-    // eventType "materia_prompt") without the explicit orchestration flag.
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { prefix: "materia", eventType: "materia_prompt" } })).toBe(true);
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { prefix: "materia" } })).toBe(true);
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "Casting Narrata", details: { eventType: "materia_prompt" } })).toBe(true);
+describe("isLegacyMateriaDisplayMessage", () => {
+  test("matches every legacy card regardless of per-card details", () => {
+    expect(isLegacyMateriaDisplayMessage({ role: "custom", customType: "pi-materia", content: "quest card", details: { prefix: "quest" } })).toBe(true);
+    expect(isLegacyMateriaDisplayMessage({ role: "custom", customType: "pi-materia", content: "status card", details: {} })).toBe(true);
+    expect(isLegacyMateriaDisplayMessage({ role: "custom", customType: "pi-materia-presentation", content: "replayed entry" })).toBe(true);
   });
 
-  test("preserves the hidden materia prompt and non-quest custom cards", () => {
-    // The hidden pi-materia-prompt carries socket/materia details but none of
-    // the display-card signatures, so it is never mistaken for a transition card.
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>", details: { phase: "Socket-7", socketId: "Socket-7", materiaName: "Narrata" } })).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "status", details: { prefix: "status" } })).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "custom", customType: "pi-materia", content: "orphan", details: {} })).toBe(false);
-  });
-
-  test("never treats user, assistant, tool, or toolResult messages as orchestration", () => {
-    expect(isOrchestrationOnlyMessage({ role: "user", content: [{ type: "text", text: "Started continuous quest runner" }] })).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "assistant", content: [{ type: "text", text: "ack" }] })).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "toolResult", content: [] })).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "tool", content: [] })).toBe(false);
+  test("preserves the hidden materia prompt and ordinary message roles", () => {
+    expect(isLegacyMateriaDisplayMessage({ role: "custom", customType: "pi-materia-prompt", content: "<materia-instructions>" })).toBe(false);
+    expect(isLegacyMateriaDisplayMessage({ role: "user", customType: "pi-materia", content: "user refinement" })).toBe(false);
+    expect(isLegacyMateriaDisplayMessage({ role: "assistant", customType: "pi-materia", content: "assistant turn" })).toBe(false);
+    expect(isLegacyMateriaDisplayMessage({ role: "toolResult", customType: "pi-materia", content: "tool result" })).toBe(false);
   });
 
   test("handles malformed inputs defensively", () => {
-    expect(isOrchestrationOnlyMessage(null)).toBe(false);
-    expect(isOrchestrationOnlyMessage(undefined)).toBe(false);
-    expect(isOrchestrationOnlyMessage("text")).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "custom" })).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "custom", details: "not-an-object" })).toBe(false);
-    expect(isOrchestrationOnlyMessage({ role: "custom", details: null })).toBe(false);
+    expect(isLegacyMateriaDisplayMessage(null)).toBe(false);
+    expect(isLegacyMateriaDisplayMessage(undefined)).toBe(false);
+    expect(isLegacyMateriaDisplayMessage("text")).toBe(false);
+    expect(isLegacyMateriaDisplayMessage({ role: "custom" })).toBe(false);
+    expect(isLegacyMateriaDisplayMessage({ role: "custom", customType: "other" })).toBe(false);
   });
 });
 

@@ -31,7 +31,8 @@ export interface CastBudgetPersistencePort<TPi = unknown> {
 }
 
 export interface CastContextPort {
-  buildIsolatedContext(eventMessages: unknown, state: MateriaCastState): unknown;
+  /** Project every context request, including sessions without an active cast. */
+  buildIsolatedContext(eventMessages: unknown, state?: MateriaCastState): unknown;
 }
 
 export interface CastAgentTurnPort<TSession = unknown, TPi = unknown, TAgentEvent = unknown> {
