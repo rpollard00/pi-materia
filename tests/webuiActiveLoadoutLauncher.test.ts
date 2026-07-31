@@ -44,11 +44,12 @@ describe("WebUI active loadout launcher callback", () => {
     await expect(readFile(configuredPath, "utf8")).rejects.toThrow();
     expect(harness.widgets.has("materia-loadouts")).toBe(false);
     expect(harness.notifications).toEqual([{ message: "Cannot change active loadout during active cast cast-123.", type: "error" }]);
-    expect(harness.sentMessages).toHaveLength(1);
-    expect((harness.sentMessages[0]?.message as { details?: Record<string, unknown> }).details).toMatchObject({ eventType: "loadout", source: "webui", error: "active_cast_conflict", castId: "cast-123" });
+    expect(harness.sentMessages).toHaveLength(0);
+    const conflictCard = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { content?: string; details?: Record<string, unknown> };
+    expect(conflictCard).toMatchObject({ content: "Cannot change active loadout during active cast cast-123.", details: { eventType: "loadout", source: "webui", error: "active_cast_conflict", castId: "cast-123" } });
   });
 
-  test("persists, reloads the loadout widget, notifies the TUI, and emits a pi-materia WebUI loadout event", async () => {
+  test("persists, reloads the loadout widget, notifies the TUI, and emits a transcript-only WebUI loadout card", async () => {
     const { harness, configuredPath } = await harnessWithConfig("pi-materia-webui-active-success-");
     const setActiveLoadout = webUiLauncherTestInternals.createActiveLoadoutSetter(harness.ctx, configuredPath, harness.pi);
 
@@ -70,9 +71,8 @@ describe("WebUI active loadout launcher callback", () => {
       type: "info",
     });
 
-    const sent = harness.sentMessages.at(-1)?.message as { customType?: string; details?: Record<string, unknown>; content?: string; display?: boolean };
-    expect(sent.customType).toBe("pi-materia");
-    expect(sent.display).toBe(true);
+    expect(harness.sentMessages).toHaveLength(0);
+    const sent = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { details?: Record<string, unknown>; content?: string };
     expect(sent.content).toContain("Web-Test-B");
     expect(sent.details).toMatchObject({
       eventType: "loadout",

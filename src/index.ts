@@ -199,7 +199,10 @@ export default function piMateria(pi: ExtensionAPI) {
           clearMateriaAuxiliaryWidgets(ctx);
           updateMateriaWebUiStatusWidget(ctx, { url: result.url, status: result.status });
           ctx.ui.notify(`Materia WebUI ${reused ? "ready" : "started"}: ${result.url}`, "info");
-          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "ui", materiaName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey } });
+          appendMateriaPresentation(pi, {
+            content: lines.join("\n"),
+            details: { prefix: "ui", materiaName: "orchestrator", eventType: "ui", url: result.url, sessionKey: result.sessionKey },
+          });
           pi.appendEntry("pi-materia-webui", { url: result.url, sessionKey: result.sessionKey, reused, startedAt: Date.now() });
         } catch (error) {
           ctx.ui.notify(`pi-materia ui failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -296,12 +299,18 @@ export default function piMateria(pi: ExtensionAPI) {
           } else {
             const { lines } = await loadoutUseCases.listLoadouts(ctx.cwd, configuredPath);
             clearMateriaAuxiliaryWidgets(ctx);
-            pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout" } });
+            appendMateriaPresentation(pi, {
+              content: lines.join("\n"),
+              details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout" },
+            });
           }
         } catch (error) {
           if (error instanceof ActiveCastConflictError) {
             ctx.ui.notify(error.message, "error");
-            pi.sendMessage({ customType: "pi-materia", content: error.message, display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "command", error: error.code, castId: error.castId } });
+            appendMateriaPresentation(pi, {
+              content: error.message,
+              details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "command", error: error.code, castId: error.castId },
+            });
           } else {
             ctx.ui.notify(`pi-materia loadout failed: ${error instanceof Error ? error.message : String(error)}`, "error");
           }

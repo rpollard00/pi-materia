@@ -11,6 +11,7 @@ import { loadRuntimeConfig, saveRuntimeActiveLoadout } from "../infrastructure/a
 import { clearStaleDefaultLoadoutPreference, getRoleGenerationPreference, loadProfileConfig, saveDefaultLoadoutPreference, saveMateriaConfigPatch, saveQuestDefaultLoadoutPreference, saveRoleGenerationPreference } from "../config/config.js";
 import { resolveLoadoutReference } from "../loadout/defaultLoadoutResolver.js";
 import { publishActiveLoadoutChange } from "../presentation/activeLoadoutEvents.js";
+import { appendMateriaPresentation } from "../presentation/materiaPresentation.js";
 import { generateMateriaRolePrompt } from "../handoff/roleGeneration.js";
 import { addQuest as addQuestToBoard, deleteQuest as deleteQuestFromBoard, generateUniqueQuestId, movePendingQuest, requeueQuest, updatePendingQuest } from "../domain/questBoard.js";
 import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
@@ -299,7 +300,10 @@ function createActiveLoadoutSetter(ctx: ExtensionContext, configuredPath?: strin
     if (activeCast?.active) {
       const message = `Cannot change active loadout during active cast ${activeCast.castId}.`;
       ctx.ui.notify(message, "error");
-      pi.sendMessage({ customType: "pi-materia", content: message, display: true, details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "webui", error: "active_cast_conflict", castId: activeCast.castId } });
+      appendMateriaPresentation(pi, {
+        content: message,
+        details: { prefix: "loadout", materiaName: "orchestrator", eventType: "loadout", source: "webui", error: "active_cast_conflict", castId: activeCast.castId },
+      });
       pi.appendEntry("pi-materia-active-loadout-change-blocked", { eventType: "active-loadout-change-blocked", source: "webui", reason: "active_cast_conflict", castId: activeCast.castId, timestamp: Date.now() });
       return {
         ok: false,

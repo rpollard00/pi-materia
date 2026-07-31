@@ -128,7 +128,8 @@ describe("FakePiHarness", () => {
     piMateria(harness.pi);
 
     await harness.runCommand("materia", "loadout");
-    const listed = harness.sentMessages.at(-1)?.message as { content?: string };
+    const listed = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { content?: string };
+    expect(harness.sentMessages).toHaveLength(0);
     // Catalog output: header line, blank line, then one line per loadout with active marker and id/source
     expect(listed.content).toContain("loadout(s) from");
     expect(listed.content).toContain("Full-Auto");
@@ -144,14 +145,15 @@ describe("FakePiHarness", () => {
     expect(harness.widgets.get("materia-loadouts")?.content).toBeUndefined();
 
     await harness.runCommand("materia", "loadout Planning-Consult");
-    const switched = harness.sentMessages.at(-1)?.message as { content?: string };
+    const switched = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { content?: string; details?: Record<string, unknown> };
     const raw = JSON.parse(await readFile(configFile, "utf8"));
     expect(raw.activeLoadout).toBe("Planning-Consult");
+    expect(harness.sentMessages).toHaveLength(0);
     expect(switched.content).toContain("⌘ Planning-Consult");
     expect(switched.content).toContain("Planning-Consult*");
     expect(switched.content).not.toContain("Loadout:");
     expect(switched.content).not.toContain("Available:");
-    const switchedDetails = (harness.sentMessages.at(-1)?.message as { details?: Record<string, unknown> }).details;
+    const switchedDetails = switched.details;
     expect(switchedDetails).toMatchObject({
       eventType: "loadout",
       source: "command",
@@ -189,7 +191,8 @@ describe("FakePiHarness", () => {
     await harness.runCommand("materia", "loadout Planning-Consult");
 
     const raw = JSON.parse(await readFile(projectFile, "utf8"));
-    const switched = harness.sentMessages.at(-1)?.message as { content?: string };
+    const switched = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { content?: string };
+    expect(harness.sentMessages).toHaveLength(0);
     expect(raw).toMatchObject({ activeLoadout: "Planning-Consult", activeLoadoutId: "default:planning-consult" });
     expect(raw.piMateria).toBeUndefined();
     expect(await readFile(defaultFile, "utf8")).toBe(beforeDefault);
@@ -224,7 +227,8 @@ describe("FakePiHarness", () => {
     piMateria(harness.pi);
 
     await harness.runCommand("materia", "loadout");
-    const listed = harness.sentMessages.at(-1)?.message as { content?: string };
+    const listed = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { content?: string };
+    expect(harness.sentMessages).toHaveLength(0);
     // All 7 custom loadouts plus the 4 default loadouts = 11 total (custom overrides default names when non-overlapping)
     expect(listed.content).toContain("loadout(s) from");
     // Last configured custom loadout present
@@ -272,7 +276,8 @@ describe("FakePiHarness", () => {
 
     harness.idle = false;
     await harness.runCommand("materia", "ui");
-    const first = harness.sentMessages.at(-1)?.message as { content?: string; details?: { url?: string; sessionKey?: string } };
+    const first = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { content?: string; details?: { url?: string; sessionKey?: string } };
+    expect(harness.sentMessages).toHaveLength(0);
     const firstUrl = first.details?.url;
     expect(firstUrl).toStartWith("http://127.0.0.1:");
     // URLs are now clean roots with no ?session query; the per-session port/server provides isolation.
@@ -289,7 +294,8 @@ describe("FakePiHarness", () => {
     expect(session.sessionKey).toBe(first.details?.sessionKey);
 
     await harness.runCommand("materia", "ui");
-    const second = harness.sentMessages.at(-1)?.message as { content?: string; details?: { url?: string; sessionKey?: string } };
+    const second = harness.appendedEntries.findLast((entry) => entry.customType === "pi-materia-presentation")?.data as { content?: string; details?: { url?: string; sessionKey?: string } };
+    expect(harness.sentMessages).toHaveLength(0);
     expect(second.details?.url).toBe(firstUrl);
     expect(second.content).toContain("WebUI ready: http://127.0.0.1:");
     expect(harness.waitForIdleCalls).toBe(0);

@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { LoadedConfig } from "../types.js";
 import { renderLoadoutList } from "../loadout/loadouts.js";
 import { syncConfiguredLoadoutWidget } from "./ui.js";
+import { appendMateriaPresentation } from "./materiaPresentation.js";
 
 export const ACTIVE_LOADOUT_CHANGED_EVENT = "active-loadout-changed";
 export const ACTIVE_LOADOUT_CHANGED_ENTRY = "pi-materia-active-loadout-changed";
@@ -57,10 +58,8 @@ export function publishActiveLoadoutChange(
   syncConfiguredLoadoutWidget(ctx, activeLoadout);
   if (options.notifyMessage) ctx.ui.notify(options.notifyMessage, "info");
 
-  pi.sendMessage({
-    customType: "pi-materia",
+  appendMateriaPresentation(pi, {
     content: lines.join("\n"),
-    display: true,
     details: {
       prefix: "loadout",
       materiaName: "orchestrator",
