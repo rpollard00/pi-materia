@@ -4,6 +4,7 @@ import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValid
 import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
+import { appendMateriaPresentation } from "./presentation/materiaPresentation.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
 import { closeMateriaWebUiForSession, initializeDefaultLoadoutPreference, type MateriaWebUiQuestControlCallbacks } from "./webui/launcher.js";
 import { saveQuestDefaultLoadoutPreference } from "./config/config.js";
@@ -334,7 +335,10 @@ export default function piMateria(pi: ExtensionAPI) {
             `consumed tokens: ${snapshot.consumedTokens}`,
             `current token limit: ${limit}`,
           ].join("\n");
-          pi.sendMessage({ customType: "pi-materia", content, display: true, details: { prefix: "budget", materiaName: "orchestrator", eventType: updated ? "budget_updated" : "budget", castId: snapshot.castId, consumedTokens: snapshot.consumedTokens, maxTokens: snapshot.maxTokens } });
+          appendMateriaPresentation(pi, {
+            content,
+            details: { prefix: "budget", materiaName: "orchestrator", eventType: updated ? "budget_updated" : "budget", castId: snapshot.castId, consumedTokens: snapshot.consumedTokens, maxTokens: snapshot.maxTokens },
+          });
         } catch (error) {
           if (error instanceof CastBudgetTargetError || error instanceof CastBudgetValidationError) {
             ctx.ui.notify(error.message, "error");

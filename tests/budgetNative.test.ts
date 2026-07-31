@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
+import { MATERIA_PRESENTATION_ENTRY_TYPE } from "../src/presentation/materiaPresentation.js";
 import type { MateriaCastState } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -27,12 +28,19 @@ function latestState(harness: FakePiHarness): MateriaCastState {
   return entry.data as MateriaCastState;
 }
 
-function latestBudgetMessage(harness: FakePiHarness): string {
-  const message = harness.sentMessages
-    .map(({ message }) => message as { customType?: string; content?: unknown; details?: { prefix?: string } })
-    .filter((candidate) => candidate.customType === "pi-materia" && candidate.details?.prefix === "budget")
+function latestBudgetPresentation(harness: FakePiHarness): string {
+  const entry = harness.appendedEntries
+    .filter((candidate) => candidate.customType === MATERIA_PRESENTATION_ENTRY_TYPE)
+    .map((candidate) => candidate.data as { content?: unknown; details?: { prefix?: string } })
+    .filter((candidate) => candidate.details?.prefix === "budget")
     .at(-1);
-  return String(message?.content ?? "");
+  return String(entry?.content ?? "");
+}
+
+function materiaMessages(harness: FakePiHarness): unknown[] {
+  return harness.sentMessages
+    .map(({ message }) => message as { customType?: string })
+    .filter((message) => message.customType === "pi-materia");
 }
 
 describe("/materia budget command", () => {
@@ -50,17 +58,23 @@ describe("/materia budget command", () => {
 
     harness.idle = false;
     const waitsBefore = harness.waitForIdleCalls;
+    const materiaMessagesBeforeQuery = materiaMessages(harness).length;
+    const triggerTurnsBeforeQuery = harness.operationLog.filter((operation) => operation === "triggerTurn").length;
     await harness.runCommand("materia", "budget");
     expect(harness.waitForIdleCalls).toBe(waitsBefore);
-    expect(latestBudgetMessage(harness)).toContain(`cast id: ${started.castId}`);
-    expect(latestBudgetMessage(harness)).toContain("consumed tokens: 12");
-    expect(latestBudgetMessage(harness)).toContain("current token limit: 100");
+    expect(harness.operationLog.filter((operation) => operation === "triggerTurn").length).toBe(triggerTurnsBeforeQuery);
+    expect(latestBudgetPresentation(harness)).toContain(`cast id: ${started.castId}`);
+    expect(latestBudgetPresentation(harness)).toContain("consumed tokens: 12");
+    expect(latestBudgetPresentation(harness)).toContain("current token limit: 100");
+    expect(materiaMessages(harness)).toHaveLength(materiaMessagesBeforeQuery);
 
     const triggerTurnsBefore = harness.operationLog.filter((operation) => operation === "triggerTurn").length;
+    const materiaMessagesBeforeUpdate = materiaMessages(harness).length;
     await harness.runCommand("materia", "budget 150");
     expect(harness.waitForIdleCalls).toBe(waitsBefore);
-    expect(latestBudgetMessage(harness)).toContain("pi-materia budget updated.");
-    expect(latestBudgetMessage(harness)).toContain("current token limit: 150");
+    expect(latestBudgetPresentation(harness)).toContain("pi-materia budget updated.");
+    expect(latestBudgetPresentation(harness)).toContain("current token limit: 150");
+    expect(materiaMessages(harness)).toHaveLength(materiaMessagesBeforeUpdate);
     expect(harness.operationLog.filter((operation) => operation === "triggerTurn").length).toBe(triggerTurnsBefore);
   });
 
@@ -78,9 +92,11 @@ describe("/materia budget command", () => {
     harness.pi.appendEntry("pi-materia-cast-state", failed);
 
     const triggerTurnsBefore = harness.operationLog.filter((operation) => operation === "triggerTurn").length;
+    const materiaMessagesBeforeUpdate = materiaMessages(harness).length;
     await harness.runCommand("materia", "budget 25");
-    expect(latestBudgetMessage(harness)).toContain(`cast id: ${running.castId}`);
-    expect(latestBudgetMessage(harness)).toContain("current token limit: 25");
+    expect(latestBudgetPresentation(harness)).toContain(`cast id: ${running.castId}`);
+    expect(latestBudgetPresentation(harness)).toContain("current token limit: 25");
+    expect(materiaMessages(harness)).toHaveLength(materiaMessagesBeforeUpdate);
     expect(harness.operationLog.filter((operation) => operation === "triggerTurn").length).toBe(triggerTurnsBefore);
 
     const resolvedConfig = JSON.parse(await readFile(path.join(failed.runDir, "config.resolved.json"), "utf8")) as { budget?: { maxTokens?: number } };
