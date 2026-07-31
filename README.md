@@ -203,6 +203,7 @@ Run `/materia quest run` after reviving to consume the queued quest.
 
 Loadout and materia configuration is layered JSON (defaults → user profile → project file → env/cli overrides). Full customization details live in the docs:
 
+- [Presentation and context contract](docs/materia-presentation-and-context.md) — keep visible Materia cards out of model and compaction context while reserving `pi-materia-prompt` for intentional inference
 - [Handoff contract](docs/handoff-contract.md) — the JSON contract agent sockets use to pass work items between materia
 - [Finalization configuration and migration](docs/finalization-configuration.md) — direct JSON, qualified tool-backed submission, fallback, and rollout guidance
 - [Graph semantics](docs/graph-semantics.md) — edge conditions, branching, loops, and structured iteration
