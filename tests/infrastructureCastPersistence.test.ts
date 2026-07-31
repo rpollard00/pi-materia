@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { appendEvent, appendManifest, initializeRun, recordCommandArtifacts, recordSocketOutput, recordSocketParsedJson, recordUtilityInput, writeContextArtifact } from "../src/infrastructure/castArtifacts.js";
 import { assertBudget, writeUsage } from "../src/infrastructure/castUsage.js";
 import { clearCastState, listLatestCastStates, loadActiveCastState, saveCastState } from "../src/infrastructure/castStateRepository.js";
+import { hashConfig, loadConfigFromState, persistCastBudget } from "../src/runtime/configPersistence.js";
 import type { MateriaCastState } from "../src/types.js";
 
 function castState(runDir: string, overrides: Partial<MateriaCastState> = {}): MateriaCastState {
@@ -193,6 +194,39 @@ describe("cast persistence infrastructure", () => {
       state.runState,
       { ui: { notify: () => undefined }, hasUI: true } as any,
     )).rejects.toThrow("pi-materia budget limit reached");
+  });
+
+  test("persists cast-local token budgets atomically without changing source-shaped config", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "pi-materia-cast-budget-update-"));
+    const state = castState(root);
+    state.runState.usage.tokens.total = 40;
+    state.runState.budgetWarned = true;
+    await writeFile(path.join(root, "config.resolved.json"), JSON.stringify({
+      artifactDir: ".pi/pi-materia",
+      budget: { maxTokens: 100, warnAtPercent: 75 },
+      limits: { maxSocketVisits: 3 },
+      materia: { Build: { prompt: "unchanged" } },
+    }, null, 2));
+    await writeFile(state.runState.eventsFile, "");
+    const entries: unknown[] = [];
+    const pi = { appendEntry: (customType: string, data: unknown) => entries.push({ customType, data }) } as any;
+
+    const update = await persistCastBudget(pi, state, 200);
+    const persisted = JSON.parse(await readFile(path.join(root, "config.resolved.json"), "utf8"));
+
+    expect(update).toEqual({ castId: "cast-1", previousMaxTokens: 100, maxTokens: 200, consumedTokens: 40 });
+    expect(persisted).toEqual({
+      artifactDir: ".pi/pi-materia",
+      budget: { maxTokens: 200, warnAtPercent: 75 },
+      limits: { maxSocketVisits: 3 },
+      materia: { Build: { prompt: "unchanged" } },
+    });
+    expect(state.configHash).toBe(hashConfig(persisted));
+    expect(state.runState.budgetWarned).toBe(false);
+    expect(await loadConfigFromState(state)).toMatchObject({ budget: { maxTokens: 200, warnAtPercent: 75 } });
+    expect(entries).toHaveLength(1);
+    const events = (await readFile(state.runState.eventsFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toEqual([{ ts: expect.any(Number), type: "budget_updated", data: update }]);
   });
 
   test("context artifact writer keeps isolated context layout", async () => {

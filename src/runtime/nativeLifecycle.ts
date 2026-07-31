@@ -28,7 +28,7 @@ import { recordActiveTurnProvenance, updateToolScope } from "./agentTurnState.js
 import { recordMultiTurnRefinement, recordSocketOutput, writeContextArtifact } from "./artifactRecording.js";
 import { createCastLifecycle } from "./castLifecycle.js";
 import { createCastTermination } from "./castTermination.js";
-import { loadConfigFromState, resolvePersistedCastLoadoutIdentity } from "./configPersistence.js";
+import { loadConfigFromState, persistCastBudget, resolvePersistedCastLoadoutIdentity } from "./configPersistence.js";
 import { flushBusOutcomes } from "./eventBus.js";
 import { resolveActiveModelPolicy } from "./modelPolicyResolver.js";
 import { materiaModelSelection } from "./modelSelection.js";
@@ -351,6 +351,7 @@ export const reactivateQueuedNativeCast = castLifecycle.reactivateQueuedNativeCa
 export const resumeNativeCast = castLifecycle.resumeNativeCast;
 export const reviveNativeCast = castLifecycle.reviveNativeCast;
 export const startNativeCast = castLifecycle.startNativeCast;
+export { persistCastBudget };
 
 /**
  * Cancel a running cast, emitting `lifecycle.cast.cancelled` through
