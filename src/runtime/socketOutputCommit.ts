@@ -22,8 +22,9 @@ import {
   validateHandoffJsonOutput,
 } from "../handoff/handoffValidation.js";
 import type { SocketParsedJsonArtifactInput } from "../infrastructure/castArtifacts.js";
+import { appendMateriaPresentation } from "../presentation/materiaPresentation.js";
 import { formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
-import { buildMateriaTextOutputMessage } from "../presentation/textOutput.js";
+import { buildMateriaTextOutputPresentation } from "../presentation/textOutput.js";
 import type {
   MateriaCastState,
   MateriaJsonOutputRepairContext,
@@ -423,7 +424,7 @@ function emitMateriaTextOutput(
 ): void {
   const notificationMateria = resolvedMateriaDisplayName(socket) ?? socketMateriaName(socket);
   const display = formatMateriaNotificationDisplay(notificationMateria, socket.id);
-  const message = buildMateriaTextOutputMessage({
+  const presentation = buildMateriaTextOutputPresentation({
     parsed,
     materiaName: display.materiaName,
     socketId: socket.id,
@@ -431,5 +432,5 @@ function emitMateriaTextOutput(
     itemKey: state.currentItemKey,
     itemLabel: state.currentItemLabel,
   });
-  if (message) pi.sendMessage(message);
+  if (presentation) appendMateriaPresentation(pi, presentation);
 }

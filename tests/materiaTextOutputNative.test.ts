@@ -4,6 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import piMateria from "../src/index.js";
 import { FakePiHarness } from "./fakePi.js";
+import { MATERIA_PRESENTATION_ENTRY_TYPE } from "../src/presentation/materiaPresentation.js";
 import { MATERIA_TEXT_OUTPUT_EVENT_TYPE } from "../src/presentation/textOutput.js";
 
 interface PiMateriaMessage {
@@ -74,9 +75,10 @@ function autoEvalStyleConfig() {
 }
 
 function materiaTextMessages(harness: FakePiHarness): PiMateriaMessage[] {
-  return harness.sentMessages
-    .map(({ message }) => message as PiMateriaMessage)
-    .filter((message) => message.customType === "pi-materia" && message.details?.eventType === MATERIA_TEXT_OUTPUT_EVENT_TYPE);
+  return harness.appendedEntries
+    .filter((entry) => entry.customType === MATERIA_PRESENTATION_ENTRY_TYPE)
+    .map(({ data }) => data as PiMateriaMessage)
+    .filter((message) => message.details?.eventType === MATERIA_TEXT_OUTPUT_EVENT_TYPE);
 }
 
 function promptMessages(harness: FakePiHarness): PiMateriaMessage[] {
@@ -112,7 +114,6 @@ describe("materia text output native rendering", () => {
     const textMessages = materiaTextMessages(harness);
     expect(textMessages).toHaveLength(1);
     const message = textMessages[0];
-    expect(message?.display).toBe(true);
     // Only the prose is rendered; transport metadata is hidden.
     expect(message?.content).toBe("## Summary\n\nClean narration prose for the user.");
     expect(message?.details).toMatchObject({
@@ -124,6 +125,7 @@ describe("materia text output native rendering", () => {
     });
     expect(JSON.stringify(message?.content)).not.toContain("implementation notes");
     expect(JSON.stringify(message?.details)).not.toContain("internal handoff context");
+    expect(harness.sentMessages.map(({ message: sent }) => (sent as { customType?: string }).customType)).toEqual(["pi-materia-prompt"]);
   });
 
   test("does not emit a text-output message when no text payload is present", async () => {

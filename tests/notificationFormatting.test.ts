@@ -4,6 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import piMateria from "../src/index.js";
+import { MATERIA_PRESENTATION_ENTRY_TYPE } from "../src/presentation/materiaPresentation.js";
 import { formatMateriaCastContent, formatMateriaNotificationDisplay } from "../src/presentation/notificationFormatting.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -36,14 +37,17 @@ describe("materia cast notification formatting", () => {
 
     await harness.runCommand("materia", "cast reduce socket prominence");
 
-    const message = harness.sentMessages.map(({ message }) => message as { customType?: string; content?: string; details?: Record<string, unknown> }).find((candidate) => candidate.customType === "pi-materia");
+    const message = harness.appendedEntries
+      .filter((entry) => entry.customType === MATERIA_PRESENTATION_ENTRY_TYPE)
+      .map((entry) => entry.data as { content?: string; details?: Record<string, unknown> })
+      .find((candidate) => candidate.details?.eventType === "materia_prompt");
     expect(message?.content).toBe("Casting **Interactive-Plan (3)**");
     expect(message?.content).not.toContain("Socket-3");
     expect(message?.details).toMatchObject({ socketId: "Socket-3", materiaName: "Interactive-Plan", socketOrdinal: 3, eventType: "materia_prompt" });
-    // Transition/status cards are display-only orchestration UI and must be
-    // tagged so they can be filtered from isolated agent context, while the
-    // hidden pi-materia-prompt remains available as agent context.
-    expect(message?.details?.orchestration).toBe(true);
+    // Transition/status cards are transcript-only presentation entries, while
+    // the hidden pi-materia-prompt remains available as agent context.
+    expect(message?.details?.orchestration).toBeUndefined();
     expect(message?.details?.prefix).toBe("materia");
+    expect(harness.sentMessages.map(({ message: sent }) => (sent as { customType?: string }).customType)).toEqual(["pi-materia-prompt"]);
   });
 });

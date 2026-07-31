@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   MATERIA_TEXT_OUTPUT_EVENT_TYPE,
-  buildMateriaTextOutputMessage,
+  buildMateriaTextOutputPresentation,
   extractMateriaTextOutput,
   formatMateriaTextOutputContent,
 } from "../src/presentation/textOutput.js";
@@ -47,9 +47,9 @@ describe("materia text output content formatting", () => {
   });
 });
 
-describe("materia text output message builder", () => {
-  test("builds a clean pi-materia display message hiding transport metadata", () => {
-    const message = buildMateriaTextOutputMessage({
+describe("materia text output presentation builder", () => {
+  test("builds a clean transcript-only presentation payload hiding transport metadata", () => {
+    const presentation = buildMateriaTextOutputPresentation({
       parsed: { workItems: [{ title: "t", context: "c" }], satisfied: true, [HANDOFF_TEXT_FIELD]: "  Narration.  " },
       materiaName: "Narrate",
       socketId: "Socket-3",
@@ -57,10 +57,8 @@ describe("materia text output message builder", () => {
       itemKey: "WI-1",
       itemLabel: "narration item",
     });
-    expect(message).toEqual({
-      customType: "pi-materia",
+    expect(presentation).toEqual({
       content: "Narration.",
-      display: true,
       details: {
         prefix: "materia",
         eventType: MATERIA_TEXT_OUTPUT_EVENT_TYPE,
@@ -74,23 +72,23 @@ describe("materia text output message builder", () => {
   });
 
   test("omits undefined optional detail fields", () => {
-    const message = buildMateriaTextOutputMessage({
+    const presentation = buildMateriaTextOutputPresentation({
       parsed: { [HANDOFF_TEXT_FIELD]: "prose" },
       materiaName: "Narrate",
       socketId: "Socket-1",
     });
-    expect(message?.details).toEqual({
+    expect(presentation?.details).toEqual({
       prefix: "materia",
       eventType: MATERIA_TEXT_OUTPUT_EVENT_TYPE,
       socketId: "Socket-1",
       materiaName: "Narrate",
     });
-    expect(message?.details).not.toHaveProperty("socketOrdinal");
-    expect(message?.details).not.toHaveProperty("itemKey");
+    expect(presentation?.details).not.toHaveProperty("socketOrdinal");
+    expect(presentation?.details).not.toHaveProperty("itemKey");
   });
 
   test("returns undefined when there is no renderable text payload", () => {
-    expect(buildMateriaTextOutputMessage({ parsed: { satisfied: true }, materiaName: "Narrate", socketId: "Socket-1" })).toBeUndefined();
-    expect(buildMateriaTextOutputMessage({ parsed: "raw text", materiaName: "Narrate", socketId: "Socket-1" })).toBeUndefined();
+    expect(buildMateriaTextOutputPresentation({ parsed: { satisfied: true }, materiaName: "Narrate", socketId: "Socket-1" })).toBeUndefined();
+    expect(buildMateriaTextOutputPresentation({ parsed: "raw text", materiaName: "Narrate", socketId: "Socket-1" })).toBeUndefined();
   });
 });

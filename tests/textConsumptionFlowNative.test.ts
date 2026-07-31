@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import piMateria from "../src/index.js";
 import type { MateriaCastState } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
+import { MATERIA_PRESENTATION_ENTRY_TYPE } from "../src/presentation/materiaPresentation.js";
 import { MATERIA_TEXT_OUTPUT_EVENT_TYPE } from "../src/presentation/textOutput.js";
 
 const previousProfileDir = process.env.PI_MATERIA_PROFILE_DIR;
@@ -107,9 +108,10 @@ interface PiMateriaMessage {
 }
 
 function materiaTextMessages(harness: FakePiHarness): PiMateriaMessage[] {
-  return harness.sentMessages
-    .map(({ message }) => message as PiMateriaMessage)
-    .filter((message) => message.customType === "pi-materia" && message.details?.eventType === MATERIA_TEXT_OUTPUT_EVENT_TYPE);
+  return harness.appendedEntries
+    .filter((entry) => entry.customType === MATERIA_PRESENTATION_ENTRY_TYPE)
+    .map(({ data }) => data as PiMateriaMessage)
+    .filter((message) => message.details?.eventType === MATERIA_TEXT_OUTPUT_EVENT_TYPE);
 }
 
 function promptMessages(harness: FakePiHarness): string[] {
@@ -153,7 +155,6 @@ describe("renderable text consumption flow", () => {
     //    message, hiding transport metadata (workItems/satisfied/context).
     const textMessages = materiaTextMessages(harness);
     expect(textMessages).toHaveLength(1);
-    expect(textMessages[0]?.display).toBe(true);
     expect(textMessages[0]?.content).toBe(NARRATION_PROSE);
     expect(JSON.stringify(textMessages[0]?.details)).not.toContain("internal handoff notes only");
 
@@ -219,9 +220,10 @@ describe("renderable text consumption flow", () => {
     // No duplicate raw-text output: exactly one materia_text display message and
     // no second display emission of the prose as plain text.
     expect(materiaTextMessages(harness)).toHaveLength(1);
-    const proseDisplays = harness.sentMessages
-      .map(({ message }) => message as PiMateriaMessage)
-      .filter((message) => message.customType === "pi-materia" && message.display === true && message.content === NARRATION_PROSE);
+    const proseDisplays = harness.appendedEntries
+      .filter((entry) => entry.customType === MATERIA_PRESENTATION_ENTRY_TYPE)
+      .map(({ data }) => data as PiMateriaMessage)
+      .filter((message) => message.content === NARRATION_PROSE);
     expect(proseDisplays).toHaveLength(1);
   });
 

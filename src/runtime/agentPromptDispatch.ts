@@ -14,6 +14,7 @@ import {
   formatMateriaCastContent,
   formatMateriaNotificationDisplay,
 } from "../presentation/notificationFormatting.js";
+import { appendMateriaPresentation } from "../presentation/materiaPresentation.js";
 import type {
   MateriaAgentConfig,
   MateriaCastState,
@@ -317,14 +318,12 @@ export function createAgentPromptDispatch(deps: AgentPromptDispatchDependencies)
 
     const notificationMateria = resolvedMateriaDisplayName(activeResolvedSocket(state)) ?? state.currentMateria;
     const display = formatMateriaNotificationDisplay(notificationMateria, currentSocketId(state));
-    // Display-only orchestration card. The hidden prompt below is the actual
-    // agent context and intentionally remains untagged as orchestration.
-    pi.sendMessage({
-      customType: "pi-materia",
+    // Transcript-only transition card. The hidden prompt below is the actual
+    // agent context and intentionally remains the only pi-materia custom
+    // message emitted by this dispatch path.
+    appendMateriaPresentation(pi, {
       content: formatMateriaCastContent(notificationMateria, currentSocketId(state), state.currentItemLabel),
-      display: true,
       details: {
-        orchestration: true,
         prefix: "materia",
         socketId: currentSocketId(state),
         materiaName: display.materiaName,
