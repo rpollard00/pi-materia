@@ -50,15 +50,25 @@ function agentQuestConfig() {
 }
 
 function latestMateriaMessage(harness: FakePiHarness): string {
-  const messages = harness.sentMessages.map(({ message }) => message as { customType?: string; content?: unknown }).filter((message) => message.customType === "pi-materia");
-  return String(messages.at(-1)?.content ?? "");
+  const entries = harness.appendedEntries
+    .filter((entry) => entry.customType === "pi-materia-presentation")
+    .map(({ data }) => data as { content?: unknown });
+  return String(entries.at(-1)?.content ?? "");
 }
 
 function questCardSends(harness: FakePiHarness, eventType: string): Array<{ message: any; options?: any }> {
-  return harness.sentMessages.filter(({ message }) => {
-    const details = (message as any)?.details;
-    return (message as any)?.customType === "pi-materia" && details?.prefix === "quest" && details?.eventType === eventType;
-  });
+  return harness.appendedEntries
+    .filter((entry) => {
+      const details = (entry.data as any)?.details;
+      return entry.customType === "pi-materia-presentation" && details?.prefix === "quest" && details?.eventType === eventType;
+    })
+    .map((entry) => ({
+      message: {
+        customType: "pi-materia-presentation",
+        content: (entry.data as any)?.content,
+        details: (entry.data as any)?.details,
+      },
+    }));
 }
 
 async function flushDeferredDispatch(): Promise<void> {
@@ -769,7 +779,7 @@ describe("/materia quest command interface", () => {
     expect(errors.some((message) => message.includes("No pending pi-materia quests"))).toBe(true);
   });
 
-  test("runner control cards stay user-visible but are marked orchestration-only and never trigger a turn", async () => {
+  test("runner control cards are presentation-only and never trigger a turn", async () => {
     // run + auto-advance: the continuous runner drains two utility quests back to back.
     const runHarness = await makeHarness();
     await runHarness.runCommand("materia", "quest add First immediate quest");
@@ -780,27 +790,34 @@ describe("/materia quest command interface", () => {
 
     const runCards = questCardSends(runHarness, "run");
     expect(runCards).toHaveLength(1);
-    expect(runCards[0].message.display).toBe(true);
+    expect(runCards[0].message.customType).toBe("pi-materia-presentation");
     expect(runCards[0].message.content).toContain("Started continuous quest runner and launched");
-    expect(runCards[0].message.details.orchestration).toBe(true);
+    expect(runCards[0].message.details.orchestration).toBeUndefined();
     expect(runCards[0].message.details.prefix).toBe("quest");
     expect(runCards[0].options?.triggerTurn).not.toBe(true);
 
     const autoCards = questCardSends(runHarness, "auto-advance");
     expect(autoCards.length).toBeGreaterThanOrEqual(1);
-    expect(autoCards[0].message.display).toBe(true);
-    expect(autoCards[0].message.details.orchestration).toBe(true);
+    expect(autoCards[0].message.customType).toBe("pi-materia-presentation");
+    expect(autoCards[0].message.details.orchestration).toBeUndefined();
     expect(autoCards[0].options?.triggerTurn).not.toBe(true);
 
+    expect(runHarness.sentMessages.filter(({ message }) => {
+      const value = message as any;
+      return value?.customType === "pi-materia" && value.details?.prefix === "quest";
+    })).toHaveLength(0);
+  });
+
+  test("runonce and stop cards are presentation-only and never trigger a turn", async () => {
     // runonce: one-shot launch emits the runonce runner card.
     const onceHarness = await makeHarness();
     await onceHarness.runCommand("materia", "quest add Build once");
     await onceHarness.runCommand("materia", "quest runonce");
     const runonceCards = questCardSends(onceHarness, "runonce");
     expect(runonceCards).toHaveLength(1);
-    expect(runonceCards[0].message.display).toBe(true);
+    expect(runonceCards[0].message.customType).toBe("pi-materia-presentation");
     expect(runonceCards[0].message.content).toContain("Launched quest");
-    expect(runonceCards[0].message.details.orchestration).toBe(true);
+    expect(runonceCards[0].message.details.orchestration).toBeUndefined();
     expect(runonceCards[0].options?.triggerTurn).not.toBe(true);
 
     // stop: disabling the runner emits the stop runner card.
@@ -809,13 +826,20 @@ describe("/materia quest command interface", () => {
     await stopHarness.runCommand("materia", "quest stop");
     const stopCards = questCardSends(stopHarness, "stop");
     expect(stopCards).toHaveLength(1);
-    expect(stopCards[0].message.display).toBe(true);
+    expect(stopCards[0].message.customType).toBe("pi-materia-presentation");
     expect(stopCards[0].message.content).toContain("Quest runner stopped");
-    expect(stopCards[0].message.details.orchestration).toBe(true);
+    expect(stopCards[0].message.details.orchestration).toBeUndefined();
     expect(stopCards[0].options?.triggerTurn).not.toBe(true);
+
+    const legacyQuestCards = (candidate: FakePiHarness) => candidate.sentMessages.filter(({ message }) => {
+      const value = message as any;
+      return value?.customType === "pi-materia" && value.details?.prefix === "quest";
+    });
+    expect(legacyQuestCards(onceHarness)).toHaveLength(0);
+    expect(legacyQuestCards(stopHarness)).toHaveLength(0);
   });
 
-  test("context hook strips the quest runner card from isolated agent context after /materia quest run", async () => {
+  test("quest runner presentation entries do not leak into isolated agent context", async () => {
     // Use an agent quest loadout so /materia quest run launches a real agent cast
     // (hidden materia prompt + triggerTurn) that stays active and awaiting
     // response, which is exactly when context isolation engages. The explicit
@@ -835,13 +859,18 @@ describe("/materia quest command interface", () => {
       .map(({ message }) => message as { customType?: string; content?: string })
       .find((message) => message.customType === "pi-materia-prompt");
     const runCardMessage = questCardSends(harness, "run").at(-1)?.message as
-      | { content?: string; details?: { orchestration?: true; prefix?: string; eventType?: string } }
+      | { customType?: string; content?: string; details?: { orchestration?: true; prefix?: string; eventType?: string } }
       | undefined;
     expect(hiddenPromptMessage).toBeDefined();
     expect(runCardMessage).toBeDefined();
     expect(hiddenPromptMessage!.content).toContain("<materia-instructions>");
-    expect(runCardMessage!.details?.orchestration).toBe(true);
+    expect(runCardMessage!.customType).toBe("pi-materia-presentation");
+    expect(runCardMessage!.details?.orchestration).toBeUndefined();
     expect(runCardMessage!.details?.prefix).toBe("quest");
+    expect(harness.sentMessages.filter(({ message }) => {
+      const value = message as any;
+      return value?.customType === "pi-materia" && value.details?.prefix === "quest";
+    })).toHaveLength(0);
 
     // The real user-facing card carries every orchestration string we must isolate.
     const cardContent = String(runCardMessage!.content);
@@ -850,9 +879,9 @@ describe("/materia quest command interface", () => {
     expect(cardContent).toContain("Loadout:");
     expect(cardContent).toContain("Mode: continuous run");
 
-    // Simulate the transcript Pi passes to the context hook: earlier unrelated
-    // user text, then the hidden materia prompt, then the user-facing quest
-    // runner card appended AFTER the prompt (the leaked-context bug scenario).
+    // A presentation entry is persisted for the session view but is not part of
+    // the message transcript Pi passes to the context hook. Keep a legacy custom
+    // card here as a defense-in-depth regression for older sessions.
     const messages = [
       { role: "user", content: [{ type: "text", text: "unrelated earlier transcript" }] },
       { role: "custom", customType: "pi-materia-prompt", content: hiddenPromptMessage!.content, display: false, details: { phase: "Socket-1", socketId: "Socket-1", materiaName: "Build" } },
@@ -887,19 +916,20 @@ describe("/materia quest command interface", () => {
     expect(syntheticContent).toContain("Mode: awaiting_agent_response");
   });
 
-  test("explicit quest command cards stay user-visible without the orchestration-only flag", async () => {
+  test("explicit quest command cards are persisted as presentation entries", async () => {
     const harness = await makeHarness();
     await harness.runCommand("materia", "quest add Build something");
     const addCards = questCardSends(harness, "add");
     expect(addCards).toHaveLength(1);
-    expect(addCards[0].message.display).toBe(true);
+    expect(addCards[0].message.customType).toBe("pi-materia-presentation");
     expect(addCards[0].message.details.orchestration).toBeUndefined();
     expect(addCards[0].message.details.prefix).toBe("quest");
 
     await harness.runCommand("materia", "quest status");
     const statusCards = questCardSends(harness, "status");
-    expect(statusCards.at(-1)?.message.display).toBe(true);
+    expect(statusCards.at(-1)?.message.customType).toBe("pi-materia-presentation");
     expect(statusCards.at(-1)?.message.details.orchestration).toBeUndefined();
+    expect(harness.sentMessages.filter(({ message }) => (message as any)?.customType === "pi-materia")).toHaveLength(0);
   });
 });
 
