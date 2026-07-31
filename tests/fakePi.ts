@@ -102,6 +102,7 @@ export class FakePiHarness {
   readonly notifications: FakeUiNotification[] = [];
   readonly statuses = new Map<string, string | undefined>();
   readonly registeredRenderers = new Map<string, unknown>();
+  readonly registeredEntryRenderers = new Map<string, unknown>();
   readonly registeredTools = new Map<string, ToolDefinition>();
   readonly setModelCalls: unknown[] = [];
   readonly setThinkingLevelCalls: string[] = [];
@@ -139,6 +140,7 @@ export class FakePiHarness {
       registerFlag: (name: string, options: { default?: boolean | string }) => this.flags.set(name, options.default),
       getFlag: (name: string) => this.flags.get(name),
       registerMessageRenderer: (customType: string, renderer: unknown) => this.registeredRenderers.set(customType, renderer),
+      registerEntryRenderer: (customType: string, renderer: unknown) => this.registeredEntryRenderers.set(customType, renderer),
       sendMessage: (message: unknown, options?: unknown) => {
         const triggerTurn = (options as { triggerTurn?: boolean } | undefined)?.triggerTurn === true;
         if (triggerTurn && this.options.strictTriggerTurnDuringAgentEnd && this.agentEndHandlerDepth > 0) {
