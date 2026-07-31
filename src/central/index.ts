@@ -145,6 +145,12 @@ export {
 } from "./server/routes.js";
 
 export {
+  CENTRAL_ADMIN_SHELL,
+  isCentralStaticRequest,
+  serveCentralStatic,
+} from "./server/static.js";
+
+export {
   handleCentralAdminRoute,
   type CentralAdminRouteDeps,
 } from "./server/admin.js";

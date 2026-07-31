@@ -1,4 +1,7 @@
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { createDefaultCentralAuth, type CentralAuth } from "../auth/index.js";
 import { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
 import { CENTRAL_SERVICE_ID } from "../controlPlane/shared.js";
@@ -18,6 +21,7 @@ import {
 } from "../persistence/index.js";
 import { applyCentralCorsHeaders, errorMessage, handleCentralCorsPreflight, sendJson } from "./http.js";
 import { handleMateriaCentralRequest } from "./routes.js";
+import { isCentralStaticRequest, serveCentralStatic } from "./static.js";
 import type { ControlPlanePorts } from "../../application/controlPlane.js";
 
 export { createInMemoryCentralPorts } from "../controlPlane/inMemoryCentralPorts.js";
@@ -43,6 +47,7 @@ export { handleCentralTelemetryRoute } from "./telemetry.js";
 export type { CentralTelemetryRouteDeps } from "./telemetry.js";
 export { handleMateriaCentralRequest } from "./routes.js";
 export type { MateriaCentralRouteDeps } from "./routes.js";
+export { CENTRAL_ADMIN_SHELL, isCentralStaticRequest, serveCentralStatic } from "./static.js";
 
 export interface MateriaCentralServerOptions {
   host?: string;
@@ -73,6 +78,12 @@ export interface MateriaCentralServerOptions {
   label?: string;
   /** Resolved CORS allow-origin value for this server instance. */
   corsOrigin?: string;
+  /**
+   * Directory containing the built central-admin UI (`dist/webui/client`).
+   * Defaults to the repo build output; a missing build degrades non-API
+   * requests to a plain 404 hint without affecting API routes.
+   */
+  staticDir?: string;
 }
 
 export interface MateriaCentralServer {
@@ -86,6 +97,8 @@ export interface MateriaCentralServer {
   ports: ControlPlanePorts;
   /** Resolved auth configuration used by route guards. */
   auth: CentralAuth;
+  /** Directory the central-admin UI is served from. */
+  staticDir: string;
 }
 
 /**
@@ -126,17 +139,26 @@ export function createMateriaCentralServer(options: MateriaCentralServerOptions 
       : {}),
   });
 
+  const staticDir = options.staticDir ?? resolve(fileURLToPath(new URL("../../../dist/webui/client", import.meta.url)));
+
   const server = createServer(async (req, res) => {
     try {
       if (options.corsOrigin !== undefined) applyCentralCorsHeaders(res, options.corsOrigin);
       if (handleCentralCorsPreflight(req, res, options.corsOrigin)) return;
+      // The central-admin UI is same-origin with this API, so the central
+      // server serves its built statics directly. API routes (and non-GET
+      // requests) always go to the API dispatcher first-class.
+      if (isCentralStaticRequest(req)) {
+        serveCentralStatic(req, res, staticDir);
+        return;
+      }
       await handleMateriaCentralRequest(req, res, { ports, auth, ...(options.label !== undefined ? { label: options.label } : {}) });
     } catch (error) {
       sendJson(res, 500, { ok: false, scope: "control-plane", service: CENTRAL_SERVICE_ID, error: errorMessage(error) });
     }
   });
 
-  return { server, host, port, ports, auth };
+  return { server, host, port, ports, auth, staticDir };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -165,5 +187,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(
       `${CENTRAL_SERVICE_ID} (central control plane, mode=${mode}, schema=${initialized.migrationResult.currentVersion}) listening at http://${created.host}:${actualPort}`,
     );
+    if (existsSync(created.staticDir)) {
+      console.log(`central-admin UI available at http://${created.host}:${actualPort}/`);
+    } else {
+      console.log("central-admin UI build not found; run `npm run build:webui` to enable the browser console.");
+    }
   });
 }

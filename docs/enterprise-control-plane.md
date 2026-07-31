@@ -236,7 +236,9 @@ binds them to separate `central-reader`, `central-admin`, and
 binding when that configuration is incomplete. The documented built-in tokens are loaded
 only when `MATERIA_CENTRAL_AUTH_MODE=development` is explicit and no deployment
 credentials are supplied; known built-in values are rejected in production. The
-`dev:central:server` script opts into development mode by name.
+`dev:central:server` script opts into development mode by name. `start:central` runs the
+same server entry point without watch mode and without forcing an auth mode, so the
+environment alone decides the security posture.
 
 Bearer values are hashed during auth composition and are not retained on the public auth
 object. Every presented token is hashed to the same fixed width and compared against the
@@ -300,6 +302,11 @@ aligned to [WebUI architecture](webui-architecture.md).
   ([WebUI architecture — Backend boundaries](webui-architecture.md#backend-boundaries));
   central routes live on the separate central server and must not be mixed into the local
   session dispatcher.
+- The standalone central server serves the built central-admin browser shell
+  (`central-admin.html` from `dist/webui/client`) same-origin for GET/HEAD requests
+  outside `/api/*`, because the shell discovers topology and calls the API relative to
+  its own origin. It never serves the local-session WebUI entry point and never exposes
+  local-session routes.
 
 ## 9. Quest board relationship
 

@@ -232,6 +232,104 @@ Minimal hello-world config to get started writing your own:
 
 Save this as `.pi/pi-materia.json` in your project, or pass it with `--materia-config`.
 
+## Central control plane
+
+pi-materia can run **central-connected**: a standalone central control-plane server hosts a shared catalog of loadouts/materia, model policy, and aggregated telemetry, while your local Pi instance keeps executing casts locally. Local-only mode is the default and loses nothing — nothing central happens until you configure a connection. Central definitions slot into config precedence between bundled defaults and your files (`default < central < user < project < explicit`), so local files always win and central never overwrites them.
+
+### Start the server
+
+From a pi-materia checkout:
+
+```bash
+# Optional: build the browser console (once, or after UI changes)
+npm run build:webui
+
+# Development mode: built-in tokens, fixed port 4600, SQLite state under ./data/
+./scripts/dev-central-server.sh
+```
+
+The script just exports `MATERIA_CENTRAL_AUTH_MODE=development` and `MATERIA_CENTRAL_PORT=4600` before running `npm run start:central` — override either by exporting it first.
+
+Verify it's up:
+
+```bash
+curl http://127.0.0.1:4600/api/health
+```
+
+Development mode enables three built-in bearer tokens:
+
+| Token | Role |
+|---|---|
+| `dev-token-reader` | Read catalog, policy, telemetry, status |
+| `dev-token-admin` | Reader + catalog/policy writes, admin metadata |
+| `dev-token-sink` | Telemetry ingestion only |
+
+State persists to `data/pi-materia-central.sqlite` (override with `MATERIA_CENTRAL_DATABASE_PATH`; delete the file to reset). Open the admin console at `http://127.0.0.1:4600/` and sign in with `dev-token-admin` to browse the catalog, publish definitions, and watch aggregate telemetry.
+
+### Seed the catalog
+
+Publish a loadout to the central catalog (writes use the admin token):
+
+```bash
+curl -X POST http://127.0.0.1:4600/api/catalog \
+  -H "Authorization: Bearer dev-token-admin" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "central-echo",
+    "kind": "loadout",
+    "name": "Central-Echo",
+    "description": "Seeded from the central catalog",
+    "content": {
+      "definition": {
+        "entry": "Socket-1",
+        "sockets": {
+          "Socket-1": {
+            "socketKind": "entry",
+            "materia": "Narrate",
+            "edges": [{ "when": "always", "to": "end" }]
+          }
+        }
+      }
+    }
+  }'
+```
+
+### Connect your local Pi
+
+Point your project at the server in `.pi/pi-materia.json`:
+
+```json
+{
+  "central": { "apiUrl": "http://127.0.0.1:4600" }
+}
+```
+
+Credentials come from the environment — never the profile file — so launch Pi through the connect wrapper, which exports the dev tokens (and a default `MATERIA_CENTRAL_API_URL`) for you:
+
+```bash
+cd /path/to/your-project
+/path/to/pi-materia/scripts/dev-central-connect.sh                      # launches pi
+/path/to/pi-materia/scripts/dev-central-connect.sh pi -e /path/to/pi-materia/src/index.ts
+```
+
+Or set the variables yourself: `MATERIA_CENTRAL_READ_TOKEN=dev-token-reader` and `MATERIA_CENTRAL_TELEMETRY_TOKEN=dev-token-sink`, then launch Pi normally.
+
+`/materia loadout` now lists `Central-Echo` alongside your local loadouts, and every cast fans telemetry out to the server best-effort. If the server is unreachable, casts continue normally: catalog reads degrade to a last-known snapshot and telemetry drops with a diagnostic. Optionally set `MATERIA_CENTRAL_RUNTIME_ID` to give this runtime a stable identity in the monitoring views.
+
+### Watch telemetry arrive
+
+```bash
+# Aggregated status across runtimes
+curl -H "Authorization: Bearer dev-token-reader" http://127.0.0.1:4600/api/status
+
+# Raw ingested events (filter with ?runtimeId=, ?castId=, ?limit=)
+curl -H "Authorization: Bearer dev-token-reader" "http://127.0.0.1:4600/api/telemetry/events?limit=50"
+```
+
+### Production posture
+
+Omit `MATERIA_CENTRAL_AUTH_MODE=development` (production is the default) and set `MATERIA_CENTRAL_READ_TOKEN`, `MATERIA_CENTRAL_ADMIN_TOKEN`, and `MATERIA_CENTRAL_TELEMETRY_TOKEN` to three distinct values; each also supports a `_FILE` variant (e.g. `MATERIA_CENTRAL_ADMIN_TOKEN_FILE`) for mounted secrets. Startup refuses to bind without them. The full deployment/settings contract is in [docs/enterprise-control-plane.md](docs/enterprise-control-plane.md).
+
 ## Reference
 
 ### All commands
