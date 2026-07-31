@@ -449,8 +449,11 @@ describe("FakePiHarness", () => {
     expect(harness.commands.has("materia")).toBe(true);
     expect(harness.registeredRenderers.has("pi-materia")).toBe(true);
     expect(harness.widgets.get("materia-grid")?.content).toBeUndefined();
-    const gridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(gridMessage.content).toContain("Materia Grid");
+    const gridPresentationEntry = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-presentation").at(-1);
+    const gridPresentation = gridPresentationEntry?.data as { content?: string };
+    expect(gridPresentationEntry).toBeDefined();
+    expect(gridPresentation.content).toContain("Materia Grid");
+    expect(harness.sentMessages).toHaveLength(0);
     expect(harness.userMessages).toHaveLength(0);
   });
 
@@ -463,15 +466,43 @@ describe("FakePiHarness", () => {
     await harness.runCommand("materia", "grid");
 
     expect(harness.widgets.get("materia-grid")?.content).toBeUndefined();
-    const firstGridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(firstGridMessage.content).toContain("Materia Grid");
+    const firstGridPresentationEntry = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-presentation").at(-1);
+    const firstGridPresentation = firstGridPresentationEntry?.data as { content?: string };
+    expect(firstGridPresentationEntry).toBeDefined();
+    expect(firstGridPresentation.content).toContain("Materia Grid");
 
     harness.widgets.set("materia-grid", { content: ["stale", "persistent", "grid"], options: { placement: "belowEditor" } });
     await harness.runCommand("materia", "grid");
 
     expect(harness.widgets.get("materia-grid")?.content).toBeUndefined();
-    const secondGridMessage = harness.sentMessages.at(-1)?.message as { content?: string };
-    expect(secondGridMessage.content).toContain("Materia Grid");
-    expect(harness.sentMessages).toHaveLength(2);
+    const secondGridPresentationEntry = harness.appendedEntries.filter((entry) => entry.customType === "pi-materia-presentation").at(-1);
+    const secondGridPresentation = secondGridPresentationEntry?.data as { content?: string };
+    expect(secondGridPresentationEntry).toBeDefined();
+    expect(secondGridPresentation.content).toContain("Materia Grid");
+    expect(harness.sentMessages).toHaveLength(0);
+  });
+
+  test("/materia casts and status use transcript-only presentation cards", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-core-command-cards-"));
+    const harness = new FakePiHarness(dir);
+    piMateria(harness.pi);
+
+    await harness.runCommand("materia", "casts");
+    const castsEntry = harness.appendedEntries
+      .filter((entry) => entry.customType === "pi-materia-presentation")
+      .at(-1);
+    expect(castsEntry?.data).toMatchObject({ details: { prefix: "casts", eventType: "casts" } });
+    expect((castsEntry?.data as { content?: string }).content).toContain("Materia Casts");
+    expect(harness.sentMessages).toHaveLength(0);
+
+    await harness.runCommand("materia", "cast presentation status");
+    const sentBeforeStatus = harness.sentMessages.length;
+    await harness.runCommand("materia", "status");
+    const statusEntry = harness.appendedEntries
+      .filter((entry) => entry.customType === "pi-materia-presentation")
+      .at(-1);
+    expect(statusEntry?.data).toMatchObject({ details: { prefix: "status", eventType: "status" } });
+    expect((statusEntry?.data as { content?: string }).content).toContain("›");
+    expect(harness.sentMessages).toHaveLength(sentBeforeStatus);
   });
 });

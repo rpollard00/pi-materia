@@ -269,7 +269,10 @@ export default function piMateria(pi: ExtensionAPI) {
           const { loaded, lines } = await loadoutUseCases.prepareGrid(ctx.cwd, getConfiguredConfigPath());
           clearMateriaAuxiliaryWidgets(ctx);
           ctx.ui.notify(`pi-materia grid loaded from ${loaded.source}`, "info");
-          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "grid", materiaName: "orchestrator", eventType: "grid" } });
+          appendMateriaPresentation(pi, {
+            content: lines.join("\n"),
+            details: { prefix: "grid", materiaName: "orchestrator", eventType: "grid" },
+          });
           pi.appendEntry("pi-materia-grid", { source: loaded.source, lines });
         } catch (error) {
           ctx.ui.notify(`pi-materia grid failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -311,7 +314,10 @@ export default function piMateria(pi: ExtensionAPI) {
         try {
           const { lines } = await castCatalogUseCases.listCasts({ cwd: ctx.cwd, session: ctx, configuredPath: getConfiguredConfigPath() });
           clearMateriaAuxiliaryWidgets(ctx);
-          pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "casts", materiaName: "orchestrator", eventType: "casts" } });
+          appendMateriaPresentation(pi, {
+            content: lines.join("\n"),
+            details: { prefix: "casts", materiaName: "orchestrator", eventType: "casts" },
+          });
         } catch (error) {
           ctx.ui.notify(`pi-materia casts failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
@@ -356,7 +362,10 @@ export default function piMateria(pi: ExtensionAPI) {
           return;
         }
         const lines = updateWidget(ctx, state, { replaceOwner: true }) ?? [];
-        pi.sendMessage({ customType: "pi-materia", content: lines.join("\n"), display: true, details: { prefix: "status", materiaName: "orchestrator", eventType: "status" } });
+        appendMateriaPresentation(pi, {
+          content: lines.join("\n"),
+          details: { prefix: "status", materiaName: "orchestrator", eventType: "status" },
+        });
         return;
       }
 
