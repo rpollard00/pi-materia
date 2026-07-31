@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ArtifactCatalog, CastAgentTurnPort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
-import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, handleAgentHandoffToolExecutionEnd, materiaStatusLabel, prepareAgentStartSystemPrompt, reactivateQueuedNativeCast, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
+import type { ArtifactCatalog, CastAgentTurnPort, CastBudgetPersistencePort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
+import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, handleAgentHandoffToolExecutionEnd, materiaStatusLabel, persistCastBudget, prepareAgentStartSystemPrompt, reactivateQueuedNativeCast, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
+import { loadConfigFromState } from "./configPersistence.js";
 import { createArtifactCatalog, createCastStateRepository, createCentralConnectedModelPolicyResolver, createCentralConnectedTelemetrySinkResolver, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../infrastructure/index.js";
 import type { CentralTelemetrySinkResolver } from "./nativeEventing.js";
 import type { ModelPolicyResolver } from "./modelPolicyResolver.js";
@@ -32,6 +33,13 @@ export function createCastStatusPort(): CastStatusPort {
   return { statusLabel: materiaStatusLabel };
 }
 
+export function createCastBudgetPersistencePort(): CastBudgetPersistencePort<ExtensionAPI> {
+  return {
+    loadConfig: loadConfigFromState,
+    persist: persistCastBudget,
+  };
+}
+
 export interface MateriaPluginAdapters {
   configs: ConfigRepository;
   pipeline: PipelinePresenter;
@@ -41,6 +49,7 @@ export interface MateriaPluginAdapters {
   agentTurns: CastAgentTurnPort<ExtensionContext, ExtensionAPI, unknown>;
   lifecycle: CastLifecyclePort<ExtensionContext, ExtensionAPI>;
   statusPresenter: CastStatusPort;
+  budget: CastBudgetPersistencePort<ExtensionAPI>;
   environment: EnvironmentLookup;
   logger: Logger;
   modelPolicies: ModelPolicyResolver;
@@ -57,6 +66,7 @@ export function createMateriaPluginAdapters(env?: NodeJS.ProcessEnv): MateriaPlu
     agentTurns: createCastAgentTurnPort(),
     lifecycle: createCastLifecyclePort(),
     statusPresenter: createCastStatusPort(),
+    budget: createCastBudgetPersistencePort(),
     environment: createProcessEnvironmentLookup(env),
     logger: createConsoleLogger(),
     modelPolicies: createCentralConnectedModelPolicyResolver(),

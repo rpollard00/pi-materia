@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStartOptions, type CastStateRepository, type QuestStartResult } from "./application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastBudgetTargetError, CastBudgetUseCases, CastBudgetValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStartOptions, type CastStateRepository, type QuestStartResult } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
@@ -31,6 +31,7 @@ export default function piMateria(pi: ExtensionAPI) {
   const getConfiguredConfigPath = () => configuredConfigPath(pi, adapters.environment);
   const loadoutUseCases = new LoadoutUseCases({ configs: adapters.configs, pipeline: adapters.pipeline, logger: adapters.logger });
   const castCatalogUseCases = new CastCatalogUseCases({ configs: adapters.configs, states: adapters.states, artifacts: adapters.artifacts });
+  const castBudgetUseCases = new CastBudgetUseCases({ states: adapters.states, budget: adapters.budget });
   const castExecutionUseCases = new CastExecutionUseCases({ states: adapters.states, context: adapters.context, agentTurns: adapters.agentTurns, lifecycle: adapters.lifecycle, statusPresenter: adapters.statusPresenter, loadouts: loadoutUseCases, configs: adapters.configs, pipeline: adapters.pipeline });
   const createQuestBoardRepository = (cwd: string) => new FileQuestBoardRepository(cwd);
   const createQuestRunnerUseCases = (cwd: string, boards = createQuestBoardRepository(cwd)) => new QuestRunnerUseCases({ boards, casts: castExecutionUseCases, loadouts: loadoutUseCases, states: adapters.states, logger: adapters.logger });
@@ -174,7 +175,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states, getConfiguredConfigPath),
     handler: async (args, ctx) => {
       activeContext = ctx;
@@ -316,6 +317,34 @@ export default function piMateria(pi: ExtensionAPI) {
         return;
       }
 
+      if (subcommand === "budget") {
+        if (rest.length > 1) {
+          ctx.ui.notify("Usage: /materia budget [<tokens>]", "error");
+          return;
+        }
+        try {
+          const snapshot = rest.length === 0
+            ? await castBudgetUseCases.getBudget(ctx)
+            : await castBudgetUseCases.updateBudget(pi, ctx, rest[0]);
+          const updated = rest.length === 1;
+          const limit = snapshot.maxTokens === undefined ? "unlimited" : String(snapshot.maxTokens);
+          const content = [
+            updated ? "pi-materia budget updated." : "pi-materia budget",
+            `cast id: ${snapshot.castId}`,
+            `consumed tokens: ${snapshot.consumedTokens}`,
+            `current token limit: ${limit}`,
+          ].join("\n");
+          pi.sendMessage({ customType: "pi-materia", content, display: true, details: { prefix: "budget", materiaName: "orchestrator", eventType: updated ? "budget_updated" : "budget", castId: snapshot.castId, consumedTokens: snapshot.consumedTokens, maxTokens: snapshot.maxTokens } });
+        } catch (error) {
+          if (error instanceof CastBudgetTargetError || error instanceof CastBudgetValidationError) {
+            ctx.ui.notify(error.message, "error");
+          } else {
+            ctx.ui.notify(`pi-materia budget failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+          }
+        }
+        return;
+      }
+
       if (subcommand === "status") {
         const state = castExecutionUseCases.status(ctx);
         if (!state) {
@@ -405,7 +434,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (passive revive if ordinary failure; extends recovery allowance then recasts if exhaustion metadata present), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (passive revive if ordinary failure; extends recovery allowance then recasts if exhaustion metadata present), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -779,7 +808,7 @@ function isNonBlockingQuestCommand(args: string): boolean {
 }
 
 function isNonBlockingMateriaCommand(subcommand: string | undefined): boolean {
-  return subcommand === "continue";
+  return subcommand === "continue" || subcommand === "budget";
 }
 
 function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | undefined, statesRepository: Pick<CastStateRepository<ExtensionContext>, "listResumable" | "listRevivable">, getConfigPath?: () => string | undefined): Array<{ value: string; label: string; description?: string }> | null | Promise<Array<{ value: string; label: string; description?: string }> | null> {
@@ -863,7 +892,7 @@ function questDefaultLoadoutCompletions(tokens: string[], endsWithWhitespace: bo
 }
 
 function materiaSubcommands(): string[] {
-  return ["cast", "autocast", "link", "recast", "revive", "casts", "quest", "grid", "loadout", "ui", "status", "continue", "abort"];
+  return ["cast", "autocast", "budget", "link", "recast", "revive", "casts", "quest", "grid", "loadout", "ui", "status", "continue", "abort"];
 }
 
 function shouldAutoStartWebUi(subcommand: string | undefined): boolean {
