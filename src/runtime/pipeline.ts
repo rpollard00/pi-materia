@@ -329,7 +329,10 @@ function formatSocketSlot(config: PiMateriaConfig, socket: MateriaPipelineSocket
   if (socket.edges?.length) details.push(`edges=${socket.edges.map((edge) => `${edgeLabel(edge)}->${edge.to}`).join(",")}`);
   if (socket.foreach) details.push(`foreach=${socket.foreach.items}${socket.foreach.as ? ` as ${socket.foreach.as}` : ""}${socket.foreach.done ? ` done ${socket.foreach.done}` : ""}`);
   if (socket.advance) details.push(`advance=${socket.advance.cursor}:${socket.advance.items}${socket.advance.when ? ` when ${socket.advance.when}` : ""}${socket.advance.done ? ` done ${socket.advance.done}` : ""}`);
-  if (socket.limits) details.push(`limits=${formatSocketLimits(socket.limits)}`);
+  if (socket.limits) {
+    const limits = formatSocketLimits(socket.limits);
+    if (limits !== undefined) details.push(`limits=${limits}`);
+  }
   if (isUtility && materia.timeoutMs !== undefined) details.push(`timeoutMs=${materia.timeoutMs}`);
   return details.join(", ");
 }
@@ -366,12 +369,10 @@ function formatMateriaModelSettings(materia: { model?: string; thinking?: string
   ].join(", ");
 }
 
-function formatSocketLimits(limits: NonNullable<MateriaPipelineSocketConfig["limits"]>): string {
-  return [
-    limits.maxVisits === undefined ? undefined : `visits ${limits.maxVisits}`,
-    limits.maxEdgeTraversals === undefined ? undefined : `edges ${limits.maxEdgeTraversals}`,
-    limits.maxOutputBytes === undefined ? undefined : `output ${limits.maxOutputBytes}B`,
-  ].filter(Boolean).join("/") || "default";
+function formatSocketLimits(limits: NonNullable<MateriaPipelineSocketConfig["limits"]>): string | undefined {
+  // Legacy socket maxVisits/maxEdgeTraversals are deprecated, ignored, and
+  // omitted from runtime summaries; only maxOutputBytes remains meaningful.
+  return limits.maxOutputBytes === undefined ? undefined : `output ${limits.maxOutputBytes}B`;
 }
 
 function formatLoopDisplayText(pipeline: MateriaPipelineConfig, loopId: string, loop: MateriaLoopConfig): string {
@@ -443,13 +444,10 @@ function edgeLabel(edge: MateriaEdgeConfig): string {
 }
 
 function formatLimits(config: PiMateriaConfig): string {
-  return [
-    `socket visits ${config.limits?.maxSocketVisits ?? 25}`,
-    // Legacy maxEdgeTraversals is ignored (edges without explicit maxTraversals are unbounded);
-    // show only an explicitly configured value with no hardcoded fallback.
-    config.limits?.maxEdgeTraversals === undefined ? undefined : `edge traversals ${config.limits.maxEdgeTraversals}`,
-    `no-advance cycles ${config.limits?.maxNoAdvanceCycles ?? 3}`,
-  ].join(", ");
+  // Legacy global maxSocketVisits/maxEdgeTraversals are deprecated, ignored,
+  // and omitted from runtime summaries; only maxNoAdvanceCycles remains
+  // meaningful. Edges without explicit maxTraversals are unbounded.
+  return `no-advance cycles ${config.limits?.maxNoAdvanceCycles ?? 3}`;
 }
 
 function formatBudget(budget?: MateriaBudgetConfig): string {

@@ -194,8 +194,16 @@ export interface MateriaBudgetConfig {
 }
 
 export interface MateriaLimitsConfig {
-  /** Canonical socket visit cap for a cast. */
+  /**
+   * @deprecated Legacy cumulative socket visit cap. Accepted for load
+   * compatibility but ignored: socket visits are diagnostic-only and never
+   * fail execution.
+   */
   maxSocketVisits?: number;
+  /**
+   * @deprecated Legacy cumulative edge traversal cap. Accepted for load
+   * compatibility but ignored: only explicit edge.maxTraversals is enforced.
+   */
   maxEdgeTraversals?: number;
   /** Consecutive graph cycles permitted for one work item without cursor advancement. */
   maxNoAdvanceCycles?: number;
@@ -769,7 +777,16 @@ export interface MateriaLoopExitRouteConfig {
 }
 
 export interface MateriaSocketLimitsConfig {
+  /**
+   * @deprecated Legacy cumulative socket visit cap. Accepted for load
+   * compatibility but ignored: socket visits are diagnostic-only and never
+   * fail execution.
+   */
   maxVisits?: number;
+  /**
+   * @deprecated Legacy cumulative edge traversal cap. Accepted for load
+   * compatibility but ignored: only explicit edge.maxTraversals is enforced.
+   */
   maxEdgeTraversals?: number;
   maxOutputBytes?: number;
 }

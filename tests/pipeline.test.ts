@@ -539,7 +539,7 @@ describe("utility pipeline sockets", () => {
     expect(hello).toContain("parse=json");
     expect(hello).toContain("edges=always->Socket-2");
     expect(hello).toContain("foreach=state.items as item done end");
-    expect(hello).toContain("limits=visits 2/edges 3/output 1024B");
+    expect(hello).toContain("limits=output 1024B");
     expect(hello).toContain("timeoutMs=5000");
 
     const ignored = lines.find((line) => line.startsWith("- Socket-2:"));

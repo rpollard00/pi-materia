@@ -7,7 +7,7 @@ import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
 import { effectiveResolvedSocketConfig } from "../src/runtime/resolvedMateria.js";
-import { getEffectivePipelineConfig, resolvePipeline } from "../src/runtime/pipeline.js";
+import { getEffectivePipelineConfig, renderGrid, resolvePipeline } from "../src/runtime/pipeline.js";
 import { paletteColors } from "../src/webui/client/src/loadoutModel.js";
 
 async function writeConfig(config: unknown): Promise<{ dir: string; file: string }> {
@@ -1316,6 +1316,64 @@ describe("config loadouts", () => {
     expect("multiTurn" in planningConsult.sockets["Socket-3"].socket).toBe(false);
     expect(planningConsult.sockets["Socket-3"].materia.multiTurn).toBe(true);
     expect(planningConsult.sockets["Socket-3"].materia.prompt).toContain("interactive planning materia");
+  });
+});
+
+describe("config traversal limits", () => {
+  test("bundled defaults ship only maxNoAdvanceCycles and omit obsolete traversal caps", async () => {
+    const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8"));
+    expect(rawDefault.limits).toEqual({ maxNoAdvanceCycles: 3 });
+    expect(rawDefault.limits.maxSocketVisits).toBeUndefined();
+    expect(rawDefault.limits.maxEdgeTraversals).toBeUndefined();
+  });
+
+  test("legacy low traversal limits load without enforcement and are omitted from grid summaries", async () => {
+    const { dir, file } = await writeConfig({
+      activeLoadout: "Legacy-Limits",
+      limits: {
+        maxSocketVisits: 1,
+        maxEdgeTraversals: 1,
+        maxNoAdvanceCycles: 3,
+      },
+      loadouts: {
+        "Legacy-Limits": {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": {
+              materia: "Build",
+              edges: [{ when: "always", to: "Socket-2" }],
+              limits: { maxVisits: 1, maxEdgeTraversals: 1, maxOutputBytes: 2048 },
+            },
+            "Socket-2": {
+              materia: "Build",
+              limits: { maxVisits: 1 },
+            },
+          },
+        },
+      },
+      materia: {
+        Build: { tools: "coding", prompt: "Build." },
+      },
+    });
+
+    const loaded = await loadConfig(dir, file);
+    const pipeline = resolvePipeline(loaded.config);
+    expect(pipeline.entry.id).toBe("Socket-1");
+
+    const lines = renderGrid(loaded.config, pipeline, "test", dir);
+    const limitsLine = lines.find((line) => line.startsWith("limits:"));
+    expect(limitsLine).toBe("limits: no-advance cycles 3");
+    expect(limitsLine).not.toContain("socket visits");
+    expect(limitsLine).not.toContain("edge traversals");
+
+    const socket1 = lines.find((line) => line.startsWith("- Socket-1:"));
+    expect(socket1).toContain("limits=output 2048B");
+    expect(socket1).not.toMatch(/visits \d+/);
+    expect(socket1).not.toMatch(/edges \d+/);
+
+    // Socket-2 carries only legacy limits: no limits= summary is rendered.
+    const socket2 = lines.find((line) => line.startsWith("- Socket-2:"));
+    expect(socket2).not.toContain("limits=");
   });
 });
 
