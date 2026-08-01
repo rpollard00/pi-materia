@@ -66,11 +66,11 @@ describe("application child cast runner port", () => {
     expect(snapshot.diagnostics).toHaveLength(1);
   });
 
-  test("resumes failed children and makes abort idempotent", async () => {
+  test("resumes failed or unaccepted children and makes abort idempotent", async () => {
     let now = 20;
     const runner = createFakeChildCastRunner({ now: () => now++ });
     await runner.start(startInput());
-    runner.fail("child-1", { error: "child failed" });
+    runner.complete("child-1", { accepted: false, message: "no accepted terminal result" });
 
     const resumed = await runner.resume({ childCastId: "child-1" });
     expect(resumed.snapshot.status).toBe("running");
@@ -84,5 +84,13 @@ describe("application child cast runner port", () => {
     const repeated = await runner.abort({ childCastId: "child-1", reason: "parent cancelled again" });
     expect(repeated).toMatchObject({ status: "already_terminal", aborted: false });
     expect(repeated.snapshot?.terminalResult?.abortReason).toBe("parent cancelled");
+  });
+
+  test("does not resume an accepted child", async () => {
+    const runner = createFakeChildCastRunner();
+    await runner.start(startInput());
+    runner.complete("child-1", { accepted: true });
+
+    await expect(runner.resume({ childCastId: "child-1" })).rejects.toThrow(/accepted and cannot be resumed/);
   });
 });

@@ -407,6 +407,8 @@ export const applyParallelFinalizationProvenance = recordParallelFinalization;
 export interface RestartParallelLaneInput extends ParallelTransitionGuard {
   timestamp?: number;
   diagnostic?: MateriaParallelDiagnostic;
+  /** Keep a verifiable child identity/session when the runner can resume it. */
+  preserveChildSession?: boolean;
 }
 
 /**
@@ -430,8 +432,15 @@ export function restartParallelLaneAttempt(
     ...clone(lane),
     status: "queued",
     attempt: lane.attempt + 1,
-    childCastId: undefined,
-    childSession: undefined,
+    ...(input.preserveChildSession
+      ? {
+          ...(lane.childCastId !== undefined ? { childCastId: lane.childCastId } : {}),
+          ...(lane.childSession !== undefined ? { childSession: clone(lane.childSession) } : {}),
+        }
+      : {
+          childCastId: undefined,
+          childSession: undefined,
+        }),
     acceptedHead: undefined,
     startedAt: undefined,
     endedAt: undefined,

@@ -207,7 +207,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     if (existing.process && !hasProcessExited(existing.process) && !existing.snapshot.terminalResult) {
       throw new Error(`Child cast ${JSON.stringify(input.childCastId)} is already active.`);
     }
-    if (existing.snapshot.status === "succeeded") {
+    if (existing.snapshot.status === "succeeded" && existing.snapshot.accepted) {
       throw new Error(`Child cast ${JSON.stringify(input.childCastId)} was accepted and cannot be resumed.`);
     }
 

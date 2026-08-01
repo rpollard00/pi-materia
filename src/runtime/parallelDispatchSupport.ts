@@ -43,6 +43,11 @@ export interface ParallelWorkspaceRecord {
 }
 
 export interface ParallelWorkspaceInspection {
+  /** Whether the owned workspace directory still exists. */
+  exists?: boolean;
+  /** Whether jj still tracks the owned workspace name. */
+  tracked?: boolean;
+  /** Current working-copy revision observed inside the lane workspace. */
   currentRevision?: ParallelWorkspaceRevision;
 }
 

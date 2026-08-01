@@ -352,7 +352,9 @@ const castLifecycle = createCastLifecycle({
   },
   termination: {
     failCastAtStart,
+    failCast,
   },
+  parallel: parallelLoopDispatcher,
   ui: {
     updateWidget,
   },

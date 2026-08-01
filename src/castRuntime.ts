@@ -44,6 +44,8 @@ export type {
   ParallelLoopCancellationInput,
   ParallelLoopDispatchInput,
   ParallelLoopFinalizationInput,
+  ParallelLoopReviveInput,
+  ParallelLoopReviveResult,
   ParallelLoopDispatcherDependencies,
   ParallelWorkspaceInspection,
   ParallelWorkspacePort,
@@ -84,6 +86,8 @@ export {
   transitionParallelRun,
   transitionParallelRunPhase,
   updateParallelRunState,
+  isParallelLaneRevivalCandidate,
+  validateParallelRecovery,
 } from "./runtime/parallelCoordinatorState.js";
 export type {
   CastParallelTransitionResult,
@@ -97,6 +101,10 @@ export type {
   ParallelFinalizationTransitionInput,
   RestartParallelLaneInput,
   ParallelTransitionIgnoreReason,
+  ParallelRecoveryPlan,
+  ParallelRecoveryValidationIssue,
+  ParallelRecoveryValidationInput,
+  ParallelRecoveryValidationResult,
 } from "./runtime/parallelCoordinatorState.js";
 export {
   clearCastState,

@@ -133,7 +133,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
     if (existing.status === "running" || existing.status === "starting" || existing.status === "queued") {
       throw new Error(`Child cast ${JSON.stringify(input.childCastId)} is already active.`);
     }
-    if (existing.status === "succeeded") {
+    if (existing.status === "succeeded" && existing.accepted) {
       throw new Error(`Child cast ${JSON.stringify(input.childCastId)} was accepted and cannot be resumed.`);
     }
 

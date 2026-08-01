@@ -270,6 +270,50 @@ describe("parallel loop dispatcher", () => {
     expect(diagnostics[0]?.diagnostics[0].message).toBe("child launch failed: child process unavailable");
   });
 
+  test("settles all-terminal runs when lanes fail before a child callback", async () => {
+    for (const failureMode of ["workspace", "child"] as const) {
+      const childRunner = createFakeChildCastRunner({ now: () => 10 });
+      const state = makeState();
+      const baseline = { commitId: "base", changeId: "base-change" };
+      const workspaces = {
+        async pinBaseline() { return { repositoryRoot: "/repo", baseline }; },
+        async create(input: { laneId: string }) {
+          if (failureMode === "workspace") throw new Error("jj unavailable");
+          return {
+            repositoryRoot: "/repo",
+            workspaceRoot: "/tmp/materia",
+            workspacePath: `/tmp/materia/${input.laneId}`,
+            workspaceName: input.laneId,
+            baseline,
+            revision: baseline,
+          };
+        },
+      };
+      const children = failureMode === "workspace" ? childRunner : {
+        start: async () => { throw new Error("child process unavailable"); },
+        observe: childRunner.observe.bind(childRunner),
+        subscribe: childRunner.subscribe.bind(childRunner),
+        resume: childRunner.resume.bind(childRunner),
+        abort: childRunner.abort.bind(childRunner),
+      };
+      const dispatcher = new ParallelLoopDispatcher({
+        children: children as any,
+        workspaces,
+        state: { saveCastState: () => undefined },
+      });
+
+      await dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! });
+
+      const run = state.parallelRuns?.build;
+      expect(run?.phase).toBe("failed");
+      expect(run?.fanInPhase).toBe("skipped");
+      expect(Object.values(run?.lanes ?? {}).every((lane) => lane.status === "failed")).toBe(true);
+      expect(state.active).toBe(false);
+      expect(state.socketState).toBe("failed");
+      expect(state.failedReason).toContain("fan-in skipped");
+    }
+  });
+
   test("launches ordered streams with bounded concurrency and child context", async () => {
     const childRunner = createFakeChildCastRunner({ now: () => 10 });
     const created: string[] = [];
@@ -349,6 +393,166 @@ describe("parallel loop dispatcher", () => {
     expect(childRunner.listSnapshots()).toHaveLength(0);
     expect(state.parallelRuns?.build?.phase).toBe("failed");
     expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.status === "interrupted")).toBe(true);
+  });
+
+  test("revives failed or unaccepted lanes while preserving accepted heads and stream membership", async () => {
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const state = makeState();
+    const created: string[] = [];
+    const baseline = { commitId: "base", changeId: "base-change" };
+    const workspaces = {
+      async pinBaseline() { return { repositoryRoot: "/repo", baseline }; },
+      async create(input: { laneId: string }) {
+        created.push(input.laneId);
+        return {
+          repositoryRoot: "/repo",
+          workspaceRoot: "/tmp/materia",
+          workspacePath: `/tmp/materia/${input.laneId}`,
+          workspaceName: input.laneId,
+          baseline,
+          revision: baseline,
+        };
+      },
+      async fanIn(input: any) {
+        const orderedHeads = input.queueOrder.map((laneId: string, queueIndex: number) => {
+          const lane = input.lanes.find((candidate: any) => candidate.laneId === laneId);
+          return {
+            laneId,
+            streamIndex: lane.streamIndex,
+            queueIndex,
+            workItemIndexes: [...lane.workItemIndexes],
+            head: lane.acceptedHead,
+            workspace: lane.workspace,
+          };
+        });
+        return {
+          version: 1,
+          parentCastId: input.parentCastId,
+          loopId: input.loopId,
+          runId: input.runId,
+          baseline,
+          parentRevisionBefore: baseline,
+          parentRevisionAfter: baseline,
+          orderedHeads,
+          integrationRevision: baseline,
+          outcome: "clean",
+          conflictedPaths: [],
+          conflictDetails: [],
+          operationId: "fan-in",
+          startedAt: 1,
+          completedAt: 2,
+          satisfied: true,
+        };
+      },
+    };
+    const dispatcher = new ParallelLoopDispatcher({
+      children: childRunner,
+      workspaces,
+      state: { saveCastState: () => undefined },
+    });
+    const input = { pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! };
+
+    await dispatcher.dispatch(input);
+    const initial = childRunner.listSnapshots();
+    const laneA = initial.find((child) => child.identity.laneId === "lane-a")!;
+    const laneB = initial.find((child) => child.identity.laneId === "lane-b")!;
+    childRunner.complete(laneA.identity.childCastId, { output: baseline });
+    // A child that exits cleanly without an accepted terminal result is
+    // persisted as succeeded/accepted=false, but the lane is still failed and
+    // must be eligible for explicit revival.
+    childRunner.complete(laneB.identity.childCastId, { accepted: false, message: "no accepted terminal result" });
+    await childRunner.drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const laneC = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-c")!;
+    childRunner.complete(laneC.identity.childCastId, { output: baseline });
+    await childRunner.drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const failedRun = state.parallelRuns?.build!;
+    expect(failedRun.phase).toBe("failed");
+    expect(failedRun.fanInPhase).toBe("skipped");
+    expect(failedRun.lanes["lane-a"]?.status).toBe("accepted");
+    expect(failedRun.lanes["lane-c"]?.status).toBe("accepted");
+    const acceptedHead = failedRun.lanes["lane-a"]?.acceptedHead;
+    const acceptedAttempt = failedRun.lanes["lane-a"]?.attempt;
+    const beforeChildren = childRunner.listSnapshots().length;
+
+    await dispatcher.revive(input);
+    expect(created).toEqual(["lane-a", "lane-b", "lane-c", "lane-b"]);
+    const revivedChild = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-b")!;
+    expect(revivedChild.identity.childCastId).toBe(laneB.identity.childCastId);
+    expect(revivedChild.attempt).toBe(2);
+    expect(childRunner.listSnapshots().filter((child) => child.identity.laneId !== "lane-b")).toHaveLength(beforeChildren - 1);
+    expect(state.parallelRuns?.build?.lanes["lane-a"]?.acceptedHead).toEqual(acceptedHead);
+    expect(state.parallelRuns?.build?.lanes["lane-a"]?.attempt).toBe(acceptedAttempt);
+    expect(state.parallelRuns?.build?.lanes["lane-b"]?.workItemIndexes).toEqual([1]);
+
+    childRunner.complete(revivedChild.identity.childCastId, { output: baseline });
+    await childRunner.drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(state.parallelRuns?.build?.fanInProvenance?.orderedHeads.map((head) => head.laneId)).toEqual(["lane-a", "lane-b", "lane-c"]);
+  });
+
+  test("rejects revival when a preserved workspace drifts or is no longer tracked", async () => {
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const state = makeState();
+    const baseline = { commitId: "base", changeId: "base-change" };
+    const inspections = new Map<string, { exists: boolean; tracked: boolean; currentRevision: typeof baseline }>();
+    const workspaces = {
+      async pinBaseline() { return { repositoryRoot: "/repo", baseline }; },
+      async create(input: { laneId: string }) {
+        inspections.set(input.laneId, { exists: true, tracked: true, currentRevision: baseline });
+        return {
+          repositoryRoot: "/repo",
+          workspaceRoot: "/tmp/materia",
+          workspacePath: `/tmp/materia/${input.laneId}`,
+          workspaceName: input.laneId,
+          baseline,
+          revision: baseline,
+        };
+      },
+      async inspect(input: { workspaceName: string }) {
+        return inspections.get(input.workspaceName);
+      },
+    };
+    const dispatcher = new ParallelLoopDispatcher({
+      children: childRunner,
+      workspaces,
+      state: { saveCastState: () => undefined },
+    });
+    const input = { pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! };
+
+    await dispatcher.dispatch(input);
+    const initial = childRunner.listSnapshots();
+    const laneA = initial.find((child) => child.identity.laneId === "lane-a")!;
+    const laneB = initial.find((child) => child.identity.laneId === "lane-b")!;
+    const headA = { commitId: "head-a", changeId: "change-a" };
+    inspections.get("lane-a")!.currentRevision = headA;
+    childRunner.complete(laneA.identity.childCastId, { output: headA });
+    childRunner.complete(laneB.identity.childCastId, { accepted: false, message: "retry this lane" });
+    await childRunner.drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const laneC = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-c")!;
+    const headC = { commitId: "head-c", changeId: "change-c" };
+    inspections.get("lane-c")!.currentRevision = headC;
+    childRunner.complete(laneC.identity.childCastId, { output: headC });
+    await childRunner.drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const beforeChildren = childRunner.listSnapshots().length;
+    inspections.get("lane-a")!.tracked = false;
+    const untracked = await dispatcher.validateRevival(input);
+    expect(untracked.ok).toBe(false);
+    expect(untracked.issues.some((issue) => issue.code === "workspace_untracked" && issue.laneId === "lane-a")).toBe(true);
+    expect(childRunner.listSnapshots()).toHaveLength(beforeChildren);
+
+    inspections.get("lane-a")!.tracked = true;
+    inspections.get("lane-a")!.currentRevision = { commitId: "drifted", changeId: "drifted-change" };
+    const drifted = await dispatcher.validateRevival(input);
+    expect(drifted.ok).toBe(false);
+    expect(drifted.issues.some((issue) => issue.code === "accepted_head_drift" && issue.laneId === "lane-a")).toBe(true);
+    await expect(dispatcher.revive(input)).rejects.toThrow("accepted lane workspace revision");
+    expect(childRunner.listSnapshots()).toHaveLength(beforeChildren);
   });
 
   test("cancels active and queued lanes, preserves workspace ownership, and ignores late callbacks", async () => {

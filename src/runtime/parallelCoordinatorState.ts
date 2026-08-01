@@ -4,6 +4,7 @@
  * only knows how to attach them to a persisted cast snapshot.
  */
 export * from "../domain/parallelRun.js";
+export * from "../domain/parallelRecovery.js";
 
 import type { MateriaCastState, MateriaParallelRunState } from "../types.js";
 import {

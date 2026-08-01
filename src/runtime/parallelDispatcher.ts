@@ -7,6 +7,7 @@ import type {
   StartChildCastInput,
 } from "../application/childCastRunner.js";
 import { boundParallelFanInResult, type ParallelFanInResult } from "../domain/parallelFanIn.js";
+import { isParallelLaneRevivalCandidate, validateParallelRecovery, type ParallelRecoveryPlan, type ParallelRecoveryValidationIssue } from "../domain/parallelRecovery.js";
 import type {
   ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
@@ -24,6 +25,7 @@ import {
   applyParallelTransitionToCastState,
   attachParallelRunToCastState,
   createParallelRunState,
+  restartParallelLaneAttempt,
 } from "./parallelCoordinatorState.js";
 import type { MateriaCastState, MateriaLoopParallelConfig, MateriaParallelFinalizationProvenance, MateriaParallelRunState, MateriaParallelUsageTotals, ResolvedMateriaSocket } from "../types.js";
 import {
@@ -37,6 +39,7 @@ import {
   replaceParallelState as replaceState,
   revisionInValue,
   workspaceOwnership,
+  type NormalizedParallelPlan,
   type NormalizedParallelStream,
   type ParallelWorkspacePort,
   type ParallelWorkspaceRecord,
@@ -105,6 +108,25 @@ export interface ParallelLoopCancellationInput {
   reason?: string;
 }
 
+export interface ParallelLoopReviveInput {
+  pi: ExtensionAPI;
+  ctx: ExtensionContext;
+  state: MateriaCastState;
+  loopId: string;
+  config: MateriaLoopParallelConfig;
+  /** Reinstall parent eventing/UI services before child callbacks can route. */
+  onPrepared?: () => Promise<void>;
+  /** Continue at the symbolic fan-in barrier after all revived lanes succeed. */
+  onFanIn?: (input: ParallelFanInCompletionInput) => Promise<void>;
+  /** Hard-fail the parent if a revived attempt remains unaccepted. */
+  onFailure?: (input: ParallelRunFailureInput) => Promise<void>;
+}
+
+export interface ParallelLoopReviveResult {
+  ok: boolean;
+  issues: readonly ParallelRecoveryValidationIssue[];
+}
+
 export interface ParallelLoopDispatcherDependencies {
   children: ChildCastRunnerPort;
   workspaces: ParallelWorkspacePort;
@@ -141,6 +163,11 @@ interface PreparedLane {
   stream: NormalizedParallelStream;
   compiledLoadout: CompiledLoopChildLoadout;
   workspace?: ParallelWorkspaceRecord;
+  /** Existing failed or unaccepted child that can be resumed without changing lane identity. */
+  recoveryChildCastId?: string;
+  /** Last event already retained by the failed attempt; old events must not replay. */
+  recoveryAfterSequence?: number;
+  resumeChild?: boolean;
 }
 
 interface ActiveLane {
@@ -149,6 +176,7 @@ interface ActiveLane {
   attempt: number;
   artifactIdentity: ParallelLaneArtifactIdentity;
   artifactPaths?: ParallelLaneArtifactPaths;
+  subscription?: { unsubscribe(): void };
 }
 
 interface DispatchInitialization {
@@ -371,6 +399,202 @@ export class ParallelLoopDispatcher {
     if (initializationInterrupted || this.#cancelRequested || this.#prepared.length === 0) return true;
 
     await this.#pump();
+    // Workspace and child-start failures terminalize lanes synchronously and
+    // therefore do not produce a child terminal callback. Reconcile the
+    // scheduler barrier after the initial pump so an all-failed fan-out skips
+    // fan-in and fails the parent just like callback-driven completion does.
+    await this.#maybeFanIn(input, input.state);
+    return true;
+  }
+
+  /**
+   * Validate a failed lane run without changing durable state. Revival is
+   * intentionally strict: the normalized plan, loop config, baseline, lane
+   * ownership, and accepted heads are all immutable recovery inputs.
+   */
+  async validateRevival(input: ParallelLoopReviveInput): Promise<ParallelLoopReviveResult> {
+    const issues: ParallelRecoveryValidationIssue[] = [];
+    try {
+      validateDispatchConfig(input.config);
+    } catch (error) {
+      issues.push({ code: "config_unsupported", path: `loops.${input.loopId}.parallel`, message: boundedFailureReason(errorMessage(error)) });
+    }
+    const run = input.state.parallelRuns?.[input.loopId];
+    if (!run) return { ok: false, issues: [{ code: "run_missing", path: `parallelRuns.${input.loopId}`, message: "no persisted parallel run exists for this loop" }] };
+    if (!isParallelLaneRevivalCandidate(run)) {
+      issues.push({ code: "not_lane_revivable", path: `parallelRuns.${input.loopId}`, message: "the run is not a failed all-terminal lane run with fan-in skipped" });
+    }
+
+    let plan: NormalizedParallelPlan | undefined;
+    try {
+      plan = readNormalizedPlan(input.state, input.config.planInput);
+    } catch (error) {
+      issues.push({ code: "plan_invalid", path: input.config.planInput, message: boundedFailureReason(errorMessage(error)) });
+    }
+
+    let baseline: ParallelWorkspaceRevision | undefined;
+    try {
+      baseline = (await this.#deps.workspaces.pinBaseline(input.state.cwd)).baseline;
+    } catch (error) {
+      issues.push({ code: "baseline_unavailable", path: "baseline", message: boundedFailureReason(errorMessage(error)) });
+    }
+
+    if (plan && baseline) {
+      const result = validateParallelRecovery({
+        parentCastId: input.state.castId,
+        loopId: input.loopId,
+        configHash: input.state.configHash,
+        config: input.config,
+        plan: plan as ParallelRecoveryPlan,
+        baseline,
+        run,
+      });
+      issues.push(...result.issues);
+    }
+
+    if (run && baseline) {
+      await this.#validateRevivalReferences(input, run, issues);
+    }
+    return { ok: issues.length === 0, issues };
+  }
+
+  /**
+   * Revive only failed/interrupted lanes of a terminal run. Accepted lanes
+   * remain untouched, retain their heads/workspaces, and never consume a new
+   * scheduler slot. Failed or unaccepted children are resumed when their
+   * process/session is still observable; otherwise a fresh child attempt is
+   * launched in the same owned workspace.
+   */
+  async revive(input: ParallelLoopReviveInput): Promise<boolean> {
+    validateDispatchConfig(input.config);
+    const validation = await this.validateRevival(input);
+    if (!validation.ok) {
+      throw new Error(`Parallel revival validation failed: ${validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+    }
+
+    const originalRun = input.state.parallelRuns?.[input.loopId];
+    if (!originalRun) throw new Error(`No parallel run exists for loop ${JSON.stringify(input.loopId)}.`);
+    const plan = readNormalizedPlan(input.state, input.config.planInput);
+    const baseline = await this.#deps.workspaces.pinBaseline(input.state.cwd);
+    const workItems = readWorkItems(input.state);
+    if (plan.workItemCount !== workItems.length) {
+      throw new Error(`Parallel revival plan workItemCount ${plan.workItemCount} does not match state.workItems length ${workItems.length}.`);
+    }
+
+    const failedStreams = plan.streams.filter((stream) => {
+      const lane = originalRun.lanes[stream.laneId];
+      return lane?.status === "failed" || lane?.status === "interrupted";
+    });
+    // Compile only the streams being revived. Accepted lanes remain entirely
+    // outside the child launch path, while the plan/config validation above
+    // prevents a changed graph from being treated as the original run.
+    const prepared: PreparedLane[] = [];
+    for (const stream of failedStreams) {
+      const compiled = compileLoopRegionToChildLoadout({
+        pipeline: input.state.pipeline,
+        loopId: input.loopId,
+        workItems,
+        workItemIndexes: stream.workItemIndexes,
+        laneId: stream.laneId,
+      });
+      if (!compiled.ok) {
+        throw new Error(`Unable to compile revived parallel lane ${JSON.stringify(stream.laneId)}: ${compiled.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+      }
+      const lane = originalRun.lanes[stream.laneId]!;
+      let resumeChild = false;
+      let recoveryAfterSequence: number | undefined;
+      if (lane.childCastId && lane.childSession) {
+        const observation = await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined);
+        if (observation) {
+          resumeChild = true;
+          recoveryAfterSequence = lane.lastEvent?.sequence ?? observation.events.at(-1)?.sequence ?? 0;
+          this.#latestUsage.set(lane.childCastId, observation.snapshot.usage);
+        }
+      }
+      prepared.push({
+        stream,
+        compiledLoadout: compiled.value,
+        ...(resumeChild && lane.childCastId ? { recoveryChildCastId: lane.childCastId, resumeChild: true } : {}),
+        ...(recoveryAfterSequence !== undefined ? { recoveryAfterSequence } : {}),
+      });
+    }
+
+    let nextRun = originalRun;
+    for (const preparedLane of prepared) {
+      const lane = nextRun.lanes[preparedLane.stream.laneId]!;
+      const restarted = restartParallelLaneAttempt(nextRun, {
+        parentCastId: input.state.castId,
+        loopId: input.loopId,
+        runId: nextRun.runId,
+        laneId: lane.laneId,
+        attempt: lane.attempt,
+        ...(lane.childCastId ? { childCastId: lane.childCastId } : {}),
+        preserveChildSession: preparedLane.resumeChild === true,
+        diagnostic: {
+          code: "parallel_lane_revived",
+          message: `Reviving lane ${lane.laneId} without rerunning accepted lanes or changing stream assignment.`,
+          severity: "info",
+          occurredAt: this.#now(),
+        },
+        timestamp: this.#now(),
+      });
+      if (!restarted.applied) throw new Error(`Unable to revive lane ${JSON.stringify(lane.laneId)}: ${restarted.reason ?? "invalid lane state"}.`);
+      nextRun = restarted.state;
+    }
+
+    const state = input.state;
+    this.#state = state;
+    this.#input = {
+      pi: input.pi,
+      ctx: input.ctx,
+      state,
+      socket: {} as ResolvedMateriaSocket,
+      loopId: input.loopId,
+      config: input.config,
+      ...(input.onFanIn ? { onFanIn: input.onFanIn } : {}),
+      ...(input.onFailure ? { onFailure: input.onFailure } : {}),
+    };
+    this.#run = nextRun;
+    this.#repositoryRoot = baseline.repositoryRoot;
+    this.#prepared = prepared;
+    this.#nextQueueIndex = 0;
+    this.#active.clear();
+    this.#eventTails.clear();
+    this.#usageWriteTail = Promise.resolve();
+    this.#budgetFailure = undefined;
+    this.#fanInPromise = undefined;
+    this.#fanInRunId = undefined;
+    this.#cancelRequested = false;
+    this.#cancelPromise = undefined;
+    this.#cancelCastId = undefined;
+
+    replaceState(state, {
+      ...state,
+      active: true,
+      phase: state.currentSocketId ?? state.phase,
+      awaitingResponse: false,
+      socketState: "running_parallel",
+      failedReason: undefined,
+      recoveryExhaustion: undefined,
+      runState: { ...state.runState, endedAt: undefined, currentSocketId: state.currentSocketId ?? state.runState.currentSocketId, lastMessage: `Reviving parallel lanes for ${input.loopId}.` },
+      parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: nextRun },
+    });
+    this.#deps.state.saveCastState(input.pi, state);
+    await this.#appendEvent(state, "parallel_revive_started", {
+      parentCastId: state.castId,
+      loopId: input.loopId,
+      runId: nextRun.runId,
+      planId: nextRun.planIdentity.planId,
+      revivedLaneIds: prepared.map((lane) => lane.stream.laneId),
+      preservedLaneIds: nextRun.queueOrder.filter((laneId) => nextRun.lanes[laneId]?.status === "accepted"),
+      baseline: nextRun.baseline,
+    });
+    await input.onPrepared?.();
+    await this.#pump();
+    // A revived lane can fail while its workspace is being recreated or its
+    // child is being started. Those terminal failures have no child callback
+    // to release the final scheduling barrier, so reconcile it explicitly.
+    await this.#maybeFanIn(this.#input, state);
     return true;
   }
 
@@ -507,6 +731,76 @@ export class ParallelLoopDispatcher {
       this.#run.parentCastId === input.state.castId &&
       (input.loopId === undefined || this.#run.loopId === input.loopId),
     );
+  }
+
+  async #validateRevivalReferences(
+    input: ParallelLoopReviveInput,
+    run: MateriaParallelRunState,
+    issues: ParallelRecoveryValidationIssue[],
+  ): Promise<void> {
+    if (!run.lanes || typeof run.lanes !== "object" || Array.isArray(run.lanes)) {
+      issues.push({ code: "lanes_invalid", path: "lanes", message: "the persisted parallel lanes record is invalid" });
+      return;
+    }
+    for (const lane of Object.values(run.lanes)) {
+      if (lane.workspace && this.#deps.workspaces.inspect) {
+        const inspected = await this.#deps.workspaces.inspect({
+          workspacePath: lane.workspace.workspacePath,
+          workspaceRoot: lane.workspace.workspaceRoot,
+          workspaceName: lane.workspace.workspaceName,
+        }).catch((error) => {
+          issues.push({ code: "workspace_inspection_failed", path: `lanes.${lane.laneId}.workspace`, laneId: lane.laneId, message: boundedFailureReason(errorMessage(error)) });
+          return undefined;
+        });
+        if (!inspected) {
+          issues.push({ code: "workspace_missing", path: `lanes.${lane.laneId}.workspace`, laneId: lane.laneId, message: "owned lane workspace could not be inspected" });
+        } else {
+          const workspacePath = `lanes.${lane.laneId}.workspace`;
+          if (inspected.exists === false) {
+            issues.push({ code: "workspace_missing", path: workspacePath, laneId: lane.laneId, message: "owned lane workspace directory no longer exists" });
+          }
+          if (inspected.tracked === false) {
+            issues.push({ code: "workspace_untracked", path: workspacePath, laneId: lane.laneId, message: "owned lane workspace is no longer tracked by jj" });
+          }
+          // Accepted lanes are preserved inputs to the next fan-in. Their
+          // recorded head is only trustworthy when the owned workspace still
+          // points at that exact revision; an altered or missing current head
+          // must stop revival before any failed lane is relaunched.
+          if (lane.status === "accepted" && lane.acceptedHead) {
+            if (!inspected.currentRevision) {
+              issues.push({ code: "accepted_head_unverified", path: `${workspacePath}.currentRevision`, laneId: lane.laneId, message: "accepted lane workspace has no verifiable current revision" });
+            } else if (!sameRevisionIdentity(inspected.currentRevision, lane.acceptedHead)) {
+              issues.push({ code: "accepted_head_drift", path: `${workspacePath}.currentRevision`, laneId: lane.laneId, message: `accepted lane workspace revision ${formatRevision(inspected.currentRevision)} differs from recorded accepted head ${formatRevision(lane.acceptedHead)}` });
+            }
+          }
+        }
+      }
+
+      if (!lane.childCastId) continue;
+      const observation = await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined);
+      // A failed child may be restarted from its durable launch/session paths
+      // after a parent process restart. Accepted lanes still retain their
+      // identity structurally and are never relaunched here.
+      if (!observation) continue;
+      const identity = observation.snapshot.identity;
+      if (identity.childCastId !== lane.childCastId || identity.parentCastId !== input.state.castId || identity.loopId !== input.loopId || identity.laneId !== lane.laneId) {
+        issues.push({ code: "child_identity_mismatch", path: `lanes.${lane.laneId}.childSession`, laneId: lane.laneId, message: "observed child session identity does not match the persisted lane" });
+      }
+      if (lane.status === "accepted" && (!observation.snapshot.terminalResult || !observation.snapshot.accepted)) {
+        issues.push({ code: "accepted_child_unverified", path: `lanes.${lane.laneId}.childSession`, laneId: lane.laneId, message: "accepted lane child session is not terminal and accepted" });
+      }
+      if ((lane.status === "failed" || lane.status === "interrupted") && (observation.snapshot.status === "running" || observation.snapshot.status === "starting" || observation.snapshot.status === "queued")) {
+        issues.push({ code: "child_not_terminal", path: `lanes.${lane.laneId}.childSession`, laneId: lane.laneId, message: "failed/interrupted lane child session is still active" });
+      }
+      // A clean child exit without an explicit accepted terminal result is
+      // represented as succeeded/accepted=false by the runner. The parent
+      // already records that lane as failed, so this is a recoverable attempt,
+      // not an accepted head. Only an actually accepted child is unsafe to
+      // revive here.
+      if ((lane.status === "failed" || lane.status === "interrupted") && observation.snapshot.status === "succeeded" && observation.snapshot.accepted) {
+        issues.push({ code: "child_terminal_mismatch", path: `lanes.${lane.laneId}.childSession`, laneId: lane.laneId, message: "failed/interrupted lane child session is already succeeded and accepted and cannot be safely revived" });
+      }
+    }
   }
 
   async #pump(): Promise<void> {
@@ -700,6 +994,8 @@ export class ParallelLoopDispatcher {
         this.#run = state.parallelRuns?.[dispatchInput.loopId];
       }
     }
+    for (const active of initiallyActive) active.subscription?.unsubscribe();
+    for (const active of remainingActive) active.subscription?.unsubscribe();
     this.#active.clear();
     this.#deps.state.saveCastState(input.pi, state);
     await this.#appendEvent(state, "parallel_cancelled", {
@@ -764,7 +1060,7 @@ export class ParallelLoopDispatcher {
     if (!lane || lane.status !== "queued") return;
 
     const attempt = lane.attempt;
-    const childCastId = childCastIdentity(state.castId, input.loopId, prepared.stream.laneId, attempt);
+    const childCastId = prepared.recoveryChildCastId ?? childCastIdentity(state.castId, input.loopId, prepared.stream.laneId, attempt);
     const childPaths = lanePaths(state, input.loopId, prepared.stream.laneId, attempt);
     // Initialize the lane record before workspace creation. A workspace failure
     // is still a terminal lane attempt and must have a durable artifact trail.
@@ -853,14 +1149,18 @@ export class ParallelLoopDispatcher {
     };
 
     try {
-      await this.#deps.children.start(startInput);
+      if (prepared.resumeChild) {
+        await this.#deps.children.resume({ childCastId, mode: "resume" });
+      } else {
+        await this.#deps.children.start(startInput);
+      }
       if (this.#cancelRequested) {
         // Cancellation may have raced with start(). Keep the active record so
         // the coordinator can observe telemetry and persist its workspace.
         await this.#abortChild(childCastId, "parallel execution cancelled");
         return;
       }
-      this.#deps.children.subscribe({ childCastId }, {
+      active.subscription = this.#deps.children.subscribe({ childCastId, afterSequence: prepared.recoveryAfterSequence }, {
         onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active, event),
         onTerminal: (result) => this.#handleChildTerminal(input, state, prepared.stream, active, result),
       });
@@ -955,6 +1255,7 @@ export class ParallelLoopDispatcher {
     // budget stop may have already removed and finalized this lane.
     if (this.#budgetFailure) return;
     if (!this.#active.delete(stream.laneId)) return;
+    active.subscription?.unsubscribe();
 
     const currentLane = this.#run?.lanes[stream.laneId];
     const attempt = currentLane?.attempt ?? active.attempt;
@@ -1046,16 +1347,30 @@ export class ParallelLoopDispatcher {
   async #performFanIn(input: ParallelLoopDispatchInput, state: MateriaCastState, run: MateriaParallelRunState): Promise<void> {
     const nonAccepted = Object.values(run.lanes).filter((lane) => lane.status !== "accepted");
     if (nonAccepted.length > 0) {
+      const occurredAt = this.#now();
       const phase = applyParallelRunPhaseTransition(run, {
         parentCastId: state.castId,
         loopId: input.loopId,
         runId: run.runId,
         phase: "failed",
         fanInPhase: "skipped",
-        timestamp: this.#now(),
+        timestamp: occurredAt,
       });
+      const aggregate = aggregateParallelLaneFailureReason(run);
+      const diagnostic = {
+        code: "parallel_lanes_unaccepted",
+        message: aggregate,
+        severity: "error" as const,
+        occurredAt,
+        details: {
+          failedLaneIds: nonAccepted.filter((lane) => lane.status === "failed").map((lane) => lane.laneId),
+          interruptedLaneIds: nonAccepted.filter((lane) => lane.status === "interrupted").map((lane) => lane.laneId),
+          preservedAcceptedLaneIds: Object.values(run.lanes).filter((lane) => lane.status === "accepted").map((lane) => lane.laneId),
+        },
+      };
       if (phase.applied) {
-        replaceState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: phase.state } });
+        const next = { ...phase.state, diagnostics: [...phase.state.diagnostics, diagnostic].slice(-64) };
+        replaceState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: next } });
         this.#run = state.parallelRuns?.[input.loopId];
         this.#deps.state.saveCastState(input.pi, state);
       }
@@ -1064,9 +1379,10 @@ export class ParallelLoopDispatcher {
         loopId: input.loopId,
         runId: run.runId,
         reason: "not_all_lanes_accepted",
+        aggregateFailure: aggregate,
         laneStatuses: Object.fromEntries(Object.entries(run.lanes).map(([laneId, lane]) => [laneId, lane.status])),
       });
-      await this.#notifyRunFailure(input, state, run.runId, "Parallel fan-in skipped because not every lane was accepted.");
+      await this.#notifyRunFailure(input, state, run.runId, aggregate);
       return;
     }
 
@@ -1210,9 +1526,22 @@ export class ParallelLoopDispatcher {
   }
 
   async #notifyRunFailure(input: ParallelLoopDispatchInput, state: MateriaCastState, runId: string, reason: string): Promise<void> {
-    if (!input.onFailure) return;
+    const boundedReason = boundedFailureReason(reason);
+    if (!input.onFailure) {
+      // Embedders may omit the lifecycle callback, but a terminal lane run
+      // must still leave the parent durably failed rather than appearing live.
+      state.active = false;
+      state.awaitingResponse = false;
+      state.socketState = "failed";
+      state.phase = "failed";
+      state.failedReason = boundedReason;
+      state.runState.lastMessage = boundedReason;
+      state.runState.endedAt ??= this.#now();
+      this.#deps.state.saveCastState(input.pi, state);
+      return;
+    }
     try {
-      await input.onFailure({ loopId: input.loopId, runId, reason: boundedFailureReason(reason) });
+      await input.onFailure({ loopId: input.loopId, runId, reason: boundedReason });
     } catch (error) {
       await this.#appendEvent(state, "parallel_parent_failure_callback_failed", {
         parentCastId: state.castId,
@@ -1700,6 +2029,31 @@ function boundDiagnosticDetails(details: Record<string, unknown>): Record<string
 function boundedFailureReason(value: string, max = 1_000): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
+
+function sameRevisionIdentity(
+  left: ParallelWorkspaceRevision | undefined,
+  right: ParallelWorkspaceRevision | undefined,
+): boolean {
+  return Boolean(left && right && left.commitId === right.commitId && left.changeId === right.changeId);
+}
+
+function formatRevision(revision: ParallelWorkspaceRevision): string {
+  return `${revision.commitId}/${revision.changeId}`;
+}
+
+function aggregateParallelLaneFailureReason(run: MateriaParallelRunState): string {
+  const failures = Object.values(run.lanes)
+    .filter((lane) => lane.status === "failed" || lane.status === "interrupted")
+    .sort((left, right) => left.queueIndex - right.queueIndex)
+    .map((lane) => `${lane.laneId} (${lane.status}: ${lane.failureReason ?? lane.diagnostics.at(-1)?.message ?? "no diagnostic"})`);
+  const accepted = Object.values(run.lanes)
+    .filter((lane) => lane.status === "accepted")
+    .sort((left, right) => left.queueIndex - right.queueIndex)
+    .map((lane) => lane.laneId);
+  const suffix = failures.length > 0 ? ` Lane diagnostics: ${failures.join("; ")}.` : "";
+  const preserved = accepted.length > 0 ? ` Preserved accepted lane heads: ${accepted.join(", ")}.` : "";
+  return boundedFailureReason(`Parallel run ${run.runId} hard-failed: fan-in skipped because not every lane was accepted.${suffix}${preserved}`);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
