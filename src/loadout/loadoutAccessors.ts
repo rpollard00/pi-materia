@@ -46,7 +46,7 @@ export function requireLoadoutSocket(loadout: Pick<MateriaPipelineConfig, "socke
 }
 
 export function loopSockets(loop: Pick<MateriaLoopConfig, "sockets">): string[] {
-  return loop.sockets ?? [];
+  return Array.isArray(loop.sockets) ? loop.sockets : [];
 }
 
 export function loopSocketSet(loop: Pick<MateriaLoopConfig, "sockets">): Set<string> {

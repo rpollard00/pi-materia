@@ -23,6 +23,10 @@ export interface MateriaGraphValidationResult {
 
 export interface MateriaGraphValidationOptions {
   isGeneratorSocket?: (socketId: string) => boolean;
+  /** Optional parallel-plan producer predicate for normalizer utilities. */
+  isParallelPlanProducerSocket?: (socketId: string) => boolean;
+  /** Alias for callers that model the normalizer explicitly. */
+  isNormalizerSocket?: (socketId: string) => boolean;
 }
 
 export interface ValidatedGraphChangeResult<TGraph extends MateriaPipelineConfig = MateriaPipelineConfig> extends MateriaGraphValidationResult {
@@ -60,6 +64,7 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig, options: Mat
     if (errors.length === errorCountBeforeSocket) validateOutgoingEdgeConditions(id, socket.edges ?? [], errors);
   }
   validateLoops(normalized, errors, socketIds, options);
+  validateParallelRegionInteractions(normalized, errors, socketIds);
 
   // Materia graphs are workflow state machines, not DAGs: transitions may
   // intentionally revisit earlier sockets (for example Build -> Eval -> Maintain
@@ -148,7 +153,8 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
       continue;
     }
     let loopSocketsAreValid = true;
-    for (const issue of validateMateriaLoopParallelConfig(loop.parallel, `loops.${loopId}.parallel`)) {
+    const parallelMetadataIssues = validateMateriaLoopParallelConfig(loop.parallel, `loops.${loopId}.parallel`);
+    for (const issue of parallelMetadataIssues) {
       errors.push({ code: "invalid-loop", source: issue.path, message: `Loop "${loopId}" has invalid parallel execution metadata at ${issue.path}: ${issue.message}.` });
     }
     for (const [index, socketId] of sockets.entries()) {
@@ -159,7 +165,12 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
     validateOptionalTarget(errors, socketIds, loopId, loop.iterator?.done, `loops.${loopId}.iterator.done`);
     const exitIsValid = validateLoopExit(errors, socketIds, loopId, sockets, loop.exit);
     validateLoopExitRoutes(errors, socketIds, loopId, sockets, loop.exits);
-    if (loop.consumes && consumesFromIsValid && loopSocketsAreValid) validateLoopTopology(graph, errors, loopId, sockets, loop.consumes.from, options);
+    const parallelMetadataIsValid = parallelMetadataIssues.length === 0;
+    if (loop.parallel && parallelMetadataIsValid && loopSocketsAreValid) {
+      validateParallelLoopTopology(graph, errors, loopId, sockets, loop.consumes, loop.exit, loop.exits, options);
+    } else if (!loop.parallel && loop.consumes && consumesFromIsValid && loopSocketsAreValid) {
+      validateLoopTopology(graph, errors, loopId, sockets, loop.consumes.from, options);
+    }
     if (loop.consumes && loopSocketsAreValid && exitIsValid) validateExecutableLoopSemantics(graph, errors, loopId, sockets, loop.consumes, loop.exit);
   }
 }
@@ -295,8 +306,240 @@ function validateLoopExitRoutes(errors: MateriaGraphValidationError[], socketIds
       }
     }
 
-    validateOptionalTarget(errors, socketIds, route.from, route.targetSocketId, `${routeSource}.targetSocketId`);
+    if (!route.targetSocketId) {
+      errors.push({ code: "missing-endpoint", source: `${routeSource}.targetSocketId`, from: route.from, message: `Missing graph endpoint referenced by ${routeSource}.targetSocketId.` });
+    } else {
+      validateOptionalTarget(errors, socketIds, route.from, route.targetSocketId, `${routeSource}.targetSocketId`);
+    }
   }
+}
+
+function validateParallelLoopTopology(
+  graph: MateriaPipelineConfig,
+  errors: MateriaGraphValidationError[],
+  loopId: string,
+  loopMemberSockets: string[],
+  consumes: MateriaLoopConfig["consumes"],
+  exit: MateriaLoopExitConfig | undefined,
+  exits: MateriaLoopExitRouteConfig[] | undefined,
+  options: MateriaGraphValidationOptions,
+): void {
+  const loopPath = `loops.${loopId}`;
+  const loopSet = new Set(loopMemberSockets);
+  const parallel = graph.loops?.[loopId]?.parallel;
+  if (!parallel) return;
+  const configuredExits = Array.isArray(exits) ? exits : [];
+
+  const duplicateMembers = loopMemberSockets.filter((socketId, index) => loopMemberSockets.indexOf(socketId) !== index);
+  if (duplicateMembers.length > 0) {
+    errors.push({
+      code: "invalid-loop",
+      source: `${loopPath}.sockets`,
+      message: `Parallel loop "${loopId}" has duplicate lane socket ids: ${Array.from(new Set(duplicateMembers)).join(", ")}. A parallel region must have a deterministic member boundary.`,
+    });
+  }
+
+  if (!isNormalizedPlanInput(parallel.planInput)) {
+    errors.push({
+      code: "invalid-loop",
+      source: `${loopPath}.parallel.planInput`,
+      message: `Parallel loop "${loopId}" requires parallel.planInput to be a normalized-plan state path starting with "state."; received ${JSON.stringify(parallel.planInput)}.`,
+    });
+  }
+
+  if (!consumes) {
+    errors.push({
+      code: "invalid-loop",
+      source: `${loopPath}.consumes`,
+      message: `Parallel loop "${loopId}" must consume workItems from exactly one generator or normalizer socket before its lanes can be scheduled.`,
+    });
+    return;
+  }
+
+  const consumesFrom = consumes.from;
+  const inputPredicateConfigured = options.isGeneratorSocket !== undefined || options.isParallelPlanProducerSocket !== undefined || options.isNormalizerSocket !== undefined;
+  const isParallelInput = inputPredicateConfigured && (
+    options.isGeneratorSocket?.(consumesFrom) === true
+    || options.isParallelPlanProducerSocket?.(consumesFrom) === true
+    || options.isNormalizerSocket?.(consumesFrom) === true
+  );
+  if (inputPredicateConfigured && !isParallelInput) {
+    errors.push({
+      code: "invalid-loop",
+      source: `${loopPath}.consumes.from`,
+      from: consumesFrom,
+      message: `Parallel loop "${loopId}" consumes "${consumesFrom}", but that socket is not declared as a generator or parallel normalizer input.`,
+    });
+  }
+  if (consumes.output !== undefined && consumes.output !== "workItems") {
+    errors.push({
+      code: "invalid-loop",
+      source: `${loopPath}.consumes.output`,
+      from: consumesFrom,
+      message: `Parallel loop "${loopId}" must consume the canonical workItems list; custom loop output ${JSON.stringify(consumes.output)} cannot be normalized into ordered lanes.`,
+    });
+  }
+
+  if (!containsDirectedCycle(graph, loopSet)) {
+    errors.push({ code: "invalid-loop", source: `${loopPath}.sockets`, message: `Parallel loop "${loopId}" must contain a directed cycle among its selected lane sockets.` });
+  }
+
+  const inboundEdges = loadoutSocketEntries(graph).flatMap(([from, socket]) => {
+    if (loopSet.has(from)) return [];
+    return (socket.edges ?? []).filter((edge) => loopSet.has(edge.to)).map((edge) => ({ from, to: edge.to, edgeWhen: edge.when }));
+  });
+  if (inboundEdges.length === 0) {
+    errors.push({ code: "invalid-loop", source: `${loopPath}.consumes`, from: consumesFrom, message: `Parallel loop "${loopId}" requires one deterministic inbound edge from "${consumesFrom}" into its lane subgraph; found none.` });
+  } else if (inboundEdges.length > 1) {
+    const details = inboundEdges.map((edge) => `${edge.from}->${edge.to}`).join(", ");
+    errors.push({ code: "invalid-loop", source: `${loopPath}.consumes`, from: consumesFrom, message: `Parallel loop "${loopId}" has an ambiguous entry boundary. Expected exactly one inbound edge from its generator/normalizer, found ${inboundEdges.length}: ${details}.` });
+  } else if (inboundEdges[0]?.from !== consumesFrom) {
+    errors.push({ code: "invalid-loop", source: `${loopPath}.consumes.from`, from: consumesFrom, message: `Parallel loop "${loopId}" consumes "${consumesFrom}" but its only inbound lane edge comes from "${inboundEdges[0]?.from}".` });
+  } else if (inboundEdges[0]?.edgeWhen !== "always") {
+    errors.push({ code: "invalid-loop", source: `${loopPath}.consumes`, from: consumesFrom, message: `Parallel loop "${loopId}" requires an unconditional generator/normalizer entry edge; its boundary uses condition "${inboundEdges[0]?.edgeWhen}".` });
+  }
+
+  const entrySocket = inboundEdges.length === 1 ? inboundEdges[0]?.to : undefined;
+  if (entrySocket && !reachableWithinLoop(graph, entrySocket, loopSet)) {
+    const unreachable = loopMemberSockets.filter((socketId) => !reachableWithinLoop(graph, entrySocket, loopSet, socketId));
+    if (unreachable.length > 0) {
+      errors.push({ code: "invalid-loop", source: `${loopPath}.sockets`, message: `Parallel loop "${loopId}" has unreachable lane sockets from deterministic entry "${entrySocket}": ${unreachable.join(", ")}.` });
+    }
+  }
+
+  const terminalSources = new Set<string>();
+  if (exit?.from) terminalSources.add(exit.from);
+  for (const route of configuredExits) if (route?.from) terminalSources.add(route.from);
+  const validTerminalSources = Array.from(terminalSources).filter((socketId) => loopSet.has(socketId));
+  if (terminalSources.size === 0) {
+    errors.push({ code: "invalid-loop", source: `${loopPath}.exit`, message: `Parallel loop "${loopId}" requires one explicit terminal boundary via exit.from or loop-exit routes.` });
+  } else if (terminalSources.size !== 1 || validTerminalSources.length !== terminalSources.size) {
+    errors.push({ code: "invalid-loop", source: `${loopPath}.exit`, message: `Parallel loop "${loopId}" has ambiguous terminal boundaries. exit.from and every parallel fan-in route must identify the same member socket.` });
+  }
+  const terminalSource = validTerminalSources.length === 1 && terminalSources.size === 1 ? validTerminalSources[0] : undefined;
+  if (terminalSource) {
+    const cannotReachTerminal = loopMemberSockets.filter((socketId) => !canReachWithinLoop(graph, socketId, terminalSource, loopSet));
+    if (cannotReachTerminal.length > 0) {
+      errors.push({ code: "invalid-loop", source: `${loopPath}.sockets`, message: `Parallel loop "${loopId}" has lane sockets that cannot reach terminal boundary "${terminalSource}": ${cannotReachTerminal.join(", ")}.` });
+    }
+  }
+
+  for (const from of loopMemberSockets) {
+    const socket = getLoadoutSocket(graph, from);
+    for (const [index, edge] of (socket?.edges ?? []).entries()) {
+      if (loopSet.has(edge.to)) continue;
+      errors.push({
+        code: "invalid-loop",
+        source: `${from}.edges[${index}].to`,
+        from,
+        to: edge.to,
+        message: `Parallel loop "${loopId}" has a parent route from lane socket "${from}" to "${edge.to}". Lane sockets must terminate through the symbolic parallel fan-in routes, not direct parent edges.`,
+      });
+    }
+    for (const [field, target] of [["foreach.done", socket?.foreach?.done], ["advance.done", socket?.advance?.done]] as const) {
+      if (target && target !== "end" && !loopSet.has(target)) {
+        errors.push({
+          code: "invalid-loop",
+          source: `${from}.${field}`,
+          from,
+          to: target,
+          message: `Parallel loop "${loopId}" has a parent route from lane socket "${from}" through ${field} to "${target}". Lane exhaustion must terminate locally before symbolic fan-in.`,
+        });
+      }
+    }
+  }
+
+  const fanInRoutes = configuredExits.filter((route) => route?.from === terminalSource);
+  const cleanRoute = fanInRoutes.find((route) => route.condition === "satisfied");
+  const conflictRoute = fanInRoutes.find((route) => route.condition === "not_satisfied");
+  if (!terminalSource || !cleanRoute || !conflictRoute) {
+    errors.push({
+      code: "invalid-loop",
+      source: `${loopPath}.exits`,
+      message: `Parallel loop "${loopId}" must define compatible fan-in exits from one terminal boundary: a satisfied clean-join route and a not_satisfied conflict/resolver route.`,
+    });
+  } else {
+    validateParallelFanInTarget(errors, graph, loopId, cleanRoute, loopSet, "clean join");
+    validateParallelFanInTarget(errors, graph, loopId, conflictRoute, loopSet, "conflict resolver");
+    if (cleanRoute.targetSocketId === conflictRoute.targetSocketId) {
+      errors.push({ code: "invalid-loop", source: `${loopPath}.exits`, message: `Parallel loop "${loopId}" routes clean fan-in and conflicted fan-in to the same socket "${cleanRoute.targetSocketId}"; configure distinct join and resolver boundaries.` });
+    }
+  }
+
+  if (exit?.to && exit.to !== "end") {
+    errors.push({ code: "invalid-loop", source: `${loopPath}.exit.to`, from: exit.from, to: exit.to, message: `Parallel loop "${loopId}" exit.to must be the local terminal "end"; parent completion must use symbolic fan-in exits instead of routing directly to "${exit.to}".` });
+  }
+  const loop = graph.loops?.[loopId];
+  for (const [field, target] of [["consumes.done", loop?.consumes?.done], ["iterator.done", loop?.iterator?.done]] as const) {
+    if (target && target !== "end" && !loopSet.has(target)) {
+      errors.push({ code: "invalid-loop", source: `${loopPath}.${field}`, from: terminalSource, to: target, message: `Parallel loop "${loopId}" ${field} must terminate locally at "end"; parent completion must use symbolic fan-in exits.` });
+    }
+  }
+}
+
+function validateParallelFanInTarget(
+  errors: MateriaGraphValidationError[],
+  graph: MateriaPipelineConfig,
+  loopId: string,
+  route: MateriaLoopExitRouteConfig,
+  loopSet: Set<string>,
+  label: string,
+): void {
+  const target = route.targetSocketId;
+  if (target === "end") {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.exits`, from: route.from, to: target, message: `Parallel loop "${loopId}" ${label} route cannot terminate at "end"; it needs an explicit post-integration socket.` });
+    return;
+  }
+  if (loopSet.has(target)) {
+    errors.push({ code: "invalid-loop", source: `loops.${loopId}.exits`, from: route.from, to: target, message: `Parallel loop "${loopId}" ${label} route targets lane socket "${target}". Fan-in targets must be outside the parallel region.` });
+    return;
+  }
+  if (!getLoadoutSocket(graph, target)) return;
+}
+
+function validateParallelRegionInteractions(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], socketIds: Set<string>): void {
+  const parallelRegions = Object.entries(graph.loops ?? {})
+    .filter(([, loop]) => Boolean(loop?.parallel))
+    .map(([loopId, loop]) => ({ loopId, members: loopSockets(loop).filter((socketId) => socketIds.has(socketId)) }));
+
+  for (let leftIndex = 0; leftIndex < parallelRegions.length; leftIndex += 1) {
+    const left = parallelRegions[leftIndex]!;
+    const leftMembers = new Set(left.members);
+    for (let rightIndex = leftIndex + 1; rightIndex < parallelRegions.length; rightIndex += 1) {
+      const right = parallelRegions[rightIndex]!;
+      const overlap = right.members.filter((socketId) => leftMembers.has(socketId));
+      if (overlap.length === 0) continue;
+      errors.push({
+        code: "invalid-loop",
+        source: `loops.${left.loopId}.sockets`,
+        message: `Parallel loops "${left.loopId}" and "${right.loopId}" overlap or nest through lane sockets ${Array.from(new Set(overlap)).join(", ")}. Parallel regions must be disjoint; nested parallel execution is not supported.`,
+      });
+    }
+  }
+}
+
+function isNormalizedPlanInput(value: unknown): value is string {
+  return typeof value === "string" && /^state\.[A-Za-z_$][A-Za-z0-9_$-]*(?:\.[A-Za-z0-9_$-]+)*$/.test(value.trim());
+}
+
+function reachableWithinLoop(graph: MateriaPipelineConfig, start: string, loopSet: Set<string>, target?: string): boolean {
+  const visited = new Set<string>();
+  const queue = [start];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    if (target === undefined && visited.size === loopSet.size) return true;
+    if (target !== undefined && current === target) return true;
+    for (const edge of getLoadoutSocket(graph, current)?.edges ?? []) {
+      if (loopSet.has(edge.to) && !visited.has(edge.to)) queue.push(edge.to);
+    }
+  }
+  return target === undefined ? visited.size === loopSet.size : false;
+}
+
+function canReachWithinLoop(graph: MateriaPipelineConfig, start: string, target: string, loopSet: Set<string>): boolean {
+  return reachableWithinLoop(graph, start, loopSet, target);
 }
 
 function validateLoopTopology(graph: MateriaPipelineConfig, errors: MateriaGraphValidationError[], loopId: string, loopMemberSockets: string[], consumesFrom: string, options: MateriaGraphValidationOptions): void {
