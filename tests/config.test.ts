@@ -940,6 +940,7 @@ describe("config loadouts", () => {
       ["Blackbelt-GH-PR", "json"],
       ["Commit-Sigil", "json"],
       ["Normalize-Parallel-Streams", "json"],
+      ["Parallel-Lane-Checkpoint", "json"],
       ["Auto-Architect", "json"],
       ["Chain-Context", "json"],
       ["Build", "text"],

@@ -22,11 +22,15 @@ import { execFile } from "node:child_process";
 
 const CHECKPOINT_STATE_VERSION = 1;
 const MAX_BUFFER = 10 * 1024 * 1024;
+const MAX_ERROR_DETAIL = 1_000;
 const COMMAND_TIMEOUT_MS = 30_000;
 
+let input = {};
+let cwd = process.cwd();
+let lastObservedHead;
 try {
-  const input = await readStdinJson();
-  const cwd = typeof input.cwd === "string" && input.cwd.trim().length > 0
+  input = await readStdinJson();
+  cwd = typeof input.cwd === "string" && input.cwd.trim().length > 0
     ? input.cwd
     : process.cwd();
   const title = input.item != null && typeof input.item === "object"
@@ -40,11 +44,7 @@ try {
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  const input = globalThis.__parallelLaneCheckpointInput;
-  const cwd = input && typeof input.cwd === "string" && input.cwd.trim().length > 0
-    ? input.cwd
-    : process.cwd();
-  finishFailure(input ?? {}, cwd, message);
+  finishFailure(input, cwd, message, lastObservedHead ? { latestMeaningfulHead: lastObservedHead, meaningful: true } : {});
 }
 
 async function checkpointLane(input, cwd, title) {
@@ -59,6 +59,7 @@ async function checkpointLane(input, cwd, title) {
       ok: true,
       checkpointCreated: false,
       meaningful: false,
+      itemKey: input.itemKey,
       itemTitle: title,
       context: "empty working copy; no checkpoint created",
     });
@@ -76,6 +77,7 @@ async function checkpointLane(input, cwd, title) {
   }
 
   const head = await readRevision(cwd);
+  lastObservedHead = head;
   const created = await runJj(["new"], cwd);
   if (created.exitCode !== 0) {
     throw new Error(`jj new failed: ${formatCommandResult(created)}`);
@@ -136,12 +138,13 @@ function buildCheckpointState(input, cwd, previous, values) {
   };
 }
 
-function finishFailure(input, cwd, reason) {
+function finishFailure(input, cwd, reason, details = {}) {
   const previous = previousCheckpoint(input);
   const checkpoint = buildCheckpointState(input, cwd, previous, {
     ok: false,
     checkpointCreated: false,
     meaningful: false,
+    ...details,
     context: reason,
   });
   writeStdoutJson({
@@ -181,7 +184,9 @@ function resolveLaneId(input, previous) {
   const params = isPlainObject(input?.params) ? input.params : {};
   const state = isPlainObject(input?.state) ? input.state : {};
   const lane = isPlainObject(state.parallelLane) ? state.parallelLane : {};
-  const candidates = [params.laneId, input?.laneId, lane.laneId, previous?.laneId];
+  const run = isPlainObject(state.parallelRun) ? state.parallelRun : {};
+  const coordinator = isPlainObject(state.parallelCoordinator) ? state.parallelCoordinator : {};
+  const candidates = [params.laneId, input?.laneId, state.parallelLaneId, lane.laneId, run.laneId, coordinator.laneId, previous?.laneId];
   return candidates.find((value) => typeof value === "string" && value.trim().length > 0)?.trim();
 }
 
@@ -191,8 +196,7 @@ function cloneCheckpoint(value) {
 
 function isCleanStatus(stdout) {
   const text = String(stdout ?? "").trim();
-  if (text.length === 0) return true;
-  const normalized = text.toLowerCase();
+  if (text.length === 0 || /^(?:clean|empty)$/i.test(text)) return true;
   if (/working copy (?:has no changes|is clean)/i.test(text)) return true;
   if (/no changes/i.test(text) && !/working copy changes/i.test(text)) return true;
   if (/working copy changes\s*:/i.test(text)) return false;
@@ -225,16 +229,17 @@ async function runJj(args, cwd) {
 
 function formatCommandResult(result) {
   const details = result.stderr.trim() || result.stdout.trim();
-  return details || `exit code ${result.exitCode}`;
+  if (!details) return `exit code ${result.exitCode}`;
+  return details.length > MAX_ERROR_DETAIL
+    ? `${details.slice(0, MAX_ERROR_DETAIL)}…`
+    : details;
 }
 
 async function readStdinJson() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const text = Buffer.concat(chunks).toString("utf8").trim();
-  const input = text ? JSON.parse(text) : {};
-  globalThis.__parallelLaneCheckpointInput = input;
-  return input;
+  return text ? JSON.parse(text) : {};
 }
 
 function writeStdoutJson(value) {
