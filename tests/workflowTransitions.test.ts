@@ -125,6 +125,43 @@ describe("workflow transitions", () => {
     expect(() => selectNextTarget(cast, current, { satisfied: true }, config)).toThrow(/edge traversal limit exceeded/);
   });
 
+  test("explicit retry traversals are scoped per work item with a stable scoped key", () => {
+    const cast = state();
+    const current = socket("Socket-1", { edges: [{ when: "not_satisfied", to: "retry", maxTraversals: 2 }, { when: "always", to: "done" }] });
+    cast.currentItemKey = "WI-1";
+    // WI-1 consumes its own two retries, then exhausts.
+    expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
+    expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
+    expect(() => selectNextTarget(cast, current, { satisfied: false }, config)).toThrow(/edge traversal limit exceeded/);
+    // WI-2 starts a fresh budget on the same edge; WI-1's consumption does not count against it.
+    cast.currentItemKey = "WI-2";
+    expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
+    expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
+    expect(() => selectNextTarget(cast, current, { satisfied: false }, config)).toThrow(/edge traversal limit exceeded/);
+    // Stable scoped retry counts remain item-independent while aggregate diagnostics accumulate.
+    expect(cast.scopedEdgeRetries).toMatchObject({ "Socket-1->retry@WI-1": 3, "Socket-1->retry@WI-2": 3 });
+    expect(cast.edgeTraversals["Socket-1->retry"]).toBe(6);
+  });
+
+  test("retry traversals outside item loops use a singleton scope", () => {
+    const cast = state();
+    const current = socket("Socket-1", { edges: [{ when: "not_satisfied", to: "retry", maxTraversals: 1 }] });
+    expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
+    expect(() => selectNextTarget(cast, current, { satisfied: false }, config)).toThrow(/edge traversal limit exceeded/);
+    expect(cast.scopedEdgeRetries).toEqual({ "Socket-1->retry": 2 });
+  });
+
+  test("edges without explicit maxTraversals remain unbounded retry budgets", () => {
+    const cast = state();
+    const current = socket("Socket-1", { edges: [{ when: "not_satisfied", to: "retry" }] });
+    for (let index = 0; index < 40; index += 1) {
+      expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
+    }
+    // Aggregate diagnostics keep counting; no scoped retry budget is created.
+    expect(cast.edgeTraversals["Socket-1->retry"]).toBe(40);
+    expect(cast.scopedEdgeRetries).toBeUndefined();
+  });
+
   test("routing and advancement use current parsed satisfied instead of stale carried state", () => {
     const cast = state({ data: { satisfied: true, workItems: [{ id: "one" }] }, lastJson: { satisfied: true } });
     const current = socket("Socket-1", {

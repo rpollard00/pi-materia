@@ -457,7 +457,16 @@ export interface MateriaCastState {
   /** Same recovery keys that have already retried a strong context-window failure without compaction. */
   contextWindowRecoveryGuards?: Record<string, number>;
   taskAttempts: Record<string, number>;
+  /** Aggregate from-to traversal counts for diagnostics, provenance, and telemetry. Never enforced. */
   edgeTraversals: Record<string, number>;
+  /**
+   * Per-edge explicit retry budget counts scoped by edge and current work-item
+   * identity (singleton scope outside item loops), keyed like {@link scopedEdgeRetryKey}.
+   * Separate from aggregate {@link edgeTraversals} so retries consumed by one
+   * work item never reduce another item's allowance. Only enforced when an edge
+   * configures an explicit {@code maxTraversals}.
+   */
+  scopedEdgeRetries?: Record<string, number>;
   /** Persisted consecutive-cycle tracker for the current work item. */
   noAdvanceCycles?: MateriaNoAdvanceCycleTracker;
   lastOutput?: string;
@@ -537,6 +546,8 @@ export interface MateriaEdgeTraversalExhaustion {
   from: string;
   to: string;
   key: string;
+  /** Scoped edge-and-item retry identity that exhausted; optional so legacy persisted metadata stays readable. */
+  scopedKey?: string;
   count: number;
   originalLimit: number;
   effectiveLimit: number;

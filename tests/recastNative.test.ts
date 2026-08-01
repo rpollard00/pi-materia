@@ -84,10 +84,11 @@ function makeRevivableState(state: MateriaCastState, options: { key?: string; or
   });
 }
 
-function makeEdgeTraversalExhaustedState(state: MateriaCastState, options: { from?: string; to?: string; originalLimit?: number; effectiveLimit?: number; reviveCount?: number; count?: number; extraEdgeAllowances?: MateriaCastState["edgeAllowances"] } = {}): MateriaCastState {
+function makeEdgeTraversalExhaustedState(state: MateriaCastState, options: { from?: string; to?: string; scopedKey?: string; originalLimit?: number; effectiveLimit?: number; reviveCount?: number; count?: number; extraEdgeAllowances?: MateriaCastState["edgeAllowances"] } = {}): MateriaCastState {
   const from = options.from ?? "Socket-1";
   const to = options.to ?? "Socket-2";
   const key = `${from}->${to}`;
+  const scopedKey = options.scopedKey ?? key;
   const originalLimit = options.originalLimit ?? 1;
   const effectiveLimit = options.effectiveLimit ?? originalLimit;
   const reviveCount = options.reviveCount ?? 0;
@@ -101,6 +102,7 @@ function makeEdgeTraversalExhaustedState(state: MateriaCastState, options: { fro
       from,
       to,
       key,
+      scopedKey,
       count,
       originalLimit,
       effectiveLimit,

@@ -141,4 +141,81 @@ describe("graph semantics regression", () => {
     const betaInput = JSON.parse(await readFile(path.join(state.runDir!, "sockets", "Socket-4", "3-1.input.json"), "utf8"));
     expect(betaInput.itemKey).toBe("1");
   });
+
+  test("multiple work items independently consume the same explicit retry edge", async () => {
+    // Each work item fails evaluation exactly once, so both items traverse the
+    // same retry edge (`Socket-3->Socket-2`) while the edge's explicit
+    // maxTraversals of 1 must be scoped per work item. Legacy aggregate
+    // counting would exhaust on the second item.
+    const evalScript = `
+      let input = "";
+      process.stdin.on("data", (chunk) => input += chunk);
+      process.stdin.on("end", () => {
+        const ctx = JSON.parse(input);
+        const key = ctx.itemKey ?? "singleton";
+        const previous = ctx.state.evalAttempts ?? {};
+        const attempt = Number(previous[key] ?? 0) + 1;
+        const evalAttempts = { ...previous, [key]: attempt };
+        process.stdout.write(JSON.stringify({ satisfied: attempt >= 2, feedback: attempt >= 2 ? "ok" : "retry", evalAttempts }));
+      });
+    `;
+    const config: PiMateriaConfig = {
+      artifactDir: ".pi/pi-materia",
+      activeLoadout: "ScopedRetry",
+      loadouts: {
+        ScopedRetry: {
+          entry: "Socket-1",
+          sockets: {
+            "Socket-1": {
+              materia: "SeedWork",
+              edges: [{ when: "always", to: "Socket-2" }],
+            },
+            "Socket-2": { materia: "BuildSocket", edges: [{ when: "always", to: "Socket-3" }] },
+            "Socket-3": {
+              materia: "EvalSocket",
+              edges: [
+                { when: "not_satisfied", to: "Socket-2", maxTraversals: 1 },
+                { when: "satisfied", to: "Socket-4" },
+              ],
+            },
+            "Socket-4": {
+              materia: "AdvanceSocket",
+              advance: { cursor: "workItemIndex", items: "state.workItems", done: "end", when: "satisfied" },
+              edges: [{ when: "always", to: "Socket-2" }],
+            },
+          },
+          loops: {
+            work: {
+              sockets: ["Socket-2", "Socket-3", "Socket-4"],
+              iterator: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "end" },
+              exit: { from: "Socket-4", when: "satisfied", to: "end" },
+            },
+          },
+        },
+      },
+      materia: {
+        SeedWork: {
+          type: "utility",
+          utility: "echo",
+          parse: "json",
+          params: { output: { workItems: [{ id: "alpha", title: "Alpha" }, { id: "beta", title: "Beta" }] } },
+          assign: { workItems: "$.workItems" },
+        },
+        BuildSocket: { type: "utility", utility: "echo", params: { text: "build" } },
+        EvalSocket: { type: "utility", command: ["node", "-e", evalScript], parse: "json", assign: { evalAttempts: "$.evalAttempts" } },
+        AdvanceSocket: { type: "utility", utility: "echo", parse: "json", params: { output: { satisfied: true } } },
+      },
+    };
+
+    const harness = await makeHarness(config);
+    await harness.runCommand("materia", "cast scoped retry traversals");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; data?: Record<string, unknown>; edgeTraversals?: Record<string, number>; scopedEdgeRetries?: Record<string, number>; cursors?: Record<string, number> };
+    expect(state.phase).toBe("complete");
+    expect(state.data?.evalAttempts).toEqual({ "WI-1": 2, "WI-2": 2 });
+    // Each item consumed its own single retry on the same edge.
+    expect(state.scopedEdgeRetries).toMatchObject({ "Socket-3->Socket-2@WI-1": 1, "Socket-3->Socket-2@WI-2": 1 });
+    expect(state.edgeTraversals).toMatchObject({ "Socket-3->Socket-2": 2, "Socket-3->Socket-4": 2 });
+    expect(state.cursors?.workItemIndex).toBe(2);
+  });
 });

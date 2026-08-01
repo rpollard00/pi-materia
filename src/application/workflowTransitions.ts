@@ -14,16 +14,18 @@ export class MateriaEdgeTraversalExhaustionError extends Error {
   public readonly from: string;
   public readonly to: string;
   public readonly key: string;
+  public readonly scopedKey: string;
   public readonly count: number;
   public readonly originalLimit: number;
   public readonly effectiveLimit: number;
 
-  constructor(from: string, to: string, key: string, count: number, originalLimit: number, effectiveLimit: number) {
+  constructor(from: string, to: string, key: string, scopedKey: string, count: number, originalLimit: number, effectiveLimit: number) {
     super(`Materia edge traversal limit exceeded for ${key} (${count}/${effectiveLimit}).`);
     this.name = "MateriaEdgeTraversalExhaustionError";
     this.from = from;
     this.to = to;
     this.key = key;
+    this.scopedKey = scopedKey;
     this.count = count;
     this.originalLimit = originalLimit;
     this.effectiveLimit = effectiveLimit;
@@ -76,14 +78,36 @@ export function selectNextTarget(state: MateriaCastState, socket: ResolvedMateri
   return "end";
 }
 
-export function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEdgeConfig, config: PiMateriaConfig): void {
+export function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEdgeConfig, _config: PiMateriaConfig): void {
   const to = edge.to;
   const key = `${from}->${to}`;
-  const count = (state.edgeTraversals[key] ?? 0) + 1;
-  state.edgeTraversals[key] = count;
-  const originalLimit = edge.maxTraversals ?? config.limits?.maxEdgeTraversals ?? DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS;
+  // Aggregate from-to counts always record for diagnostics, provenance, and
+  // telemetry, regardless of configured limits.
+  state.edgeTraversals[key] = (state.edgeTraversals[key] ?? 0) + 1;
+  // maxTraversals is the only explicit retry budget. Edges without it are
+  // unbounded: the historical 25-edge fallback and legacy global/socket
+  // maxEdgeTraversals settings never fail execution.
+  if (typeof edge.maxTraversals !== "number" || !Number.isSafeInteger(edge.maxTraversals) || edge.maxTraversals <= 0) return;
+  // Retry consumption is scoped by edge and current work-item identity so one
+  // item's retries never reduce another item's allowance on the same edge.
+  const scopedKey = scopedEdgeRetryKey(from, to, state);
+  state.scopedEdgeRetries ??= {};
+  const count = (state.scopedEdgeRetries[scopedKey] ?? 0) + 1;
+  state.scopedEdgeRetries[scopedKey] = count;
+  const originalLimit = edge.maxTraversals;
   const effectiveLimit = resolveEdgeEffectiveLimit(state, key, originalLimit);
-  if (count > effectiveLimit) throw new MateriaEdgeTraversalExhaustionError(from, to, key, count, originalLimit, effectiveLimit);
+  if (count > effectiveLimit) throw new MateriaEdgeTraversalExhaustionError(from, to, key, scopedKey, count, originalLimit, effectiveLimit);
+}
+
+/**
+ * Stable retry identity for an explicit {@code edge.maxTraversals} budget,
+ * scoped by edge and current work-item identity with a singleton scope outside
+ * item loops. Separate from the aggregate {@code from->to} diagnostic key so
+ * retries consumed by one work item do not reduce another item's allowance.
+ */
+export function scopedEdgeRetryKey(from: string, to: string, state: MateriaCastState): string {
+  const itemKey = state.currentItemKey;
+  return itemKey === undefined ? `${from}->${to}` : `${from}->${to}@${itemKey}`;
 }
 
 function resolveEdgeEffectiveLimit(state: MateriaCastState, key: string, originalLimit: number): number {
