@@ -17,6 +17,41 @@ loop) cannot fail on a stale aggregate visit or edge count.
 | Visit counts | `state.visits` | Diagnostic | Always recorded; **never enforced** |
 | Aggregate traversals | `state.edgeTraversals` | Diagnostic | Always recorded; **never enforced** |
 
+For the opt-in parallel loop contract, see [Parallel loop orchestration semantics](parallel-loop-orchestration.md). Parallel mode adds coordinator, child-process, and workspace rules without changing the resource scopes below for an ordinary sequential loop.
+
+## Parallel loop safety (experimental)
+
+Parallel mode is an explicitly bounded orchestration mode, not an implicit
+relaxation of workflow limits:
+
+- `maxConcurrency` bounds live child lanes. Queued streams do not create a
+  process or workspace until a slot is available.
+- The parent `budget.maxTokens` remains the aggregate hard stop. Child usage is
+  counted once in parent totals; parallel execution never raises the budget or
+  hides child cost.
+- Per-item `edge.maxTraversals` and `limits.maxNoAdvanceCycles` retain their
+  existing child-local scopes. A retry in one lane or item does not consume
+  another lane's allowance. Resolver retries have their own explicit edge
+  budgets.
+- A child failure prevents fan-in but does not cancel healthy siblings. The
+  coordinator waits for all lanes to become terminal unless the parent is
+  cancelled or a hard global limit interrupts the run.
+- Cancellation stops queued launches, terminates live child process trees,
+  marks nonterminal lanes interrupted, and preserves workspaces and artifacts
+  for diagnosis or revival. It is idempotent; late events cannot reopen a
+  terminal lane.
+- The parent workspace and bookmark remain unchanged through fan-out, child
+  execution, and lane-local checkpoints. Shared repository state can advance
+  only after all lanes succeed, fan-in/evaluation is accepted, and finalization
+  verifies the result.
+
+Parallel mode is jj-only and requires explicit child-safe capability metadata.
+It rejects nested/overlapping regions and parent-shared operations such as
+bookmark advancement or publishing from child subgraphs. See the full
+[parallel orchestration contract](parallel-loop-orchestration.md) for durable
+lane states, all-terminal failure, revival, artifact ownership, and conflict
+resolution.
+
 ## Operator-controlled token budget
 
 The top-level `budget` object configures the cast token budget:

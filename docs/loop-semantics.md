@@ -1,6 +1,6 @@
 # Loop semantics
 
-This is the developer reference for generator-driven loop exits. The structured contract keeps current-item flow, cursor advancement, and post-loop routing separate.
+This is the developer reference for generator-driven loop exits. The structured contract keeps current-item flow, cursor advancement, and post-loop routing separate. The opt-in parallel extension is specified in [Parallel loop orchestration semantics](parallel-loop-orchestration.md).
 
 ## Runtime model
 
@@ -59,6 +59,26 @@ If Maintain returns `{ "satisfied": false }`, `advance.when` does not run and th
 ```
 
 A final satisfied item routes to `Socket-7`; otherwise the loop terminates at `end` unless another matching route is configured.
+
+## Parallel loop regions (experimental)
+
+An ordinary loop serializes its items in the parent cast. An opt-in parallel
+loop instead consumes a normalized planner plan: each ordered stream runs the
+complete loop subgraph in one persistent jj child workspace, while the parent
+waits as a coordinator and never traverses member sockets itself.
+
+The child still applies the same item cursor, `satisfied`/`not_satisfied`,
+retry-edge, and no-advance rules described below. A lane is accepted only when
+all of its items reach the child terminal state. All lanes must be accepted
+before jj fan-in; a failed or interrupted lane prevents partial fan-in and is
+revivable without rerunning successful lanes. Clean fan-in follows the
+satisfied post-integration route, while a structural jj conflict follows the
+configured not-satisfied resolver route.
+
+Omit parallel metadata to retain the sequential runtime exactly. See
+[Parallel loop orchestration semantics](parallel-loop-orchestration.md) for the
+planner sidecar, symbolic fork/join, durable lane states, workspace lifecycle,
+cancellation, and artifact ownership contract.
 
 ## Workflow safety in loops
 

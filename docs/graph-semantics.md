@@ -2,7 +2,7 @@
 
 Materia graphs are ordered workflow state machines. They may branch, loop, and run deterministic utility sockets before or between agent turns.
 
-For the structured loop contract, see [Structured loop semantics](structured-loop-semantics.md). Normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is the graph/loadout terminal sentinel.
+For the structured loop contract, see [Structured loop semantics](structured-loop-semantics.md). For the opt-in jj-only parallel mode, see [Parallel loop orchestration semantics](parallel-loop-orchestration.md). Normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is the graph/loadout terminal sentinel.
 
 ## Edge conditions
 
@@ -97,6 +97,26 @@ Each route id is stable and unique within the owning loop. `from` is the loop me
 Route resolution is deterministic. A final `{ "satisfied": true }` result selects `satisfied`, then `always`, then `end`. A final `{ "satisfied": false }` result selects `not_satisfied`, then `always`, then `end`. Without a boolean result, only `always` can match before `end`.
 
 The WebUI derives visual edges for these routes with stable ids like `loop-exit:<loopId>:<routeId>`. Editing or deleting those visual edges mutates `loops.<id>.exits`, not normal socket edges.
+
+## Parallel loop regions (experimental)
+
+A loop may opt into parallel orchestration, but the graph remains symbolic: the
+planner/normalizer connection renders a fork, and the loop's post-integration
+routes render a barrier and fan-in. Runtime lane sockets are not materialized
+in the parent graph, and parent edges must never target or traverse them. The
+parent enters the region once and coordinates one child loop per ordered
+planner stream.
+
+Parallel topology is validated more strictly than an ordinary loop. It needs a
+valid planner/normalizer input, deterministic entry and terminal boundaries,
+compatible clean/conflict exits, bounded concurrency, and a child-safe loop
+subgraph. Parallel regions cannot overlap or nest. Failure and cancellation are
+coordinator outcomes rather than ordinary per-item edge routing; only a clean
+or conflicted fan-in follows the symbolic satisfied/not-satisfied routes.
+
+See [Parallel loop orchestration semantics](parallel-loop-orchestration.md) for
+stream validation, child compilation, durable lane states, jj lifecycle,
+revival, and the parent-workspace invariant.
 
 ## Utility materia and generator/consumer styling
 

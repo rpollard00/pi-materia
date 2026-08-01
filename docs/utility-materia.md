@@ -1,6 +1,6 @@
 # Utility Materia
 
-Utility sockets are deterministic Materia pipeline sockets that run configured local utilities instead of starting a Pi agent/LLM turn. Use them for setup, discovery, code generation, checks, or other repeatable steps that should be visible in the loadout and removable by editing config.
+Utility sockets are deterministic Materia pipeline sockets that run configured local utilities instead of starting a Pi agent/LLM turn. Use them for setup, discovery, code generation, checks, or other repeatable steps that should be visible in the loadout and removable by editing config. The opt-in parallel loop contract is defined in [Parallel loop orchestration semantics](parallel-loop-orchestration.md).
 
 Agent sockets still render prompts and wait for Pi assistant output. Utility sockets skip the agent turn, write artifacts, optionally parse their output, apply `assign`, route through `edges`, participate in `foreach`, and update the same manifest/event log as agent sockets.
 
@@ -221,7 +221,32 @@ The referenced `Detect-VCS` utility materia writes deterministic repository deta
 
 Utility materia marked `generator: true` follow the same top-level `workItems` / `satisfied` / `context` contract as agent generators. A deterministic script emits canonical generator output; utility state patches remain under a separate `state` object. This lets utility generators participate in loop regions and generator-to-generator pipelines with `consumes: { "from": "Socket-N", "output": "workItems" }`.
 
-A utility materia may set `generator: true` when a deterministic script should produce generated work items for loop regions. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON. Generated work item entries use the same minimal item shape as agent output: `title:string` plus `context:string`.
+A utility materia may set `generator: true` when a deterministic script should produce generated work items for loop regions. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON. Generated work item entries use the same minimal item shape as agent generator output: `title:string` plus `context:string`.
+
+### Parallel scheduling sidecar
+
+The experimental parallel mode composes a planner's canonical `workItems`
+output with a versioned `parallelSchedule` sidecar. The sidecar is planner
+only: an ordinary utility generator must not opt into scheduling merely by
+printing that field. A planner explicitly enabled for the parallel region may
+emit ordered streams whose entries are indexes into `workItems`; it must not
+copy lane metadata into each item or mutate the canonical `{ title, context }`
+shape.
+
+A deterministic normalizer consumes the two outputs before any lane starts. It
+validates supported version, unique non-empty stream names, in-range indexes,
+and exactly-once assignment of every item. It preserves `workItems` unchanged
+and emits the normalized plan under `state.parallelPlan`, including stable lane
+identities and stream order. Invalid schedules produce actionable
+`satisfied:false`/`context` feedback and create no child workspace or
+subprocess. The sidecar is not placed in generic downstream agent context.
+
+Parallel child loops may use deterministic utilities only when their
+capabilities are explicitly workspace-local and child-safe. Bookmark
+advancement, publishing, parent integration, interactive utilities, and other
+shared-state operations remain parent-only. Utility commands are trusted local
+code, not a sandbox; the parallel safety declaration is a graph validation
+boundary rather than a security boundary.
 
 Utility scripts should not emit broad agent-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, or `missing`. When deterministic structured data is needed in shared runtime state, put it under a separate top-level `state` object (for example, `{ "state": { "planMetadata": { "source": "script" } }, "workItems": [...] }`) or map script-owned output with explicit `assign` entries. Do not use generated-output aliases such as `tasks`.
 
