@@ -660,6 +660,20 @@
         "runtime": "node"
       }
     },
+    "Normalize-Parallel-Streams": {
+      "type": "utility",
+      "label": "Normalize-Parallel-Streams",
+      "description": "Deterministically validate planner-defined ordered parallel streams, preserve canonical workItems, and emit stable lane metadata under state.parallelPlan.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "generator": true,
+      "script": {
+        "kind": "shippedUtility",
+        "name": "normalize-parallel-streams.mjs",
+        "runtime": "node"
+      }
+    },
     "Chain-Context": {
       "type": "agent",
       "tools": "readOnly",
